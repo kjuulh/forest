@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://git.front.kjuulh.io/kjuulh/cuddle/raw/branch/main/schemas/base.json
+
+base: "git@git.front.kjuulh.io:kjuulh/cuddle-rust-service-plan.git"
+
+vars:
+  service: "forest"
+  registry: kasperhermansen
+
+  database:
+    crdb: "false"
+
+  ingress:
+    - external: "true"
+    - internal: "true"
+
+cuddle/clusters:
+  dev:
+    env:
+      service.host: "0.0.0.0:3000"
+  prod:
+    env:
+      service.host: "0.0.0.0:3000"
