@@ -14,7 +14,7 @@ struct Command {
 #[derive(Subcommand)]
 enum Commands {
     Serve {
-        #[arg(env = "SERVICE_HOST", long, default_value = "127.0.0.1:3000")]
+        #[arg(env = "FOREST_HOST", long, default_value = "127.0.0.1:3000")]
         host: SocketAddr,
     },
 }
@@ -22,8 +22,8 @@ enum Commands {
 pub async fn execute() -> anyhow::Result<()> {
     let cli = Command::parse();
 
-    if let Some(Commands::Serve { host }) = cli.command {
-        tracing::info!("Starting service");
+    if let Some(Commands::Serve { .. }) = cli.command {
+        tracing::info!("Starting forest server");
 
         let state = SharedState::new().await?;
     }
