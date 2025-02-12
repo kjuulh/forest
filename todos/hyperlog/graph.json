@@ -10,10 +10,25 @@
         "state": "not-done"
       },
       "projects": {
-        "type": "item",
-        "title": "projects",
-        "description": "",
-        "state": "not-done"
+        "type": "section",
+        "should be able to download a remote plan": {
+          "type": "item",
+          "title": "should be able to download a remote plan",
+          "description": "",
+          "state": "not-done"
+        },
+        "should be able to template from a remote plan": {
+          "type": "item",
+          "title": "should be able to template from a remote plan",
+          "description": "",
+          "state": "not-done"
+        },
+        "should be able to use scripts from a remote plan": {
+          "type": "item",
+          "title": "should be able to use scripts from a remote plan",
+          "description": "",
+          "state": "not-done"
+        }
       }
     }
   }

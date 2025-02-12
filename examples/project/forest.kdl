@@ -1,0 +1,10 @@
+project {
+	name local
+	description """
+		A simple local project that depends on ../plan for its utility scripts
+	"""
+
+	plan {
+		local "../plan"
+	}
+}
