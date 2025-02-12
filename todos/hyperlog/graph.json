@@ -1,0 +1,20 @@
+{
+  "forest": {
+    "type": "user",
+    "projects": {
+      "type": "section",
+      "artifacts": {
+        "type": "item",
+        "title": "artifacts",
+        "description": "",
+        "state": "not-done"
+      },
+      "projects": {
+        "type": "item",
+        "title": "projects",
+        "description": "",
+        "state": "not-done"
+      }
+    }
+  }
+}

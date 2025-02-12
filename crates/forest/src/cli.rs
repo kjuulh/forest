@@ -58,9 +58,9 @@ pub async fn execute() -> anyhow::Result<()> {
         )?;
 
         let put_object = bucket.put_object(Some(&creds), "some-object");
-        put_object.sign(expires_in)
+        let _url = put_object.sign(std::time::Duration::from_secs(30));
 
-        let state = SharedState::new().await?;
+        let _state = SharedState::new().await?;
     }
 
     Ok(())
