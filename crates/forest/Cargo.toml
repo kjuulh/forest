@@ -16,3 +16,4 @@ uuid.workspace = true
 rusty-s3 = "0.7.0"
 url = "2.5.4"
 kdl = "6.3.3"
+walkdir = "2.5.0"

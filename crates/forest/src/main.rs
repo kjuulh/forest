@@ -1,4 +1,6 @@
 pub mod cli;
+pub mod model;
+pub mod plan_reconciler;
 pub mod state;
 
 #[tokio::main]
