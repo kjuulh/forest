@@ -40,9 +40,13 @@ impl PlanReconciler {
                 local::reconcile(source, &plan_dir).await?;
             }
             crate::model::ProjectPlan::NoPlan => {
-                tracing::debug!("no plan, returning")
+                tracing::debug!("no plan, returning");
+                return Ok(());
             }
         }
+
+        tracing::info!("recociled project");
+
         Ok(())
     }
 }
