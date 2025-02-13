@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
@@ -14,11 +14,15 @@ impl PlanReconciler {
         Self {}
     }
 
-    pub async fn reconcile(&self, project: &Project, destination: &Path) -> anyhow::Result<()> {
+    pub async fn reconcile(
+        &self,
+        project: &Project,
+        destination: &Path,
+    ) -> anyhow::Result<Option<PathBuf>> {
         tracing::info!("reconciling project");
         if project.plan.is_none() {
             tracing::debug!("no plan, returning");
-            return Ok(());
+            return Ok(None);
         }
 
         // prepare the plan dir
@@ -41,12 +45,12 @@ impl PlanReconciler {
             }
             crate::model::ProjectPlan::NoPlan => {
                 tracing::debug!("no plan, returning");
-                return Ok(());
+                return Ok(None);
             }
         }
 
         tracing::info!("recociled project");
 
-        Ok(())
+        Ok(Some(plan_dir.join("forest.kdl")))
     }
 }
