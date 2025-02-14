@@ -49,7 +49,7 @@ impl PlanReconciler {
             }
         }
 
-        tracing::info!("recociled project");
+        tracing::info!("reconciled project");
 
         Ok(Some(plan_dir.join("forest.kdl")))
     }
