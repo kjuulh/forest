@@ -86,6 +86,8 @@ pub async fn execute() -> anyhow::Result<()> {
             };
 
             let context = Context { project, plan };
+
+            tracing::info!("context: {:+?}", context);
         }
 
         Commands::Serve {

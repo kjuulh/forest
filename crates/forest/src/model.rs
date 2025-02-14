@@ -1,6 +1,6 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, fmt::Debug, path::PathBuf};
 
-use kdl::{KdlDocument, KdlNode, KdlValue};
+use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
 
 #[derive(Debug, Clone)]
 pub struct Context {
@@ -67,10 +67,98 @@ impl TryFrom<&KdlNode> for ProjectPlan {
 }
 
 #[derive(Debug, Clone)]
+pub enum GlobalVariable {
+    Map(BTreeMap<String, GlobalVariable>),
+    String(String),
+    Float(f64),
+    Integer(i128),
+    Bool(bool),
+}
+
+impl TryFrom<&KdlDocument> for GlobalVariable {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &KdlDocument) -> Result<Self, Self::Error> {
+        let nodes = value.nodes();
+        if nodes.is_empty() {
+            return Ok(Self::Map(BTreeMap::default()));
+        }
+
+        let mut items = BTreeMap::new();
+        for node in nodes {
+            let name = node.name().value();
+            if let Some(children) = node.children() {
+                let val: GlobalVariable = children.try_into()?;
+                items.insert(name.into(), val);
+            } else if let Some(entry) = node.entries().first() {
+                items.insert(name.into(), entry.value().try_into()?);
+            } else {
+                items.insert(name.into(), GlobalVariable::Map(BTreeMap::default()));
+            }
+        }
+
+        Ok(GlobalVariable::Map(items))
+    }
+}
+
+impl TryFrom<&KdlValue> for GlobalVariable {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &KdlValue) -> Result<Self, Self::Error> {
+        if let Some(value) = value.as_string() {
+            return Ok(Self::String(value.to_string()));
+        }
+
+        if let Some(value) = value.as_integer() {
+            return Ok(Self::Integer(value));
+        }
+
+        if let Some(value) = value.as_float() {
+            return Ok(Self::Float(value));
+        }
+
+        if let Some(value) = value.as_bool() {
+            return Ok(Self::Bool(value));
+        }
+
+        anyhow::bail!("value is not supported by global variables")
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Global {
+    items: BTreeMap<String, GlobalVariable>,
+}
+
+impl TryFrom<&KdlNode> for Global {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &KdlNode) -> Result<Self, Self::Error> {
+        let mut global = Global::default();
+        let Some(item) = value.children() else {
+            return Ok(global);
+        };
+
+        for node in item.nodes() {
+            let name = node.name().value();
+            if let Some(children) = node.children() {
+                let val: GlobalVariable = children.try_into()?;
+                global.items.insert(name.into(), val);
+            } else if let Some(entry) = node.entries().first() {
+                global.items.insert(name.into(), entry.value().try_into()?);
+            }
+        }
+
+        Ok(global)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Project {
     pub name: String,
     pub description: Option<String>,
     pub plan: Option<ProjectPlan>,
+    pub global: Global,
 }
 
 impl TryFrom<KdlDocument> for Project {
@@ -92,6 +180,12 @@ impl TryFrom<KdlDocument> for Project {
             None
         };
 
+        let global: Option<Global> = if let Some(global) = project_children.get("global") {
+            Some(global.try_into()?)
+        } else {
+            None
+        };
+
         Ok(Self {
             name: project_children
                 .get_arg("name")
@@ -108,6 +202,7 @@ impl TryFrom<KdlDocument> for Project {
                     _ => None,
                 }),
             plan: project_plan,
+            global: global.unwrap_or_default(),
         })
     }
 }

@@ -7,4 +7,17 @@ project {
 	plan {
 		local "../plan"
 	}
+
+	global {
+		someName "name"
+		someKey {
+			someNestedKey "somevalue"
+			some {
+				key {
+					val
+					val
+				}
+			}
+		}
+	}
 }
