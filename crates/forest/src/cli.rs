@@ -5,7 +5,7 @@ use kdl::KdlDocument;
 use rusty_s3::{Bucket, Credentials, S3Action};
 
 use crate::{
-    model::{Plan, Project},
+    model::{Context, Plan, Project},
     plan_reconciler::PlanReconciler,
     state::SharedState,
 };
@@ -70,16 +70,22 @@ pub async fn execute() -> anyhow::Result<()> {
             let project: Project = project_doc.try_into()?;
             tracing::trace!("found a project name: {}", project.name);
 
-            if let Some(plan_file_path) = PlanReconciler::new()
+            let plan = if let Some(plan_file_path) = PlanReconciler::new()
                 .reconcile(&project, &project_path)
                 .await?
             {
                 let plan_file = tokio::fs::read_to_string(&plan_file_path).await?;
                 let plan_doc: KdlDocument = plan_file.parse()?;
 
-                let project: Plan = plan_doc.try_into()?;
+                let plan: Plan = plan_doc.try_into()?;
                 tracing::trace!("found a plan name: {}", project.name);
-            }
+
+                Some(plan)
+            } else {
+                None
+            };
+
+            let context = Context { project, plan };
         }
 
         Commands::Serve {

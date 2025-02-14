@@ -3,6 +3,12 @@ use std::path::PathBuf;
 use kdl::{KdlDocument, KdlNode, KdlValue};
 
 #[derive(Debug, Clone)]
+pub struct Context {
+    pub project: Project,
+    pub plan: Option<Plan>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Plan {
     pub name: String,
 }
