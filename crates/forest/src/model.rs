@@ -153,12 +153,79 @@ impl TryFrom<&KdlNode> for Global {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub enum TemplateType {
+    #[default]
+    Jinja2,
+}
+
+#[derive(Debug, Clone)]
+pub struct Templates {
+    pub ty: TemplateType,
+    pub path: String,
+    pub output: PathBuf,
+}
+
+impl Default for Templates {
+    fn default() -> Self {
+        Self {
+            ty: TemplateType::default(),
+            path: "./templates/*.jinja2".into(),
+            output: "output/".into(),
+        }
+    }
+}
+
+impl TryFrom<&KdlNode> for Templates {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &KdlNode) -> Result<Self, Self::Error> {
+        let mut templates = Templates::default();
+
+        for entry in value.entries() {
+            let Some(name) = entry.name() else { continue };
+            match name.value() {
+                "type" => {
+                    let Some(val) = entry.value().as_string() else {
+                        anyhow::bail!("type is not a valid string")
+                    };
+
+                    match val.to_lowercase().as_str() {
+                        "jinja2" => templates.ty = TemplateType::Jinja2,
+                        e => {
+                            anyhow::bail!("failed to find a template matching the required type: {}, only 'jinja2' is supported", e);
+                        }
+                    }
+                }
+                "path" => {
+                    let Some(val) = entry.value().as_string() else {
+                        anyhow::bail!("failed to parse path as a valid string")
+                    };
+
+                    templates.path = val.to_string();
+                }
+                "output" => {
+                    let Some(val) = entry.value().as_string() else {
+                        anyhow::bail!("failed to parse val as a valid string")
+                    };
+
+                    templates.output = PathBuf::from(val);
+                }
+                _ => continue,
+            }
+        }
+
+        Ok(templates)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Project {
     pub name: String,
     pub description: Option<String>,
     pub plan: Option<ProjectPlan>,
     pub global: Global,
+    pub templates: Option<Templates>,
 }
 
 impl TryFrom<KdlDocument> for Project {
@@ -203,6 +270,10 @@ impl TryFrom<KdlDocument> for Project {
                 }),
             plan: project_plan,
             global: global.unwrap_or_default(),
+            templates: project_children
+                .get("templates")
+                .map(|t| t.try_into())
+                .transpose()?,
         })
     }
 }
