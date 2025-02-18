@@ -3,6 +3,13 @@ use std::{net::SocketAddr, path::PathBuf};
 use clap::{Parser, Subcommand};
 use kdl::KdlDocument;
 use rusty_s3::{Bucket, Credentials, S3Action};
+use syntect::{
+    easy::HighlightLines,
+    highlighting::{Style, ThemeSet},
+    parsing::SyntaxSet,
+    util::{as_24_bit_terminal_escaped, LinesWithEndings},
+};
+use syntect_assets::assets::HighlightingAssets;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
@@ -30,6 +37,8 @@ enum Commands {
     Init {},
 
     Template {},
+
+    Info {},
 
     Serve {
         #[arg(env = "FOREST_HOST", long, default_value = "127.0.0.1:3000")]
@@ -91,6 +100,23 @@ pub async fn execute() -> anyhow::Result<()> {
         Commands::Init {} => {
             tracing::info!("initializing project");
             tracing::trace!("found context: {:?}", context);
+        }
+
+        Commands::Info {} => {
+            let output = serde_json::to_string_pretty(&context)?;
+            let assets = HighlightingAssets::from_binary();
+            let theme = assets.get_theme("OneHalfDark");
+
+            let ss = SyntaxSet::load_defaults_nonewlines();
+
+            let syntax = ss.find_syntax_by_extension("json").unwrap();
+            let mut h = HighlightLines::new(syntax, theme);
+
+            for line in LinesWithEndings::from(&output) {
+                let ranges: Vec<(Style, &str)> = h.highlight_line(line, &ss).unwrap();
+                print!("{}", as_24_bit_terminal_escaped(&ranges[..], true));
+            }
+            println!()
         }
 
         Commands::Template {} => {

@@ -25,5 +25,12 @@ project {
 		path "templates/*.jinja2"
 		output "output/"
 	}
+
+	scripts type=shell {
+		path "scripts/"
+		actions {
+			build
+		}
+	}
 }
 

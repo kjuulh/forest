@@ -1,14 +1,15 @@
 use std::{collections::BTreeMap, fmt::Debug, path::PathBuf};
 
 use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
+use serde::Serialize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Context {
     pub project: Project,
     pub plan: Option<Plan>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Plan {
     pub name: String,
 }
@@ -38,7 +39,8 @@ impl TryFrom<KdlDocument> for Plan {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
 pub enum ProjectPlan {
     Local { path: PathBuf },
     NoPlan,
@@ -66,7 +68,8 @@ impl TryFrom<&KdlNode> for ProjectPlan {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
 pub enum GlobalVariable {
     Map(BTreeMap<String, GlobalVariable>),
     String(String),
@@ -125,7 +128,7 @@ impl TryFrom<&KdlValue> for GlobalVariable {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct Global {
     items: BTreeMap<String, GlobalVariable>,
 }
@@ -153,14 +156,15 @@ impl TryFrom<&KdlNode> for Global {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub enum TemplateType {
     #[default]
     Jinja2,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Templates {
+    #[serde(rename = "type")]
     pub ty: TemplateType,
     pub path: String,
     pub output: PathBuf,
@@ -219,13 +223,50 @@ impl TryFrom<&KdlNode> for Templates {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+pub struct Action {}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Scripts {
+    pub path: PathBuf,
+    pub actions: BTreeMap<String, Action>,
+}
+
+impl TryFrom<&KdlNode> for Scripts {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &KdlNode) -> Result<Self, Self::Error> {
+        let val = Self {
+            path: value
+                .get("path")
+                .and_then(|p| p.as_string())
+                .map(PathBuf::from)
+                .unwrap_or(PathBuf::from("scripts/")),
+            actions: value
+                .children()
+                .and_then(|c| c.get("actions"))
+                .and_then(|a| a.children())
+                .map(|d| {
+                    d.nodes()
+                        .iter()
+                        .map(|n| (n.name().value().to_string(), Action {}))
+                        .collect::<BTreeMap<String, Action>>()
+                })
+                .unwrap_or_default(),
+        };
+
+        Ok(val)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Project {
     pub name: String,
     pub description: Option<String>,
     pub plan: Option<ProjectPlan>,
     pub global: Global,
     pub templates: Option<Templates>,
+    pub scripts: Option<Scripts>,
 }
 
 impl TryFrom<KdlDocument> for Project {
@@ -273,6 +314,10 @@ impl TryFrom<KdlDocument> for Project {
             templates: project_children
                 .get("templates")
                 .map(|t| t.try_into())
+                .transpose()?,
+            scripts: project_children
+                .get("scripts")
+                .map(|m| m.try_into())
                 .transpose()?,
         })
     }

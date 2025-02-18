@@ -21,7 +21,7 @@
           "type": "item",
           "title": "should be able to template from a remote plan",
           "description": "",
-          "state": "not-done"
+          "state": "done"
         },
         "should be able to use scripts from a remote plan": {
           "type": "item",
