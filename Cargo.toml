@@ -3,7 +3,6 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.dependencies]
-forest = { path = "crates/forest" }
 
 anyhow = { version = "1" }
 tokio = { version = "1", features = ["full"] }
