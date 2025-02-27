@@ -26,11 +26,8 @@ project {
 		output "output/"
 	}
 
-	scripts type=shell {
-		path "scripts/"
-		actions {
-			build
-		}
+	scripts {
+		hello type=shell {}
 	}
 }
 

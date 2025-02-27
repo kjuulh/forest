@@ -130,6 +130,7 @@ impl TryFrom<&KdlValue> for GlobalVariable {
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct Global {
+    #[serde(flatten)]
     items: BTreeMap<String, GlobalVariable>,
 }
 
@@ -233,12 +234,23 @@ impl TryFrom<&KdlNode> for Templates {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct Action {}
+#[serde(tag = "type")]
+pub enum Script {
+    Shell {},
+}
+
+impl TryFrom<&KdlNode> for Script {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &KdlNode) -> Result<Self, Self::Error> {
+        Ok(Self::Shell {})
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Scripts {
-    pub path: PathBuf,
-    pub actions: BTreeMap<String, Action>,
+    #[serde(flatten)]
+    pub items: BTreeMap<String, Script>,
 }
 
 impl TryFrom<&KdlNode> for Scripts {
@@ -246,22 +258,21 @@ impl TryFrom<&KdlNode> for Scripts {
 
     fn try_from(value: &KdlNode) -> Result<Self, Self::Error> {
         let val = Self {
-            path: value
-                .get("path")
-                .and_then(|p| p.as_string())
-                .map(PathBuf::from)
-                .unwrap_or(PathBuf::from("scripts/")),
-            actions: value
-                .children()
-                .and_then(|c| c.get("actions"))
-                .and_then(|a| a.children())
-                .map(|d| {
-                    d.nodes()
-                        .iter()
-                        .map(|n| (n.name().value().to_string(), Action {}))
-                        .collect::<BTreeMap<String, Action>>()
-                })
-                .unwrap_or_default(),
+            items: {
+                let mut out = BTreeMap::default();
+                if let Some(children) = value.children() {
+                    for entry in children.nodes() {
+                        let name = entry.name().value();
+                        let val = entry.try_into()?;
+
+                        out.insert(name.to_string(), val);
+                    }
+
+                    out
+                } else {
+                    out
+                }
+            },
         };
 
         Ok(val)

@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::PathBuf};
 
-use clap::{Parser, Subcommand};
+use clap::{FromArgMatches, Parser, Subcommand, crate_authors, crate_description, crate_version};
 use colored_json::ToColoredJson;
 use kdl::KdlDocument;
 use rusty_s3::{Bucket, Credentials, S3Action};
@@ -11,29 +11,14 @@ use crate::{
     state::SharedState,
 };
 
+mod run;
 mod template;
-
-#[derive(Parser)]
-#[command(author, version, about, long_about = None, subcommand_required = true)]
-struct Command {
-    #[command(subcommand)]
-    command: Option<Commands>,
-    #[arg(
-        env = "FOREST_PROJECT_PATH",
-        long = "project-path",
-        default_value = "."
-    )]
-    project_path: PathBuf,
-}
 
 #[derive(Subcommand)]
 enum Commands {
     Init {},
-
     Template(template::Template),
-
     Info {},
-
     Serve {
         #[arg(env = "FOREST_HOST", long, default_value = "127.0.0.1:3000")]
         host: SocketAddr,
@@ -55,10 +40,36 @@ enum Commands {
     },
 }
 
-pub async fn execute() -> anyhow::Result<()> {
-    let cli = Command::parse();
+fn get_root(include_run: bool) -> clap::Command {
+    let mut root_cmd = clap::Command::new("forest")
+        .subcommand_required(true)
+        .author(crate_authors!())
+        .version(crate_version!())
+        .about(crate_description!())
+        .arg(
+            clap::Arg::new("project_path")
+                .long("project-path")
+                .env("FOREST_PROJECT_PATH")
+                .default_value("."),
+        );
 
-    let project_path = &cli.project_path.canonicalize()?;
+    if include_run {
+        root_cmd = root_cmd
+            .subcommand(clap::Command::new("run").allow_external_subcommands(true))
+            .ignore_errors(true);
+    }
+
+    Commands::augment_subcommands(root_cmd)
+}
+
+pub async fn execute() -> anyhow::Result<()> {
+    let matches = get_root(true).get_matches();
+    let project_path = PathBuf::from(
+        &matches
+            .get_one::<String>("project_path")
+            .expect("project path always to be set"),
+    )
+    .canonicalize()?;
     let project_file_path = project_path.join("forest.kdl");
     if !project_file_path.exists() {
         anyhow::bail!(
@@ -74,7 +85,7 @@ pub async fn execute() -> anyhow::Result<()> {
     tracing::trace!("found a project name: {}", project.name);
 
     let plan = if let Some(plan_file_path) = PlanReconciler::new()
-        .reconcile(&project, project_path)
+        .reconcile(&project, &project_path)
         .await?
     {
         let plan_file = tokio::fs::read_to_string(&plan_file_path).await?;
@@ -90,41 +101,54 @@ pub async fn execute() -> anyhow::Result<()> {
 
     let context = Context { project, plan };
 
-    match cli.command.unwrap() {
-        Commands::Init {} => {
-            tracing::info!("initializing project");
-            tracing::trace!("found context: {:?}", context);
-        }
+    let matches = if matches.subcommand_matches("run").is_some() {
+        tracing::debug!("run is called, building extra commands, rerunning the parser");
+        let root = get_root(false);
 
-        Commands::Info {} => {
-            let output = serde_json::to_string_pretty(&context)?;
-            println!("{}", output.to_colored_json_auto().unwrap_or(output));
-        }
+        let root = run::Run::augment_command(root, &context);
 
-        Commands::Template(template) => {
-            template.execute(project_path, &context).await?;
-        }
+        root.get_matches()
+    } else {
+        matches
+    };
 
-        Commands::Serve {
-            s3_endpoint,
-            s3_bucket,
-            s3_region,
-            s3_user,
-            s3_password,
-            ..
-        } => {
-            tracing::info!("Starting server");
-            let creds = Credentials::new(s3_user, s3_password);
-            let bucket = Bucket::new(
-                url::Url::parse(&s3_endpoint)?,
-                rusty_s3::UrlStyle::Path,
+    match matches.subcommand().unwrap() {
+        ("run", args) => {
+            run::Run::execute(args, &project_path, &context).await?;
+        }
+        _ => match Commands::from_arg_matches(&matches).unwrap() {
+            Commands::Init {} => {
+                tracing::info!("initializing project");
+                tracing::trace!("found context: {:?}", context);
+            }
+            Commands::Info {} => {
+                let output = serde_json::to_string_pretty(&context)?;
+                println!("{}", output.to_colored_json_auto().unwrap_or(output));
+            }
+            Commands::Template(template) => {
+                template.execute(&project_path, &context).await?;
+            }
+            Commands::Serve {
+                s3_endpoint,
                 s3_bucket,
                 s3_region,
-            )?;
-            let put_object = bucket.put_object(Some(&creds), "some-object");
-            let _url = put_object.sign(std::time::Duration::from_secs(30));
-            let _state = SharedState::new().await?;
-        }
+                s3_user,
+                s3_password,
+                ..
+            } => {
+                tracing::info!("Starting server");
+                let creds = Credentials::new(s3_user, s3_password);
+                let bucket = Bucket::new(
+                    url::Url::parse(&s3_endpoint)?,
+                    rusty_s3::UrlStyle::Path,
+                    s3_bucket,
+                    s3_region,
+                )?;
+                let put_object = bucket.put_object(Some(&creds), "some-object");
+                let _url = put_object.sign(std::time::Duration::from_secs(30));
+                let _state = SharedState::new().await?;
+            }
+        },
     }
 
     Ok(())
