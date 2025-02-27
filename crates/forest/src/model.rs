@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fmt::Debug, path::PathBuf};
 
-use kdl::{KdlDocument, KdlEntry, KdlNode, KdlValue};
+use kdl::{KdlDocument, KdlNode, KdlValue};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -133,6 +133,12 @@ pub struct Global {
     items: BTreeMap<String, GlobalVariable>,
 }
 
+impl From<&Global> for minijinja::Value {
+    fn from(value: &Global) -> Self {
+        Self::from_serialize(&value.items)
+    }
+}
+
 impl TryFrom<&KdlNode> for Global {
     type Error = anyhow::Error;
 
@@ -197,7 +203,10 @@ impl TryFrom<&KdlNode> for Templates {
                     match val.to_lowercase().as_str() {
                         "jinja2" => templates.ty = TemplateType::Jinja2,
                         e => {
-                            anyhow::bail!("failed to find a template matching the required type: {}, only 'jinja2' is supported", e);
+                            anyhow::bail!(
+                                "failed to find a template matching the required type: {}, only 'jinja2' is supported",
+                                e
+                            );
                         }
                     }
                 }
