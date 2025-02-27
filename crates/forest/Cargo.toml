@@ -1,7 +1,7 @@
 [package]
 name = "forest"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
@@ -13,11 +13,11 @@ dotenvy.workspace = true
 serde.workspace = true
 uuid.workspace = true
 
-rusty-s3 = "0.7.0"
-url = "2.5.4"
-kdl = "6.3.3"
-walkdir = "2.5.0"
-minijinja = "2.7.0"
-glob = "0.3.2"
-serde_json = "1.0.138"
-colored_json = "5.0.0"
+rusty-s3 = "0.7"
+url = "2.5"
+kdl = "6.3"
+walkdir = "2.5"
+minijinja = "2.7"
+glob = "0.3"
+serde_json = "1"
+colored_json = "5"
