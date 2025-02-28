@@ -1,3 +1,13 @@
 plan {
 	name project
+	
+	templates type=jinja2 {
+		path "templates/*.jinja2"
+		output "output/"
+	}
+
+	scripts {
+		world type=shell {}
+		hello type=shell {}
+	}
 }

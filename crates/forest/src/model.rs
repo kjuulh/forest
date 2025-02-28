@@ -12,6 +12,8 @@ pub struct Context {
 #[derive(Debug, Clone, Serialize)]
 pub struct Plan {
     pub name: String,
+    pub templates: Option<Templates>,
+    pub scripts: Option<Scripts>,
 }
 
 impl TryFrom<KdlDocument> for Plan {
@@ -35,6 +37,14 @@ impl TryFrom<KdlDocument> for Plan {
                 })
                 .cloned()
                 .ok_or(anyhow::anyhow!("a forest kuddle plan must have a name"))?,
+            templates: plan_children
+                .get("templates")
+                .map(|t| t.try_into())
+                .transpose()?,
+            scripts: plan_children
+                .get("scripts")
+                .map(|m| m.try_into())
+                .transpose()?,
         })
     }
 }
