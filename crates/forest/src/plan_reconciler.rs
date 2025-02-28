@@ -7,6 +7,8 @@ use crate::model::Project;
 pub mod git;
 pub mod local;
 
+mod cache;
+
 #[derive(Default)]
 pub struct PlanReconciler {}
 
@@ -25,11 +27,17 @@ impl PlanReconciler {
             tracing::debug!("no plan, returning");
             return Ok(None);
         }
+        let cache = cache::Cache::new(destination);
 
         // prepare the plan dir
         // TODO: We're always deleting, consider some form of caching
         let plan_dir = destination.join(".forest").join("plan");
         if plan_dir.exists() {
+            if let Some(secs) = cache.is_cache_valid().await? {
+                tracing::debug!("cache is valid for {} seconds", secs);
+                return Ok(Some(plan_dir.join("forest.kdl")));
+            }
+
             tokio::fs::remove_dir_all(&plan_dir).await?;
         }
         tokio::fs::create_dir_all(&plan_dir)
@@ -54,6 +62,8 @@ impl PlanReconciler {
         }
 
         tracing::info!("reconciled project");
+
+        cache.upsert_cache().await?;
 
         Ok(Some(plan_dir.join("forest.kdl")))
     }
