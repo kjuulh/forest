@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, fmt::Debug, path::PathBuf};
 
+use colored_json::Paint;
 use kdl::{KdlDocument, KdlNode, KdlValue};
 use serde::Serialize;
 
@@ -53,6 +54,7 @@ impl TryFrom<KdlDocument> for Plan {
 #[serde(untagged)]
 pub enum ProjectPlan {
     Local { path: PathBuf },
+    Git { url: String, path: Option<PathBuf> },
     NoPlan,
 }
 
@@ -71,6 +73,24 @@ impl TryFrom<&KdlNode> for ProjectPlan {
                     .map(|l| l.to_string())
                     .ok_or(anyhow::anyhow!("local must have an arg with a valid path"))?
                     .into(),
+            });
+        }
+
+        if let Some(git) = children.get_arg("git") {
+            return Ok(Self::Git {
+                url: git
+                    .as_string()
+                    .map(|l| l.to_string())
+                    .ok_or(anyhow::anyhow!("a git url is required"))?,
+                path: children
+                    .get("git")
+                    .and_then(|git| {
+                        git.entries()
+                            .iter()
+                            .filter(|i| i.name().is_some())
+                            .find(|i| i.name().expect("to have a value").to_string() == "path")
+                    })
+                    .and_then(|i| i.value().as_string().map(|p| p.to_string().into())),
             });
         }
 

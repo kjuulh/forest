@@ -1,0 +1,33 @@
+project {
+	name local
+	description """
+		A simple local project that depends on ../plan for its utility scripts
+	"""
+
+	plan {
+		git "ssh://git@git.front.kjuulh.io/kjuulh/forest" path="examples/plan"
+	}
+
+	global {
+		someName "name"
+		someKey {
+			someNestedKey "somevalue"
+			some {
+				key {
+					val
+					val
+				}
+			}
+		}
+	}
+
+	templates type=jinja2 {
+		path "templates/*.jinja2"
+		output "output/"
+	}
+
+	scripts {
+		hello type=shell {}
+	}
+}
+
