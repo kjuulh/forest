@@ -40,7 +40,7 @@ impl Cache {
 
         let cache_expire = now
             .as_secs()
-            .saturating_sub(std::time::Duration::from_secs(60 * 60 * 8).as_secs());
+            .saturating_sub(std::time::Duration::from_secs(60 * 60).as_secs()); // cache lasts an hour
 
         if unix_cache.as_secs() > cache_expire {
             return Ok(Some(unix_cache.as_secs().saturating_sub(cache_expire)));
