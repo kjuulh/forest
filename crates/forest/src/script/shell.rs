@@ -1,4 +1,4 @@
-use std::process::Stdio;
+use std::{path::PathBuf, process::Stdio};
 
 use anyhow::Context;
 
@@ -6,15 +6,26 @@ use super::ScriptExecutor;
 
 pub struct ShellExecutor {
     root: ScriptExecutor,
+    ty: ShellType,
+}
+
+pub enum ScriptStatus {
+    Found,
+    NotFound,
+}
+
+enum ShellType {
+    Plan,
+    Project,
 }
 
 impl ShellExecutor {
-    pub async fn execute(&self, name: &str) -> anyhow::Result<()> {
-        let path = &self.root.project_path;
+    pub async fn execute(&self, name: &str) -> anyhow::Result<ScriptStatus> {
+        let path = &self.get_path();
         let script_path = path.join("scripts").join(format!("{name}.sh"));
 
         if !script_path.exists() {
-            anyhow::bail!("script was not found at: {}", script_path.display());
+            return Ok(ScriptStatus::NotFound);
         }
 
         let mut cmd = tokio::process::Command::new(&script_path);
@@ -37,7 +48,21 @@ impl ShellExecutor {
             )
         }
 
-        Ok(())
+        Ok(ScriptStatus::Found)
+    }
+
+    fn get_path(&self) -> PathBuf {
+        match self.ty {
+            ShellType::Plan => self.root.project_path.join(".forest").join("plan"),
+            ShellType::Project => self.root.project_path.clone(),
+        }
+    }
+
+    pub fn from_plan(value: &ScriptExecutor) -> Self {
+        Self {
+            root: value.clone(),
+            ty: ShellType::Plan,
+        }
     }
 }
 
@@ -45,6 +70,7 @@ impl From<&ScriptExecutor> for ShellExecutor {
     fn from(value: &ScriptExecutor) -> Self {
         Self {
             root: value.clone(),
+            ty: ShellType::Project,
         }
     }
 }

@@ -19,6 +19,24 @@ impl Run {
             }
         }
 
+        if let Some(plan) = &ctx.plan {
+            if let Some(scripts) = &plan.scripts {
+                let existing_cmds = run_cmd
+                    .get_subcommands()
+                    .map(|s| s.get_name().to_string())
+                    .collect::<Vec<_>>();
+
+                for name in scripts.items.keys() {
+                    if existing_cmds.contains(name) {
+                        continue;
+                    }
+
+                    let cmd = clap::Command::new(name.to_string());
+                    run_cmd = run_cmd.subcommand(cmd);
+                }
+            }
+        }
+
         root.subcommand(run_cmd)
     }
 
@@ -31,14 +49,27 @@ impl Run {
             anyhow::bail!("failed to find a matching run command")
         };
 
-        let scripts_ctx = ctx.project.scripts.as_ref().expect("to find scripts");
-        let Some(script_ctx) = scripts_ctx.items.get(name) else {
-            anyhow::bail!("failed to find script: {}", name);
-        };
+        if let Some(scripts_ctx) = &ctx.project.scripts {
+            if let Some(script_ctx) = scripts_ctx.items.get(name) {
+                ScriptExecutor::new(project_path.into(), ctx.clone())
+                    .run(script_ctx, name)
+                    .await?;
 
-        ScriptExecutor::new(project_path.into(), ctx.clone())
-            .run(script_ctx, name)
-            .await?;
+                return Ok(());
+            }
+        }
+
+        if let Some(plan) = &ctx.plan {
+            if let Some(scripts_ctx) = &plan.scripts {
+                if let Some(script_ctx) = scripts_ctx.items.get(name) {
+                    ScriptExecutor::new(project_path.into(), ctx.clone())
+                        .run(script_ctx, name)
+                        .await?;
+
+                    return Ok(());
+                }
+            }
+        }
 
         Ok(())
     }
