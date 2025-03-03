@@ -26,7 +26,7 @@ impl ScriptExecutor {
             return Ok(());
         }
 
-        Ok(())
+        anyhow::bail!("script was not found for name: {}", name)
     }
 
     async fn run_project(&self, script_ctx: &Script, name: &str) -> anyhow::Result<bool> {

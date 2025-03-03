@@ -71,6 +71,6 @@ impl Run {
             }
         }
 
-        Ok(())
+        anyhow::bail!("no scripts were found for command: {}", name)
     }
 }

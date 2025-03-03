@@ -19,6 +19,7 @@ enum Commands {
     Init {},
     Template(template::Template),
     Info {},
+    Clean {},
     Serve {
         #[arg(env = "FOREST_HOST", long, default_value = "127.0.0.1:3000")]
         host: SocketAddr,
@@ -54,9 +55,7 @@ fn get_root(include_run: bool) -> clap::Command {
         );
 
     if include_run {
-        root_cmd = root_cmd
-            .subcommand(clap::Command::new("run").allow_external_subcommands(true))
-            .ignore_errors(true);
+        root_cmd = root_cmd.subcommand(clap::Command::new("run").allow_external_subcommands(true));
     }
 
     Commands::augment_subcommands(root_cmd)
@@ -112,7 +111,10 @@ pub async fn execute() -> anyhow::Result<()> {
         matches
     };
 
-    match matches.subcommand().unwrap() {
+    match matches
+        .subcommand()
+        .expect("forest requires a command to be passed")
+    {
         ("run", args) => {
             run::Run::execute(args, &project_path, &context).await?;
         }
@@ -147,6 +149,13 @@ pub async fn execute() -> anyhow::Result<()> {
                 let put_object = bucket.put_object(Some(&creds), "some-object");
                 let _url = put_object.sign(std::time::Duration::from_secs(30));
                 let _state = SharedState::new().await?;
+            }
+            Commands::Clean {} => {
+                let forest_path = project_path.join(".forest");
+                if forest_path.exists() {
+                    tokio::fs::remove_dir_all(forest_path).await?;
+                    tracing::info!("removed .forest");
+                }
             }
         },
     }
