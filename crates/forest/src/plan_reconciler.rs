@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::model::Project;
+use crate::model::{ForestFile, Project};
 
 pub mod git;
 pub mod local;

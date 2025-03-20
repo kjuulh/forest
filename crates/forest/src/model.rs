@@ -372,3 +372,40 @@ impl TryFrom<KdlDocument> for Project {
         })
     }
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Workspace {}
+
+impl TryFrom<KdlDocument> for Workspace {
+    type Error = anyhow::Error;
+
+    fn try_from(value: KdlDocument) -> Result<Self, Self::Error> {
+        Ok(Self {})
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum ForestFile {
+    Workspace(Workspace),
+    Project(Project),
+}
+
+impl TryFrom<KdlDocument> for ForestFile {
+    type Error = anyhow::Error;
+
+    fn try_from(value: KdlDocument) -> Result<Self, Self::Error> {
+        if value.get("workspace").is_some() && value.get("project").is_some() {
+            anyhow::bail!("a forest.kdl file cannot contain both a workspace and project")
+        }
+
+        if value.get("project").is_some() {
+            return Ok(Self::Project(value.try_into()?));
+        }
+
+        if value.get("workspace").is_some() {
+            return Ok(Self::Workspace(value.try_into()?));
+        }
+
+        anyhow::bail!("a forest.kdl file must be either a project, workspace or plan")
+    }
+}

@@ -6,7 +6,7 @@ use kdl::KdlDocument;
 use rusty_s3::{Bucket, Credentials, S3Action};
 
 use crate::{
-    model::{Context, Plan, Project},
+    model::{Context, ForestFile, Plan},
     plan_reconciler::PlanReconciler,
     state::SharedState,
 };
@@ -80,84 +80,92 @@ pub async fn execute() -> anyhow::Result<()> {
     let project_file = tokio::fs::read_to_string(&project_file_path).await?;
     let project_doc: KdlDocument = project_file.parse()?;
 
-    let project: Project = project_doc.try_into()?;
-    tracing::trace!("found a project name: {}", project.name);
+    let project: ForestFile = project_doc.try_into()?;
 
-    let plan = if let Some(plan_file_path) = PlanReconciler::new()
-        .reconcile(&project, &project_path)
-        .await?
-    {
-        let plan_file = tokio::fs::read_to_string(&plan_file_path).await?;
-        let plan_doc: KdlDocument = plan_file.parse()?;
-
-        let plan: Plan = plan_doc.try_into()?;
-        tracing::trace!("found a plan name: {}", project.name);
-
-        Some(plan)
-    } else {
-        None
-    };
-
-    let context = Context { project, plan };
-
-    let matches = if matches.subcommand_matches("run").is_some() {
-        tracing::debug!("run is called, building extra commands, rerunning the parser");
-        let root = get_root(false);
-
-        let root = run::Run::augment_command(root, &context);
-
-        root.get_matches()
-    } else {
-        matches
-    };
-
-    match matches
-        .subcommand()
-        .expect("forest requires a command to be passed")
-    {
-        ("run", args) => {
-            run::Run::execute(args, &project_path, &context).await?;
+    match project {
+        ForestFile::Workspace(workspace) => {
+            tracing::trace!("running as workspace")
         }
-        _ => match Commands::from_arg_matches(&matches).unwrap() {
-            Commands::Init {} => {
-                tracing::info!("initializing project");
-                tracing::trace!("found context: {:?}", context);
-            }
-            Commands::Info {} => {
-                let output = serde_json::to_string_pretty(&context)?;
-                println!("{}", output.to_colored_json_auto().unwrap_or(output));
-            }
-            Commands::Template(template) => {
-                template.execute(&project_path, &context).await?;
-            }
-            Commands::Serve {
-                s3_endpoint,
-                s3_bucket,
-                s3_region,
-                s3_user,
-                s3_password,
-                ..
-            } => {
-                tracing::info!("Starting server");
-                let creds = Credentials::new(s3_user, s3_password);
-                let bucket = Bucket::new(
-                    url::Url::parse(&s3_endpoint)?,
-                    rusty_s3::UrlStyle::Path,
-                    s3_bucket,
-                    s3_region,
-                )?;
-                let put_object = bucket.put_object(Some(&creds), "some-object");
-                let _url = put_object.sign(std::time::Duration::from_secs(30));
-                let _state = SharedState::new().await?;
-            }
-            Commands::Clean {} => {
-                let forest_path = project_path.join(".forest");
-                if forest_path.exists() {
-                    tokio::fs::remove_dir_all(forest_path).await?;
-                    tracing::info!("removed .forest");
+        ForestFile::Project(project) => {
+            tracing::trace!("found a project name: {}", project.name);
+
+            let plan = if let Some(plan_file_path) = PlanReconciler::new()
+                .reconcile(&project, &project_path)
+                .await?
+            {
+                let plan_file = tokio::fs::read_to_string(&plan_file_path).await?;
+                let plan_doc: KdlDocument = plan_file.parse()?;
+
+                let plan: Plan = plan_doc.try_into()?;
+                tracing::trace!("found a plan name: {}", project.name);
+
+                Some(plan)
+            } else {
+                None
+            };
+
+            let context = Context { project, plan };
+
+            let matches = if matches.subcommand_matches("run").is_some() {
+                tracing::debug!("run is called, building extra commands, rerunning the parser");
+                let root = get_root(false);
+
+                let root = run::Run::augment_command(root, &context);
+
+                root.get_matches()
+            } else {
+                matches
+            };
+
+            match matches
+                .subcommand()
+                .expect("forest requires a command to be passed")
+            {
+                ("run", args) => {
+                    run::Run::execute(args, &project_path, &context).await?;
                 }
+                _ => match Commands::from_arg_matches(&matches).unwrap() {
+                    Commands::Init {} => {
+                        tracing::info!("initializing project");
+                        tracing::trace!("found context: {:?}", context);
+                    }
+                    Commands::Info {} => {
+                        let output = serde_json::to_string_pretty(&context)?;
+                        println!("{}", output.to_colored_json_auto().unwrap_or(output));
+                    }
+                    Commands::Template(template) => {
+                        template.execute(&project_path, &context).await?;
+                    }
+                    Commands::Serve {
+                        s3_endpoint,
+                        s3_bucket,
+                        s3_region,
+                        s3_user,
+                        s3_password,
+                        ..
+                    } => {
+                        tracing::info!("Starting server");
+                        let creds = Credentials::new(s3_user, s3_password);
+                        let bucket = Bucket::new(
+                            url::Url::parse(&s3_endpoint)?,
+                            rusty_s3::UrlStyle::Path,
+                            s3_bucket,
+                            s3_region,
+                        )?;
+                        let put_object = bucket.put_object(Some(&creds), "some-object");
+                        let _url = put_object.sign(std::time::Duration::from_secs(30));
+                        let _state = SharedState::new().await?;
+                    }
+                    Commands::Clean {} => {
+                        let forest_path = project_path.join(".forest");
+                        if forest_path.exists() {
+                            tokio::fs::remove_dir_all(forest_path).await?;
+                            tracing::info!("removed .forest");
+                        }
+                    }
+                },
             }
-        },
+        }
     }
 
     Ok(())
