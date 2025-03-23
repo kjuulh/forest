@@ -374,13 +374,57 @@ impl TryFrom<KdlDocument> for Project {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct Workspace {}
+pub struct WorkspaceMember {
+    pub name: String,
+}
+
+impl TryFrom<&kdl::KdlNode> for WorkspaceMember {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &kdl::KdlNode) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: value
+                .entries()
+                .first()
+                .ok_or(anyhow::anyhow!(
+                    "is supposed to have a path `member ./some-path`"
+                ))?
+                .value()
+                .as_string()
+                .ok_or(anyhow::anyhow!("value is required to be a string"))?
+                .to_string(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Workspace {
+    members: Vec<WorkspaceMember>,
+}
 
 impl TryFrom<KdlDocument> for Workspace {
     type Error = anyhow::Error;
 
     fn try_from(value: KdlDocument) -> Result<Self, Self::Error> {
-        Ok(Self {})
+        let workspace = value
+            .get("workspace")
+            .expect("to have a workspace at this point")
+            .children()
+            .ok_or(anyhow::anyhow!("workspace to be a section"))?;
+
+        Ok(Self {
+            members: workspace
+                .get("members")
+                .ok_or(anyhow::anyhow!(
+                    "a members section is required for a workspace"
+                ))?
+                .children()
+                .ok_or(anyhow::anyhow!("a members is required to have children"))?
+                .nodes()
+                .iter()
+                .map(|m| m.try_into())
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        })
     }
 }
 

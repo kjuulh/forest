@@ -78,13 +78,20 @@ pub async fn execute() -> anyhow::Result<()> {
     }
 
     let project_file = tokio::fs::read_to_string(&project_file_path).await?;
-    let project_doc: KdlDocument = project_file.parse()?;
-
-    let project: ForestFile = project_doc.try_into()?;
+    let doc: KdlDocument = project_file.parse()?;
+    let project: ForestFile = doc.try_into()?;
 
     match project {
         ForestFile::Workspace(workspace) => {
-            tracing::trace!("running as workspace")
+            tracing::trace!("running as workspace");
+
+            // 1. For each member load the project
+            let output = serde_json::to_string_pretty(&workspace)?;
+            println!("{}", output.to_colored_json_auto().unwrap_or(output));
+
+            // TODO: 1a (optional). Resolve dependencies
+            // 2. Reconcile plans
+            // 3. Provide context and aggregated commands for projects
         }
         ForestFile::Project(project) => {
             tracing::trace!("found a project name: {}", project.name);
