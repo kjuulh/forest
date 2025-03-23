@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::model::{ForestFile, Project};
+use crate::model::{ForestFile, Project, Workspace, WorkspaceProject};
 
 pub mod git;
 pub mod local;
@@ -21,6 +21,8 @@ impl PlanReconciler {
         &self,
         project: &Project,
         destination: &Path,
+        workspace_members: Option<&Vec<(PathBuf, WorkspaceProject)>>,
+        workspace_root: Option<&Path>,
     ) -> anyhow::Result<Option<PathBuf>> {
         tracing::info!("reconciling project");
         if project.plan.is_none() {
@@ -54,6 +56,21 @@ impl PlanReconciler {
             }
             crate::model::ProjectPlan::Git { url, path } => {
                 git::reconcile(url, path, &plan_dir).await?;
+            }
+            crate::model::ProjectPlan::Workspace { name } => {
+                let workspace_root = workspace_root.expect("to have workspace root available");
+
+                if let Some(workspace_members) = workspace_members {
+                    for (member_path, member) in workspace_members {
+                        if let WorkspaceProject::Plan(plan) = member {
+                            if &plan.name == name {
+                                tracing::debug!("found workspace project: {}", name);
+                                local::reconcile(&workspace_root.join(member_path), &plan_dir)
+                                    .await?;
+                            }
+                        }
+                    }
+                }
             }
             crate::model::ProjectPlan::NoPlan => {
                 tracing::debug!("no plan, returning");

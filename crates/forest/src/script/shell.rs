@@ -29,7 +29,7 @@ impl ShellExecutor {
         }
 
         let mut cmd = tokio::process::Command::new(&script_path);
-        let cmd = cmd.current_dir(path);
+        let cmd = cmd.current_dir(&self.root.project_path);
         cmd.stdin(Stdio::inherit());
         cmd.stdout(Stdio::inherit());
         cmd.stderr(Stdio::inherit());
@@ -53,6 +53,7 @@ impl ShellExecutor {
 
     fn get_path(&self) -> PathBuf {
         match self.ty {
+            //ShellType::Plan => self.root.project_path.join(".forest").join("plan"),
             ShellType::Plan => self.root.project_path.join(".forest").join("plan"),
             ShellType::Project => self.root.project_path.clone(),
         }

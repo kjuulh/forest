@@ -1,6 +1,5 @@
 use std::{collections::BTreeMap, fmt::Debug, path::PathBuf};
 
-use colored_json::Paint;
 use kdl::{KdlDocument, KdlNode, KdlValue};
 use serde::Serialize;
 
@@ -57,6 +56,7 @@ impl TryFrom<KdlDocument> for Plan {
 pub enum ProjectPlan {
     Local { path: PathBuf },
     Git { url: String, path: Option<PathBuf> },
+    Workspace { name: String },
     NoPlan,
 }
 
@@ -93,6 +93,17 @@ impl TryFrom<&KdlNode> for ProjectPlan {
                             .find(|i| i.name().expect("to have a value").to_string() == "path")
                     })
                     .and_then(|i| i.value().as_string().map(|p| p.to_string().into())),
+            });
+        }
+
+        if let Some(workspace) = children.get_arg("workspace") {
+            return Ok(Self::Workspace {
+                name: workspace
+                    .as_string()
+                    .map(|w| w.to_string())
+                    .ok_or(anyhow::anyhow!(
+                        "workspace requires a project name in the same project"
+                    ))?,
             });
         }
 

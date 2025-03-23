@@ -1,3 +1,7 @@
 plan {
 	name a
+
+	scripts {
+		hello_plan type=shell {}
+	}
 }

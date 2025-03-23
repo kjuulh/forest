@@ -1,6 +1,10 @@
 project {
 	name a
 
+	plan {
+		workspace a
+	}
+
 	scripts {
 		hello type=shell {}
 	}

@@ -116,17 +116,27 @@ pub async fn execute() -> anyhow::Result<()> {
 
             let mut member_contexts = Vec::new();
 
-            for (member_path, member) in workspace_members {
+            for (member_path, member) in &workspace_members {
                 match member {
-                    WorkspaceProject::Plan(plan) => {
+                    WorkspaceProject::Plan(_plan) => {
                         tracing::warn!("skipping reconcile for plans for now")
                     }
                     WorkspaceProject::Project(project) => {
                         let plan = if let Some(plan_file_path) = PlanReconciler::new()
-                            .reconcile(&project, &project_path)
+                            .reconcile(
+                                project,
+                                member_path,
+                                Some(workspace_members.as_ref()),
+                                Some(&project_path),
+                            )
                             .await?
                         {
-                            let plan_file = tokio::fs::read_to_string(&plan_file_path).await?;
+                            let plan_file = tokio::fs::read_to_string(&plan_file_path)
+                                .await
+                                .context(format!(
+                                    "failed to read file at: {}",
+                                    project_path.to_string_lossy()
+                                ))?;
                             let plan_doc: KdlDocument = plan_file.parse()?;
 
                             let plan: Plan = plan_doc.try_into()?;
@@ -137,7 +147,10 @@ pub async fn execute() -> anyhow::Result<()> {
                             None
                         };
 
-                        let context = Context { project, plan };
+                        let context = Context {
+                            project: project.clone(),
+                            plan,
+                        };
                         member_contexts.push((member_path, context));
                     }
                 }
@@ -177,12 +190,8 @@ pub async fn execute() -> anyhow::Result<()> {
                                 .expect("to be able to get a subcommand (todo: might not work)");
 
                             for (member_path, context) in member_contexts {
-                                run::Run::execute_command_if_exists(
-                                    all_cmd,
-                                    &member_path,
-                                    &context,
-                                )
-                                .await?;
+                                run::Run::execute_command_if_exists(all_cmd, member_path, &context)
+                                    .await?;
                             }
                         }
                         _ => {
@@ -252,7 +261,7 @@ pub async fn execute() -> anyhow::Result<()> {
             tracing::trace!("found a project name: {}", project.name);
 
             let plan = if let Some(plan_file_path) = PlanReconciler::new()
-                .reconcile(&project, &project_path)
+                .reconcile(&project, &project_path, None, None)
                 .await?
             {
                 let plan_file = tokio::fs::read_to_string(&plan_file_path).await?;
