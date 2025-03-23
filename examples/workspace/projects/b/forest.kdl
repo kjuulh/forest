@@ -1,3 +1,7 @@
 project {
 	name b
+
+	scripts {
+		hello type=shell {}
+	}
 }
