@@ -1,9 +1,9 @@
 workspace {
 	members {
-		member "./projects/a"
-		member "./projects/b"
-		member "./plan/a"
-		member "./plan/b"
-		member "./components/*"
+		member "projects/a"
+		member "projects/b"
+		member "plan/a"
+		member "plan/b"
+		// member "components/*"
 	}
 }

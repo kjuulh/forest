@@ -13,7 +13,9 @@ pub struct Context {
 #[derive(Debug, Clone, Serialize)]
 pub struct Plan {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub templates: Option<Templates>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub scripts: Option<Scripts>,
 }
 
@@ -164,6 +166,12 @@ pub struct Global {
     items: BTreeMap<String, GlobalVariable>,
 }
 
+impl Global {
+    fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+}
+
 impl From<&Global> for minijinja::Value {
     fn from(value: &Global) -> Self {
         Self::from_serialize(&value.items)
@@ -312,10 +320,16 @@ impl TryFrom<&KdlNode> for Scripts {
 #[derive(Debug, Clone, Serialize)]
 pub struct Project {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub plan: Option<ProjectPlan>,
+
+    #[serde(skip_serializing_if = "Global::is_empty")]
     pub global: Global,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub templates: Option<Templates>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub scripts: Option<Scripts>,
 }
 
@@ -375,7 +389,7 @@ impl TryFrom<KdlDocument> for Project {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkspaceMember {
-    pub name: String,
+    pub path: String,
 }
 
 impl TryFrom<&kdl::KdlNode> for WorkspaceMember {
@@ -383,7 +397,7 @@ impl TryFrom<&kdl::KdlNode> for WorkspaceMember {
 
     fn try_from(value: &kdl::KdlNode) -> Result<Self, Self::Error> {
         Ok(Self {
-            name: value
+            path: value
                 .entries()
                 .first()
                 .ok_or(anyhow::anyhow!(
@@ -399,7 +413,7 @@ impl TryFrom<&kdl::KdlNode> for WorkspaceMember {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Workspace {
-    members: Vec<WorkspaceMember>,
+    pub members: Vec<WorkspaceMember>,
 }
 
 impl TryFrom<KdlDocument> for Workspace {
@@ -448,6 +462,33 @@ impl TryFrom<KdlDocument> for ForestFile {
 
         if value.get("workspace").is_some() {
             return Ok(Self::Workspace(value.try_into()?));
+        }
+
+        anyhow::bail!("a forest.kdl file must be either a project, workspace or plan")
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum WorkspaceProject {
+    Plan(Plan),
+    Project(Project),
+}
+
+impl TryFrom<KdlDocument> for WorkspaceProject {
+    type Error = anyhow::Error;
+
+    fn try_from(value: KdlDocument) -> Result<Self, Self::Error> {
+        if value.get("plan").is_some() && value.get("project").is_some() {
+            anyhow::bail!("a forest.kdl file cannot contain both a plan and project")
+        }
+
+        if value.get("project").is_some() {
+            return Ok(Self::Project(value.try_into()?));
+        }
+
+        if value.get("plan").is_some() {
+            return Ok(Self::Plan(value.try_into()?));
         }
 
         anyhow::bail!("a forest.kdl file must be either a project, workspace or plan")

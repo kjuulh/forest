@@ -1,12 +1,13 @@
 use std::{net::SocketAddr, path::PathBuf};
 
+use anyhow::Context as AnyContext;
 use clap::{FromArgMatches, Parser, Subcommand, crate_authors, crate_description, crate_version};
 use colored_json::ToColoredJson;
 use kdl::KdlDocument;
 use rusty_s3::{Bucket, Credentials, S3Action};
 
 use crate::{
-    model::{Context, ForestFile, Plan},
+    model::{Context, ForestFile, Plan, Project, WorkspaceProject},
     plan_reconciler::PlanReconciler,
     state::SharedState,
 };
@@ -86,11 +87,36 @@ pub async fn execute() -> anyhow::Result<()> {
             tracing::trace!("running as workspace");
 
             // 1. For each member load the project
-            let output = serde_json::to_string_pretty(&workspace)?;
+
+            let mut workspace_members = Vec::new();
+
+            for member in workspace.members {
+                let workspace_member_path = project_path.join(&member.path);
+
+                let project_file_path = workspace_member_path.join("forest.kdl");
+                if !project_file_path.exists() {
+                    anyhow::bail!(
+                        "no 'forest.kdl' file was found at: {}",
+                        workspace_member_path.display().to_string()
+                    );
+                }
+
+                let project_file = tokio::fs::read_to_string(&project_file_path).await?;
+                let doc: KdlDocument = project_file.parse()?;
+                let project: WorkspaceProject = doc.try_into().context(format!(
+                    "workspace member: {} failed to parse",
+                    &member.path
+                ))?;
+
+                workspace_members.push(project);
+            }
+
+            let output = serde_json::to_string_pretty(&workspace_members)?;
             println!("{}", output.to_colored_json_auto().unwrap_or(output));
 
             // TODO: 1a (optional). Resolve dependencies
             // 2. Reconcile plans
+
             // 3. Provide context and aggregated commands for projects
         }
         ForestFile::Project(project) => {
