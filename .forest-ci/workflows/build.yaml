@@ -1,0 +1,41 @@
+name: Build Forest
+
+on:
+  - push
+  - pull_request
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    env:
+      RUSTFLAGS: -D warnings
+    timeout_minutes: 30
+    steps:
+          
+      - name: Build application
+        uses: rustlang/rust:nightly
+        run:
+          - export SQLX_OFFLINE=true
+          - cargo build --release
+          
+      - name: Run tests
+        uses: rustlang/rust:nightly
+        run:
+          - cargo test
+        
+      - name: Check code formatting
+        uses: rustlang/rust:nightly
+        run:
+          - cargo fmt -- --check
+        continue_on_error: true
+      
+      - name: Run clippy lints
+        uses: rustlang/rust:nightly
+        run:
+          - rustup component add clippy
+          - cargo clippy -- -D warnings
+        continue_on_error: true
+
