@@ -1,11 +1,9 @@
 use clap::{Parser, Subcommand};
-use components::ComponentsCommand;
-use init::InitCommand;
 
 use crate::state::State;
 
-mod components;
-mod init;
+mod serve;
+use serve::*;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None, subcommand_required = true)]
@@ -16,8 +14,15 @@ struct Command {
 
 #[derive(Subcommand)]
 enum Commands {
-    Init(InitCommand),
-    Components(ComponentsCommand),
+    Serve(ServeCommand),
+}
+
+impl Commands {
+    async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        match self {
+            Commands::Serve(serve_command) => serve_command.execute(state).await,
+        }
+    }
 }
 
 pub async fn execute() -> anyhow::Result<()> {
@@ -26,17 +31,10 @@ pub async fn execute() -> anyhow::Result<()> {
 
     let state = State::new().await?;
 
-    match cli
-        .command
+    cli.command
         .expect("commands are required should've been caught by clap")
-    {
-        Commands::Init(init_command) => {
-            init_command.execute(&state).await?;
-        }
-        Commands::Components(components_command) => {
-            components_command.execute(&state).await?;
-        }
-    }
+        .execute(&state)
+        .await?;
 
     Ok(())
 }

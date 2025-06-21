@@ -1,5 +1,17 @@
+[env]
+RUST_LOG = "non=debug,info"
+
 [tools]
 rust = { version = "1.87", components = "rust-src,rust-analyzer" }
 
 [tasks.non]
 run = "cargo run -p non -- "
+
+[tasks."non:trace"]
+env = { RUST_LOG = "non=trace,info" }
+run = "cargo run -p non -- "
+
+
+[tasks."dev:server"]
+env = { RUST_LOG = "non_server=trace,info" }
+run = "cargo run -p non-server -- "

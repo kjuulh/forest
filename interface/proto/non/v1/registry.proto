@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package non.v1;
+
+service RegistryService {
+  rpc GetComponents(GetComponentsRequest) returns (GetComponentsResponse) {}
+}
+
+message GetComponentsRequest {}
+message GetComponentsResponse {}

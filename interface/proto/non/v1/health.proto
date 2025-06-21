@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package non.v1;
+
+service StatusService {
+  rpc Status(GetStatusRequest) returns (GetStatusResponse) {}
+}
+
+message GetStatusRequest {}
+message GetStatusResponse {}
