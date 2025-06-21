@@ -1,5 +1,5 @@
 [tools]
 rust = { version = "1.87", components = "rust-src,rust-analyzer" }
 
-[tasks.no]
-run = "cargo run -p cargo-no -- "
+[tasks.non]
+run = "cargo run -p non -- "

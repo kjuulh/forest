@@ -6,7 +6,7 @@ resolver = "2"
 version = "0.1.0"
 
 [workspace.dependencies]
-cargo-no = { path = "crates/cargo-no" }
+non = { path = "crates/non" }
 
 anyhow = { version = "1" }
 tokio = { version = "1", features = ["full"] }
