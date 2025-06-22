@@ -1,9 +1,11 @@
+use admin::AdminCommand;
 use clap::{Parser, Subcommand};
 use components::ComponentsCommand;
 use init::InitCommand;
 
 use crate::state::State;
 
+mod admin;
 mod components;
 mod init;
 
@@ -18,6 +20,7 @@ struct Command {
 enum Commands {
     Init(InitCommand),
     Components(ComponentsCommand),
+    Admin(AdminCommand),
 }
 
 pub async fn execute() -> anyhow::Result<()> {
@@ -35,6 +38,9 @@ pub async fn execute() -> anyhow::Result<()> {
         }
         Commands::Components(components_command) => {
             components_command.execute(&state).await?;
+        }
+        Commands::Admin(cmd) => {
+            cmd.execute(&state).await?;
         }
     }
 

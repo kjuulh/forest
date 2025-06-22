@@ -1,4 +1,5 @@
 mod cli;
+mod grpc;
 mod services;
 mod state;
 

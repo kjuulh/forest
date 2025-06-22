@@ -1,9 +1,12 @@
-version: "3"
 services:
   crdb:
     restart: 'always'
-    image: 'cockroachdb/cockroach:v23.1.14'
+    image: 'cockroachdb/cockroach:v25.2.1'
     command: 'start-single-node --advertise-addr 0.0.0.0 --insecure'
+    environment:
+      COCKROACH_DATABASE: dev
+      COCKROACH_USER: devuser
+      COCKROACH_PASSWORD: devpassword
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health?ready=1"]
       interval: '10s'

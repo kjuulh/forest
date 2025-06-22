@@ -1,0 +1,61 @@
+use std::net::SocketAddr;
+
+use namespaces::NamespacesServer;
+use non_grpc_interface::{
+    namespace_service_server::NamespaceServiceServer,
+    registry_service_server::RegistryServiceServer, status_service_server::StatusServiceServer,
+};
+use notmad::MadError;
+use registry::RegistryServer;
+use status::StatusServer;
+use tokio_util::sync::CancellationToken;
+
+use crate::state::State;
+
+mod namespaces;
+mod registry;
+mod status;
+
+pub struct GrpcServer {
+    pub host: SocketAddr,
+    pub state: State,
+}
+
+impl GrpcServer {
+    pub async fn serve(&self, cancellation_token: CancellationToken) -> anyhow::Result<()> {
+        tracing::info!("serving grpc on {}", self.host);
+
+        tonic::transport::Server::builder()
+            .add_service(StatusServiceServer::new(StatusServer {
+                state: self.state.clone(),
+            }))
+            .add_service(RegistryServiceServer::new(RegistryServer {
+                state: self.state.clone(),
+            }))
+            .add_service(NamespaceServiceServer::new(NamespacesServer {
+                state: self.state.clone(),
+            }))
+            .serve_with_shutdown(
+                self.host,
+                async move { cancellation_token.cancelled().await },
+            )
+            .await?;
+
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl notmad::Component for GrpcServer {
+    fn name(&self) -> Option<String> {
+        Some("non-server/grpc".into())
+    }
+
+    async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {
+        self.serve(cancellation_token)
+            .await
+            .map_err(MadError::Inner)?;
+
+        Ok(())
+    }
+}

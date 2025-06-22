@@ -12,6 +12,18 @@ env = { RUST_LOG = "non=trace,info" }
 run = "cargo run -p non -- "
 
 
-[tasks."dev:server"]
+[tasks."dev:serve"]
 env = { RUST_LOG = "non_server=trace,info" }
-run = "cargo run -p non-server -- "
+run = "cargo run -p non-server -- serve"
+
+[tasks."dev:init"]
+run = """
+mise run dev -- admin create-namespace non
+mise run dev -- admin deploy-component ./components/* --all --quiet
+"""
+
+[tasks."local:up"]
+run = "docker compose -f ./templates/docker-compose.yaml up -d --remove-orphans"
+
+[tasks."local:down"]
+run = "docker compose -f ./templates/docker-compose.yaml down -v"

@@ -8,6 +8,7 @@ version = "0.1.0"
 [workspace.dependencies]
 non = { path = "crates/non" }
 non-server = { path = "crates/non-server" }
+non-grpc-interface = { path = "crates/non-grpc-interface" }
 
 anyhow = { version = "1" }
 tokio = { version = "1", features = ["full"] }
@@ -15,3 +16,10 @@ tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3.19" }
 clap = { version = "4", features = ["derive", "env"] }
 dotenvy = { version = "0.15" }
+async-trait = "0.1.88"
+semver = "1.0.26"
+
+bytes = "1.10.1"
+prost = "0.13.5"
+prost-types = "0.13.5"
+tonic = "0.12.1"

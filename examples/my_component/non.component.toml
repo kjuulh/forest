@@ -1,0 +1,6 @@
+[component]
+name = "my_component"
+namespace = "non"
+version = "0.0.2"
+
+[templates.rust_service]
