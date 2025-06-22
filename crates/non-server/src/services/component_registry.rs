@@ -54,7 +54,7 @@ impl ComponentRegistry {
         Ok(UploadContext { context })
     }
 
-    #[tracing::instrument(skip(self), level = "trace")]
+    #[tracing::instrument(skip(self, file_content), level = "trace")]
     pub async fn upload_file(
         &self,
         context: UploadContext,
