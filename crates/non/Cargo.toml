@@ -1,6 +1,10 @@
 [package]
 name = "non"
 edition = "2024"
+description = "Non (nonothing) is a set of tools to help you design the development workflows you need. It is specifically built to allow you to share workflows and streamline boring tasks."
+repository = "https://git.front.kjuulh.io/kjuulh/non"
+readme = "../../README.md"
+license = "MIT"
 
 version.workspace = true
 
@@ -28,3 +32,4 @@ reqwest = "0.12.20"
 glob = "0.3.2"
 toml = "0.8.23"
 walkdir = "2.5.0"
+dirs = "6.0.0"
