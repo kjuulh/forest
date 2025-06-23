@@ -2,8 +2,8 @@
 /// Generated client implementations.
 pub mod status_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
-    use tonic::codegen::http::Uri;
     use tonic::codegen::*;
+    use tonic::codegen::http::Uri;
     ///
     #[derive(Debug, Clone)]
     pub struct StatusServiceClient<T> {
@@ -43,13 +43,14 @@ pub mod status_service_client {
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
             T: tonic::codegen::Service<
-                    http::Request<tonic::body::BoxBody>,
-                    Response = http::Response<
-                        <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
-                    >,
+                http::Request<tonic::body::BoxBody>,
+                Response = http::Response<
+                    <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
                 >,
-            <T as tonic::codegen::Service<http::Request<tonic::body::BoxBody>>>::Error:
-                Into<StdError> + Send + Sync,
+            >,
+            <T as tonic::codegen::Service<
+                http::Request<tonic::body::BoxBody>,
+            >>::Error: Into<StdError> + Send + Sync,
         {
             StatusServiceClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -88,15 +89,23 @@ pub mod status_service_client {
         pub async fn status(
             &mut self,
             request: impl tonic::IntoRequest<super::GetStatusRequest>,
-        ) -> std::result::Result<tonic::Response<super::GetStatusResponse>, tonic::Status> {
-            self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
-            })?;
+        ) -> std::result::Result<
+            tonic::Response<super::GetStatusResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static("/non.v1.StatusService/Status");
+            let path = http::uri::PathAndQuery::from_static(
+                "/non.v1.StatusService/Status",
+            );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("non.v1.StatusService", "Status"));
@@ -115,7 +124,10 @@ pub mod status_service_server {
         async fn status(
             &self,
             request: tonic::Request<super::GetStatusRequest>,
-        ) -> std::result::Result<tonic::Response<super::GetStatusResponse>, tonic::Status>;
+        ) -> std::result::Result<
+            tonic::Response<super::GetStatusResponse>,
+            tonic::Status,
+        >;
     }
     ///
     #[derive(Debug)]
@@ -141,7 +153,10 @@ pub mod status_service_server {
                 max_encoding_message_size: None,
             }
         }
-        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
+        pub fn with_interceptor<F>(
+            inner: T,
+            interceptor: F,
+        ) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -197,16 +212,23 @@ pub mod status_service_server {
                 "/non.v1.StatusService/Status" => {
                     #[allow(non_camel_case_types)]
                     struct StatusSvc<T: StatusService>(pub Arc<T>);
-                    impl<T: StatusService> tonic::server::UnaryService<super::GetStatusRequest> for StatusSvc<T> {
+                    impl<
+                        T: StatusService,
+                    > tonic::server::UnaryService<super::GetStatusRequest>
+                    for StatusSvc<T> {
                         type Response = super::GetStatusResponse;
-                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetStatusRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut =
-                                async move { <T as StatusService>::status(&inner, request).await };
+                            let fut = async move {
+                                <T as StatusService>::status(&inner, request).await
+                            };
                             Box::pin(fut)
                         }
                     }
@@ -233,14 +255,18 @@ pub mod status_service_server {
                     };
                     Box::pin(fut)
                 }
-                _ => Box::pin(async move {
-                    Ok(http::Response::builder()
-                        .status(200)
-                        .header("grpc-status", "12")
-                        .header("content-type", "application/grpc")
-                        .body(empty_body())
-                        .unwrap())
-                }),
+                _ => {
+                    Box::pin(async move {
+                        Ok(
+                            http::Response::builder()
+                                .status(200)
+                                .header("grpc-status", "12")
+                                .header("content-type", "application/grpc")
+                                .body(empty_body())
+                                .unwrap(),
+                        )
+                    })
+                }
             }
         }
     }
@@ -273,8 +299,8 @@ pub mod status_service_server {
 /// Generated client implementations.
 pub mod namespace_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
-    use tonic::codegen::http::Uri;
     use tonic::codegen::*;
+    use tonic::codegen::http::Uri;
     ///
     #[derive(Debug, Clone)]
     pub struct NamespaceServiceClient<T> {
@@ -314,13 +340,14 @@ pub mod namespace_service_client {
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
             T: tonic::codegen::Service<
-                    http::Request<tonic::body::BoxBody>,
-                    Response = http::Response<
-                        <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
-                    >,
+                http::Request<tonic::body::BoxBody>,
+                Response = http::Response<
+                    <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
                 >,
-            <T as tonic::codegen::Service<http::Request<tonic::body::BoxBody>>>::Error:
-                Into<StdError> + Send + Sync,
+            >,
+            <T as tonic::codegen::Service<
+                http::Request<tonic::body::BoxBody>,
+            >>::Error: Into<StdError> + Send + Sync,
         {
             NamespaceServiceClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -360,14 +387,19 @@ pub mod namespace_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::CreateRequest>,
         ) -> std::result::Result<tonic::Response<super::CreateResponse>, tonic::Status> {
-            self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
-            })?;
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static("/non.v1.NamespaceService/Create");
+            let path = http::uri::PathAndQuery::from_static(
+                "/non.v1.NamespaceService/Create",
+            );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("non.v1.NamespaceService", "Create"));
@@ -412,7 +444,10 @@ pub mod namespace_service_server {
                 max_encoding_message_size: None,
             }
         }
-        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
+        pub fn with_interceptor<F>(
+            inner: T,
+            interceptor: F,
+        ) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -468,9 +503,15 @@ pub mod namespace_service_server {
                 "/non.v1.NamespaceService/Create" => {
                     #[allow(non_camel_case_types)]
                     struct CreateSvc<T: NamespaceService>(pub Arc<T>);
-                    impl<T: NamespaceService> tonic::server::UnaryService<super::CreateRequest> for CreateSvc<T> {
+                    impl<
+                        T: NamespaceService,
+                    > tonic::server::UnaryService<super::CreateRequest>
+                    for CreateSvc<T> {
                         type Response = super::CreateResponse;
-                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CreateRequest>,
@@ -505,14 +546,18 @@ pub mod namespace_service_server {
                     };
                     Box::pin(fut)
                 }
-                _ => Box::pin(async move {
-                    Ok(http::Response::builder()
-                        .status(200)
-                        .header("grpc-status", "12")
-                        .header("content-type", "application/grpc")
-                        .body(empty_body())
-                        .unwrap())
-                }),
+                _ => {
+                    Box::pin(async move {
+                        Ok(
+                            http::Response::builder()
+                                .status(200)
+                                .header("grpc-status", "12")
+                                .header("content-type", "application/grpc")
+                                .body(empty_body())
+                                .unwrap(),
+                        )
+                    })
+                }
             }
         }
     }
@@ -545,8 +590,8 @@ pub mod namespace_service_server {
 /// Generated client implementations.
 pub mod registry_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
-    use tonic::codegen::http::Uri;
     use tonic::codegen::*;
+    use tonic::codegen::http::Uri;
     #[derive(Debug, Clone)]
     pub struct RegistryServiceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -585,13 +630,14 @@ pub mod registry_service_client {
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
             T: tonic::codegen::Service<
-                    http::Request<tonic::body::BoxBody>,
-                    Response = http::Response<
-                        <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
-                    >,
+                http::Request<tonic::body::BoxBody>,
+                Response = http::Response<
+                    <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
                 >,
-            <T as tonic::codegen::Service<http::Request<tonic::body::BoxBody>>>::Error:
-                Into<StdError> + Send + Sync,
+            >,
+            <T as tonic::codegen::Service<
+                http::Request<tonic::body::BoxBody>,
+            >>::Error: Into<StdError> + Send + Sync,
         {
             RegistryServiceClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -629,17 +675,23 @@ pub mod registry_service_client {
         pub async fn get_components(
             &mut self,
             request: impl tonic::IntoRequest<super::GetComponentsRequest>,
-        ) -> std::result::Result<tonic::Response<super::GetComponentsResponse>, tonic::Status>
-        {
-            self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
-            })?;
+        ) -> std::result::Result<
+            tonic::Response<super::GetComponentsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path =
-                http::uri::PathAndQuery::from_static("/non.v1.RegistryService/GetComponents");
+            let path = http::uri::PathAndQuery::from_static(
+                "/non.v1.RegistryService/GetComponents",
+            );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("non.v1.RegistryService", "GetComponents"));
@@ -648,16 +700,23 @@ pub mod registry_service_client {
         pub async fn get_component(
             &mut self,
             request: impl tonic::IntoRequest<super::GetComponentRequest>,
-        ) -> std::result::Result<tonic::Response<super::GetComponentResponse>, tonic::Status>
-        {
-            self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
-            })?;
+        ) -> std::result::Result<
+            tonic::Response<super::GetComponentResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static("/non.v1.RegistryService/GetComponent");
+            let path = http::uri::PathAndQuery::from_static(
+                "/non.v1.RegistryService/GetComponent",
+            );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("non.v1.RegistryService", "GetComponent"));
@@ -666,16 +725,23 @@ pub mod registry_service_client {
         pub async fn begin_upload(
             &mut self,
             request: impl tonic::IntoRequest<super::BeginUploadRequest>,
-        ) -> std::result::Result<tonic::Response<super::BeginUploadResponse>, tonic::Status>
-        {
-            self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
-            })?;
+        ) -> std::result::Result<
+            tonic::Response<super::BeginUploadResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static("/non.v1.RegistryService/BeginUpload");
+            let path = http::uri::PathAndQuery::from_static(
+                "/non.v1.RegistryService/BeginUpload",
+            );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("non.v1.RegistryService", "BeginUpload"));
@@ -684,16 +750,23 @@ pub mod registry_service_client {
         pub async fn upload_file(
             &mut self,
             request: impl tonic::IntoRequest<super::UploadFileRequest>,
-        ) -> std::result::Result<tonic::Response<super::UploadFileResponse>, tonic::Status>
-        {
-            self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
-            })?;
+        ) -> std::result::Result<
+            tonic::Response<super::UploadFileResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static("/non.v1.RegistryService/UploadFile");
+            let path = http::uri::PathAndQuery::from_static(
+                "/non.v1.RegistryService/UploadFile",
+            );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("non.v1.RegistryService", "UploadFile"));
@@ -702,20 +775,52 @@ pub mod registry_service_client {
         pub async fn commit_upload(
             &mut self,
             request: impl tonic::IntoRequest<super::CommitUploadRequest>,
-        ) -> std::result::Result<tonic::Response<super::CommitUploadResponse>, tonic::Status>
-        {
-            self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
-            })?;
+        ) -> std::result::Result<
+            tonic::Response<super::CommitUploadResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static("/non.v1.RegistryService/CommitUpload");
+            let path = http::uri::PathAndQuery::from_static(
+                "/non.v1.RegistryService/CommitUpload",
+            );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("non.v1.RegistryService", "CommitUpload"));
             self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_component_files(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetComponentFilesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::GetComponentFilesResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/non.v1.RegistryService/GetComponentFiles",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("non.v1.RegistryService", "GetComponentFiles"));
+            self.inner.server_streaming(req, path, codec).await
         }
     }
 }
@@ -729,23 +834,54 @@ pub mod registry_service_server {
         async fn get_components(
             &self,
             request: tonic::Request<super::GetComponentsRequest>,
-        ) -> std::result::Result<tonic::Response<super::GetComponentsResponse>, tonic::Status>;
+        ) -> std::result::Result<
+            tonic::Response<super::GetComponentsResponse>,
+            tonic::Status,
+        >;
         async fn get_component(
             &self,
             request: tonic::Request<super::GetComponentRequest>,
-        ) -> std::result::Result<tonic::Response<super::GetComponentResponse>, tonic::Status>;
+        ) -> std::result::Result<
+            tonic::Response<super::GetComponentResponse>,
+            tonic::Status,
+        >;
         async fn begin_upload(
             &self,
             request: tonic::Request<super::BeginUploadRequest>,
-        ) -> std::result::Result<tonic::Response<super::BeginUploadResponse>, tonic::Status>;
+        ) -> std::result::Result<
+            tonic::Response<super::BeginUploadResponse>,
+            tonic::Status,
+        >;
         async fn upload_file(
             &self,
             request: tonic::Request<super::UploadFileRequest>,
-        ) -> std::result::Result<tonic::Response<super::UploadFileResponse>, tonic::Status>;
+        ) -> std::result::Result<
+            tonic::Response<super::UploadFileResponse>,
+            tonic::Status,
+        >;
         async fn commit_upload(
             &self,
             request: tonic::Request<super::CommitUploadRequest>,
-        ) -> std::result::Result<tonic::Response<super::CommitUploadResponse>, tonic::Status>;
+        ) -> std::result::Result<
+            tonic::Response<super::CommitUploadResponse>,
+            tonic::Status,
+        >;
+        /// Server streaming response type for the GetComponentFiles method.
+        type GetComponentFilesStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<
+                    super::GetComponentFilesResponse,
+                    tonic::Status,
+                >,
+            >
+            + Send
+            + 'static;
+        async fn get_component_files(
+            &self,
+            request: tonic::Request<super::GetComponentFilesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<Self::GetComponentFilesStream>,
+            tonic::Status,
+        >;
     }
     #[derive(Debug)]
     pub struct RegistryServiceServer<T: RegistryService> {
@@ -770,7 +906,10 @@ pub mod registry_service_server {
                 max_encoding_message_size: None,
             }
         }
-        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
+        pub fn with_interceptor<F>(
+            inner: T,
+            interceptor: F,
+        ) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -826,19 +965,23 @@ pub mod registry_service_server {
                 "/non.v1.RegistryService/GetComponents" => {
                     #[allow(non_camel_case_types)]
                     struct GetComponentsSvc<T: RegistryService>(pub Arc<T>);
-                    impl<T: RegistryService>
-                        tonic::server::UnaryService<super::GetComponentsRequest>
-                        for GetComponentsSvc<T>
-                    {
+                    impl<
+                        T: RegistryService,
+                    > tonic::server::UnaryService<super::GetComponentsRequest>
+                    for GetComponentsSvc<T> {
                         type Response = super::GetComponentsResponse;
-                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetComponentsRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RegistryService>::get_components(&inner, request).await
+                                <T as RegistryService>::get_components(&inner, request)
+                                    .await
                             };
                             Box::pin(fut)
                         }
@@ -869,11 +1012,15 @@ pub mod registry_service_server {
                 "/non.v1.RegistryService/GetComponent" => {
                     #[allow(non_camel_case_types)]
                     struct GetComponentSvc<T: RegistryService>(pub Arc<T>);
-                    impl<T: RegistryService> tonic::server::UnaryService<super::GetComponentRequest>
-                        for GetComponentSvc<T>
-                    {
+                    impl<
+                        T: RegistryService,
+                    > tonic::server::UnaryService<super::GetComponentRequest>
+                    for GetComponentSvc<T> {
                         type Response = super::GetComponentResponse;
-                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::GetComponentRequest>,
@@ -911,11 +1058,15 @@ pub mod registry_service_server {
                 "/non.v1.RegistryService/BeginUpload" => {
                     #[allow(non_camel_case_types)]
                     struct BeginUploadSvc<T: RegistryService>(pub Arc<T>);
-                    impl<T: RegistryService> tonic::server::UnaryService<super::BeginUploadRequest>
-                        for BeginUploadSvc<T>
-                    {
+                    impl<
+                        T: RegistryService,
+                    > tonic::server::UnaryService<super::BeginUploadRequest>
+                    for BeginUploadSvc<T> {
                         type Response = super::BeginUploadResponse;
-                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::BeginUploadRequest>,
@@ -953,11 +1104,15 @@ pub mod registry_service_server {
                 "/non.v1.RegistryService/UploadFile" => {
                     #[allow(non_camel_case_types)]
                     struct UploadFileSvc<T: RegistryService>(pub Arc<T>);
-                    impl<T: RegistryService> tonic::server::UnaryService<super::UploadFileRequest>
-                        for UploadFileSvc<T>
-                    {
+                    impl<
+                        T: RegistryService,
+                    > tonic::server::UnaryService<super::UploadFileRequest>
+                    for UploadFileSvc<T> {
                         type Response = super::UploadFileResponse;
-                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::UploadFileRequest>,
@@ -995,11 +1150,15 @@ pub mod registry_service_server {
                 "/non.v1.RegistryService/CommitUpload" => {
                     #[allow(non_camel_case_types)]
                     struct CommitUploadSvc<T: RegistryService>(pub Arc<T>);
-                    impl<T: RegistryService> tonic::server::UnaryService<super::CommitUploadRequest>
-                        for CommitUploadSvc<T>
-                    {
+                    impl<
+                        T: RegistryService,
+                    > tonic::server::UnaryService<super::CommitUploadRequest>
+                    for CommitUploadSvc<T> {
                         type Response = super::CommitUploadResponse;
-                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::CommitUploadRequest>,
@@ -1034,14 +1193,67 @@ pub mod registry_service_server {
                     };
                     Box::pin(fut)
                 }
-                _ => Box::pin(async move {
-                    Ok(http::Response::builder()
-                        .status(200)
-                        .header("grpc-status", "12")
-                        .header("content-type", "application/grpc")
-                        .body(empty_body())
-                        .unwrap())
-                }),
+                "/non.v1.RegistryService/GetComponentFiles" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetComponentFilesSvc<T: RegistryService>(pub Arc<T>);
+                    impl<
+                        T: RegistryService,
+                    > tonic::server::ServerStreamingService<
+                        super::GetComponentFilesRequest,
+                    > for GetComponentFilesSvc<T> {
+                        type Response = super::GetComponentFilesResponse;
+                        type ResponseStream = T::GetComponentFilesStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetComponentFilesRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as RegistryService>::get_component_files(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetComponentFilesSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                _ => {
+                    Box::pin(async move {
+                        Ok(
+                            http::Response::builder()
+                                .status(200)
+                                .header("grpc-status", "12")
+                                .header("content-type", "application/grpc")
+                                .body(empty_body())
+                                .unwrap(),
+                        )
+                    })
+                }
             }
         }
     }

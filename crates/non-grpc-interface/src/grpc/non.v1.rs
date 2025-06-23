@@ -44,6 +44,8 @@ pub struct GetComponentResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Component {
     #[prost(string, tag="1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
     pub version: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -85,6 +87,42 @@ pub struct CommitUploadRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct CommitUploadResponse {
+}
+/// Get component files
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetComponentFilesRequest {
+    #[prost(string, tag="1")]
+    pub component_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetComponentFilesResponse {
+    #[prost(oneof="get_component_files_response::Msg", tags="1, 2")]
+    pub msg: ::core::option::Option<get_component_files_response::Msg>,
+}
+/// Nested message and enum types in `GetComponentFilesResponse`.
+pub mod get_component_files_response {
+    #[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Msg {
+        #[prost(message, tag="1")]
+        Done(super::Done),
+        #[prost(message, tag="2")]
+        ComponentFile(super::ComponentFile),
+    }
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ComponentFile {
+    #[prost(string, tag="1")]
+    pub file_path: ::prost::alloc::string::String,
+    #[prost(bytes="vec", tag="2")]
+    pub file_content: ::prost::alloc::vec::Vec<u8>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct Done {
 }
 include!("non.v1.tonic.rs");
 // @@protoc_insertion_point(module)

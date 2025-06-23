@@ -8,6 +8,7 @@ service RegistryService {
   rpc BeginUpload(BeginUploadRequest) returns (BeginUploadResponse) {}
   rpc UploadFile(UploadFileRequest) returns (UploadFileResponse) {}
   rpc CommitUpload(CommitUploadRequest) returns (CommitUploadResponse) {}
+  rpc GetComponentFiles(GetComponentFilesRequest) returns (stream GetComponentFilesResponse) {}
 }
 
 message GetComponentsRequest {}
@@ -22,7 +23,8 @@ message GetComponentResponse {
 }
 
 message Component {
-  string version = 1;
+  string id = 1;
+  string version = 2;
 }
 
 message BeginUploadRequest {
@@ -45,3 +47,21 @@ message CommitUploadRequest {
   string upload_context = 1;
 }
 message CommitUploadResponse {}
+
+// Get component files
+message GetComponentFilesRequest {
+  string component_id = 1;
+}
+message GetComponentFilesResponse {
+  oneof msg {
+    Done done = 1;
+    ComponentFile component_file = 2;
+  }
+}
+
+message ComponentFile {
+  string file_path = 1;
+  bytes file_content = 2;
+}
+
+message Done {}

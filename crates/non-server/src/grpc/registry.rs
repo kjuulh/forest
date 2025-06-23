@@ -1,7 +1,12 @@
+use std::pin::Pin;
+
+use anyhow::Context;
+use futures::{Stream, TryStreamExt};
 use non_grpc_interface::{registry_service_server::RegistryService, *};
+use uuid::Uuid;
 
 use crate::{
-    services::component_registry::{ComponentRegistryState, models::ComponentVersion},
+    services::component_registry::{ComponentRegistryState, FileStream, models::ComponentVersion},
     state::State,
 };
 
@@ -101,11 +106,43 @@ impl RegistryService for RegistryServer {
 
         Ok(tonic::Response::new(CommitUploadResponse {}))
     }
+
+    type GetComponentFilesStream = Pin<
+        Box<
+            dyn Stream<Item = std::result::Result<GetComponentFilesResponse, tonic::Status>> + Send,
+        >,
+    >;
+    async fn get_component_files(
+        &self,
+        request: tonic::Request<GetComponentFilesRequest>,
+    ) -> std::result::Result<tonic::Response<Self::GetComponentFilesStream>, tonic::Status> {
+        let request = request.into_inner();
+
+        let mut stream = FileStream::new();
+
+        let take_stream = stream.take_stream();
+
+        let component_id: Uuid = request
+            .component_id
+            .parse()
+            .context("failed to parse uuid")
+            .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
+
+        let s = self.state.clone();
+        tokio::spawn(async move {
+            if let Err(e) = s.component_registry().get_files(component_id, stream).await {
+                tracing::error!("failed to send files: {:#?}", e);
+            }
+        });
+
+        Ok(tonic::Response::new(take_stream))
+    }
 }
 
 impl From<ComponentVersion> for Component {
     fn from(value: ComponentVersion) -> Self {
         Self {
+            id: value.id,
             version: value.version,
         }
     }

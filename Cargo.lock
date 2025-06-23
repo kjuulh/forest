@@ -1387,6 +1387,7 @@ dependencies = [
  "bytes",
  "clap",
  "dotenvy",
+ "futures",
  "inquire",
  "non-grpc-interface",
  "notmad",

@@ -32,3 +32,4 @@ sqlx = { version = "0.8.6", features = [
   "runtime-tokio",
   "uuid",
 ] }
+futures = "0.3.31"

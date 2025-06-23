@@ -1,8 +1,9 @@
 use std::{path::Path, sync::OnceLock};
 
 use non_grpc_interface::{
-    BeginUploadRequest, CommitUploadRequest, Component, CreateRequest, GetComponentRequest,
-    UploadFileRequest, namespace_service_client::NamespaceServiceClient,
+    BeginUploadRequest, CommitUploadRequest, Component, ComponentFile, CreateRequest,
+    GetComponentFilesRequest, GetComponentRequest, UploadFileRequest,
+    get_component_files_response::Msg, namespace_service_client::NamespaceServiceClient,
     registry_service_client::RegistryServiceClient,
 };
 use tokio::sync::OnceCell;
@@ -135,6 +136,36 @@ impl GrpcClient {
             .await?;
 
         Ok(client.clone())
+    }
+
+    pub async fn list_files(
+        &self,
+        component_id: &str,
+        f: impl Fn(ComponentFile),
+    ) -> anyhow::Result<()> {
+        let mut client = self.registry_client().await?;
+        let resp = client
+            .get_component_files(GetComponentFilesRequest {
+                component_id: component_id.into(),
+            })
+            .await?;
+
+        let mut stream = resp.into_inner();
+        while let Some(msg) = stream.message().await? {
+            let Some(msg) = msg.msg else { return Ok(()) };
+
+            match msg {
+                Msg::Done(_) => {
+                    tracing::info!("done receiving items");
+                    break;
+                }
+                Msg::ComponentFile(component_file) => {
+                    f(component_file);
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 

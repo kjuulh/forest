@@ -15,6 +15,7 @@ impl ComponentsRepository {
         let rec = sqlx::query!(
             r#"
                 SELECT
+                    id,
                     name,
                     namespace,
                     version
@@ -32,6 +33,7 @@ impl ComponentsRepository {
         .await?;
 
         Ok(rec.map(|r| ComponentVersion {
+            id: r.id.to_string(),
             name: r.name,
             namespace: r.namespace,
             version: r.version,
