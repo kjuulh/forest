@@ -7,6 +7,7 @@ use super::{
     models::RegistryComponents,
 };
 
+#[allow(dead_code)]
 pub struct NonRegistryClient {
     host: String,
     client: reqwest::Client,

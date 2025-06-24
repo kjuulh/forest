@@ -2,12 +2,9 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct Project {
     pub name: String,
-
-    pub dependencies: BTreeMap<String, ProjectDependency>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -18,4 +15,5 @@ pub struct ProjectDependency {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct ProjectFile {
     pub project: Project,
+    pub dependencies: BTreeMap<String, ProjectDependency>,
 }

@@ -5,10 +5,25 @@ RUST_LOG = "non=debug,info"
 rust = { version = "1.87", components = "rust-src,rust-analyzer" }
 
 [tasks.non]
+dir = "{{ cwd }}"
+run = "cargo run -p non -- "
+
+[tasks."non:my"]
+dir = "./examples/my_project"
+run = "cargo run -p non -- "
+
+[tasks."non:publish"]
+dir = "{{ cwd }}"
+run = "cargo run -p non -- publish"
+
+[tasks."non:trace:my"]
+env = { RUST_LOG = "non=trace,info" }
+dir = "./examples/my_project"
 run = "cargo run -p non -- "
 
 [tasks."non:trace"]
 env = { RUST_LOG = "non=trace,info" }
+dir = "{{cwd}}"
 run = "cargo run -p non -- "
 
 

@@ -12,29 +12,6 @@ pub mod models {
         pub components: Vec<LocalComponent>,
     }
 
-    impl LocalComponents {
-        pub fn find(&self, name: &str, namespace: &str, version: &str) -> Option<&LocalComponent> {
-            self.components
-                .iter()
-                .find(|c| c.namespace == namespace && c.name == name && c.version == version)
-        }
-
-        pub fn diff_right(&self, right: Vec<impl Into<LocalComponent>>) -> LocalComponents {
-            let components: Vec<LocalComponent> =
-                right.into_iter().map(|c| c.into()).collect::<Vec<_>>();
-
-            let right_components = components
-                .iter()
-                .filter(|r| self.components.iter().any(|l| l == *r))
-                .cloned()
-                .collect::<Vec<_>>();
-
-            LocalComponents {
-                components: right_components,
-            }
-        }
-    }
-
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct LocalComponent {
         pub name: String,
@@ -59,19 +36,30 @@ impl ComponentCache {
     }
 
     pub async fn get_local_components(&self) -> anyhow::Result<LocalComponents> {
-        let component_cache_path = self.get_component_cache().await?;
+        let component_cache_path = self
+            .get_component_cache()
+            .await
+            .context("failed to get cache")?;
 
         // cache is [namespace]/[name]/[version]/[component...]
+        if !component_cache_path.exists() {
+            tracing::debug!("found no local cache, skipping");
+            return Ok(LocalComponents::default());
+        }
 
         let mut components = Vec::new();
         tracing::trace!("scanning component cache");
+
         let mut namespace_entries = tokio::fs::read_dir(component_cache_path).await?;
         while let Some(namespace_entry) = namespace_entries.next_entry().await? {
             let mut name_entries = tokio::fs::read_dir(namespace_entry.path()).await?;
+
             while let Some(name_entry) = name_entries.next_entry().await? {
                 let mut version_entries = tokio::fs::read_dir(name_entry.path()).await?;
+
                 while let Some(version_entry) = version_entries.next_entry().await? {
                     let component = self.component_parser.parse(&version_entry.path()).await?;
+
                     components.push(component);
                 }
             }

@@ -26,23 +26,6 @@ impl DeployComponentCommand {
         tracing::info!("deploying components");
 
         let mut component_paths = Vec::new();
-        // for path in glob::glob(&self.path)? {
-        //     let path = path?;
-
-        //     if !path.is_dir() {
-        //         tracing::trace!(
-        //             path = path.display().to_string(),
-        //             "skipping path, as it is not a dir"
-        //         );
-
-        //         component_paths.push(path);
-
-        //         if !self.all {
-        //             break;
-        //         }
-        //         continue;
-        //     }
-        // }
 
         let path = PathBuf::from(&self.path);
         component_paths.push(&path);

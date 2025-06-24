@@ -11,7 +11,7 @@ const NON_PROJECT_FILE: &str = "non.toml";
 pub struct ProjectParser {}
 
 impl ProjectParser {
-    pub async fn get_project(&self) -> anyhow::Result<Project> {
+    pub async fn get_project(&self) -> anyhow::Result<ProjectFile> {
         let current_dir =
             std::env::current_dir().context("current project dir is required for a project")?;
 
@@ -19,7 +19,7 @@ impl ProjectParser {
 
         let project_file: ProjectFile = toml::from_str(&project_file_content)?;
 
-        Ok(project_file.project)
+        Ok(project_file)
     }
 
     #[tracing::instrument(skip(self), level = "trace")]

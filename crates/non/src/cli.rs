@@ -2,6 +2,7 @@ use admin::AdminCommand;
 use clap::{Parser, Subcommand};
 use components::ComponentsCommand;
 use init::InitCommand;
+use publish::PublishCommand;
 use run::RunCommand;
 use template::TemplateCommand;
 
@@ -10,6 +11,7 @@ use crate::state::State;
 mod admin;
 mod components;
 mod init;
+mod publish;
 mod run;
 mod template;
 
@@ -27,6 +29,7 @@ enum Commands {
     Admin(AdminCommand),
     Run(RunCommand),
     Template(TemplateCommand),
+    Publish(PublishCommand),
 }
 
 pub async fn execute() -> anyhow::Result<()> {
@@ -44,5 +47,6 @@ pub async fn execute() -> anyhow::Result<()> {
         Commands::Admin(cmd) => cmd.execute(&state).await,
         Commands::Run(cmd) => cmd.execute(&state).await,
         Commands::Template(cmd) => cmd.execute(&state).await,
+        Commands::Publish(cmd) => cmd.execute(&state).await,
     }
 }

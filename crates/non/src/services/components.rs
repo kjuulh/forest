@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::{
     component_cache::{ComponentCache, ComponentCacheState, models::LocalComponent},
     grpc::{GrpcClient, GrpcClientState},
@@ -5,6 +7,8 @@ use crate::{
 };
 
 use super::{
+    component_deployment::{ComponentDeploymentService, ComponentDeploymentServiceState},
+    component_parser::{ComponentParser, ComponentParserState, models::RawComponent},
     component_registry::{ComponentRegistry, ComponentRegistryState, models::RegistryComponent},
     project::{ProjectParser, ProjectParserState},
 };
@@ -19,28 +23,50 @@ pub struct ComponentsService {
     component_cache: ComponentCache,
     project_parser: ProjectParser,
     grpc: GrpcClient,
+    parser: ComponentParser,
+    deployment: ComponentDeploymentService,
 }
 
 impl ComponentsService {
     pub async fn sync_components(&self) -> anyhow::Result<()> {
         // 1. Construct local store of existing components
-        let project = self.project_parser.get_project().await?;
+        let project = self
+            .project_parser
+            .get_project()
+            .await
+            .context("failed to get project")?;
 
         let deps: ProjectDependencies = project.try_into()?;
 
-        let local_deps = self.component_cache.get_local_components().await?;
+        let local_deps = self
+            .component_cache
+            .get_local_components()
+            .await
+            .context("failed to get local components")?;
 
-        let missing_deps = deps.diff_right(
-            local_deps
+        let local_components = ProjectDependencies {
+            dependencies: local_deps
                 .components
                 .iter()
                 .map(|c| ProjectDependency::try_from(c.clone()))
-                .collect::<anyhow::Result<Vec<_>>>()?,
-        );
+                .collect::<anyhow::Result<Vec<_>>>()
+                .context("failed to get upstream dependencies")?,
+        };
+
+        let (existing_deps, missing_deps) = local_components.diff(deps.dependencies);
+        for dep in existing_deps.dependencies {
+            tracing::debug!(
+                "local deps already exists: {}/{}@{}",
+                dep.namespace,
+                dep.name,
+                dep.version
+            );
+        }
 
         // 2. Fetch upstream version that is missing
         let mut upstream = Vec::new();
         for dep in &missing_deps.dependencies {
+            tracing::debug!("fetching upstream dep");
             let upstream_component = self
                 .registry
                 .get_component_version(&dep.name, &dep.namespace, &dep.version.to_string())
@@ -120,6 +146,18 @@ impl ComponentsService {
 
         Ok(())
     }
+
+    pub async fn get_staging_component(&self, path: &Path) -> anyhow::Result<RawComponent> {
+        let component_spec = self.parser.parse(path).await?;
+
+        Ok(component_spec)
+    }
+
+    pub async fn deploy_component(&self, raw_component: RawComponent) -> anyhow::Result<()> {
+        self.deployment.deploy_component(raw_component).await?;
+
+        Ok(())
+    }
 }
 
 impl TryFrom<RegistryComponent> for UpstreamProjectDependency {
@@ -164,6 +202,8 @@ impl ComponentsServiceState for State {
             component_cache: self.component_cache(),
             project_parser: self.project_parser(),
             grpc: self.grpc_client(),
+            parser: self.component_parser(),
+            deployment: self.component_deployment_service(),
         }
     }
 }

@@ -13,6 +13,7 @@ pub struct RawComponent {
 pub struct RawComponentSpec {
     pub component: RawSpecComponent,
 
+    #[serde(default)]
     pub templates: BTreeMap<String, RawSpecTemplate>,
 }
 #[derive(Default, Clone, Debug, PartialEq, Eq, Deserialize)]

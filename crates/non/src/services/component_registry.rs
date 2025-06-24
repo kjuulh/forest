@@ -31,6 +31,8 @@ impl ComponentRegistry {
         namespace: &str,
         version: &str,
     ) -> anyhow::Result<Option<RegistryComponent>> {
+        tracing::trace!("get component version");
+
         let component_version = self
             .client
             .get_component_version(name, namespace, version)

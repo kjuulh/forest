@@ -1,7 +1,7 @@
 use anyhow::Context;
 use uuid::Uuid;
 
-use crate::services::project::{self, Project};
+use crate::services::project::{self, Project, ProjectFile};
 
 #[derive(Clone, Debug, Default)]
 pub struct Components {}
@@ -19,19 +19,34 @@ pub struct ProjectDependencies {
 }
 
 impl ProjectDependencies {
-    pub fn diff_right(&self, right: Vec<impl Into<ProjectDependency>>) -> ProjectDependencies {
+    pub fn diff(
+        &self,
+        right: Vec<impl Into<ProjectDependency>>,
+    ) -> (ProjectDependencies, ProjectDependencies) {
         let components: Vec<ProjectDependency> =
             right.into_iter().map(|c| c.into()).collect::<Vec<_>>();
 
         let right_components = components
             .iter()
-            .filter(|r| self.dependencies.iter().any(|l| l == *r))
+            .filter(|r| !self.dependencies.iter().any(|l| l == *r))
             .cloned()
             .collect::<Vec<_>>();
 
-        ProjectDependencies {
-            dependencies: right_components,
-        }
+        let left_components = self
+            .dependencies
+            .iter()
+            .filter(|r| !right_components.iter().any(|l| l == *r))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        (
+            ProjectDependencies {
+                dependencies: left_components,
+            },
+            ProjectDependencies {
+                dependencies: right_components,
+            },
+        )
     }
 }
 
@@ -43,18 +58,18 @@ pub struct UpstreamProjectDependency {
     pub version: semver::Version,
 }
 
-impl TryFrom<Project> for ProjectDependencies {
+impl TryFrom<ProjectFile> for ProjectDependencies {
     type Error = anyhow::Error;
 
-    fn try_from(value: Project) -> Result<Self, Self::Error> {
+    fn try_from(value: ProjectFile) -> Result<Self, Self::Error> {
         (&value).try_into()
     }
 }
 
-impl TryFrom<&Project> for ProjectDependencies {
+impl TryFrom<&ProjectFile> for ProjectDependencies {
     type Error = anyhow::Error;
 
-    fn try_from(value: &Project) -> Result<Self, Self::Error> {
+    fn try_from(value: &ProjectFile) -> Result<Self, Self::Error> {
         let deps = value
             .dependencies
             .iter()

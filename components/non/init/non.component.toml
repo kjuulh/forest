@@ -1,0 +1,4 @@
+[component]
+name = "init"
+namespace = "non"
+version = "0.0.1"
