@@ -4,5 +4,7 @@ pub mod init;
 
 pub mod templates;
 
+pub mod project;
+
 pub mod component_deployment;
 pub mod component_parser;

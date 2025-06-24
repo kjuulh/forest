@@ -48,6 +48,25 @@ pub struct Component {
     #[prost(string, tag="2")]
     pub version: ::prost::alloc::string::String,
 }
+/// ComponentVersion
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetComponentVersionRequest {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub version: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetComponentVersionResponse {
+    #[prost(message, optional, tag="1")]
+    pub component: ::core::option::Option<Component>,
+}
+// BeginUpload
+
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct BeginUploadRequest {

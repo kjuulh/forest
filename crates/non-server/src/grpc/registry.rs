@@ -1,7 +1,7 @@
 use std::pin::Pin;
 
 use anyhow::Context;
-use futures::{Stream, TryStreamExt};
+use futures::Stream;
 use non_grpc_interface::{registry_service_server::RegistryService, *};
 use uuid::Uuid;
 
@@ -40,6 +40,25 @@ impl RegistryService for RegistryServer {
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
         Ok(tonic::Response::new(GetComponentResponse {
+            component: component.map(|c| c.into()),
+        }))
+    }
+
+    async fn get_component_version(
+        &self,
+        request: tonic::Request<GetComponentVersionRequest>,
+    ) -> std::result::Result<tonic::Response<GetComponentVersionResponse>, tonic::Status> {
+        let req = request.into_inner();
+
+        let component = self
+            .state
+            .component_registry()
+            .get_component_version(&req.name, &req.namespace, &req.version)
+            .await
+            .inspect_err(|e| tracing::warn!("failed to get component by version: {:#?}", e))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        Ok(tonic::Response::new(GetComponentVersionResponse {
             component: component.map(|c| c.into()),
         }))
     }

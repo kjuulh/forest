@@ -43,6 +43,20 @@ impl ComponentRegistry {
         Ok(component)
     }
 
+    pub async fn get_component_version(
+        &self,
+        name: &str,
+        namespace: &str,
+        version: &str,
+    ) -> anyhow::Result<Option<ComponentVersion>> {
+        let component = self
+            .component_repository
+            .get_component_version(name, namespace, version)
+            .await?;
+
+        Ok(component)
+    }
+
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn begin_upload(
         &self,

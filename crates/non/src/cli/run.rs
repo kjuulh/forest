@@ -4,7 +4,7 @@ use crate::state::State;
 pub struct RunCommand {}
 
 impl RunCommand {
-    pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+    pub async fn execute(&self, _state: &State) -> anyhow::Result<()> {
         Ok(())
     }
 }

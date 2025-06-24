@@ -5,6 +5,7 @@ package non.v1;
 service RegistryService {
   rpc GetComponents(GetComponentsRequest) returns (GetComponentsResponse) {}
   rpc GetComponent(GetComponentRequest) returns (GetComponentResponse) {}
+  rpc GetComponentVersion(GetComponentVersionRequest) returns (GetComponentVersionResponse) {}
   rpc BeginUpload(BeginUploadRequest) returns (BeginUploadResponse) {}
   rpc UploadFile(UploadFileRequest) returns (UploadFileResponse) {}
   rpc CommitUpload(CommitUploadRequest) returns (CommitUploadResponse) {}
@@ -26,6 +27,18 @@ message Component {
   string id = 1;
   string version = 2;
 }
+
+// ComponentVersion
+message GetComponentVersionRequest {
+  string name = 1;
+  string namespace = 2;
+  string version = 3;
+}
+message GetComponentVersionResponse {
+  optional Component component = 1;
+}
+
+// BeginUpload
 
 message BeginUploadRequest {
   string name = 1;

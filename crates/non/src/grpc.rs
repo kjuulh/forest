@@ -1,8 +1,9 @@
 use std::{path::Path, sync::OnceLock};
 
+use futures::{SinkExt, Stream, TryStreamExt};
 use non_grpc_interface::{
     BeginUploadRequest, CommitUploadRequest, Component, ComponentFile, CreateRequest,
-    GetComponentFilesRequest, GetComponentRequest, UploadFileRequest,
+    GetComponentFilesRequest, GetComponentRequest, GetComponentVersionRequest, UploadFileRequest,
     get_component_files_response::Msg, namespace_service_client::NamespaceServiceClient,
     registry_service_client::RegistryServiceClient,
 };
@@ -42,6 +43,27 @@ impl GrpcClient {
             .get_component(GetComponentRequest {
                 name: name.into(),
                 namespace: namespace.into(),
+            })
+            .await?;
+
+        let resp = resp.into_inner();
+
+        Ok(resp.component)
+    }
+
+    pub async fn get_component_version(
+        &self,
+        name: &str,
+        namespace: &str,
+        version: &str,
+    ) -> anyhow::Result<Option<Component>> {
+        let mut client = self.registry_client().await?;
+
+        let resp = client
+            .get_component_version(GetComponentVersionRequest {
+                name: name.into(),
+                namespace: namespace.into(),
+                version: version.into(),
             })
             .await?;
 
@@ -166,6 +188,59 @@ impl GrpcClient {
         }
 
         Ok(())
+    }
+
+    pub async fn get_component_files(
+        &self,
+        component_id: &str,
+    ) -> anyhow::Result<impl Stream<Item = anyhow::Result<ComponentFile>>> {
+        let mut client = self.registry_client().await?;
+        let resp = client
+            .get_component_files(GetComponentFilesRequest {
+                component_id: component_id.into(),
+            })
+            .await?;
+
+        let (mut tx, rx) = futures::channel::mpsc::channel(10);
+
+        tokio::spawn(async move {
+            let mut stream = resp.into_inner();
+            loop {
+                let Ok(message) = stream.message().await else {
+                    tx.send(Err(anyhow::anyhow!("failed to read next item")))
+                        .await
+                        .expect("failed to send end result");
+                    tx.close_channel();
+
+                    return;
+                };
+                if let Some(msg) = message {
+                    let Some(msg) = msg.msg else {
+                        return;
+                    };
+
+                    match msg {
+                        Msg::Done(_) => {
+                            tracing::info!("done receiving items");
+                            tx.close_channel();
+
+                            break;
+                        }
+                        Msg::ComponentFile(component_file) => {
+                            tx.send(Ok(component_file))
+                                .await
+                                .expect("to be able to send item");
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            tx.close_channel();
+        });
+
+        Ok(rx.into_stream())
     }
 }
 

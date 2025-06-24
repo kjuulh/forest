@@ -1,5 +1,6 @@
 #[derive(Clone, Debug)]
 pub struct RegistryComponent {
+    pub id: String,
     pub namespace: String,
     pub name: String,
     pub version: String,

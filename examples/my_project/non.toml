@@ -1,0 +1,5 @@
+[project]
+name = "my_project"
+
+[dependencies]
+"non/service" = { version = "0.0.1" }

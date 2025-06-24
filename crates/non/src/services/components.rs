@@ -1,19 +1,85 @@
-use crate::state::State;
+use crate::{
+    component_cache::{ComponentCache, ComponentCacheState, models::LocalComponent},
+    grpc::{GrpcClient, GrpcClientState},
+    state::State,
+};
 
-pub mod models {
-    #[derive(Clone, Debug, Default)]
-    pub struct Components {}
-}
+use super::{
+    component_registry::{ComponentRegistry, ComponentRegistryState, models::RegistryComponent},
+    project::{ProjectParser, ProjectParserState},
+};
 
+pub mod models;
+use anyhow::Context;
+use futures::StreamExt;
 use models::*;
-
-use super::component_registry::{ComponentRegistry, ComponentRegistryState};
 
 pub struct ComponentsService {
     registry: ComponentRegistry,
+    component_cache: ComponentCache,
+    project_parser: ProjectParser,
+    grpc: GrpcClient,
 }
 
 impl ComponentsService {
+    pub async fn sync_components(&self) -> anyhow::Result<()> {
+        // 1. Construct local store of existing components
+        let project = self.project_parser.get_project().await?;
+
+        let deps: ProjectDependencies = project.try_into()?;
+
+        let local_deps = self.component_cache.get_local_components().await?;
+
+        let missing_deps = deps.diff_right(
+            local_deps
+                .components
+                .iter()
+                .map(|c| ProjectDependency::try_from(c.clone()))
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        );
+
+        // 2. Fetch upstream version that is missing
+        let mut upstream = Vec::new();
+        for dep in &missing_deps.dependencies {
+            let upstream_component = self
+                .registry
+                .get_component_version(&dep.name, &dep.namespace, &dep.version.to_string())
+                .await?
+                .ok_or(anyhow::anyhow!("failed to find upstream component"))?;
+
+            upstream.push(upstream_component);
+        }
+
+        // Download deps
+
+        for dep in upstream {
+            self.download_component(&dep.id, &dep.name, &dep.namespace, &dep.version)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self), level = "trace")]
+    pub async fn get_component(
+        &self,
+        dep: &ProjectDependency,
+    ) -> anyhow::Result<UpstreamProjectDependency> {
+        let component_version = self
+            .registry
+            .get_component_version(&dep.name, &dep.namespace, &dep.version.to_string())
+            .await
+            .context("failed to get component version")?;
+
+        component_version
+            .map(|c| c.try_into())
+            .transpose()?
+            .ok_or(anyhow::anyhow!(
+                "failed to find upstream component: {:?}",
+                dep
+            ))
+    }
+
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn list_components(&self) -> anyhow::Result<()> {
         tracing::debug!("listing components");
@@ -25,6 +91,59 @@ impl ComponentsService {
         }
 
         Ok(())
+    }
+
+    pub async fn get_templates(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn download_component(
+        &self,
+        id: &str,
+        name: &str,
+        namespace: &str,
+        version: &str,
+    ) -> anyhow::Result<()> {
+        let mut stream = self.grpc.get_component_files(id).await?;
+
+        while let Some(item) = stream.next().await.transpose()? {
+            self.component_cache
+                .add_file(
+                    name,
+                    namespace,
+                    version,
+                    &item.file_path,
+                    &item.file_content,
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+}
+
+impl TryFrom<RegistryComponent> for UpstreamProjectDependency {
+    type Error = anyhow::Error;
+
+    fn try_from(value: RegistryComponent) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: value.id.parse()?,
+            name: value.name,
+            namespace: value.namespace,
+            version: value.version.parse()?,
+        })
+    }
+}
+
+impl TryFrom<LocalComponent> for ProjectDependency {
+    type Error = anyhow::Error;
+
+    fn try_from(value: LocalComponent) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: value.name,
+            namespace: value.namespace,
+            version: value.version.parse()?,
+        })
     }
 }
 
@@ -42,6 +161,9 @@ impl ComponentsServiceState for State {
     fn components_service(&self) -> ComponentsService {
         ComponentsService {
             registry: self.component_registry(),
+            component_cache: self.component_cache(),
+            project_parser: self.project_parser(),
+            grpc: self.grpc_client(),
         }
     }
 }

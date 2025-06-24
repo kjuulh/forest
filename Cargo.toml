@@ -18,6 +18,7 @@ clap = { version = "4", features = ["derive", "env"] }
 dotenvy = { version = "0.15" }
 async-trait = "0.1.88"
 semver = "1.0.26"
+futures = "0.3.31"
 
 bytes = "1.10.1"
 prost = "0.13.5"

@@ -4,7 +4,11 @@ pub mod models;
 
 use models::*;
 
-pub struct InitService {}
+use super::components::{ComponentsService, ComponentsServiceState};
+
+pub struct InitService {
+    components: ComponentsService,
+}
 
 impl InitService {
     #[tracing::instrument(skip(self), level = "trace")]
@@ -25,6 +29,9 @@ impl InitService {
 
     pub async fn fetch_sources(&self) -> anyhow::Result<Choices> {
         tracing::debug!("fetching init sources");
+
+        self.components.sync_components().await?;
+        self.components.get_templates().await?;
 
         Ok(Choices {
             choices: vec![Choice {
@@ -62,11 +69,17 @@ impl InitService {
 
     pub async fn download_choice(&self, choice: &Choice) -> anyhow::Result<Template> {
         tracing::debug!("fetching template into temp");
+
+        // TODO: get choices out of components, move to tempdir
+
         todo!()
     }
 
     pub async fn move_template(&self, template: &Template) -> anyhow::Result<()> {
         tracing::debug!("putting template in path");
+
+        // TODO: move template files into current dir
+
         todo!()
     }
 }
@@ -77,6 +90,8 @@ pub trait InitServiceState {
 
 impl InitServiceState for State {
     fn init_service(&self) -> InitService {
-        InitService {}
+        InitService {
+            components: self.components_service(),
+        }
     }
 }

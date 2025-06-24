@@ -722,6 +722,33 @@ pub mod registry_service_client {
                 .insert(GrpcMethod::new("non.v1.RegistryService", "GetComponent"));
             self.inner.unary(req, path, codec).await
         }
+        pub async fn get_component_version(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetComponentVersionRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetComponentVersionResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/non.v1.RegistryService/GetComponentVersion",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("non.v1.RegistryService", "GetComponentVersion"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         pub async fn begin_upload(
             &mut self,
             request: impl tonic::IntoRequest<super::BeginUploadRequest>,
@@ -843,6 +870,13 @@ pub mod registry_service_server {
             request: tonic::Request<super::GetComponentRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetComponentResponse>,
+            tonic::Status,
+        >;
+        async fn get_component_version(
+            &self,
+            request: tonic::Request<super::GetComponentVersionRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetComponentVersionResponse>,
             tonic::Status,
         >;
         async fn begin_upload(
@@ -1040,6 +1074,56 @@ pub mod registry_service_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = GetComponentSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/non.v1.RegistryService/GetComponentVersion" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetComponentVersionSvc<T: RegistryService>(pub Arc<T>);
+                    impl<
+                        T: RegistryService,
+                    > tonic::server::UnaryService<super::GetComponentVersionRequest>
+                    for GetComponentVersionSvc<T> {
+                        type Response = super::GetComponentVersionResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetComponentVersionRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as RegistryService>::get_component_version(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetComponentVersionSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
