@@ -1,8 +1,11 @@
+use std::collections::BTreeMap;
+
 use anyhow::Context;
 use serde::Deserialize;
 use tokio::sync::OnceCell;
 
 use crate::{
+    services::project::ProjectDependency,
     state::State,
     user_locations::{UserLocations, UserLocationsState},
 };
@@ -44,12 +47,16 @@ impl UserConfigService {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-pub struct UserConfig {}
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct UserConfig {
+    pub dependencies: BTreeMap<String, ProjectDependency>,
+}
 
 impl Default for UserConfig {
     fn default() -> Self {
-        Self {}
+        Self {
+            dependencies: BTreeMap::default(),
+        }
     }
 }
 

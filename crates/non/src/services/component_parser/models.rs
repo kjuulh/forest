@@ -15,7 +15,11 @@ pub struct RawComponentSpec {
 
     #[serde(default)]
     pub templates: BTreeMap<String, RawSpecTemplate>,
+
+    #[serde(default)]
+    pub init: BTreeMap<String, Init>,
 }
+
 #[derive(Default, Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct RawSpecComponent {
     pub name: String,
@@ -25,3 +29,12 @@ pub struct RawSpecComponent {
 
 #[derive(Default, Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct RawSpecTemplate {}
+
+#[derive(Default, Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Init {
+    #[serde(default)]
+    pub require: bool,
+
+    #[serde(default)]
+    pub default: String,
+}

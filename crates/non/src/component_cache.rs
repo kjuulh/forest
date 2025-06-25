@@ -1,27 +1,18 @@
 use std::path::PathBuf;
 
 use crate::{
-    services::component_parser::{ComponentParser, ComponentParserState, models::RawComponent},
+    services::component_parser::{
+        self, ComponentParser, ComponentParserState, models::RawComponent,
+    },
     state::State,
     user_locations::{UserLocations, UserLocationsState},
 };
 
-pub mod models {
-    #[derive(Clone, Debug, Default)]
-    pub struct LocalComponents {
-        pub components: Vec<LocalComponent>,
-    }
-
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct LocalComponent {
-        pub name: String,
-        pub namespace: String,
-        pub version: String,
-    }
-}
 use anyhow::Context;
-use models::*;
 use tokio::io::AsyncWriteExt;
+
+pub mod models;
+use models::*;
 
 pub struct ComponentCache {
     locations: UserLocations,
@@ -118,6 +109,22 @@ impl From<RawComponent> for LocalComponent {
             name: value.component_spec.component.name,
             namespace: value.component_spec.component.namespace,
             version: value.component_spec.component.version,
+
+            init: value
+                .component_spec
+                .init
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+        }
+    }
+}
+
+impl From<component_parser::models::Init> for Init {
+    fn from(value: component_parser::models::Init) -> Self {
+        Self {
+            require: value.require,
+            default: value.default,
         }
     }
 }

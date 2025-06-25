@@ -2,4 +2,4 @@
 name = "my_project"
 
 [dependencies]
-"non/init" = { version = "0.0.1" }
+"non-contrib/rust_service" = { version = "0.0.2" }

@@ -84,7 +84,8 @@ mod test {
                         namespace: "non".into(),
                         version: "0.0.1".into()
                     },
-                    templates: BTreeMap::from([("rust_service".to_string(), RawSpecTemplate {})])
+                    templates: BTreeMap::from([("rust_service".to_string(), RawSpecTemplate {})]),
+                    init: BTreeMap::default()
                 }
             },
             raw_component

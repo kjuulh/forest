@@ -1,3 +1,5 @@
+use crate::component_cache::models::LocalComponent;
+
 #[derive(Clone, Debug)]
 pub struct Choices {
     pub choices: Vec<Choice>,
@@ -15,5 +17,7 @@ impl Choices {
 #[derive(Clone, Debug)]
 pub struct Choice {
     pub name: String,
+
+    pub component: LocalComponent,
 }
 pub struct Template {}

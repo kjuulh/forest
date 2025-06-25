@@ -20,7 +20,7 @@ impl InitService {
             anyhow::bail!("failed to find source");
         };
 
-        let template = self.download_choice(&choice).await?;
+        let template = self.render_choice(&choice).await?;
 
         self.move_template(&template).await?;
 
@@ -31,12 +31,16 @@ impl InitService {
         tracing::debug!("fetching init sources");
 
         self.components.sync_components().await?;
-        self.components.get_templates().await?;
+        let inits = self.components.get_inits().await?;
 
         Ok(Choices {
-            choices: vec![Choice {
-                name: "rust:service".into(),
-            }],
+            choices: inits
+                .into_iter()
+                .map(|(k, v)| Choice {
+                    name: k,
+                    component: v,
+                })
+                .collect(),
         })
     }
 
@@ -67,7 +71,7 @@ impl InitService {
         Ok(Some(choice))
     }
 
-    pub async fn download_choice(&self, choice: &Choice) -> anyhow::Result<Template> {
+    pub async fn render_choice(&self, choice: &Choice) -> anyhow::Result<Template> {
         tracing::debug!("fetching template into temp");
 
         // TODO: get choices out of components, move to tempdir

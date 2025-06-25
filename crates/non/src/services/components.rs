@@ -1,7 +1,10 @@
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 use crate::{
-    component_cache::{ComponentCache, ComponentCacheState, models::LocalComponent},
+    component_cache::{
+        ComponentCache, ComponentCacheState,
+        models::{Init, LocalComponent},
+    },
     grpc::{GrpcClient, GrpcClientState},
     state::State,
 };
@@ -119,8 +122,26 @@ impl ComponentsService {
         Ok(())
     }
 
-    pub async fn get_templates(&self) -> anyhow::Result<()> {
-        Ok(())
+    pub async fn get_inits(&self) -> anyhow::Result<BTreeMap<String, LocalComponent>> {
+        let project = self
+            .project_parser
+            .get_project()
+            .await
+            .context("failed to get project")?;
+
+        let deps: ProjectDependencies = project.try_into()?;
+
+        let local_deps = self
+            .component_cache
+            .get_local_components()
+            .await
+            .context("failed to get local components")?;
+
+        let local = local_deps
+            .get(deps.dependencies)
+            .context("failed to find all required local dependencies")?;
+
+        Ok(local.get_init())
     }
 
     async fn download_component(
