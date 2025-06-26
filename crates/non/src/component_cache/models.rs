@@ -1,16 +1,13 @@
 use std::collections::BTreeMap;
 
-use crate::services::components::models::ProjectDependency;
+use crate::services::components::models::Dependency;
 
 #[derive(Clone, Debug, Default)]
 pub struct LocalComponents {
     pub components: Vec<LocalComponent>,
 }
 impl LocalComponents {
-    pub(crate) fn get(
-        &self,
-        dependencies: Vec<ProjectDependency>,
-    ) -> anyhow::Result<LocalComponents> {
+    pub(crate) fn get(&self, dependencies: Vec<Dependency>) -> anyhow::Result<LocalComponents> {
         let mut components = Vec::new();
 
         for dep in &dependencies {

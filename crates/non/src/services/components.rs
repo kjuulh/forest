@@ -1,12 +1,10 @@
 use std::{collections::BTreeMap, path::Path};
 
 use crate::{
-    component_cache::{
-        ComponentCache, ComponentCacheState,
-        models::{Init, LocalComponent},
-    },
+    component_cache::{ComponentCache, ComponentCacheState, models::LocalComponent},
     grpc::{GrpcClient, GrpcClientState},
     state::State,
+    user_config::{UserConfigService, UserConfigServiceState},
 };
 
 use super::{
@@ -28,18 +26,22 @@ pub struct ComponentsService {
     grpc: GrpcClient,
     parser: ComponentParser,
     deployment: ComponentDeploymentService,
+    user_config: UserConfigService,
 }
 
 impl ComponentsService {
     pub async fn sync_components(&self) -> anyhow::Result<()> {
-        // 1. Construct local store of existing components
-        let project = self
-            .project_parser
-            .get_project()
-            .await
-            .context("failed to get project")?;
+        let user_config = self.user_config.get_user_config().await?;
 
-        let deps: ProjectDependencies = project.try_into()?;
+        // 1. Construct local store of existing components
+        // let project = self
+        //     .project_parser
+        //     .get_project()
+        //     .await
+        //     .context("failed to get project")?;
+
+        //let deps: Dependencies = project.try_into()?;
+        let deps: Dependencies = user_config.try_into()?;
 
         let local_deps = self
             .component_cache
@@ -47,11 +49,11 @@ impl ComponentsService {
             .await
             .context("failed to get local components")?;
 
-        let local_components = ProjectDependencies {
+        let local_components = Dependencies {
             dependencies: local_deps
                 .components
                 .iter()
-                .map(|c| ProjectDependency::try_from(c.clone()))
+                .map(|c| Dependency::try_from(c.clone()))
                 .collect::<anyhow::Result<Vec<_>>>()
                 .context("failed to get upstream dependencies")?,
         };
@@ -92,7 +94,7 @@ impl ComponentsService {
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn get_component(
         &self,
-        dep: &ProjectDependency,
+        dep: &Dependency,
     ) -> anyhow::Result<UpstreamProjectDependency> {
         let component_version = self
             .registry
@@ -123,13 +125,14 @@ impl ComponentsService {
     }
 
     pub async fn get_inits(&self) -> anyhow::Result<BTreeMap<String, LocalComponent>> {
-        let project = self
-            .project_parser
-            .get_project()
-            .await
-            .context("failed to get project")?;
+        // let project = self
+        //     .project_parser
+        //     .get_project()
+        //     .await
+        //     .context("failed to get project")?;
+        let user_config = self.user_config.get_user_config().await?;
 
-        let deps: ProjectDependencies = project.try_into()?;
+        let deps: Dependencies = user_config.try_into()?;
 
         let local_deps = self
             .component_cache
@@ -194,7 +197,7 @@ impl TryFrom<RegistryComponent> for UpstreamProjectDependency {
     }
 }
 
-impl TryFrom<LocalComponent> for ProjectDependency {
+impl TryFrom<LocalComponent> for Dependency {
     type Error = anyhow::Error;
 
     fn try_from(value: LocalComponent) -> Result<Self, Self::Error> {
@@ -225,6 +228,7 @@ impl ComponentsServiceState for State {
             grpc: self.grpc_client(),
             parser: self.component_parser(),
             deployment: self.component_deployment_service(),
+            user_config: self.user_config_service(),
         }
     }
 }
