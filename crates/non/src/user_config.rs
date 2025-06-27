@@ -98,6 +98,77 @@ impl UserConfigService {
 
         Ok(())
     }
+
+    pub(crate) async fn add_dependency(
+        &self,
+        name: &str,
+        namespace: &str,
+        version: &str,
+    ) -> anyhow::Result<()> {
+        let config_path = self.locations.get_config().join(USER_CONFIG_FILE);
+
+        let mut user_config = if !config_path.exists() {
+            toml_edit::DocumentMut::default()
+        } else {
+            let file = tokio::fs::read_to_string(&config_path)
+                .await
+                .context(format!(
+                    "failed to load config file at path: {}",
+                    config_path.display()
+                ))?;
+
+            toml_edit::DocumentMut::from_str(&file).context("failed to parse user config")?
+        };
+
+        if !user_config.contains_table("dependencies") {
+            user_config["dependencies"] = toml_edit::Item::Table(toml_edit::Table::new());
+        }
+
+        if let Some(table) = user_config["dependencies"].as_table() {
+            user_config["dependencies"] = toml_edit::Item::Table(table.clone());
+        }
+
+        let table = user_config["dependencies"].as_table_mut().unwrap();
+
+        if table.contains_key(name) && table.contains_key(&format!("{namespace}/{name}")) {
+            anyhow::bail!("dependency already exists in user config");
+        }
+
+        let mut dependency_table = toml_edit::InlineTable::new();
+        dependency_table.insert(
+            "version",
+            toml_edit::Value::String(toml_edit::Formatted::new(version.into())),
+        );
+
+        if namespace == "non" {
+            table[name] = toml_edit::value(toml_edit::Value::InlineTable(dependency_table));
+        } else {
+            table[&format!("{namespace}/{name}")] =
+                toml_edit::value(toml_edit::Value::InlineTable(dependency_table));
+        }
+
+        if !config_path.exists() {
+            if let Some(parent) = config_path.parent() {
+                tokio::fs::create_dir_all(&parent)
+                    .await
+                    .context("failed to create config dir")?;
+            }
+        }
+
+        let mut config = tokio::fs::File::create(config_path)
+            .await
+            .context("failed to create config file")?;
+
+        let output = user_config.to_string();
+
+        config
+            .write_all(output.as_bytes())
+            .await
+            .context("failed to write to file")?;
+        config.flush().await?;
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
