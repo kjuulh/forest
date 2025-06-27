@@ -1,10 +1,12 @@
+use global_add::GlobalAddCommand;
 use global_init::GlobalInitCommand;
-use set::SetCommand;
+use global_set::GlobalSetCommand;
 
 use crate::state::State;
 
+mod global_add;
 mod global_init;
-mod set;
+mod global_set;
 
 #[derive(clap::Parser)]
 pub struct GlobalCommand {
@@ -16,7 +18,8 @@ pub struct GlobalCommand {
 #[clap(subcommand_required = true)]
 enum Commands {
     Init(GlobalInitCommand),
-    Set(SetCommand),
+    Set(GlobalSetCommand),
+    Add(GlobalAddCommand),
 }
 
 impl GlobalCommand {
@@ -24,6 +27,7 @@ impl GlobalCommand {
         match self.commands {
             Commands::Init(cmd) => cmd.execute(state).await,
             Commands::Set(cmd) => cmd.execute(state).await,
+            Commands::Add(cmd) => cmd.execute(state).await,
         }
     }
 }
