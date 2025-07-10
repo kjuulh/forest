@@ -8,3 +8,5 @@ pub mod project;
 
 pub mod component_deployment;
 pub mod component_parser;
+
+pub mod temp_directories;

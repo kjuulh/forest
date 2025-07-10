@@ -35,3 +35,6 @@ toml = { version = "0.8.23", features = ["preserve_order"] }
 walkdir = "2.5.0"
 dirs = "6.0.0"
 toml_edit = "0.22.27"
+rand = "0.9.1"
+hex = "0.4.3"
+noworkers = "0.0.1"

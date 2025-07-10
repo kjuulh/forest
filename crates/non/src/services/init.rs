@@ -4,10 +4,15 @@ pub mod models;
 
 use models::*;
 
-use super::components::{ComponentsService, ComponentsServiceState};
+use super::{
+    components::{ComponentsService, ComponentsServiceState},
+    temp_directories::{TempDirectories, TempDirectoriesState},
+};
 
 pub struct InitService {
     components: ComponentsService,
+
+    temp: TempDirectories,
 }
 
 impl InitService {
@@ -74,6 +79,8 @@ impl InitService {
     pub async fn render_choice(&self, choice: &Choice) -> anyhow::Result<Template> {
         tracing::debug!("fetching template into temp");
 
+        let temp = self.temp.create_emphemeral_temp().await?;
+
         // TODO: get choices out of components, move to tempdir
 
         todo!()
@@ -96,6 +103,7 @@ impl InitServiceState for State {
     fn init_service(&self) -> InitService {
         InitService {
             components: self.components_service(),
+            temp: self.temp_directories(),
         }
     }
 }

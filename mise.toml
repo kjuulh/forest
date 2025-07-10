@@ -26,7 +26,6 @@ env = { RUST_LOG = "non=trace,info" }
 dir = "{{cwd}}"
 run = "cargo run -p non -- "
 
-
 [tasks."dev:serve"]
 env = { RUST_LOG = "non_server=trace,info" }
 run = "cargo run -p non-server -- serve"
