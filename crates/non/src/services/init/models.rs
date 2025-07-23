@@ -18,6 +18,7 @@ impl Choices {
 pub struct Choice {
     pub name: String,
 
+    pub init: String,
     pub component: LocalComponent,
 }
 pub struct Template {}

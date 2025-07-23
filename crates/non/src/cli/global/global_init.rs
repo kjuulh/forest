@@ -7,8 +7,8 @@ pub struct GlobalInitCommand {
 }
 
 impl GlobalInitCommand {
-    pub async fn execute(self, state: &State) -> anyhow::Result<()> {
-        state.init_service().init(self.starter).await?;
+    pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        state.init_service().init(&self.starter).await?;
 
         Ok(())
     }

@@ -62,6 +62,10 @@ impl ComponentCache {
         })
     }
 
+    pub async fn get_component_path(&self, component: &LocalComponent) -> anyhow::Result<PathBuf> {
+        let component_
+    }
+
     pub async fn add_file(
         &self,
         name: &str,

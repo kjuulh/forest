@@ -7,8 +7,8 @@ pub struct InitCommand {
 }
 
 impl InitCommand {
-    pub async fn execute(self, state: &State) -> anyhow::Result<()> {
-        state.init_service().init(self.starter).await?;
+    pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        state.init_service().init(&self.starter).await?;
 
         Ok(())
     }

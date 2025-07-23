@@ -82,7 +82,7 @@ mod test {
                     component: RawSpecComponent {
                         name: "my_component".into(),
                         namespace: "non".into(),
-                        version: "0.0.1".into()
+                        version: "0.0.2".into()
                     },
                     templates: BTreeMap::from([("rust_service".to_string(), RawSpecTemplate {})]),
                     init: BTreeMap::default()

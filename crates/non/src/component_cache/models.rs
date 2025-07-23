@@ -27,15 +27,20 @@ impl LocalComponents {
         Ok(LocalComponents { components })
     }
 
-    pub fn get_init(&self) -> BTreeMap<String, LocalComponent> {
+    pub fn get_init(&self) -> BTreeMap<String, (String, LocalComponent)> {
         self.components
             .iter()
             .cloned()
             .flat_map(|i| {
                 i.init
                     .keys()
-                    .map(|k| (format!("{}:{}:{}", i.namespace, i.name, k), i.clone()))
-                    .collect::<BTreeMap<String, LocalComponent>>()
+                    .map(|k| {
+                        (
+                            format!("{}:{}:{}", i.namespace, i.name, k),
+                            (k.clone(), i.clone()),
+                        )
+                    })
+                    .collect::<BTreeMap<String, (String, LocalComponent)>>()
             })
             .collect()
     }

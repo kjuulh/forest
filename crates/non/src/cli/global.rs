@@ -23,8 +23,8 @@ enum Commands {
 }
 
 impl GlobalCommand {
-    pub async fn execute(self, state: &State) -> anyhow::Result<()> {
-        match self.commands {
+    pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        match &self.commands {
             Commands::Init(cmd) => cmd.execute(state).await,
             Commands::Set(cmd) => cmd.execute(state).await,
             Commands::Add(cmd) => cmd.execute(state).await,

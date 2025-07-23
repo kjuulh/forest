@@ -4,6 +4,10 @@ RUST_LOG = "non=debug,info"
 [tools]
 rust = { version = "1.87", components = "rust-src,rust-analyzer" }
 
+[tasks."non:install"]
+alias = ["i", "install"]
+run = "cargo install --path crates/non -f"
+
 [tasks.non]
 dir = "{{ cwd }}"
 run = "cargo run -p non -- "
@@ -27,6 +31,7 @@ dir = "{{cwd}}"
 run = "cargo run -p non -- "
 
 [tasks."dev:serve"]
+alias = ["d", "dev"]
 env = { RUST_LOG = "non_server=trace,info" }
 run = "cargo run -p non-server -- serve"
 
@@ -41,3 +46,6 @@ run = "docker compose -f ./templates/docker-compose.yaml up -d --remove-orphans"
 
 [tasks."local:down"]
 run = "docker compose -f ./templates/docker-compose.yaml down -v"
+
+[tasks.test]
+run = "cargo nextest run"

@@ -17,7 +17,7 @@ pub struct InitService {
 
 impl InitService {
     #[tracing::instrument(skip(self), level = "trace")]
-    pub async fn init(&self, choice: Option<String>) -> anyhow::Result<()> {
+    pub async fn init(&self, choice: &Option<String>) -> anyhow::Result<()> {
         let sources = self.fetch_sources().await?;
 
         let Some(choice) = self.get_choice(&sources, choice).await? else {
@@ -41,9 +41,10 @@ impl InitService {
         Ok(Choices {
             choices: inits
                 .into_iter()
-                .map(|(k, v)| Choice {
+                .map(|(k, (init_key, value))| Choice {
                     name: k,
-                    component: v,
+                    init: init_key,
+                    component: value,
                 })
                 .collect(),
         })
@@ -53,12 +54,18 @@ impl InitService {
     pub async fn get_choice(
         &self,
         choices: &Choices,
-        choice: Option<String>,
+        choice: &Option<String>,
     ) -> anyhow::Result<Option<Choice>> {
         tracing::debug!("providing user choice of source");
 
+        if choices.choices.is_empty() {
+            anyhow::bail!(
+                "No choices available, add some projects first `non global add <my-init-project>`"
+            )
+        }
+
         let user_choice = match choice {
-            Some(user_choice) => user_choice,
+            Some(user_choice) => user_choice.clone(),
             None => inquire::Select::new(
                 "choose a template to bootstrap your project",
                 choices.to_string_vec(),
@@ -81,7 +88,15 @@ impl InitService {
 
         let temp = self.temp.create_emphemeral_temp().await?;
 
+        let init = choice
+            .component
+            .init
+            .get(&choice.init)
+            .expect("item from choice to match internal structure");
+
         // TODO: get choices out of components, move to tempdir
+
+        println!("choice: {}", choice.name);
 
         todo!()
     }

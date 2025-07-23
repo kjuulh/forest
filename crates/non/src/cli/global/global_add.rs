@@ -1,11 +1,6 @@
 use anyhow::Context;
 
-use crate::{
-    grpc::GrpcClientState,
-    services::{component_registry::ComponentRegistryState, components::ComponentsServiceState},
-    state::State,
-    user_config::{self, UserConfigServiceState},
-};
+use crate::{grpc::GrpcClientState, state::State, user_config::UserConfigServiceState};
 
 #[derive(clap::Parser, Debug)]
 pub struct GlobalAddCommand {
@@ -57,9 +52,9 @@ impl TryFrom<&GlobalAddCommand> for AddComponent {
 
 impl GlobalAddCommand {
     #[tracing::instrument(skip(state), level = "debug")]
-    pub async fn execute(self, state: &State) -> anyhow::Result<()> {
+    pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         tracing::info!("adding global dependency");
-        let add_command: AddComponent = (&self).try_into()?;
+        let add_command: AddComponent = self.try_into()?;
 
         let component = match add_command.version {
             Some(version) => {

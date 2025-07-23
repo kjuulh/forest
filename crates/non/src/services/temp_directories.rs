@@ -1,8 +1,10 @@
 use std::{env::temp_dir, path::PathBuf, time::SystemTime};
 
+use anyhow::Context;
+use drop_queue::DropQueue;
 use rand::Rng;
 
-use crate::{drop_queue::DropQueue, state::State};
+use crate::state::State;
 
 pub struct TempDirectories {
     drop_queue: DropQueue,
@@ -19,11 +21,13 @@ impl TempDirectories {
     }
 
     pub async fn create_temp(&self) -> anyhow::Result<TempDirectory> {
-        self.garbage_collect().await?;
+        self.garbage_collect().await.context("garbage collect")?;
 
         let random_path = self.base_dir().join(generate_id(10));
 
-        tokio::fs::create_dir_all(&random_path).await?;
+        tokio::fs::create_dir_all(&random_path)
+            .await
+            .context("create temp parent dir")?;
 
         Ok(TempDirectory {
             last_modified: SystemTime::now(),
@@ -33,6 +37,10 @@ impl TempDirectories {
 
     pub async fn index(&self) -> anyhow::Result<Index> {
         let base = self.base_dir();
+
+        if !base.exists() {
+            return Ok(Index::default());
+        }
 
         let mut directories = Index::default();
 

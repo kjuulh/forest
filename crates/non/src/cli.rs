@@ -3,11 +3,13 @@ use clap::{Parser, Subcommand};
 use components::ComponentsCommand;
 use global::GlobalCommand;
 use init::InitCommand;
+use notmad::{Component, MadError};
 use publish::PublishCommand;
 use run::RunCommand;
 use shell::ShellCommand;
 use template::TemplateCommand;
 use tmp::TmpCommand;
+use tokio_util::sync::CancellationToken;
 
 use crate::state::State;
 
@@ -45,38 +47,75 @@ pub async fn execute() -> anyhow::Result<()> {
     let cli = Command::parse();
     let state = State::new().await?;
 
-    let _state = state.clone();
+    notmad::Mad::builder()
+        .add(state.drop_queue.clone())
+        .add(CommandHandler::new(cli, &state))
+        .run()
+        .await
+        .map_err(unwrap_run_errors)?;
 
-    // TODO: Replace with mad at some point
-    tokio::spawn(async move {
-        let state = _state;
+    Ok(())
+}
 
-        loop {
-            if let Err(e) = state.drop_queue.process().await {
-                tracing::warn!("failed to process items: {}", e)
-            }
+fn unwrap_run_errors(error: MadError) -> anyhow::Error {
+    match error {
+        MadError::Inner(error) => error,
+        MadError::RunError { run } => run,
+        MadError::CloseError { close } => close,
+        MadError::AggregateError(aggregate_error) => anyhow::anyhow!("{}", aggregate_error),
+        _ => todo!("error is not implemented, and not intended"),
+    }
+}
 
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+struct CommandHandler {
+    state: State,
+    cli: Command,
+}
+
+impl CommandHandler {
+    fn new(cli: Command, state: &State) -> Self {
+        Self {
+            state: state.clone(),
+            cli,
         }
-    });
-
-    let res = match cli
-        .command
-        .expect("commands are required should've been caught by clap")
-    {
-        Commands::Init(init_command) => init_command.execute(&state).await,
-        Commands::Components(components_command) => components_command.execute(&state).await,
-        Commands::Admin(cmd) => cmd.execute(&state).await,
-        Commands::Run(cmd) => cmd.execute(&state).await,
-        Commands::Template(cmd) => cmd.execute(&state).await,
-        Commands::Publish(cmd) => cmd.execute(&state).await,
-        Commands::Global(cmd) => cmd.execute(&state).await,
-        Commands::Shell(cmd) => cmd.execute(&state).await,
-        Commands::Tmp(cmd) => cmd.execute(&state).await,
-    };
-    if let Err(e) = state.drop_queue.drain().await {
-        tracing::warn!("failed to process dropped items: {}", e);
     }
 
-    res
+    async fn handle(&self) -> anyhow::Result<()> {
+        let state = &self.state;
+        let cli = &self.cli;
+
+        match cli
+            .command
+            .as_ref()
+            .expect("commands are required should've been caught by clap")
+        {
+            Commands::Init(init_command) => init_command.execute(state).await,
+            Commands::Components(components_command) => components_command.execute(state).await,
+            Commands::Admin(cmd) => cmd.execute(state).await,
+            Commands::Run(cmd) => cmd.execute(state).await,
+            Commands::Template(cmd) => cmd.execute(state).await,
+            Commands::Publish(cmd) => cmd.execute(state).await,
+            Commands::Global(cmd) => cmd.execute(state).await,
+            Commands::Shell(cmd) => cmd.execute(state).await,
+            Commands::Tmp(cmd) => cmd.execute(state).await,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Component for CommandHandler {
+    fn name(&self) -> Option<String> {
+        Some("non/command".into())
+    }
+
+    async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {
+        tokio::select! {
+            _ = cancellation_token.cancelled() => {},
+            res = self.handle() => {
+                res.map_err(notmad::MadError::Inner)?;
+            }
+        }
+
+        Ok(())
+    }
 }

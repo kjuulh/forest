@@ -1,4 +1,4 @@
-use crate::drop_queue::DropQueue;
+use drop_queue::DropQueue;
 
 #[derive(Clone)]
 pub struct State {

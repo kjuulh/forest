@@ -11,18 +11,16 @@ use super::{
 };
 
 pub struct RegistryClient {
-    pub(crate) inner: Arc<dyn RegistryClientContract + 'static>,
+    pub(crate) inner: Arc<dyn RegistryClientContract + Send + Sync + 'static>,
 }
 
-impl std::ops::Deref for RegistryClient {
-    type Target = Arc<dyn RegistryClientContract>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
+impl RegistryClient {
+    pub async fn get_components(&self) -> anyhow::Result<RegistryComponents> {
+        self.inner.get_components().await
     }
 }
 
-impl<T: RegistryClientContract + 'static> From<T> for RegistryClient {
+impl<T: RegistryClientContract + Send + Sync + 'static> From<T> for RegistryClient {
     fn from(value: T) -> Self {
         Self {
             inner: Arc::new(value),

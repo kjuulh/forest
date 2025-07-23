@@ -10,7 +10,7 @@ pub struct GlobalSetCommand {
 
 impl GlobalSetCommand {
     #[tracing::instrument(skip(state), level = "debug")]
-    pub async fn execute(self, state: &State) -> anyhow::Result<()> {
+    pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         tracing::debug!("writing user keys to file");
 
         state

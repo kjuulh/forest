@@ -124,12 +124,7 @@ impl ComponentsService {
         Ok(())
     }
 
-    pub async fn get_inits(&self) -> anyhow::Result<BTreeMap<String, LocalComponent>> {
-        // let project = self
-        //     .project_parser
-        //     .get_project()
-        //     .await
-        //     .context("failed to get project")?;
+    pub async fn get_inits(&self) -> anyhow::Result<BTreeMap<String, (String, LocalComponent)>> {
         let user_config = self.user_config.get_user_config().await?;
 
         let deps: Dependencies = user_config.try_into()?;
