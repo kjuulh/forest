@@ -2,7 +2,7 @@
 name = "non"
 edition = "2024"
 description = "Non (nonothing) is a set of tools to help you design the development workflows you need. It is specifically built to allow you to share workflows and streamline boring tasks."
-repository = "https://git.front.kjuulh.io/kjuulh/non"
+repository = "https://git.kjuulh.io/kjuulh/non"
 readme = "../../README.md"
 license = "MIT"
 
@@ -37,7 +37,7 @@ dirs = "6.0.0"
 toml_edit = "0.22.27"
 rand = "0.9.1"
 hex = "0.4.3"
-noworkers = "0.0.1"
+noworkers = "0.1.0"
 drop-queue = { version = "0.0.4", features = ["notmad"] }
 notmad = "0.7.5"
 tokio-util = "0.7.15"

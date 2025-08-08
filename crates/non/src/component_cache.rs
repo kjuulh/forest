@@ -63,7 +63,14 @@ impl ComponentCache {
     }
 
     pub async fn get_component_path(&self, component: &LocalComponent) -> anyhow::Result<PathBuf> {
-        let component_
+        let file_path = self
+            .get_component_cache()
+            .await?
+            .join(&component.namespace)
+            .join(&component.name)
+            .join(&component.version);
+
+        Ok(file_path)
     }
 
     pub async fn add_file(
@@ -82,14 +89,14 @@ impl ComponentCache {
             .join(version)
             .join(file_path);
 
-        if let Some(parent) = file_path.parent() {
-            if !parent.exists() {
-                tracing::trace!("creating component dir: {}", parent.display());
+        if let Some(parent) = file_path.parent()
+            && !parent.exists()
+        {
+            tracing::trace!("creating component dir: {}", parent.display());
 
-                tokio::fs::create_dir_all(parent)
-                    .await
-                    .context("failed to create path")?;
-            }
+            tokio::fs::create_dir_all(parent)
+                .await
+                .context("failed to create path")?;
         }
 
         tracing::trace!("creating component file: {}", file_path.display());

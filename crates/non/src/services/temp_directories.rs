@@ -1,4 +1,4 @@
-use std::{env::temp_dir, path::PathBuf, time::SystemTime};
+use std::{env::temp_dir, ops::Deref, path::PathBuf, sync::Arc, time::SystemTime};
 
 use anyhow::Context;
 use drop_queue::DropQueue;
@@ -14,10 +14,7 @@ impl TempDirectories {
     pub async fn create_emphemeral_temp(&self) -> anyhow::Result<GuardedTempDirectory> {
         let temp = self.create_temp().await?;
 
-        Ok(GuardedTempDirectory {
-            drop_queue: self.drop_queue.clone(),
-            temp,
-        })
+        Ok(GuardedTempDirectory::new(self.drop_queue.clone(), temp))
     }
 
     pub async fn create_temp(&self) -> anyhow::Result<TempDirectory> {
@@ -108,11 +105,15 @@ pub struct TempDirectory {
     path: PathBuf,
 }
 
-impl TempDirectory {
-    pub fn to_path_buf(&self) -> PathBuf {
-        self.path.clone()
-    }
+impl Deref for TempDirectory {
+    type Target = PathBuf;
 
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+impl TempDirectory {
     #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         self.path.display().to_string()
@@ -155,21 +156,34 @@ impl Index {
         })
     }
 
-    fn size(&self) -> usize {
-        self.directories.len()
-    }
-
     fn size_expired(&self) -> usize {
         self.directories.iter().filter(|d| d.is_expired()).count()
     }
 }
 
 pub struct GuardedTempDirectory {
+    inner: Arc<InnerGuardedTempDirectory>,
+}
+impl GuardedTempDirectory {
+    fn new(drop_queue: DropQueue, temp: TempDirectory) -> Self {
+        Self {
+            inner: Arc::new(InnerGuardedTempDirectory { drop_queue, temp }),
+        }
+    }
+}
+impl Deref for GuardedTempDirectory {
+    type Target = PathBuf;
+    fn deref(&self) -> &Self::Target {
+        &self.inner.temp.path
+    }
+}
+
+struct InnerGuardedTempDirectory {
     drop_queue: DropQueue,
     temp: TempDirectory,
 }
 
-impl Drop for GuardedTempDirectory {
+impl Drop for InnerGuardedTempDirectory {
     fn drop(&mut self) {
         let temp = self.temp.clone();
         self.drop_queue

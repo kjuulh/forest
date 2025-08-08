@@ -2,7 +2,7 @@
 RUST_LOG = "non=debug,info"
 
 [tools]
-rust = { version = "1.87", components = "rust-src,rust-analyzer" }
+rust = { version = "1.89", components = "rust-src,rust-analyzer" }
 
 [tasks."non:install"]
 alias = ["i", "install"]

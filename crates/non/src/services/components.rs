@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 use crate::{
     component_cache::{ComponentCache, ComponentCacheState, models::LocalComponent},
@@ -164,6 +167,12 @@ impl ComponentsService {
         }
 
         Ok(())
+    }
+
+    pub async fn get_component_path(&self, component: &LocalComponent) -> anyhow::Result<PathBuf> {
+        let path = self.component_cache.get_component_path(component).await?;
+
+        Ok(path)
     }
 
     pub async fn get_staging_component(&self, path: &Path) -> anyhow::Result<RawComponent> {

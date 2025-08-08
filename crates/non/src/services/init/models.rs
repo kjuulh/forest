@@ -1,4 +1,8 @@
-use crate::component_cache::models::LocalComponent;
+use std::path::PathBuf;
+
+use crate::{
+    component_cache::models::LocalComponent, services::temp_directories::GuardedTempDirectory,
+};
 
 #[derive(Clone, Debug)]
 pub struct Choices {
@@ -21,4 +25,6 @@ pub struct Choice {
     pub init: String,
     pub component: LocalComponent,
 }
-pub struct Template {}
+pub struct Template {
+    pub path: GuardedTempDirectory,
+}
