@@ -33,8 +33,15 @@ pub struct RawSpecTemplate {}
 #[derive(Default, Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct Init {
     #[serde(default)]
-    pub require: bool,
+    pub input: BTreeMap<String, InitInput>,
+}
+#[derive(Default, Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct InitInput {
+    #[serde(default)]
+    pub required: bool,
 
     #[serde(default)]
     pub default: String,
+
+    pub description: Option<String>,
 }

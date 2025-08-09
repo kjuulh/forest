@@ -134,8 +134,21 @@ impl From<RawComponent> for LocalComponent {
 impl From<component_parser::models::Init> for Init {
     fn from(value: component_parser::models::Init) -> Self {
         Self {
-            require: value.require,
+            input: value
+                .input
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+        }
+    }
+}
+
+impl From<component_parser::models::InitInput> for InitInput {
+    fn from(value: component_parser::models::InitInput) -> Self {
+        Self {
+            required: value.required,
             default: value.default,
+            description: value.description,
         }
     }
 }

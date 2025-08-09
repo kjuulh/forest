@@ -57,6 +57,12 @@ pub struct LocalComponent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Init {
-    pub require: bool,
+    pub input: BTreeMap<String, InitInput>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InitInput {
+    pub required: bool,
     pub default: String,
+    pub description: Option<String>,
 }

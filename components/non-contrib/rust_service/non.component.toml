@@ -1,9 +1,14 @@
 [component]
 name = "rust_service"
 namespace = "non-contrib"
-version = "0.0.2"
+version = "0.0.3"
 
 [init."project"]
 [init."project".input]
 name = { required = true }
 http = { default = "false" }
+
+[init.project.input.something]
+required = true
+default = "something"
+description = "my arg, please insert 'stuff' here"
