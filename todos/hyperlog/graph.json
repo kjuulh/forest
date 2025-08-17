@@ -1,0 +1,32 @@
+{
+  "non": {
+    "type": "user",
+    "todos": {
+      "type": "section",
+      "substrait": {
+        "type": "section",
+        "component substrait v2": {
+          "type": "item",
+          "title": "component substrait v2",
+          "description": "Component substrait is an abstraction over a remote or local component registry. It allows interacting with components through a common abstraction.\n\nThe component substrait is initialized in a few phases\n\n1. Project and global component dependencies are gathered\n2. Existing registry is scanned and archived\n3. A sparse graph of dependencies are downloaded, this will make it easy to traverse the full tree of items required\n4. Components not found are downloaded and moved to their proper location\n5. Each components are now fully indexed, catalogued and ready for usage for the rest of the session\n",
+          "state": "not-done"
+        }
+      },
+      "templating": {
+        "type": "item",
+        "title": "templating",
+        "description": "",
+        "state": "done"
+      },
+      "templating-system": {
+        "type": "section",
+        "artifacts": {
+          "type": "item",
+          "title": "artifacts",
+          "description": "",
+          "state": "not-done"
+        }
+      }
+    }
+  }
+}

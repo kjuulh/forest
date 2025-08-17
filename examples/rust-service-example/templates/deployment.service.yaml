@@ -1,0 +1,50 @@
+apiVersion: platform.understory.io/v1
+kind: Service
+metadata:
+  name: user-api
+  namespace: production
+  labels:
+    team: backend
+    domain: user-management
+    version: v1.2.3
+  annotations:
+    platform.company.com/owner: backend-team@company.com
+spec:
+  deployment:
+    type: service  
+    replicas: 3
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 1
+        maxSurge: 1
+    
+  containers:
+    - 
+      image: user-api:latest
+      ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+      
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi" 
+          cpu: "500m"
+      
+      env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "8080"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: user-api-secrets
+  namespace: production
+

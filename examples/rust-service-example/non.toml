@@ -1,5 +1,5 @@
 [project]
-name = "my_project"
+name = "rust-service-example"
 
 [dependencies]
 "non/service" = { version = "0.0.1" }

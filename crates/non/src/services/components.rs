@@ -4,8 +4,12 @@ use std::{
 };
 
 use crate::{
-    component_cache::{ComponentCache, ComponentCacheState, models::LocalComponent},
+    component_cache::{
+        ComponentCache, ComponentCacheState,
+        models::{CacheComponent, CacheComponents},
+    },
     grpc::{GrpcClient, GrpcClientState},
+    models::{Dependencies, Dependency, Project},
     state::State,
     user_config::{UserConfigService, UserConfigServiceState},
 };
@@ -14,18 +18,17 @@ use super::{
     component_deployment::{ComponentDeploymentService, ComponentDeploymentServiceState},
     component_parser::{ComponentParser, ComponentParserState, models::RawComponent},
     component_registry::{ComponentRegistry, ComponentRegistryState, models::RegistryComponent},
-    project::{ProjectParser, ProjectParserState},
 };
 
-pub mod models;
 use anyhow::Context;
 use futures::StreamExt;
+
+pub mod models;
 use models::*;
 
 pub struct ComponentsService {
     registry: ComponentRegistry,
     component_cache: ComponentCache,
-    project_parser: ProjectParser,
     grpc: GrpcClient,
     parser: ComponentParser,
     deployment: ComponentDeploymentService,
@@ -33,18 +36,18 @@ pub struct ComponentsService {
 }
 
 impl ComponentsService {
-    pub async fn sync_components(&self) -> anyhow::Result<()> {
+    pub async fn sync_components(
+        &self,
+        project: Option<Project>,
+    ) -> anyhow::Result<CacheComponents> {
         let user_config = self.user_config.get_user_config().await?;
 
         // 1. Construct local store of existing components
-        // let project = self
-        //     .project_parser
-        //     .get_project()
-        //     .await
-        //     .context("failed to get project")?;
-
-        //let deps: Dependencies = project.try_into()?;
-        let deps: Dependencies = user_config.try_into()?;
+        let mut deps: Dependencies = user_config.try_into()?;
+        if let Some(project) = project {
+            let mut project = project.clone();
+            deps.merge(&mut project.dependencies);
+        }
 
         let local_deps = self
             .component_cache
@@ -54,7 +57,6 @@ impl ComponentsService {
 
         let local_components = Dependencies {
             dependencies: local_deps
-                .components
                 .iter()
                 .map(|c| Dependency::try_from(c.clone()))
                 .collect::<anyhow::Result<Vec<_>>>()
@@ -91,7 +93,13 @@ impl ComponentsService {
                 .await?;
         }
 
-        Ok(())
+        let local_deps = self
+            .component_cache
+            .get_local_components()
+            .await
+            .context("failed to get local components")?;
+
+        Ok(local_deps)
     }
 
     #[tracing::instrument(skip(self), level = "trace")]
@@ -127,7 +135,7 @@ impl ComponentsService {
         Ok(())
     }
 
-    pub async fn get_inits(&self) -> anyhow::Result<BTreeMap<String, (String, LocalComponent)>> {
+    pub async fn get_inits(&self) -> anyhow::Result<BTreeMap<String, (String, CacheComponent)>> {
         let user_config = self.user_config.get_user_config().await?;
 
         let deps: Dependencies = user_config.try_into()?;
@@ -138,11 +146,13 @@ impl ComponentsService {
             .await
             .context("failed to get local components")?;
 
-        let local = local_deps
-            .get(deps.dependencies)
-            .context("failed to find all required local dependencies")?;
+        // FIXME(kjuulh): implement inits
+        // let local = local_deps
+        //     .get(deps.dependencies)
+        //     .context("failed to find all required local dependencies")?;
 
-        Ok(local.get_init())
+        // Ok(local.get_init())
+        todo!()
     }
 
     async fn download_component(
@@ -169,7 +179,7 @@ impl ComponentsService {
         Ok(())
     }
 
-    pub async fn get_component_path(&self, component: &LocalComponent) -> anyhow::Result<PathBuf> {
+    pub async fn get_component_path(&self, component: &CacheComponent) -> anyhow::Result<PathBuf> {
         let path = self.component_cache.get_component_path(component).await?;
 
         Ok(path)
@@ -201,10 +211,10 @@ impl TryFrom<RegistryComponent> for UpstreamProjectDependency {
     }
 }
 
-impl TryFrom<LocalComponent> for Dependency {
+impl TryFrom<CacheComponent> for Dependency {
     type Error = anyhow::Error;
 
-    fn try_from(value: LocalComponent) -> Result<Self, Self::Error> {
+    fn try_from(value: CacheComponent) -> Result<Self, Self::Error> {
         Ok(Self {
             name: value.name,
             namespace: value.namespace,
@@ -228,7 +238,6 @@ impl ComponentsServiceState for State {
         ComponentsService {
             registry: self.component_registry(),
             component_cache: self.component_cache(),
-            project_parser: self.project_parser(),
             grpc: self.grpc_client(),
             parser: self.component_parser(),
             deployment: self.component_deployment_service(),

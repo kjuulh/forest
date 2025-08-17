@@ -1,18 +1,141 @@
 use std::path::PathBuf;
 
 use crate::{
-    services::component_parser::{
-        self, ComponentParser, ComponentParserState, models::RawComponent,
-    },
+    component_cache::models::{CacheComponent, CacheComponents},
+    services::component_parser::{ComponentParser, ComponentParserState, models::RawComponent},
     state::State,
     user_locations::{UserLocations, UserLocationsState},
 };
 
+pub mod models {
+    use std::ops::Deref;
+
+    use anyhow::Context;
+
+    use crate::services::component_parser::models::{
+        RawComponent, RawComponentDependency, RawComponentRequirement, RawComponentRequirementType,
+    };
+
+    #[derive(Default)]
+    pub struct CacheComponents(pub Vec<CacheComponent>);
+    impl Deref for CacheComponents {
+        type Target = Vec<CacheComponent>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct CacheComponent {
+        pub name: String,
+        pub namespace: String,
+        pub version: String,
+
+        pub dependencies: Vec<CacheComponentDependency>,
+
+        pub requirements: Vec<CacheComponentRequirement>,
+    }
+
+    impl TryFrom<RawComponent> for CacheComponent {
+        type Error = anyhow::Error;
+
+        fn try_from(value: RawComponent) -> Result<Self, Self::Error> {
+            Ok(Self {
+                name: value.component_spec.component.name,
+                namespace: value.component_spec.component.namespace,
+                version: value.component_spec.component.version,
+                dependencies: value
+                    .component_spec
+                    .dependencies
+                    .into_iter()
+                    .map(|i| i.try_into())
+                    .collect::<anyhow::Result<Vec<_>>>()?,
+                requirements: value
+                    .component_spec
+                    .requirements
+                    .into_iter()
+                    .map(|i| i.try_into())
+                    .collect::<anyhow::Result<Vec<_>>>()?,
+            })
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct CacheComponentDependency {
+        pub name: String,
+        pub namespace: String,
+        pub version: semver::Version,
+    }
+
+    impl TryFrom<(String, RawComponentDependency)> for CacheComponentDependency {
+        type Error = anyhow::Error;
+
+        fn try_from(
+            (name, dependency): (String, RawComponentDependency),
+        ) -> Result<Self, Self::Error> {
+            let (namespace, name) = match name.split_once("/") {
+                Some((namespace, dep)) => (namespace, dep),
+                None => ("non", name.as_str()),
+            };
+
+            let version = match dependency {
+                RawComponentDependency::String(version) => version,
+                RawComponentDependency::Detailed(dep) => dep.version,
+            };
+
+            let version =
+                semver::Version::parse(&version).context("failed to parse dependency version")?;
+
+            Ok(Self {
+                name: name.into(),
+                namespace: namespace.into(),
+                version,
+            })
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct CacheComponentRequirement {
+        pub name: String,
+        pub description: Option<String>,
+        pub default: Option<String>,
+        pub r#type: Option<CacheComponentRequirementType>,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum CacheComponentRequirementType {
+        String,
+    }
+
+    impl TryFrom<(String, RawComponentRequirement)> for CacheComponentRequirement {
+        type Error = anyhow::Error;
+
+        fn try_from((entry, req): (String, RawComponentRequirement)) -> Result<Self, Self::Error> {
+            Ok(Self {
+                name: entry,
+                description: req.description,
+                default: req.default,
+                r#type: req.r#type.map(|i| i.try_into()).transpose()?,
+            })
+        }
+    }
+
+    impl TryFrom<RawComponentRequirementType> for CacheComponentRequirementType {
+        type Error = anyhow::Error;
+
+        fn try_from(value: RawComponentRequirementType) -> Result<Self, Self::Error> {
+            let val = match value {
+                RawComponentRequirementType::String => Self::String,
+            };
+
+            Ok(val)
+        }
+    }
+}
+
 use anyhow::Context;
 use tokio::io::AsyncWriteExt;
-
-pub mod models;
-use models::*;
 
 pub struct ComponentCache {
     locations: UserLocations,
@@ -26,7 +149,7 @@ impl ComponentCache {
         Ok(cache.join("components"))
     }
 
-    pub async fn get_local_components(&self) -> anyhow::Result<LocalComponents> {
+    pub async fn get_local_components(&self) -> anyhow::Result<CacheComponents> {
         let component_cache_path = self
             .get_component_cache()
             .await
@@ -35,7 +158,7 @@ impl ComponentCache {
         // cache is [namespace]/[name]/[version]/[component...]
         if !component_cache_path.exists() {
             tracing::debug!("found no local cache, skipping");
-            return Ok(LocalComponents::default());
+            return Ok(CacheComponents::default());
         }
 
         let mut components = Vec::new();
@@ -57,12 +180,15 @@ impl ComponentCache {
         }
         tracing::trace!("done scanning component cache");
 
-        Ok(LocalComponents {
-            components: components.into_iter().map(|i| i.into()).collect(),
-        })
+        Ok(CacheComponents(
+            components
+                .into_iter()
+                .map(|i| i.try_into())
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        ))
     }
 
-    pub async fn get_component_path(&self, component: &LocalComponent) -> anyhow::Result<PathBuf> {
+    pub async fn get_component_path(&self, component: &CacheComponent) -> anyhow::Result<PathBuf> {
         let file_path = self
             .get_component_cache()
             .await?
@@ -111,45 +237,6 @@ impl ComponentCache {
             .context("failed to flush component file")?;
 
         Ok(())
-    }
-}
-
-impl From<RawComponent> for LocalComponent {
-    fn from(value: RawComponent) -> Self {
-        Self {
-            name: value.component_spec.component.name,
-            namespace: value.component_spec.component.namespace,
-            version: value.component_spec.component.version,
-
-            init: value
-                .component_spec
-                .init
-                .into_iter()
-                .map(|(k, v)| (k, v.into()))
-                .collect(),
-        }
-    }
-}
-
-impl From<component_parser::models::Init> for Init {
-    fn from(value: component_parser::models::Init) -> Self {
-        Self {
-            input: value
-                .input
-                .into_iter()
-                .map(|(k, v)| (k, v.into()))
-                .collect(),
-        }
-    }
-}
-
-impl From<component_parser::models::InitInput> for InitInput {
-    fn from(value: component_parser::models::InitInput) -> Self {
-        Self {
-            required: value.required,
-            default: value.default,
-            description: value.description,
-        }
     }
 }
 

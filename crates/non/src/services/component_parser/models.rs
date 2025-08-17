@@ -13,11 +13,43 @@ pub struct RawComponent {
 pub struct RawComponentSpec {
     pub component: RawSpecComponent,
 
+    pub dependencies: BTreeMap<String, RawComponentDependency>,
+
     #[serde(default)]
     pub templates: BTreeMap<String, RawSpecTemplate>,
 
     #[serde(default)]
     pub init: BTreeMap<String, Init>,
+
+    #[serde(default)]
+    pub requirements: BTreeMap<String, RawComponentRequirement>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub enum RawComponentDependency {
+    String(String),
+    Detailed(RawComponentDetailedDependency),
+}
+
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct RawComponentDetailedDependency {
+    pub version: String,
+}
+
+#[derive(Default, Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct RawComponentRequirement {
+    pub description: Option<String>,
+    pub optional: bool,
+    pub default: Option<String>,
+
+    #[serde(rename = "type")]
+    pub r#type: Option<RawComponentRequirementType>,
+}
+
+#[derive(Default, Clone, Debug, PartialEq, Eq, Deserialize)]
+pub enum RawComponentRequirementType {
+    #[default]
+    String,
 }
 
 #[derive(Default, Clone, Debug, PartialEq, Eq, Deserialize)]

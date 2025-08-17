@@ -2,52 +2,13 @@ use anyhow::Context;
 use uuid::Uuid;
 
 use crate::{
-    services::project::{self, ProjectFile},
+    models::{Dependencies, Dependency},
+    services::project::{self, NonProject, ProjectDependency},
     user_config::{GlobalDependency, UserConfig},
 };
 
 #[derive(Clone, Debug, Default)]
 pub struct Components {}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Dependency {
-    pub name: String,
-    pub namespace: String,
-    pub version: semver::Version,
-}
-
-#[derive(Clone, Debug)]
-pub struct Dependencies {
-    pub(super) dependencies: Vec<Dependency>,
-}
-
-impl Dependencies {
-    pub fn diff(&self, right: Vec<impl Into<Dependency>>) -> (Dependencies, Dependencies) {
-        let components: Vec<Dependency> = right.into_iter().map(|c| c.into()).collect::<Vec<_>>();
-
-        let right_components = components
-            .iter()
-            .filter(|r| !self.dependencies.iter().any(|l| l == *r))
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let left_components = self
-            .dependencies
-            .iter()
-            .filter(|r| !right_components.iter().any(|l| l == *r))
-            .cloned()
-            .collect::<Vec<_>>();
-
-        (
-            Dependencies {
-                dependencies: left_components,
-            },
-            Dependencies {
-                dependencies: right_components,
-            },
-        )
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct UpstreamProjectDependency {
@@ -55,31 +16,6 @@ pub struct UpstreamProjectDependency {
     pub name: String,
     pub namespace: String,
     pub version: semver::Version,
-}
-
-impl TryFrom<ProjectFile> for Dependencies {
-    type Error = anyhow::Error;
-
-    fn try_from(value: ProjectFile) -> Result<Self, Self::Error> {
-        (&value).try_into()
-    }
-}
-
-impl TryFrom<&ProjectFile> for Dependencies {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &ProjectFile) -> Result<Self, Self::Error> {
-        let deps = value
-            .dependencies
-            .iter()
-            .map(|(decl, dep)| (decl.clone(), dep.clone()))
-            .map(|i| i.try_into())
-            .collect::<anyhow::Result<Vec<_>>>();
-
-        Ok(Self {
-            dependencies: deps?,
-        })
-    }
 }
 
 impl TryFrom<UserConfig> for Dependencies {

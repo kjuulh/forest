@@ -1,0 +1,4 @@
+plan: go-service-plan
+
+vars:
+  name: gitnow-client

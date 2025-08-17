@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::{
-    component_cache::models::LocalComponent, services::temp_directories::GuardedTempDirectory,
+    component_cache::models::CacheComponent, services::temp_directories::GuardedTempDirectory,
 };
 
 #[derive(Clone, Debug)]
@@ -23,7 +23,7 @@ pub struct Choice {
     pub name: String,
 
     pub init: String,
-    pub component: LocalComponent,
+    pub component: CacheComponent,
 }
 pub struct Template {
     pub path: GuardedTempDirectory,

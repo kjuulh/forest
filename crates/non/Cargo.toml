@@ -41,5 +41,9 @@ noworkers = "0.1.0"
 drop-queue = { version = "0.0.4", features = ["notmad"] }
 notmad = "0.7.5"
 tokio-util = "0.7.15"
-minijinja = "2.11.0"
 stringcase = "0.4.0"
+ron = { version = "0.10.1", features = ["indexmap"] }
+minijinja = "2.11.0"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"

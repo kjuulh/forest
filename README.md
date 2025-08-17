@@ -99,3 +99,12 @@ Components are generally language, and/or organisation specific, and can pull ce
 - [ ] Components
   - [ ] Local
   - [ ] Remote
+
+
+## Domain model
+
+- Projects: scoped by org and name, contains everything related to a single project. Such as dependencies, code, links and more, documentation.
+- Components: a non runnable project. It can contain requirements, other dependencies. It is basically either a tool, or a set of requirements and features that make upstream development easier.
+- Dependencies: A project or component can have a set of dependencies. These are components to include. Each component can require certain things their upstream parts, and add certain functionality.
+- Requirements: A component can require information from upstream services. These requirements are extra bits of information that can either be provided at runtime via. args, or via. the project variables. A component has to implement the requirements and re-require them from their upstream.
+- Artifact: A project can be published via. artifacts. An artifact can be used by interested parties and can optionally be annotated. These can either be static, or dynamic. If static it acts as releases, if dynamic these can be released, rolled back, re-released. A static artifact can be upgraded to a dynamic artifact, but the other way around isn't possible

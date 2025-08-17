@@ -5,9 +5,15 @@ mod grpc;
 mod services;
 mod state;
 
+mod component_registry;
+
 mod component_cache;
+mod requirements;
 mod user_config;
 mod user_locations;
+
+mod features;
+mod models;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

@@ -4,6 +4,9 @@ RUST_LOG = "non=debug,info"
 [tools]
 rust = { version = "1.89", components = "rust-src,rust-analyzer" }
 
+[tasks.todos]
+run = "hyperlog --local-path ./todos"
+
 [tasks."non:install"]
 alias = ["i", "install"]
 run = "cargo install --path crates/non -f"

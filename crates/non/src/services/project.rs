@@ -1,25 +1,27 @@
 use std::path::Path;
 
-use crate::state::State;
+use crate::{models::Project, state::State};
 
 use anyhow::Context;
 pub mod models;
 pub use models::*;
 
-const NON_PROJECT_FILE: &str = "non.toml";
+const NON_PROJECT_FILE: &str = "non.ron";
 
 pub struct ProjectParser {}
 
 impl ProjectParser {
-    pub async fn get_project(&self) -> anyhow::Result<ProjectFile> {
+    pub async fn get_project(&self) -> anyhow::Result<Project> {
         let current_dir =
             std::env::current_dir().context("current project dir is required for a project")?;
 
         let project_file_content = self.find_project_file(current_dir).await?;
 
-        let project_file: ProjectFile = toml::from_str(&project_file_content)?;
+        let project_file: NonProject = ron::from_str(&project_file_content)?;
 
-        Ok(project_file)
+        let project = project_file.try_into().context("parse project")?;
+
+        Ok(project)
     }
 
     #[tracing::instrument(skip(self), level = "trace")]
@@ -61,5 +63,36 @@ pub trait ProjectParserState {
 impl ProjectParserState for State {
     fn project_parser(&self) -> ProjectParser {
         ProjectParser {}
+    }
+}
+
+impl TryFrom<NonProject> for Project {
+    type Error = anyhow::Error;
+
+    fn try_from(value: NonProject) -> Result<Self, Self::Error> {
+        Ok(Self {
+            name: value.name,
+            dependencies: crate::models::Dependencies {
+                dependencies: value
+                    .dependencies
+                    .into_iter()
+                    .map(|(entry, dep)| {
+                        let version = match &dep {
+                            Dependency::String(version) => version,
+                            Dependency::Detailed(project_dependency) => &project_dependency.version,
+                        };
+
+                        let (namespace, name) =
+                            entry.split_once(&entry).unwrap_or_else(|| ("non", &entry));
+
+                        Ok(crate::models::Dependency {
+                            name: name.into(),
+                            namespace: namespace.into(),
+                            version: version.parse().context("parse version")?,
+                        })
+                    })
+                    .collect::<anyhow::Result<Vec<_>>>()?,
+            },
+        })
     }
 }
