@@ -2,18 +2,25 @@ use std::net::SocketAddr;
 
 use namespaces::NamespacesServer;
 use non_grpc_interface::{
+    artifact_service_server::ArtifactServiceServer,
     namespace_service_server::NamespaceServiceServer,
-    registry_service_server::RegistryServiceServer, status_service_server::StatusServiceServer,
+    registry_service_server::RegistryServiceServer, release_service_server::ReleaseServiceServer,
+    status_service_server::StatusServiceServer,
 };
 use notmad::MadError;
 use registry::RegistryServer;
 use status::StatusServer;
 use tokio_util::sync::CancellationToken;
 
-use crate::state::State;
+use crate::{
+    grpc::{artifacts::ArtifactServer, release::ReleaseServer},
+    state::State,
+};
 
+mod artifacts;
 mod namespaces;
 mod registry;
+mod release;
 mod status;
 
 pub struct GrpcServer {
@@ -33,6 +40,12 @@ impl GrpcServer {
                 state: self.state.clone(),
             }))
             .add_service(NamespaceServiceServer::new(NamespacesServer {
+                state: self.state.clone(),
+            }))
+            .add_service(ArtifactServiceServer::new(ArtifactServer {
+                state: self.state.clone(),
+            }))
+            .add_service(ReleaseServiceServer::new(ReleaseServer {
                 state: self.state.clone(),
             }))
             .serve_with_shutdown(

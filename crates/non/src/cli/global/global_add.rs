@@ -1,6 +1,9 @@
 use anyhow::Context;
 
-use crate::{grpc::GrpcClientState, state::State, user_config::UserConfigServiceState};
+use crate::{
+    grpc::GrpcClientState, services::components::ComponentsServiceState, state::State,
+    user_config::UserConfigServiceState,
+};
 
 #[derive(clap::Parser, Debug)]
 pub struct GlobalAddCommand {
@@ -89,6 +92,9 @@ impl GlobalAddCommand {
             .await?;
 
         tracing::info!("added global dependency");
+
+        tracing::info!("syncing components");
+        state.components_service().sync_components(None).await?;
 
         Ok(())
     }

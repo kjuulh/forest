@@ -33,3 +33,5 @@ sqlx = { version = "0.8.6", features = [
   "runtime-tokio",
   "uuid",
 ] }
+serde_json = "1.0.145"
+petname = "2.0.2"

@@ -14,6 +14,9 @@ mod user_locations;
 
 mod features;
 mod models;
+mod project_artifacts;
+
+mod otel;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

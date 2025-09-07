@@ -4,6 +4,6 @@ edition = "2024"
 version.workspace = true
 
 [dependencies]
-{% if input.http = true %}
+{% if input.http | as_bool %}
 reqwest = "1"
 {% endif %}

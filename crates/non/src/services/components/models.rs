@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::{
     models::{Dependencies, Dependency},
-    services::project::{self, NonProject, ProjectDependency},
+    services::project::{self},
     user_config::{GlobalDependency, UserConfig},
 };
 

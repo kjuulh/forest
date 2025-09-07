@@ -115,7 +115,7 @@ impl Component for CommandHandler {
         tokio::select! {
             _ = cancellation_token.cancelled() => {},
             res = self.handle() => {
-                res.map_err(notmad::MadError::Inner)?;
+                res?;
             }
         }
 

@@ -1,10 +1,11 @@
 use crate::{
-    cli::project::{init::InitCommand, publish::PublishCommand},
+    cli::project::{init::InitCommand, publish::PublishCommand, release::ReleaseCommand},
     state::State,
 };
 
 mod init;
 mod publish;
+mod release;
 
 #[derive(clap::Parser)]
 pub struct ProjectCommand {
@@ -16,6 +17,7 @@ pub struct ProjectCommand {
 enum Commands {
     Init(InitCommand),
     Publish(PublishCommand),
+    Release(ReleaseCommand),
 }
 
 impl ProjectCommand {
@@ -23,6 +25,7 @@ impl ProjectCommand {
         match &self.commands {
             Commands::Init(cmd) => cmd.execute(state).await,
             Commands::Publish(cmd) => cmd.execute(state).await,
+            Commands::Release(cmd) => cmd.execute(state).await,
         }
     }
 }

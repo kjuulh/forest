@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO artifact_staging\n                (\n                    artifact_id\n                )\n                VALUES\n                (\n                    $1\n                )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e192997029d1c66ca7cbb94e8d2f708ecc5cd94f9d97e078a3de15fcbd431e5c"
+}

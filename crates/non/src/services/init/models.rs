@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use crate::{
     component_cache::models::CacheComponent, services::temp_directories::GuardedTempDirectory,
 };

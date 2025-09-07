@@ -1,22 +1,38 @@
-use std::{path::Path, sync::OnceLock};
+use std::{collections::HashMap, path::Path, sync::OnceLock};
 
+use anyhow::Context;
 use futures::{SinkExt, Stream, TryStreamExt};
 use non_grpc_interface::{
-    BeginUploadRequest, CommitUploadRequest, Component, ComponentFile, CreateRequest,
-    GetComponentFilesRequest, GetComponentRequest, GetComponentVersionRequest, UploadFileRequest,
-    get_component_files_response::Msg, namespace_service_client::NamespaceServiceClient,
-    registry_service_client::RegistryServiceClient,
+    AnnotateReleaseRequest, BeginUploadArtifactRequest, BeginUploadRequest, CommitArtifactRequest,
+    CommitUploadRequest, Component, ComponentFile, CreateRequest, GetArtifactBySlugRequest,
+    GetComponentFilesRequest, GetComponentRequest, GetComponentVersionRequest,
+    UploadArtifactRequest, UploadArtifactResponse, UploadFileRequest,
+    artifact_service_client::ArtifactServiceClient, get_component_files_response::Msg,
+    namespace_service_client::NamespaceServiceClient,
+    registry_service_client::RegistryServiceClient, release_service_client::ReleaseServiceClient,
 };
-use tokio::sync::OnceCell;
-use tonic::transport::Channel;
+use tokio::{
+    sync::{OnceCell, mpsc::Sender},
+    task::JoinHandle,
+};
+use tokio_stream::wrappers::ReceiverStream;
+use tonic::{Response, transport::Channel};
 
-use crate::state::State;
+use crate::{
+    models::{
+        self, artifacts::ArtifactID, context::ArtifactContext,
+        release_annotation::ReleaseAnnotation, source::Source,
+    },
+    state::State,
+};
 
 #[derive(Clone)]
 pub struct GrpcClient {
     host: String,
     namespaces_client: OnceCell<NamespaceServiceClient<Channel>>,
     registry_client: OnceCell<RegistryServiceClient<Channel>>,
+    artifact_client: OnceCell<ArtifactServiceClient<Channel>>,
+    release_client: OnceCell<ReleaseServiceClient<Channel>>,
 }
 
 impl GrpcClient {
@@ -133,6 +149,86 @@ impl GrpcClient {
         Ok(())
     }
 
+    pub async fn begin_artifact_upload(&self) -> anyhow::Result<UploadFileHandle> {
+        let mut client = self.artifact_client().await?;
+
+        let resp = client
+            .begin_upload_artifact(BeginUploadArtifactRequest {})
+            .await?;
+
+        let resp = resp.into_inner();
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<UploadArtifactRequest>(10);
+
+        let handle = tokio::spawn(async move {
+            let stream_req = ReceiverStream::new(rx);
+            client
+                .upload_artifact(stream_req)
+                .await
+                .context("upload artifact")
+                .inspect_err(|e| tracing::error!("failed to upload file: {:?}", e))
+        });
+
+        Ok(UploadFileHandle {
+            tx,
+            handle,
+            staging_id: resp.upload_id,
+        })
+    }
+
+    #[tracing::instrument(skip(self, handle, file_content), level = "trace")]
+    pub async fn upload_artifact_file(
+        &self,
+        handle: &UploadFileHandle,
+        file_name: &str,
+        file_content: &str,
+        env: &str,
+        destination: &str,
+    ) -> anyhow::Result<()> {
+        tracing::info!("uploading file: {}", handle.staging_id);
+
+        handle
+            .tx
+            .send(UploadArtifactRequest {
+                upload_id: handle.staging_id.clone(),
+                env: env.into(),
+                destination: destination.into(),
+                file_name: file_name.into(),
+                file_content: file_content.into(),
+            })
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn commit_artifact_upload(
+        &self,
+        handle: UploadFileHandle,
+    ) -> anyhow::Result<ArtifactID> {
+        let staging_id = handle.staging_id;
+        let upload_file_handle = handle.handle;
+
+        drop(handle.tx);
+
+        // Make sure we've received a final response from the server
+        // FIXME: this may block forever if there are multiple producers
+        upload_file_handle.await??;
+
+        tracing::info!("commiting upload: {}", staging_id);
+
+        let mut client = self.artifact_client().await?;
+        let res = client
+            .commit_artifact(CommitArtifactRequest {
+                upload_id: staging_id,
+            })
+            .await
+            .context("grpc commit artifact")?;
+
+        let msg = res.into_inner();
+
+        Ok(msg.artifact_id.try_into()?)
+    }
+
     async fn namespaces_client(&self) -> anyhow::Result<NamespaceServiceClient<Channel>> {
         let client = self
             .namespaces_client
@@ -146,12 +242,40 @@ impl GrpcClient {
 
         Ok(client.clone())
     }
+
+    async fn release_client(&self) -> anyhow::Result<ReleaseServiceClient<Channel>> {
+        let client = self
+            .release_client
+            .get_or_try_init(move || async move {
+                let channel = Channel::from_shared(self.host.clone())?.connect().await?;
+                let client = ReleaseServiceClient::new(channel);
+
+                Ok::<_, anyhow::Error>(client)
+            })
+            .await?;
+
+        Ok(client.clone())
+    }
+
     async fn registry_client(&self) -> anyhow::Result<RegistryServiceClient<Channel>> {
         let client = self
             .registry_client
             .get_or_try_init(move || async move {
                 let channel = Channel::from_shared(self.host.clone())?.connect().await?;
                 let client = RegistryServiceClient::new(channel);
+
+                Ok::<_, anyhow::Error>(client)
+            })
+            .await?;
+
+        Ok(client.clone())
+    }
+    async fn artifact_client(&self) -> anyhow::Result<ArtifactServiceClient<Channel>> {
+        let client = self
+            .artifact_client
+            .get_or_try_init(move || async move {
+                let channel = Channel::from_shared(self.host.clone())?.connect().await?;
+                let client = ArtifactServiceClient::new(channel);
 
                 Ok::<_, anyhow::Error>(client)
             })
@@ -242,6 +366,52 @@ impl GrpcClient {
 
         Ok(rx.into_stream())
     }
+
+    pub async fn annotate_artifact(
+        &self,
+        artifact_id: &ArtifactID,
+        metadata: &HashMap<String, String>,
+        source: &Source,
+        context: &ArtifactContext,
+        project: &models::project::Project,
+        reference: &models::reference::Reference,
+    ) -> anyhow::Result<()> {
+        let mut client = self.release_client().await?;
+
+        client
+            .annotate_release(AnnotateReleaseRequest {
+                artifact_id: artifact_id.to_string(),
+                metadata: metadata.clone(),
+                source: Some(source.clone().into()),
+                context: Some(context.clone().into()),
+                project: Some(project.clone().into()),
+                r#ref: Some(reference.clone().into()),
+            })
+            .await
+            .context("annotate artifact")?;
+
+        Ok(())
+    }
+
+    pub async fn get_release_annotation_by_slug(
+        &self,
+        slug: &str,
+    ) -> anyhow::Result<ReleaseAnnotation> {
+        let mut client = self.release_client().await?;
+
+        let resp = client
+            .get_artifact_by_slug(GetArtifactBySlugRequest { slug: slug.into() })
+            .await
+            .context("get release annotation by slug")?;
+
+        let res = resp.into_inner();
+
+        Ok(res
+            .artifact
+            .ok_or(anyhow::anyhow!("artifact could not be found"))?
+            .try_into()
+            .context("release annotation")?)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -278,8 +448,103 @@ impl GrpcClientState for State {
 
                 namespaces_client: OnceCell::const_new(),
                 registry_client: OnceCell::const_new(),
+                artifact_client: OnceCell::const_new(),
+                release_client: OnceCell::const_new(),
             }
         })
         .clone()
+    }
+}
+
+pub struct UploadFileHandle {
+    tx: Sender<UploadArtifactRequest>,
+    handle: JoinHandle<Result<Response<UploadArtifactResponse>, anyhow::Error>>,
+    staging_id: String,
+}
+
+impl From<crate::models::context::ArtifactContext> for non_grpc_interface::ArtifactContext {
+    fn from(value: crate::models::context::ArtifactContext) -> Self {
+        Self {
+            title: value.title,
+            description: value.description,
+            web: value.web,
+        }
+    }
+}
+
+impl From<crate::models::source::Source> for non_grpc_interface::Source {
+    fn from(value: crate::models::source::Source) -> Self {
+        Self {
+            user: value.username,
+            email: value.email,
+        }
+    }
+}
+
+impl TryFrom<non_grpc_interface::Artifact> for models::release_annotation::ReleaseAnnotation {
+    type Error = anyhow::Error;
+
+    fn try_from(value: non_grpc_interface::Artifact) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: value.id.parse().context("id")?,
+            artifact_id: value.artifact_id.parse().context("artifact id")?,
+            slug: value.slug,
+            metadata: value.metadata,
+            source: value.source.context("source not found")?.into(),
+            context: value.context.context("context not found")?.into(),
+        })
+    }
+}
+
+impl From<non_grpc_interface::Source> for models::source::Source {
+    fn from(value: non_grpc_interface::Source) -> Self {
+        Self {
+            username: value.user,
+            email: value.email,
+        }
+    }
+}
+
+impl From<non_grpc_interface::ArtifactContext> for models::context::ArtifactContext {
+    fn from(value: non_grpc_interface::ArtifactContext) -> Self {
+        Self {
+            title: value.title,
+            description: value.description,
+            web: value.web,
+        }
+    }
+}
+
+impl From<crate::models::project::Project> for non_grpc_interface::Project {
+    fn from(value: crate::models::project::Project) -> Self {
+        Self {
+            namespace: value.namespace,
+            project: value.project,
+        }
+    }
+}
+impl From<non_grpc_interface::Project> for crate::models::project::Project {
+    fn from(value: non_grpc_interface::Project) -> Self {
+        Self {
+            namespace: value.namespace,
+            project: value.project,
+        }
+    }
+}
+
+impl From<non_grpc_interface::Ref> for crate::models::reference::Reference {
+    fn from(value: non_grpc_interface::Ref) -> Self {
+        Self {
+            commit_sha: value.commit_sha,
+            commit_branch: value.branch,
+        }
+    }
+}
+impl From<crate::models::reference::Reference> for non_grpc_interface::Ref {
+    fn from(value: crate::models::reference::Reference) -> Self {
+        Self {
+            commit_sha: value.commit_sha,
+            branch: value.commit_branch,
+        }
     }
 }

@@ -1,7 +1,5 @@
 use crate::{
-    component_cache::ComponentCache,
     models::{Project, Requirements},
-    services::components::ComponentsService,
     state::State,
 };
 

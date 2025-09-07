@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                   INSERT INTO component_staging (\n                       name,\n                       namespace,\n                       version,\n                       status\n                   ) VALUES (\n                       $1,\n                       $2,\n                       $3,\n                       'staged'\n                   )\n                   RETURNING id\n               ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6b542b8b25ac80338868262ba5c9c67f50cf6226d57bfaa6f8de24c55c6d230a"
+}

@@ -1,5 +1,5 @@
 use crate::{
-    component_cache::models::{CacheComponent, CacheComponents},
+    component_cache::models::CacheComponents,
     models::Project,
     services::components::{ComponentsService, ComponentsServiceState},
     state::State,

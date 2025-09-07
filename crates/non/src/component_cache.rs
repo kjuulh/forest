@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::{
     component_cache::models::{CacheComponent, CacheComponents},
-    services::component_parser::{ComponentParser, ComponentParserState, models::RawComponent},
+    services::component_parser::{ComponentParser, ComponentParserState},
     state::State,
     user_locations::{UserLocations, UserLocationsState},
 };

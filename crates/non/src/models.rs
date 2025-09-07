@@ -1,3 +1,57 @@
+pub mod artifacts {
+    pub type ArtifactID = uuid::Uuid;
+}
+
+pub mod source {
+    #[derive(Clone)]
+    pub struct Source {
+        pub username: Option<String>,
+        pub email: Option<String>,
+    }
+}
+
+pub mod context {
+    #[derive(Clone)]
+    pub struct ArtifactContext {
+        pub title: String,
+        pub description: Option<String>,
+        pub web: Option<String>,
+    }
+}
+
+pub mod release_annotation {
+    use std::collections::HashMap;
+
+    use uuid::Uuid;
+
+    use crate::models::{context::ArtifactContext, source::Source};
+
+    pub struct ReleaseAnnotation {
+        pub id: Uuid,
+        pub artifact_id: Uuid,
+        pub slug: String,
+        pub metadata: HashMap<String, String>,
+        pub source: Source,
+        pub context: ArtifactContext,
+    }
+}
+
+pub mod project {
+    #[derive(Clone)]
+    pub struct Project {
+        pub namespace: String,
+        pub project: String,
+    }
+}
+
+pub mod reference {
+    #[derive(Clone)]
+    pub struct Reference {
+        pub commit_sha: String,
+        pub commit_branch: Option<String>,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Project {
     pub name: String,

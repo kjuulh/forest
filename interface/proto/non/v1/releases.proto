@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package non.v1;
+
+message AnnotateReleaseRequest {
+  string artifact_id = 1;
+  map<string, string> metadata = 2;
+  Source source = 3;
+  ArtifactContext context = 4;
+  Project project = 5;
+  Ref ref = 6;
+}
+message AnnotateReleaseResponse {}
+
+message GetArtifactBySlugRequest {
+  string slug = 1;
+}
+message GetArtifactBySlugResponse {
+  Artifact artifact = 1;
+}
+
+message ReleaseRequest {
+  string artifact_id = 1;
+  repeated string destinations = 2;
+}
+
+message ReleaseResponse {}
+
+service ReleaseService {
+  rpc AnnotateRelease(AnnotateReleaseRequest) returns (AnnotateReleaseResponse);
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+
+  rpc GetArtifactBySlug(GetArtifactBySlugRequest) returns (GetArtifactBySlugResponse);
+}
+
+message Source {
+  optional string user = 1;
+  optional string email = 2;
+}
+
+message ArtifactContext {
+  string title = 1;
+  optional string description = 2; 
+  optional string web = 3;
+}
+
+message Artifact {
+  string id = 1;
+  string artifact_id = 2;
+  string slug = 3;
+  map<string, string> metadata = 4;
+  Source source = 5;
+  ArtifactContext context = 6;
+  Project project = 7;
+}
+
+message Project {
+  string namespace = 1;
+  string project = 2;
+}
+
+message Ref {
+  string commit_sha = 1;
+  optional string branch = 2;
+}

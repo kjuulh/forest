@@ -1,5 +1,5 @@
 [env]
-RUST_LOG = "non=debug,info"
+RUST_LOG = "non=trace,info"
 
 [tools]
 rust = { version = "1.89", components = "rust-src,rust-analyzer" }
@@ -52,3 +52,11 @@ run = "docker compose -f ./templates/docker-compose.yaml down -v"
 
 [tasks.test]
 run = "cargo nextest run"
+
+
+[tasks."generate:proto"]
+run = "buf generate"
+
+[tasks."generate"]
+alias = ["g", "gen"]
+depends = ["generate:proto"]

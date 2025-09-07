@@ -34,7 +34,7 @@ impl InitService {
             anyhow::bail!("failed to find source");
         };
 
-        let template = self.render_choice(&choice).await?;
+        let template = self.render_choice(&choice).await.context("render choice")?;
 
         self.move_template(&template, dest).await?;
 
@@ -213,11 +213,17 @@ impl InitService {
                             .await
                             .context("read template")?;
 
-                        let action =
-                            apply_template(&template_content, choices).context("apply template")?;
+                        let action = render_template(&template_content, choices)
+                            .context(format!("render template: {}", entry_path.display()))?;
                         let output = match action {
                             TemplateAction::Skip => {
                                 tracing::warn!("skipping file: {}", entry_path.display());
+
+                                tracing::debug!("remove old template");
+                                tokio::fs::remove_file(entry.path())
+                                    .await
+                                    .context("remove template file")?;
+
                                 return Ok(());
                             }
                             TemplateAction::Run { output } => output,
@@ -230,7 +236,9 @@ impl InitService {
                         let new_file_path = parent
                             .join(entry_path.file_stem().expect("to be able to get file stem"));
 
-                        let mut file = tokio::fs::File::create_new(new_file_path).await?;
+                        let mut file = tokio::fs::File::create_new(new_file_path)
+                            .await
+                            .context("create file")?;
                         file.write_all(output.as_bytes())
                             .await
                             .context("write template file")?;
@@ -239,7 +247,6 @@ impl InitService {
                         tokio::fs::remove_file(entry.path())
                             .await
                             .context("remove template file")?;
-
                         Ok(())
                     })
                     .await?;
@@ -252,7 +259,7 @@ impl InitService {
     }
 }
 
-fn apply_template(
+fn render_template(
     template_content: &str,
     choices: BTreeMap<String, String>,
 ) -> anyhow::Result<TemplateAction> {
@@ -279,19 +286,28 @@ fn apply_template(
     env.add_filter("to_kebab", |input: String| -> String {
         stringcase::kebab_case(&input)
     });
+    env.add_filter(
+        "as_bool",
+        |input: String| -> Result<bool, minijinja::Error> {
+            input.parse::<bool>().map_err(|e| {
+                minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
+            })
+        },
+    );
 
     let file_ignore: Arc<Mutex<bool>> = Arc::default();
     env.add_function("ignore_file", {
         let file_ignore = file_ignore.clone();
 
-        move |input: bool| {
+        move || {
             let mut file_ignore = file_ignore.lock().unwrap();
-            *file_ignore = input;
+            *file_ignore = true;
         }
     });
 
     let output = env
         .render_str(template_content, minijinja::context! {})
+        .inspect_err(|e| tracing::error!("failed to render template: {}", e))
         .context("render template for init")?;
 
     if *file_ignore.lock().unwrap() {
@@ -381,4 +397,422 @@ impl InitServiceState for State {
 }
 
 #[cfg(test)]
-mod test {}
+mod test {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test_basic_template_rendering() {
+        let template = "Hello {{ input.name }}!";
+        let mut choices = BTreeMap::new();
+        choices.insert("name".to_string(), "World".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "Hello World!");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_multiple_input_variables() {
+        let template = "Project: {{ input.project }}, Author: {{ input.author }}";
+        let mut choices = BTreeMap::new();
+        choices.insert("project".to_string(), "MyApp".to_string());
+        choices.insert("author".to_string(), "John Doe".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "Project: MyApp, Author: John Doe");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_to_lower_filter() {
+        let template = "{{ input.name | to_lower }}";
+        let mut choices = BTreeMap::new();
+        choices.insert("name".to_string(), "HELLO WORLD".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "hello world");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_to_upper_filter() {
+        let template = "{{ input.name | to_upper }}";
+        let mut choices = BTreeMap::new();
+        choices.insert("name".to_string(), "hello world".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "HELLO WORLD");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_to_snake_filter() {
+        let template = "{{ input.name | to_snake }}";
+        let mut choices = BTreeMap::new();
+        choices.insert("name".to_string(), "HelloWorld".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "hello_world");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_to_camel_filter() {
+        let template = "{{ input.name | to_camel }}";
+        let mut choices = BTreeMap::new();
+        choices.insert("name".to_string(), "hello_world".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "helloWorld");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_to_pascal_filter() {
+        let template = "{{ input.name | to_pascal }}";
+        let mut choices = BTreeMap::new();
+        choices.insert("name".to_string(), "hello_world".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "HelloWorld");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_to_screaming_snake_filter() {
+        let template = "{{ input.name | to_screaming_snake }}";
+        let mut choices = BTreeMap::new();
+        choices.insert("name".to_string(), "helloWorld".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "HELLO_WORLD");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_to_kebab_filter() {
+        let template = "{{ input.name | to_kebab }}";
+        let mut choices = BTreeMap::new();
+        choices.insert("name".to_string(), "HelloWorld".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "hello-world");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_ignore_file_function() {
+        let template = "{% do ignore_file() %}This content should be ignored";
+        let choices = BTreeMap::new();
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Skip => {}
+            _ => panic!("Expected TemplateAction::Skip"),
+        }
+    }
+
+    #[test]
+    fn test_ignore_file_with_condition() {
+        let template = "{% if input.skip == \"true\" %}{% do ignore_file() %}{% endif %}Content";
+        let mut choices = BTreeMap::new();
+        choices.insert("skip".to_string(), "true".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Skip => {}
+            _ => panic!("Expected TemplateAction::Skip"),
+        }
+    }
+
+    #[test]
+    fn test_no_ignore_file_with_false_condition() {
+        let template = "{% if input.skip == \"true\" %}{% do ignore_file() %}{% endif %}Content";
+        let mut choices = BTreeMap::new();
+        choices.insert("skip".to_string(), "false".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "Content");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_chained_filters() {
+        let template = "{{ input.name | to_upper | to_kebab }}";
+        let mut choices = BTreeMap::new();
+        choices.insert("name".to_string(), "hello world".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "hello-world");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_complex_template_with_conditionals() {
+        let template = r#"
+{%- if input.project_type == "library" -%}
+pub mod {{ input.name | to_snake }} {
+    // Library code
+}
+{%- else -%}
+fn main() {
+    println!("{{ input.name | to_pascal }} Application");
+}
+{%- endif -%}"#;
+
+        let mut choices = BTreeMap::new();
+        choices.insert("project_type".to_string(), "library".to_string());
+        choices.insert("name".to_string(), "My Cool Project".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "pub mod my_cool_project {\n    // Library code\n}");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_complex_template_with_loops() {
+        let template = r#"
+{%- for item in ["one", "two", "three"] -%}
+- {{ input.prefix }}{{ item | to_upper }}
+{% endfor -%}"#;
+
+        let mut choices = BTreeMap::new();
+        choices.insert("prefix".to_string(), "Item_".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "- Item_ONE\n- Item_TWO\n- Item_THREE\n");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_empty_template() {
+        let template = "";
+        let choices = BTreeMap::new();
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_template_with_missing_variable() {
+        let template = "Hello {{ input.nonexistent }}!";
+        let choices = BTreeMap::new();
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "Hello !");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_template_with_special_characters() {
+        let template = "{{ input.text }}";
+        let mut choices = BTreeMap::new();
+        choices.insert(
+            "text".to_string(),
+            "Hello\n\"World\" & 'Friends'!".to_string(),
+        );
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "Hello\n\"World\" & 'Friends'!");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_multiple_filters_on_different_vars() {
+        let template =
+            "Class: {{ input.class | to_pascal }}, Method: {{ input.method | to_snake }}";
+        let mut choices = BTreeMap::new();
+        choices.insert("class".to_string(), "my_cool_class".to_string());
+        choices.insert("method".to_string(), "doSomethingAwesome".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                assert_eq!(output, "Class: MyCoolClass, Method: do_something_awesome");
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_if() {
+        let template = r#"
+[package]
+name = "{{ input.name }}"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+{%- if input.http == "true" %}
+reqwest = "1"
+{%- endif -%}
+            "#
+        .trim();
+        let mut choices = BTreeMap::new();
+        choices.insert("name".to_string(), "some-name".to_string());
+        choices.insert("http".to_string(), "true".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                pretty_assertions::assert_eq!(
+                    output,
+                    r#"
+[package]
+name = "some-name"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+reqwest = "1"
+                    "#
+                    .trim()
+                );
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_if_as_bool() {
+        let template = r#"
+[package]
+name = "{{ input.name }}"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+{%- if input.http | as_bool %}
+reqwest = "1"
+{%- endif -%}
+            "#
+        .trim();
+        let mut choices = BTreeMap::new();
+        choices.insert("name".to_string(), "some-name".to_string());
+        choices.insert("http".to_string(), "true".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                pretty_assertions::assert_eq!(
+                    output,
+                    r#"
+[package]
+name = "some-name"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+reqwest = "1"
+                    "#
+                    .trim()
+                );
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+
+    #[test]
+    fn test_if_not_as_bool() {
+        let template = r#"
+[package]
+name = "{{ input.name }}"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+{%- if input.http | as_bool %}
+reqwest = "1"
+{%- endif -%}
+            "#
+        .trim();
+        let mut choices = BTreeMap::new();
+        choices.insert("name".to_string(), "some-name".to_string());
+        choices.insert("http".to_string(), "false".to_string());
+
+        let result = render_template(template, choices).unwrap();
+        match result {
+            TemplateAction::Run { output } => {
+                pretty_assertions::assert_eq!(
+                    output,
+                    r#"
+[package]
+name = "some-name"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+                    "#
+                    .trim()
+                );
+            }
+            _ => panic!("Expected TemplateAction::Run"),
+        }
+    }
+}

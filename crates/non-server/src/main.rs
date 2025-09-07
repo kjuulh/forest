@@ -2,6 +2,7 @@ mod cli;
 mod repositories;
 mod services;
 mod state;
+pub use state::*;
 
 mod grpc;
 

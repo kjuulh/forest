@@ -1,7 +1,7 @@
 [component]
 name = "rust_service"
 namespace = "non-contrib"
-version = "0.0.3"
+version = "0.0.10"
 
 [init."project"]
 [init."project".input]
