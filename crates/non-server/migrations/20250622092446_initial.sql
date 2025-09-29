@@ -112,14 +112,23 @@ create table releases (
     annotation_id uuid not null,
 
     project_id uuid not null,
-    destination TEXT not null,
+    destination_id uuid not null,
 
     status TEXT not null,
 
     created timestamptz not null default now(),
     updated timestamptz not null default now()
 );
-CREATE UNIQUE INDEX idx_release_destination_unique ON releases (project_id, destination);
+CREATE UNIQUE INDEX idx_release_destination_unique ON releases (project_id, destination_id);
 CREATE INDEX idx_release_project_id ON releases (project_id);
 CREATE INDEX idx_release_annotation_id ON releases (annotation_id);
-CREATE INDEX idx_release_destination ON releases (destination);
+CREATE INDEX idx_release_destination ON releases (destination_id);
+
+create table destinations (
+    id uuid primary key default gen_random_uuid(),
+    name TEXT not null,
+    metadata JSONB not null,
+    created timestamptz not null default now(),
+    updated timestamptz not null default now()
+);
+CREATE UNIQUE INDEX idx_destinations_name ON destinations (name);

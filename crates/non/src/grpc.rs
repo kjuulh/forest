@@ -4,13 +4,16 @@ use anyhow::Context;
 use futures::{SinkExt, Stream, TryStreamExt};
 use non_grpc_interface::{
     AnnotateReleaseRequest, BeginUploadArtifactRequest, BeginUploadRequest, CommitArtifactRequest,
-    CommitUploadRequest, Component, ComponentFile, CreateRequest, GetArtifactBySlugRequest,
-    GetComponentFilesRequest, GetComponentRequest, GetComponentVersionRequest, ReleaseRequest,
-    UploadArtifactRequest, UploadArtifactResponse, UploadFileRequest,
-    artifact_service_client::ArtifactServiceClient, get_component_files_response::Msg,
-    namespace_service_client::NamespaceServiceClient,
+    CommitUploadRequest, Component, ComponentFile, CreateDestinationRequest, CreateRequest,
+    GetArtifactBySlugRequest, GetComponentFilesRequest, GetComponentRequest,
+    GetComponentVersionRequest, GetDestinationsRequest, GetNamespacesRequest, GetProjectsRequest,
+    ReleaseRequest, UploadArtifactRequest, UploadArtifactResponse, UploadFileRequest,
+    artifact_service_client::ArtifactServiceClient,
+    destination_service_client::DestinationServiceClient, get_component_files_response::Msg,
+    get_projects_request::Query, namespace_service_client::NamespaceServiceClient,
     registry_service_client::RegistryServiceClient, release_service_client::ReleaseServiceClient,
 };
+use non_models::{Destination, Namespace, ProjectName};
 use tokio::{
     sync::{OnceCell, mpsc::Sender},
     task::JoinHandle,
@@ -34,6 +37,7 @@ pub struct GrpcClient {
     registry_client: OnceCell<RegistryServiceClient<Channel>>,
     artifact_client: OnceCell<ArtifactServiceClient<Channel>>,
     release_client: OnceCell<ReleaseServiceClient<Channel>>,
+    destination_client: OnceCell<DestinationServiceClient<Channel>>,
 }
 
 impl GrpcClient {
@@ -284,6 +288,19 @@ impl GrpcClient {
 
         Ok(client.clone())
     }
+    async fn destination_client(&self) -> anyhow::Result<DestinationServiceClient<Channel>> {
+        let client = self
+            .destination_client
+            .get_or_try_init(move || async move {
+                let channel = Channel::from_shared(self.host.clone())?.connect().await?;
+                let client = DestinationServiceClient::new(channel);
+
+                Ok::<_, anyhow::Error>(client)
+            })
+            .await?;
+
+        Ok(client.clone())
+    }
 
     pub async fn list_files(
         &self,
@@ -409,11 +426,10 @@ impl GrpcClient {
 
         let res = resp.into_inner();
 
-        Ok(res
-            .artifact
+        res.artifact
             .ok_or(anyhow::anyhow!("artifact could not be found"))?
             .try_into()
-            .context("release annotation")?)
+            .context("release annotation")
     }
 
     pub async fn release(&self, artifact_id: Uuid, destination: &[String]) -> anyhow::Result<()> {
@@ -429,6 +445,62 @@ impl GrpcClient {
 
         Ok(())
     }
+
+    pub async fn get_namespaces(&self) -> anyhow::Result<Vec<Namespace>> {
+        let mut client = self.release_client().await?;
+
+        let response = client
+            .get_namespaces(GetNamespacesRequest {})
+            .await
+            .context("get namespaces (grpc)")?;
+        let resp = response.into_inner();
+
+        Ok(resp.namespaces.into_iter().map(|r| r.into()).collect())
+    }
+
+    pub async fn get_projects(&self, query: GetProjectsQuery) -> anyhow::Result<Vec<ProjectName>> {
+        let mut client = self.release_client().await?;
+
+        let response = client
+            .get_projects(GetProjectsRequest {
+                query: Some(match query {
+                    GetProjectsQuery::Namespace(ns) => Query::Namespace(ns.into()),
+                }),
+            })
+            .await
+            .context("get projects (grpc)")?;
+        let resp = response.into_inner();
+
+        Ok(resp.projects.into_iter().map(|r| r.into()).collect())
+    }
+
+    pub async fn get_destinations(&self) -> anyhow::Result<Vec<Destination>> {
+        let mut client = self.release_client().await?;
+
+        let response = client
+            .get_destinations(GetDestinationsRequest {})
+            .await
+            .context("get destinations (grpc)")?;
+        let resp = response.into_inner();
+
+        Ok(resp.destinations.into_iter().map(|r| r.into()).collect())
+    }
+
+    pub async fn create_destination(&self, name: &str) -> anyhow::Result<()> {
+        self.destination_client()
+            .await?
+            .create_destination(CreateDestinationRequest {
+                name: name.to_string(),
+            })
+            .await
+            .context("create destination (grpc)")?;
+
+        Ok(())
+    }
+}
+
+pub enum GetProjectsQuery {
+    Namespace(Namespace),
 }
 
 #[derive(Clone, Debug)]
@@ -467,6 +539,7 @@ impl GrpcClientState for State {
                 registry_client: OnceCell::const_new(),
                 artifact_client: OnceCell::const_new(),
                 release_client: OnceCell::const_new(),
+                destination_client: OnceCell::const_new(),
             }
         })
         .clone()

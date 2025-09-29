@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
+use non_models::{Destination, Namespace, ProjectName};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -141,10 +142,24 @@ impl ReleaseRegistry {
         let annotation_id = annotation_rec.id;
         let project_id = annotation_rec.project_id;
 
+        let destination_ids = sqlx::query!(
+            "SELECT DISTINCT id FROM destinations WHERE name = ANY($1)",
+            &destinations
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("release")?;
+
+        if destination_ids.len() != destinations.len() {
+            anyhow::bail!("not all destinations exists")
+        }
+
+        let destination_ids: Vec<Uuid> = destination_ids.into_iter().map(|n| n.id).collect();
+
         // TODO: should likely be pushed to a leader, such that we have consistency in which thing is actually released and so on
         let mut tx = self.db.begin().await?;
 
-        for destination in destinations {
+        for destination_id in destination_ids {
             sqlx::query!(
                 "
                 INSERT INTO
@@ -152,7 +167,7 @@ impl ReleaseRegistry {
                         artifact,
                         annotation_id,
                         project_id,
-                        destination,
+                        destination_id,
                         status
                     ) VALUES (
                         $1,
@@ -161,17 +176,18 @@ impl ReleaseRegistry {
                         $4,
                         $5
                     )
-                    ON CONFLICT (destination)
+                    ON CONFLICT (project_id, destination_id)
                     DO UPDATE SET
                         artifact = EXCLUDED.artifact,
                         annotation_id = EXCLUDED.annotation_id,
-                        status = EXCLUDED.status
+                        status = EXCLUDED.status,
+                        updated = now()
                 
             ",
                 artifact_id,
                 annotation_id,
                 project_id,
-                destination,
+                destination_id,
                 "STAGED"
             )
             .execute(&mut *tx)
@@ -179,7 +195,7 @@ impl ReleaseRegistry {
             .context(anyhow::anyhow!(
                 "release: {} to {}",
                 artifact_id,
-                destination
+                destination_id
             ))?;
         }
 
@@ -231,6 +247,54 @@ impl ReleaseRegistry {
                 project: rec.project,
             },
         })
+    }
+
+    pub async fn get_namespaces(&self) -> anyhow::Result<Vec<Namespace>> {
+        // TODO: consider if we should cursor this
+        let recs = sqlx::query!(
+            "
+                SELECT DISTINCT namespace FROM projects;
+            "
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("get namespaces (db)")?;
+
+        Ok(recs.into_iter().map(|r| r.namespace.into()).collect())
+    }
+
+    pub async fn get_projects_by_namespace(
+        &self,
+        namespace: &Namespace,
+    ) -> anyhow::Result<Vec<ProjectName>> {
+        // TODO: consider if we should cursor this
+        let recs = sqlx::query!(
+            "
+                SELECT project
+                FROM projects
+                WHERE namespace = $1;
+            ",
+            namespace.as_str(),
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("get projects (db)")?;
+
+        Ok(recs.into_iter().map(|r| r.project.into()).collect())
+    }
+
+    pub async fn get_destinations(&self) -> anyhow::Result<Vec<Destination>> {
+        // TODO: consider if we should cursor this
+        let recs = sqlx::query!(
+            "
+                SELECT id, name FROM destinations 
+            ",
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("get destinations (db)")?;
+
+        Ok(recs.into_iter().map(|r| r.name.into()).collect())
     }
 }
 

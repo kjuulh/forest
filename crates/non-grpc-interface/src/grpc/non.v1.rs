@@ -41,6 +41,16 @@ pub struct CommitArtifactResponse {
     pub artifact_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateDestinationRequest {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct CreateDestinationResponse {
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct GetStatusRequest {
 }
@@ -230,6 +240,47 @@ pub struct ReleaseRequest {
 pub struct ReleaseResponse {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct GetNamespacesRequest {
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetNamespacesResponse {
+    #[prost(message, repeated, tag="1")]
+    pub namespaces: ::prost::alloc::vec::Vec<Namespace>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetProjectsRequest {
+    #[prost(oneof="get_projects_request::Query", tags="1")]
+    pub query: ::core::option::Option<get_projects_request::Query>,
+}
+/// Nested message and enum types in `GetProjectsRequest`.
+pub mod get_projects_request {
+    #[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Query {
+        #[prost(message, tag="1")]
+        Namespace(super::Namespace),
+    }
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetProjectsResponse {
+    #[prost(string, repeated, tag="1")]
+    pub projects: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct GetDestinationsRequest {
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetDestinationsResponse {
+    #[prost(string, repeated, tag="1")]
+    pub destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Source {
     #[prost(string, optional, tag="1")]
@@ -280,6 +331,12 @@ pub struct Ref {
     pub commit_sha: ::prost::alloc::string::String,
     #[prost(string, optional, tag="2")]
     pub branch: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Namespace {
+    #[prost(string, tag="1")]
+    pub namespace: ::prost::alloc::string::String,
 }
 include!("non.v1.tonic.rs");
 // @@protoc_insertion_point(module)

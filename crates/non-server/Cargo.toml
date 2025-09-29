@@ -5,6 +5,7 @@ version.workspace = true
 
 [dependencies]
 non-grpc-interface.workspace = true
+non-models.workspace = true
 
 anyhow.workspace = true
 tokio.workspace = true

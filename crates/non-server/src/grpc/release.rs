@@ -100,6 +100,65 @@ impl ReleaseService for ReleaseServer {
 
         Ok(Response::new(ReleaseResponse {}))
     }
+
+    async fn get_namespaces(
+        &self,
+        request: tonic::Request<GetNamespacesRequest>,
+    ) -> std::result::Result<tonic::Response<GetNamespacesResponse>, tonic::Status> {
+        let _req = request.into_inner();
+
+        let namespaces = self
+            .state
+            .release_registry()
+            .get_namespaces()
+            .await
+            .context("failed to find namespaces")
+            .to_internal_error()?;
+
+        Ok(Response::new(GetNamespacesResponse {
+            namespaces: namespaces.into_iter().map(|n| n.into()).collect(),
+        }))
+    }
+
+    async fn get_projects(
+        &self,
+        request: tonic::Request<GetProjectsRequest>,
+    ) -> std::result::Result<tonic::Response<GetProjectsResponse>, tonic::Status> {
+        let req = request.into_inner();
+
+        let projects = match req.query.context("query is required").to_internal_error()? {
+            get_projects_request::Query::Namespace(namespace) => self
+                .state
+                .release_registry()
+                .get_projects_by_namespace(&namespace.into())
+                .await
+                .context("failed to find projects")
+                .to_internal_error()?,
+        };
+
+        Ok(Response::new(GetProjectsResponse {
+            projects: projects.into_iter().map(|n| n.to_string()).collect(),
+        }))
+    }
+
+    async fn get_destinations(
+        &self,
+        request: tonic::Request<GetDestinationsRequest>,
+    ) -> std::result::Result<tonic::Response<GetDestinationsResponse>, tonic::Status> {
+        let _req = request.into_inner();
+
+        let destinations = self
+            .state
+            .release_registry()
+            .get_destinations()
+            .await
+            .context("failed to find destinations")
+            .to_internal_error()?;
+
+        Ok(Response::new(GetDestinationsResponse {
+            destinations: destinations.into_iter().map(|n| n.to_string()).collect(),
+        }))
+    }
 }
 
 impl From<grpc::ArtifactContext> for crate::services::release_registry::ArtifactContext {

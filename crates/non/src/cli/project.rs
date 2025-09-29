@@ -1,9 +1,12 @@
 use crate::{
-    cli::project::{init::InitCommand, publish::PublishCommand, release::ReleaseCommand},
+    cli::project::{
+        init::InitCommand, list::ListCommand, publish::PublishCommand, release::ReleaseCommand,
+    },
     state::State,
 };
 
 mod init;
+mod list;
 mod publish;
 mod release;
 
@@ -18,6 +21,7 @@ enum Commands {
     Init(InitCommand),
     Publish(PublishCommand),
     Release(ReleaseCommand),
+    List(ListCommand),
 }
 
 impl ProjectCommand {
@@ -26,6 +30,7 @@ impl ProjectCommand {
             Commands::Init(cmd) => cmd.execute(state).await,
             Commands::Publish(cmd) => cmd.execute(state).await,
             Commands::Release(cmd) => cmd.execute(state).await,
+            Commands::List(cmd) => cmd.execute(state).await,
         }
     }
 }

@@ -1501,6 +1501,7 @@ dependencies = [
  "jiff",
  "minijinja",
  "non-grpc-interface",
+ "non-models",
  "notmad",
  "noworkers",
  "opentelemetry",
@@ -1540,6 +1541,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "non-models"
+version = "0.1.0"
+dependencies = [
+ "non-grpc-interface",
+]
+
+[[package]]
 name = "non-server"
 version = "0.1.0"
 dependencies = [
@@ -1551,6 +1559,7 @@ dependencies = [
  "futures",
  "inquire",
  "non-grpc-interface",
+ "non-models",
  "notmad",
  "petname",
  "prost",

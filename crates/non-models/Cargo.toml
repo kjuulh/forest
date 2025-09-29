@@ -1,0 +1,7 @@
+[package]
+name = "non-models"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+non-grpc-interface.workspace = true

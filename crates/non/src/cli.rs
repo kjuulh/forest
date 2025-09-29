@@ -11,10 +11,14 @@ use template::TemplateCommand;
 use tmp::TmpCommand;
 use tokio_util::sync::CancellationToken;
 
-use crate::{cli::project::ProjectCommand, state::State};
+use crate::{
+    cli::{destination::DestinationCommand, project::ProjectCommand},
+    state::State,
+};
 
 mod admin;
 mod components;
+mod destination;
 mod global;
 mod init;
 mod project;
@@ -43,6 +47,7 @@ enum Commands {
     Shell(ShellCommand),
     Tmp(TmpCommand),
     Project(ProjectCommand),
+    Destination(DestinationCommand),
 }
 
 pub async fn execute() -> anyhow::Result<()> {
@@ -101,6 +106,7 @@ impl CommandHandler {
             Commands::Shell(cmd) => cmd.execute(state).await,
             Commands::Tmp(cmd) => cmd.execute(state).await,
             Commands::Project(cmd) => cmd.execute(state).await,
+            Commands::Destination(cmd) => cmd.execute(state).await,
         }
     }
 }

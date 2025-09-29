@@ -1,4 +1,5 @@
-// ARCHITECTURE:
+// # ARCHITECTURE:
+//
 // destinations are viewable in two ways. either destination first, or project first. I.e. For which destinations what is our current state, and for which projects what is currently released.
 //
 // ## Destinations
@@ -7,6 +8,7 @@
 // 2. Namespace / Project / Refs (commits, branches) / Destinations
 //
 // Destinations will receive hooks for each change to the refs
+
 use anyhow::Context;
 
 use crate::{grpc::GrpcClientState, models::artifacts::ArtifactID, state::State};

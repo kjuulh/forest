@@ -25,14 +25,36 @@ message ReleaseRequest {
   string artifact_id = 1;
   repeated string destinations = 2;
 }
-
 message ReleaseResponse {}
+
+message GetNamespacesRequest {}
+message GetNamespacesResponse {
+  repeated Namespace namespaces = 1;
+}
+
+message GetProjectsRequest {
+  oneof query {
+    Namespace namespace = 1;
+  }
+}
+message GetProjectsResponse {
+  repeated string projects = 1;
+}
+
+message GetDestinationsRequest {}
+message GetDestinationsResponse {
+  repeated string destinations = 1;
+}
+
 
 service ReleaseService {
   rpc AnnotateRelease(AnnotateReleaseRequest) returns (AnnotateReleaseResponse);
   rpc Release(ReleaseRequest) returns (ReleaseResponse);
 
   rpc GetArtifactBySlug(GetArtifactBySlugRequest) returns (GetArtifactBySlugResponse);
+  rpc GetNamespaces(GetNamespacesRequest) returns (GetNamespacesResponse);
+  rpc GetProjects(GetProjectsRequest) returns (GetProjectsResponse);
+  rpc GetDestinations(GetDestinationsRequest) returns (GetDestinationsResponse);
 }
 
 message Source {
@@ -65,3 +87,8 @@ message Ref {
   string commit_sha = 1;
   optional string branch = 2;
 }
+
+message Namespace {
+  string namespace = 1;
+}
+

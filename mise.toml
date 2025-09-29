@@ -50,6 +50,9 @@ run = "docker compose -f ./templates/docker-compose.yaml up -d --remove-orphans"
 [tasks."local:down"]
 run = "docker compose -f ./templates/docker-compose.yaml down -v"
 
+[tasks."local:logs"]
+run = "docker compose -f ./templates/docker-compose.yaml logs -f"
+
 [tasks.test]
 run = "cargo nextest run"
 

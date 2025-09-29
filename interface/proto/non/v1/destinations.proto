@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package non.v1;
+
+message CreateDestinationRequest {
+  string name = 1;
+}
+message CreateDestinationResponse {}
+
+service DestinationService {
+  rpc CreateDestination(CreateDestinationRequest) returns (CreateDestinationResponse) {}
+}
+
