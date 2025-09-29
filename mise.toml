@@ -53,6 +53,16 @@ run = "docker compose -f ./templates/docker-compose.yaml down -v"
 [tasks."local:logs"]
 run = "docker compose -f ./templates/docker-compose.yaml logs -f"
 
+
+[tasks."k8s:up"]
+run = "./scripts/k3d-manager.sh create"
+
+[tasks."k8s:down"]
+run = "./scripts/k3d-manager.sh cleanup"
+
+[tasks."k8s:list"]
+run = "./scripts/k3d-manager.sh list"
+
 [tasks.test]
 run = "cargo nextest run"
 
