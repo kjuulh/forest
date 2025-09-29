@@ -376,7 +376,7 @@ impl GrpcClient {
         context: &ArtifactContext,
         project: &models::project::Project,
         reference: &models::reference::Reference,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<String> {
         let mut client = self.release_client().await?;
 
         let resp = client
@@ -393,7 +393,7 @@ impl GrpcClient {
 
         let resp = resp.into_inner();
 
-        Ok(())
+        Ok(resp.artifact.context("no artifact found")?.slug)
     }
 
     pub async fn get_release_annotation_by_slug(

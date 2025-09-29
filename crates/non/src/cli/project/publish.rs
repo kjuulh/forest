@@ -100,16 +100,20 @@ impl PublishCommand {
             commit_branch: self.commit_branch.clone(),
         };
 
-        grpc.annotate_artifact(
-            &artifact_id,
-            &metadata,
-            &source,
-            &context,
-            &project,
-            &reference,
-        )
-        .await
-        .context("annotate artifact")?;
+        let slug = grpc
+            .annotate_artifact(
+                &artifact_id,
+                &metadata,
+                &source,
+                &context,
+                &project,
+                &reference,
+            )
+            .await
+            .context("annotate artifact")?;
+
+        println!("published artifact: {slug}\n");
+        println!("$ non project release {slug} --destination <prod/k8s/eu-west-1/001>");
 
         Ok(())
     }
