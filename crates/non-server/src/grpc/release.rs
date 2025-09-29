@@ -18,6 +18,8 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<AnnotateReleaseRequest>,
     ) -> std::result::Result<tonic::Response<AnnotateReleaseResponse>, tonic::Status> {
+        tracing::debug!("annotate release");
+
         let req = request.into_inner();
 
         let slug = petname::petname(3, "-").expect("to be able to generate slug");
@@ -64,6 +66,7 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<GetArtifactBySlugRequest>,
     ) -> std::result::Result<tonic::Response<GetArtifactBySlugResponse>, tonic::Status> {
+        tracing::debug!("get artifact by slug");
         let req = request.into_inner();
 
         let release_annotation = self
@@ -83,6 +86,7 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<ReleaseRequest>,
     ) -> std::result::Result<tonic::Response<ReleaseResponse>, tonic::Status> {
+        tracing::debug!("release");
         let req = request.into_inner();
 
         self.state
@@ -105,6 +109,7 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<GetNamespacesRequest>,
     ) -> std::result::Result<tonic::Response<GetNamespacesResponse>, tonic::Status> {
+        tracing::debug!("get namespaces");
         let _req = request.into_inner();
 
         let namespaces = self
@@ -124,6 +129,7 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<GetProjectsRequest>,
     ) -> std::result::Result<tonic::Response<GetProjectsResponse>, tonic::Status> {
+        tracing::debug!("get projects");
         let req = request.into_inner();
 
         let projects = match req.query.context("query is required").to_internal_error()? {
@@ -145,6 +151,7 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<GetDestinationsRequest>,
     ) -> std::result::Result<tonic::Response<GetDestinationsResponse>, tonic::Status> {
+        tracing::debug!("get destinations");
         let _req = request.into_inner();
 
         let destinations = self
