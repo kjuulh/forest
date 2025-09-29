@@ -10,7 +10,9 @@ message AnnotateReleaseRequest {
   Project project = 5;
   Ref ref = 6;
 }
-message AnnotateReleaseResponse {}
+message AnnotateReleaseResponse {
+  Artifact artifact = 1;
+}
 
 message GetArtifactBySlugRequest {
   string slug = 1;

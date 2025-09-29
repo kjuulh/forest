@@ -5,7 +5,7 @@ use futures::{SinkExt, Stream, TryStreamExt};
 use non_grpc_interface::{
     AnnotateReleaseRequest, BeginUploadArtifactRequest, BeginUploadRequest, CommitArtifactRequest,
     CommitUploadRequest, Component, ComponentFile, CreateRequest, GetArtifactBySlugRequest,
-    GetComponentFilesRequest, GetComponentRequest, GetComponentVersionRequest,
+    GetComponentFilesRequest, GetComponentRequest, GetComponentVersionRequest, ReleaseRequest,
     UploadArtifactRequest, UploadArtifactResponse, UploadFileRequest,
     artifact_service_client::ArtifactServiceClient, get_component_files_response::Msg,
     namespace_service_client::NamespaceServiceClient,
@@ -17,6 +17,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, transport::Channel};
+use uuid::Uuid;
 
 use crate::{
     models::{
@@ -378,7 +379,7 @@ impl GrpcClient {
     ) -> anyhow::Result<()> {
         let mut client = self.release_client().await?;
 
-        client
+        let resp = client
             .annotate_release(AnnotateReleaseRequest {
                 artifact_id: artifact_id.to_string(),
                 metadata: metadata.clone(),
@@ -389,6 +390,8 @@ impl GrpcClient {
             })
             .await
             .context("annotate artifact")?;
+
+        let resp = resp.into_inner();
 
         Ok(())
     }
@@ -411,6 +414,20 @@ impl GrpcClient {
             .ok_or(anyhow::anyhow!("artifact could not be found"))?
             .try_into()
             .context("release annotation")?)
+    }
+
+    pub async fn release(&self, artifact_id: Uuid, destination: &[String]) -> anyhow::Result<()> {
+        let mut client = self.release_client().await?;
+
+        client
+            .release(ReleaseRequest {
+                artifact_id: artifact_id.to_string(),
+                destinations: destination.into(),
+            })
+            .await
+            .context("release (grpc)")?;
+
+        Ok(())
     }
 }
 

@@ -46,7 +46,7 @@ impl ReleaseCommand {
                     .get_release_annotation_by_slug(slug)
                     .await
                     .context("get release annotation by slug")?
-                    .id
+                    .artifact_id
             }
             (None, None) => {
                 todo!(); // TODO: select based on how much namespace / project and ref we receive
@@ -55,7 +55,15 @@ impl ReleaseCommand {
 
         tracing::info!("found artifact: {}", artifact_id);
 
-        // TODO: release to destinations
+        tracing::info!("releasing");
+
+        state
+            .grpc_client()
+            .release(artifact_id, &self.destination)
+            .await
+            .context("release")?;
+
+        tracing::info!("you've released {artifact_id} successfully");
 
         Ok(())
     }

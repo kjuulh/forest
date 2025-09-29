@@ -85,21 +85,33 @@ create table annotations (
     source JSONB not null,
     context JSONB not null,
 
-    namespace TEXT not null,
-    project TEXT not null,
+    project_id uuid not null,
 
     ref JSONB not null,
     
     created timestamptz not null default now(),
     updated timestamptz not null default now()
 );
-
 CREATE UNIQUE INDEX idx_annotations_slug ON annotations (slug);
+
+create table projects (
+    id uuid primary key default gen_random_uuid(),
+
+    namespace TEXT not null,
+    project TEXT not null,
+
+    created timestamptz not null default now(),
+    updated timestamptz not null default now()
+);
+CREATE INDEX idx_project_namespace ON projects (namespace);
+CREATE UNIQUE INDEX idx_project_unique ON projects (namespace, project);
 
 create table releases (
     id uuid primary key default gen_random_uuid(),
     artifact uuid not null,
     annotation_id uuid not null,
+
+    project_id uuid not null,
     destination TEXT not null,
 
     status TEXT not null,
@@ -107,3 +119,7 @@ create table releases (
     created timestamptz not null default now(),
     updated timestamptz not null default now()
 );
+CREATE UNIQUE INDEX idx_release_destination_unique ON releases (project_id, destination);
+CREATE INDEX idx_release_project_id ON releases (project_id);
+CREATE INDEX idx_release_annotation_id ON releases (annotation_id);
+CREATE INDEX idx_release_destination ON releases (destination);

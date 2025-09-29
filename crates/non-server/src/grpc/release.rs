@@ -27,7 +27,8 @@ impl ReleaseService for ReleaseServer {
             .context("no project found")
             .to_internal_error()?;
 
-        self.state
+        let artifact = self
+            .state
             .release_registry()
             .annotate(
                 &req.artifact_id
@@ -54,7 +55,9 @@ impl ReleaseService for ReleaseServer {
             .await
             .to_internal_error()?;
 
-        Ok(Response::new(AnnotateReleaseResponse {}))
+        Ok(Response::new(AnnotateReleaseResponse {
+            artifact: Some(artifact.into()),
+        }))
     }
 
     async fn get_artifact_by_slug(

@@ -200,8 +200,10 @@ pub struct AnnotateReleaseRequest {
     pub r#ref: ::core::option::Option<Ref>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnnotateReleaseResponse {
+    #[prost(message, optional, tag="1")]
+    pub artifact: ::core::option::Option<Artifact>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

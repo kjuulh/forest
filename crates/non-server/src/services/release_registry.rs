@@ -12,6 +12,7 @@ pub struct ReleaseRegistry {
 }
 
 impl ReleaseRegistry {
+    #[allow(clippy::too_many_arguments)]
     pub async fn annotate(
         &self,
         artifact_id: &ArtifactID,
@@ -22,13 +23,55 @@ impl ReleaseRegistry {
         namespace: &str,
         project: &str,
         reference: &Reference,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<ReleaseAnnotation> {
         let metadata = serde_json::to_value(metadata)?;
         let source = serde_json::to_value(source)?;
         let context = serde_json::to_value(context)?;
         let reference = serde_json::to_value(reference)?;
 
-        sqlx::query!(
+        let mut tx = self.db.begin().await.context("tx annotate")?;
+
+        let project_id = sqlx::query!(
+            "
+                SELECT id
+                FROM projects
+                WHERE
+                        namespace = $1
+                    AND project = $2
+                FOR UPDATE
+            ",
+            namespace,
+            project
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .context("get project")?;
+
+        let project_id = match project_id {
+            Some(rec) => rec.id,
+            None => {
+                let rec = sqlx::query!(
+                    "
+                   INSERT INTO projects (
+                       namespace,
+                       project
+                   ) VALUES (
+                       $1,
+                       $2
+                   ) RETURNING id
+                   ",
+                    namespace,
+                    project
+                )
+                .fetch_one(&mut *tx)
+                .await
+                .context("create project")?;
+
+                rec.id
+            }
+        };
+
+        let annotation_rec = sqlx::query!(
             "
                 INSERT INTO annotations (
                     artifact_id,
@@ -36,8 +79,7 @@ impl ReleaseRegistry {
                     metadata,
                     source,
                     context,
-                    namespace,
-                    project,
+                    project_id,
                     ref
                 ) VALUES (
                     $1,
@@ -46,24 +88,36 @@ impl ReleaseRegistry {
                     $4,
                     $5,
                     $6,
-                    $7,
-                    $8
+                    $7
                 )
+                RETURNING id
             ",
             artifact_id,
             slug,
             metadata,
             source,
             context,
-            namespace,
-            project,
+            project_id,
             reference,
         )
-        .execute(&self.db)
+        .fetch_one(&mut *tx)
         .await
         .context("annotate (db)")?;
 
-        Ok(())
+        tx.commit().await.context("annotate (db/tx)")?;
+
+        Ok(ReleaseAnnotation {
+            id: annotation_rec.id,
+            artifact_id: *artifact_id,
+            slug: slug.to_string(),
+            metadata: serde_json::from_value(metadata).context("metadata")?,
+            source: serde_json::from_value(source).context("source")?,
+            context: serde_json::from_value(context).context("context")?,
+            project: Project {
+                namespace: namespace.to_string(),
+                project: project.to_string(),
+            },
+        })
     }
 
     pub async fn release(
@@ -71,6 +125,66 @@ impl ReleaseRegistry {
         artifact_id: &ArtifactID,
         destinations: Vec<String>,
     ) -> anyhow::Result<()> {
+        let annotation_rec = sqlx::query!(
+            "
+                SELECT id, project_id
+                FROM annotations
+                WHERE
+                    artifact_id = $1
+            ",
+            artifact_id
+        )
+        .fetch_one(&self.db)
+        .await
+        .context("get annotation")?;
+
+        let annotation_id = annotation_rec.id;
+        let project_id = annotation_rec.project_id;
+
+        // TODO: should likely be pushed to a leader, such that we have consistency in which thing is actually released and so on
+        let mut tx = self.db.begin().await?;
+
+        for destination in destinations {
+            sqlx::query!(
+                "
+                INSERT INTO
+                    releases (
+                        artifact,
+                        annotation_id,
+                        project_id,
+                        destination,
+                        status
+                    ) VALUES (
+                        $1,
+                        $2,
+                        $3,
+                        $4,
+                        $5
+                    )
+                    ON CONFLICT (destination)
+                    DO UPDATE SET
+                        artifact = EXCLUDED.artifact,
+                        annotation_id = EXCLUDED.annotation_id,
+                        status = EXCLUDED.status
+                
+            ",
+                artifact_id,
+                annotation_id,
+                project_id,
+                destination,
+                "STAGED"
+            )
+            .execute(&mut *tx)
+            .await
+            .context(anyhow::anyhow!(
+                "release: {} to {}",
+                artifact_id,
+                destination
+            ))?;
+        }
+
+        tx.commit().await.context("commit release batch")?;
+
         Ok(())
     }
 
@@ -81,15 +195,17 @@ impl ReleaseRegistry {
         let rec = sqlx::query!(
             "
                 SELECT
-                    id,
-                    artifact_id,
-                    slug,
-                    metadata,
-                    source,
-                    context,
-                    namespace,
-                    project
-                FROM annotations
+                    a.id,
+                    a.artifact_id,
+                    a.slug,
+                    a.metadata,
+                    a.source,
+                    a.context,
+                    a.project_id,
+                    p.namespace as namespace,
+                    p.project as project
+                FROM annotations a
+                JOIN projects p ON a.project_id = p.id
                 WHERE
                     slug = $1
             ",
