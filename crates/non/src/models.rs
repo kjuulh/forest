@@ -64,35 +64,59 @@ pub struct Project {
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
-pub struct CommandName {
-    pub namespace: Option<String>,
-    pub name: Option<String>,
-    pub source: CommandSource,
-
-    pub command_name: String,
+pub enum CommandName {
+    Component {
+        namespace: Option<String>,
+        name: Option<String>,
+        source: CommandSource,
+        command_name: String,
+    },
+    Project {
+        command_name: String,
+    },
+}
+impl CommandName {
+    pub(crate) fn command_name(&self) -> &str {
+        match self {
+            CommandName::Component { command_name, .. } => &command_name,
+            CommandName::Project { command_name } => &command_name,
+        }
+    }
 }
 
 impl Display for CommandName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}{}{}:{}",
-            match &self.namespace {
-                Some(item) => format!("{item}/"),
-                None => "".to_string(),
-            },
-            match &self.name {
-                Some(item) => item,
-                None => "",
-            },
-            {
-                match &self.source {
-                    CommandSource::Local(path) => format!("#{}", path.to_string_lossy()),
-                    CommandSource::Versioned(version) => format!("@{}", version.to_string()),
-                }
-            },
-            self.command_name
-        )
+        match self {
+            CommandName::Component {
+                namespace,
+                name,
+                source,
+                command_name,
+            } => {
+                write!(
+                    f,
+                    "{}{}{}:{}",
+                    match &namespace {
+                        Some(item) => format!("{item}/"),
+                        None => "".to_string(),
+                    },
+                    match &name {
+                        Some(item) => item,
+                        None => "",
+                    },
+                    {
+                        match &source {
+                            CommandSource::Local(path) => format!("#{}", path.to_string_lossy()),
+                            CommandSource::Versioned(version) => {
+                                format!("@{}", version.to_string())
+                            }
+                        }
+                    },
+                    command_name
+                )
+            }
+            CommandName::Project { command_name } => f.write_str(&command_name),
+        }
     }
 }
 

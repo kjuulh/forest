@@ -31,7 +31,7 @@ impl RunCommand {
                         match project
                             .commands
                             .iter()
-                            .find(|(c, _)| &c.command_name == command)
+                            .find(|(c, _)| &c.command_name() == command)
                         {
                             Some((command_name, command)) => {
                                 tracing::info!("running command: {}", command_name);
@@ -65,7 +65,7 @@ impl RunCommand {
                                                     {
                                                         println!(
                                                             "{}: {line}",
-                                                            command_name.command_name
+                                                            command_name.command_name()
                                                         )
                                                     }
                                                 }
@@ -83,7 +83,7 @@ impl RunCommand {
                                                     {
                                                         println!(
                                                             "{}: {line}",
-                                                            command_name.command_name
+                                                            command_name.command_name()
                                                         )
                                                     }
                                                 }

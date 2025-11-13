@@ -1,7 +1,7 @@
 [project]
 name = "my_service"
 
-[project.dependencies]
+[dependencies]
 "non/rust-persistent-service" = { path = "../../components/non-contrib/rust_persistent_service" }
 
 [non."rust-persistent-service".config]
@@ -17,3 +17,6 @@ health_checks = { live = { http = { path = "/", port = 3001 } } }
 
 [non."rust-persistent-service".config.environment]
 RUST_LOG = "my_service=debug,info"
+
+[commands]
+dev = ["cargo run"]

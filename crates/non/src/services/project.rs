@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     component_cache::models::{CacheComponent, CacheComponentCommand, CacheComponentSource},
-    models::{CommandSource, DependencyType, Project},
+    models::{CommandName, CommandSource, DependencyType, Project},
     services::components::{ComponentsService, ComponentsServiceState},
     state::State,
 };
@@ -35,7 +35,7 @@ impl ProjectParser {
 
             for (command_name, command) in component.commands {
                 project.commands.insert(
-                    crate::models::CommandName {
+                    crate::models::CommandName::Component {
                         namespace: Some(component.namespace.clone()),
                         name: Some(component.name.clone()),
                         source: match &component.source {
@@ -183,7 +183,6 @@ impl TryFrom<NonProject> for Project {
             name: value.project.name,
             dependencies: crate::models::Dependencies {
                 dependencies: value
-                    .project
                     .dependencies
                     .into_iter()
                     .map(|(entry, dep)| {
@@ -220,8 +219,19 @@ impl TryFrom<NonProject> for Project {
                     .collect::<anyhow::Result<Vec<_>>>()?,
             },
 
-            // FIXME(kjuulh): get actual commands from the project
-            commands: BTreeMap::new(),
+            commands: value
+                .commands
+                .into_iter()
+                .map(|(name, command)| {
+                    (
+                        CommandName::Project { command_name: name },
+                        match command {
+                            Command::Inline(items) => crate::models::Command::Inline(items),
+                            Command::Script(script) => crate::models::Command::Script(script),
+                        },
+                    )
+                })
+                .collect(),
             path: PathBuf::default(),
         })
     }

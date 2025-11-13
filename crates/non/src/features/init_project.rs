@@ -119,8 +119,9 @@ NonProject(
             NonProject {
                 project: Project {
                     name: "some-name".into(),
-                    dependencies: BTreeMap::default(),
-                }
+                },
+                dependencies: BTreeMap::default(),
+                commands: BTreeMap::new(),
             },
             project
         );
