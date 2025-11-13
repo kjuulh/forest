@@ -93,7 +93,10 @@ impl InitProjectState for State {
 mod test {
     use std::collections::BTreeMap;
 
-    use crate::{features::init_project::InitProject, services::project::NonProject};
+    use crate::{
+        features::init_project::InitProject,
+        services::project::{NonProject, models::Project},
+    };
 
     #[test]
     fn can_create_init_file() -> anyhow::Result<()> {
@@ -114,8 +117,10 @@ NonProject(
 
         assert_eq!(
             NonProject {
-                name: "some-name".into(),
-                dependencies: BTreeMap::default(),
+                project: Project {
+                    name: "some-name".into(),
+                    dependencies: BTreeMap::default(),
+                }
             },
             project
         );

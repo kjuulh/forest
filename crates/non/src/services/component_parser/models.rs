@@ -13,6 +13,7 @@ pub struct RawComponent {
 pub struct RawComponentSpec {
     pub component: RawSpecComponent,
 
+    #[serde(default)]
     pub dependencies: BTreeMap<String, RawComponentDependency>,
 
     #[serde(default)]
@@ -23,6 +24,16 @@ pub struct RawComponentSpec {
 
     #[serde(default)]
     pub requirements: BTreeMap<String, RawComponentRequirement>,
+
+    #[serde(default)]
+    pub commands: BTreeMap<String, RawComponentCommand>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum RawComponentCommand {
+    Inline(Vec<String>),
+    Script(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]

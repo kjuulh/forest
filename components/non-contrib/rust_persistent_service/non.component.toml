@@ -1,0 +1,12 @@
+[component]
+name = "rust-persistent-service"
+namespace = "non"
+version = "0.0.0"
+
+[commands]
+build = ["echo hello world", """
+  echo something else
+  cargo build
+  cargo run --help || true
+  export SOMETHING=1
+""", """echo "something = $SOMETHING""""]

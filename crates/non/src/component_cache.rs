@@ -1,138 +1,13 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::{
     component_cache::models::{CacheComponent, CacheComponents},
-    services::component_parser::{ComponentParser, ComponentParserState},
+    services::component_parser::{ComponentParser, ComponentParserState, models::RawComponent},
     state::State,
     user_locations::{UserLocations, UserLocationsState},
 };
 
-pub mod models {
-    use std::ops::Deref;
-
-    use anyhow::Context;
-
-    use crate::services::component_parser::models::{
-        RawComponent, RawComponentDependency, RawComponentRequirement, RawComponentRequirementType,
-    };
-
-    #[derive(Default)]
-    pub struct CacheComponents(pub Vec<CacheComponent>);
-    impl Deref for CacheComponents {
-        type Target = Vec<CacheComponent>;
-
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-
-    #[derive(Debug, Clone)]
-    pub struct CacheComponent {
-        pub name: String,
-        pub namespace: String,
-        pub version: String,
-
-        pub dependencies: Vec<CacheComponentDependency>,
-
-        pub requirements: Vec<CacheComponentRequirement>,
-    }
-
-    impl TryFrom<RawComponent> for CacheComponent {
-        type Error = anyhow::Error;
-
-        fn try_from(value: RawComponent) -> Result<Self, Self::Error> {
-            Ok(Self {
-                name: value.component_spec.component.name,
-                namespace: value.component_spec.component.namespace,
-                version: value.component_spec.component.version,
-                dependencies: value
-                    .component_spec
-                    .dependencies
-                    .into_iter()
-                    .map(|i| i.try_into())
-                    .collect::<anyhow::Result<Vec<_>>>()?,
-                requirements: value
-                    .component_spec
-                    .requirements
-                    .into_iter()
-                    .map(|i| i.try_into())
-                    .collect::<anyhow::Result<Vec<_>>>()?,
-            })
-        }
-    }
-
-    #[derive(Debug, Clone)]
-    pub struct CacheComponentDependency {
-        pub name: String,
-        pub namespace: String,
-        pub version: semver::Version,
-    }
-
-    impl TryFrom<(String, RawComponentDependency)> for CacheComponentDependency {
-        type Error = anyhow::Error;
-
-        fn try_from(
-            (name, dependency): (String, RawComponentDependency),
-        ) -> Result<Self, Self::Error> {
-            let (namespace, name) = match name.split_once("/") {
-                Some((namespace, dep)) => (namespace, dep),
-                None => ("non", name.as_str()),
-            };
-
-            let version = match dependency {
-                RawComponentDependency::String(version) => version,
-                RawComponentDependency::Detailed(dep) => dep.version,
-            };
-
-            let version =
-                semver::Version::parse(&version).context("failed to parse dependency version")?;
-
-            Ok(Self {
-                name: name.into(),
-                namespace: namespace.into(),
-                version,
-            })
-        }
-    }
-
-    #[derive(Debug, Clone)]
-    pub struct CacheComponentRequirement {
-        pub name: String,
-        pub description: Option<String>,
-        pub default: Option<String>,
-        pub r#type: Option<CacheComponentRequirementType>,
-    }
-
-    #[derive(Debug, Clone)]
-    pub enum CacheComponentRequirementType {
-        String,
-    }
-
-    impl TryFrom<(String, RawComponentRequirement)> for CacheComponentRequirement {
-        type Error = anyhow::Error;
-
-        fn try_from((entry, req): (String, RawComponentRequirement)) -> Result<Self, Self::Error> {
-            Ok(Self {
-                name: entry,
-                description: req.description,
-                default: req.default,
-                r#type: req.r#type.map(|i| i.try_into()).transpose()?,
-            })
-        }
-    }
-
-    impl TryFrom<RawComponentRequirementType> for CacheComponentRequirementType {
-        type Error = anyhow::Error;
-
-        fn try_from(value: RawComponentRequirementType) -> Result<Self, Self::Error> {
-            let val = match value {
-                RawComponentRequirementType::String => Self::String,
-            };
-
-            Ok(val)
-        }
-    }
-}
+pub mod models;
 
 use anyhow::Context;
 use tokio::io::AsyncWriteExt;
@@ -164,15 +39,50 @@ impl ComponentCache {
         let mut components = Vec::new();
         tracing::trace!("scanning component cache");
 
-        let mut namespace_entries = tokio::fs::read_dir(component_cache_path).await?;
-        while let Some(namespace_entry) = namespace_entries.next_entry().await? {
-            let mut name_entries = tokio::fs::read_dir(namespace_entry.path()).await?;
+        let mut namespace_entries = tokio::fs::read_dir(component_cache_path)
+            .await
+            .context("read namespaces")?;
+        while let Some(namespace_entry) = namespace_entries
+            .next_entry()
+            .await
+            .context("read namespaces entry")?
+        {
+            let mut name_entries =
+                tokio::fs::read_dir(namespace_entry.path())
+                    .await
+                    .context(anyhow::anyhow!(
+                        "read names for namespace: {}",
+                        namespace_entry.path().to_string_lossy()
+                    ))?;
 
-            while let Some(name_entry) = name_entries.next_entry().await? {
-                let mut version_entries = tokio::fs::read_dir(name_entry.path()).await?;
+            while let Some(name_entry) =
+                name_entries.next_entry().await.context(anyhow::anyhow!(
+                    "read name entry for namespace: {}",
+                    namespace_entry.path().to_string_lossy()
+                ))?
+            {
+                let mut version_entries =
+                    tokio::fs::read_dir(name_entry.path())
+                        .await
+                        .context(anyhow::anyhow!(
+                            "read versions for name {}",
+                            name_entry.path().to_string_lossy()
+                        ))?;
 
-                while let Some(version_entry) = version_entries.next_entry().await? {
-                    let component = self.component_parser.parse(&version_entry.path()).await?;
+                while let Some(version_entry) =
+                    version_entries.next_entry().await.context(anyhow::anyhow!(
+                        "read version entry for name {}",
+                        name_entry.path().to_string_lossy()
+                    ))?
+                {
+                    let mut component = self.get_component_from_path(&version_entry.path()).await?;
+
+                    component.source = models::CacheComponentSource::Versioned(
+                        component
+                            .version
+                            .parse()
+                            .context("parsing semver for versioned component")?,
+                    );
 
                     components.push(component);
                 }
@@ -180,12 +90,19 @@ impl ComponentCache {
         }
         tracing::trace!("done scanning component cache");
 
-        Ok(CacheComponents(
-            components
-                .into_iter()
-                .map(|i| i.try_into())
-                .collect::<anyhow::Result<Vec<_>>>()?,
-        ))
+        Ok(CacheComponents(components))
+    }
+    #[tracing::instrument(skip(self), level = "trace")]
+    pub async fn get_component_from_path(&self, path: &Path) -> anyhow::Result<CacheComponent> {
+        tracing::debug!("getting component");
+
+        let component = self
+            .component_parser
+            .parse(path)
+            .await
+            .context(anyhow::anyhow!("parse file for {}", path.to_string_lossy()))?;
+
+        component.try_into()
     }
 
     pub async fn get_component_path(&self, component: &CacheComponent) -> anyhow::Result<PathBuf> {

@@ -1,11 +1,15 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct NonProject {
-    pub name: String,
+    pub project: Project,
+}
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Project {
+    pub name: String,
     pub dependencies: BTreeMap<String, Dependency>,
 }
 
@@ -13,10 +17,16 @@ pub struct NonProject {
 #[serde(untagged)]
 pub enum Dependency {
     String(String),
-    Detailed(ProjectDependency),
+    Versioned(VersionedDependency),
+    Local(LocalDependency),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct ProjectDependency {
+pub struct VersionedDependency {
     pub version: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct LocalDependency {
+    pub path: PathBuf,
 }

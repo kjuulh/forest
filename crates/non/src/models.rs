@@ -1,3 +1,5 @@
+use std::{collections::BTreeMap, fmt::Display, path::PathBuf};
+
 pub mod artifacts {
     pub type ArtifactID = uuid::Uuid;
 }
@@ -56,6 +58,54 @@ pub mod reference {
 pub struct Project {
     pub name: String,
     pub dependencies: Dependencies,
+
+    pub commands: BTreeMap<CommandName, Command>,
+    pub path: PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
+pub struct CommandName {
+    pub namespace: Option<String>,
+    pub name: Option<String>,
+    pub source: CommandSource,
+
+    pub command_name: String,
+}
+
+impl Display for CommandName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}{}:{}",
+            match &self.namespace {
+                Some(item) => format!("{item}/"),
+                None => "".to_string(),
+            },
+            match &self.name {
+                Some(item) => item,
+                None => "",
+            },
+            {
+                match &self.source {
+                    CommandSource::Local(path) => format!("#{}", path.to_string_lossy()),
+                    CommandSource::Versioned(version) => format!("@{}", version.to_string()),
+                }
+            },
+            self.command_name
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
+pub enum CommandSource {
+    Local(PathBuf),
+    Versioned(semver::Version),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Command {
+    Script(String),
+    Inline(Vec<String>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -99,12 +149,20 @@ impl Dependencies {
 pub struct Dependency {
     pub name: DependencyName,
     pub namespace: DependencyNamespace,
-    pub version: DependencyVersion,
+
+    pub dependency_type: DependencyType,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DependencyType {
+    Versioned(DependencyVersion),
+    Local(DependencyPath),
 }
 
 type DependencyName = String;
 type DependencyNamespace = String;
 type DependencyVersion = semver::Version;
+type DependencyPath = PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Requirements {

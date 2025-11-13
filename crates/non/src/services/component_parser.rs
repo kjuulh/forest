@@ -88,6 +88,7 @@ mod test {
                     init: BTreeMap::default(),
                     requirements: BTreeMap::default(),
                     dependencies: BTreeMap::default(),
+                    commands: BTreeMap::new(),
                 }
             },
             raw_component

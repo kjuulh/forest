@@ -2,7 +2,7 @@ use anyhow::Context;
 use uuid::Uuid;
 
 use crate::{
-    models::{Dependencies, Dependency},
+    models::{Dependencies, Dependency, DependencyType},
     services::project::{self},
     user_config::{GlobalDependency, UserConfig},
 };
@@ -43,24 +43,37 @@ impl TryFrom<&UserConfig> for Dependencies {
     }
 }
 
-impl TryFrom<(String, project::models::ProjectDependency)> for Dependency {
+impl TryFrom<(String, project::models::Dependency)> for Dependency {
     type Error = anyhow::Error;
 
     fn try_from(
-        (name, dependency): (String, project::models::ProjectDependency),
+        (name, dependency): (String, project::models::Dependency),
     ) -> Result<Self, Self::Error> {
         let (namespace, name) = match name.split_once("/") {
             Some((namespace, dep)) => (namespace, dep),
             None => ("non", name.as_str()),
         };
 
-        let version = semver::Version::parse(&dependency.version)
-            .context("failed to parse dependency version")?;
+        let dep = match dependency {
+            project::Dependency::String(version) => {
+                let version = semver::Version::parse(&version)
+                    .context("failed to parse dependency version")?;
+
+                DependencyType::Versioned(version)
+            }
+            project::Dependency::Versioned(details) => {
+                let version = semver::Version::parse(&details.version)
+                    .context("failed to parse dependency version")?;
+
+                DependencyType::Versioned(version)
+            }
+            project::Dependency::Local(details) => DependencyType::Local(details.path),
+        };
 
         Ok(Self {
             name: name.into(),
             namespace: namespace.into(),
-            version,
+            dependency_type: dep,
         })
     }
 }
@@ -80,7 +93,7 @@ impl TryFrom<(String, GlobalDependency)> for Dependency {
         Ok(Self {
             name: name.into(),
             namespace: namespace.into(),
-            version,
+            dependency_type: DependencyType::Versioned(version),
         })
     }
 }

@@ -9,7 +9,7 @@ use crate::{
         models::{CacheComponent, CacheComponents},
     },
     grpc::{GrpcClient, GrpcClientState},
-    models::{Dependencies, Dependency, Project},
+    models::{Dependencies, Dependency, DependencyType, Project},
     state::State,
     user_config::{UserConfigService, UserConfigServiceState},
 };
@@ -40,14 +40,18 @@ impl ComponentsService {
         &self,
         project: Option<Project>,
     ) -> anyhow::Result<CacheComponents> {
-        let user_config = self.user_config.get_user_config().await?;
+        tracing::debug!("syncing components");
 
         // 1. Construct local store of existing components
-        let mut deps: Dependencies = user_config.try_into()?;
-        if let Some(project) = project {
-            let mut project = project.clone();
-            deps.merge(&mut project.dependencies);
-        }
+        let deps = if let Some(project) = project {
+            let project = project.clone();
+            project.dependencies
+        } else {
+            let user_config = self.user_config.get_user_config().await?;
+            let deps: Dependencies = user_config.try_into()?;
+
+            deps
+        };
 
         let local_deps = self
             .component_cache
@@ -63,41 +67,69 @@ impl ComponentsService {
                 .context("failed to get upstream dependencies")?,
         };
 
-        let (existing_deps, missing_deps) = local_components.diff(deps.dependencies);
+        let (existing_deps, missing_deps) = local_components.diff(deps.dependencies.clone());
         for dep in existing_deps.dependencies {
-            tracing::debug!(
-                "local deps already exists: {}/{}@{}",
-                dep.namespace,
-                dep.name,
-                dep.version
-            );
+            match dep.dependency_type {
+                crate::models::DependencyType::Versioned(version) => {
+                    tracing::debug!(
+                        "local deps already exists: {}/{}@{}",
+                        dep.namespace,
+                        dep.name,
+                        version
+                    );
+                }
+                crate::models::DependencyType::Local(path) => {
+                    tracing::debug!(
+                        "local deps already exists: {}/{}#{}",
+                        dep.namespace,
+                        dep.name,
+                        path.display().to_string()
+                    );
+                }
+            }
         }
 
         // 2. Fetch upstream version that is missing
         let mut upstream = Vec::new();
         for dep in &missing_deps.dependencies {
-            tracing::debug!("fetching upstream dep");
-            let upstream_component = self
-                .registry
-                .get_component_version(&dep.name, &dep.namespace, &dep.version.to_string())
-                .await?
-                .ok_or(anyhow::anyhow!("failed to find upstream component"))?;
+            if let DependencyType::Versioned(version) = &dep.dependency_type {
+                tracing::debug!("fetching upstream dep");
+                let upstream_component = self
+                    .registry
+                    .get_component_version(&dep.name, &dep.namespace, &version.to_string())
+                    .await?
+                    .ok_or(anyhow::anyhow!("failed to find upstream component"))?;
 
-            upstream.push(upstream_component);
+                upstream.push(upstream_component);
+            }
         }
 
         // Download deps
-
         for dep in upstream {
             self.download_component(&dep.id, &dep.name, &dep.namespace, &dep.version)
                 .await?;
         }
 
-        let local_deps = self
+        let mut local_deps = self
             .component_cache
             .get_local_components()
             .await
             .context("failed to get local components")?;
+
+        for dependency in &deps.dependencies {
+            match &dependency.dependency_type {
+                DependencyType::Versioned(version) => continue,
+                DependencyType::Local(path) => {
+                    let mut component = self.component_cache.get_component_from_path(path).await?;
+
+                    component.source = crate::component_cache::models::CacheComponentSource::Local(
+                        component.path.clone(),
+                    );
+
+                    local_deps.push(component);
+                }
+            }
+        }
 
         Ok(local_deps)
     }
@@ -107,19 +139,24 @@ impl ComponentsService {
         &self,
         dep: &Dependency,
     ) -> anyhow::Result<UpstreamProjectDependency> {
-        let component_version = self
-            .registry
-            .get_component_version(&dep.name, &dep.namespace, &dep.version.to_string())
-            .await
-            .context("failed to get component version")?;
+        match &dep.dependency_type {
+            DependencyType::Versioned(version) => {
+                let component_version = self
+                    .registry
+                    .get_component_version(&dep.name, &dep.namespace, &version.to_string())
+                    .await
+                    .context("failed to get component version")?;
 
-        component_version
-            .map(|c| c.try_into())
-            .transpose()?
-            .ok_or(anyhow::anyhow!(
-                "failed to find upstream component: {:?}",
-                dep
-            ))
+                component_version
+                    .map(|c| c.try_into())
+                    .transpose()?
+                    .ok_or(anyhow::anyhow!(
+                        "failed to find upstream component: {:?}",
+                        dep
+                    ))
+            }
+            DependencyType::Local(path) => todo!(),
+        }
     }
 
     #[tracing::instrument(skip(self), level = "trace")]
@@ -218,7 +255,7 @@ impl TryFrom<CacheComponent> for Dependency {
         Ok(Self {
             name: value.name,
             namespace: value.namespace,
-            version: value.version.parse()?,
+            dependency_type: DependencyType::Versioned(value.version.parse()?),
         })
     }
 }
