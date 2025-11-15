@@ -10,4 +10,4 @@ notmad = "0.8.1"
 tokio = "1"
 tokio-util = "0.7.17"
 tracing = "0.1"
-tracing-subscriber = { version = "0.2", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

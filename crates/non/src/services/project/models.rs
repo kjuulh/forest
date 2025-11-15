@@ -7,6 +7,9 @@ pub struct NonProject {
     pub project: Project,
     pub dependencies: BTreeMap<String, Dependency>,
     pub commands: BTreeMap<String, Command>,
+
+    #[serde(skip)]
+    pub raw: Option<toml::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

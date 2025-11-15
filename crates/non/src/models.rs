@@ -1,6 +1,11 @@
-use std::{collections::BTreeMap, fmt::Display, path::PathBuf};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Display,
+    path::PathBuf,
+};
 
 use anyhow::Context;
+use serde::Serialize;
 
 pub mod artifacts {
     pub type ArtifactID = uuid::Uuid;
@@ -63,6 +68,48 @@ pub struct Project {
 
     pub commands: BTreeMap<CommandName, Command>,
     pub path: PathBuf,
+
+    pub other: ProjectValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum ProjectValue {
+    String(String),
+    Integer(i64),
+    Decimal(f64),
+    Bool(bool),
+    Map(HashMap<String, ProjectValue>),
+    Array(Vec<ProjectValue>),
+}
+
+impl Default for ProjectValue {
+    fn default() -> Self {
+        Self::Map(HashMap::default())
+    }
+}
+
+impl Project {
+    pub fn get_component_config(
+        &self,
+        component_ref: &ComponentReference,
+    ) -> Option<&ProjectValue> {
+        let (namespace, name) = (&component_ref.namespace, &component_ref.name);
+
+        let ProjectValue::Map(map) = &self.other else {
+            return None;
+        };
+
+        let ProjectValue::Map(map) = map.get(namespace)? else {
+            return None;
+        };
+
+        let ProjectValue::Map(map) = map.get(name)? else {
+            return None;
+        };
+
+        map.get("config")
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]

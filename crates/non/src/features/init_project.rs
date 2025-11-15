@@ -122,6 +122,7 @@ NonProject(
                 },
                 dependencies: BTreeMap::default(),
                 commands: BTreeMap::new(),
+                raw: None
             },
             project
         );

@@ -9,7 +9,7 @@ build = { bash = """
   echo "tmp $NON_TMP"
   $non template production.Dockerfile.jinja2
   echo "$?"
-  docker build -f $NON_TMP/production.Dockerfile .
+  docker build -t something:latest -f $NON_TMP/production.Dockerfile .
 """ }
 
 parent = { bash = "echo parent && non run nested" }

@@ -4,6 +4,7 @@ use anyhow::Context;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
+    models::ProjectValue,
     non_context::NonContextState,
     services::{
         component_parser::ComponentParserState, components::ComponentsServiceState,
@@ -20,6 +21,7 @@ pub struct TemplateCommand {
 impl TemplateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let ctx = state.context();
+        let project = state.project_parser().get_project().await?;
 
         let templates_path = if let Some(component_ref) = ctx.component() {
             let comps = state.components_service();
@@ -30,9 +32,12 @@ impl TemplateCommand {
 
             raw.path.join("templates")
         } else {
-            let project = state.project_parser().get_project().await?;
-
             project.path.join("templates")
+        };
+
+        let config = match ctx.component() {
+            Some(component_ref) => project.get_component_config(component_ref),
+            None => todo!("project templating not supported yet"),
         };
 
         let temp_dir = ctx.get_tmp().await?;
@@ -75,7 +80,8 @@ impl TemplateCommand {
                 let raw_content = tokio::fs::read_to_string(template_file)
                     .await
                     .context("read template file")?;
-                let rendered_content = render_template(&raw_content).context("render template")?;
+                let rendered_content =
+                    render_template(&raw_content, &config).context("render template")?;
 
                 let mut file = tokio::fs::File::create(&new_file_path)
                     .await
@@ -103,9 +109,18 @@ impl TemplateCommand {
     }
 }
 
-fn render_template(template_content: &str) -> anyhow::Result<String> {
+fn render_template(
+    template_content: &str,
+    config: &Option<&ProjectValue>,
+) -> anyhow::Result<String> {
     let mut env = minijinja::Environment::new();
+    // Debug diagnostics, jinja is not fun to debug without
     env.set_debug(true);
+
+    if let Some(config) = config {
+        env.add_global("config", minijinja::Value::from_serialize(config));
+    }
+
     env.add_filter("to_lower", |input: String| -> String {
         input.to_lowercase()
     });

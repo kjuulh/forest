@@ -1,8 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use crate::{
     component_cache::models::{CacheComponent, CacheComponentCommand, CacheComponentSource},
-    models::{CommandName, CommandSource, DependencyType, Project},
+    models::{CommandName, CommandSource, DependencyType, Project, ProjectValue},
     services::components::{ComponentsService, ComponentsServiceState},
     state::State,
 };
@@ -114,7 +117,10 @@ impl ProjectParser {
         let current_dir =
             std::env::current_dir().context("current project dir is required for a project")?;
         let (project_file_path, project_file_content) = self.find_project_file(current_dir).await?;
-        let project_file: NonProject = toml::from_str(&project_file_content)?;
+        let mut project_file: NonProject = toml::from_str(&project_file_content)?;
+        let raw: toml::Value = toml::from_str(&project_file_content)?;
+        project_file.raw = Some(raw);
+
         let mut project: Project = project_file.try_into().context("parse project")?;
 
         project.path = project_file_path
@@ -230,6 +236,38 @@ impl TryFrom<NonProject> for Project {
                 })
                 .collect(),
             path: PathBuf::default(),
+            other: value
+                .raw
+                .map(ProjectValue::try_from)
+                .transpose()?
+                .unwrap_or_default(),
         })
+    }
+}
+
+impl TryFrom<toml::Value> for ProjectValue {
+    type Error = anyhow::Error;
+
+    fn try_from(value: toml::Value) -> Result<Self, Self::Error> {
+        let item = match value {
+            toml::Value::String(s) => Self::String(s),
+            toml::Value::Integer(i) => Self::Integer(i),
+            toml::Value::Float(f) => Self::Decimal(f),
+            toml::Value::Boolean(b) => Self::Bool(b),
+            toml::Value::Datetime(datetime) => Self::String(datetime.to_string()),
+            toml::Value::Array(values) => Self::Array(
+                values
+                    .into_iter()
+                    .map(ProjectValue::try_from)
+                    .collect::<anyhow::Result<Vec<_>>>()?,
+            ),
+            toml::Value::Table(map) => Self::Map(
+                map.into_iter()
+                    .map(|(k, v)| Ok((k, ProjectValue::try_from(v)?)))
+                    .collect::<anyhow::Result<HashMap<_, _>>>()?,
+            ),
+        };
+
+        Ok(item)
     }
 }

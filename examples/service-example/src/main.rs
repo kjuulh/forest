@@ -6,10 +6,22 @@ use axum::{Router, routing::get};
 use notmad::{Component, MadError};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
+use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt().init();
+    tracing_subscriber::fmt
+        // .with_env_filter(
+        //     EnvFilter::from_default_env().add_directive("notmad=debug".parse().context("notmad")?),
+        // )
+        ::init();
+
+    for arg in std::env::args() {
+        if arg == "--help" {
+            println!("run without anything to serve");
+            return Ok(());
+        }
+    }
 
     notmad::Mad::builder()
         .add(create_router(
@@ -48,6 +60,10 @@ struct Http {
 
 #[async_trait]
 impl Component for Http {
+    fn name(&self) -> Option<String> {
+        Some(format!("{}:{}", self.name, self.port))
+    }
+
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {
         let router = axum::Router::new().route(
             "/",
