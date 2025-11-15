@@ -168,7 +168,7 @@ impl Display for StagingArtifactID {
                 .duration_since(UNIX_EPOCH)
                 .expect("to be able to get timestamp")
                 .as_secs(),
-            self.id.to_string()
+            self.id
         ))
     }
 }

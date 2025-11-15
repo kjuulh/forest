@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Context;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub mod artifacts {
     pub type ArtifactID = uuid::Uuid;
@@ -72,7 +72,7 @@ pub struct Project {
     pub other: ProjectValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ProjectValue {
     String(String),
@@ -81,6 +81,22 @@ pub enum ProjectValue {
     Bool(bool),
     Map(HashMap<String, ProjectValue>),
     Array(Vec<ProjectValue>),
+}
+
+impl ProjectValue {
+    pub fn get_from_component(&self, component_ref: &ComponentReference) -> Option<ProjectValue> {
+        let (namespace, name) = (&component_ref.namespace, &component_ref.name);
+
+        let ProjectValue::Map(map) = &self else {
+            return None;
+        };
+
+        let ProjectValue::Map(names) = map.get(namespace)? else {
+            return None;
+        };
+
+        names.get(name).cloned()
+    }
 }
 
 impl Default for ProjectValue {
@@ -210,7 +226,7 @@ impl Display for CommandName {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Serialize, Deserialize)]
 pub struct ComponentReference {
     pub namespace: String,
     pub name: String,
@@ -277,7 +293,7 @@ impl TryFrom<&str> for ComponentReference {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Serialize, Deserialize)]
 pub enum ComponentSource {
     Local(PathBuf),
     Versioned(semver::Version),
@@ -329,6 +345,45 @@ impl Dependencies {
 
     pub fn merge(&mut self, dependencies: &mut Dependencies) {
         self.dependencies.append(&mut dependencies.dependencies);
+    }
+
+    pub(crate) fn get(&self, namespace: &str, name: &str) -> Option<ComponentReference> {
+        for dep in &self.dependencies {
+            if dep.namespace == namespace && dep.name == name {
+                match &dep.dependency_type {
+                    DependencyType::Versioned(version) => {
+                        return Some(ComponentReference::new(
+                            namespace,
+                            name,
+                            ComponentSource::Versioned(version.clone()),
+                        ));
+                    }
+                    DependencyType::Local(path) => {
+                        return Some(ComponentReference::new(
+                            namespace,
+                            name,
+                            ComponentSource::Local(path.clone()),
+                        ));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    pub(crate) fn get_components(&self) -> Vec<ComponentReference> {
+        let mut references = Vec::new();
+
+        for dep in &self.dependencies {
+            references.push(
+                // TODO: slightly unoptimal, as we have a double loop here
+                self.get(&dep.namespace, &dep.name)
+                    .expect("to find dependency we just got"),
+            );
+        }
+
+        references
     }
 }
 

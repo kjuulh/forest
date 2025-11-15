@@ -34,18 +34,12 @@ spec:
               protocol: {{ port.protocol | default('TCP') }}
           {%- endfor %}
           {%- endif %}
-          {%- if config.environment or config.env %}
+          {%- if config.environment %}
           env:
           {%- if config.environment %}
-          {%- for key, value in config.environment.items() %}
-            - name: {{ key }}
-              value: "{{ value }}"
-          {%- endfor %}
-          {%- endif %}
-          {%- if config.env %}
-          {%- for env_var in config.env %}
-            - name: {{ env_var.key }}
-              value: "{{ env_var.value }}"
+          {%- for item in config.environment %}
+            - name: "{{ item.key }}"
+              value: "{{ item.value }}"
           {%- endfor %}
           {%- endif %}
           {%- endif %}

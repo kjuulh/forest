@@ -17,14 +17,14 @@ replicas = 3
 environment = [{ key = "RUST_LOG", value = "debug" }]
 
 ["non-contrib"."rust-persistent-service".env.prod]
-destinations = [{ destination = "prod-k8s-*", type = "non/kubernetes@1" }]
+destinations = [
+  { destination = "prod-k8s-*", type = "non/kubernetes@1" },
+  { destination = "eu-west-1-*", type = "non/terraform@1" },
+]
 
 ["non-contrib"."rust-persistent-service".env.prod.config]
 replicas = 10
 environment = [{ key = "RUST_LOG", value = "info" }]
-
-["non-contrib"."rust-persistent-service".env.prod.destination.prod-k8s-1]
-replicas = 100
 
 ["non-contrib"."rust-persistent-service".config]
 name = "service-example"

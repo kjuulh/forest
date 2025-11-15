@@ -12,12 +12,13 @@ use tmp::TmpCommand;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    cli::{destination::DestinationCommand, project::ProjectCommand},
+    cli::{deploy::DeployCommand, destination::DestinationCommand, project::ProjectCommand},
     state::State,
 };
 
 mod admin;
 mod components;
+mod deploy;
 mod destination;
 mod global;
 mod init;
@@ -42,6 +43,7 @@ enum Commands {
     Admin(AdminCommand),
     Run(RunCommand),
     Template(TemplateCommand),
+    Deploy(DeployCommand),
     Publish(PublishCommand),
     Global(GlobalCommand),
     Shell(ShellCommand),
@@ -122,6 +124,7 @@ impl CommandHandler {
             Commands::Admin(cmd) => cmd.execute(state).await,
             Commands::Run(cmd) => cmd.execute(state).await,
             Commands::Template(cmd) => cmd.execute(state).await,
+            Commands::Deploy(cmd) => cmd.execute(state).await,
             Commands::Publish(cmd) => cmd.execute(state).await,
             Commands::Global(cmd) => cmd.execute(state).await,
             Commands::Shell(cmd) => cmd.execute(state).await,

@@ -19,7 +19,7 @@ tracing-subscriber.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
 async-trait.workspace = true
-semver.workspace = true
+semver = { workspace = true, features = ["serde"] }
 futures.workspace = true
 
 bytes.workspace = true
@@ -28,7 +28,7 @@ prost-types.workspace = true
 tonic.workspace = true
 
 serde = { version = "1.0.197", features = ["derive"] }
-uuid = { version = "1.7.0", features = ["v4"] }
+uuid = { version = "1.7.0", features = ["v4", "v7"] }
 inquire = "0.7.5"
 reqwest = "0.12.20"
 glob = "0.3.2"
@@ -44,7 +44,7 @@ notmad = "0.10.0"
 tokio-util = "0.7.15"
 stringcase = "0.4.0"
 ron = { version = "0.10.1", features = ["indexmap"] }
-minijinja = "2.11.0"
+minijinja = { version = "2.11.0", features = ["builtins"] }
 jiff = "0.2.15"
 tokio-stream = { version = "0.1.17", features = ["sync"] }
 
@@ -53,6 +53,7 @@ opentelemetry_sdk = "0.31.0"
 opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic"] }
 opentelemetry-appender-tracing = "0.31.0"
 tracing-opentelemetry = "0.31.0"
+serde_json = "1.0.145"
 
 
 [dev-dependencies]

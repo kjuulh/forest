@@ -3,7 +3,7 @@ use crate::state::State;
 pub struct NamespaceService {}
 
 impl NamespaceService {
-    pub async fn create_namespace(&self, namespace: &str) -> anyhow::Result<()> {
+    pub async fn create_namespace(&self, _namespace: &str) -> anyhow::Result<()> {
         Ok(())
     }
 }
