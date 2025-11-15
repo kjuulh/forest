@@ -2,11 +2,19 @@
 name = "service-example"
 
 [dependencies]
+"non/deployment" = { path = "../../components/non/deployment" }
 "non-contrib/rust-persistent-service" = { path = "../../components/non-contrib/rust_persistent_service" }
+
+["non-contrib"."rust-persistent-service".destination.dev.config]
+replicas = 3
+environment = [{ key = "RUST_LOG", value = "debug" }]
+
+["non-contrib"."rust-persistent-service".destination.prod.config]
+replicas = 10
+environment = [{ key = "RUST_LOG", value = "info" }]
 
 ["non-contrib"."rust-persistent-service".config]
 name = "service-example"
-replicas = 2
 ports = [
   { name = "external", port = 3000, external = true },
   { name = "internal", port = 3001 },

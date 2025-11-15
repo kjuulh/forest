@@ -1,0 +1,4 @@
+[component]
+name = "deployment"
+namespace = "non"
+version = "0.0.1"
