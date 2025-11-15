@@ -1,0 +1,4 @@
+[component]
+name = "postgres"
+namespace = "non-contrib"
+version = "0.0.0"

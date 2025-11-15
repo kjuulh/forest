@@ -2,8 +2,12 @@
 name = "service-example"
 
 [dependencies]
-"non/deployment" = { path = "../../components/non/deployment" }
-"non-contrib/rust-persistent-service" = { path = "../../components/non-contrib/rust_persistent_service" }
+"non/deployment".path = "../../components/non/deployment"
+"non-contrib/postgres".path = "../../components/non-contrib/postgres"
+"non-contrib/rust-persistent-service".path = "../../components/non-contrib/rust_persistent_service"
+
+[non.deployment]
+enabled = true
 
 ["non-contrib"."rust-persistent-service".destination.dev.config]
 replicas = 3
