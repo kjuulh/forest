@@ -32,6 +32,7 @@ pub struct RawComponentSpec {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
 pub enum RawComponentCommand {
+    InlineBash { bash: String },
     Inline(Vec<String>),
     Script(String),
 }

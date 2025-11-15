@@ -28,10 +28,11 @@ impl<T: RegistryClientContract + Send + Sync + 'static> From<T> for RegistryClie
     }
 }
 
+#[derive(Clone)]
 pub struct RegistryClients {
     state: State,
 
-    clients: OnceCell<BTreeMap<RegistryName, RegistryClient>>,
+    clients: Arc<OnceCell<BTreeMap<RegistryName, RegistryClient>>>,
 }
 
 impl RegistryClients {
@@ -79,7 +80,7 @@ impl RegistryClientsState for State {
     fn registry_clients(&self) -> RegistryClients {
         RegistryClients {
             state: self.clone(),
-            clients: OnceCell::default(),
+            clients: Arc::new(OnceCell::default()),
         }
     }
 }

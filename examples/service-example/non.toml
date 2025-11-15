@@ -2,9 +2,9 @@
 name = "my_service"
 
 [dependencies]
-"non/rust-persistent-service" = { path = "../../components/non-contrib/rust_persistent_service" }
+"non-contrib/rust-persistent-service" = { path = "../../components/non-contrib/rust_persistent_service" }
 
-[non."rust-persistent-service".config]
+["non-contrib"."rust-persistent-service".config]
 name = "my-service"
 replicas = 2
 ports = [

@@ -2,6 +2,7 @@ use std::{
     collections::BTreeMap,
     ops::{Deref, DerefMut},
     str::FromStr,
+    sync::Arc,
 };
 
 use anyhow::Context;
@@ -13,10 +14,11 @@ use crate::{
     user_locations::{UserLocations, UserLocationsState},
 };
 
+#[derive(Clone)]
 pub struct UserConfigService {
     locations: UserLocations,
 
-    config: OnceCell<UserConfig>,
+    config: Arc<OnceCell<UserConfig>>,
 }
 
 const USER_CONFIG_FILE: &str = "non.toml";
@@ -224,7 +226,7 @@ impl UserConfigServiceState for State {
     fn user_config_service(&self) -> UserConfigService {
         UserConfigService {
             locations: self.user_locations(),
-            config: OnceCell::const_new(),
+            config: Arc::new(OnceCell::const_new()),
         }
     }
 }

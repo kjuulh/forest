@@ -1,15 +1,19 @@
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
+    sync::{Arc, OnceLock},
 };
 
 use crate::{
     component_cache::{
         ComponentCache, ComponentCacheState,
-        models::{CacheComponent, CacheComponents},
+        models::{CacheComponent, CacheComponentSource, CacheComponents},
     },
     grpc::{GrpcClient, GrpcClientState},
-    models::{Dependencies, Dependency, DependencyType, Project},
+    models::{
+        ComponentReference, ComponentSource, Dependencies, Dependency, DependencyType, Project,
+    },
+    non_context::{NonContext, NonContextState},
     state::State,
     user_config::{UserConfigService, UserConfigServiceState},
 };
@@ -25,7 +29,9 @@ use futures::StreamExt;
 
 pub mod models;
 use models::*;
+use tokio::sync::OnceCell;
 
+#[derive(Clone)]
 pub struct ComponentsService {
     registry: ComponentRegistry,
     component_cache: ComponentCache,
@@ -33,13 +39,83 @@ pub struct ComponentsService {
     parser: ComponentParser,
     deployment: ComponentDeploymentService,
     user_config: UserConfigService,
+    ctx: NonContext,
+
+    components_project: Arc<OnceCell<CacheComponents>>,
+    components_user_config: Arc<OnceCell<CacheComponents>>,
 }
 
 impl ComponentsService {
-    pub async fn sync_components(
+    pub async fn get_components_project(
         &self,
-        project: Option<Project>,
-    ) -> anyhow::Result<CacheComponents> {
+        project: Project,
+    ) -> anyhow::Result<&CacheComponents> {
+        self.components_project
+            .get_or_try_init(|| async move {
+                let c = self.sync_components(Some(project)).await?;
+
+                Ok::<_, anyhow::Error>(c)
+            })
+            .await
+    }
+
+    pub async fn get_components_component(&self) -> anyhow::Result<&CacheComponents> {
+        // FIXME: implement proper support for components
+        self.get_components_user_config().await
+    }
+
+    pub async fn get_components_user_config(&self) -> anyhow::Result<&CacheComponents> {
+        self.components_user_config
+            .get_or_try_init(|| async move {
+                let c = self.sync_components(None).await?;
+
+                Ok::<_, anyhow::Error>(c)
+            })
+            .await
+    }
+
+    pub async fn get_local_component(
+        &self,
+        component_ref: &ComponentReference,
+    ) -> anyhow::Result<CacheComponent> {
+        match &component_ref.source {
+            ComponentSource::Local(path) => {
+                let comp = self.component_cache.get_component_from_path(path).await?;
+
+                return Ok(comp);
+            }
+            ComponentSource::Versioned(_version) => {
+                let comp =
+                    self.get_cache_component(component_ref)
+                        .await?
+                        .ok_or(anyhow::anyhow!(
+                            "failed to find component: {}",
+                            component_ref
+                        ))?;
+
+                return Ok(comp.clone());
+            }
+        }
+    }
+
+    pub async fn get_cache_component(
+        &self,
+        component_ref: &ComponentReference,
+    ) -> anyhow::Result<Option<&CacheComponent>> {
+        let components = self.get_components_component().await?;
+
+        for component in components.iter() {
+            if &component.component_ref() == component_ref {
+                return Ok(Some(component));
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn sync_components(&self, project: Option<Project>) -> anyhow::Result<CacheComponents> {
+        let inherited = self.ctx.inherited();
+
         tracing::debug!("syncing components");
 
         // 1. Construct local store of existing components
@@ -67,47 +143,49 @@ impl ComponentsService {
                 .context("failed to get upstream dependencies")?,
         };
 
-        let (existing_deps, missing_deps) = local_components.diff(deps.dependencies.clone());
-        for dep in existing_deps.dependencies {
-            match dep.dependency_type {
-                crate::models::DependencyType::Versioned(version) => {
-                    tracing::debug!(
-                        "local deps already exists: {}/{}@{}",
-                        dep.namespace,
-                        dep.name,
-                        version
-                    );
-                }
-                crate::models::DependencyType::Local(path) => {
-                    tracing::debug!(
-                        "local deps already exists: {}/{}#{}",
-                        dep.namespace,
-                        dep.name,
-                        path.display().to_string()
-                    );
+        if inherited {
+            let (existing_deps, missing_deps) = local_components.diff(deps.dependencies.clone());
+            for dep in existing_deps.dependencies {
+                match dep.dependency_type {
+                    crate::models::DependencyType::Versioned(version) => {
+                        tracing::debug!(
+                            "local deps already exists: {}/{}@{}",
+                            dep.namespace,
+                            dep.name,
+                            version
+                        );
+                    }
+                    crate::models::DependencyType::Local(path) => {
+                        tracing::debug!(
+                            "local deps already exists: {}/{}#{}",
+                            dep.namespace,
+                            dep.name,
+                            path.display().to_string()
+                        );
+                    }
                 }
             }
-        }
 
-        // 2. Fetch upstream version that is missing
-        let mut upstream = Vec::new();
-        for dep in &missing_deps.dependencies {
-            if let DependencyType::Versioned(version) = &dep.dependency_type {
-                tracing::debug!("fetching upstream dep");
-                let upstream_component = self
-                    .registry
-                    .get_component_version(&dep.name, &dep.namespace, &version.to_string())
-                    .await?
-                    .ok_or(anyhow::anyhow!("failed to find upstream component"))?;
+            // 2. Fetch upstream version that is missing
+            let mut upstream = Vec::new();
+            for dep in &missing_deps.dependencies {
+                if let DependencyType::Versioned(version) = &dep.dependency_type {
+                    tracing::debug!("fetching upstream dep");
+                    let upstream_component = self
+                        .registry
+                        .get_component_version(&dep.name, &dep.namespace, &version.to_string())
+                        .await?
+                        .ok_or(anyhow::anyhow!("failed to find upstream component"))?;
 
-                upstream.push(upstream_component);
+                    upstream.push(upstream_component);
+                }
             }
-        }
 
-        // Download deps
-        for dep in upstream {
-            self.download_component(&dep.id, &dep.name, &dep.namespace, &dep.version)
-                .await?;
+            // Download deps
+            for dep in upstream {
+                self.download_component(&dep.id, &dep.name, &dep.namespace, &dep.version)
+                    .await?;
+            }
         }
 
         let mut local_deps = self
@@ -118,7 +196,7 @@ impl ComponentsService {
 
         for dependency in &deps.dependencies {
             match &dependency.dependency_type {
-                DependencyType::Versioned(version) => continue,
+                DependencyType::Versioned(_version) => continue,
                 DependencyType::Local(path) => {
                     let mut component = self.component_cache.get_component_from_path(path).await?;
 
@@ -255,7 +333,7 @@ impl TryFrom<CacheComponent> for Dependency {
         Ok(Self {
             name: value.name,
             namespace: value.namespace,
-            dependency_type: DependencyType::Versioned(value.version.parse()?),
+            dependency_type: DependencyType::Versioned(value.version),
         })
     }
 }
@@ -272,13 +350,19 @@ pub trait ComponentsServiceState {
 
 impl ComponentsServiceState for State {
     fn components_service(&self) -> ComponentsService {
-        ComponentsService {
+        static ONCE: OnceLock<ComponentsService> = OnceLock::new();
+
+        ONCE.get_or_init(|| ComponentsService {
             registry: self.component_registry(),
             component_cache: self.component_cache(),
             grpc: self.grpc_client(),
             parser: self.component_parser(),
             deployment: self.component_deployment_service(),
             user_config: self.user_config_service(),
-        }
+            ctx: self.context(),
+            components_project: Arc::new(OnceCell::new()),
+            components_user_config: Arc::new(OnceCell::new()),
+        })
+        .clone()
     }
 }

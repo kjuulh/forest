@@ -9,6 +9,7 @@ use models::*;
 
 const COMPONENT_SPEC_FILE_NAME: &str = "non.component.toml";
 
+#[derive(Clone)]
 pub struct ComponentParser {}
 
 impl ComponentParser {

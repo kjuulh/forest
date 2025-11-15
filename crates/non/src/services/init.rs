@@ -44,7 +44,7 @@ impl InitService {
     pub async fn fetch_sources(&self) -> anyhow::Result<Choices> {
         tracing::debug!("fetching init sources");
 
-        self.components.sync_components(None).await?;
+        self.components.get_components_user_config().await?;
         let inits = self.components.get_inits().await?;
 
         Ok(Choices {

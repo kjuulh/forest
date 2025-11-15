@@ -1,5 +1,7 @@
 use std::{collections::BTreeMap, fmt::Display, path::PathBuf};
 
+use anyhow::Context;
+
 pub mod artifacts {
     pub type ArtifactID = uuid::Uuid;
 }
@@ -67,7 +69,7 @@ pub struct Project {
 pub enum CommandName {
     Component {
         namespace: Option<String>,
-        name: Option<String>,
+        name: String,
         source: CommandSource,
         command_name: String,
     },
@@ -80,6 +82,50 @@ impl CommandName {
         match self {
             CommandName::Component { command_name, .. } => &command_name,
             CommandName::Project { command_name } => &command_name,
+        }
+    }
+
+    pub fn to_fqn(&self) -> String {
+        match self {
+            CommandName::Component {
+                namespace,
+                name,
+                source,
+                command_name,
+            } => {
+                let src = match source {
+                    CommandSource::Local(path) => format!("#{}", path.to_string_lossy()),
+                    CommandSource::Versioned(version) => format!("@{}", version.to_string()),
+                };
+                format!(
+                    "{}/{}{src}:{command_name}",
+                    namespace.as_ref().unwrap_or(&"non".to_string()),
+                    name,
+                )
+            }
+            CommandName::Project { command_name } => format!(":{}", command_name),
+        }
+    }
+
+    pub fn to_component(&self) -> Option<String> {
+        match self {
+            CommandName::Component {
+                namespace,
+                name,
+                source,
+                ..
+            } => {
+                let src = match source {
+                    CommandSource::Local(path) => format!("#{}", path.to_string_lossy()),
+                    CommandSource::Versioned(version) => format!("@{}", version.to_string()),
+                };
+                Some(format!(
+                    "{}/{}{src}",
+                    namespace.as_ref().unwrap_or(&"non".to_string()),
+                    name,
+                ))
+            }
+            CommandName::Project { .. } => None,
         }
     }
 }
@@ -100,10 +146,7 @@ impl Display for CommandName {
                         Some(item) => format!("{item}/"),
                         None => "".to_string(),
                     },
-                    match &name {
-                        Some(item) => item,
-                        None => "",
-                    },
+                    &name,
                     {
                         match &source {
                             CommandSource::Local(path) => format!("#{}", path.to_string_lossy()),
@@ -118,6 +161,79 @@ impl Display for CommandName {
             CommandName::Project { command_name } => f.write_str(&command_name),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
+pub struct ComponentReference {
+    pub namespace: String,
+    pub name: String,
+    pub source: ComponentSource,
+}
+impl ComponentReference {
+    pub(crate) fn new(namespace: &str, name: &str, source: ComponentSource) -> Self {
+        Self {
+            namespace: namespace.into(),
+            name: name.into(),
+            source: source.into(),
+        }
+    }
+}
+
+impl Display for ComponentReference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}/{}{}",
+            self.namespace,
+            self.name,
+            match &self.source {
+                ComponentSource::Local(path) => format!("#{}", path.to_string_lossy()),
+                ComponentSource::Versioned(version) => format!("@{version}"),
+            }
+        )
+    }
+}
+
+impl TryFrom<String> for ComponentReference {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.as_str().try_into()
+    }
+}
+
+impl TryFrom<&str> for ComponentReference {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let (namespace, rest) = match value.split_once("/") {
+            Some((namespace, rest)) => (namespace, rest),
+            None => ("non", value),
+        };
+
+        let (name, source) = if let Some((name, rest)) = rest.split_once("@") {
+            (
+                name,
+                ComponentSource::Versioned(rest.parse().context("parse version")?),
+            )
+        } else if let Some((name, rest)) = rest.split_once("#") {
+            (name, ComponentSource::Local(PathBuf::from(rest)))
+        } else {
+            anyhow::bail!("component reference must include either a version or path")
+        };
+
+        Ok(Self {
+            namespace: namespace.into(),
+            name: name.into(),
+            source,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
+pub enum ComponentSource {
+    Local(PathBuf),
+    Versioned(semver::Version),
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]

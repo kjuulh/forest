@@ -11,6 +11,7 @@ mod non_client;
 pub mod models;
 use models::*;
 
+#[derive(Clone)]
 pub struct ComponentRegistry {
     clients: RegistryClients,
     client: GrpcClient,

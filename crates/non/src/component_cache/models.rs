@@ -6,12 +6,15 @@ use std::{
 
 use anyhow::Context;
 
-use crate::services::component_parser::models::{
-    RawComponent, RawComponentCommand, RawComponentDependency, RawComponentRequirement,
-    RawComponentRequirementType,
+use crate::{
+    models::{self, ComponentReference},
+    services::component_parser::models::{
+        RawComponent, RawComponentCommand, RawComponentDependency, RawComponentRequirement,
+        RawComponentRequirementType,
+    },
 };
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct CacheComponents(pub Vec<CacheComponent>);
 impl Deref for CacheComponents {
     type Target = Vec<CacheComponent>;
@@ -30,7 +33,7 @@ impl DerefMut for CacheComponents {
 pub struct CacheComponent {
     pub name: String,
     pub namespace: String,
-    pub version: String,
+    pub version: semver::Version,
 
     pub dependencies: Vec<CacheComponentDependency>,
 
@@ -42,6 +45,21 @@ pub struct CacheComponent {
 
     pub source: CacheComponentSource,
 }
+impl CacheComponent {
+    pub(crate) fn component_ref(&self) -> ComponentReference {
+        ComponentReference::new(
+            &self.namespace,
+            &self.name,
+            match &self.source {
+                CacheComponentSource::Versioned(version) => {
+                    models::ComponentSource::Versioned(version.clone())
+                }
+                CacheComponentSource::Local(path) => models::ComponentSource::Local(path.clone()),
+                CacheComponentSource::Unknown => todo!(),
+            },
+        )
+    }
+}
 
 impl TryFrom<RawComponent> for CacheComponent {
     type Error = anyhow::Error;
@@ -50,7 +68,12 @@ impl TryFrom<RawComponent> for CacheComponent {
         Ok(Self {
             name: value.component_spec.component.name,
             namespace: value.component_spec.component.namespace,
-            version: value.component_spec.component.version,
+            version: value
+                .component_spec
+                .component
+                .version
+                .parse()
+                .context("semver")?,
             dependencies: value
                 .component_spec
                 .dependencies
@@ -158,6 +181,7 @@ impl TryFrom<RawComponentCommand> for CacheComponentCommand {
         match value {
             RawComponentCommand::Inline(items) => Ok(Self::Inline(items)),
             RawComponentCommand::Script(path) => Ok(Self::Script(path)),
+            RawComponentCommand::InlineBash { bash } => Ok(Self::Inline(vec![bash])),
         }
     }
 }

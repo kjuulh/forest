@@ -12,6 +12,7 @@ pub mod models;
 use anyhow::Context;
 use tokio::io::AsyncWriteExt;
 
+#[derive(Clone)]
 pub struct ComponentCache {
     locations: UserLocations,
     component_parser: ComponentParser,
@@ -77,12 +78,8 @@ impl ComponentCache {
                 {
                     let mut component = self.get_component_from_path(&version_entry.path()).await?;
 
-                    component.source = models::CacheComponentSource::Versioned(
-                        component
-                            .version
-                            .parse()
-                            .context("parsing semver for versioned component")?,
-                    );
+                    component.source =
+                        models::CacheComponentSource::Versioned(component.version.clone());
 
                     components.push(component);
                 }
@@ -111,7 +108,7 @@ impl ComponentCache {
             .await?
             .join(&component.namespace)
             .join(&component.name)
-            .join(&component.version);
+            .join(&component.version.to_string());
 
         Ok(file_path)
     }

@@ -4,7 +4,12 @@ use anyhow::Context;
 use clap::Subcommand;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use crate::{services::project::ProjectParserState, state::State};
+use crate::{
+    models::{CommandName, CommandSource},
+    non_context::{self, NonContext, NonContextState},
+    services::project::ProjectParserState,
+    state::State,
+};
 
 #[derive(clap::Parser)]
 pub struct RunCommand {
@@ -20,6 +25,8 @@ enum Commands {
 
 impl RunCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        let ctx = state.context();
+
         let project = state.project_parser().get_project().await?;
 
         match &self.cmd {
@@ -27,11 +34,11 @@ impl RunCommand {
                 tracing::info!("item: {}", items.join(" "));
 
                 match items.split_first() {
-                    Some((command, rest)) => {
+                    Some((command, _rest)) => {
                         match project
                             .commands
                             .iter()
-                            .find(|(c, _)| &c.command_name() == command)
+                            .find(|(c, _)| c.command_name() == command)
                         {
                             Some((command_name, command)) => {
                                 tracing::info!("running command: {}", command_name);
@@ -44,13 +51,28 @@ impl RunCommand {
                                         let mut cmd = tokio::process::Command::new("bash");
                                         cmd.arg("-c")
                                             .arg(format!(
-                                                "set -e \n\n # script begins here \n\n{}",
+                                                "set -e; \n\n # script begins here \n\n{}",
                                                 items.join("\n")
                                             ))
                                             .stdout(Stdio::piped())
                                             .stderr(Stdio::piped())
                                             .current_dir(&project.path)
-                                            .env("NON_CONTEXT", "true");
+                                            .env(
+                                                NonContext::get_context_key(),
+                                                ctx.context_string(),
+                                            )
+                                            .env(
+                                                NonContext::get_tmp_key(),
+                                                ctx.get_tmp().await?.to_string(),
+                                            );
+
+                                        if let Ok(exe) = std::env::current_exe() {
+                                            cmd.env("non", exe);
+                                        }
+
+                                        if let Some(comp) = command_name.to_component() {
+                                            cmd.env(NonContext::get_component_key(), comp);
+                                        }
 
                                         let mut proc = cmd.spawn().context("spawn child")?;
 

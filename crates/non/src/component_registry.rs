@@ -28,9 +28,12 @@ impl ComponentRegistry {
         &self,
         project: Option<Project>,
     ) -> Result<CacheComponents, anyhow::Error> {
-        let components = self.components_service.sync_components(project).await?;
+        let components = match project {
+            Some(p) => self.components_service.get_components_project(p).await?,
+            None => self.components_service.get_components_user_config().await?,
+        };
 
-        Ok(components)
+        Ok(components.clone())
     }
 }
 

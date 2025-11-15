@@ -1,4 +1,10 @@
-use std::{env::temp_dir, ops::Deref, path::PathBuf, sync::Arc, time::SystemTime};
+use std::{
+    env::temp_dir,
+    ops::Deref,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::SystemTime,
+};
 
 use anyhow::Context;
 use drop_queue::DropQueue;
@@ -6,6 +12,7 @@ use rand::Rng;
 
 use crate::state::State;
 
+#[derive(Clone)]
 pub struct TempDirectories {
     drop_queue: DropQueue,
 }
@@ -17,6 +24,12 @@ impl TempDirectories {
         Ok(GuardedTempDirectory::new(self.drop_queue.clone(), temp))
     }
 
+    pub fn inherit_temp(&self, path: &Path) -> TempDirectory {
+        TempDirectory::Inherited {
+            path: path.to_path_buf(),
+        }
+    }
+
     pub async fn create_temp(&self) -> anyhow::Result<TempDirectory> {
         self.garbage_collect().await.context("garbage collect")?;
 
@@ -26,7 +39,7 @@ impl TempDirectories {
             .await
             .context("create temp parent dir")?;
 
-        Ok(TempDirectory {
+        Ok(TempDirectory::Owned {
             last_modified: SystemTime::now(),
             path: random_path,
         })
@@ -100,46 +113,65 @@ impl TempDirectoriesState for State {
 }
 
 #[derive(Clone, Debug)]
-pub struct TempDirectory {
-    last_modified: SystemTime,
-    path: PathBuf,
+pub enum TempDirectory {
+    Owned {
+        last_modified: SystemTime,
+        path: PathBuf,
+    },
+    Inherited {
+        path: PathBuf,
+    },
 }
 
 impl Deref for TempDirectory {
     type Target = PathBuf;
 
     fn deref(&self) -> &Self::Target {
-        &self.path
+        match self {
+            TempDirectory::Owned { path, .. } => path,
+            TempDirectory::Inherited { path } => path,
+        }
     }
 }
 
 impl TempDirectory {
     #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
-        self.path.display().to_string()
+        self.path().display().to_string()
     }
 
     pub fn is_expired(&self) -> bool {
-        let modified = self
-            .last_modified
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        match self {
+            TempDirectory::Owned { last_modified, .. } => {
+                let modified = last_modified
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
 
-        const SECONDS_7_DAYS: u64 = 60 * 60 * 24 * 7;
+                const SECONDS_7_DAYS: u64 = 60 * 60 * 24 * 7;
 
-        modified < now - SECONDS_7_DAYS
+                modified < now - SECONDS_7_DAYS
+            }
+            TempDirectory::Inherited { .. } => false,
+        }
     }
 
     async fn remove(&self) -> anyhow::Result<()> {
-        tokio::fs::remove_dir_all(&self.path).await?;
+        tokio::fs::remove_dir_all(self.path()).await?;
 
         Ok(())
+    }
+
+    fn path(&self) -> &Path {
+        match self {
+            TempDirectory::Owned { path, .. } => path,
+            TempDirectory::Inherited { path } => path,
+        }
     }
 }
 
@@ -150,7 +182,7 @@ pub struct Index {
 
 impl Index {
     fn add(&mut self, path: PathBuf, modified: SystemTime) {
-        self.directories.push(TempDirectory {
+        self.directories.push(TempDirectory::Owned {
             path,
             last_modified: modified,
         })
@@ -174,7 +206,10 @@ impl GuardedTempDirectory {
 impl Deref for GuardedTempDirectory {
     type Target = PathBuf;
     fn deref(&self) -> &Self::Target {
-        &self.inner.temp.path
+        match &self.inner.temp {
+            TempDirectory::Owned { path, .. } => &path,
+            TempDirectory::Inherited { path } => &path,
+        }
     }
 }
 

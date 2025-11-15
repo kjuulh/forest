@@ -1,7 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use crate::{
     component_cache::models::{CacheComponent, CacheComponentCommand, CacheComponentSource},
@@ -37,12 +34,14 @@ impl ProjectParser {
                 project.commands.insert(
                     crate::models::CommandName::Component {
                         namespace: Some(component.namespace.clone()),
-                        name: Some(component.name.clone()),
+                        name: component.name.clone(),
                         source: match &component.source {
                             CacheComponentSource::Versioned(version) => {
                                 CommandSource::Versioned(version.clone())
                             }
-                            CacheComponentSource::Local(path) => CommandSource::Local(path.clone()),
+                            CacheComponentSource::Local(path) => CommandSource::Local(
+                                path.canonicalize().context("get absolute path")?,
+                            ),
                             CacheComponentSource::Unknown => {
                                 anyhow::bail!("a component source cannot be unknown")
                             }
@@ -68,7 +67,7 @@ impl ProjectParser {
     ) -> anyhow::Result<Vec<CacheComponent>> {
         let components = self
             .component_service
-            .sync_components(Some(project.clone()))
+            .get_components_project(project.clone())
             .await
             .inspect_err(|e| println!("{e:?}"))?;
 
@@ -83,9 +82,7 @@ impl ProjectParser {
 
                 if dep.namespace == component.namespace && dep.name == component.name {
                     match &dep.dependency_type {
-                        DependencyType::Versioned(version)
-                            if version.to_string() == component.version =>
-                        {
+                        DependencyType::Versioned(version) if version == &component.version => {
                             tracing::trace!(
                                 name = dep.name,
                                 namespace = dep.namespace,

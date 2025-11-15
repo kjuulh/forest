@@ -1,5 +1,5 @@
 [env]
-RUST_LOG = "non=trace,info"
+#RUST_LOG = "non=trace,info"
 
 [tools]
 rust = { version = "1.89", components = "rust-src,rust-analyzer" }

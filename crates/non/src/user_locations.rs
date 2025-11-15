@@ -1,4 +1,7 @@
-use std::{path::PathBuf, sync::OnceLock};
+use std::{
+    path::PathBuf,
+    sync::{Arc, OnceLock},
+};
 
 use anyhow::Context;
 
@@ -10,8 +13,9 @@ struct Locations {
     data: PathBuf,
 }
 
+#[derive(Clone)]
 pub struct UserLocations {
-    locations: OnceLock<Locations>,
+    locations: Arc<OnceLock<Locations>>,
 }
 
 impl UserLocations {
@@ -91,7 +95,7 @@ pub trait UserLocationsState {
 impl UserLocationsState for State {
     fn user_locations(&self) -> UserLocations {
         UserLocations {
-            locations: OnceLock::new(),
+            locations: Arc::new(OnceLock::new()),
         }
     }
 }

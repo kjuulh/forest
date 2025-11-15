@@ -18,6 +18,8 @@ mod project_artifacts;
 
 mod otel;
 
+mod non_context;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();

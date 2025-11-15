@@ -7,6 +7,7 @@ use crate::{
 
 use super::component_parser::models::RawComponent;
 
+#[derive(Clone)]
 pub struct ComponentDeploymentService {
     grpc: GrpcClient,
 }

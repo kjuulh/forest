@@ -69,7 +69,28 @@ fn unwrap_run_errors(error: MadError) -> anyhow::Error {
         MadError::Inner(error) => error,
         MadError::RunError { run } => run,
         MadError::CloseError { close } => close,
-        MadError::AggregateError(aggregate_error) => anyhow::anyhow!("{}", aggregate_error),
+        MadError::AggregateError(aggregate_error) => {
+            let errors = aggregate_error
+                .take_errors()
+                .into_iter()
+                .map(unwrap_run_errors)
+                .collect::<Vec<_>>();
+
+            let mut combined = Vec::new();
+
+            for error in errors {
+                combined.push(format!("{:?}", error));
+            }
+
+            anyhow::anyhow!(
+                "{}",
+                combined
+                    .into_iter()
+                    .filter(|i| !i.trim().is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            )
+        }
         _ => todo!("error is not implemented, and not intended"),
     }
 }
