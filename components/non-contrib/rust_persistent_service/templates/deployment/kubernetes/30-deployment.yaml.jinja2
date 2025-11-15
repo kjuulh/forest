@@ -1,0 +1,135 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ config.name }}
+  namespace: {{ namespace | default('default') }}
+  labels:
+    app: {{ config.name }}
+    version: {{ version | default('latest') }}
+spec:
+  replicas: {{ config.replicas | default(1) }}
+  selector:
+    matchLabels:
+      app: {{ config.name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: {{ config.name }}
+        version: {{ version | default('latest') }}
+    spec:
+      containers:
+        - name: {{ config.name }}
+          image: {{ config.image | default(config.name + ':latest') }}
+          imagePullPolicy: {{ config.image_pull_policy | default('IfNotPresent') }}
+          {%- if config.ports %}
+          ports:
+          {%- for port in config.ports %}
+            - name: {{ port.name }}
+              containerPort: {{ port.port }}
+              protocol: {{ port.protocol | default('TCP') }}
+          {%- endfor %}
+          {%- endif %}
+          {%- if config.environment or config.env %}
+          env:
+          {%- if config.environment %}
+          {%- for key, value in config.environment.items() %}
+            - name: {{ key }}
+              value: "{{ value }}"
+          {%- endfor %}
+          {%- endif %}
+          {%- if config.env %}
+          {%- for env_var in config.env %}
+            - name: {{ env_var.key }}
+              value: "{{ env_var.value }}"
+          {%- endfor %}
+          {%- endif %}
+          {%- endif %}
+          {%- if config.resources %}
+          resources:
+            {%- if config.resources.requests %}
+            requests:
+              {%- if config.resources.requests.memory %}
+              memory: "{{ config.resources.requests.memory }}"
+              {%- endif %}
+              {%- if config.resources.requests.cpu %}
+              cpu: "{{ config.resources.requests.cpu }}"
+              {%- endif %}
+            {%- endif %}
+            {%- if config.resources.limits %}
+            limits:
+              {%- if config.resources.limits.memory %}
+              memory: "{{ config.resources.limits.memory }}"
+              {%- endif %}
+              {%- if config.resources.limits.cpu %}
+              cpu: "{{ config.resources.limits.cpu }}"
+              {%- endif %}
+            {%- endif %}
+          {%- else %}
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          {%- endif %}
+          {%- if config.health_checks %}
+          {%- if config.health_checks.live %}
+          livenessProbe:
+            {%- if config.health_checks.live.http %}
+            httpGet:
+              path: {{ config.health_checks.live.http.path }}
+              port: {{ config.health_checks.live.http.port }}
+            {%- elif config.health_checks.live.tcp %}
+            tcpSocket:
+              port: {{ config.health_checks.live.tcp.port }}
+            {%- endif %}
+            initialDelaySeconds: {{ config.health_checks.live.initial_delay_seconds | default(30) }}
+            periodSeconds: {{ config.health_checks.live.period_seconds | default(10) }}
+            timeoutSeconds: {{ config.health_checks.live.timeout_seconds | default(5) }}
+            failureThreshold: {{ config.health_checks.live.failure_threshold | default(3) }}
+          {%- endif %}
+          {%- if config.health_checks.ready %}
+          readinessProbe:
+            {%- if config.health_checks.ready.http %}
+            httpGet:
+              path: {{ config.health_checks.ready.http.path }}
+              port: {{ config.health_checks.ready.http.port }}
+            {%- elif config.health_checks.ready.tcp %}
+            tcpSocket:
+              port: {{ config.health_checks.ready.tcp.port }}
+            {%- endif %}
+            initialDelaySeconds: {{ config.health_checks.ready.initial_delay_seconds | default(10) }}
+            periodSeconds: {{ config.health_checks.ready.period_seconds | default(5) }}
+            timeoutSeconds: {{ config.health_checks.ready.timeout_seconds | default(3) }}
+            failureThreshold: {{ config.health_checks.ready.failure_threshold | default(3) }}
+          {%- endif %}
+          {%- endif %}
+{%- if config.ports and (config.ports | selectattr('external', 'defined') | selectattr('external') | list | length > 0) %}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ config.name }}
+  namespace: {{ namespace | default('default') }}
+  labels:
+    app: {{ config.name }}
+spec:
+  type: {{ config.service_type | default('ClusterIP') }}
+  selector:
+    app: {{ config.name }}
+  ports:
+  {%- for port in config.ports %}
+  {%- if port.external %}
+    - name: {{ port.name }}
+      port: {{ port.port }}
+      targetPort: {{ port.port }}
+      protocol: {{ port.protocol | default('TCP') }}
+  {%- endif %}
+  {%- endfor %}
+{%- endif %}

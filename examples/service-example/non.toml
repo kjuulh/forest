@@ -9,13 +9,22 @@ name = "service-example"
 [non.deployment]
 enabled = true
 
-["non-contrib"."rust-persistent-service".destination.dev.config]
+["non-contrib"."rust-persistent-service".env.dev]
+destinations = [{ destination = "dev-k8s-*", type = "non/kubernetes@1" }]
+
+["non-contrib"."rust-persistent-service".env.dev.config]
 replicas = 3
 environment = [{ key = "RUST_LOG", value = "debug" }]
 
-["non-contrib"."rust-persistent-service".destination.prod.config]
+["non-contrib"."rust-persistent-service".env.prod]
+destinations = [{ destination = "prod-k8s-*", type = "non/kubernetes@1" }]
+
+["non-contrib"."rust-persistent-service".env.prod.config]
 replicas = 10
 environment = [{ key = "RUST_LOG", value = "info" }]
+
+["non-contrib"."rust-persistent-service".env.prod.destination.prod-k8s-1]
+replicas = 100
 
 ["non-contrib"."rust-persistent-service".config]
 name = "service-example"
