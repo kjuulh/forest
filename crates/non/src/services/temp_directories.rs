@@ -207,8 +207,8 @@ impl Deref for GuardedTempDirectory {
     type Target = PathBuf;
     fn deref(&self) -> &Self::Target {
         match &self.inner.temp {
-            TempDirectory::Owned { path, .. } => &path,
-            TempDirectory::Inherited { path } => &path,
+            TempDirectory::Owned { path, .. } => path,
+            TempDirectory::Inherited { path } => path,
         }
     }
 }

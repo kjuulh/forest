@@ -7,7 +7,7 @@ use std::{
 use crate::{
     component_cache::{
         ComponentCache, ComponentCacheState,
-        models::{CacheComponent, CacheComponentSource, CacheComponents},
+        models::{CacheComponent, CacheComponents},
     },
     grpc::{GrpcClient, GrpcClientState},
     models::{
@@ -82,7 +82,7 @@ impl ComponentsService {
             ComponentSource::Local(path) => {
                 let comp = self.component_cache.get_component_from_path(path).await?;
 
-                return Ok(comp);
+                Ok(comp)
             }
             ComponentSource::Versioned(_version) => {
                 let comp =
@@ -93,7 +93,7 @@ impl ComponentsService {
                             component_ref
                         ))?;
 
-                return Ok(comp.clone());
+                Ok(comp.clone())
             }
         }
     }
@@ -233,7 +233,7 @@ impl ComponentsService {
                         dep
                     ))
             }
-            DependencyType::Local(path) => todo!(),
+            DependencyType::Local(_path) => todo!(),
         }
     }
 
@@ -251,15 +251,15 @@ impl ComponentsService {
     }
 
     pub async fn get_inits(&self) -> anyhow::Result<BTreeMap<String, (String, CacheComponent)>> {
-        let user_config = self.user_config.get_user_config().await?;
+        let _user_config = self.user_config.get_user_config().await?;
 
-        let deps: Dependencies = user_config.try_into()?;
+        // let deps: Dependencies = user_config.try_into()?;
 
-        let local_deps = self
-            .component_cache
-            .get_local_components()
-            .await
-            .context("failed to get local components")?;
+        // let local_deps = self
+        //     .component_cache
+        //     .get_local_components()
+        //     .await
+        //     .context("failed to get local components")?;
 
         // FIXME(kjuulh): implement inits
         // let local = local_deps

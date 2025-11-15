@@ -5,8 +5,7 @@ use clap::Subcommand;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
-    models::{CommandName, CommandSource},
-    non_context::{self, NonContext, NonContextState},
+    non_context::{NonContext, NonContextState},
     services::project::ProjectParserState,
     state::State,
 };

@@ -19,7 +19,7 @@ pub struct ComponentRegistry {
 
 impl ComponentRegistry {
     pub async fn get_edge_components(&self, project: Option<Project>) -> anyhow::Result<()> {
-        let cached_components = self.download_components(project).await?;
+        self.download_components(project).await?;
 
         Ok(())
     }

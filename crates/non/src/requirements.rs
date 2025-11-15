@@ -8,7 +8,7 @@ pub struct RequirementsService {
 }
 
 impl RequirementsService {
-    pub async fn gather_requirements(&self, project: Project) -> anyhow::Result<Requirements> {
+    pub async fn gather_requirements(&self, _project: Project) -> anyhow::Result<Requirements> {
         todo!()
     }
 }

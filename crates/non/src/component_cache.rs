@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     component_cache::models::{CacheComponent, CacheComponents},
-    services::component_parser::{ComponentParser, ComponentParserState, models::RawComponent},
+    services::component_parser::{ComponentParser, ComponentParserState},
     state::State,
     user_locations::{UserLocations, UserLocationsState},
 };
@@ -108,7 +108,7 @@ impl ComponentCache {
             .await?
             .join(&component.namespace)
             .join(&component.name)
-            .join(&component.version.to_string());
+            .join(component.version.to_string());
 
         Ok(file_path)
     }

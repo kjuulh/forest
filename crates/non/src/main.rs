@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use tracing_subscriber::EnvFilter;
 
 mod cli;

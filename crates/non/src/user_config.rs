@@ -78,12 +78,12 @@ impl UserConfigService {
 
         table[key] = toml_edit::value(value);
 
-        if !config_path.exists() {
-            if let Some(parent) = config_path.parent() {
-                tokio::fs::create_dir_all(&parent)
-                    .await
-                    .context("failed to create config dir")?;
-            }
+        if !config_path.exists()
+            && let Some(parent) = config_path.parent()
+        {
+            tokio::fs::create_dir_all(&parent)
+                .await
+                .context("failed to create config dir")?;
         }
 
         let mut config = tokio::fs::File::create(config_path)
@@ -149,12 +149,12 @@ impl UserConfigService {
                 toml_edit::value(toml_edit::Value::InlineTable(dependency_table));
         }
 
-        if !config_path.exists() {
-            if let Some(parent) = config_path.parent() {
-                tokio::fs::create_dir_all(&parent)
-                    .await
-                    .context("failed to create config dir")?;
-            }
+        if !config_path.exists()
+            && let Some(parent) = config_path.parent()
+        {
+            tokio::fs::create_dir_all(&parent)
+                .await
+                .context("failed to create config dir")?;
         }
 
         let mut config = tokio::fs::File::create(config_path)

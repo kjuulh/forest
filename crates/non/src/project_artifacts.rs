@@ -24,9 +24,9 @@ impl ProjectArtifacts {
     pub async fn publish(
         &self,
         registry_url: impl Into<RegistryUrl>,
-        data: ArtifactData,
+        _data: ArtifactData,
     ) -> anyhow::Result<()> {
-        let registry: RegistryUrl = registry_url.into();
+        let _registry: RegistryUrl = registry_url.into();
 
         // 1. Stage the upload
         // 2. Upload files

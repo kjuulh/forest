@@ -127,8 +127,8 @@ pub enum CommandName {
 impl CommandName {
     pub(crate) fn command_name(&self) -> &str {
         match self {
-            CommandName::Component { command_name, .. } => &command_name,
-            CommandName::Project { command_name } => &command_name,
+            CommandName::Component { command_name, .. } => command_name,
+            CommandName::Project { command_name } => command_name,
         }
     }
 
@@ -142,7 +142,7 @@ impl CommandName {
             } => {
                 let src = match source {
                     CommandSource::Local(path) => format!("#{}", path.to_string_lossy()),
-                    CommandSource::Versioned(version) => format!("@{}", version.to_string()),
+                    CommandSource::Versioned(version) => format!("@{}", version),
                 };
                 format!(
                     "{}/{}{src}:{command_name}",
@@ -164,7 +164,7 @@ impl CommandName {
             } => {
                 let src = match source {
                     CommandSource::Local(path) => format!("#{}", path.to_string_lossy()),
-                    CommandSource::Versioned(version) => format!("@{}", version.to_string()),
+                    CommandSource::Versioned(version) => format!("@{}", version),
                 };
                 Some(format!(
                     "{}/{}{src}",
@@ -198,14 +198,14 @@ impl Display for CommandName {
                         match &source {
                             CommandSource::Local(path) => format!("#{}", path.to_string_lossy()),
                             CommandSource::Versioned(version) => {
-                                format!("@{}", version.to_string())
+                                format!("@{}", version)
                             }
                         }
                     },
                     command_name
                 )
             }
-            CommandName::Project { command_name } => f.write_str(&command_name),
+            CommandName::Project { command_name } => f.write_str(command_name),
         }
     }
 }
@@ -221,7 +221,7 @@ impl ComponentReference {
         Self {
             namespace: namespace.into(),
             name: name.into(),
-            source: source.into(),
+            source,
         }
     }
 }
