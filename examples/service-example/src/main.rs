@@ -2,7 +2,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 
 use anyhow::Context;
 use async_trait::async_trait;
-use axum::{Router, routing::get};
+use axum::routing::get;
 use notmad::{Component, MadError};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -10,11 +10,11 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt
-        // .with_env_filter(
-        //     EnvFilter::from_default_env().add_directive("notmad=debug".parse().context("notmad")?),
-        // )
-        ::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::from_default_env().add_directive("notmad=debug".parse().context("notmad")?),
+        )
+        .init();
 
     for arg in std::env::args() {
         if arg == "--help" {
