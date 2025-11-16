@@ -6,7 +6,10 @@ use std::{
 use crate::{
     component_cache::models::{CacheComponent, CacheComponentCommand, CacheComponentSource},
     models::{CommandName, CommandSource, DependencyType, Project, ProjectValue},
-    services::components::{ComponentsService, ComponentsServiceState},
+    services::{
+        components::{ComponentsService, ComponentsServiceState},
+        temp_directories::{TempDirectories, TempDirectoriesState},
+    },
     state::State,
 };
 
@@ -14,10 +17,14 @@ use anyhow::Context;
 pub mod models;
 pub use models::*;
 
-const NON_PROJECT_FILE: &str = "non.toml";
+const NON_PROJECT_TOML_FILE: &str = "non.toml";
+const NON_PROJECT_NICKEL_FILE: &str = "non.ncl";
+const NON_PROJECT_YAML_FILE: &str = "non.yaml";
+const NON_PROJECT_CUE_FILE: &str = "non.cue";
 
 pub struct ProjectParser {
     component_service: ComponentsService,
+    temp: TempDirectories,
 }
 
 impl ProjectParser {
@@ -117,8 +124,10 @@ impl ProjectParser {
         let current_dir =
             std::env::current_dir().context("current project dir is required for a project")?;
         let (project_file_path, project_file_content) = self.find_project_file(current_dir).await?;
-        let mut project_file: NonProject = toml::from_str(&project_file_content)?;
-        let raw: toml::Value = toml::from_str(&project_file_content)?;
+        let mut project_file: NonProject =
+            toml::from_str(&project_file_content).context("parse file as toml")?;
+        let raw: toml::Value =
+            toml::from_str(&project_file_content).context("parse file as raw toml")?;
         project_file.raw = Some(raw);
 
         let mut project: Project = project_file.try_into().context("parse project")?;
@@ -152,17 +161,78 @@ impl ProjectParser {
 
     #[tracing::instrument(skip(self), level = "debug")]
     async fn get_project_file(&self, dir: &Path) -> anyhow::Result<Option<(PathBuf, String)>> {
-        let file_path = dir.join(NON_PROJECT_FILE);
-        if !file_path.exists() {
-            tracing::debug!("project file doesn't exist");
-            return Ok(None);
+        let file_path = dir.join(NON_PROJECT_CUE_FILE);
+        if file_path.exists() {
+            // 1. Transform cue into toml
+            let output = tokio::process::Command::new("cue")
+                .arg("export")
+                .arg(&file_path)
+                .arg("--out")
+                .arg("toml")
+                .output()
+                .await?;
+
+            let stderr =
+                std::string::String::from_utf8(output.stderr).context("interpret stderr")?;
+            let output = std::string::String::from_utf8(output.stdout)
+                .context("convert cue into native format (toml)")?;
+
+            tracing::debug!("output: (stdout: {:?}, stderr: {:?})", output, stderr);
+
+            return Ok(Some((file_path, output)));
+        }
+        let file_path = dir.join(NON_PROJECT_NICKEL_FILE);
+        if file_path.exists() {
+            // 1. Transform cue into toml
+            let output = tokio::process::Command::new("nickel")
+                .arg("export")
+                .arg(&file_path)
+                .arg("--format")
+                .arg("toml")
+                .output()
+                .await?;
+
+            let stderr =
+                std::string::String::from_utf8(output.stderr).context("interpret stderr")?;
+            let output = std::string::String::from_utf8(output.stdout)
+                .context("convert nickel (ncl) into native format (toml)")?;
+
+            tracing::debug!("output: (stdout: {:?}, stderr: {:?})", output, stderr);
+
+            return Ok(Some((file_path, output)));
+        }
+        let file_path = dir.join(NON_PROJECT_YAML_FILE);
+        if file_path.exists() {
+            // 1. Transform cue into toml
+            let output = tokio::process::Command::new("cue")
+                .arg("export")
+                .arg(&file_path)
+                .arg("--out")
+                .arg("toml")
+                .output()
+                .await?;
+
+            let stderr =
+                std::string::String::from_utf8(output.stderr).context("interpret stderr")?;
+            let output = std::string::String::from_utf8(output.stdout)
+                .context("convert yaml into native format (toml)")?;
+
+            tracing::debug!("output: (stdout: {:?}, stderr: {:?})", output, stderr);
+
+            return Ok(Some((file_path, output)));
         }
 
-        let file_content = tokio::fs::read_to_string(&file_path)
-            .await
-            .context(format!("failed to read file: {}", file_path.display()))?;
+        let file_path = dir.join(NON_PROJECT_TOML_FILE);
+        if file_path.exists() {
+            let file_content = tokio::fs::read_to_string(&file_path)
+                .await
+                .context(format!("failed to read file: {}", file_path.display()))?;
 
-        return Ok(Some((file_path, file_content)));
+            return Ok(Some((file_path, file_content)));
+        }
+
+        tracing::debug!("project file doesn't exist");
+        return Ok(None);
     }
 }
 
@@ -174,6 +244,7 @@ impl ProjectParserState for State {
     fn project_parser(&self) -> ProjectParser {
         ProjectParser {
             component_service: self.components_service(),
+            temp: self.temp_directories(),
         }
     }
 }

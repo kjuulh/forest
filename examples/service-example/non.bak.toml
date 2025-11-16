@@ -36,7 +36,7 @@ ports = [
 ]
 health_checks = { live = { http = { path = "/", port = 3001 } } }
 
-[non."rust-persistent-service".config.environment]
+["non-contrib"."rust-persistent-service".config.environment]
 RUST_LOG = "my_service=debug,info"
 
 [commands]
