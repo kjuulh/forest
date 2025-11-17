@@ -13,7 +13,7 @@ use non_grpc_interface::{
     get_projects_request::Query, namespace_service_client::NamespaceServiceClient,
     registry_service_client::RegistryServiceClient, release_service_client::ReleaseServiceClient,
 };
-use non_models::{Destination, Namespace, ProjectName};
+use non_models::{Destination, DestinationType, Namespace, ProjectName};
 use tokio::{
     sync::{OnceCell, mpsc::Sender},
     task::JoinHandle,
@@ -432,13 +432,19 @@ impl GrpcClient {
             .context("release annotation")
     }
 
-    pub async fn release(&self, artifact_id: Uuid, destination: &[String]) -> anyhow::Result<()> {
+    pub async fn release(
+        &self,
+        artifact_id: Uuid,
+        destination: &[String],
+        environments: &[String],
+    ) -> anyhow::Result<()> {
         let mut client = self.release_client().await?;
 
         client
             .release(ReleaseRequest {
                 artifact_id: artifact_id.to_string(),
                 destinations: destination.into(),
+                environments: environments.into(),
             })
             .await
             .context("release (grpc)")?;
@@ -475,7 +481,7 @@ impl GrpcClient {
     }
 
     pub async fn get_destinations(&self) -> anyhow::Result<Vec<Destination>> {
-        let mut client = self.release_client().await?;
+        let mut client = self.destination_client().await?;
 
         let response = client
             .get_destinations(GetDestinationsRequest {})
@@ -483,14 +489,31 @@ impl GrpcClient {
             .context("get destinations (grpc)")?;
         let resp = response.into_inner();
 
-        Ok(resp.destinations.into_iter().map(|r| r.into()).collect())
+        Ok(resp
+            .destinations
+            .into_iter()
+            .map(|r| {
+                Destination::new(
+                    &r.name,
+                    &r.environment,
+                    r.r#type.expect("to always be available").into(),
+                )
+            })
+            .collect())
     }
 
-    pub async fn create_destination(&self, name: &str) -> anyhow::Result<()> {
+    pub async fn create_destination(
+        &self,
+        name: &str,
+        environment: &str,
+        destination_type: DestinationType,
+    ) -> anyhow::Result<()> {
         self.destination_client()
             .await?
             .create_destination(CreateDestinationRequest {
                 name: name.to_string(),
+                environment: environment.to_string(),
+                r#type: Some(destination_type.into()),
             })
             .await
             .context("create destination (grpc)")?;

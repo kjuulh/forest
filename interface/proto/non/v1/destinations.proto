@@ -4,10 +4,29 @@ package non.v1;
 
 message CreateDestinationRequest {
   string name = 1;
+  string environment = 2;
+  DestinationType type = 3;
 }
 message CreateDestinationResponse {}
 
-service DestinationService {
-  rpc CreateDestination(CreateDestinationRequest) returns (CreateDestinationResponse) {}
+message GetDestinationsRequest {}
+message GetDestinationsResponse {
+  repeated Destination destinations = 1;
 }
 
+service DestinationService {
+  rpc CreateDestination(CreateDestinationRequest) returns (CreateDestinationResponse) {}
+  rpc GetDestinations(GetDestinationsRequest) returns (GetDestinationsResponse);
+}
+
+message Destination {
+  string name = 1;
+  string environment = 2;
+  DestinationType type = 3;
+}
+
+message DestinationType {
+  string organisation = 1;
+  string name = 2;
+  uint64 version = 3;
+}

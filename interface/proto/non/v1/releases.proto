@@ -24,6 +24,7 @@ message GetArtifactBySlugResponse {
 message ReleaseRequest {
   string artifact_id = 1;
   repeated string destinations = 2;
+  repeated string environments = 3;
 }
 message ReleaseResponse {}
 
@@ -41,10 +42,6 @@ message GetProjectsResponse {
   repeated string projects = 1;
 }
 
-message GetDestinationsRequest {}
-message GetDestinationsResponse {
-  repeated string destinations = 1;
-}
 
 
 service ReleaseService {
@@ -54,7 +51,6 @@ service ReleaseService {
   rpc GetArtifactBySlug(GetArtifactBySlugRequest) returns (GetArtifactBySlugResponse);
   rpc GetNamespaces(GetNamespacesRequest) returns (GetNamespacesResponse);
   rpc GetProjects(GetProjectsRequest) returns (GetProjectsResponse);
-  rpc GetDestinations(GetDestinationsRequest) returns (GetDestinationsResponse);
 }
 
 message Source {

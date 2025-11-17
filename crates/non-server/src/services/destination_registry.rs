@@ -1,4 +1,6 @@
 use anyhow::Context;
+use non_models::{Destination, DestinationType};
+use uuid::Uuid;
 
 use crate::State;
 
@@ -7,24 +9,74 @@ pub struct DestinationRegistry {
 }
 
 impl DestinationRegistry {
-    pub async fn create_destination(&self, name: &str) -> anyhow::Result<()> {
+    pub async fn create_destination(
+        &self,
+        name: &str,
+        environment: &str,
+        destination_type: DestinationType,
+    ) -> anyhow::Result<()> {
         sqlx::query!(
             "
                 INSERT INTO destinations (
                     name,
-                    metadata
+                    environment,
+                    metadata,
+                    type_organisation,
+                    type_name,
+                    type_version
                 ) VALUES (
                     $1,
-                    '{}'
+                    $2,
+                    '{}',
+                    $3,
+                    $4,
+                    $5
+
                 )
                 ",
-            name
+            name,
+            environment,
+            destination_type.organisation,
+            destination_type.name,
+            destination_type.version as i32,
         )
         .execute(&self.db)
         .await
         .context("create destination (db)")?;
 
         Ok(())
+    }
+
+    pub(crate) async fn get(&self, destination_id: &Uuid) -> anyhow::Result<Option<Destination>> {
+        let rec = sqlx::query!(
+            "
+                SELECT
+                    name,
+                    environment,
+                    type_organisation,
+                    type_name,
+                    type_version
+                FROM destinations
+                WHERE id = $1
+                LIMIT 1;
+            ",
+            destination_id
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("get destination")?;
+
+        let Some(rec) = rec else { return Ok(None) };
+
+        Ok(Some(Destination::new(
+            &rec.name,
+            &rec.environment,
+            non_models::DestinationType {
+                organisation: rec.type_organisation,
+                name: rec.type_name,
+                version: rec.type_version as usize,
+            },
+        )))
     }
 }
 

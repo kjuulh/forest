@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::Context;
 
@@ -48,20 +48,75 @@ impl PublishCommand {
             .await
             .context("begin artifact upload")?;
 
-        let large_payload = str::from_utf8(&LARGE_PAYOAD).unwrap();
+        let mut files = Vec::new();
+        for entry in walkdir::WalkDir::new(".non/deployment") {
+            let entry = entry?;
+            let path = entry.path();
+            let metadata = entry.metadata()?;
 
-        for i in 0..9 {
-            tracing::info!("uploading file: {}", i);
+            if !metadata.is_file() {
+                continue;
+            }
+
+            files.push(path.to_path_buf());
+        }
+
+        for file in files {
+            let artifact_file = file.strip_prefix(".non/deployment")?;
+            let mut components = artifact_file.components();
+            let Some(env) = components.next() else {
+                tracing::warn!("file doesn't exist, env is required");
+                continue;
+            };
+            let Some(destination) = components.next() else {
+                tracing::warn!("file doesn't exist, destination is required");
+                continue;
+            };
+
+            let destination = destination.as_os_str().to_string_lossy();
+            let destination = destination.replace(".", "/");
+
+            let Some(_destination_type_namespace) = components.next() else {
+                tracing::warn!("file doesn't exist, destination_type_namespace is required");
+                continue;
+            };
+            let Some(_destination_type_name) = components.next() else {
+                tracing::warn!("file doesn't exist, destination_type_name is required");
+                continue;
+            };
+
+            let _file_name = components.collect::<PathBuf>();
+            let file_content = tokio::fs::read_to_string(&file)
+                .await
+                .context("failed to read template file")?;
+
+            let file_path = artifact_file.to_string_lossy();
+            tracing::info!("uploading file: {}", file_path);
             grpc.upload_artifact_file(
                 &upload_handle,
-                &i.to_string(),
-                large_payload,
-                "some-env",
-                "some-dest",
+                &file_path,
+                &file_content,
+                &env.as_os_str().to_string_lossy(),
+                &destination,
             )
             .await
-            .context("upload first file")?;
+            .context("upload file")?;
         }
+
+        // let large_payload = str::from_utf8(&LARGE_PAYOAD).unwrap();
+
+        // for i in 0..9 {
+        //     tracing::info!("uploading file: {}", i);
+        //     grpc.upload_artifact_file(
+        //         &upload_handle,
+        //         &i.to_string(),
+        //         large_payload,
+        //         "some-env",
+        //         "some-dest",
+        //     )
+        //     .await
+        //     .context("upload first file")?;
+        // }
 
         let artifact_id = grpc
             .commit_artifact_upload(upload_handle)

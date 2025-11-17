@@ -45,10 +45,44 @@ pub struct CommitArtifactResponse {
 pub struct CreateDestinationRequest {
     #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub environment: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub r#type: ::core::option::Option<DestinationType>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct CreateDestinationResponse {
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct GetDestinationsRequest {
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetDestinationsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub destinations: ::prost::alloc::vec::Vec<Destination>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Destination {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub environment: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub r#type: ::core::option::Option<DestinationType>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DestinationType {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(uint64, tag="3")]
+    pub version: u64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -234,6 +268,8 @@ pub struct ReleaseRequest {
     pub artifact_id: ::prost::alloc::string::String,
     #[prost(string, repeated, tag="2")]
     pub destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="3")]
+    pub environments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -269,16 +305,6 @@ pub mod get_projects_request {
 pub struct GetProjectsResponse {
     #[prost(string, repeated, tag="1")]
     pub projects: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
-pub struct GetDestinationsRequest {
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetDestinationsResponse {
-    #[prost(string, repeated, tag="1")]
-    pub destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

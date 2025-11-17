@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use crate::{grpc, state::State};
+use crate::{grpc, scheduler::SchedulerState, state::State};
 
 #[derive(clap::Parser)]
 pub struct ServeCommand {
@@ -15,6 +15,8 @@ impl ServeCommand {
                 host: self.host,
                 state: state.clone(),
             })
+            .add(state.scheduler())
+            .add(state.drop_queue.clone())
             .run()
             .await?;
 

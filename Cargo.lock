@@ -1553,14 +1553,17 @@ dependencies = [
  "bytes",
  "clap",
  "dotenvy",
+ "drop-queue",
  "futures",
  "inquire",
  "non-grpc-interface",
  "non-models",
- "notmad 0.7.5",
+ "notmad 0.10.0",
+ "noworkers",
  "petname",
  "prost 0.13.5",
  "prost-types",
+ "rand 0.9.2",
  "reqwest",
  "semver",
  "serde",
@@ -1572,23 +1575,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
-]
-
-[[package]]
-name = "notmad"
-version = "0.7.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f3302ab4d73d7c9c76f2832d6b207560b8d37f00661f4c82f26dd4dc01a1ff8"
-dependencies = [
- "anyhow",
- "async-trait",
- "futures",
- "futures-util",
- "rand 0.9.2",
- "thiserror",
- "tokio",
- "tokio-util",
- "tracing",
 ]
 
 [[package]]

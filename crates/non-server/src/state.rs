@@ -1,9 +1,11 @@
 use anyhow::Context;
+use drop_queue::DropQueue;
 use sqlx::PgPool;
 
 #[derive(Clone)]
 pub struct State {
     pub db: PgPool,
+    pub drop_queue: DropQueue,
 }
 
 impl State {
@@ -19,6 +21,9 @@ impl State {
             .run(&pool)
             .await?;
 
-        Ok(Self { db: pool })
+        Ok(Self {
+            db: pool,
+            drop_queue: DropQueue::new(),
+        })
     }
 }

@@ -1,15 +1,30 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
-use non_models::Destination;
-use tokio::sync::RwLock;
+use crate::{
+    State,
+    destinations::{DestinationIndex, DestinationService},
+};
 
-use crate::{State, destinations::DestinationService};
-
+#[derive(Clone)]
 pub struct DestinationServices {
-    services: Arc<RwLock<BTreeMap<Destination, DestinationService>>>,
+    services: Arc<Vec<DestinationService>>,
 }
 
-impl DestinationServices {}
+impl DestinationServices {
+    pub fn get_destination(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: usize,
+    ) -> Option<&DestinationService> {
+        let index = DestinationIndex {
+            organisation: organisation.into(),
+            name: name.into(),
+            version,
+        };
+        self.services.iter().find(|i| i.name() == index)
+    }
+}
 
 pub trait DestinationServicesState {
     fn destination_services(&self) -> DestinationServices;
@@ -18,7 +33,10 @@ pub trait DestinationServicesState {
 impl DestinationServicesState for State {
     fn destination_services(&self) -> DestinationServices {
         DestinationServices {
-            services: Arc::default(),
+            services: Arc::new(vec![
+                DestinationService::new_kubernetes_v1(),
+                DestinationService::new_terraform_v1(self),
+            ]),
         }
     }
 }

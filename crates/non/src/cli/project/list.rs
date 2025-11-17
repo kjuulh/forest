@@ -68,7 +68,7 @@ mod destination {
 
             println!("destinations:\n");
             for destination in destinations {
-                println!("- {}", destination.as_str())
+                println!("- {}", destination)
             }
 
             Ok(())

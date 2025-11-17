@@ -1,8 +1,14 @@
-use crate::destinations::{DestinationEdge, DestinationIndex};
+use non_models::Destination;
+
+use crate::{
+    destinations::{DestinationEdge, DestinationIndex},
+    services::release_registry::ReleaseItem,
+};
 
 /// Kubernetes is flux2 based currently. (git)
 pub struct KubernetesV1Destination {}
 
+#[async_trait::async_trait]
 impl DestinationEdge for KubernetesV1Destination {
     fn name(&self) -> DestinationIndex {
         DestinationIndex {
@@ -10,5 +16,13 @@ impl DestinationEdge for KubernetesV1Destination {
             name: "kubernetes".into(),
             version: 1,
         }
+    }
+
+    async fn release(
+        &self,
+        release: &ReleaseItem,
+        destination: &Destination,
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
 }

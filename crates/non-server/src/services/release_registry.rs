@@ -125,6 +125,7 @@ impl ReleaseRegistry {
         &self,
         artifact_id: &ArtifactID,
         destinations: Vec<String>,
+        environments: Vec<String>,
     ) -> anyhow::Result<()> {
         let annotation_rec = sqlx::query!(
             "
@@ -143,15 +144,20 @@ impl ReleaseRegistry {
         let project_id = annotation_rec.project_id;
 
         let destination_ids = sqlx::query!(
-            "SELECT DISTINCT id FROM destinations WHERE name = ANY($1)",
-            &destinations
+            "SELECT DISTINCT id FROM destinations WHERE name = ANY($1) OR environment = ANY($2)",
+            &destinations,
+            &environments
         )
         .fetch_all(&self.db)
         .await
         .context("release")?;
 
-        if destination_ids.len() != destinations.len() {
+        if destination_ids.len() < destinations.len() {
             anyhow::bail!("not all destinations exists")
+        }
+
+        if destination_ids.is_empty() {
+            anyhow::bail!("found no destinations for requested environment");
         }
 
         let destination_ids: Vec<Uuid> = destination_ids.into_iter().map(|n| n.id).collect();
@@ -200,6 +206,80 @@ impl ReleaseRegistry {
         }
 
         tx.commit().await.context("commit release batch")?;
+
+        Ok(())
+    }
+
+    pub async fn get_staged_release(
+        &self,
+    ) -> anyhow::Result<Option<(ReleaseItem, StagedReleaseTx)>> {
+        let mut tx = self.db.begin().await?;
+
+        let item = sqlx::query!(
+            "
+            SELECT
+                id,
+                artifact,
+                annotation_id,
+                project_id,
+                destination_id,
+                status
+            FROM releases
+            WHERE status = 'STAGED'
+            LIMIT 1
+            FOR UPDATE
+            SKIP LOCKED
+        "
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let Some(item) = item else {
+            return Ok(None);
+        };
+
+        Ok(Some((
+            ReleaseItem {
+                id: item.id,
+                artifact: item.artifact,
+                project_id: item.project_id,
+                destination_id: item.destination_id,
+                status: item.status,
+            },
+            StagedReleaseTx { tx },
+        )))
+    }
+
+    pub async fn commit_release_status(
+        &self,
+        release_item: &ReleaseItem,
+        mut staged_release_tx: StagedReleaseTx,
+        status: &str,
+    ) -> anyhow::Result<()> {
+        let res = sqlx::query!(
+            "
+                UPDATE releases
+                SET
+                    status = $2,
+                    updated = now()
+                WHERE id = $1
+            ",
+            release_item.id,
+            status
+        )
+        .execute(&mut *staged_release_tx.tx)
+        .await
+        .context("update release status")?;
+
+        if res.rows_affected() != 1 {
+            anyhow::bail!(
+                "setting release status failed to update row: {}",
+                release_item.id
+            );
+        }
+
+        tracing::debug!(release_id =% release_item.id, status, "committing final release status");
+        staged_release_tx.tx.commit().await?;
 
         Ok(())
     }
@@ -287,14 +367,34 @@ impl ReleaseRegistry {
         // TODO: consider if we should cursor this
         let recs = sqlx::query!(
             "
-                SELECT id, name FROM destinations 
+                SELECT
+                    id,
+                    name,
+                    environment,
+                    type_organisation,
+                    type_name,
+                    type_version
+                FROM destinations 
             ",
         )
         .fetch_all(&self.db)
         .await
         .context("get destinations (db)")?;
 
-        Ok(recs.into_iter().map(|r| r.name.into()).collect())
+        Ok(recs
+            .into_iter()
+            .map(|r| {
+                Destination::new(
+                    &r.name,
+                    &r.environment,
+                    non_models::DestinationType {
+                        organisation: r.type_organisation,
+                        name: r.type_name,
+                        version: r.type_version as usize,
+                    },
+                )
+            })
+            .collect())
     }
 }
 
@@ -342,4 +442,16 @@ pub struct ReleaseAnnotation {
     pub source: Source,
     pub context: ArtifactContext,
     pub project: Project,
+}
+
+pub struct ReleaseItem {
+    pub id: Uuid,
+    pub artifact: Uuid,
+    pub project_id: Uuid,
+    pub destination_id: Uuid,
+    pub status: String,
+}
+
+pub struct StagedReleaseTx {
+    tx: sqlx::Transaction<'static, sqlx::Postgres>,
 }

@@ -30,15 +30,20 @@ pub struct ReleaseCommand {
     #[arg(long = "ref", short = 'r')]
     r#ref: Option<String>,
 
+    #[arg(long, short = 'e', alias = "env")]
+    environment: Vec<String>,
+
     #[arg(long, short = 'd')]
-    destination: Vec<String>,
+    destination: Option<Vec<String>>,
 }
 
 impl ReleaseCommand {
     pub async fn execute(&self, state: &State) -> Result<(), anyhow::Error> {
-        if self.destination.is_empty() {
-            anyhow::bail!("a destination is required for deployment")
+        if self.environment.is_empty() {
+            anyhow::bail!("at least one environment is required");
         }
+
+        let destination = self.destination.clone().unwrap_or_default();
 
         let artifact_id: ArtifactID = match (&self.artifact_id, &self.slug) {
             (Some(artifact_id), _) => artifact_id.parse().context("artifact id")?,
@@ -55,13 +60,11 @@ impl ReleaseCommand {
             }
         };
 
-        tracing::info!("found artifact: {}", artifact_id);
-
-        tracing::info!("releasing");
+        tracing::info!(artifact =% artifact_id, "releasing");
 
         state
             .grpc_client()
-            .release(artifact_id, &self.destination)
+            .release(artifact_id, &destination, &self.environment)
             .await
             .context("release")?;
 

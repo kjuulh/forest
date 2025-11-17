@@ -21,6 +21,10 @@ dotenvy.workspace = true
 async-trait.workspace = true
 semver = { workspace = true, features = ["serde"] }
 futures.workspace = true
+notmad.workspace = true
+drop-queue.workspace = true
+rand.workspace = true
+noworkers.workspace = true
 
 bytes.workspace = true
 prost.workspace = true
@@ -36,11 +40,8 @@ toml = { version = "0.8.23", features = ["preserve_order"] }
 walkdir = "2.5.0"
 dirs = "6.0.0"
 toml_edit = "0.22.27"
-rand = "0.9.1"
 hex = "0.4.3"
-noworkers = "0.1.0"
-drop-queue = { version = "0.0.8", features = ["notmad"] }
-notmad = "0.10.0"
+
 tokio-util = "0.7.15"
 stringcase = "0.4.0"
 ron = { version = "0.10.1", features = ["indexmap"] }

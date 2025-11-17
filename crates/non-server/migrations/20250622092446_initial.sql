@@ -127,8 +127,13 @@ CREATE INDEX idx_release_destination ON releases (destination_id);
 create table destinations (
     id uuid primary key default gen_random_uuid(),
     name TEXT not null,
+    environment TEXT not null,
+    type_organisation TEXT not null,
+    type_name TEXT not null,
+    type_version INTEGER not null,
     metadata JSONB not null,
     created timestamptz not null default now(),
     updated timestamptz not null default now()
 );
 CREATE UNIQUE INDEX idx_destinations_name ON destinations (name);
+CREATE INDEX idx_destinations_environment ON destinations (environment);

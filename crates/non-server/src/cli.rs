@@ -20,7 +20,7 @@ enum Commands {
 impl Commands {
     async fn execute(&self, state: &State) -> anyhow::Result<()> {
         match self {
-            Commands::Serve(serve_command) => serve_command.execute(state).await,
+            Commands::Serve(cmd) => cmd.execute(state).await,
         }
     }
 }

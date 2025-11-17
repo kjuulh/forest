@@ -97,6 +97,7 @@ impl ReleaseService for ReleaseServer {
                     .context("artifact id")
                     .to_internal_error()?,
                 req.destinations,
+                req.environments,
             )
             .await
             .context("release")
@@ -144,26 +145,6 @@ impl ReleaseService for ReleaseServer {
 
         Ok(Response::new(GetProjectsResponse {
             projects: projects.into_iter().map(|n| n.to_string()).collect(),
-        }))
-    }
-
-    async fn get_destinations(
-        &self,
-        request: tonic::Request<GetDestinationsRequest>,
-    ) -> std::result::Result<tonic::Response<GetDestinationsResponse>, tonic::Status> {
-        tracing::debug!("get destinations");
-        let _req = request.into_inner();
-
-        let destinations = self
-            .state
-            .release_registry()
-            .get_destinations()
-            .await
-            .context("failed to find destinations")
-            .to_internal_error()?;
-
-        Ok(Response::new(GetDestinationsResponse {
-            destinations: destinations.into_iter().map(|n| n.to_string()).collect(),
         }))
     }
 }

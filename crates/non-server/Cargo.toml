@@ -16,6 +16,10 @@ dotenvy.workspace = true
 async-trait.workspace = true
 semver.workspace = true
 futures.workspace = true
+notmad.workspace = true
+drop-queue.workspace = true
+rand.workspace = true
+noworkers.workspace = true
 
 bytes.workspace = true
 prost.workspace = true
@@ -27,7 +31,6 @@ uuid = { version = "1.7.0", features = ["v4"] }
 inquire = "0.7.5"
 reqwest = "0.12.20"
 tokio-util = "0.7.15"
-notmad = "0.7.1"
 sqlx = { version = "0.8.6", features = [
   "chrono",
   "postgres",

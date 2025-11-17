@@ -53,6 +53,16 @@ run = "docker compose -f ./templates/docker-compose.yaml down -v"
 [tasks."local:logs"]
 run = "docker compose -f ./templates/docker-compose.yaml logs -f"
 
+[tasks."db:shell"]
+env = {PGPASSWORD="devpassword"}
+run = "psql -h localhost -p 5432 -U devuser -d dev"
+
+[tasks."db:migrate"]
+run = "cargo sqlx migrate run --source ./crates/non-server/migrations/"
+
+[tasks."db:prepare"]
+run = "cargo sqlx prepare --workspace"
+
 [tasks."k8s:up"]
 run = "./scripts/k3d-manager.sh create"
 

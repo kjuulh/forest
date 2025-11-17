@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                   INSERT INTO projects (\n                       namespace,\n                       project\n                   ) VALUES (\n                       $1,\n                       $2\n                   ) RETURNING id\n                   ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c357ca1054213ace574fc4c28b43338cfc23fe5e35275dde56ec6d4d47610840"
+}

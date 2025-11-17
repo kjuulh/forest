@@ -1,5 +1,6 @@
 use std::{
     fmt::Display,
+    path::PathBuf,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -86,6 +87,41 @@ impl ArtifactStagingRegistry {
         .context("create artifact file")?;
 
         Ok(())
+    }
+
+    pub async fn get_files_for_release(
+        &self,
+        id: &uuid::Uuid,
+        env: &str,
+    ) -> anyhow::Result<Vec<(PathBuf, String)>> {
+        let rec = sqlx::query!("SELECT artifact_id FROM artifacts WHERE id = $1", id)
+            .fetch_one(&self.db)
+            .await
+            .context("get artifact id")?;
+        let artifact_id = rec.artifact_id;
+
+        let recs = sqlx::query!(
+            "
+                SELECT
+                    file.file_name as file_name,
+                    blob.content as file_content
+                FROM artifact_files file
+                JOIN blob_storage blob ON
+                    file.file_content = blob.id
+                WHERE
+                        artifact_staging_id = $1
+                    AND env = $2;
+            ",
+            artifact_id,
+            env
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        Ok(recs
+            .into_iter()
+            .flat_map(|r| Some((PathBuf::from(r.file_name), r.file_content?)))
+            .collect())
     }
 
     pub async fn commit_staging(&self, id: &StagingArtifactID) -> anyhow::Result<ArtifactID> {

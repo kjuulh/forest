@@ -1,25 +1,24 @@
 project: name: "service-example"
 
-#basePath: "../../components"
-
-dependencies: {
-	"non/deployment": path:                      "\(#basePath)/non/deployment"
-	"non-contrib/postgres": path:                "\(#basePath)/non-contrib/postgres"
-	"non-contrib/rust-persistent-service": path: "\(#basePath)/non-contrib/rust_persistent_service"
-}
-
-non: deployment: enabled: true
-
-#destinationTypes: {
+_basePath: "../../components"
+_destinationTypes: {
 	kubernetes: "non/kubernetes@1"
 	terraform:  "non/terraform@1"
 }
+
+dependencies: {
+	"non/deployment": path:                      "\(_basePath)/non/deployment"
+	"non-contrib/postgres": path:                "\(_basePath)/non-contrib/postgres"
+	"non-contrib/rust-persistent-service": path: "\(_basePath)/non-contrib/rust_persistent_service"
+}
+
+non: deployment: enabled: true
 
 "non-contrib": "rust-persistent-service": {
 	env: {
 		dev: {
 			destinations: [
-				{destination: "dev-k8s-*", type: #destinationTypes.kubernetes},
+				{destination: "k8s.*", type: _destinationTypes.kubernetes},
 			]
 			config: {
 				replicas: 3
@@ -31,8 +30,8 @@ non: deployment: enabled: true
 
 		prod: {
 			destinations: [
-				{destination: "prod-k8s-*", type: #destinationTypes.kubernetes},
-				{destination: "eu-west-1-*", type: #destinationTypes.terraform},
+				{destination: "k8s.*", type: _destinationTypes.kubernetes},
+				{destination: "eu-west-1.*", type: _destinationTypes.terraform},
 			]
 			config: {
 				replicas: 10

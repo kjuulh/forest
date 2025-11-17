@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT\n                    file.file_name as file_name,\n                    blob.content as file_content\n                FROM artifact_files file\n                JOIN blob_storage blob ON\n                    file.file_content = blob.id\n                WHERE\n                        artifact_staging_id = $1\n                    AND env = $2;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "file_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "file_content",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "ae2044c3c779bdba7e26e4dfac4994989d62a9dcdf936a33bbed9cfb8f2292eb"
+}

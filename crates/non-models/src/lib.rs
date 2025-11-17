@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::{fmt::Display, ops::Deref};
 
 pub struct Namespace(String);
 impl Deref for Namespace {
@@ -61,18 +61,67 @@ impl From<Project> for non_grpc_interface::Project {
     }
 }
 
-pub struct Destination(String);
+pub struct Destination {
+    pub name: String,
+    pub environment: String,
 
-impl Deref for Destination {
-    type Target = String;
+    pub destination_type: DestinationType,
+}
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl Destination {
+    pub fn new(name: &str, environment: &str, destination_type: DestinationType) -> Self {
+        Self {
+            name: name.into(),
+            environment: environment.into(),
+            destination_type,
+        }
     }
 }
 
-impl From<String> for Destination {
-    fn from(value: String) -> Self {
-        Self(value)
+impl Display for Destination {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
+impl From<Destination> for non_grpc_interface::Destination {
+    fn from(value: Destination) -> Self {
+        Self {
+            name: value.name,
+            environment: value.environment,
+            r#type: Some(value.destination_type.into()),
+        }
+    }
+}
+
+pub struct DestinationType {
+    pub organisation: String,
+    pub name: String,
+    pub version: usize,
+}
+
+impl Display for DestinationType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}@{}", self.organisation, self.name, self.version)
+    }
+}
+
+impl From<DestinationType> for non_grpc_interface::DestinationType {
+    fn from(value: DestinationType) -> Self {
+        Self {
+            organisation: value.organisation,
+            name: value.name,
+            version: value.version as u64,
+        }
+    }
+}
+
+impl From<non_grpc_interface::DestinationType> for DestinationType {
+    fn from(value: non_grpc_interface::DestinationType) -> Self {
+        Self {
+            organisation: value.organisation,
+            name: value.name,
+            version: value.version as usize,
+        }
     }
 }

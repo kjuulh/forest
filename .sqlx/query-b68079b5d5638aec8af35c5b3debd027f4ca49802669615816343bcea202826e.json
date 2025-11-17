@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT\n                    name,\n                    environment,\n                    type_organisation,\n                    type_name,\n                    type_version\n                FROM destinations\n                WHERE id = $1\n                LIMIT 1;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "environment",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "type_organisation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "type_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "type_version",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b68079b5d5638aec8af35c5b3debd027f4ca49802669615816343bcea202826e"
+}
