@@ -47,12 +47,26 @@ pub struct CreateDestinationRequest {
     pub name: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
     pub environment: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
+    #[prost(map="string, string", tag="3")]
+    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, optional, tag="4")]
     pub r#type: ::core::option::Option<DestinationType>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct CreateDestinationResponse {
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateDestinationRequest {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(map="string, string", tag="2")]
+    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct UpdateDestinationResponse {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -71,7 +85,9 @@ pub struct Destination {
     pub name: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
     pub environment: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
+    #[prost(map="string, string", tag="3")]
+    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, optional, tag="4")]
     pub r#type: ::core::option::Option<DestinationType>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]

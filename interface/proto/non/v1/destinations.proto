@@ -5,9 +5,16 @@ package non.v1;
 message CreateDestinationRequest {
   string name = 1;
   string environment = 2;
-  DestinationType type = 3;
+  map<string, string> metadata = 3;
+  DestinationType type = 4;
 }
 message CreateDestinationResponse {}
+
+message UpdateDestinationRequest {
+  string name = 1;
+  map<string, string> metadata = 2;
+}
+message UpdateDestinationResponse {}
 
 message GetDestinationsRequest {}
 message GetDestinationsResponse {
@@ -16,13 +23,15 @@ message GetDestinationsResponse {
 
 service DestinationService {
   rpc CreateDestination(CreateDestinationRequest) returns (CreateDestinationResponse) {}
+  rpc UpdateDestination(UpdateDestinationRequest) returns (UpdateDestinationResponse) {}
   rpc GetDestinations(GetDestinationsRequest) returns (GetDestinationsResponse);
 }
 
 message Destination {
   string name = 1;
   string environment = 2;
-  DestinationType type = 3;
+  map<string, string> metadata = 3;
+  DestinationType type = 4;
 }
 
 message DestinationType {

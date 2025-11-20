@@ -19,6 +19,7 @@ non: deployment: enabled: true
 		dev: {
 			destinations: [
 				{destination: "k8s.*", type: _destinationTypes.kubernetes},
+				{destination: "eu-west-1.*", type: _destinationTypes.terraform},
 			]
 			config: {
 				replicas: 3

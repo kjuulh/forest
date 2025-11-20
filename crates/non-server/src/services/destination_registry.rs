@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::Context;
 use non_models::{Destination, DestinationType};
 use uuid::Uuid;
@@ -13,6 +15,7 @@ impl DestinationRegistry {
         &self,
         name: &str,
         environment: &str,
+        metadata: HashMap<String, String>,
         destination_type: DestinationType,
     ) -> anyhow::Result<()> {
         sqlx::query!(
@@ -27,15 +30,16 @@ impl DestinationRegistry {
                 ) VALUES (
                     $1,
                     $2,
-                    '{}',
                     $3,
                     $4,
-                    $5
+                    $5,
+                    $6
 
                 )
                 ",
             name,
             environment,
+            serde_json::to_value(&metadata)?,
             destination_type.organisation,
             destination_type.name,
             destination_type.version as i32,
@@ -47,11 +51,39 @@ impl DestinationRegistry {
         Ok(())
     }
 
+    pub async fn update_destination(
+        &self,
+        name: &str,
+        metadata: HashMap<String, String>,
+    ) -> anyhow::Result<()> {
+        let res = sqlx::query!(
+            "
+                UPDATE destinations
+                SET
+                    metadata = $1
+                WHERE
+                    name = $2
+                ",
+            serde_json::to_value(&metadata)?,
+            name,
+        )
+        .execute(&self.db)
+        .await
+        .context("update destination (db)")?;
+
+        if res.rows_affected() != 1 {
+            anyhow::bail!("update failed, destination was not found")
+        }
+
+        Ok(())
+    }
+
     pub(crate) async fn get(&self, destination_id: &Uuid) -> anyhow::Result<Option<Destination>> {
         let rec = sqlx::query!(
             "
                 SELECT
                     name,
+                    metadata,
                     environment,
                     type_organisation,
                     type_name,
@@ -71,6 +103,7 @@ impl DestinationRegistry {
         Ok(Some(Destination::new(
             &rec.name,
             &rec.environment,
+            serde_json::from_value(rec.metadata).context("metadata is invalid")?,
             non_models::DestinationType {
                 organisation: rec.type_organisation,
                 name: rec.type_name,

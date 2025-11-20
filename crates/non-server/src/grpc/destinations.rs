@@ -37,12 +37,28 @@ impl DestinationService for DestinationServer {
 
         self.state
             .destination_registry()
-            .create_destination(&req.name, &req.environment, dest_type)
+            .create_destination(&req.name, &req.environment, req.metadata, dest_type)
             .await
             .context("create destination")
             .to_internal_error()?;
 
         Ok(Response::new(CreateDestinationResponse {}))
+    }
+
+    async fn update_destination(
+        &self,
+        request: tonic::Request<UpdateDestinationRequest>,
+    ) -> std::result::Result<tonic::Response<UpdateDestinationResponse>, tonic::Status> {
+        let req = request.into_inner();
+
+        self.state
+            .destination_registry()
+            .update_destination(&req.name, req.metadata)
+            .await
+            .context("update destination")
+            .to_internal_error()?;
+
+        Ok(Response::new(UpdateDestinationResponse {}))
     }
 
     async fn get_destinations(

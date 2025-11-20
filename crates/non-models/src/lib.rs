@@ -1,4 +1,4 @@
-use std::{fmt::Display, ops::Deref};
+use std::{collections::HashMap, fmt::Display, ops::Deref};
 
 pub struct Namespace(String);
 impl Deref for Namespace {
@@ -64,15 +64,22 @@ impl From<Project> for non_grpc_interface::Project {
 pub struct Destination {
     pub name: String,
     pub environment: String,
+    pub metadata: HashMap<String, String>,
 
     pub destination_type: DestinationType,
 }
 
 impl Destination {
-    pub fn new(name: &str, environment: &str, destination_type: DestinationType) -> Self {
+    pub fn new(
+        name: &str,
+        environment: &str,
+        metadata: HashMap<String, String>,
+        destination_type: DestinationType,
+    ) -> Self {
         Self {
             name: name.into(),
             environment: environment.into(),
+            metadata,
             destination_type,
         }
     }
@@ -90,6 +97,7 @@ impl From<Destination> for non_grpc_interface::Destination {
             name: value.name,
             environment: value.environment,
             r#type: Some(value.destination_type.into()),
+            metadata: value.metadata,
         }
     }
 }

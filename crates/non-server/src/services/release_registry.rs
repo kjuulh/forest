@@ -370,6 +370,7 @@ impl ReleaseRegistry {
                 SELECT
                     id,
                     name,
+                    metadata,
                     environment,
                     type_organisation,
                     type_name,
@@ -381,20 +382,20 @@ impl ReleaseRegistry {
         .await
         .context("get destinations (db)")?;
 
-        Ok(recs
-            .into_iter()
+        recs.into_iter()
             .map(|r| {
-                Destination::new(
+                Ok(Destination::new(
                     &r.name,
                     &r.environment,
+                    serde_json::from_value(r.metadata).context("parse metadata")?,
                     non_models::DestinationType {
                         organisation: r.type_organisation,
                         name: r.type_name,
                         version: r.type_version as usize,
                     },
-                )
+                ))
             })
-            .collect())
+            .collect::<anyhow::Result<Vec<_>>>()
     }
 }
 

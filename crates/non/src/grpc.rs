@@ -7,8 +7,8 @@ use non_grpc_interface::{
     CommitUploadRequest, Component, ComponentFile, CreateDestinationRequest, CreateRequest,
     GetArtifactBySlugRequest, GetComponentFilesRequest, GetComponentRequest,
     GetComponentVersionRequest, GetDestinationsRequest, GetNamespacesRequest, GetProjectsRequest,
-    ReleaseRequest, UploadArtifactRequest, UploadArtifactResponse, UploadFileRequest,
-    artifact_service_client::ArtifactServiceClient,
+    ReleaseRequest, UpdateDestinationRequest, UploadArtifactRequest, UploadArtifactResponse,
+    UploadFileRequest, artifact_service_client::ArtifactServiceClient,
     destination_service_client::DestinationServiceClient, get_component_files_response::Msg,
     get_projects_request::Query, namespace_service_client::NamespaceServiceClient,
     registry_service_client::RegistryServiceClient, release_service_client::ReleaseServiceClient,
@@ -496,6 +496,7 @@ impl GrpcClient {
                 Destination::new(
                     &r.name,
                     &r.environment,
+                    r.metadata,
                     r.r#type.expect("to always be available").into(),
                 )
             })
@@ -506,6 +507,7 @@ impl GrpcClient {
         &self,
         name: &str,
         environment: &str,
+        metadata: HashMap<String, String>,
         destination_type: DestinationType,
     ) -> anyhow::Result<()> {
         self.destination_client()
@@ -513,7 +515,25 @@ impl GrpcClient {
             .create_destination(CreateDestinationRequest {
                 name: name.to_string(),
                 environment: environment.to_string(),
+                metadata,
                 r#type: Some(destination_type.into()),
+            })
+            .await
+            .context("create destination (grpc)")?;
+
+        Ok(())
+    }
+
+    pub async fn update_destination(
+        &self,
+        name: &str,
+        metadata: HashMap<String, String>,
+    ) -> anyhow::Result<()> {
+        self.destination_client()
+            .await?
+            .update_destination(UpdateDestinationRequest {
+                name: name.to_string(),
+                metadata,
             })
             .await
             .context("create destination (grpc)")?;
