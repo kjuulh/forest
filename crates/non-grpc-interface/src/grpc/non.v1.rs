@@ -279,6 +279,18 @@ pub struct GetArtifactBySlugResponse {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetArtifactsByProjectRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetArtifactsByProjectResponse {
+    #[prost(message, repeated, tag="1")]
+    pub artifact: ::prost::alloc::vec::Vec<Artifact>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReleaseRequest {
     #[prost(string, tag="1")]
     pub artifact_id: ::prost::alloc::string::String,

@@ -5,10 +5,10 @@ use futures::{SinkExt, Stream, TryStreamExt};
 use non_grpc_interface::{
     AnnotateReleaseRequest, BeginUploadArtifactRequest, BeginUploadRequest, CommitArtifactRequest,
     CommitUploadRequest, Component, ComponentFile, CreateDestinationRequest, CreateRequest,
-    GetArtifactBySlugRequest, GetComponentFilesRequest, GetComponentRequest,
-    GetComponentVersionRequest, GetDestinationsRequest, GetNamespacesRequest, GetProjectsRequest,
-    ReleaseRequest, UpdateDestinationRequest, UploadArtifactRequest, UploadArtifactResponse,
-    UploadFileRequest, artifact_service_client::ArtifactServiceClient,
+    GetArtifactBySlugRequest, GetArtifactsByProjectRequest, GetComponentFilesRequest,
+    GetComponentRequest, GetComponentVersionRequest, GetDestinationsRequest, GetNamespacesRequest,
+    GetProjectsRequest, Project, ReleaseRequest, UpdateDestinationRequest, UploadArtifactRequest,
+    UploadArtifactResponse, UploadFileRequest, artifact_service_client::ArtifactServiceClient,
     destination_service_client::DestinationServiceClient, get_component_files_response::Msg,
     get_projects_request::Query, namespace_service_client::NamespaceServiceClient,
     registry_service_client::RegistryServiceClient, release_service_client::ReleaseServiceClient,
@@ -430,6 +430,31 @@ impl GrpcClient {
             .ok_or(anyhow::anyhow!("artifact could not be found"))?
             .try_into()
             .context("release annotation")
+    }
+
+    pub async fn get_release_annotations_by_project(
+        &self,
+        namespace: &str,
+        project: &str,
+    ) -> anyhow::Result<Vec<ReleaseAnnotation>> {
+        let mut client = self.release_client().await?;
+
+        let resp = client
+            .get_artifacts_by_project(GetArtifactsByProjectRequest {
+                project: Some(Project {
+                    namespace: namespace.into(),
+                    project: project.into(),
+                }),
+            })
+            .await
+            .context("get releases by project")?;
+
+        let res = resp.into_inner();
+
+        res.artifact
+            .into_iter()
+            .map(|a| a.try_into())
+            .collect::<anyhow::Result<Vec<_>>>()
     }
 
     pub async fn release(

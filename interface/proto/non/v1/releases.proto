@@ -20,6 +20,12 @@ message GetArtifactBySlugRequest {
 message GetArtifactBySlugResponse {
   Artifact artifact = 1;
 }
+message GetArtifactsByProjectRequest {
+  Project project = 1;
+}
+message GetArtifactsByProjectResponse {
+  repeated Artifact artifact = 1;
+}
 
 message ReleaseRequest {
   string artifact_id = 1;
@@ -49,6 +55,7 @@ service ReleaseService {
   rpc Release(ReleaseRequest) returns (ReleaseResponse);
 
   rpc GetArtifactBySlug(GetArtifactBySlugRequest) returns (GetArtifactBySlugResponse);
+  rpc GetArtifactsByProject(GetArtifactsByProjectRequest) returns (GetArtifactsByProjectResponse);
   rpc GetNamespaces(GetNamespacesRequest) returns (GetNamespacesResponse);
   rpc GetProjects(GetProjectsRequest) returns (GetProjectsResponse);
 }

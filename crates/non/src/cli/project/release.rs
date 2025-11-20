@@ -45,9 +45,14 @@ impl ReleaseCommand {
 
         let destination = self.destination.clone().unwrap_or_default();
 
-        let artifact_id: ArtifactID = match (&self.artifact_id, &self.slug) {
-            (Some(artifact_id), _) => artifact_id.parse().context("artifact id")?,
-            (_, Some(slug)) => {
+        let artifact_id: ArtifactID = match (
+            &self.artifact_id,
+            &self.slug,
+            &self.namespace,
+            &self.project,
+        ) {
+            (Some(artifact_id), _, _, _) => artifact_id.parse().context("artifact id")?,
+            (_, Some(slug), _, _) => {
                 state
                     .grpc_client()
                     .get_release_annotation_by_slug(slug)
@@ -55,7 +60,30 @@ impl ReleaseCommand {
                     .context("get release annotation by slug")?
                     .artifact_id
             }
-            (None, None) => {
+            (_, _, Some(namespace), Some(project)) => {
+                let release_annotations = state
+                    .grpc_client()
+                    .get_release_annotations_by_project(namespace, project)
+                    .await
+                    .context("get releases by namespace and project")?;
+
+                let choice = inquire::Select::new(
+                    "select a release",
+                    release_annotations
+                        .iter()
+                        .map(|r| r.slug.to_string())
+                        .collect(),
+                )
+                .prompt()?;
+
+                let release_annotation = release_annotations
+                    .iter()
+                    .find(|r| r.slug == choice)
+                    .expect("slug to match");
+
+                release_annotation.artifact_id
+            }
+            (None, None, _, _) => {
                 todo!(); // TODO: select based on how much namespace / project and ref we receive
             }
         };

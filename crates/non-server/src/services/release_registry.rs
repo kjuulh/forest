@@ -329,6 +329,54 @@ impl ReleaseRegistry {
         })
     }
 
+    pub async fn get_release_annotation_by_project(
+        &self,
+        namespace: &str,
+        project: &str,
+    ) -> anyhow::Result<Vec<ReleaseAnnotation>> {
+        let rec = sqlx::query!(
+            "
+                SELECT
+                    a.id,
+                    a.artifact_id,
+                    a.slug,
+                    a.metadata,
+                    a.source,
+                    a.context,
+                    a.project_id,
+                    p.namespace as namespace,
+                    p.project as project
+                FROM annotations a
+                JOIN projects p ON a.project_id = p.id
+                WHERE
+                        p.namespace = $1
+                    AND p.project = $2
+            ",
+            namespace,
+            project
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("get annotations (db)")?;
+
+        rec.into_iter()
+            .map(|rec| {
+                Ok(ReleaseAnnotation {
+                    id: rec.id,
+                    artifact_id: rec.artifact_id,
+                    slug: rec.slug,
+                    metadata: serde_json::from_value(rec.metadata).context("metadata")?,
+                    source: serde_json::from_value(rec.source).context("source")?,
+                    context: serde_json::from_value(rec.context).context("context")?,
+                    project: Project {
+                        namespace: rec.namespace,
+                        project: rec.project,
+                    },
+                })
+            })
+            .collect()
+    }
+
     pub async fn get_namespaces(&self) -> anyhow::Result<Vec<Namespace>> {
         // TODO: consider if we should cursor this
         let recs = sqlx::query!(

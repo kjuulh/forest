@@ -81,6 +81,30 @@ impl ReleaseService for ReleaseServer {
             artifact: Some(release_annotation.into()),
         }))
     }
+    async fn get_artifacts_by_project(
+        &self,
+        request: tonic::Request<GetArtifactsByProjectRequest>,
+    ) -> std::result::Result<tonic::Response<GetArtifactsByProjectResponse>, tonic::Status> {
+        tracing::debug!("get artifact by project");
+        let req = request.into_inner();
+
+        let project = req
+            .project
+            .ok_or(anyhow::anyhow!("project is required"))
+            .to_internal_error()?;
+
+        let release_annotation = self
+            .state
+            .release_registry()
+            .get_release_annotation_by_project(&project.namespace, &project.project)
+            .await
+            .context("get release annotation by project")
+            .to_internal_error()?;
+
+        Ok(Response::new(GetArtifactsByProjectResponse {
+            artifact: release_annotation.into_iter().map(|r| r.into()).collect(),
+        }))
+    }
 
     async fn release(
         &self,
