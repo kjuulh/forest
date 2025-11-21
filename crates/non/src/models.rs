@@ -31,6 +31,7 @@ pub mod context {
 pub mod release_annotation {
     use std::collections::HashMap;
 
+    use chrono::{DateTime, Utc};
     use uuid::Uuid;
 
     use crate::models::{context::ArtifactContext, source::Source};
@@ -42,6 +43,16 @@ pub mod release_annotation {
         pub metadata: HashMap<String, String>,
         pub source: Source,
         pub context: ArtifactContext,
+        pub destinations: Vec<ReleaseDestination>,
+        pub created_at: DateTime<Utc>,
+    }
+
+    pub struct ReleaseDestination {
+        pub name: String,
+        pub environment: String,
+        pub type_organisation: String,
+        pub type_name: String,
+        pub type_version: u64,
     }
 }
 

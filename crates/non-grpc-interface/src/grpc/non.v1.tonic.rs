@@ -2306,7 +2306,6 @@ pub mod release_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
-    ///
     #[derive(Debug, Clone)]
     pub struct ReleaseServiceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -2387,7 +2386,6 @@ pub mod release_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        ///
         pub async fn annotate_release(
             &mut self,
             request: impl tonic::IntoRequest<super::AnnotateReleaseRequest>,
@@ -2437,6 +2435,31 @@ pub mod release_service_client {
             req.extensions_mut()
                 .insert(GrpcMethod::new("non.v1.ReleaseService", "Release"));
             self.inner.unary(req, path, codec).await
+        }
+        pub async fn wait_release(
+            &mut self,
+            request: impl tonic::IntoRequest<super::WaitReleaseRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::WaitReleaseEvent>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/non.v1.ReleaseService/WaitRelease",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("non.v1.ReleaseService", "WaitRelease"));
+            self.inner.server_streaming(req, path, codec).await
         }
         pub async fn get_artifact_by_slug(
             &mut self,
@@ -2549,7 +2572,6 @@ pub mod release_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with ReleaseServiceServer.
     #[async_trait]
     pub trait ReleaseService: Send + Sync + 'static {
-        ///
         async fn annotate_release(
             &self,
             request: tonic::Request<super::AnnotateReleaseRequest>,
@@ -2561,6 +2583,19 @@ pub mod release_service_server {
             &self,
             request: tonic::Request<super::ReleaseRequest>,
         ) -> std::result::Result<tonic::Response<super::ReleaseResponse>, tonic::Status>;
+        /// Server streaming response type for the WaitRelease method.
+        type WaitReleaseStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::WaitReleaseEvent, tonic::Status>,
+            >
+            + Send
+            + 'static;
+        async fn wait_release(
+            &self,
+            request: tonic::Request<super::WaitReleaseRequest>,
+        ) -> std::result::Result<
+            tonic::Response<Self::WaitReleaseStream>,
+            tonic::Status,
+        >;
         async fn get_artifact_by_slug(
             &self,
             request: tonic::Request<super::GetArtifactBySlugRequest>,
@@ -2590,7 +2625,6 @@ pub mod release_service_server {
             tonic::Status,
         >;
     }
-    ///
     #[derive(Debug)]
     pub struct ReleaseServiceServer<T: ReleaseService> {
         inner: _Inner<T>,
@@ -2759,6 +2793,53 @@ pub mod release_service_server {
                                 max_encoding_message_size,
                             );
                         let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/non.v1.ReleaseService/WaitRelease" => {
+                    #[allow(non_camel_case_types)]
+                    struct WaitReleaseSvc<T: ReleaseService>(pub Arc<T>);
+                    impl<
+                        T: ReleaseService,
+                    > tonic::server::ServerStreamingService<super::WaitReleaseRequest>
+                    for WaitReleaseSvc<T> {
+                        type Response = super::WaitReleaseEvent;
+                        type ResponseStream = T::WaitReleaseStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::WaitReleaseRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ReleaseService>::wait_release(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = WaitReleaseSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)

@@ -477,6 +477,68 @@ impl GrpcClient {
         Ok(())
     }
 
+    pub async fn wait_release(
+        &self,
+        artifact_id: Uuid,
+        environment: &str,
+    ) -> anyhow::Result<WaitReleaseResult> {
+        use futures::StreamExt;
+
+        let mut client = self.release_client().await?;
+
+        let response = client
+            .wait_release(non_grpc_interface::WaitReleaseRequest {
+                artifact_id: artifact_id.to_string(),
+                environment: environment.to_string(),
+            })
+            .await
+            .context("wait_release (grpc)")?;
+
+        let mut stream = response.into_inner();
+        let mut final_result: Option<WaitReleaseResult> = None;
+
+        while let Some(event) = stream.next().await {
+            let event = event.context("stream error")?;
+
+            match event.event {
+                Some(non_grpc_interface::wait_release_event::Event::StatusUpdate(status)) => {
+                    let release_status: non_models::ReleaseStatus = status
+                        .status
+                        .parse()
+                        .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+                    tracing::debug!(
+                        destination =% status.destination,
+                        status =% release_status,
+                        "received status update"
+                    );
+
+                    final_result = Some(WaitReleaseResult {
+                        destination: status.destination,
+                        status: release_status,
+                    });
+
+                    // If finalized, we can return
+                    if release_status.is_finalized() {
+                        break;
+                    }
+                }
+                Some(non_grpc_interface::wait_release_event::Event::LogLine(log)) => {
+                    // For now, just log the line - can be expanded later
+                    tracing::info!(
+                        destination =% log.destination,
+                        timestamp =% log.timestamp,
+                        "{}",
+                        log.line
+                    );
+                }
+                None => {}
+            }
+        }
+
+        final_result.context("stream ended without final status")
+    }
+
     pub async fn get_namespaces(&self) -> anyhow::Result<Vec<Namespace>> {
         let mut client = self.release_client().await?;
 
@@ -571,6 +633,11 @@ pub enum GetProjectsQuery {
     Namespace(Namespace),
 }
 
+pub struct WaitReleaseResult {
+    pub destination: String,
+    pub status: non_models::ReleaseStatus,
+}
+
 #[derive(Clone, Debug)]
 pub struct UploadContext {
     context_id: uuid::Uuid,
@@ -650,7 +717,25 @@ impl TryFrom<non_grpc_interface::Artifact> for models::release_annotation::Relea
             metadata: value.metadata,
             source: value.source.context("source not found")?.into(),
             context: value.context.context("context not found")?.into(),
+            destinations: value.destinations.into_iter().map(|d| d.into()).collect(),
+            created_at: chrono::DateTime::parse_from_rfc3339(&value.created_at)
+                .context("created_at")?
+                .with_timezone(&chrono::Utc),
         })
+    }
+}
+
+impl From<non_grpc_interface::ArtifactDestination>
+    for models::release_annotation::ReleaseDestination
+{
+    fn from(value: non_grpc_interface::ArtifactDestination) -> Self {
+        Self {
+            name: value.name,
+            environment: value.environment,
+            type_organisation: value.type_organisation,
+            type_name: value.type_name,
+            type_version: value.type_version,
+        }
     }
 }
 

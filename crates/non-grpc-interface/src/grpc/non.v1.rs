@@ -304,6 +304,49 @@ pub struct ReleaseRequest {
 pub struct ReleaseResponse {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WaitReleaseRequest {
+    #[prost(string, tag="1")]
+    pub artifact_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub environment: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WaitReleaseEvent {
+    #[prost(oneof="wait_release_event::Event", tags="1, 2")]
+    pub event: ::core::option::Option<wait_release_event::Event>,
+}
+/// Nested message and enum types in `WaitReleaseEvent`.
+pub mod wait_release_event {
+    #[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Event {
+        #[prost(message, tag="1")]
+        StatusUpdate(super::ReleaseStatusUpdate),
+        #[prost(message, tag="2")]
+        LogLine(super::ReleaseLogLine),
+    }
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReleaseStatusUpdate {
+    #[prost(string, tag="1")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub status: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReleaseLogLine {
+    #[prost(string, tag="1")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub line: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub timestamp: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct GetNamespacesRequest {
 }
@@ -369,6 +412,24 @@ pub struct Artifact {
     pub context: ::core::option::Option<ArtifactContext>,
     #[prost(message, optional, tag="7")]
     pub project: ::core::option::Option<Project>,
+    #[prost(message, repeated, tag="8")]
+    pub destinations: ::prost::alloc::vec::Vec<ArtifactDestination>,
+    #[prost(string, tag="9")]
+    pub created_at: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ArtifactDestination {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub environment: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub type_organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub type_name: ::prost::alloc::string::String,
+    #[prost(uint64, tag="5")]
+    pub type_version: u64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

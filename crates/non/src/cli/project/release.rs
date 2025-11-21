@@ -9,9 +9,16 @@
 //
 // Destinations will receive hooks for each change to the refs
 
-use anyhow::Context;
+use std::fmt::Display;
 
-use crate::{grpc::GrpcClientState, models::artifacts::ArtifactID, state::State};
+use anyhow::Context;
+use inquire::ui::Color;
+
+use crate::{
+    grpc::GrpcClientState,
+    models::{artifacts::ArtifactID, release_annotation::ReleaseAnnotation},
+    state::State,
+};
 
 #[derive(clap::Parser)]
 pub struct ReleaseCommand {
@@ -31,16 +38,20 @@ pub struct ReleaseCommand {
     r#ref: Option<String>,
 
     #[arg(long, short = 'e', alias = "env")]
-    environment: Vec<String>,
+    environment: String,
 
     #[arg(long, short = 'd')]
     destination: Option<Vec<String>>,
+
+    /// Wait for the release to complete (SUCCESS or FAILURE)
+    #[arg(long, short = 'w')]
+    wait: bool,
 }
 
 impl ReleaseCommand {
     pub async fn execute(&self, state: &State) -> Result<(), anyhow::Error> {
         if self.environment.is_empty() {
-            anyhow::bail!("at least one environment is required");
+            anyhow::bail!("environment is required");
         }
 
         let destination = self.destination.clone().unwrap_or_default();
@@ -67,36 +78,84 @@ impl ReleaseCommand {
                     .await
                     .context("get releases by namespace and project")?;
 
-                let choice = inquire::Select::new(
-                    "select a release",
-                    release_annotations
-                        .iter()
-                        .map(|r| r.slug.to_string())
-                        .collect(),
-                )
-                .prompt()?;
+                let display_items: Vec<ReleaseAnnotationDisplay> = release_annotations
+                    .into_iter()
+                    .map(ReleaseAnnotationDisplay)
+                    .collect();
 
-                let release_annotation = release_annotations
-                    .iter()
-                    .find(|r| r.slug == choice)
-                    .expect("slug to match");
+                let choice = inquire::Select::new("select a release", display_items).prompt()?;
 
-                release_annotation.artifact_id
+                choice.0.artifact_id
             }
             (None, None, _, _) => {
                 todo!(); // TODO: select based on how much namespace / project and ref we receive
             }
         };
 
-        tracing::info!(artifact =% artifact_id, "releasing");
+        tracing::info!(artifact =% artifact_id, environment =% self.environment, "releasing");
 
         state
             .grpc_client()
-            .release(artifact_id, &destination, &self.environment)
+            .release(
+                artifact_id,
+                &destination,
+                std::slice::from_ref(&self.environment),
+            )
             .await
             .context("release")?;
 
-        tracing::info!("you've released {artifact_id} successfully");
+        if self.wait {
+            tracing::info!("waiting for release to complete...");
+
+            let result = state
+                .grpc_client()
+                .wait_release(artifact_id, &self.environment)
+                .await
+                .context("wait_release")?;
+
+            if result.status.is_success() {
+                tracing::info!(
+                    destination =% result.destination,
+                    "release completed successfully"
+                );
+            } else {
+                tracing::error!(
+                    destination =% result.destination,
+                    status =% result.status,
+                    "release failed"
+                );
+                anyhow::bail!("release failed with status: {}", result.status);
+            }
+        } else {
+            tracing::info!("release staged for {artifact_id}");
+        }
+
+        Ok(())
+    }
+}
+
+/// Wrapper for ReleaseAnnotation that provides custom Display for inquire Select
+struct ReleaseAnnotationDisplay(ReleaseAnnotation);
+
+impl Display for ReleaseAnnotationDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let annotation = &self.0;
+
+        // Format: slug (created_at) [dest1@env1, dest2@env2, ...]
+        let created = annotation.created_at.format("%Y-%m-%d %H:%M");
+        write!(f, "{}: {}", created, annotation.context.title)?;
+
+        if !annotation.destinations.is_empty() {
+            write!(f, "\n    destinations: ")?;
+
+            for (i, dest) in annotation.destinations.iter().enumerate() {
+                if i > 0 {
+                    write!(f, "\n    - ")?;
+                }
+                write!(f, "{}@{}", dest.name, dest.environment)?;
+            }
+            writeln!(f)?;
+        }
 
         Ok(())
     }

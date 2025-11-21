@@ -312,7 +312,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "145052bdd345b87320e369255277e3fb5152762ad123a901ef5c262dd38fe8d2"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -1486,6 +1488,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
+ "chrono",
  "clap",
  "dirs",
  "dotenvy",
@@ -1494,6 +1497,7 @@ dependencies = [
  "glob",
  "hex",
  "inquire",
+ "itertools",
  "jiff",
  "minijinja",
  "non-grpc-interface",
@@ -1551,10 +1555,12 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
+ "chrono",
  "clap",
  "dotenvy",
  "drop-queue",
  "futures",
+ "indexmap 2.12.0",
  "inquire",
  "non-grpc-interface",
  "non-models",
@@ -1571,6 +1577,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "tonic 0.12.3",
  "tracing",

@@ -34,6 +34,29 @@ message ReleaseRequest {
 }
 message ReleaseResponse {}
 
+message WaitReleaseRequest {
+  string artifact_id = 1;
+  string environment = 2;
+}
+
+message WaitReleaseEvent {
+  oneof event {
+    ReleaseStatusUpdate status_update = 1;
+    ReleaseLogLine log_line = 2;
+  }
+}
+
+message ReleaseStatusUpdate {
+  string destination = 1;
+  string status = 2;
+}
+
+message ReleaseLogLine {
+  string destination = 1;
+  string line = 2;
+  string timestamp = 3;
+}
+
 message GetNamespacesRequest {}
 message GetNamespacesResponse {
   repeated Namespace namespaces = 1;
@@ -53,6 +76,7 @@ message GetProjectsResponse {
 service ReleaseService {
   rpc AnnotateRelease(AnnotateReleaseRequest) returns (AnnotateReleaseResponse);
   rpc Release(ReleaseRequest) returns (ReleaseResponse);
+  rpc WaitRelease(WaitReleaseRequest) returns (stream WaitReleaseEvent);
 
   rpc GetArtifactBySlug(GetArtifactBySlugRequest) returns (GetArtifactBySlugResponse);
   rpc GetArtifactsByProject(GetArtifactsByProjectRequest) returns (GetArtifactsByProjectResponse);
@@ -79,6 +103,16 @@ message Artifact {
   Source source = 5;
   ArtifactContext context = 6;
   Project project = 7;
+  repeated ArtifactDestination destinations = 8;
+  string created_at = 9;
+}
+
+message ArtifactDestination {
+  string name = 1;
+  string environment = 2;
+  string type_organisation = 3;
+  string type_name = 4;
+  uint64 type_version = 5;
 }
 
 message Project {

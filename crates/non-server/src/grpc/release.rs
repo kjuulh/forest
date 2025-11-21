@@ -1,10 +1,14 @@
 use anyhow::Context;
 use non_grpc_interface::{release_service_server::ReleaseService, *};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::Response;
 
 use crate::{
     grpc::artifacts::GrpcErrorExt,
-    services::release_registry::{self, ReleaseAnnotation, ReleaseRegistryState},
+    services::release_registry::{
+        self, ReleaseAnnotation, ReleaseDestination, ReleaseRegistryState,
+    },
     state::State,
 };
 
@@ -130,6 +134,85 @@ impl ReleaseService for ReleaseServer {
         Ok(Response::new(ReleaseResponse {}))
     }
 
+    type WaitReleaseStream = ReceiverStream<Result<WaitReleaseEvent, tonic::Status>>;
+
+    async fn wait_release(
+        &self,
+        request: tonic::Request<WaitReleaseRequest>,
+    ) -> std::result::Result<tonic::Response<Self::WaitReleaseStream>, tonic::Status> {
+        tracing::debug!("wait_release stream");
+        let req = request.into_inner();
+
+        let artifact_id: uuid::Uuid = req
+            .artifact_id
+            .parse()
+            .context("artifact id")
+            .to_internal_error()?;
+        let environment = req.environment;
+
+        let (tx, rx) = mpsc::channel(32);
+        let release_registry = self.state.release_registry();
+
+        // Spawn a task to poll and send status updates
+        tokio::spawn(async move {
+            let poll_interval = std::time::Duration::from_millis(1000);
+            let mut last_status: Option<non_models::ReleaseStatus> = None;
+
+            loop {
+                match release_registry
+                    .get_release_status(&artifact_id, &environment)
+                    .await
+                {
+                    Ok(Some(status_info)) => {
+                        // Only send if status changed
+                        let status_changed = last_status
+                            .map(|prev| prev != status_info.status)
+                            .unwrap_or(true);
+
+                        if status_changed {
+                            last_status = Some(status_info.status);
+
+                            let event = WaitReleaseEvent {
+                                event: Some(wait_release_event::Event::StatusUpdate(
+                                    ReleaseStatusUpdate {
+                                        destination: status_info.destination.clone(),
+                                        status: status_info.status.to_string(),
+                                    },
+                                )),
+                            };
+
+                            if tx.send(Ok(event)).await.is_err() {
+                                // Client disconnected
+                                break;
+                            }
+
+                            // If finalized, we're done
+                            if status_info.status.is_finalized() {
+                                break;
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        // No release found yet, keep polling
+                    }
+                    Err(e) => {
+                        tracing::warn!("error polling release status: {e:#}");
+                        let _ = tx
+                            .send(Err(tonic::Status::internal(format!(
+                                "error polling status: {e}"
+                            ))))
+                            .await;
+                        break;
+                    }
+                }
+
+                tokio::time::sleep(poll_interval).await;
+            }
+        });
+
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
     async fn get_namespaces(
         &self,
         request: tonic::Request<GetNamespacesRequest>,
@@ -211,6 +294,20 @@ impl From<ReleaseAnnotation> for Artifact {
             context: Some(value.context.into()),
             slug: value.slug,
             project: Some(value.project.into()),
+            destinations: value.destinations.into_iter().map(|d| d.into()).collect(),
+            created_at: value.created_at.to_rfc3339(),
+        }
+    }
+}
+
+impl From<ReleaseDestination> for ArtifactDestination {
+    fn from(value: ReleaseDestination) -> Self {
+        Self {
+            name: value.name,
+            environment: value.environment,
+            type_organisation: value.type_organisation,
+            type_name: value.type_name,
+            type_version: value.type_version as u64,
         }
     }
 }

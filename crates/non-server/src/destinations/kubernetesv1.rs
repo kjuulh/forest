@@ -1,7 +1,7 @@
 use non_models::Destination;
 
 use crate::{
-    destinations::{DestinationEdge, DestinationIndex},
+    destinations::{DestinationEdge, DestinationIndex, logger::DestinationLogger},
     services::release_registry::ReleaseItem,
 };
 
@@ -20,6 +20,7 @@ impl DestinationEdge for KubernetesV1Destination {
 
     async fn release(
         &self,
+        logger: &DestinationLogger,
         release: &ReleaseItem,
         destination: &Destination,
     ) -> anyhow::Result<()> {

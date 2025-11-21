@@ -1,10 +1,14 @@
 use std::{fmt::Display, sync::Arc};
 
 use non_models::Destination;
+use sqlx::PgPool;
 
 use crate::{
     State,
-    destinations::{kubernetesv1::KubernetesV1Destination, terraformv1::TerraformV1Destination},
+    destinations::{
+        kubernetesv1::KubernetesV1Destination, logger::DestinationLogger,
+        terraformv1::TerraformV1Destination,
+    },
     services::{
         artifact_staging_registry::ArtifactStagingRegistryState, release_registry::ReleaseItem,
     },
@@ -14,24 +18,33 @@ use crate::{
 pub mod kubernetesv1;
 pub mod terraformv1;
 
+pub mod logger;
+
 pub struct DestinationService {
     inner: Arc<dyn DestinationEdge + Send + Sync + 'static>,
+    db: PgPool,
 }
 
 impl DestinationService {
-    pub fn new<T: DestinationEdge + Send + Sync + 'static>(t: T) -> Self {
-        Self { inner: Arc::new(t) }
+    pub fn new<T: DestinationEdge + Send + Sync + 'static>(t: T, db: PgPool) -> Self {
+        Self {
+            inner: Arc::new(t),
+            db,
+        }
     }
 
-    pub fn new_kubernetes_v1() -> Self {
-        Self::new(KubernetesV1Destination {})
+    pub fn new_kubernetes_v1(db: PgPool) -> Self {
+        Self::new(KubernetesV1Destination {}, db)
     }
 
-    pub fn new_terraform_v1(state: &State) -> Self {
-        Self::new(TerraformV1Destination {
-            temp: state.temp_directories(),
-            artifact_files: state.artifact_staging_registry(),
-        })
+    pub fn new_terraform_v1(state: &State, db: PgPool) -> Self {
+        Self::new(
+            TerraformV1Destination {
+                temp: state.temp_directories(),
+                artifact_files: state.artifact_staging_registry(),
+            },
+            db,
+        )
     }
 
     #[inline(always)]
@@ -46,7 +59,11 @@ impl DestinationService {
     ) -> anyhow::Result<()> {
         tracing::debug!(id =% staged_release.id, destination =% self.name(), "preparing release");
 
-        self.inner.prepare(staged_release, destination).await
+        let logger = self.create_logger(&staged_release);
+
+        self.inner
+            .prepare(&logger, staged_release, destination)
+            .await
     }
 
     pub(crate) async fn release(
@@ -55,7 +72,15 @@ impl DestinationService {
         destination: &Destination,
     ) -> anyhow::Result<()> {
         tracing::debug!(id =% staged_release.id, destination =% self.name(), "running release");
-        self.inner.release(staged_release, destination).await
+        let logger = self.create_logger(&staged_release);
+
+        self.inner
+            .release(&logger, staged_release, destination)
+            .await
+    }
+
+    fn create_logger(&self, staged_release: &ReleaseItem) -> DestinationLogger {
+        DestinationLogger::new(staged_release.clone(), self.db.clone())
     }
 }
 
@@ -63,16 +88,21 @@ impl DestinationService {
 pub trait DestinationEdge {
     fn name(&self) -> DestinationIndex;
 
+    #[allow(unused_variables)]
     async fn prepare(
         &self,
+        logger: &DestinationLogger,
         release: &ReleaseItem,
-
         destination: &Destination,
     ) -> anyhow::Result<()> {
         Ok(())
     }
-    async fn release(&self, release: &ReleaseItem, destination: &Destination)
-    -> anyhow::Result<()>;
+    async fn release(
+        &self,
+        logger: &DestinationLogger,
+        release: &ReleaseItem,
+        destination: &Destination,
+    ) -> anyhow::Result<()>;
 }
 
 #[derive(Debug, Clone, PartialEq)]

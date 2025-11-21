@@ -34,8 +34,8 @@ impl DestinationServicesState for State {
     fn destination_services(&self) -> DestinationServices {
         DestinationServices {
             services: Arc::new(vec![
-                DestinationService::new_kubernetes_v1(),
-                DestinationService::new_terraform_v1(self),
+                DestinationService::new_kubernetes_v1(self.db.clone()),
+                DestinationService::new_terraform_v1(self, self.db.clone()),
             ]),
         }
     }

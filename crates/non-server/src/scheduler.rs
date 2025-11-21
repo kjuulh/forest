@@ -1,4 +1,5 @@
 use anyhow::Context;
+use non_models::ReleaseStatus;
 use notmad::{Component, MadError};
 use tokio_util::sync::CancellationToken;
 
@@ -29,14 +30,14 @@ impl Scheduler {
         match res {
             Ok(_) => {
                 self.release_registry
-                    .commit_release_status(&staged_release, tx, "SUCCESS")
+                    .commit_release_status(&staged_release, tx, ReleaseStatus::Success)
                     .await?;
             }
             Err(e) => {
                 tracing::warn!("failed to handle release: {e:#}");
 
                 self.release_registry
-                    .commit_release_status(&staged_release, tx, "FAILURE")
+                    .commit_release_status(&staged_release, tx, ReleaseStatus::Failure)
                     .await?;
             }
         }

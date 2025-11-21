@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-use non_models::{Destination, Namespace, ProjectName};
+use non_models::{Destination, Namespace, ProjectName, ReleaseStatus};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -91,7 +91,7 @@ impl ReleaseRegistry {
                     $6,
                     $7
                 )
-                RETURNING id
+                RETURNING id, created
             ",
             artifact_id,
             slug,
@@ -118,6 +118,8 @@ impl ReleaseRegistry {
                 namespace: namespace.to_string(),
                 project: project.to_string(),
             },
+            destinations: Vec::new(),
+            created_at: annotation_rec.created,
         })
     }
 
@@ -210,6 +212,44 @@ impl ReleaseRegistry {
         Ok(())
     }
 
+    /// Get the current release status without blocking.
+    /// Returns None if no release exists for this artifact/environment.
+    pub async fn get_release_status(
+        &self,
+        artifact_id: &ArtifactID,
+        environment: &str,
+    ) -> anyhow::Result<Option<ReleaseStatusInfo>> {
+        let record = sqlx::query!(
+            r#"
+                SELECT
+                    r.status,
+                    d.name as destination
+                FROM releases r
+                JOIN destinations d ON r.destination_id = d.id
+                WHERE r.artifact = $1 AND d.environment = $2
+            "#,
+            artifact_id,
+            environment
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("get_release_status")?;
+
+        let Some(record) = record else {
+            return Ok(None);
+        };
+
+        let status: ReleaseStatus = record
+            .status
+            .parse()
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        Ok(Some(ReleaseStatusInfo {
+            destination: record.destination,
+            status,
+        }))
+    }
+
     pub async fn get_staged_release(
         &self,
     ) -> anyhow::Result<Option<(ReleaseItem, StagedReleaseTx)>> {
@@ -254,8 +294,9 @@ impl ReleaseRegistry {
         &self,
         release_item: &ReleaseItem,
         mut staged_release_tx: StagedReleaseTx,
-        status: &str,
+        status: ReleaseStatus,
     ) -> anyhow::Result<()> {
+        let status_str = status.as_str();
         let res = sqlx::query!(
             "
                 UPDATE releases
@@ -265,7 +306,7 @@ impl ReleaseRegistry {
                 WHERE id = $1
             ",
             release_item.id,
-            status
+            status_str
         )
         .execute(&mut *staged_release_tx.tx)
         .await
@@ -278,7 +319,7 @@ impl ReleaseRegistry {
             );
         }
 
-        tracing::debug!(release_id =% release_item.id, status, "committing final release status");
+        tracing::debug!(release_id =% release_item.id, %status, "committing final release status");
         staged_release_tx.tx.commit().await?;
 
         Ok(())
@@ -298,6 +339,7 @@ impl ReleaseRegistry {
                     a.source,
                     a.context,
                     a.project_id,
+                    a.created,
                     p.namespace as namespace,
                     p.project as project
                 FROM annotations a
@@ -326,6 +368,8 @@ impl ReleaseRegistry {
                 namespace: rec.namespace,
                 project: rec.project,
             },
+            destinations: Vec::new(),
+            created_at: rec.created,
         })
     }
 
@@ -334,24 +378,35 @@ impl ReleaseRegistry {
         namespace: &str,
         project: &str,
     ) -> anyhow::Result<Vec<ReleaseAnnotation>> {
-        let rec = sqlx::query!(
-            "
+        // Use LEFT JOINs to get annotations even if they have no releases/destinations
+        // This query may return multiple rows per annotation (one per destination)
+        let recs = sqlx::query!(
+            r#"
                 SELECT
-                    a.id,
-                    a.artifact_id,
-                    a.slug,
-                    a.metadata,
-                    a.source,
-                    a.context,
-                    a.project_id,
-                    p.namespace as namespace,
-                    p.project as project
+                    a.id                 as id,
+                    a.artifact_id        as artifact_id,
+                    a.slug               as slug,
+                    a.metadata           as metadata,
+                    a.source             as source,
+                    a.context            as context,
+                    a.project_id         as project_id,
+                    a.created            as created,
+                    p.namespace          as namespace,
+                    p.project            as project,
+                    d.environment        as "environment?",
+                    d.name               as "destination_name?",
+                    d.type_organisation  as "destination_type?",
+                    d.type_name          as "destination_type_name?",
+                    d.type_version       as "destination_type_version?"
                 FROM annotations a
                 JOIN projects p ON a.project_id = p.id
+                LEFT JOIN releases r ON a.id = r.annotation_id
+                LEFT JOIN destinations d ON d.id = r.destination_id
                 WHERE
                         p.namespace = $1
                     AND p.project = $2
-            ",
+                ORDER BY a.created DESC, a.id
+            "#,
             namespace,
             project
         )
@@ -359,9 +414,47 @@ impl ReleaseRegistry {
         .await
         .context("get annotations (db)")?;
 
-        rec.into_iter()
-            .map(|rec| {
-                Ok(ReleaseAnnotation {
+        // Group results by annotation ID to consolidate destinations
+        // Use IndexMap to preserve insertion order (sorted by created DESC)
+        let mut annotations_map: indexmap::IndexMap<Uuid, ReleaseAnnotation> =
+            indexmap::IndexMap::new();
+
+        for rec in recs {
+            let annotation_id = rec.id;
+
+            // Build destination if present
+            let destination = match (
+                rec.destination_name,
+                rec.environment,
+                rec.destination_type,
+                rec.destination_type_name,
+                rec.destination_type_version,
+            ) {
+                (Some(name), Some(env), Some(org), Some(type_name), Some(version)) => {
+                    Some(ReleaseDestination {
+                        name,
+                        environment: env,
+                        type_organisation: org,
+                        type_name,
+                        type_version: version,
+                    })
+                }
+                _ => None,
+            };
+
+            if let Some(annotation) = annotations_map.get_mut(&annotation_id) {
+                // Annotation already exists, just add the destination if present
+                if let Some(dest) = destination {
+                    annotation.destinations.push(dest);
+                }
+            } else {
+                // Create new annotation entry
+                let mut destinations = Vec::new();
+                if let Some(dest) = destination {
+                    destinations.push(dest);
+                }
+
+                let annotation = ReleaseAnnotation {
                     id: rec.id,
                     artifact_id: rec.artifact_id,
                     slug: rec.slug,
@@ -372,9 +465,15 @@ impl ReleaseRegistry {
                         namespace: rec.namespace,
                         project: rec.project,
                     },
-                })
-            })
-            .collect()
+                    destinations,
+                    created_at: rec.created,
+                };
+
+                annotations_map.insert(annotation_id, annotation);
+            }
+        }
+
+        Ok(annotations_map.into_values().collect())
     }
 
     pub async fn get_namespaces(&self) -> anyhow::Result<Vec<Namespace>> {
@@ -491,14 +590,30 @@ pub struct ReleaseAnnotation {
     pub source: Source,
     pub context: ArtifactContext,
     pub project: Project,
+    pub destinations: Vec<ReleaseDestination>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+pub struct ReleaseDestination {
+    pub name: String,
+    pub environment: String,
+    pub type_organisation: String,
+    pub type_name: String,
+    pub type_version: i32,
+}
+
+#[derive(Clone)]
 pub struct ReleaseItem {
     pub id: Uuid,
     pub artifact: Uuid,
     pub project_id: Uuid,
     pub destination_id: Uuid,
     pub status: String,
+}
+
+pub struct ReleaseStatusInfo {
+    pub destination: String,
+    pub status: ReleaseStatus,
 }
 
 pub struct StagedReleaseTx {

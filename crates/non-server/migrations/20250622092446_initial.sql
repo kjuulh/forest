@@ -137,3 +137,16 @@ create table destinations (
 );
 CREATE UNIQUE INDEX idx_destinations_name ON destinations (name);
 CREATE INDEX idx_destinations_environment ON destinations (environment);
+
+create table release_logs (
+    id uuid primary key default gen_random_uuid(),
+    release_attempt uuid not null,
+    release_id uuid not null,
+    destination_id uuid not null,
+    log_lines JSONB not null,
+    sequence bigserial not null,
+    created timestamptz not null default now(),
+    updated timestamptz not null default now()
+);
+CREATE INDEX idx_release_logs_release_id_destination_id ON release_logs (release_id, destination_id);
+CREATE UNIQUE INDEX idx_release_logs_release_id_destination_id_sequence ON release_logs (release_attempt, release_id, destination_id, sequence);

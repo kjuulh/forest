@@ -133,3 +133,53 @@ impl From<non_grpc_interface::DestinationType> for DestinationType {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseStatus {
+    Staged,
+    Success,
+    Failure,
+}
+
+impl ReleaseStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ReleaseStatus::Staged => "STAGED",
+            ReleaseStatus::Success => "SUCCESS",
+            ReleaseStatus::Failure => "FAILURE",
+        }
+    }
+
+    pub fn is_finalized(&self) -> bool {
+        matches!(self, ReleaseStatus::Success | ReleaseStatus::Failure)
+    }
+
+    pub fn is_success(&self) -> bool {
+        matches!(self, ReleaseStatus::Success)
+    }
+}
+
+impl Display for ReleaseStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for ReleaseStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "STAGED" => Ok(ReleaseStatus::Staged),
+            "SUCCESS" => Ok(ReleaseStatus::Success),
+            "FAILURE" => Ok(ReleaseStatus::Failure),
+            _ => Err(format!("unknown release status: {}", s)),
+        }
+    }
+}
+
+impl From<ReleaseStatus> for String {
+    fn from(value: ReleaseStatus) -> Self {
+        value.as_str().to_string()
+    }
+}

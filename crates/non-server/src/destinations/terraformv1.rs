@@ -5,7 +5,7 @@ use non_models::Destination;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::{
-    destinations::{DestinationEdge, DestinationIndex},
+    destinations::{DestinationEdge, DestinationIndex, logger::DestinationLogger},
     services::{artifact_staging_registry::ArtifactStagingRegistry, release_registry::ReleaseItem},
     temp_dir::TempDirectories,
 };
@@ -18,6 +18,7 @@ pub struct TerraformV1Destination {
 impl TerraformV1Destination {
     async fn run(
         &self,
+        logger: &DestinationLogger,
         release: &ReleaseItem,
         destination: &Destination,
         mode: Mode,
@@ -94,20 +95,20 @@ impl TerraformV1Destination {
                 ));
 
             // 2. Run terraform command over it
-            self.run_command(destination, &dir, &["init"])
+            self.run_command(logger, destination, &dir, &["init"])
                 .await
                 .context("terraform init")?;
 
             match mode {
                 Mode::Prepare => {
                     tracing::info!("running terraform plan");
-                    self.run_command(destination, &dir, &["plan"])
+                    self.run_command(logger, destination, &dir, &["plan"])
                         .await
                         .context("terraform plan")?;
                 }
                 Mode::Apply => {
                     tracing::info!("running terraform apply");
-                    self.run_command(destination, &dir, &["apply", "-auto-approve"])
+                    self.run_command(logger, destination, &dir, &["apply", "-auto-approve"])
                         .await
                         .context("terraform apply")?;
                 }
@@ -123,6 +124,7 @@ impl TerraformV1Destination {
 
     async fn run_command(
         &self,
+        logger: &DestinationLogger,
         destination: &Destination,
         path: &Path,
         args: &[&str],
@@ -151,18 +153,22 @@ impl TerraformV1Destination {
             .spawn()?;
 
         if let Some(stdout) = proc.stdout.take() {
+            let logger = logger.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     tracing::debug!("terraform@1: {}", line);
+                    logger.log_stdout(&line);
                 }
             });
         }
         if let Some(stderr) = proc.stderr.take() {
+            let logger = logger.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     tracing::debug!("terraform@1: {}", line);
+                    logger.log_stderr(&line);
                 }
             });
         }
@@ -189,10 +195,11 @@ impl DestinationEdge for TerraformV1Destination {
     }
     async fn prepare(
         &self,
+        logger: &DestinationLogger,
         release: &ReleaseItem,
         destination: &Destination,
     ) -> anyhow::Result<()> {
-        self.run(release, destination, Mode::Prepare)
+        self.run(logger, release, destination, Mode::Prepare)
             .await
             .context("terraform plan failed")?;
 
@@ -201,10 +208,11 @@ impl DestinationEdge for TerraformV1Destination {
 
     async fn release(
         &self,
+        logger: &DestinationLogger,
         release: &ReleaseItem,
         destination: &Destination,
     ) -> anyhow::Result<()> {
-        self.run(release, destination, Mode::Apply)
+        self.run(logger, release, destination, Mode::Apply)
             .await
             .context("terraform plan failed")?;
 
