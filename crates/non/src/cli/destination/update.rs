@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-use non_models::DestinationType;
 
 use crate::{grpc::GrpcClientState, state::State};
 

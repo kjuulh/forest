@@ -300,16 +300,27 @@ pub struct ReleaseRequest {
     pub environments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReleaseResponse {
+    /// List of release intents created (one per destination)
+    #[prost(message, repeated, tag="1")]
+    pub intents: ::prost::alloc::vec::Vec<ReleaseIntent>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReleaseIntent {
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub environment: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct WaitReleaseRequest {
     #[prost(string, tag="1")]
-    pub artifact_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub environment: ::prost::alloc::string::String,
+    pub release_intent_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

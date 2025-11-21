@@ -128,7 +128,7 @@ impl ReleaseRegistry {
         artifact_id: &ArtifactID,
         destinations: Vec<String>,
         environments: Vec<String>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<CreatedReleaseIntent> {
         let annotation_rec = sqlx::query!(
             "
                 SELECT id, project_id
@@ -145,8 +145,8 @@ impl ReleaseRegistry {
         let annotation_id = annotation_rec.id;
         let project_id = annotation_rec.project_id;
 
-        let destination_ids = sqlx::query!(
-            "SELECT DISTINCT id FROM destinations WHERE name = ANY($1) OR environment = ANY($2)",
+        let destination_recs = sqlx::query!(
+            "SELECT DISTINCT id, name, environment FROM destinations WHERE name = ANY($1) OR environment = ANY($2)",
             &destinations,
             &environments
         )
@@ -154,104 +154,130 @@ impl ReleaseRegistry {
         .await
         .context("release")?;
 
-        if destination_ids.len() < destinations.len() {
+        if destination_recs.len() < destinations.len() {
             anyhow::bail!("not all destinations exists")
         }
 
-        if destination_ids.is_empty() {
+        if destination_recs.is_empty() {
             anyhow::bail!("found no destinations for requested environment");
         }
-
-        let destination_ids: Vec<Uuid> = destination_ids.into_iter().map(|n| n.id).collect();
 
         // TODO: should likely be pushed to a leader, such that we have consistency in which thing is actually released and so on
         let mut tx = self.db.begin().await?;
 
-        for destination_id in destination_ids {
+        // 1. Create ONE release_intent for this release request
+        let release_intent = sqlx::query!(
+            "
+            INSERT INTO release_intents (
+                artifact,
+                annotation_id,
+                project_id
+            ) VALUES (
+                $1,
+                $2,
+                $3
+            )
+            RETURNING id
+            ",
+            artifact_id,
+            annotation_id,
+            project_id
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .context("create release_intent")?;
+
+        let mut created_releases = Vec::new();
+
+        // 2. Create/update releases for each destination, all pointing to this intent
+        for dest in &destination_recs {
             sqlx::query!(
                 "
-                INSERT INTO
-                    releases (
-                        artifact,
-                        annotation_id,
-                        project_id,
-                        destination_id,
-                        status
-                    ) VALUES (
-                        $1,
-                        $2,
-                        $3,
-                        $4,
-                        $5
-                    )
-                    ON CONFLICT (project_id, destination_id)
-                    DO UPDATE SET
-                        artifact = EXCLUDED.artifact,
-                        annotation_id = EXCLUDED.annotation_id,
-                        status = EXCLUDED.status,
-                        updated = now()
-                
-            ",
-                artifact_id,
-                annotation_id,
+                INSERT INTO releases (
+                    release_intent_id,
+                    project_id,
+                    destination_id,
+                    status
+                ) VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4
+                )
+                ON CONFLICT (project_id, destination_id)
+                DO UPDATE SET
+                    release_intent_id = EXCLUDED.release_intent_id,
+                    status = EXCLUDED.status,
+                    updated = now()
+                ",
+                release_intent.id,
                 project_id,
-                destination_id,
+                dest.id,
                 "STAGED"
             )
             .execute(&mut *tx)
             .await
             .context(anyhow::anyhow!(
-                "release: {} to {}",
+                "upsert release: {} to {}",
                 artifact_id,
-                destination_id
+                dest.id
             ))?;
+
+            created_releases.push(CreatedRelease {
+                destination: dest.name.clone(),
+                environment: dest.environment.clone(),
+            });
         }
 
         tx.commit().await.context("commit release batch")?;
 
-        Ok(())
+        Ok(CreatedReleaseIntent {
+            release_intent_id: release_intent.id,
+            releases: created_releases,
+        })
     }
 
-    /// Get the current release status without blocking.
-    /// Returns None if no release exists for this artifact/environment.
-    pub async fn get_release_status(
+    /// Get release status by release_intent_id
+    /// Returns all releases (destinations) for this intent with their statuses
+    pub async fn get_release_status_by_intent(
         &self,
-        artifact_id: &ArtifactID,
-        environment: &str,
-    ) -> anyhow::Result<Option<ReleaseStatusInfo>> {
-        let record = sqlx::query!(
+        release_intent_id: &Uuid,
+    ) -> anyhow::Result<Vec<ReleaseStatusInfo>> {
+        let records = sqlx::query!(
             r#"
                 SELECT
                     r.id as release_id,
+                    r.release_intent_id,
                     r.destination_id,
                     r.status,
                     d.name as destination
                 FROM releases r
                 JOIN destinations d ON r.destination_id = d.id
-                WHERE r.artifact = $1 AND d.environment = $2
+                WHERE r.release_intent_id = $1
             "#,
-            artifact_id,
-            environment
+            release_intent_id
         )
-        .fetch_optional(&self.db)
+        .fetch_all(&self.db)
         .await
-        .context("get_release_status")?;
+        .context("get_release_status_by_intent")?;
 
-        let Some(record) = record else {
-            return Ok(None);
-        };
+        records
+            .into_iter()
+            .map(|record| {
+                let status: ReleaseStatus = record
+                    .status
+                    .parse()
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        let status: ReleaseStatus = record
-            .status
-            .parse()
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-        Ok(Some(ReleaseStatusInfo {
-            release_id: record.release_id,
-            destination_id: record.destination_id,
-            destination: record.destination,
-            status,
-        }))
+                Ok(ReleaseStatusInfo {
+                    release_id: record.release_id,
+                    release_intent_id: record.release_intent_id,
+                    destination_id: record.destination_id,
+                    destination: record.destination,
+                    status,
+                })
+            })
+            .collect()
     }
 
     pub async fn get_staged_release(
@@ -259,19 +285,21 @@ impl ReleaseRegistry {
     ) -> anyhow::Result<Option<(ReleaseItem, StagedReleaseTx)>> {
         let mut tx = self.db.begin().await?;
 
+        // Pick up staged releases (status is now on releases table)
         let item = sqlx::query!(
             "
             SELECT
-                id,
-                artifact,
-                annotation_id,
-                project_id,
-                destination_id,
-                status
-            FROM releases
-            WHERE status = 'STAGED'
+                r.id as release_id,
+                r.release_intent_id,
+                r.destination_id,
+                r.status,
+                ri.artifact,
+                ri.project_id
+            FROM releases r
+            JOIN release_intents ri ON r.release_intent_id = ri.id
+            WHERE r.status = 'STAGED'
             LIMIT 1
-            FOR UPDATE
+            FOR UPDATE OF r
             SKIP LOCKED
         "
         )
@@ -284,7 +312,8 @@ impl ReleaseRegistry {
 
         Ok(Some((
             ReleaseItem {
-                id: item.id,
+                id: item.release_id,
+                release_intent_id: item.release_intent_id,
                 artifact: item.artifact,
                 project_id: item.project_id,
                 destination_id: item.destination_id,
@@ -301,6 +330,7 @@ impl ReleaseRegistry {
         status: ReleaseStatus,
     ) -> anyhow::Result<()> {
         let status_str = status.as_str();
+        // Update the release status (status is on releases table, per destination)
         let res = sqlx::query!(
             "
                 UPDATE releases
@@ -323,7 +353,12 @@ impl ReleaseRegistry {
             );
         }
 
-        tracing::debug!(release_id =% release_item.id, %status, "committing final release status");
+        tracing::debug!(
+            release_id =% release_item.id,
+            release_intent_id =% release_item.release_intent_id,
+            %status,
+            "committing final release status"
+        );
         staged_release_tx.tx.commit().await?;
 
         Ok(())
@@ -384,6 +419,7 @@ impl ReleaseRegistry {
     ) -> anyhow::Result<Vec<ReleaseAnnotation>> {
         // Use LEFT JOINs to get annotations even if they have no releases/destinations
         // This query may return multiple rows per annotation (one per destination)
+        // Join through release_intents to find which destinations have this annotation released
         let recs = sqlx::query!(
             r#"
                 SELECT
@@ -404,7 +440,8 @@ impl ReleaseRegistry {
                     d.type_version       as "destination_type_version?"
                 FROM annotations a
                 JOIN projects p ON a.project_id = p.id
-                LEFT JOIN releases r ON a.id = r.annotation_id
+                LEFT JOIN release_intents ri ON a.id = ri.annotation_id
+                LEFT JOIN releases r ON r.release_intent_id = ri.id
                 LEFT JOIN destinations d ON d.id = r.destination_id
                 WHERE
                         p.namespace = $1
@@ -609,6 +646,7 @@ pub struct ReleaseDestination {
 #[derive(Clone)]
 pub struct ReleaseItem {
     pub id: Uuid,
+    pub release_intent_id: Uuid,
     pub artifact: Uuid,
     pub project_id: Uuid,
     pub destination_id: Uuid,
@@ -617,9 +655,20 @@ pub struct ReleaseItem {
 
 pub struct ReleaseStatusInfo {
     pub release_id: Uuid,
+    pub release_intent_id: Uuid,
     pub destination_id: Uuid,
     pub destination: String,
     pub status: ReleaseStatus,
+}
+
+pub struct CreatedReleaseIntent {
+    pub release_intent_id: Uuid,
+    pub releases: Vec<CreatedRelease>,
+}
+
+pub struct CreatedRelease {
+    pub destination: String,
+    pub environment: String,
 }
 
 pub struct StagedReleaseTx {

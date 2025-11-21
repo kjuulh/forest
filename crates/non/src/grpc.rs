@@ -462,10 +462,10 @@ impl GrpcClient {
         artifact_id: Uuid,
         destination: &[String],
         environments: &[String],
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<ReleaseResult> {
         let mut client = self.release_client().await?;
 
-        client
+        let response = client
             .release(ReleaseRequest {
                 artifact_id: artifact_id.to_string(),
                 destinations: destination.into(),
@@ -474,28 +474,43 @@ impl GrpcClient {
             .await
             .context("release (grpc)")?;
 
-        Ok(())
+        let resp = response.into_inner();
+
+        // All intents share the same release_intent_id
+        let release_intent_id = resp
+            .intents
+            .first()
+            .map(|i| i.release_intent_id.clone())
+            .context("no intents returned")?;
+
+        Ok(ReleaseResult {
+            release_intent_id: release_intent_id.parse().context("release_intent_id")?,
+            releases: resp
+                .intents
+                .into_iter()
+                .map(|i| ReleaseIntentInfo {
+                    destination: i.destination,
+                    environment: i.environment,
+                })
+                .collect(),
+        })
     }
 
-    pub async fn wait_release(
-        &self,
-        artifact_id: Uuid,
-        environment: &str,
-    ) -> anyhow::Result<WaitReleaseResult> {
+    pub async fn wait_release(&self, release_intent_id: Uuid) -> anyhow::Result<WaitReleaseResult> {
         use futures::StreamExt;
 
         let mut client = self.release_client().await?;
 
         let response = client
             .wait_release(non_grpc_interface::WaitReleaseRequest {
-                artifact_id: artifact_id.to_string(),
-                environment: environment.to_string(),
+                release_intent_id: release_intent_id.to_string(),
             })
             .await
             .context("wait_release (grpc)")?;
 
         let mut stream = response.into_inner();
-        let mut final_result: Option<WaitReleaseResult> = None;
+        // Track status per destination
+        let mut final_statuses: HashMap<String, non_models::ReleaseStatus> = HashMap::new();
 
         while let Some(event) = stream.next().await {
             let event = event.context("stream error")?;
@@ -513,15 +528,7 @@ impl GrpcClient {
                         "received status update"
                     );
 
-                    final_result = Some(WaitReleaseResult {
-                        destination: status.destination,
-                        status: release_status,
-                    });
-
-                    // If finalized, we can return
-                    if release_status.is_finalized() {
-                        break;
-                    }
+                    final_statuses.insert(status.destination, release_status);
                 }
                 Some(non_grpc_interface::wait_release_event::Event::LogLine(log)) => {
                     // Print log lines to appropriate output stream
@@ -538,7 +545,20 @@ impl GrpcClient {
             }
         }
 
-        final_result.context("stream ended without final status")
+        // Return aggregated results
+        let destinations: Vec<WaitReleaseDestinationResult> = final_statuses
+            .into_iter()
+            .map(|(dest, status)| WaitReleaseDestinationResult {
+                destination: dest,
+                status,
+            })
+            .collect();
+
+        if destinations.is_empty() {
+            anyhow::bail!("stream ended without any status updates");
+        }
+
+        Ok(WaitReleaseResult { destinations })
     }
 
     pub async fn get_namespaces(&self) -> anyhow::Result<Vec<Namespace>> {
@@ -635,7 +655,33 @@ pub enum GetProjectsQuery {
     Namespace(Namespace),
 }
 
+pub struct ReleaseResult {
+    pub release_intent_id: Uuid,
+    pub releases: Vec<ReleaseIntentInfo>,
+}
+
+pub struct ReleaseIntentInfo {
+    pub destination: String,
+    pub environment: String,
+}
+
 pub struct WaitReleaseResult {
+    pub destinations: Vec<WaitReleaseDestinationResult>,
+}
+
+impl WaitReleaseResult {
+    /// Returns true if all destinations succeeded
+    pub fn all_succeeded(&self) -> bool {
+        self.destinations.iter().all(|d| d.status.is_success())
+    }
+
+    /// Returns true if any destination failed
+    pub fn any_failed(&self) -> bool {
+        self.destinations.iter().any(|d| d.status.is_failure())
+    }
+}
+
+pub struct WaitReleaseDestinationResult {
     pub destination: String,
     pub status: non_models::ReleaseStatus,
 }

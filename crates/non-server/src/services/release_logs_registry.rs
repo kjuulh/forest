@@ -21,7 +21,7 @@ impl ReleaseLogsRegistry {
     pub async fn insert_log_block(
         &self,
         attempt: Uuid,
-        release_id: Uuid,
+        release_intent_id: Uuid,
         destination_id: Uuid,
         log_lines: &[LogLine],
         sequence: i64,
@@ -30,7 +30,7 @@ impl ReleaseLogsRegistry {
             r#"
                 INSERT INTO release_logs (
                     release_attempt,
-                    release_id,
+                    release_intent_id,
                     destination_id,
                     log_lines,
                     sequence
@@ -43,7 +43,7 @@ impl ReleaseLogsRegistry {
                 );
             "#,
             attempt,
-            release_id,
+            release_intent_id,
             destination_id,
             serde_json::to_value(log_lines).context("serialize log lines")?,
             sequence
@@ -62,7 +62,7 @@ impl ReleaseLogsRegistry {
                 SELECT
                     id,
                     release_attempt,
-                    release_id,
+                    release_intent_id,
                     destination_id,
                     log_lines,
                     sequence,
@@ -83,7 +83,7 @@ impl ReleaseLogsRegistry {
                 Ok(LogBlock {
                     id: r.id,
                     release_attempt: r.release_attempt,
-                    release_id: r.release_id,
+                    release_intent_id: r.release_intent_id,
                     destination_id: r.destination_id,
                     log_lines: serde_json::from_value(r.log_lines).context("parse log lines")?,
                     sequence: r.sequence,
@@ -93,27 +93,30 @@ impl ReleaseLogsRegistry {
             .collect()
     }
 
-    /// Get all log blocks for a release, ordered by sequence
-    pub async fn get_logs_by_release(&self, release_id: Uuid) -> anyhow::Result<Vec<LogBlock>> {
+    /// Get all log blocks for a release intent, ordered by sequence
+    pub async fn get_logs_by_intent(
+        &self,
+        release_intent_id: Uuid,
+    ) -> anyhow::Result<Vec<LogBlock>> {
         let records = sqlx::query!(
             r#"
                 SELECT
                     id,
                     release_attempt,
-                    release_id,
+                    release_intent_id,
                     destination_id,
                     log_lines,
                     sequence,
                     created
                 FROM release_logs
-                WHERE release_id = $1
+                WHERE release_intent_id = $1
                 ORDER BY created ASC, sequence ASC
             "#,
-            release_id
+            release_intent_id
         )
         .fetch_all(&self.db)
         .await
-        .context("get logs by release")?;
+        .context("get logs by release intent")?;
 
         records
             .into_iter()
@@ -121,7 +124,7 @@ impl ReleaseLogsRegistry {
                 Ok(LogBlock {
                     id: r.id,
                     release_attempt: r.release_attempt,
-                    release_id: r.release_id,
+                    release_intent_id: r.release_intent_id,
                     destination_id: r.destination_id,
                     log_lines: serde_json::from_value(r.log_lines).context("parse log lines")?,
                     sequence: r.sequence,
@@ -131,11 +134,11 @@ impl ReleaseLogsRegistry {
             .collect()
     }
 
-    /// Get log blocks for a release and destination after a given sequence (cursor-based)
+    /// Get log blocks for a release intent and destination after a given sequence (cursor-based)
     /// Returns blocks where sequence > after_sequence, ordered by sequence ASC
     pub async fn get_logs_after_sequence(
         &self,
-        release_id: Uuid,
+        release_intent_id: Uuid,
         destination_id: Uuid,
         after_sequence: i64,
     ) -> anyhow::Result<Vec<LogBlock>> {
@@ -144,18 +147,18 @@ impl ReleaseLogsRegistry {
                 SELECT
                     id,
                     release_attempt,
-                    release_id,
+                    release_intent_id,
                     destination_id,
                     log_lines,
                     sequence,
                     created
                 FROM release_logs
-                WHERE release_id = $1
+                WHERE release_intent_id = $1
                   AND destination_id = $2
                   AND sequence > $3
                 ORDER BY sequence ASC
             "#,
-            release_id,
+            release_intent_id,
             destination_id,
             after_sequence
         )
@@ -169,7 +172,7 @@ impl ReleaseLogsRegistry {
                 Ok(LogBlock {
                     id: r.id,
                     release_attempt: r.release_attempt,
-                    release_id: r.release_id,
+                    release_intent_id: r.release_intent_id,
                     destination_id: r.destination_id,
                     log_lines: serde_json::from_value(r.log_lines).context("parse log lines")?,
                     sequence: r.sequence,
@@ -194,7 +197,7 @@ impl ReleaseLogsRegistryState for State {
 pub struct LogBlock {
     pub id: Uuid,
     pub release_attempt: Uuid,
-    pub release_id: Uuid,
+    pub release_intent_id: Uuid,
     pub destination_id: Uuid,
     pub log_lines: Vec<LogLine>,
     pub sequence: i64,

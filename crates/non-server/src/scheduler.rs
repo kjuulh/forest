@@ -6,14 +6,17 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     State,
     destination_services::{DestinationServices, DestinationServicesState},
+    destinations::logger::DestinationLogger,
     services::{
         destination_registry::{DestinationRegistry, DestinationRegistryState},
+        release_logs_registry::{ReleaseLogsRegistry, ReleaseLogsRegistryState},
         release_registry::{ReleaseItem, ReleaseRegistry, ReleaseRegistryState},
     },
 };
 
 pub struct Scheduler {
     release_registry: ReleaseRegistry,
+    release_log_registry: ReleaseLogsRegistry,
     destination_registry: DestinationRegistry,
     destinations: DestinationServices,
 }
@@ -64,10 +67,13 @@ impl Scheduler {
                 dest.destination_type
             ))?;
 
-        dest_svc.prepare(staged_release, &dest).await?;
-        dest_svc.release(staged_release, &dest).await?;
+        let logger =
+            DestinationLogger::new(staged_release.clone(), self.release_log_registry.clone());
 
-        tracing::info!("got this far");
+        dest_svc.prepare(&logger, staged_release, &dest).await?;
+        dest_svc.release(&logger, staged_release, &dest).await?;
+
+        tracing::info!("release to destination success");
 
         Ok(())
     }
@@ -106,6 +112,7 @@ impl SchedulerState for State {
     fn scheduler(&self) -> Scheduler {
         Scheduler {
             release_registry: self.release_registry(),
+            release_log_registry: self.release_logs_registry(),
             destinations: self.destination_services(),
             destination_registry: self.destination_registry(),
         }

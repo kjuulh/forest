@@ -118,7 +118,8 @@ impl ReleaseService for ReleaseServer {
         tracing::debug!("release");
         let req = request.into_inner();
 
-        self.state
+        let created = self
+            .state
             .release_registry()
             .release(
                 &req.artifact_id
@@ -132,7 +133,17 @@ impl ReleaseService for ReleaseServer {
             .context("release")
             .to_internal_error()?;
 
-        Ok(Response::new(ReleaseResponse {}))
+        Ok(Response::new(ReleaseResponse {
+            intents: created
+                .releases
+                .into_iter()
+                .map(|r| ReleaseIntent {
+                    release_intent_id: created.release_intent_id.to_string(),
+                    destination: r.destination,
+                    environment: r.environment,
+                })
+                .collect(),
+        }))
     }
 
     type WaitReleaseStream = ReceiverStream<Result<WaitReleaseEvent, tonic::Status>>;
@@ -144,73 +155,83 @@ impl ReleaseService for ReleaseServer {
         tracing::debug!("wait_release stream");
         let req = request.into_inner();
 
-        let artifact_id: uuid::Uuid = req
-            .artifact_id
+        let release_intent_id: uuid::Uuid = req
+            .release_intent_id
             .parse()
-            .context("artifact id")
+            .context("release_intent_id")
             .to_internal_error()?;
-        let environment = req.environment;
 
         let (tx, rx) = mpsc::channel(32);
         let release_registry = self.state.release_registry();
         let logs_registry = self.state.release_logs_registry();
 
-        // Spawn a task to poll and send status updates and logs
+        // Spawn a task to poll and send status updates and logs for all destinations
         tokio::spawn(async move {
             let poll_interval = std::time::Duration::from_millis(500);
-            let mut last_status: Option<non_models::ReleaseStatus> = None;
-            let mut log_cursor: i64 = -1; // Start before sequence 0
-            let mut release_info: Option<(uuid::Uuid, uuid::Uuid, String)> = None; // (release_id, destination_id, destination_name)
+            // Track last status per destination
+            let mut last_statuses: std::collections::HashMap<uuid::Uuid, non_models::ReleaseStatus> =
+                std::collections::HashMap::new();
+            // Track log cursors per destination
+            let mut log_cursors: std::collections::HashMap<uuid::Uuid, i64> =
+                std::collections::HashMap::new();
 
             loop {
                 match release_registry
-                    .get_release_status(&artifact_id, &environment)
+                    .get_release_status_by_intent(&release_intent_id)
                     .await
                 {
-                    Ok(Some(status_info)) => {
-                        // Store release info for log querying
-                        if release_info.is_none() {
-                            release_info = Some((
-                                status_info.release_id,
-                                status_info.destination_id,
-                                status_info.destination.clone(),
-                            ));
+                    Ok(status_infos) => {
+                        if status_infos.is_empty() {
+                            // No releases found yet for this intent, keep polling
+                            tokio::time::sleep(poll_interval).await;
+                            continue;
                         }
 
-                        // Only send status if changed
-                        let status_changed = last_status
-                            .map(|prev| prev != status_info.status)
-                            .unwrap_or(true);
+                        let mut all_finalized = true;
 
-                        if status_changed {
-                            last_status = Some(status_info.status);
+                        for status_info in &status_infos {
+                            // Check if status changed for this destination
+                            let status_changed = last_statuses
+                                .get(&status_info.destination_id)
+                                .map(|prev| *prev != status_info.status)
+                                .unwrap_or(true);
 
-                            let event = WaitReleaseEvent {
-                                event: Some(wait_release_event::Event::StatusUpdate(
-                                    ReleaseStatusUpdate {
-                                        destination: status_info.destination.clone(),
-                                        status: status_info.status.to_string(),
-                                    },
-                                )),
-                            };
+                            if status_changed {
+                                last_statuses
+                                    .insert(status_info.destination_id, status_info.status);
 
-                            if tx.send(Ok(event)).await.is_err() {
-                                // Client disconnected
-                                break;
+                                let event = WaitReleaseEvent {
+                                    event: Some(wait_release_event::Event::StatusUpdate(
+                                        ReleaseStatusUpdate {
+                                            destination: status_info.destination.clone(),
+                                            status: status_info.status.to_string(),
+                                        },
+                                    )),
+                                };
+
+                                if tx.send(Ok(event)).await.is_err() {
+                                    return;
+                                }
                             }
-                        }
 
-                        // Poll for new log blocks
-                        if let Some((release_id, destination_id, ref destination)) = release_info {
+                            // Poll for new log blocks for this destination
+                            let log_cursor =
+                                *log_cursors.get(&status_info.destination_id).unwrap_or(&-1);
+
                             match logs_registry
-                                .get_logs_after_sequence(release_id, destination_id, log_cursor)
+                                .get_logs_after_sequence(
+                                    release_intent_id,
+                                    status_info.destination_id,
+                                    log_cursor,
+                                )
                                 .await
                             {
                                 Ok(log_blocks) => {
                                     for block in log_blocks {
-                                        // Update cursor to the latest sequence we've seen
+                                        // Update cursor for this destination
                                         if block.sequence > log_cursor {
-                                            log_cursor = block.sequence;
+                                            log_cursors
+                                                .insert(status_info.destination_id, block.sequence);
                                         }
 
                                         // Send each log line from the block
@@ -218,7 +239,7 @@ impl ReleaseService for ReleaseServer {
                                             let event = WaitReleaseEvent {
                                                 event: Some(wait_release_event::Event::LogLine(
                                                     ReleaseLogLine {
-                                                        destination: destination.clone(),
+                                                        destination: status_info.destination.clone(),
                                                         line: log_line.line,
                                                         timestamp: log_line.timestamp.to_string(),
                                                         channel: match log_line.channel {
@@ -242,18 +263,22 @@ impl ReleaseService for ReleaseServer {
                                     }
                                 }
                                 Err(e) => {
-                                    tracing::warn!("error polling logs: {e:#}");
+                                    tracing::warn!(
+                                        destination = %status_info.destination,
+                                        "error polling logs: {e:#}"
+                                    );
                                 }
+                            }
+
+                            if !status_info.status.is_finalized() {
+                                all_finalized = false;
                             }
                         }
 
-                        // If finalized, we're done
-                        if status_info.status.is_finalized() {
+                        // If all destinations are finalized, we're done
+                        if all_finalized {
                             break;
                         }
-                    }
-                    Ok(None) => {
-                        // No release found yet, keep polling
                     }
                     Err(e) => {
                         tracing::warn!("error polling release status: {e:#}");

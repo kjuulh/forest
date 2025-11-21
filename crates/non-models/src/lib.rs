@@ -157,6 +157,10 @@ impl ReleaseStatus {
     pub fn is_success(&self) -> bool {
         matches!(self, ReleaseStatus::Success)
     }
+
+    pub fn is_failure(&self) -> bool {
+        matches!(self, ReleaseStatus::Failure)
+    }
 }
 
 impl Display for ReleaseStatus {

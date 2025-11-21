@@ -57,28 +57,27 @@ impl DestinationService {
 
     pub(crate) async fn prepare(
         &self,
+        logger: &DestinationLogger,
         staged_release: &ReleaseItem,
         destination: &Destination,
     ) -> anyhow::Result<()> {
         tracing::debug!(id =% staged_release.id, destination =% self.name(), "preparing release");
 
-        let logger = self.create_logger(&staged_release);
-
         self.inner
-            .prepare(&logger, staged_release, destination)
+            .prepare(logger, staged_release, destination)
             .await
     }
 
     pub(crate) async fn release(
         &self,
+        logger: &DestinationLogger,
         staged_release: &ReleaseItem,
         destination: &Destination,
     ) -> anyhow::Result<()> {
         tracing::debug!(id =% staged_release.id, destination =% self.name(), "running release");
-        let logger = self.create_logger(&staged_release);
 
         self.inner
-            .release(&logger, staged_release, destination)
+            .release(logger, staged_release, destination)
             .await
     }
 

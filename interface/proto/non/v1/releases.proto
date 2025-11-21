@@ -32,11 +32,19 @@ message ReleaseRequest {
   repeated string destinations = 2;
   repeated string environments = 3;
 }
-message ReleaseResponse {}
+message ReleaseResponse {
+  // List of release intents created (one per destination)
+  repeated ReleaseIntent intents = 1;
+}
+
+message ReleaseIntent {
+  string release_intent_id = 1;
+  string destination = 2;
+  string environment = 3;
+}
 
 message WaitReleaseRequest {
-  string artifact_id = 1;
-  string environment = 2;
+  string release_intent_id = 1;
 }
 
 message WaitReleaseEvent {

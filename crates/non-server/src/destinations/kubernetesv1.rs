@@ -20,9 +20,9 @@ impl DestinationEdge for KubernetesV1Destination {
 
     async fn release(
         &self,
-        logger: &DestinationLogger,
-        release: &ReleaseItem,
-        destination: &Destination,
+        _logger: &DestinationLogger,
+        _release: &ReleaseItem,
+        _destination: &Destination,
     ) -> anyhow::Result<()> {
         Ok(())
     }

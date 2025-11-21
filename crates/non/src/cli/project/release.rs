@@ -93,7 +93,7 @@ impl ReleaseCommand {
 
         tracing::info!(artifact =% artifact_id, environment =% self.environment, "releasing");
 
-        state
+        let release_result = state
             .grpc_client()
             .release(
                 artifact_id,
@@ -103,27 +103,42 @@ impl ReleaseCommand {
             .await
             .context("release")?;
 
+        tracing::info!(
+            release_intent_id =% release_result.release_intent_id,
+            destinations = ?release_result.releases.iter().map(|r| &r.destination).collect::<Vec<_>>(),
+            "release intent created"
+        );
+
         if self.wait {
             println!("Waiting for release to complete (streaming logs)...\n");
 
             let result = state
                 .grpc_client()
-                .wait_release(artifact_id, &self.environment)
+                .wait_release(release_result.release_intent_id)
                 .await
                 .context("wait_release")?;
 
             println!(); // Empty line after logs
-            if result.status.is_success() {
-                println!(
-                    "Release completed successfully for destination: {}",
-                    result.destination
-                );
-            } else {
-                eprintln!(
-                    "Release failed for destination: {} with status: {}",
-                    result.destination, result.status
-                );
-                anyhow::bail!("release failed with status: {}", result.status);
+
+            // Report results for each destination
+            let mut any_failed = false;
+            for dest_result in &result.destinations {
+                if dest_result.status.is_success() {
+                    println!(
+                        "Release completed successfully for destination: {}",
+                        dest_result.destination
+                    );
+                } else {
+                    eprintln!(
+                        "Release failed for destination: {} with status: {}",
+                        dest_result.destination, dest_result.status
+                    );
+                    any_failed = true;
+                }
+            }
+
+            if any_failed {
+                anyhow::bail!("one or more releases failed");
             }
         } else {
             tracing::info!("release staged for {artifact_id}");

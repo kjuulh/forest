@@ -27,6 +27,13 @@ impl DestinationLogger {
             let mut current_size = 0;
             let mut sequence: i64 = 0;
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+            tracing::debug!(
+                release_intent_id = %release.release_intent_id,
+                destination_id = %release.destination_id,
+                "destination logger started"
+            );
 
             loop {
                 let msg: Option<(LogChannel, String)> = tokio::select! {
@@ -34,13 +41,19 @@ impl DestinationLogger {
                         if current_size != 0 {
                             if let Err(e) = registry.insert_log_block(
                                 attempt,
-                                release.id,
+                                release.release_intent_id,
                                 release.destination_id,
                                 &buffer,
                                 sequence,
                             ).await {
                                 tracing::error!("failed to commit log block: {:?}", e);
                             } else {
+                                tracing::debug!(
+                                    release_intent_id = %release.release_intent_id,
+                                    sequence = sequence,
+                                    lines = buffer.len(),
+                                    "logger: committed log block"
+                                );
                                 buffer.clear();
                                 current_size = 0;
                                 sequence += 1;
@@ -61,7 +74,7 @@ impl DestinationLogger {
                             if let Err(e) = registry
                                 .insert_log_block(
                                     attempt,
-                                    release.id,
+                                    release.release_intent_id,
                                     release.destination_id,
                                     &buffer,
                                     sequence,
@@ -91,7 +104,7 @@ impl DestinationLogger {
                             && let Err(e) = registry
                                 .insert_log_block(
                                     attempt,
-                                    release.id,
+                                    release.release_intent_id,
                                     release.destination_id,
                                     &buffer,
                                     sequence,
