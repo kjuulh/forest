@@ -1,7 +1,6 @@
 use std::{fmt::Display, sync::Arc};
 
 use non_models::Destination;
-use sqlx::PgPool;
 
 use crate::{
     State,
@@ -10,7 +9,8 @@ use crate::{
         terraformv1::TerraformV1Destination,
     },
     services::{
-        artifact_staging_registry::ArtifactStagingRegistryState, release_registry::ReleaseItem,
+        artifact_staging_registry::ArtifactStagingRegistryState,
+        release_logs_registry::ReleaseLogsRegistry, release_registry::ReleaseItem,
     },
     temp_dir::TempDirectoriesState,
 };
@@ -22,28 +22,31 @@ pub mod logger;
 
 pub struct DestinationService {
     inner: Arc<dyn DestinationEdge + Send + Sync + 'static>,
-    db: PgPool,
+    release_logs_registry: ReleaseLogsRegistry,
 }
 
 impl DestinationService {
-    pub fn new<T: DestinationEdge + Send + Sync + 'static>(t: T, db: PgPool) -> Self {
+    pub fn new<T: DestinationEdge + Send + Sync + 'static>(
+        t: T,
+        release_logs_registry: ReleaseLogsRegistry,
+    ) -> Self {
         Self {
             inner: Arc::new(t),
-            db,
+            release_logs_registry,
         }
     }
 
-    pub fn new_kubernetes_v1(db: PgPool) -> Self {
-        Self::new(KubernetesV1Destination {}, db)
+    pub fn new_kubernetes_v1(release_logs_registry: ReleaseLogsRegistry) -> Self {
+        Self::new(KubernetesV1Destination {}, release_logs_registry)
     }
 
-    pub fn new_terraform_v1(state: &State, db: PgPool) -> Self {
+    pub fn new_terraform_v1(state: &State, release_logs_registry: ReleaseLogsRegistry) -> Self {
         Self::new(
             TerraformV1Destination {
                 temp: state.temp_directories(),
                 artifact_files: state.artifact_staging_registry(),
             },
-            db,
+            release_logs_registry,
         )
     }
 
@@ -80,7 +83,7 @@ impl DestinationService {
     }
 
     fn create_logger(&self, staged_release: &ReleaseItem) -> DestinationLogger {
-        DestinationLogger::new(staged_release.clone(), self.db.clone())
+        DestinationLogger::new(staged_release.clone(), self.release_logs_registry.clone())
     }
 }
 

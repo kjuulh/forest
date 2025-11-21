@@ -6,8 +6,9 @@ use tonic::Response;
 
 use crate::{
     grpc::artifacts::GrpcErrorExt,
-    services::release_registry::{
-        self, ReleaseAnnotation, ReleaseDestination, ReleaseRegistryState,
+    services::{
+        release_logs_registry::{LogChannel, ReleaseLogsRegistryState},
+        release_registry::{self, ReleaseAnnotation, ReleaseDestination, ReleaseRegistryState},
     },
     state::State,
 };
@@ -152,11 +153,14 @@ impl ReleaseService for ReleaseServer {
 
         let (tx, rx) = mpsc::channel(32);
         let release_registry = self.state.release_registry();
+        let logs_registry = self.state.release_logs_registry();
 
-        // Spawn a task to poll and send status updates
+        // Spawn a task to poll and send status updates and logs
         tokio::spawn(async move {
-            let poll_interval = std::time::Duration::from_millis(1000);
+            let poll_interval = std::time::Duration::from_millis(500);
             let mut last_status: Option<non_models::ReleaseStatus> = None;
+            let mut log_cursor: i64 = -1; // Start before sequence 0
+            let mut release_info: Option<(uuid::Uuid, uuid::Uuid, String)> = None; // (release_id, destination_id, destination_name)
 
             loop {
                 match release_registry
@@ -164,7 +168,16 @@ impl ReleaseService for ReleaseServer {
                     .await
                 {
                     Ok(Some(status_info)) => {
-                        // Only send if status changed
+                        // Store release info for log querying
+                        if release_info.is_none() {
+                            release_info = Some((
+                                status_info.release_id,
+                                status_info.destination_id,
+                                status_info.destination.clone(),
+                            ));
+                        }
+
+                        // Only send status if changed
                         let status_changed = last_status
                             .map(|prev| prev != status_info.status)
                             .unwrap_or(true);
@@ -185,11 +198,58 @@ impl ReleaseService for ReleaseServer {
                                 // Client disconnected
                                 break;
                             }
+                        }
 
-                            // If finalized, we're done
-                            if status_info.status.is_finalized() {
-                                break;
+                        // Poll for new log blocks
+                        if let Some((release_id, destination_id, ref destination)) = release_info {
+                            match logs_registry
+                                .get_logs_after_sequence(release_id, destination_id, log_cursor)
+                                .await
+                            {
+                                Ok(log_blocks) => {
+                                    for block in log_blocks {
+                                        // Update cursor to the latest sequence we've seen
+                                        if block.sequence > log_cursor {
+                                            log_cursor = block.sequence;
+                                        }
+
+                                        // Send each log line from the block
+                                        for log_line in block.log_lines {
+                                            let event = WaitReleaseEvent {
+                                                event: Some(wait_release_event::Event::LogLine(
+                                                    ReleaseLogLine {
+                                                        destination: destination.clone(),
+                                                        line: log_line.line,
+                                                        timestamp: log_line.timestamp.to_string(),
+                                                        channel: match log_line.channel {
+                                                            LogChannel::Stdout => {
+                                                                non_grpc_interface::LogChannel::Stdout
+                                                                    .into()
+                                                            }
+                                                            LogChannel::Stderr => {
+                                                                non_grpc_interface::LogChannel::Stderr
+                                                                    .into()
+                                                            }
+                                                        },
+                                                    },
+                                                )),
+                                            };
+
+                                            if tx.send(Ok(event)).await.is_err() {
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("error polling logs: {e:#}");
+                                }
                             }
+                        }
+
+                        // If finalized, we're done
+                        if status_info.status.is_finalized() {
+                            break;
                         }
                     }
                     Ok(None) => {

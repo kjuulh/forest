@@ -345,6 +345,8 @@ pub struct ReleaseLogLine {
     pub line: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
     pub timestamp: ::prost::alloc::string::String,
+    #[prost(enumeration="LogChannel", tag="4")]
+    pub channel: i32,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -452,6 +454,35 @@ pub struct Ref {
 pub struct Namespace {
     #[prost(string, tag="1")]
     pub namespace: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum LogChannel {
+    Unspecified = 0,
+    Stdout = 1,
+    Stderr = 2,
+}
+impl LogChannel {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            LogChannel::Unspecified => "LOG_CHANNEL_UNSPECIFIED",
+            LogChannel::Stdout => "LOG_CHANNEL_STDOUT",
+            LogChannel::Stderr => "LOG_CHANNEL_STDERR",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "LOG_CHANNEL_UNSPECIFIED" => Some(Self::Unspecified),
+            "LOG_CHANNEL_STDOUT" => Some(Self::Stdout),
+            "LOG_CHANNEL_STDERR" => Some(Self::Stderr),
+            _ => None,
+        }
+    }
 }
 include!("non.v1.tonic.rs");
 // @@protoc_insertion_point(module)

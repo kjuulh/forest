@@ -222,6 +222,8 @@ impl ReleaseRegistry {
         let record = sqlx::query!(
             r#"
                 SELECT
+                    r.id as release_id,
+                    r.destination_id,
                     r.status,
                     d.name as destination
                 FROM releases r
@@ -245,6 +247,8 @@ impl ReleaseRegistry {
             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         Ok(Some(ReleaseStatusInfo {
+            release_id: record.release_id,
+            destination_id: record.destination_id,
             destination: record.destination,
             status,
         }))
@@ -612,6 +616,8 @@ pub struct ReleaseItem {
 }
 
 pub struct ReleaseStatusInfo {
+    pub release_id: Uuid,
+    pub destination_id: Uuid,
     pub destination: String,
     pub status: ReleaseStatus,
 }

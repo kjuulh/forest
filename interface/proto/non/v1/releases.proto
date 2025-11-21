@@ -55,6 +55,13 @@ message ReleaseLogLine {
   string destination = 1;
   string line = 2;
   string timestamp = 3;
+  LogChannel channel = 4;
+}
+
+enum LogChannel {
+  LOG_CHANNEL_UNSPECIFIED = 0;
+  LOG_CHANNEL_STDOUT = 1;
+  LOG_CHANNEL_STDERR = 2;
 }
 
 message GetNamespacesRequest {}

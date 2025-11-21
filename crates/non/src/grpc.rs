@@ -524,13 +524,15 @@ impl GrpcClient {
                     }
                 }
                 Some(non_grpc_interface::wait_release_event::Event::LogLine(log)) => {
-                    // For now, just log the line - can be expanded later
-                    tracing::info!(
-                        destination =% log.destination,
-                        timestamp =% log.timestamp,
-                        "{}",
-                        log.line
-                    );
+                    // Print log lines to appropriate output stream
+                    match non_grpc_interface::LogChannel::try_from(log.channel) {
+                        Ok(non_grpc_interface::LogChannel::Stderr) => {
+                            eprintln!("{}", log.line);
+                        }
+                        _ => {
+                            println!("{}", log.line);
+                        }
+                    }
                 }
                 None => {}
             }

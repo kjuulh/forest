@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::{
     State,
     destinations::{DestinationIndex, DestinationService},
+    services::release_logs_registry::ReleaseLogsRegistryState,
 };
 
 #[derive(Clone)]
@@ -32,10 +33,11 @@ pub trait DestinationServicesState {
 
 impl DestinationServicesState for State {
     fn destination_services(&self) -> DestinationServices {
+        let release_logs_registry = self.release_logs_registry();
         DestinationServices {
             services: Arc::new(vec![
-                DestinationService::new_kubernetes_v1(self.db.clone()),
-                DestinationService::new_terraform_v1(self, self.db.clone()),
+                DestinationService::new_kubernetes_v1(release_logs_registry.clone()),
+                DestinationService::new_terraform_v1(self, release_logs_registry),
             ]),
         }
     }

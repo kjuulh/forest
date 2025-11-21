@@ -12,7 +12,6 @@
 use std::fmt::Display;
 
 use anyhow::Context;
-use inquire::ui::Color;
 
 use crate::{
     grpc::GrpcClientState,
@@ -105,7 +104,7 @@ impl ReleaseCommand {
             .context("release")?;
 
         if self.wait {
-            tracing::info!("waiting for release to complete...");
+            println!("Waiting for release to complete (streaming logs)...\n");
 
             let result = state
                 .grpc_client()
@@ -113,16 +112,16 @@ impl ReleaseCommand {
                 .await
                 .context("wait_release")?;
 
+            println!(); // Empty line after logs
             if result.status.is_success() {
-                tracing::info!(
-                    destination =% result.destination,
-                    "release completed successfully"
+                println!(
+                    "Release completed successfully for destination: {}",
+                    result.destination
                 );
             } else {
-                tracing::error!(
-                    destination =% result.destination,
-                    status =% result.status,
-                    "release failed"
+                eprintln!(
+                    "Release failed for destination: {} with status: {}",
+                    result.destination, result.status
                 );
                 anyhow::bail!("release failed with status: {}", result.status);
             }
