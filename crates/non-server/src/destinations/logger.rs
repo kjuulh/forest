@@ -94,7 +94,7 @@ impl DestinationLogger {
                             tracing::error!("failed to commit log block: {:?}", e);
                         }
 
-                        tracing::debug!("pushing log message");
+                        tracing::trace!("pushing log message");
                         buffer.push(LogLine {
                             channel,
                             line,
