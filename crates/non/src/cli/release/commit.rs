@@ -1,14 +1,3 @@
-// # ARCHITECTURE:
-//
-// destinations are viewable in two ways. either destination first, or project first. I.e. For which destinations what is our current state, and for which projects what is currently released.
-//
-// ## Destinations
-//
-// 1. Destination / Project (symlink) / Refs (commit (HEAD, history))
-// 2. Namespace / Project / Refs (commits, branches) / Destinations
-//
-// Destinations will receive hooks for each change to the refs
-
 use std::fmt::Display;
 
 use anyhow::Context;
@@ -19,8 +8,8 @@ use crate::{
     state::State,
 };
 
-#[derive(clap::Parser)]
-pub struct ReleaseCommand {
+#[derive(clap::Args)]
+pub struct CommitCommand {
     #[arg(long = "artifact-id", alias = "id")]
     artifact_id: Option<String>,
 
@@ -47,8 +36,8 @@ pub struct ReleaseCommand {
     wait: bool,
 }
 
-impl ReleaseCommand {
-    pub async fn execute(&self, state: &State) -> Result<(), anyhow::Error> {
+impl CommitCommand {
+    pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         if self.environment.is_empty() {
             anyhow::bail!("environment is required");
         }

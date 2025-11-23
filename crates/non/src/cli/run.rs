@@ -87,7 +87,6 @@ impl RunCommand {
 }
 
 struct CliRun;
-
 impl CliRun {
     pub async fn execute(
         &self,

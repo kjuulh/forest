@@ -4,7 +4,6 @@ use components::ComponentsCommand;
 use global::GlobalCommand;
 use init::InitCommand;
 use notmad::{Component, MadError};
-use publish::PublishCommand;
 use run::RunCommand;
 use shell::ShellCommand;
 use template::TemplateCommand;
@@ -12,18 +11,17 @@ use tmp::TmpCommand;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    cli::{deploy::DeployCommand, destination::DestinationCommand, project::ProjectCommand},
+    cli::{destination::DestinationCommand, project::ProjectCommand, release::ReleaseCommand},
     state::State,
 };
 
 mod admin;
 mod components;
-mod deploy;
 mod destination;
 mod global;
 mod init;
 mod project;
-mod publish;
+mod release;
 mod run;
 mod shell;
 mod template;
@@ -43,13 +41,12 @@ enum Commands {
     Admin(AdminCommand),
     Run(RunCommand),
     Template(TemplateCommand),
-    Deploy(DeployCommand),
-    Publish(PublishCommand),
     Global(GlobalCommand),
     Shell(ShellCommand),
     Tmp(TmpCommand),
     Project(ProjectCommand),
     Destination(DestinationCommand),
+    Release(ReleaseCommand),
 }
 
 pub async fn execute() -> anyhow::Result<()> {
@@ -124,13 +121,12 @@ impl CommandHandler {
             Commands::Admin(cmd) => cmd.execute(state).await,
             Commands::Run(cmd) => cmd.execute(state).await,
             Commands::Template(cmd) => cmd.execute(state).await,
-            Commands::Deploy(cmd) => cmd.execute(state).await,
-            Commands::Publish(cmd) => cmd.execute(state).await,
             Commands::Global(cmd) => cmd.execute(state).await,
             Commands::Shell(cmd) => cmd.execute(state).await,
             Commands::Tmp(cmd) => cmd.execute(state).await,
             Commands::Project(cmd) => cmd.execute(state).await,
             Commands::Destination(cmd) => cmd.execute(state).await,
+            Commands::Release(cmd) => cmd.execute(state).await,
         }
     }
 }
