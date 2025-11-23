@@ -116,7 +116,7 @@ impl ComponentsService {
     async fn sync_components(&self, project: Option<Project>) -> anyhow::Result<CacheComponents> {
         let inherited = self.ctx.inherited();
 
-        tracing::debug!("syncing components");
+        tracing::trace!("syncing components");
 
         // 1. Construct local store of existing components
         let deps = if let Some(project) = project {

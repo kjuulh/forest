@@ -91,7 +91,7 @@ impl ComponentCache {
     }
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn get_component_from_path(&self, path: &Path) -> anyhow::Result<CacheComponent> {
-        tracing::debug!("getting component");
+        tracing::trace!("getting component");
 
         let component = self
             .component_parser

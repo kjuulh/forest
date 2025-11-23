@@ -61,7 +61,7 @@ impl NonContext {
                     .ok()
                     .unwrap_or("no temp dir found".to_string());
 
-                tracing::debug!(
+                tracing::trace!(
                     context_id = s.context_id,
                     parents = s.get_parents().join(","),
                     inherited = s.inherited(),

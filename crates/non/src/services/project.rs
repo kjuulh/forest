@@ -29,7 +29,7 @@ pub struct ProjectParser {
 
 impl ProjectParser {
     pub async fn get_project(&self) -> anyhow::Result<Project> {
-        tracing::debug!("getting project");
+        tracing::trace!("getting project");
         let mut project = self.parse_project_file().await?;
 
         let components = self.get_project_components(&project).await?;
@@ -38,7 +38,7 @@ impl ProjectParser {
             // Assert project requirements here
             // Add command structure to project
 
-            tracing::info!("found commands: {}", component.commands.len());
+            tracing::trace!("found commands: {}", component.commands.len());
 
             for (command_name, command) in component.commands {
                 project.commands.insert(
@@ -159,7 +159,7 @@ impl ProjectParser {
         }
     }
 
-    #[tracing::instrument(skip(self), level = "debug")]
+    #[tracing::instrument(skip(self), level = "trace")]
     async fn get_project_file(&self, dir: &Path) -> anyhow::Result<Option<(PathBuf, String)>> {
         let file_path = dir.join(NON_PROJECT_CUE_FILE);
         if file_path.exists() {
@@ -177,7 +177,7 @@ impl ProjectParser {
             let output = std::string::String::from_utf8(output.stdout)
                 .context("convert cue into native format (toml)")?;
 
-            tracing::debug!("output: (stdout: {:?}, stderr: {:?})", output, stderr);
+            tracing::trace!("output: (stdout: {:?}, stderr: {:?})", output, stderr);
 
             return Ok(Some((file_path, output)));
         }

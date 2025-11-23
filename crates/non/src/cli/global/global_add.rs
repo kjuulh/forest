@@ -93,7 +93,7 @@ impl GlobalAddCommand {
 
         tracing::info!("added global dependency");
 
-        tracing::info!("syncing components");
+        tracing::trace!("syncing components");
         state
             .components_service()
             .get_components_user_config()
