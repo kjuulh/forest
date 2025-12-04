@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package forest.v1;
+
+service RegistryService {
+  rpc GetComponents(GetComponentsRequest) returns (GetComponentsResponse) {}
+  rpc GetComponent(GetComponentRequest) returns (GetComponentResponse) {}
+  rpc GetComponentVersion(GetComponentVersionRequest) returns (GetComponentVersionResponse) {}
+  rpc BeginUpload(BeginUploadRequest) returns (BeginUploadResponse) {}
+  rpc UploadFile(UploadFileRequest) returns (UploadFileResponse) {}
+  rpc CommitUpload(CommitUploadRequest) returns (CommitUploadResponse) {}
+  rpc GetComponentFiles(GetComponentFilesRequest) returns (stream GetComponentFilesResponse) {}
+}
+
+message GetComponentsRequest {}
+message GetComponentsResponse {}
+
+message GetComponentRequest {
+  string name = 1;
+  string namespace = 2;
+}
+message GetComponentResponse {
+  optional Component component = 1;
+}
+
+message Component {
+  string id = 1;
+  string version = 2;
+}
+
+// ComponentVersion
+message GetComponentVersionRequest {
+  string name = 1;
+  string namespace = 2;
+  string version = 3;
+}
+message GetComponentVersionResponse {
+  optional Component component = 1;
+}
+
+// BeginUpload
+
+message BeginUploadRequest {
+  string name = 1;
+  string namespace = 2;
+  string version = 3;
+}
+message BeginUploadResponse {
+  string upload_context = 1;
+}
+
+message UploadFileRequest {
+  string upload_context = 1;
+  string file_path = 2;
+  bytes file_content = 3;
+}
+message UploadFileResponse {}
+
+message CommitUploadRequest {
+  string upload_context = 1;
+}
+message CommitUploadResponse {}
+
+// Get component files
+message GetComponentFilesRequest {
+  string component_id = 1;
+}
+message GetComponentFilesResponse {
+  oneof msg {
+    Done done = 1;
+    ComponentFile component_file = 2;
+  }
+}
+
+message ComponentFile {
+  string file_path = 1;
+  bytes file_content = 2;
+}
+
+message Done {}

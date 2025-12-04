@@ -1,0 +1,45 @@
+[package]
+name = "forest-server"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+forest-grpc-interface.workspace = true
+forest-models.workspace = true
+
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+async-trait.workspace = true
+semver.workspace = true
+futures.workspace = true
+notmad.workspace = true
+drop-queue.workspace = true
+rand.workspace = true
+noworkers.workspace = true
+
+bytes.workspace = true
+prost.workspace = true
+prost-types.workspace = true
+tonic.workspace = true
+
+serde = { version = "1.0.197", features = ["derive"] }
+uuid = { version = "1.7.0", features = ["v4", "v7"] }
+inquire = "0.7.5"
+reqwest = "0.12.20"
+tokio-util = "0.7.15"
+sqlx = { version = "0.8.6", features = [
+  "chrono",
+  "postgres",
+  "runtime-tokio",
+  "uuid",
+] }
+serde_json = "1.0.145"
+petname = "2.0.2"
+regex = "1.12.2"
+indexmap = "2"
+chrono = "0.4"
+tokio-stream = "0.1"

@@ -1,0 +1,4 @@
+[component]
+name = "deployment"
+namespace = "forest"
+version = "0.0.1"

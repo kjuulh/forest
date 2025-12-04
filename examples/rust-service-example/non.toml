@@ -1,7 +1,0 @@
-[project]
-name = "rust-service-example"
-
-[dependencies]
-"non/service" = { version = "0.0.1" }
-"lunar/go-plan" = { version = "0.0.2" }
-"lunar/docs" = { version = "0.0.1" }

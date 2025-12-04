@@ -1,4 +1,4 @@
 version: v2
 modules:
   - path: interface/proto
-    name: buf.build/noschemaplz/non
+    name: buf.build/noschemaplz/forest

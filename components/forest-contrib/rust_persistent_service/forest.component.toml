@@ -1,0 +1,19 @@
+[component]
+name = "rust-persistent-service"
+namespace = "forest-contrib"
+version = "0.0.0"
+
+[commands]
+build = { bash = """
+  echo "component $NON_COMPONENT"
+  echo "tmp $NON_TMP"
+  $forest template production.Dockerfile.jinja2
+  echo "$?"
+  docker build -t something:latest -f $NON_TMP/production.Dockerfile .
+""" }
+
+parent = { bash = "echo parent && forest run nested" }
+nested = { bash = "echo nested && forest run nested2" }
+nested2 = ["echo nested2", "forest run nested3", "forest run nested4"]
+nested3 = ["echo nested3"]
+nested4 = ["echo nested4", "forest run nested3"]

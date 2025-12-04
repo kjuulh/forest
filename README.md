@@ -4,27 +4,27 @@ Non is a set of tools to help you design the development workflows you need. It 
 
 ## Example
 
-With `non` you can quickly compose a shareable workflow to initiate a starter kit for a service, builds to produce production ready artifacts, spin up a development environment, release production services, and more.
+With `forest` you can quickly compose a shareable workflow to initiate a starter kit for a service, builds to produce production ready artifacts, spin up a development environment, release production services, and more.
 
-**Install `non`**
+**Install `forest`**
 
 *bargo*
 
 ```bash
-cargo (b)install non
+cargo (b)install forest
 ```
 
 *brew*
 
 ```bash
-brew install nonothing/tap/non  
+brew install forestothing/tap/forest  
 ```
 
 **Create service**
 
 ```bash
-non init
-> starter: github.com/nonothing/rust-service-starter
+forest init
+> starter: github.com/forestothing/rust-service-starter
 > name: my-starter-service
 > http: y
 cd my-starter-service
@@ -33,21 +33,21 @@ cd my-starter-service
 **Build production grade artifact**
 
 ```bash
-non run docker:build
+forest run docker:build
 > tag: my-service-starter:local
 ```
 
 **Development environment**
 
 ```bash
-non run dev:up
+forest run dev:up
 > spins up: postgresql at tcp/5432
 ```
 
 **Deploy artifact**
 
 ```bash
-non service release
+forest service release
 > branch: main
 > artifact: abc123 - $(date)
 > release: y
@@ -56,20 +56,20 @@ non service release
 **Rollback service**
 
 ```bash
-non service rollback
+forest service rollback
 > artifact: abc123 - $(date)
 > release: y
 ```
 
 ## Architecture
 
-Non allows you to use standard components, either upstream from non, or build your own. Often we see that you use wrap standard non components in your own ways to make `non` truly yours.
+Non allows you to use standard components, either upstream from forest, or build your own. Often we see that you use wrap standard forest components in your own ways to make `forest` truly yours.
 
 ### Project
 
-Project is the place where actual work happens, it is in this context that `non` components are executed.
+Project is the place where actual work happens, it is in this context that `forest` components are executed.
 
-A `non.toml` is the artifact that describes your dependencies, or any local workflows you may've got
+A `forest.toml` is the artifact that describes your dependencies, or any local workflows you may've got
 
 ### Component
 
@@ -78,8 +78,8 @@ Component can be thought of as a library or repository of logic, files or media.
 Components can be added to a project with the following:
 
 ```bash
-non add
-> nonothing: rust_service:docker
+forest add
+> forestothing: rust_service:docker
 # Rust is the language in question, service is the type of project we care about
 # Docker is the component under this namespace
 ```
@@ -104,7 +104,7 @@ Components are generally language, and/or organisation specific, and can pull ce
 ## Domain model
 
 - Projects: scoped by org and name, contains everything related to a single project. Such as dependencies, code, links and more, documentation.
-- Components: a non runnable project. It can contain requirements, other dependencies. It is basically either a tool, or a set of requirements and features that make upstream development easier.
+- Components: a forest runnable project. It can contain requirements, other dependencies. It is basically either a tool, or a set of requirements and features that make upstream development easier.
 - Dependencies: A project or component can have a set of dependencies. These are components to include. Each component can require certain things their upstream parts, and add certain functionality.
 - Requirements: A component can require information from upstream services. These requirements are extra bits of information that can either be provided at runtime via. args, or via. the project variables. A component has to implement the requirements and re-require them from their upstream.
 - Artifact: A project can be published via. artifacts. An artifact can be used by interested parties and can optionally be annotated. These can either be static, or dynamic. If static it acts as releases, if dynamic these can be released, rolled back, re-released. A static artifact can be upgraded to a dynamic artifact, but the other way around isn't possible

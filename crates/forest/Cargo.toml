@@ -1,0 +1,63 @@
+[package]
+name = "forest"
+edition = "2024"
+description = "forest is a set of tools to help you design the development workflows you need. It is specifically built to allow you to share workflows and streamline boring tasks."
+repository = "https://git.kjuulh.io/kjuulh/forest"
+readme = "../../README.md"
+license = "MIT"
+
+version.workspace = true
+
+[dependencies]
+forest-grpc-interface.workspace = true
+forest-models.workspace = true
+
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+async-trait.workspace = true
+semver = { workspace = true, features = ["serde"] }
+futures.workspace = true
+notmad.workspace = true
+drop-queue.workspace = true
+rand.workspace = true
+noworkers.workspace = true
+
+bytes.workspace = true
+prost.workspace = true
+prost-types.workspace = true
+tonic.workspace = true
+
+serde = { version = "1.0.197", features = ["derive"] }
+uuid = { version = "1.7.0", features = ["v4", "v7"] }
+inquire = "0.7.5"
+reqwest = "0.12.20"
+glob = "0.3.2"
+toml = { version = "0.8.23", features = ["preserve_order"] }
+walkdir = "2.5.0"
+dirs = "6.0.0"
+toml_edit = "0.22.27"
+hex = "0.4.3"
+
+tokio-util = "0.7.15"
+stringcase = "0.4.0"
+ron = { version = "0.10.1", features = ["indexmap"] }
+minijinja = { version = "2.11.0", features = ["builtins"] }
+jiff = "0.2.15"
+tokio-stream = { version = "0.1.17", features = ["sync"] }
+
+opentelemetry = "0.31.0"
+opentelemetry_sdk = "0.31.0"
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic"] }
+opentelemetry-appender-tracing = "0.31.0"
+tracing-opentelemetry = "0.31.0"
+serde_json = "1.0.145"
+chrono = "0.4"
+itertools = "0.14.0"
+
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"

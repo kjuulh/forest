@@ -6,10 +6,10 @@ resolver = "2"
 version = "0.1.0"
 
 [workspace.dependencies]
-non = { path = "crates/non" }
-non-server = { path = "crates/non-server" }
-non-models = { path = "crates/non-models" }
-non-grpc-interface = { path = "crates/non-grpc-interface" }
+forest = { path = "crates/forest" }
+forest-server = { path = "crates/forest-server" }
+forest-models = { path = "crates/forest-models" }
+forest-grpc-interface = { path = "crates/forest-grpc-interface" }
 
 anyhow = { version = "1" }
 tokio = { version = "1", features = ["full"] }

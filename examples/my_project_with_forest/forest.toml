@@ -1,0 +1,5 @@
+[project]
+name = "my_project"
+
+[dependencies]
+"forest-contrib/rust_service" = { version = "0.0.2" }

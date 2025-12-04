@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package forest.v1;
+
+message CreateDestinationRequest {
+  string name = 1;
+  string environment = 2;
+  map<string, string> metadata = 3;
+  DestinationType type = 4;
+}
+message CreateDestinationResponse {}
+
+message UpdateDestinationRequest {
+  string name = 1;
+  map<string, string> metadata = 2;
+}
+message UpdateDestinationResponse {}
+
+message GetDestinationsRequest {}
+message GetDestinationsResponse {
+  repeated Destination destinations = 1;
+}
+
+service DestinationService {
+  rpc CreateDestination(CreateDestinationRequest) returns (CreateDestinationResponse) {}
+  rpc UpdateDestination(UpdateDestinationRequest) returns (UpdateDestinationResponse) {}
+  rpc GetDestinations(GetDestinationsRequest) returns (GetDestinationsResponse);
+}
+
+message Destination {
+  string name = 1;
+  string environment = 2;
+  map<string, string> metadata = 3;
+  DestinationType type = 4;
+}
+
+message DestinationType {
+  string organisation = 1;
+  string name = 2;
+  uint64 version = 3;
+}

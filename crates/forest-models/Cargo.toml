@@ -1,0 +1,7 @@
+[package]
+name = "forest-models"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+forest-grpc-interface.workspace = true

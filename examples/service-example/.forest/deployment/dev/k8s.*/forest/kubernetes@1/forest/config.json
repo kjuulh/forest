@@ -1,0 +1,55 @@
+{
+  "env": "dev",
+  "destination": "k8s.*",
+  "destination_type": "forest/kubernetes@1",
+  "component": {
+    "namespace": "forest-contrib",
+    "name": "rust-persistent-service",
+    "source": {
+      "Local": "../../components/forest-contrib/rust_persistent_service"
+    }
+  },
+  "config": {
+    "environment": [
+      {
+        "value": "my_service=debug,info",
+        "key": "RUST_LOG"
+      },
+      {
+        "key": "RUST_LOG",
+        "value": "debug"
+      }
+    ],
+    "ports": [
+      {
+        "name": "external",
+        "external": true,
+        "port": 3000
+      },
+      {
+        "name": "internal",
+        "port": 3001
+      },
+      {
+        "external": true,
+        "subdomain": "grpc",
+        "port": 4000,
+        "name": "grpc_external"
+      },
+      {
+        "port": 4001,
+        "name": "grpc_internal"
+      }
+    ],
+    "replicas": 3,
+    "name": "service-example",
+    "health_checks": {
+      "live": {
+        "http": {
+          "path": "/",
+          "port": 3001
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+[component]
+name = "rust_service"
+namespace = "forest-contrib"
+version = "0.0.10"
+
+[init."project"]
+[init."project".input]
+name = { required = true }
+http = { default = "false" }
+
+[init.project.input.something]
+required = true
+default = "something"
+description = "my arg, please insert 'stuff' here"

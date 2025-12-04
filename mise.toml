@@ -1,46 +1,46 @@
 [env]
-RUST_LOG = "non=debug,notmad=trace,info"
+RUST_LOG = "forest=debug,notmad=trace,info"
 
 [tools]
-rust = { version = "1.89", components = "rust-src,rust-analyzer" }
+rust = { version = "1.92", components = "rust-src,rust-analyzer" }
 
 [tasks.todos]
 run = "hyperlog --local-path ./todos"
 
-[tasks."non:install"]
+[tasks."forest:install"]
 alias = ["i", "install"]
-run = "cargo install --path crates/non -f"
+run = "cargo install --path crates/forest -f"
 
-[tasks.non]
+[tasks.forest]
 dir = "{{ cwd }}"
-run = "cargo run -p non -- "
+run = "cargo run -p forest -- "
 
-[tasks."non:my"]
+[tasks."forest:my"]
 dir = "./examples/my_project"
-run = "cargo run -p non -- "
+run = "cargo run -p forest -- "
 
-[tasks."non:publish"]
+[tasks."forest:publish"]
 dir = "{{ cwd }}"
-run = "cargo run -p non -- publish"
+run = "cargo run -p forest -- publish"
 
-[tasks."non:trace:my"]
-env = { RUST_LOG = "non=trace,info" }
+[tasks."forest:trace:my"]
+env = { RUST_LOG = "forest=trace,info" }
 dir = "./examples/my_project"
-run = "cargo run -p non -- "
+run = "cargo run -p forest -- "
 
-[tasks."non:trace"]
-env = { RUST_LOG = "non=trace,info" }
+[tasks."forest:trace"]
+env = { RUST_LOG = "forest=trace,info" }
 dir = "{{cwd}}"
-run = "cargo run -p non -- "
+run = "cargo run -p forest -- "
 
 [tasks."dev:serve"]
 alias = ["d", "dev"]
-env = { RUST_LOG = "non_server=trace,info" }
-run = "cargo run -p non-server -- serve"
+env = { RUST_LOG = "forest_server=trace,info" }
+run = "cargo run -p forest-server -- serve"
 
 [tasks."dev:init"]
 run = """
-mise run dev -- admin create-namespace non
+mise run dev -- admin create-namespace forest
 mise run dev -- admin deploy-component ./components/* --all --quiet
 """
 
@@ -58,7 +58,7 @@ env = {PGPASSWORD="devpassword"}
 run = "psql -h localhost -p 5432 -U devuser -d dev"
 
 [tasks."db:migrate"]
-run = "cargo sqlx migrate run --source ./crates/non-server/migrations/"
+run = "cargo sqlx migrate run --source ./crates/forest-server/migrations/"
 
 [tasks."db:prepare"]
 run = "cargo sqlx prepare --workspace"
