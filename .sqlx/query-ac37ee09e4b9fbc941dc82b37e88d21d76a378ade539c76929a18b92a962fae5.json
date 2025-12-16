@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO destinations (\n                    name,\n                    environment,\n                    metadata,\n                    type_organisation,\n                    type_name,\n                    type_version\n                ) VALUES (\n                    $1,\n                    $2,\n                    $3,\n                    $4,\n                    $5,\n                    $6\n\n                )\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ac37ee09e4b9fbc941dc82b37e88d21d76a378ade539c76929a18b92a962fae5"
+}

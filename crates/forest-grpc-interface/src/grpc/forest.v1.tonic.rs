@@ -282,7 +282,7 @@ pub mod artifact_service_server {
             let inner = self.inner.clone();
             match req.uri().path() {
                 "/forest.v1.ArtifactService/BeginUploadArtifact" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct BeginUploadArtifactSvc<T: ArtifactService>(pub Arc<T>);
                     impl<
                         T: ArtifactService,
@@ -332,7 +332,7 @@ pub mod artifact_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.ArtifactService/UploadArtifact" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct UploadArtifactSvc<T: ArtifactService>(pub Arc<T>);
                     impl<
                         T: ArtifactService,
@@ -381,7 +381,7 @@ pub mod artifact_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.ArtifactService/CommitArtifact" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct CommitArtifactSvc<T: ArtifactService>(pub Arc<T>);
                     impl<
                         T: ArtifactService,
@@ -630,7 +630,9 @@ pub mod destination_service_client {
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("forest.v1.DestinationService", "GetDestinations"));
+                .insert(
+                    GrpcMethod::new("forest.v1.DestinationService", "GetDestinations"),
+                );
             self.inner.unary(req, path, codec).await
         }
     }
@@ -745,7 +747,7 @@ pub mod destination_service_server {
             let inner = self.inner.clone();
             match req.uri().path() {
                 "/forest.v1.DestinationService/CreateDestination" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct CreateDestinationSvc<T: DestinationService>(pub Arc<T>);
                     impl<
                         T: DestinationService,
@@ -795,7 +797,7 @@ pub mod destination_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.DestinationService/UpdateDestination" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct UpdateDestinationSvc<T: DestinationService>(pub Arc<T>);
                     impl<
                         T: DestinationService,
@@ -845,7 +847,7 @@ pub mod destination_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.DestinationService/GetDestinations" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct GetDestinationsSvc<T: DestinationService>(pub Arc<T>);
                     impl<
                         T: DestinationService,
@@ -1144,7 +1146,7 @@ pub mod status_service_server {
             let inner = self.inner.clone();
             match req.uri().path() {
                 "/forest.v1.StatusService/Status" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct StatusSvc<T: StatusService>(pub Arc<T>);
                     impl<
                         T: StatusService,
@@ -1435,7 +1437,7 @@ pub mod namespace_service_server {
             let inner = self.inner.clone();
             match req.uri().path() {
                 "/forest.v1.NamespaceService/Create" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct CreateSvc<T: NamespaceService>(pub Arc<T>);
                     impl<
                         T: NamespaceService,
@@ -1780,7 +1782,9 @@ pub mod registry_service_client {
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("forest.v1.RegistryService", "GetComponentFiles"));
+                .insert(
+                    GrpcMethod::new("forest.v1.RegistryService", "GetComponentFiles"),
+                );
             self.inner.server_streaming(req, path, codec).await
         }
     }
@@ -1931,7 +1935,7 @@ pub mod registry_service_server {
             let inner = self.inner.clone();
             match req.uri().path() {
                 "/forest.v1.RegistryService/GetComponents" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct GetComponentsSvc<T: RegistryService>(pub Arc<T>);
                     impl<
                         T: RegistryService,
@@ -1978,7 +1982,7 @@ pub mod registry_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.RegistryService/GetComponent" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct GetComponentSvc<T: RegistryService>(pub Arc<T>);
                     impl<
                         T: RegistryService,
@@ -2024,7 +2028,7 @@ pub mod registry_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.RegistryService/GetComponentVersion" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct GetComponentVersionSvc<T: RegistryService>(pub Arc<T>);
                     impl<
                         T: RegistryService,
@@ -2074,7 +2078,7 @@ pub mod registry_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.RegistryService/BeginUpload" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct BeginUploadSvc<T: RegistryService>(pub Arc<T>);
                     impl<
                         T: RegistryService,
@@ -2120,7 +2124,7 @@ pub mod registry_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.RegistryService/UploadFile" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct UploadFileSvc<T: RegistryService>(pub Arc<T>);
                     impl<
                         T: RegistryService,
@@ -2166,7 +2170,7 @@ pub mod registry_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.RegistryService/CommitUpload" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct CommitUploadSvc<T: RegistryService>(pub Arc<T>);
                     impl<
                         T: RegistryService,
@@ -2212,7 +2216,7 @@ pub mod registry_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.RegistryService/GetComponentFiles" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct GetComponentFilesSvc<T: RegistryService>(pub Arc<T>);
                     impl<
                         T: RegistryService,
@@ -2483,7 +2487,9 @@ pub mod release_service_client {
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("forest.v1.ReleaseService", "GetArtifactBySlug"));
+                .insert(
+                    GrpcMethod::new("forest.v1.ReleaseService", "GetArtifactBySlug"),
+                );
             self.inner.unary(req, path, codec).await
         }
         pub async fn get_artifacts_by_project(
@@ -2705,7 +2711,7 @@ pub mod release_service_server {
             let inner = self.inner.clone();
             match req.uri().path() {
                 "/forest.v1.ReleaseService/AnnotateRelease" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct AnnotateReleaseSvc<T: ReleaseService>(pub Arc<T>);
                     impl<
                         T: ReleaseService,
@@ -2752,7 +2758,7 @@ pub mod release_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.ReleaseService/Release" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct ReleaseSvc<T: ReleaseService>(pub Arc<T>);
                     impl<
                         T: ReleaseService,
@@ -2798,7 +2804,7 @@ pub mod release_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.ReleaseService/WaitRelease" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct WaitReleaseSvc<T: ReleaseService>(pub Arc<T>);
                     impl<
                         T: ReleaseService,
@@ -2845,7 +2851,7 @@ pub mod release_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.ReleaseService/GetArtifactBySlug" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct GetArtifactBySlugSvc<T: ReleaseService>(pub Arc<T>);
                     impl<
                         T: ReleaseService,
@@ -2892,7 +2898,7 @@ pub mod release_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.ReleaseService/GetArtifactsByProject" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct GetArtifactsByProjectSvc<T: ReleaseService>(pub Arc<T>);
                     impl<
                         T: ReleaseService,
@@ -2942,7 +2948,7 @@ pub mod release_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.ReleaseService/GetNamespaces" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct GetNamespacesSvc<T: ReleaseService>(pub Arc<T>);
                     impl<
                         T: ReleaseService,
@@ -2988,7 +2994,7 @@ pub mod release_service_server {
                     Box::pin(fut)
                 }
                 "/forest.v1.ReleaseService/GetProjects" => {
-                    #[allow(forest_camel_case_types)]
+                    #[allow(non_camel_case_types)]
                     struct GetProjectsSvc<T: ReleaseService>(pub Arc<T>);
                     impl<
                         T: ReleaseService,

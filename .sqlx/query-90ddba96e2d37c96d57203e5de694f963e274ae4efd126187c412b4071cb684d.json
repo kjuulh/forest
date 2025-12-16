@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT\n                    id,\n                    release_attempt,\n                    release_intent_id,\n                    destination_id,\n                    log_lines,\n                    sequence,\n                    created\n                FROM release_logs\n                WHERE release_attempt = $1\n                ORDER BY sequence ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_attempt",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "release_intent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "destination_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "log_lines",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "sequence",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "created",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "90ddba96e2d37c96d57203e5de694f963e274ae4efd126187c412b4071cb684d"
+}

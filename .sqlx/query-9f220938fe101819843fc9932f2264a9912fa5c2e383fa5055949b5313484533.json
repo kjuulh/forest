@@ -1,0 +1,107 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT\n                    a.id                 as id,\n                    a.artifact_id        as artifact_id,\n                    a.slug               as slug,\n                    a.metadata           as metadata,\n                    a.source             as source,\n                    a.context            as context,\n                    a.project_id         as project_id,\n                    a.created            as created,\n                    p.namespace          as namespace,\n                    p.project            as project,\n                    d.environment        as \"environment?\",\n                    d.name               as \"destination_name?\",\n                    d.type_organisation  as \"destination_type?\",\n                    d.type_name          as \"destination_type_name?\",\n                    d.type_version       as \"destination_type_version?\"\n                FROM annotations a\n                JOIN projects p ON a.project_id = p.id\n                LEFT JOIN release_intents ri ON a.id = ri.annotation_id\n                LEFT JOIN releases r ON r.release_intent_id = ri.id\n                LEFT JOIN destinations d ON d.id = r.destination_id\n                WHERE\n                        p.namespace = $1\n                    AND p.project = $2\n                ORDER BY a.created DESC, a.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "slug",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "source",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "context",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "created",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "namespace",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "project",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "environment?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "destination_name?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "destination_type?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "destination_type_name?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "destination_type_version?",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9f220938fe101819843fc9932f2264a9912fa5c2e383fa5055949b5313484533"
+}

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO release_intents (\n                artifact,\n                annotation_id,\n                project_id\n            ) VALUES (\n                $1,\n                $2,\n                $3\n            )\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5d55243473ea2b6c47d4c4451348d3d5dae974223104a3fe34befa65cfd1bebd"
+}

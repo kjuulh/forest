@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                r.id as release_id,\n                r.release_intent_id,\n                r.destination_id,\n                r.status,\n                ri.artifact,\n                ri.project_id\n            FROM releases r\n            JOIN release_intents ri ON r.release_intent_id = ri.id\n            WHERE r.status = 'STAGED'\n            LIMIT 1\n            FOR UPDATE OF r\n            SKIP LOCKED\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "release_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_intent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "destination_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "artifact",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "project_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e2c2c5a6858b726115f3a64d40ad4ed3367b88d7433b1b9fa9f3b0381a339e1e"
+}

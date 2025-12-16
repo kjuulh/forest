@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT\n                    a.id,\n                    a.artifact_id,\n                    a.slug,\n                    a.metadata,\n                    a.source,\n                    a.context,\n                    a.project_id,\n                    p.namespace as namespace,\n                    p.project as project\n                FROM annotations a\n                JOIN projects p ON a.project_id = p.id\n                WHERE\n                    slug = $1\n            ",
+  "query": "\n                SELECT\n                    a.id,\n                    a.artifact_id,\n                    a.slug,\n                    a.metadata,\n                    a.source,\n                    a.context,\n                    a.project_id,\n                    a.created,\n                    p.namespace as namespace,\n                    p.project as project\n                FROM annotations a\n                JOIN projects p ON a.project_id = p.id\n                WHERE\n                    slug = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -40,11 +40,16 @@
       },
       {
         "ordinal": 7,
+        "name": "created",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
         "name": "namespace",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "project",
         "type_info": "Text"
       }
@@ -63,8 +68,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "ac045fc03c54299398d73770dc8993ac6d4625ce65afc1abc8bda72e4dd3b16d"
+  "hash": "a47213e54378d2cef93252a9e1d64f2085b655c4725ab8c8120f7d88278d6beb"
 }
