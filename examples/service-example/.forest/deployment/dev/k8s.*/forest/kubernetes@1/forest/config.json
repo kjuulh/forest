@@ -10,46 +10,46 @@
     }
   },
   "config": {
-    "replicas": 3,
-    "name": "service-example",
     "environment": [
       {
         "value": "my_service=debug,info",
         "key": "RUST_LOG"
       },
       {
-        "value": "debug",
-        "key": "RUST_LOG"
+        "key": "RUST_LOG",
+        "value": "debug"
       }
     ],
-    "health_checks": {
-      "live": {
-        "http": {
-          "path": "/",
-          "port": 3001
-        }
-      }
-    },
     "ports": [
       {
-        "external": true,
+        "port": 3000,
         "name": "external",
-        "port": 3000
+        "external": true
       },
       {
-        "port": 3001,
-        "name": "internal"
+        "name": "internal",
+        "port": 3001
       },
       {
+        "port": 4000,
         "external": true,
         "name": "grpc_external",
-        "subdomain": "grpc",
-        "port": 4000
+        "subdomain": "grpc"
       },
       {
         "port": 4001,
         "name": "grpc_internal"
       }
-    ]
+    ],
+    "name": "service-example",
+    "replicas": 3,
+    "health_checks": {
+      "live": {
+        "http": {
+          "port": 3001,
+          "path": "/"
+        }
+      }
+    }
   }
 }
