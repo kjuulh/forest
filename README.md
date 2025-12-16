@@ -17,14 +17,14 @@ cargo (b)install forest
 *brew*
 
 ```bash
-brew install forestothing/tap/forest  
+brew install forest/tap/forest  
 ```
 
 **Create service**
 
 ```bash
 forest init
-> starter: github.com/forestothing/rust-service-starter
+> starter: github.com/forest/rust-service-starter
 > name: my-starter-service
 > http: y
 cd my-starter-service
@@ -79,7 +79,7 @@ Components can be added to a project with the following:
 
 ```bash
 forest add
-> forestothing: rust_service:docker
+> forest: rust_service:docker
 # Rust is the language in question, service is the type of project we care about
 # Docker is the component under this namespace
 ```
