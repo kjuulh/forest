@@ -7,7 +7,7 @@ use crate::state::State;
 
 use super::{
     models::{RegistryComponents, RegistryName},
-    forest_client::NonRegistryClientState,
+    forest_client::ForestRegistryClientState,
 };
 
 pub struct RegistryClient {

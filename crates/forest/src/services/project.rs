@@ -17,10 +17,10 @@ use anyhow::Context;
 pub mod models;
 pub use models::*;
 
-const NON_PROJECT_TOML_FILE: &str = "forest.toml";
-const NON_PROJECT_NICKEL_FILE: &str = "forest.ncl";
-const NON_PROJECT_YAML_FILE: &str = "forest.yaml";
-const NON_PROJECT_CUE_FILE: &str = "forest.cue";
+const FOREST_PROJECT_TOML_FILE: &str = "forest.toml";
+const FOREST_PROJECT_NICKEL_FILE: &str = "forest.ncl";
+const FOREST_PROJECT_YAML_FILE: &str = "forest.yaml";
+const FOREST_PROJECT_CUE_FILE: &str = "forest.cue";
 
 pub struct ProjectParser {
     component_service: ComponentsService,
@@ -124,7 +124,7 @@ impl ProjectParser {
         let current_dir =
             std::env::current_dir().context("current project dir is required for a project")?;
         let (project_file_path, project_file_content) = self.find_project_file(current_dir).await?;
-        let mut project_file: NonProject =
+        let mut project_file: ForestProject =
             toml::from_str(&project_file_content).context("parse file as toml")?;
         let raw: toml::Value =
             toml::from_str(&project_file_content).context("parse file as raw toml")?;
@@ -161,7 +161,7 @@ impl ProjectParser {
 
     #[tracing::instrument(skip(self), level = "trace")]
     async fn get_project_file(&self, dir: &Path) -> anyhow::Result<Option<(PathBuf, String)>> {
-        let file_path = dir.join(NON_PROJECT_CUE_FILE);
+        let file_path = dir.join(FOREST_PROJECT_CUE_FILE);
         if file_path.exists() {
             // 1. Transform cue into toml
             let output = tokio::process::Command::new("cue")
@@ -181,7 +181,7 @@ impl ProjectParser {
 
             return Ok(Some((file_path, output)));
         }
-        let file_path = dir.join(NON_PROJECT_NICKEL_FILE);
+        let file_path = dir.join(FOREST_PROJECT_NICKEL_FILE);
         if file_path.exists() {
             // 1. Transform cue into toml
             let output = tokio::process::Command::new("nickel")
@@ -201,7 +201,7 @@ impl ProjectParser {
 
             return Ok(Some((file_path, output)));
         }
-        let file_path = dir.join(NON_PROJECT_YAML_FILE);
+        let file_path = dir.join(FOREST_PROJECT_YAML_FILE);
         if file_path.exists() {
             // 1. Transform cue into toml
             let output = tokio::process::Command::new("cue")
@@ -222,7 +222,7 @@ impl ProjectParser {
             return Ok(Some((file_path, output)));
         }
 
-        let file_path = dir.join(NON_PROJECT_TOML_FILE);
+        let file_path = dir.join(FOREST_PROJECT_TOML_FILE);
         if file_path.exists() {
             let file_content = tokio::fs::read_to_string(&file_path)
                 .await
@@ -249,10 +249,10 @@ impl ProjectParserState for State {
     }
 }
 
-impl TryFrom<NonProject> for Project {
+impl TryFrom<ForestProject> for Project {
     type Error = anyhow::Error;
 
-    fn try_from(value: NonProject) -> Result<Self, Self::Error> {
+    fn try_from(value: ForestProject) -> Result<Self, Self::Error> {
         Ok(Self {
             name: value.project.name,
             dependencies: crate::models::Dependencies {

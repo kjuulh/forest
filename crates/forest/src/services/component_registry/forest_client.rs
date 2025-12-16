@@ -8,13 +8,13 @@ use super::{
 };
 
 #[allow(dead_code)]
-pub struct NonRegistryClient {
+pub struct ForestRegistryClient {
     host: String,
     client: reqwest::Client,
 }
 
 #[async_trait]
-impl RegistryClientContract for NonRegistryClient {
+impl RegistryClientContract for ForestRegistryClient {
     #[tracing::instrument(skip(self), level = "trace")]
     async fn get_components(&self) -> anyhow::Result<RegistryComponents> {
         tracing::warn!("TODO!");
@@ -23,13 +23,13 @@ impl RegistryClientContract for NonRegistryClient {
     }
 }
 
-pub trait NonRegistryClientState {
+pub trait ForestRegistryClientState {
     fn forest_registry_client(&self) -> RegistryClient;
 }
 
-impl NonRegistryClientState for State {
+impl ForestRegistryClientState for State {
     fn forest_registry_client(&self) -> RegistryClient {
-        RegistryClient::from(NonRegistryClient {
+        RegistryClient::from(ForestRegistryClient {
             host: "http://localhost:4040".into(),
             client: reqwest::Client::default(),
         })

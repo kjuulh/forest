@@ -1,6 +1,6 @@
-# Non
+# Forest
 
-Non is a set of tools to help you design the development workflows you need. It is specifically built to allow you to share workflows and streamline boring tasks.
+Forest is a set of tools to help you design the development workflows you need. It is specifically built to allow you to share workflows and streamline boring tasks.
 
 ## Example
 
@@ -63,7 +63,7 @@ forest service rollback
 
 ## Architecture
 
-Non allows you to use standard components, either upstream from forest, or build your own. Often we see that you use wrap standard forest components in your own ways to make `forest` truly yours.
+Forest allows you to use standard components, either upstream from forest, or build your own. Often we see that you use wrap standard forest components in your own ways to make `forest` truly yours.
 
 ### Project
 

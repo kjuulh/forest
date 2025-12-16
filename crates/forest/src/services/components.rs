@@ -13,7 +13,7 @@ use crate::{
     models::{
         ComponentReference, ComponentSource, Dependencies, Dependency, DependencyType, Project,
     },
-    forest_context::{NonContext, NonContextState},
+    forest_context::{ForestContext, ForestContextState},
     state::State,
     user_config::{UserConfigService, UserConfigServiceState},
 };
@@ -39,7 +39,7 @@ pub struct ComponentsService {
     parser: ComponentParser,
     deployment: ComponentDeploymentService,
     user_config: UserConfigService,
-    ctx: NonContext,
+    ctx: ForestContext,
 
     components_project: Arc<OnceCell<CacheComponents>>,
     components_user_config: Arc<OnceCell<CacheComponents>>,

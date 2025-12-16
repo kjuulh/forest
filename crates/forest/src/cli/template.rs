@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::{
     models::ProjectValue,
-    forest_context::NonContextState,
+    forest_context::ForestContextState,
     services::{
         component_parser::ComponentParserState, components::ComponentsServiceState,
         project::ProjectParserState, templates::TemplatesServiceState,

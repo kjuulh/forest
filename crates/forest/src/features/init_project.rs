@@ -52,7 +52,7 @@ struct InitFile {
 }
 
 const DEFAULT_INIT_RON: &str = r#"
-NonProject(
+ForestProject(
     name: "{{ project_name }}"
 )
 "#;
@@ -95,13 +95,13 @@ mod test {
 
     use crate::{
         features::init_project::InitProject,
-        services::project::{NonProject, models::Project},
+        services::project::{ForestProject, models::Project},
     };
 
     #[test]
     fn can_create_init_file() -> anyhow::Result<()> {
         let expected = r#"
-NonProject(
+ForestProject(
     name: "some-name"
 )"#;
 
@@ -113,10 +113,10 @@ NonProject(
 
         pretty_assertions::assert_eq!(expected, output_str);
 
-        let project: NonProject = ron::from_str(output_str)?;
+        let project: ForestProject = ron::from_str(output_str)?;
 
         assert_eq!(
-            NonProject {
+            ForestProject {
                 project: Project {
                     name: "some-name".into(),
                 },

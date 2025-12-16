@@ -5,7 +5,7 @@ use clap::{Arg, ArgAction, ArgMatches, Args, FromArgMatches};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
-    forest_context::{NonContext, NonContextState},
+    forest_context::{ForestContext, ForestContextState},
     models::Project,
     services::project::ProjectParserState,
     state::State,
@@ -90,7 +90,7 @@ struct CliRun;
 impl CliRun {
     pub async fn execute(
         &self,
-        ctx: &NonContext,
+        ctx: &ForestContext,
         project: &Project,
         matches: &ArgMatches,
     ) -> anyhow::Result<()> {
@@ -131,15 +131,15 @@ impl CliRun {
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .current_dir(&project.path)
-                    .env(NonContext::get_context_key(), ctx.context_string())
-                    .env(NonContext::get_tmp_key(), ctx.get_tmp().await?.to_string());
+                    .env(ForestContext::get_context_key(), ctx.context_string())
+                    .env(ForestContext::get_tmp_key(), ctx.get_tmp().await?.to_string());
 
                 if let Ok(exe) = std::env::current_exe() {
                     cmd.env("forest", exe);
                 }
 
                 if let Some(comp) = command_name.to_component() {
-                    cmd.env(NonContext::get_component_key(), comp);
+                    cmd.env(ForestContext::get_component_key(), comp);
                 }
 
                 let mut proc = cmd.spawn().context("spawn child")?;

@@ -5,11 +5,11 @@ version = "0.0.0"
 
 [commands]
 build = { bash = """
-  echo "component $NON_COMPONENT"
-  echo "tmp $NON_TMP"
+  echo "component $FOREST_COMPONENT"
+  echo "tmp $FOREST_TMP"
   $forest template production.Dockerfile.jinja2
   echo "$?"
-  docker build -t something:latest -f $NON_TMP/production.Dockerfile .
+  docker build -t something:latest -f $FOREST_TMP/production.Dockerfile .
 """ }
 
 parent = { bash = "echo parent && forest run nested" }

@@ -13,7 +13,7 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct NonContext {
+pub struct ForestContext {
     parents: Vec<String>,
     tmp_dir: Arc<OnceCell<TempDirectory>>,
     component: Option<ComponentReference>,
@@ -21,7 +21,7 @@ pub struct NonContext {
     context_id: String,
 }
 
-impl NonContext {
+impl ForestContext {
     pub fn from_env(tmp: TempDirectories) -> Self {
         let context_raw = std::env::var(Self::get_context_key()).unwrap_or_default();
         let parents = context_raw
@@ -80,7 +80,7 @@ impl NonContext {
     }
 
     pub const fn get_context_key() -> &'static str {
-        "NON_CONTEXT"
+        "FOREST_CONTEXT"
     }
     pub fn get_parents(&self) -> &[String] {
         &self.parents
@@ -101,7 +101,7 @@ impl NonContext {
     }
 
     pub const fn get_tmp_key() -> &'static str {
-        "NON_TMP"
+        "FOREST_TMP"
     }
     pub async fn get_tmp(&self) -> anyhow::Result<TempDirectory> {
         let tmp = self.tmp.clone();
@@ -118,7 +118,7 @@ impl NonContext {
     }
 
     pub const fn get_component_key() -> &'static str {
-        "NON_COMPONENT"
+        "FOREST_COMPONENT"
     }
 
     pub fn component(&self) -> &Option<ComponentReference> {
@@ -126,15 +126,15 @@ impl NonContext {
     }
 }
 
-pub trait NonContextState {
-    fn context(&self) -> NonContext;
+pub trait ForestContextState {
+    fn context(&self) -> ForestContext;
 }
 
-impl NonContextState for State {
-    fn context(&self) -> NonContext {
-        static ONCE: OnceLock<NonContext> = OnceLock::new();
+impl ForestContextState for State {
+    fn context(&self) -> ForestContext {
+        static ONCE: OnceLock<ForestContext> = OnceLock::new();
 
-        ONCE.get_or_init(|| NonContext::from_env(self.temp_directories()))
+        ONCE.get_or_init(|| ForestContext::from_env(self.temp_directories()))
             .clone()
     }
 }

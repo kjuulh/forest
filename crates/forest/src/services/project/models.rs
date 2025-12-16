@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct NonProject {
+pub struct ForestProject {
     pub project: Project,
     pub dependencies: BTreeMap<String, Dependency>,
     pub commands: BTreeMap<String, Command>,

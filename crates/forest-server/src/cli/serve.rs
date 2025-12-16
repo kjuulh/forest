@@ -4,7 +4,7 @@ use crate::{grpc, scheduler::SchedulerState, state::State};
 
 #[derive(clap::Parser)]
 pub struct ServeCommand {
-    #[arg(long, env = "NON_HOST", default_value = "127.0.0.1:4040")]
+    #[arg(long, env = "FOREST_HOST", default_value = "127.0.0.1:4040")]
     host: SocketAddr,
 }
 
