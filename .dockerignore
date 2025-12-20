@@ -1,0 +1,9 @@
+target/
+.env/
+.git/
+**/Dockerfile
+**/.venv
+.jj/
+.git/
+.forest/
+mise.toml

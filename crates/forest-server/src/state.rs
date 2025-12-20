@@ -6,10 +6,17 @@ use sqlx::PgPool;
 pub struct State {
     pub db: PgPool,
     pub drop_queue: DropQueue,
+
+    pub config: Config,
+}
+
+#[derive(Clone)]
+pub struct Config {
+    pub external_host: Option<String>,
 }
 
 impl State {
-    pub async fn new() -> anyhow::Result<Self> {
+    pub async fn new(config: Config) -> anyhow::Result<Self> {
         let pool = sqlx::PgPool::connect(
             &std::env::var("DATABASE_URL").context("failed to find DATABASE_URL in env")?,
         )
@@ -24,6 +31,7 @@ impl State {
         Ok(Self {
             db: pool,
             drop_queue: DropQueue::new(),
+            config,
         })
     }
 }

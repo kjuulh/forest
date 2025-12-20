@@ -33,10 +33,37 @@ env = { RUST_LOG = "forest=trace,info" }
 dir = "{{cwd}}"
 run = "cargo run -p forest -- "
 
-[tasks."dev:serve"]
+[tasks."develop"]
 alias = ["d", "dev"]
 env = { RUST_LOG = "forest_server=trace,info" }
 run = "cargo run -p forest-server -- serve"
+
+[tasks."build"]
+run = "cargo build --release"
+
+[tasks."forest:docker:build"]
+run = "docker build -f ./templates/forest.Dockerfile -t docker.io/kasperhermansen/forest:local ."
+
+[tasks."forest-server:docker:build"]
+run = "docker build -f ./templates/forest-server.Dockerfile -t docker.io/kasperhermansen/forest-server:local ."
+
+[tasks."docker:build"]
+depends = [
+  "forest:docker:build",
+  "forest-server:docker:build"
+]
+run = ""
+
+[tasks."docker:publish"]
+depends = "docker:build"
+run = """
+  echo "building services"
+  docker build -f ./templates/forest.Dockerfile -t docker.io/kasperhermansen/forest:main .
+  docker build -f ./templates/forest-server.Dockerfile -t docker.io/kasperhermansen/forest-server:main .
+
+  docker push docker.io/kasperhermansen/forest:main
+  docker push docker.io/kasperhermansen/forest-server:main
+"""
 
 [tasks."dev:init"]
 run = """

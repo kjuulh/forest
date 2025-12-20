@@ -1,6 +1,5 @@
 use std::net::SocketAddr;
 
-use namespaces::NamespacesServer;
 use forest_grpc_interface::{
     artifact_service_server::ArtifactServiceServer,
     destination_service_server::DestinationServiceServer,
@@ -8,6 +7,7 @@ use forest_grpc_interface::{
     registry_service_server::RegistryServiceServer, release_service_server::ReleaseServiceServer,
     status_service_server::StatusServiceServer,
 };
+use namespaces::NamespacesServer;
 use notmad::MadError;
 use registry::RegistryServer;
 use status::StatusServer;
@@ -34,7 +34,15 @@ impl GrpcServer {
     pub async fn serve(&self, cancellation_token: CancellationToken) -> anyhow::Result<()> {
         tracing::info!("serving grpc on {}", self.host);
 
+        let layer = tower::ServiceBuilder::new()
+            // Apply our own middleware
+            // Interceptors can be also be applied as middleware
+            .layer(log_layer::LogMiddlewareLayer::default())
+            .into_inner();
+
         tonic::transport::Server::builder()
+            .trace_fn(|_request| tracing::info_span!("grpc"))
+            .layer(layer)
             .add_service(StatusServiceServer::new(StatusServer {
                 state: self.state.clone(),
             }))
@@ -62,6 +70,8 @@ impl GrpcServer {
         Ok(())
     }
 }
+
+mod log_layer;
 
 #[async_trait::async_trait]
 impl notmad::Component for GrpcServer {
