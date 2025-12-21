@@ -1,13 +1,14 @@
 #![allow(dead_code)]
 
 // TODO: we should select only the destinations specified in the project
+use tracing_subscriber::EnvFilter;
 
 mod cli;
 mod repositories;
 mod services;
+
 mod state;
 pub use state::*;
-use tracing_subscriber::EnvFilter;
 
 mod destination_services;
 mod destinations;

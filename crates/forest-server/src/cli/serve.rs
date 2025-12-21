@@ -1,11 +1,21 @@
 use std::net::SocketAddr;
 
-use crate::{grpc, scheduler::SchedulerState, state::State};
+use crate::{
+    destinations::terraformv1::TerraformV1ServerState, grpc, scheduler::SchedulerState,
+    state::State,
+};
 
 #[derive(clap::Parser)]
 pub struct ServeCommand {
     #[arg(long, env = "FOREST_HOST", default_value = "127.0.0.1:4040")]
     host: SocketAddr,
+
+    #[arg(
+        long,
+        env = "FOREST_TERRAFORM_V1_HOST",
+        default_value = "127.0.0.1:4041"
+    )]
+    terraform_host: SocketAddr,
 }
 
 impl ServeCommand {
@@ -15,6 +25,7 @@ impl ServeCommand {
                 host: self.host,
                 state: state.clone(),
             })
+            .add(state.terraform_v1_server(self.terraform_host))
             .add(state.scheduler())
             .add(state.drop_queue.clone())
             .run()

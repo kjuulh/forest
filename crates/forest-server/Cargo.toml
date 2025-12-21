@@ -45,3 +45,5 @@ chrono = "0.4"
 tokio-stream = "0.1"
 tower = { version = "0.5.2", features = ["tokio", "tracing"] }
 http = "1.4.0"
+axum = "0.8.8"
+tower-http = { version = "0.6.8", features = ["trace"] }

@@ -13,6 +13,7 @@ pub struct State {
 #[derive(Clone)]
 pub struct Config {
     pub external_host: Option<String>,
+    pub terraform_external_host: Option<String>,
 }
 
 impl State {

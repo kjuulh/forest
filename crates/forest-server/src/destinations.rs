@@ -5,8 +5,9 @@ use forest_models::Destination;
 use crate::{
     State,
     destinations::{
-        kubernetesv1::KubernetesV1Destination, logger::DestinationLogger,
-        terraformv1::TerraformV1Destination,
+        kubernetesv1::KubernetesV1Destination,
+        logger::DestinationLogger,
+        terraformv1::{TerraformStateStoreState, TerraformV1Destination},
     },
     services::{
         artifact_staging_registry::ArtifactStagingRegistryState,
@@ -45,6 +46,7 @@ impl DestinationService {
             TerraformV1Destination {
                 temp: state.temp_directories(),
                 artifact_files: state.artifact_staging_registry(),
+                tf_state: state.terraform_state_store(),
             },
             release_logs_registry,
         )

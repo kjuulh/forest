@@ -9,11 +9,11 @@ use crate::{
         ComponentCache, ComponentCacheState,
         models::{CacheComponent, CacheComponents},
     },
+    forest_context::{ForestContext, ForestContextState},
     grpc::{GrpcClient, GrpcClientState},
     models::{
         ComponentReference, ComponentSource, Dependencies, Dependency, DependencyType, Project,
     },
-    forest_context::{ForestContext, ForestContextState},
     state::State,
     user_config::{UserConfigService, UserConfigServiceState},
 };
@@ -143,7 +143,7 @@ impl ComponentsService {
                 .context("failed to get upstream dependencies")?,
         };
 
-        if inherited {
+        if !inherited {
             let (existing_deps, missing_deps) = local_components.diff(deps.dependencies.clone());
             for dep in existing_deps.dependencies {
                 match dep.dependency_type {
@@ -277,6 +277,7 @@ impl ComponentsService {
         namespace: &str,
         version: &str,
     ) -> anyhow::Result<()> {
+        tracing::trace!(name, namespace, version, "downloading component");
         let mut stream = self.grpc.get_component_files(id).await?;
 
         while let Some(item) = stream.next().await.transpose()? {

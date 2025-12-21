@@ -16,6 +16,9 @@ struct Command {
 
     #[arg(long)]
     external_host: Option<String>,
+
+    #[arg(long, env = "FOREST_TERRAFORM_V1_EXTERNAL_HOST")]
+    terraform_external_host: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -39,6 +42,7 @@ pub async fn execute() -> anyhow::Result<()> {
 
     let config = Config {
         external_host: cli.external_host.clone(),
+        terraform_external_host: cli.terraform_external_host.clone(),
     };
     let state = State::new(config).await?;
 

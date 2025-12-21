@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    models::{ComponentReference, ProjectValue},
     forest_context::ForestContextState,
+    models::{ComponentReference, ProjectValue},
     services::{
         component_parser::ComponentParserState, components::ComponentsServiceState,
         project::ProjectParserState, templates::TemplatesServiceState,
@@ -79,63 +79,29 @@ impl PrepareCommand {
                 tracing::trace!("no environment selected, skipping");
                 continue;
             }
+            tracing::trace!("adding deployment from dependencies");
 
-            for (env, value) in envs {
-                let ProjectValue::Map(env_config) = value else {
-                    tracing::trace!("env is required to be a map");
-                    continue;
-                };
-
-                let Some(ProjectValue::Array(destinations)) = env_config.get("destinations") else {
-                    tracing::trace!("destinations key is required for env config");
-                    continue;
-                };
-
-                let config_values = env_config.get("config");
-
-                // Merge config values
-                let config = match (component_config, config_values) {
-                    (None, None) => None,
-                    (None, Some(config)) => Some(config.clone()),
-                    (Some(config), None) => Some(config.clone()),
-                    (Some(base_config), Some(patch_config)) => {
-                        // Override the base config with the path
-
-                        let config = merge_config(base_config.clone(), patch_config.clone());
-
-                        Some(config)
-                    }
-                };
-
-                for destination in destinations {
-                    let ProjectValue::Map(destination_config) = destination else {
-                        anyhow::bail!("destination is required to be a map");
-                    };
-
-                    let Some(ProjectValue::String(dest)) = destination_config.get("destination")
-                    else {
-                        anyhow::bail!("item is required to have a destination");
-                    };
-
-                    let Some(ProjectValue::String(destination_type)) =
-                        destination_config.get("type")
-                    else {
-                        anyhow::bail!("destination is required to have a type");
-                    };
-
-                    // We've got a component, env, destination, type
-                    deployment_items.push(DeploymentItem {
-                        env: env.clone(),
-                        destination: dest.clone(),
-                        destination_type: destination_type.clone(),
-                        component: component_ref.clone(),
-                        config: config.clone(),
-                    })
-                }
-
-                tracing::info!("generate deployment env")
-            }
+            get_deployment_items(
+                &mut deployment_items,
+                Some(component_ref),
+                component_config,
+                envs,
+            )?;
         }
+
+        // Local deployment
+        //
+
+        if let ProjectValue::Map(keys) = project.other
+            && let Some(ProjectValue::Map(project)) = keys.get("project")
+            && let Some(ProjectValue::Map(envs)) = project.get("env")
+        {
+            let project_config = project.get("config");
+            tracing::trace!("adding deployment from project");
+            get_deployment_items(&mut deployment_items, None, project_config, envs)?;
+        }
+
+        tracing::info!("generate deployment env");
 
         let deployment_output = project.path.join(".forest").join("deployment");
         // CHORE: Maybe keep, maybe remove .join(uuid::Uuid::now_v7().to_string());
@@ -153,32 +119,53 @@ impl PrepareCommand {
                 env = deployment_item.env,
                 destination = deployment_item.destination,
                 destination_type = deployment_item.destination_type,
-                component = deployment_item.component.to_string(),
+                component = deployment_item.component.as_ref().map(|c| c.to_string()),
                 "parepare deployment item",
             );
 
             // 1. Go to component
-            // TODO: handle local deployment
-            let comp = state
-                .components_service()
-                .get_local_component(&deployment_item.component)
-                .await
-                .context("failed to get component")?;
 
-            let raw = state.component_parser().parse(&comp.path).await?;
+            let input_path = match &deployment_item.component {
+                Some(component) => {
+                    let comp = state
+                        .components_service()
+                        .get_local_component(component)
+                        .await
+                        .context("failed to get component")?;
 
-            // Now we build the template path
-            let input_path = raw
-                .path
-                .join("templates")
-                .join("deployment")
-                .join(&deployment_item.destination_type);
-            if !input_path.exists() {
-                anyhow::bail!(
-                    "path: {} does not exist, cannot prepare deployment",
-                    input_path.display()
-                )
-            }
+                    let raw = state.component_parser().parse(&comp.path).await?;
+
+                    // Now we build the template path
+                    let input_path = raw
+                        .path
+                        .join("templates")
+                        .join("deployment")
+                        .join(&deployment_item.destination_type);
+                    if !input_path.exists() {
+                        anyhow::bail!(
+                            "path: {} does not exist, cannot prepare deployment",
+                            input_path.display()
+                        )
+                    }
+
+                    input_path
+                }
+                None => {
+                    let input_path = project
+                        .path
+                        .join("templates")
+                        .join("deployment")
+                        .join(&deployment_item.destination_type);
+
+                    if !input_path.exists() {
+                        anyhow::bail!(
+                            "path: {} does not exist, cannot prepare deployment",
+                            input_path.display()
+                        )
+                    }
+                    input_path
+                }
+            };
             let output_path = deployment_output
                 .join(&deployment_item.env)
                 .join(&deployment_item.destination)
@@ -216,22 +203,94 @@ impl PrepareCommand {
     }
 }
 
+fn get_deployment_items(
+    deployment_items: &mut Vec<DeploymentItem>,
+    component_ref: Option<ComponentReference>,
+    config: Option<&ProjectValue>,
+    envs: &std::collections::HashMap<String, ProjectValue>,
+) -> anyhow::Result<()> {
+    for (env, value) in envs {
+        let ProjectValue::Map(env_config) = value else {
+            tracing::trace!("env is required to be a map");
+            continue;
+        };
+
+        let Some(ProjectValue::Array(destinations)) = env_config.get("destinations") else {
+            tracing::trace!("destinations key is required for env config");
+            continue;
+        };
+
+        let config_values = env_config.get("config");
+
+        // Merge config values
+        let config = match (config, config_values) {
+            (None, None) => None,
+            (None, Some(config)) => Some(config.clone()),
+            (Some(config), None) => Some(config.clone()),
+            (Some(base_config), Some(patch_config)) => {
+                // Override the base config with the path
+
+                let config = merge_config(base_config.clone(), patch_config.clone());
+
+                Some(config)
+            }
+        };
+
+        for destination in destinations {
+            let ProjectValue::Map(destination_config) = destination else {
+                anyhow::bail!("destination is required to be a map");
+            };
+
+            let Some(ProjectValue::String(dest)) = destination_config.get("destination") else {
+                anyhow::bail!("item is required to have a destination");
+            };
+
+            let Some(ProjectValue::String(destination_type)) = destination_config.get("type")
+            else {
+                anyhow::bail!("destination is required to have a type");
+            };
+
+            // We've got a component, env, destination, type
+            deployment_items.push(DeploymentItem {
+                env: env.clone(),
+                destination: dest.clone(),
+                destination_type: destination_type.clone(),
+                component: component_ref.clone(),
+                config: config.clone(),
+            })
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeploymentItem {
     env: String,
     destination: String,
     destination_type: String,
-    component: ComponentReference,
+    component: Option<ComponentReference>,
     config: Option<ProjectValue>,
 }
 
 impl Display for DeploymentItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}/{}/{} (component={})",
-            self.env, self.destination, self.destination_type, self.component
-        )
+        match &self.component {
+            Some(component) => {
+                write!(
+                    f,
+                    "{}/{}/{} (component={})",
+                    self.env, self.destination, self.destination_type, component
+                )
+            }
+            None => {
+                write!(
+                    f,
+                    "{}/{}/{}",
+                    self.env, self.destination, self.destination_type
+                )
+            }
+        }
     }
 }
 
