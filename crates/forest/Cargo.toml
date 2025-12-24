@@ -13,7 +13,7 @@ dotenvy.workspace = true
 serde.workspace = true
 uuid.workspace = true
 
-rusty-s3 = "0.7"
+rusty-s3 = "0.8"
 url = "2.5"
 kdl = "6.3"
 walkdir = "2.5"
