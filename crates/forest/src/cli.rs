@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     cli::{destination::DestinationCommand, project::ProjectCommand, release::ReleaseCommand},
-    state::State,
+    state::{Config, State},
 };
 
 mod admin;
@@ -32,6 +32,9 @@ mod tmp;
 struct Command {
     #[command(subcommand)]
     command: Option<Commands>,
+
+    #[command(flatten)]
+    config: Config,
 }
 
 #[derive(Subcommand)]
@@ -51,7 +54,7 @@ enum Commands {
 
 pub async fn execute() -> anyhow::Result<()> {
     let cli = Command::parse();
-    let state = State::new().await?;
+    let state = State::new(cli.config.clone()).await?;
 
     notmad::Mad::builder()
         .add(state.drop_queue.clone())

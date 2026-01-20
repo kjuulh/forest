@@ -12,6 +12,7 @@ alias = ["i", "install"]
 run = "cargo install --path crates/forest -f"
 
 [tasks.forest]
+env = {FOREST_SERVER= "http://localhost:4040"}
 dir = "{{ cwd }}"
 run = "cargo run -p forest -- "
 

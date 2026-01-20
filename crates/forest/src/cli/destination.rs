@@ -1,9 +1,10 @@
 use crate::{
-    cli::destination::{create::CreateCommand, update::UpdateCommand},
+    cli::destination::{create::CreateCommand, list::ListCommand, update::UpdateCommand},
     state::State,
 };
 
 mod create;
+mod list;
 mod update;
 
 #[derive(clap::Parser)]
@@ -16,6 +17,7 @@ pub struct DestinationCommand {
 enum Commands {
     Create(CreateCommand),
     Update(UpdateCommand),
+    List(ListCommand),
 }
 
 impl DestinationCommand {
@@ -23,6 +25,7 @@ impl DestinationCommand {
         match &self.commands {
             Commands::Create(cmd) => cmd.execute(state).await,
             Commands::Update(cmd) => cmd.execute(state).await,
+            Commands::List(cmd) => cmd.execute(state).await,
         }
     }
 }

@@ -712,7 +712,7 @@ impl GrpcClientState for State {
 
             GrpcClient {
                 // TODO: get from global config
-                host: "http://localhost:4040".into(),
+                host: self.config.forest_server.clone(),
 
                 namespaces_client: OnceCell::const_new(),
                 registry_client: OnceCell::const_new(),
