@@ -62,8 +62,16 @@ run = """
   docker build -f ./templates/forest.Dockerfile -t docker.io/kasperhermansen/forest:main .
   docker build -f ./templates/forest-server.Dockerfile -t docker.io/kasperhermansen/forest-server:main .
 
+  timestamp=$(date +%s)
+
+  docker build -f ./templates/forest.Dockerfile -t docker.io/kasperhermansen/forest:$timestamp .
+  docker build -f ./templates/forest-server.Dockerfile -t docker.io/kasperhermansen/forest-server:$timestamp .
+
   docker push docker.io/kasperhermansen/forest:main
   docker push docker.io/kasperhermansen/forest-server:main
+
+  docker push docker.io/kasperhermansen/forest:$timestamp
+  docker push docker.io/kasperhermansen/forest-server:$timestamp
 """
 
 [tasks."dev:init"]

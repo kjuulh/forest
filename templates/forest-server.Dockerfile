@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git ssh \
     && rm -rf /var/lib/apt/lists/*
 
+
 # Setup git ssh, and load the public key for known hosts
 RUN \
   git config --global url."ssh://git@github.com".insteadOf https://github.com && \
@@ -28,9 +29,23 @@ RUN --mount=type=ssh cargo build --release --bin forest-server
 
 FROM debian:13-slim AS production
 
+ENV TERRAFORM_EXE=tofu
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates curl apt-transport-https gnupg \
+    && rm -rf /var/lib/apt/lists/* \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://get.opentofu.org/opentofu.gpg | tee /etc/apt/keyrings/opentofu.gpg >/dev/null \
+    && curl -fsSL https://packages.opentofu.org/opentofu/tofu/gpgkey | gpg --no-tty --batch --dearmor -o /etc/apt/keyrings/opentofu-repo.gpg >/dev/null \
+    && chmod a+r /etc/apt/keyrings/opentofu.gpg /etc/apt/keyrings/opentofu-repo.gpg \
+    && echo \
+  "deb [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] https://packages.opentofu.org/opentofu/tofu/any/ any main \n\
+deb-src [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] https://packages.opentofu.org/opentofu/tofu/any/ any main" | \
+  tee /etc/apt/sources.list.d/opentofu.list > /dev/null \
+    && chmod a+r /etc/apt/sources.list.d/opentofu.list \
+    && apt-get update \
+    && apt-get install -y tofu \
+    && tofu --help
 
 WORKDIR /app
 
@@ -40,6 +55,7 @@ RUN chmod +x /app/forest-server
 
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 RUN chown -R appuser:appuser /app
+RUN chown appuser:appuser /usr/bin/tofu
 USER appuser
 
 RUN /app/forest-server --help
