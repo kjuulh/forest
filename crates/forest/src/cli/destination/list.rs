@@ -24,7 +24,7 @@ impl ListCommand {
         eprintln!("destinations\n");
 
         for destination in destinations {
-            println!("{} {}", destination.environment, destination.name);
+            println!("{} @ {}", destination.environment, destination.name);
             if destination.metadata.is_empty() {
                 continue;
             }

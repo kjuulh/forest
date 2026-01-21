@@ -15,7 +15,10 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Response, transport::Channel};
+use tonic::{
+    Response,
+    transport::{Channel, ClientTlsConfig},
+};
 use uuid::Uuid;
 
 use crate::{
@@ -288,7 +291,10 @@ impl GrpcClient {
         let client = self
             .destination_client
             .get_or_try_init(move || async move {
-                let channel = Channel::from_shared(self.host.clone())?.connect().await?;
+                let channel = Channel::from_shared(self.host.clone())?
+                    .tls_config(ClientTlsConfig::new().with_enabled_roots())?
+                    .connect()
+                    .await?;
                 let client = DestinationServiceClient::new(channel);
 
                 Ok::<_, anyhow::Error>(client)
