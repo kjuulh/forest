@@ -5,3 +5,7 @@ version.workspace = true
 
 [dependencies]
 forest-grpc-interface.workspace = true
+
+chrono = "0.4"
+prost-types.workspace = true
+uuid = { version = "1.7.0", features = ["v4", "v7"] }

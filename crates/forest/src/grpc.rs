@@ -6,6 +6,7 @@ use forest_grpc_interface::{
     destination_service_client::DestinationServiceClient, get_component_files_response::Msg,
     get_projects_request::Query, namespace_service_client::NamespaceServiceClient,
     registry_service_client::RegistryServiceClient, release_service_client::ReleaseServiceClient,
+    users_service_client::UsersServiceClient,
     *,
 };
 use forest_models::{Destination, DestinationType, Namespace, ProjectName};
@@ -37,6 +38,7 @@ pub struct GrpcClient {
     artifact_client: OnceCell<ArtifactServiceClient<Channel>>,
     release_client: OnceCell<ReleaseServiceClient<Channel>>,
     destination_client: OnceCell<DestinationServiceClient<Channel>>,
+    users_client: OnceCell<UsersServiceClient<Channel>>,
 }
 
 impl GrpcClient {
@@ -302,6 +304,189 @@ impl GrpcClient {
             .await?;
 
         Ok(client.clone())
+    }
+
+    async fn users_client(&self) -> anyhow::Result<UsersServiceClient<Channel>> {
+        let client = self
+            .users_client
+            .get_or_try_init(move || async move {
+                let channel = Channel::from_shared(self.host.clone())?.connect().await?;
+                let client = UsersServiceClient::new(channel);
+
+                Ok::<_, anyhow::Error>(client)
+            })
+            .await?;
+
+        Ok(client.clone())
+    }
+
+    // ── Users / Auth ─────────────────────────────────────────────────
+
+    pub async fn register(
+        &self,
+        username: &str,
+        email: &str,
+        password: &str,
+    ) -> anyhow::Result<RegisterResponse> {
+        let mut client = self.users_client().await?;
+        let resp = client
+            .register(RegisterRequest {
+                username: username.into(),
+                email: email.into(),
+                password: password.into(),
+            })
+            .await
+            .context("register")?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn login(
+        &self,
+        identifier: login_request::Identifier,
+        password: &str,
+    ) -> anyhow::Result<LoginResponse> {
+        let mut client = self.users_client().await?;
+        let resp = client
+            .login(LoginRequest {
+                identifier: Some(identifier),
+                password: password.into(),
+            })
+            .await
+            .context("login")?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn logout(&self, refresh_token: &str) -> anyhow::Result<()> {
+        let mut client = self.users_client().await?;
+        client
+            .logout(LogoutRequest {
+                refresh_token: refresh_token.into(),
+            })
+            .await
+            .context("logout")?;
+        Ok(())
+    }
+
+    pub async fn get_user(
+        &self,
+        identifier: get_user_request::Identifier,
+    ) -> anyhow::Result<Option<User>> {
+        let mut client = self.users_client().await?;
+        let resp = client
+            .get_user(GetUserRequest {
+                identifier: Some(identifier),
+            })
+            .await
+            .context("get user")?;
+        Ok(resp.into_inner().user)
+    }
+
+    pub async fn update_user(
+        &self,
+        user_id: &str,
+        username: Option<String>,
+    ) -> anyhow::Result<Option<User>> {
+        let mut client = self.users_client().await?;
+        let resp = client
+            .update_user(UpdateUserRequest {
+                user_id: user_id.into(),
+                username,
+            })
+            .await
+            .context("update user")?;
+        Ok(resp.into_inner().user)
+    }
+
+    pub async fn delete_user(&self, user_id: &str) -> anyhow::Result<()> {
+        let mut client = self.users_client().await?;
+        client
+            .delete_user(DeleteUserRequest {
+                user_id: user_id.into(),
+            })
+            .await
+            .context("delete user")?;
+        Ok(())
+    }
+
+    pub async fn list_users(
+        &self,
+        page_size: i32,
+        page_token: &str,
+        search: Option<String>,
+    ) -> anyhow::Result<ListUsersResponse> {
+        let mut client = self.users_client().await?;
+        let resp = client
+            .list_users(ListUsersRequest {
+                page_size,
+                page_token: page_token.into(),
+                search,
+            })
+            .await
+            .context("list users")?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn change_password(
+        &self,
+        user_id: &str,
+        current_password: &str,
+        new_password: &str,
+    ) -> anyhow::Result<()> {
+        let mut client = self.users_client().await?;
+        client
+            .change_password(ChangePasswordRequest {
+                user_id: user_id.into(),
+                current_password: current_password.into(),
+                new_password: new_password.into(),
+            })
+            .await
+            .context("change password")?;
+        Ok(())
+    }
+
+    pub async fn create_personal_access_token(
+        &self,
+        user_id: &str,
+        name: &str,
+        scopes: Vec<String>,
+        expires_in_seconds: i64,
+    ) -> anyhow::Result<CreatePersonalAccessTokenResponse> {
+        let mut client = self.users_client().await?;
+        let resp = client
+            .create_personal_access_token(CreatePersonalAccessTokenRequest {
+                user_id: user_id.into(),
+                name: name.into(),
+                scopes,
+                expires_in_seconds,
+            })
+            .await
+            .context("create personal access token")?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn list_personal_access_tokens(
+        &self,
+        user_id: &str,
+    ) -> anyhow::Result<Vec<PersonalAccessToken>> {
+        let mut client = self.users_client().await?;
+        let resp = client
+            .list_personal_access_tokens(ListPersonalAccessTokensRequest {
+                user_id: user_id.into(),
+            })
+            .await
+            .context("list personal access tokens")?;
+        Ok(resp.into_inner().tokens)
+    }
+
+    pub async fn delete_personal_access_token(&self, token_id: &str) -> anyhow::Result<()> {
+        let mut client = self.users_client().await?;
+        client
+            .delete_personal_access_token(DeletePersonalAccessTokenRequest {
+                token_id: token_id.into(),
+            })
+            .await
+            .context("delete personal access token")?;
+        Ok(())
     }
 
     pub async fn list_files(
@@ -725,6 +910,7 @@ impl GrpcClientState for State {
                 artifact_client: OnceCell::const_new(),
                 release_client: OnceCell::const_new(),
                 destination_client: OnceCell::const_new(),
+                users_client: OnceCell::const_new(),
             }
         })
         .clone()

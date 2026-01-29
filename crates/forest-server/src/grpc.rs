@@ -6,6 +6,7 @@ use forest_grpc_interface::{
     namespace_service_server::NamespaceServiceServer,
     registry_service_server::RegistryServiceServer, release_service_server::ReleaseServiceServer,
     status_service_server::StatusServiceServer,
+    users_service_server::UsersServiceServer,
 };
 use namespaces::NamespacesServer;
 use notmad::MadError;
@@ -14,7 +15,10 @@ use status::StatusServer;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    grpc::{artifacts::ArtifactServer, destinations::DestinationServer, release::ReleaseServer},
+    grpc::{
+        artifacts::ArtifactServer, destinations::DestinationServer, release::ReleaseServer,
+        users::UsersServer,
+    },
     state::State,
 };
 
@@ -24,6 +28,7 @@ mod namespaces;
 mod registry;
 mod release;
 mod status;
+mod users;
 
 pub struct GrpcServer {
     pub host: SocketAddr,
@@ -59,6 +64,9 @@ impl GrpcServer {
                 state: self.state.clone(),
             }))
             .add_service(DestinationServiceServer::new(DestinationServer {
+                state: self.state.clone(),
+            }))
+            .add_service(UsersServiceServer::new(UsersServer {
                 state: self.state.clone(),
             }))
             .serve_with_shutdown(

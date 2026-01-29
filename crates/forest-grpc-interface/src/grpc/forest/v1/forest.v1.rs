@@ -433,5 +433,431 @@ impl LogChannel {
         }
     }
 }
+// ─── Core types ──────────────────────────────────────────────────────
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct User {
+    /// UUID
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub username: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="3")]
+    pub emails: ::prost::alloc::vec::Vec<UserEmail>,
+    #[prost(message, repeated, tag="4")]
+    pub oauth_connections: ::prost::alloc::vec::Vec<OAuthConnection>,
+    #[prost(bool, tag="5")]
+    pub mfa_enabled: bool,
+    #[prost(message, optional, tag="6")]
+    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(message, optional, tag="7")]
+    pub updated_at: ::core::option::Option<::prost_types::Timestamp>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UserEmail {
+    #[prost(string, tag="1")]
+    pub email: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
+    pub verified: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OAuthConnection {
+    #[prost(enumeration="OAuthProvider", tag="1")]
+    pub provider: i32,
+    #[prost(string, tag="2")]
+    pub provider_user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub provider_email: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="4")]
+    pub linked_at: ::core::option::Option<::prost_types::Timestamp>,
+}
+// ─── Authentication ──────────────────────────────────────────────────
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RegisterRequest {
+    #[prost(string, tag="1")]
+    pub username: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub email: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub password: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RegisterResponse {
+    #[prost(message, optional, tag="1")]
+    pub user: ::core::option::Option<User>,
+    #[prost(message, optional, tag="2")]
+    pub tokens: ::core::option::Option<AuthTokens>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LoginRequest {
+    #[prost(string, tag="3")]
+    pub password: ::prost::alloc::string::String,
+    /// Login with either username or email
+    #[prost(oneof="login_request::Identifier", tags="1, 2")]
+    pub identifier: ::core::option::Option<login_request::Identifier>,
+}
+/// Nested message and enum types in `LoginRequest`.
+pub mod login_request {
+    /// Login with either username or email
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Identifier {
+        #[prost(string, tag="1")]
+        Username(::prost::alloc::string::String),
+        #[prost(string, tag="2")]
+        Email(::prost::alloc::string::String),
+    }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct LoginResponse {
+    #[prost(message, optional, tag="1")]
+    pub user: ::core::option::Option<User>,
+    #[prost(message, optional, tag="2")]
+    pub tokens: ::core::option::Option<AuthTokens>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RefreshTokenRequest {
+    #[prost(string, tag="1")]
+    pub refresh_token: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RefreshTokenResponse {
+    #[prost(message, optional, tag="1")]
+    pub tokens: ::core::option::Option<AuthTokens>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LogoutRequest {
+    #[prost(string, tag="1")]
+    pub refresh_token: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LogoutResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AuthTokens {
+    #[prost(string, tag="1")]
+    pub access_token: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub refresh_token: ::prost::alloc::string::String,
+    #[prost(int64, tag="3")]
+    pub expires_in_seconds: i64,
+}
+// ─── User CRUD ───────────────────────────────────────────────────────
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetUserRequest {
+    #[prost(oneof="get_user_request::Identifier", tags="1, 2, 3")]
+    pub identifier: ::core::option::Option<get_user_request::Identifier>,
+}
+/// Nested message and enum types in `GetUserRequest`.
+pub mod get_user_request {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Identifier {
+        #[prost(string, tag="1")]
+        UserId(::prost::alloc::string::String),
+        #[prost(string, tag="2")]
+        Username(::prost::alloc::string::String),
+        #[prost(string, tag="3")]
+        Email(::prost::alloc::string::String),
+    }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetUserResponse {
+    #[prost(message, optional, tag="1")]
+    pub user: ::core::option::Option<User>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateUserRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="2")]
+    pub username: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateUserResponse {
+    #[prost(message, optional, tag="1")]
+    pub user: ::core::option::Option<User>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteUserRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteUserResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListUsersRequest {
+    #[prost(int32, tag="1")]
+    pub page_size: i32,
+    #[prost(string, tag="2")]
+    pub page_token: ::prost::alloc::string::String,
+    /// search across username, email
+    #[prost(string, optional, tag="3")]
+    pub search: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListUsersResponse {
+    #[prost(message, repeated, tag="1")]
+    pub users: ::prost::alloc::vec::Vec<User>,
+    #[prost(string, tag="2")]
+    pub next_page_token: ::prost::alloc::string::String,
+    #[prost(int32, tag="3")]
+    pub total_count: i32,
+}
+// ─── Password management ─────────────────────────────────────────────
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ChangePasswordRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub current_password: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub new_password: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ChangePasswordResponse {
+}
+// ─── Email management ────────────────────────────────────────────────
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddEmailRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub email: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddEmailResponse {
+    #[prost(message, optional, tag="1")]
+    pub email: ::core::option::Option<UserEmail>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VerifyEmailRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub email: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VerifyEmailResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveEmailRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub email: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveEmailResponse {
+}
+// ─── OAuth / Social login ────────────────────────────────────────────
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OAuthLoginRequest {
+    #[prost(enumeration="OAuthProvider", tag="1")]
+    pub provider: i32,
+    #[prost(string, tag="2")]
+    pub authorization_code: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub redirect_uri: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OAuthLoginResponse {
+    #[prost(message, optional, tag="1")]
+    pub user: ::core::option::Option<User>,
+    #[prost(message, optional, tag="2")]
+    pub tokens: ::core::option::Option<AuthTokens>,
+    #[prost(bool, tag="3")]
+    pub is_new_user: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LinkOAuthProviderRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(enumeration="OAuthProvider", tag="2")]
+    pub provider: i32,
+    #[prost(string, tag="3")]
+    pub authorization_code: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub redirect_uri: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LinkOAuthProviderResponse {
+    #[prost(message, optional, tag="1")]
+    pub connection: ::core::option::Option<OAuthConnection>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UnlinkOAuthProviderRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(enumeration="OAuthProvider", tag="2")]
+    pub provider: i32,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UnlinkOAuthProviderResponse {
+}
+// ─── Personal access tokens ──────────────────────────────────────────
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PersonalAccessToken {
+    /// UUID
+    #[prost(string, tag="1")]
+    pub token_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="3")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(message, optional, tag="4")]
+    pub expires_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(message, optional, tag="5")]
+    pub last_used: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(message, optional, tag="6")]
+    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreatePersonalAccessTokenRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="3")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Duration in seconds; 0 = no expiry
+    #[prost(int64, tag="4")]
+    pub expires_in_seconds: i64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreatePersonalAccessTokenResponse {
+    #[prost(message, optional, tag="1")]
+    pub token: ::core::option::Option<PersonalAccessToken>,
+    /// The raw token value, only returned on creation
+    #[prost(string, tag="2")]
+    pub raw_token: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListPersonalAccessTokensRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListPersonalAccessTokensResponse {
+    #[prost(message, repeated, tag="1")]
+    pub tokens: ::prost::alloc::vec::Vec<PersonalAccessToken>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeletePersonalAccessTokenRequest {
+    #[prost(string, tag="1")]
+    pub token_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeletePersonalAccessTokenResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetupMfaRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(enumeration="MfaType", tag="2")]
+    pub mfa_type: i32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetupMfaResponse {
+    /// UUID
+    #[prost(string, tag="1")]
+    pub mfa_id: ::prost::alloc::string::String,
+    /// TOTP provisioning URI (otpauth://...)
+    #[prost(string, tag="2")]
+    pub provisioning_uri: ::prost::alloc::string::String,
+    /// Base32-encoded secret for manual entry
+    #[prost(string, tag="3")]
+    pub secret: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VerifyMfaRequest {
+    #[prost(string, tag="1")]
+    pub mfa_id: ::prost::alloc::string::String,
+    /// The TOTP code to verify setup
+    #[prost(string, tag="2")]
+    pub code: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VerifyMfaResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DisableMfaRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    /// Current TOTP code to confirm disable
+    #[prost(string, tag="2")]
+    pub code: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DisableMfaResponse {
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OAuthProvider {
+    OauthProviderUnspecified = 0,
+    OauthProviderGithub = 1,
+    OauthProviderGoogle = 2,
+    OauthProviderGitlab = 3,
+    OauthProviderMicrosoft = 4,
+}
+impl OAuthProvider {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::OauthProviderUnspecified => "OAUTH_PROVIDER_UNSPECIFIED",
+            Self::OauthProviderGithub => "OAUTH_PROVIDER_GITHUB",
+            Self::OauthProviderGoogle => "OAUTH_PROVIDER_GOOGLE",
+            Self::OauthProviderGitlab => "OAUTH_PROVIDER_GITLAB",
+            Self::OauthProviderMicrosoft => "OAUTH_PROVIDER_MICROSOFT",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "OAUTH_PROVIDER_UNSPECIFIED" => Some(Self::OauthProviderUnspecified),
+            "OAUTH_PROVIDER_GITHUB" => Some(Self::OauthProviderGithub),
+            "OAUTH_PROVIDER_GOOGLE" => Some(Self::OauthProviderGoogle),
+            "OAUTH_PROVIDER_GITLAB" => Some(Self::OauthProviderGitlab),
+            "OAUTH_PROVIDER_MICROSOFT" => Some(Self::OauthProviderMicrosoft),
+            _ => None,
+        }
+    }
+}
+// ─── MFA ─────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum MfaType {
+    Unspecified = 0,
+    Totp = 1,
+}
+impl MfaType {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "MFA_TYPE_UNSPECIFIED",
+            Self::Totp => "MFA_TYPE_TOTP",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "MFA_TYPE_UNSPECIFIED" => Some(Self::Unspecified),
+            "MFA_TYPE_TOTP" => Some(Self::Totp),
+            _ => None,
+        }
+    }
+}
 include!("forest.v1.tonic.rs");
 // @@protoc_insertion_point(module)

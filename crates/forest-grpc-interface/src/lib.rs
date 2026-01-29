@@ -1,7 +1,6 @@
 #![allow(clippy::empty_docs)]
 
-pub mod grpc {
-    include!("./grpc/forest/v1/forest.v1.rs");
-}
+#[path = "./grpc/forest/v1/forest.v1.rs"]
+pub mod grpc;
 
 pub use grpc::*;

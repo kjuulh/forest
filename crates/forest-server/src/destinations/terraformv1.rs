@@ -160,11 +160,7 @@ impl TerraformStateStoreState for State {
             users: Arc::default(),
             locks: Arc::default(),
 
-            external_url: self
-                .config
-                .terraform_external_host
-                .clone()
-                .expect("to be able to get external terraform url"),
+            external_url: self.config.terraform_external_host.clone(),
         })
         .clone()
     }

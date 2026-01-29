@@ -1,4 +1,5 @@
 use admin::AdminCommand;
+use auth::AuthCommand;
 use clap::{Parser, Subcommand};
 use components::ComponentsCommand;
 use global::GlobalCommand;
@@ -16,6 +17,7 @@ use crate::{
 };
 
 mod admin;
+mod auth;
 mod components;
 mod destination;
 mod global;
@@ -42,6 +44,8 @@ enum Commands {
     Init(InitCommand),
     Components(ComponentsCommand),
     Admin(AdminCommand),
+    /// Authenticate and manage credentials
+    Auth(AuthCommand),
     Run(RunCommand),
     Template(TemplateCommand),
     Global(GlobalCommand),
@@ -122,6 +126,7 @@ impl CommandHandler {
             Commands::Init(init_command) => init_command.execute(state).await,
             Commands::Components(components_command) => components_command.execute(state).await,
             Commands::Admin(cmd) => cmd.execute(state).await,
+            Commands::Auth(cmd) => cmd.execute(state).await,
             Commands::Run(cmd) => cmd.execute(state).await,
             Commands::Template(cmd) => cmd.execute(state).await,
             Commands::Global(cmd) => cmd.execute(state).await,

@@ -1,3 +1,5 @@
+pub mod users;
+
 use std::{collections::HashMap, fmt::Display, ops::Deref};
 
 pub struct Namespace(String);

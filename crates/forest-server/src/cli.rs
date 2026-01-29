@@ -12,13 +12,16 @@ use admin::*;
 #[command(author, version, about, long_about = None, subcommand_required = true)]
 struct Command {
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 
-    #[arg(long)]
-    external_host: Option<String>,
+    #[arg(long, env = "EXTERNAL_HOST")]
+    external_host: String,
 
     #[arg(long, env = "FOREST_TERRAFORM_V1_EXTERNAL_HOST")]
-    terraform_external_host: Option<String>,
+    terraform_external_host: String,
+
+    #[arg(long, env = "PASSWORD_SECRET_KEY")]
+    password_secret_key: String,
 }
 
 #[derive(Subcommand)]
@@ -40,16 +43,21 @@ pub async fn execute() -> anyhow::Result<()> {
     let cli = Command::parse();
     tracing::debug!("starting cli");
 
+    if cli.password_secret_key.len() != 32 {
+        anyhow::bail!(
+            "password-secret-key must be exactly 32 characters long is ({})",
+            cli.password_secret_key.len()
+        )
+    }
+
     let config = Config {
         external_host: cli.external_host.clone(),
         terraform_external_host: cli.terraform_external_host.clone(),
+        password_secret_key: cli.password_secret_key,
     };
     let state = State::new(config).await?;
 
-    cli.command
-        .expect("commands are required should've been caught by clap")
-        .execute(&state)
-        .await?;
+    cli.command.execute(&state).await?;
 
     Ok(())
 }

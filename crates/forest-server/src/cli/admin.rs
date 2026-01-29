@@ -75,11 +75,7 @@ pub mod client {
     impl GrpcClientState for State {
         fn grpc_client(&self) -> GrpcClient {
             GrpcClient {
-                host: self
-                    .config
-                    .external_host
-                    .clone()
-                    .expect("to get able to get external_host"),
+                host: self.config.external_host.clone(),
                 status_client: OnceCell::new(),
             }
         }

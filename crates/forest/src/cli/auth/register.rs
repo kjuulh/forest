@@ -1,0 +1,59 @@
+use anyhow::Context;
+
+use crate::{grpc::GrpcClientState, state::State};
+
+#[derive(clap::Parser)]
+pub struct RegisterCommand {
+    /// Username for the new account
+    #[arg(long)]
+    username: Option<String>,
+
+    /// Email for the new account
+    #[arg(long)]
+    email: Option<String>,
+}
+
+impl RegisterCommand {
+    pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        let username = match &self.username {
+            Some(u) => u.clone(),
+            None => inquire::Text::new("Username:").prompt()?,
+        };
+
+        let email = match &self.email {
+            Some(e) => e.clone(),
+            None => inquire::Text::new("Email:").prompt()?,
+        };
+
+        let password = inquire::Password::new("Password:")
+            .with_display_mode(inquire::PasswordDisplayMode::Masked)
+            .without_confirmation()
+            .prompt()?;
+
+        let confirm = inquire::Password::new("Confirm password:")
+            .with_display_mode(inquire::PasswordDisplayMode::Masked)
+            .without_confirmation()
+            .prompt()?;
+
+        if password != confirm {
+            anyhow::bail!("passwords do not match");
+        }
+
+        let resp = state
+            .grpc_client()
+            .register(&username, &email, &password)
+            .await
+            .context("failed to register")?;
+
+        if let Some(user) = resp.user {
+            println!("Registered as {} ({})", user.username, user.user_id);
+        }
+
+        if let Some(tokens) = resp.tokens {
+            // TODO: persist tokens to local config
+            println!("Access token: {}", tokens.access_token);
+        }
+
+        Ok(())
+    }
+}

@@ -7,6 +7,8 @@ mod cli;
 mod repositories;
 mod services;
 
+mod native_credentials;
+
 mod state;
 pub use state::*;
 
