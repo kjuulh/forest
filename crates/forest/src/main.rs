@@ -12,6 +12,7 @@ mod component_cache;
 mod requirements;
 mod user_config;
 mod user_locations;
+mod user_state;
 
 mod features;
 mod models;

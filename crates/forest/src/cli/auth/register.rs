@@ -1,6 +1,10 @@
 use anyhow::Context;
 
-use crate::{grpc::GrpcClientState, state::State};
+use crate::{
+    grpc::GrpcClientState,
+    state::State,
+    user_state::{UserState, UserStateLoaderState},
+};
 
 #[derive(clap::Parser)]
 pub struct RegisterCommand {
@@ -45,14 +49,26 @@ impl RegisterCommand {
             .await
             .context("failed to register")?;
 
-        if let Some(user) = resp.user {
+        if let Some(user) = &resp.user {
             println!("Registered as {} ({})", user.username, user.user_id);
         }
 
-        if let Some(tokens) = resp.tokens {
+        if let Some(tokens) = &resp.tokens {
             // TODO: persist tokens to local config
             println!("Access token: {}", tokens.access_token);
         }
+
+        let user = resp.user.unwrap();
+
+        state
+            .user_state()
+            .set_state(&UserState {
+                user_id: user.user_id,
+                username: user.username,
+                emails: user.emails.into_iter().map(|e| e.email).collect(),
+                token: resp.tokens.map(|t| t.access_token).unwrap_or_default(),
+            })
+            .await?;
 
         Ok(())
     }
