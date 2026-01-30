@@ -80,7 +80,7 @@ mise run dev -- admin deploy-component ./components/* --all --quiet
 """
 
 [tasks."local:up"]
-run = "docker compose -f ./templates/docker-compose.yaml up -d --remove-orphans"
+run = "docker compose -f ./templates/docker-compose.yaml up -d --remove-orphans --wait"
 
 [tasks."local:down"]
 run = "docker compose -f ./templates/docker-compose.yaml down -v"
