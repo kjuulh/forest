@@ -5,8 +5,7 @@ use forest_grpc_interface::{
     destination_service_server::DestinationServiceServer,
     namespace_service_server::NamespaceServiceServer,
     registry_service_server::RegistryServiceServer, release_service_server::ReleaseServiceServer,
-    status_service_server::StatusServiceServer,
-    users_service_server::UsersServiceServer,
+    status_service_server::StatusServiceServer, users_service_server::UsersServiceServer,
 };
 use namespaces::NamespacesServer;
 use notmad::MadError;

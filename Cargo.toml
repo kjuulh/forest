@@ -6,8 +6,6 @@ resolver = "2"
 version = "0.1.0"
 
 [workspace.dependencies]
-forest = { path = "crates/forest" }
-forest-server = { path = "crates/forest-server" }
 forest-models = { path = "crates/forest-models" }
 forest-grpc-interface = { path = "crates/forest-grpc-interface" }
 

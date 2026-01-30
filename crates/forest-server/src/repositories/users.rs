@@ -18,7 +18,7 @@ impl UserTx {
     }
 
     pub fn as_executor(&mut self) -> &mut sqlx::PgConnection {
-        &mut *self.tx
+        &mut self.tx
     }
 }
 
@@ -419,11 +419,7 @@ impl UserRepository {
         Ok(row)
     }
 
-    pub async fn delete_identity(
-        &self,
-        db: impl PgExecutor<'_>,
-        id: Uuid,
-    ) -> anyhow::Result<()> {
+    pub async fn delete_identity(&self, db: impl PgExecutor<'_>, id: Uuid) -> anyhow::Result<()> {
         sqlx::query!("DELETE FROM identities WHERE id = $1", id)
             .execute(db)
             .await?;
@@ -542,11 +538,7 @@ impl UserRepository {
         Ok(row)
     }
 
-    pub async fn verify_native_mfa(
-        &self,
-        db: impl PgExecutor<'_>,
-        id: Uuid,
-    ) -> anyhow::Result<()> {
+    pub async fn verify_native_mfa(&self, db: impl PgExecutor<'_>, id: Uuid) -> anyhow::Result<()> {
         sqlx::query!(
             r#"
             UPDATE provider_native_mfa
@@ -561,11 +553,7 @@ impl UserRepository {
         Ok(())
     }
 
-    pub async fn touch_native_mfa(
-        &self,
-        db: impl PgExecutor<'_>,
-        id: Uuid,
-    ) -> anyhow::Result<()> {
+    pub async fn touch_native_mfa(&self, db: impl PgExecutor<'_>, id: Uuid) -> anyhow::Result<()> {
         sqlx::query!(
             r#"
             UPDATE provider_native_mfa
@@ -665,11 +653,7 @@ impl UserRepository {
         Ok(row)
     }
 
-    pub async fn revoke_session(
-        &self,
-        db: impl PgExecutor<'_>,
-        id: Uuid,
-    ) -> anyhow::Result<()> {
+    pub async fn revoke_session(&self, db: impl PgExecutor<'_>, id: Uuid) -> anyhow::Result<()> {
         sqlx::query!(
             r#"
             UPDATE sessions

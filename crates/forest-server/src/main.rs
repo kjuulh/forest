@@ -19,6 +19,8 @@ mod grpc;
 mod scheduler;
 mod temp_dir;
 
+mod tokens;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
