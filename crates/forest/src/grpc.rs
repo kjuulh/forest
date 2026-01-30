@@ -239,7 +239,10 @@ impl GrpcClient {
         let client = self
             .namespaces_client
             .get_or_try_init(move || async move {
-                let channel = Channel::from_shared(self.host.clone())?.connect().await?;
+                let channel = Channel::from_shared(self.host.clone())?
+                    .tls_config(ClientTlsConfig::new().with_enabled_roots())?
+                    .connect()
+                    .await?;
                 let client = NamespaceServiceClient::new(channel);
 
                 Ok::<_, anyhow::Error>(client)
@@ -253,7 +256,10 @@ impl GrpcClient {
         let client = self
             .release_client
             .get_or_try_init(move || async move {
-                let channel = Channel::from_shared(self.host.clone())?.connect().await?;
+                let channel = Channel::from_shared(self.host.clone())?
+                    .tls_config(ClientTlsConfig::new().with_enabled_roots())?
+                    .connect()
+                    .await?;
                 let client = ReleaseServiceClient::new(channel);
 
                 Ok::<_, anyhow::Error>(client)
@@ -267,7 +273,10 @@ impl GrpcClient {
         let client = self
             .registry_client
             .get_or_try_init(move || async move {
-                let channel = Channel::from_shared(self.host.clone())?.connect().await?;
+                let channel = Channel::from_shared(self.host.clone())?
+                    .tls_config(ClientTlsConfig::new().with_enabled_roots())?
+                    .connect()
+                    .await?;
                 let client = RegistryServiceClient::new(channel);
 
                 Ok::<_, anyhow::Error>(client)
@@ -280,7 +289,10 @@ impl GrpcClient {
         let client = self
             .artifact_client
             .get_or_try_init(move || async move {
-                let channel = Channel::from_shared(self.host.clone())?.connect().await?;
+                let channel = Channel::from_shared(self.host.clone())?
+                    .tls_config(ClientTlsConfig::new().with_enabled_roots())?
+                    .connect()
+                    .await?;
                 let client = ArtifactServiceClient::new(channel);
 
                 Ok::<_, anyhow::Error>(client)

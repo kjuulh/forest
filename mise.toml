@@ -12,7 +12,8 @@ alias = ["i", "install"]
 run = "cargo install --path crates/forest -f"
 
 [tasks.forest]
-env = {FOREST_SERVER= "http://localhost:4040"}
+#env = { FOREST_SERVER = "http://localhost:4040" }
+env = { FOREST_SERVER = "https://forest.data.api.understory.io:4000" }
 dir = "{{ cwd }}"
 run = "cargo run -p forest -- "
 
@@ -21,8 +22,9 @@ dir = "./examples/my_project"
 run = "cargo run -p forest -- "
 
 [tasks."forest:publish"]
+env = { FOREST_SERVER = "http://localhost:4040" }
 dir = "{{ cwd }}"
-run = "cargo run -p forest -- publish"
+run = "cargo run -p forest -- components publish"
 
 [tasks."forest:trace:my"]
 env = { RUST_LOG = "forest=trace,info" }
@@ -49,10 +51,7 @@ run = "docker build -f ./templates/forest.Dockerfile -t docker.io/kasperhermanse
 run = "docker build -f ./templates/forest-server.Dockerfile -t docker.io/kasperhermansen/forest-server:local ."
 
 [tasks."docker:build"]
-depends = [
-  "forest:docker:build",
-  "forest-server:docker:build"
-]
+depends = ["forest:docker:build", "forest-server:docker:build"]
 run = ""
 
 [tasks."docker:publish"]
@@ -90,7 +89,7 @@ run = "docker compose -f ./templates/docker-compose.yaml down -v"
 run = "docker compose -f ./templates/docker-compose.yaml logs -f"
 
 [tasks."db:shell"]
-env = {PGPASSWORD="devpassword"}
+env = { PGPASSWORD = "devpassword" }
 run = "psql -h localhost -p 5432 -U devuser -d dev"
 
 [tasks."db:migrate"]
