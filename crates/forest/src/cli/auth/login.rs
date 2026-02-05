@@ -1,6 +1,5 @@
 use anyhow::Context;
 use forest_grpc_interface::login_request;
-use futures::SinkExt;
 
 use crate::{
     grpc::GrpcClientState,

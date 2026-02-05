@@ -10,7 +10,7 @@ pub struct ServeCommand {
     #[arg(long, env = "FOREST_HOST", default_value = "127.0.0.1:4040")]
     host: SocketAddr,
 
-    #[arg(long, env = "FOREST_HTTP_HOST", default_value = "127.0.0.1:4041")]
+    #[arg(long, env = "FOREST_HTTP_HOST", default_value = "127.0.0.1:4042")]
     http_host: SocketAddr,
 
     #[arg(

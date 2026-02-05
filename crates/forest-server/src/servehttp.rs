@@ -23,7 +23,7 @@ impl Component for ServeHttp {
 
         axum::serve(listener, router.into_make_service())
             .with_graceful_shutdown(async move {
-                cancellation_token.cancelled();
+                cancellation_token.cancelled().await;
             })
             .await
             .context("http server failed")?;
