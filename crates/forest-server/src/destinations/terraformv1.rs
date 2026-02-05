@@ -15,7 +15,7 @@ use axum::{response::IntoResponse, routing::get};
 use forest_models::Destination;
 
 use http::StatusCode;
-use notmad::{Component, MadError};
+use notmad::{Component, ComponentInfo, MadError};
 use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -308,10 +308,9 @@ impl IntoResponse for ApiError {
     }
 }
 
-#[async_trait::async_trait]
 impl Component for TerraformV1Server {
-    fn name(&self) -> Option<String> {
-        Some("forest-server/terraform-v1-server".into())
+    fn info(&self) -> ComponentInfo {
+        "forest-server/terraform-v1-server".into()
     }
 
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {

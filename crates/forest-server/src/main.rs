@@ -5,7 +5,10 @@ use tracing_subscriber::EnvFilter;
 
 mod cli;
 mod repositories;
+mod servehttp;
 mod services;
+
+mod checks;
 
 mod native_credentials;
 

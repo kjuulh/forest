@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use components::ComponentsCommand;
 use global::GlobalCommand;
 use init::InitCommand;
-use notmad::{Component, MadError};
+use notmad::{Component, ComponentInfo, MadError};
 use run::RunCommand;
 use shell::ShellCommand;
 use template::TemplateCommand;
@@ -139,10 +139,9 @@ impl CommandHandler {
     }
 }
 
-#[async_trait::async_trait]
 impl Component for CommandHandler {
-    fn name(&self) -> Option<String> {
-        Some("forest/command".into())
+    fn info(&self) -> ComponentInfo {
+        "forest/command".into()
     }
 
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {

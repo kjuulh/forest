@@ -1,9 +1,8 @@
 use std::net::{Ipv4Addr, SocketAddr};
 
 use anyhow::Context;
-use async_trait::async_trait;
 use axum::routing::get;
-use notmad::{Component, MadError};
+use notmad::{Component, ComponentInfo, MadError};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
@@ -58,10 +57,9 @@ struct Http {
     port: SocketAddr,
 }
 
-#[async_trait]
 impl Component for Http {
-    fn name(&self) -> Option<String> {
-        Some(format!("{}:{}", self.name, self.port))
+    fn info(&self) -> ComponentInfo {
+        format!("{}:{}", self.name, self.port).into()
     }
 
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {

@@ -80,10 +80,9 @@ impl GrpcServer {
 
 mod log_layer;
 
-#[async_trait::async_trait]
 impl notmad::Component for GrpcServer {
-    fn name(&self) -> Option<String> {
-        Some("forest-server/grpc".into())
+    fn info(&self) -> notmad::ComponentInfo {
+        "forest-server/grpc".into()
     }
 
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {

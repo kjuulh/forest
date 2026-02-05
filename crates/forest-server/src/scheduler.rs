@@ -1,6 +1,6 @@
 use anyhow::Context;
 use forest_models::ReleaseStatus;
-use notmad::{Component, MadError};
+use notmad::{Component, ComponentInfo, MadError};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -79,10 +79,9 @@ impl Scheduler {
     }
 }
 
-#[async_trait::async_trait]
 impl Component for Scheduler {
-    fn name(&self) -> Option<String> {
-        Some("forest-server/scheduler".into())
+    fn info(&self) -> ComponentInfo {
+        "forest-server/scheduler".into()
     }
 
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {
