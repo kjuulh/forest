@@ -20,8 +20,8 @@ dotenvy = { version = "0.15" }
 async-trait = "0.1.88"
 semver = "1.0.26"
 futures = "0.3.31"
-notmad = "0.10.0"
-drop-queue = { version = "0.0.8", features = ["notmad"] }
+notmad = "0.11.0"
+drop-queue = { version = "0.0.9", features = ["notmad"] }
 rand = "0.9.1"
 noworkers = "0.1.0"
 
