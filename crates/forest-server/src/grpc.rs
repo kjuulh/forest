@@ -39,9 +39,8 @@ impl GrpcServer {
         tracing::info!("serving grpc on {}", self.host);
 
         let layer = tower::ServiceBuilder::new()
-            // Apply our own middleware
-            // Interceptors can be also be applied as middleware
             .layer(log_layer::LogMiddlewareLayer::default())
+            .layer(auth_layer::AuthMiddlewareLayer::new(self.state.clone()))
             .into_inner();
 
         tonic::transport::Server::builder()
@@ -78,6 +77,7 @@ impl GrpcServer {
     }
 }
 
+mod auth_layer;
 mod log_layer;
 
 impl notmad::Component for GrpcServer {

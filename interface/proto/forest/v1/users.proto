@@ -36,6 +36,9 @@ service UsersService {
   rpc ListPersonalAccessTokens(ListPersonalAccessTokensRequest) returns (ListPersonalAccessTokensResponse);
   rpc DeletePersonalAccessToken(DeletePersonalAccessTokenRequest) returns (DeletePersonalAccessTokenResponse);
 
+  // Token introspection (requires valid access token)
+  rpc TokenInfo(TokenInfoRequest) returns (TokenInfoResponse);
+
   // MFA
   rpc SetupMfa(SetupMfaRequest) returns (SetupMfaResponse);
   rpc VerifyMfa(VerifyMfaRequest) returns (VerifyMfaResponse);
@@ -119,6 +122,15 @@ message AuthTokens {
   string access_token = 1;
   string refresh_token = 2;
   int64 expires_in_seconds = 3;
+}
+
+// ─── Token introspection ─────────────────────────────────────────────
+
+message TokenInfoRequest {}
+
+message TokenInfoResponse {
+  string user_id = 1;
+  int64 expires_at = 2; // Unix timestamp (seconds)
 }
 
 // ─── User CRUD ───────────────────────────────────────────────────────

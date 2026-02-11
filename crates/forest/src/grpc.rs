@@ -6,8 +6,7 @@ use forest_grpc_interface::{
     destination_service_client::DestinationServiceClient, get_component_files_response::Msg,
     get_projects_request::Query, namespace_service_client::NamespaceServiceClient,
     registry_service_client::RegistryServiceClient, release_service_client::ReleaseServiceClient,
-    users_service_client::UsersServiceClient,
-    *,
+    users_service_client::UsersServiceClient, *,
 };
 use forest_models::{Destination, DestinationType, Namespace, ProjectName};
 use futures::{SinkExt, Stream, TryStreamExt};
@@ -20,9 +19,11 @@ use tonic::{
     Response,
     transport::{Channel, ClientTlsConfig},
 };
+use tower::ServiceBuilder;
 use uuid::Uuid;
 
 use crate::{
+    grpc::interceptor::{AuthMiddleware, AuthMiddlewareLayer, AuthMiddlewareLayerState},
     models::{
         self, artifacts::ArtifactID, context::ArtifactContext,
         release_annotation::ReleaseAnnotation, source::Source,
@@ -30,15 +31,21 @@ use crate::{
     state::State,
 };
 
+mod interceptor;
+
 #[derive(Clone)]
 pub struct GrpcClient {
     host: String,
-    namespaces_client: OnceCell<NamespaceServiceClient<Channel>>,
-    registry_client: OnceCell<RegistryServiceClient<Channel>>,
-    artifact_client: OnceCell<ArtifactServiceClient<Channel>>,
-    release_client: OnceCell<ReleaseServiceClient<Channel>>,
-    destination_client: OnceCell<DestinationServiceClient<Channel>>,
+    auth_middleware_layer: AuthMiddlewareLayer,
+
+    channel: OnceCell<Channel>,
+    namespaces_client: OnceCell<NamespaceServiceClient<AuthMiddleware<Channel>>>,
+    registry_client: OnceCell<RegistryServiceClient<AuthMiddleware<Channel>>>,
+    artifact_client: OnceCell<ArtifactServiceClient<AuthMiddleware<Channel>>>,
+    release_client: OnceCell<ReleaseServiceClient<AuthMiddleware<Channel>>>,
+    destination_client: OnceCell<DestinationServiceClient<AuthMiddleware<Channel>>>,
     users_client: OnceCell<UsersServiceClient<Channel>>,
+    auth_users_client: OnceCell<UsersServiceClient<AuthMiddleware<Channel>>>,
 }
 
 impl GrpcClient {
@@ -235,97 +242,120 @@ impl GrpcClient {
         Ok(msg.artifact_id.try_into()?)
     }
 
-    async fn namespaces_client(&self) -> anyhow::Result<NamespaceServiceClient<Channel>> {
+    async fn channel(&self) -> anyhow::Result<Channel> {
+        let channel = self
+            .channel
+            .get_or_try_init(move || async move {
+                let channel = Channel::from_shared(self.host.clone())?
+                    .tls_config(ClientTlsConfig::new().with_enabled_roots())?
+                    .connect()
+                    .await?;
+
+                Ok::<_, anyhow::Error>(channel)
+            })
+            .await?;
+
+        Ok(channel.clone())
+    }
+
+    fn auth_channel(&self, channel: Channel) -> AuthMiddleware<Channel> {
+        ServiceBuilder::new()
+            .layer(self.auth_middleware_layer.clone())
+            .service(channel)
+    }
+
+    async fn namespaces_client(
+        &self,
+    ) -> anyhow::Result<NamespaceServiceClient<AuthMiddleware<Channel>>> {
         let client = self
             .namespaces_client
             .get_or_try_init(move || async move {
-                let channel = Channel::from_shared(self.host.clone())?
-                    .tls_config(ClientTlsConfig::new().with_enabled_roots())?
-                    .connect()
-                    .await?;
-                let client = NamespaceServiceClient::new(channel);
-
-                Ok::<_, anyhow::Error>(client)
+                let channel = self.auth_channel(self.channel().await?);
+                Ok::<_, anyhow::Error>(NamespaceServiceClient::new(channel))
             })
             .await?;
 
         Ok(client.clone())
     }
 
-    async fn release_client(&self) -> anyhow::Result<ReleaseServiceClient<Channel>> {
+    async fn release_client(
+        &self,
+    ) -> anyhow::Result<ReleaseServiceClient<AuthMiddleware<Channel>>> {
         let client = self
             .release_client
             .get_or_try_init(move || async move {
-                let channel = Channel::from_shared(self.host.clone())?
-                    .tls_config(ClientTlsConfig::new().with_enabled_roots())?
-                    .connect()
-                    .await?;
-                let client = ReleaseServiceClient::new(channel);
-
-                Ok::<_, anyhow::Error>(client)
+                let channel = self.auth_channel(self.channel().await?);
+                Ok::<_, anyhow::Error>(ReleaseServiceClient::new(channel))
             })
             .await?;
 
         Ok(client.clone())
     }
 
-    async fn registry_client(&self) -> anyhow::Result<RegistryServiceClient<Channel>> {
+    async fn registry_client(
+        &self,
+    ) -> anyhow::Result<RegistryServiceClient<AuthMiddleware<Channel>>> {
         let client = self
             .registry_client
             .get_or_try_init(move || async move {
-                let channel = Channel::from_shared(self.host.clone())?
-                    .tls_config(ClientTlsConfig::new().with_enabled_roots())?
-                    .connect()
-                    .await?;
-                let client = RegistryServiceClient::new(channel);
-
-                Ok::<_, anyhow::Error>(client)
+                let channel = self.auth_channel(self.channel().await?);
+                Ok::<_, anyhow::Error>(RegistryServiceClient::new(channel))
             })
             .await?;
 
         Ok(client.clone())
     }
-    async fn artifact_client(&self) -> anyhow::Result<ArtifactServiceClient<Channel>> {
+
+    async fn artifact_client(
+        &self,
+    ) -> anyhow::Result<ArtifactServiceClient<AuthMiddleware<Channel>>> {
         let client = self
             .artifact_client
             .get_or_try_init(move || async move {
-                let channel = Channel::from_shared(self.host.clone())?
-                    .tls_config(ClientTlsConfig::new().with_enabled_roots())?
-                    .connect()
-                    .await?;
-                let client = ArtifactServiceClient::new(channel);
-
-                Ok::<_, anyhow::Error>(client)
+                let channel = self.auth_channel(self.channel().await?);
+                Ok::<_, anyhow::Error>(ArtifactServiceClient::new(channel))
             })
             .await?;
 
         Ok(client.clone())
     }
-    async fn destination_client(&self) -> anyhow::Result<DestinationServiceClient<Channel>> {
+
+    async fn destination_client(
+        &self,
+    ) -> anyhow::Result<DestinationServiceClient<AuthMiddleware<Channel>>> {
         let client = self
             .destination_client
             .get_or_try_init(move || async move {
-                let channel = Channel::from_shared(self.host.clone())?
-                    .tls_config(ClientTlsConfig::new().with_enabled_roots())?
-                    .connect()
-                    .await?;
-                let client = DestinationServiceClient::new(channel);
-
-                Ok::<_, anyhow::Error>(client)
+                let channel = self.auth_channel(self.channel().await?);
+                Ok::<_, anyhow::Error>(DestinationServiceClient::new(channel))
             })
             .await?;
 
         Ok(client.clone())
     }
 
+    /// Unauthenticated users client (login, register, refresh_token).
     async fn users_client(&self) -> anyhow::Result<UsersServiceClient<Channel>> {
         let client = self
             .users_client
             .get_or_try_init(move || async move {
-                let channel = Channel::from_shared(self.host.clone())?.connect().await?;
-                let client = UsersServiceClient::new(channel);
+                let channel = self.channel().await?;
+                Ok::<_, anyhow::Error>(UsersServiceClient::new(channel))
+            })
+            .await?;
 
-                Ok::<_, anyhow::Error>(client)
+        Ok(client.clone())
+    }
+
+    /// Authenticated users client (get_user, update, delete, PATs, etc.).
+    async fn auth_users_client(
+        &self,
+    ) -> anyhow::Result<UsersServiceClient<AuthMiddleware<Channel>>> {
+        let client = self
+            .auth_users_client
+            .get_or_try_init(move || async move {
+                let channel = self.auth_channel(self.channel().await?);
+                Ok::<_, anyhow::Error>(UsersServiceClient::new(channel))
             })
             .await?;
 
@@ -368,8 +398,22 @@ impl GrpcClient {
         Ok(resp.into_inner())
     }
 
-    pub async fn logout(&self, refresh_token: &str) -> anyhow::Result<()> {
+    pub async fn refresh_token(
+        &self,
+        refresh_token: &str,
+    ) -> anyhow::Result<RefreshTokenResponse> {
         let mut client = self.users_client().await?;
+        let resp = client
+            .refresh_token(RefreshTokenRequest {
+                refresh_token: refresh_token.into(),
+            })
+            .await
+            .context("refresh token")?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn logout(&self, refresh_token: &str) -> anyhow::Result<()> {
+        let mut client = self.auth_users_client().await?;
         client
             .logout(LogoutRequest {
                 refresh_token: refresh_token.into(),
@@ -383,7 +427,7 @@ impl GrpcClient {
         &self,
         identifier: get_user_request::Identifier,
     ) -> anyhow::Result<Option<User>> {
-        let mut client = self.users_client().await?;
+        let mut client = self.auth_users_client().await?;
         let resp = client
             .get_user(GetUserRequest {
                 identifier: Some(identifier),
@@ -398,7 +442,7 @@ impl GrpcClient {
         user_id: &str,
         username: Option<String>,
     ) -> anyhow::Result<Option<User>> {
-        let mut client = self.users_client().await?;
+        let mut client = self.auth_users_client().await?;
         let resp = client
             .update_user(UpdateUserRequest {
                 user_id: user_id.into(),
@@ -410,7 +454,7 @@ impl GrpcClient {
     }
 
     pub async fn delete_user(&self, user_id: &str) -> anyhow::Result<()> {
-        let mut client = self.users_client().await?;
+        let mut client = self.auth_users_client().await?;
         client
             .delete_user(DeleteUserRequest {
                 user_id: user_id.into(),
@@ -426,7 +470,7 @@ impl GrpcClient {
         page_token: &str,
         search: Option<String>,
     ) -> anyhow::Result<ListUsersResponse> {
-        let mut client = self.users_client().await?;
+        let mut client = self.auth_users_client().await?;
         let resp = client
             .list_users(ListUsersRequest {
                 page_size,
@@ -444,7 +488,7 @@ impl GrpcClient {
         current_password: &str,
         new_password: &str,
     ) -> anyhow::Result<()> {
-        let mut client = self.users_client().await?;
+        let mut client = self.auth_users_client().await?;
         client
             .change_password(ChangePasswordRequest {
                 user_id: user_id.into(),
@@ -463,7 +507,7 @@ impl GrpcClient {
         scopes: Vec<String>,
         expires_in_seconds: i64,
     ) -> anyhow::Result<CreatePersonalAccessTokenResponse> {
-        let mut client = self.users_client().await?;
+        let mut client = self.auth_users_client().await?;
         let resp = client
             .create_personal_access_token(CreatePersonalAccessTokenRequest {
                 user_id: user_id.into(),
@@ -480,7 +524,7 @@ impl GrpcClient {
         &self,
         user_id: &str,
     ) -> anyhow::Result<Vec<PersonalAccessToken>> {
-        let mut client = self.users_client().await?;
+        let mut client = self.auth_users_client().await?;
         let resp = client
             .list_personal_access_tokens(ListPersonalAccessTokensRequest {
                 user_id: user_id.into(),
@@ -491,7 +535,7 @@ impl GrpcClient {
     }
 
     pub async fn delete_personal_access_token(&self, token_id: &str) -> anyhow::Result<()> {
-        let mut client = self.users_client().await?;
+        let mut client = self.auth_users_client().await?;
         client
             .delete_personal_access_token(DeletePersonalAccessTokenRequest {
                 token_id: token_id.into(),
@@ -773,13 +817,14 @@ impl GrpcClient {
     }
 
     pub async fn get_projects(&self, query: GetProjectsQuery) -> anyhow::Result<Vec<ProjectName>> {
+        let query = match query {
+            GetProjectsQuery::Namespace(ns) => Query::Namespace(ns.into()),
+        };
         let mut client = self.release_client().await?;
 
         let response = client
             .get_projects(GetProjectsRequest {
-                query: Some(match query {
-                    GetProjectsQuery::Namespace(ns) => Query::Namespace(ns.into()),
-                }),
+                query: Some(query),
             })
             .await
             .context("get projects (grpc)")?;
@@ -844,7 +889,7 @@ impl GrpcClient {
                 metadata,
             })
             .await
-            .context("create destination (grpc)")?;
+            .context("update destination (grpc)")?;
 
         Ok(())
     }
@@ -914,15 +959,17 @@ impl GrpcClientState for State {
             tracing::trace!("creating grpc client");
 
             GrpcClient {
-                // TODO: get from global config
                 host: self.config.forest_server.clone(),
+                auth_middleware_layer: self.auth_interceptor(),
 
+                channel: OnceCell::const_new(),
                 namespaces_client: OnceCell::const_new(),
                 registry_client: OnceCell::const_new(),
                 artifact_client: OnceCell::const_new(),
                 release_client: OnceCell::const_new(),
                 destination_client: OnceCell::const_new(),
                 users_client: OnceCell::const_new(),
+                auth_users_client: OnceCell::const_new(),
             }
         })
         .clone()

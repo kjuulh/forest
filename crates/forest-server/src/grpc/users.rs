@@ -1,7 +1,8 @@
+use chrono::{Days, Utc};
 use forest_grpc_interface::{users_service_server::UsersService, *};
 use uuid::Uuid;
 
-use crate::{services::users::UserServiceState, state::State};
+use crate::{services::users::UserServiceState, state::State, tokens::TokenServiceState};
 
 pub struct UsersServer {
     pub state: State,
@@ -38,10 +39,43 @@ impl UsersService for UsersServer {
             .map_err(|e| tonic::Status::internal(e.to_string()))?
             .ok_or_else(|| tonic::Status::internal("user not found after registration"))?;
 
+        let (refresh_token, hash) = self
+            .state
+            .tokens()
+            .generate_refresh_token()
+            .inspect_err(|e| tracing::warn!("failed to create refresh token: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        let expires = Utc::now()
+            .checked_add_days(Days::new(30))
+            .expect("to be able to add 30 days");
+
+        let session = self
+            .state
+            .user_service()
+            .create_session(profile.user_id, &hash, Some(expires))
+            .await
+            .inspect_err(|e| tracing::warn!("failed to create session: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        let access_token = self
+            .state
+            .tokens()
+            .issue_access_token(
+                &profile.user_id.to_string(),
+                &session.session_id.to_string(),
+                vec![],
+            )
+            .inspect_err(|e| tracing::warn!("failed to issue token: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
         Ok(tonic::Response::new(RegisterResponse {
             user: Some(profile_to_grpc_user(profile)),
-            // TODO: generate actual auth tokens
-            tokens: None,
+            tokens: Some(AuthTokens {
+                access_token: access_token.as_string(),
+                refresh_token,
+                expires_in_seconds: expires.timestamp(),
+            }),
         }))
     }
 
@@ -74,19 +108,111 @@ impl UsersService for UsersServer {
             .map_err(|e| tonic::Status::internal(e.to_string()))?
             .ok_or_else(|| tonic::Status::internal("user not found"))?;
 
+        let (refresh_token, hash) = self
+            .state
+            .tokens()
+            .generate_refresh_token()
+            .inspect_err(|e| tracing::warn!("failed to create refresh token: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        let expires = Utc::now()
+            .checked_add_days(Days::new(30))
+            .expect("to be able to add 30 days");
+
+        let session = self
+            .state
+            .user_service()
+            .create_session(profile.user_id, &hash, Some(expires))
+            .await
+            .inspect_err(|e| tracing::warn!("failed to create session: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        let access_token = self
+            .state
+            .tokens()
+            .issue_access_token(
+                &profile.user_id.to_string(),
+                &session.session_id.to_string(),
+                vec![],
+            )
+            .inspect_err(|e| tracing::warn!("failed to issue token: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
         Ok(tonic::Response::new(LoginResponse {
             user: Some(profile_to_grpc_user(profile)),
-            // TODO: generate actual auth tokens
-            tokens: None,
+            tokens: Some(AuthTokens {
+                access_token: access_token.as_string(),
+                refresh_token,
+                expires_in_seconds: expires.timestamp(),
+            }),
         }))
     }
 
     async fn refresh_token(
         &self,
-        _request: tonic::Request<RefreshTokenRequest>,
+        request: tonic::Request<RefreshTokenRequest>,
     ) -> std::result::Result<tonic::Response<RefreshTokenResponse>, tonic::Status> {
-        // TODO: implement token refresh
-        Err(tonic::Status::unimplemented("not yet implemented"))
+        let req = request.into_inner();
+
+        let token_hash = self
+            .state
+            .tokens()
+            .get_token_hash(&req.refresh_token)
+            .inspect_err(|e| tracing::warn!("failed to decode refresh token: {e:#}"))
+            .map_err(|e| tonic::Status::unauthenticated(e.to_string()))?;
+
+        let session = self
+            .service()
+            .validate_session_full(&token_hash)
+            .await
+            .inspect_err(|e| tracing::warn!("failed to validate session: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?
+            .ok_or_else(|| tonic::Status::unauthenticated("session expired or revoked"))?;
+
+        // Revoke old session
+        self.service()
+            .logout(session.session_id)
+            .await
+            .inspect_err(|e| tracing::warn!("failed to revoke old session: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        // Issue new tokens
+        let (refresh_token, hash) = self
+            .state
+            .tokens()
+            .generate_refresh_token()
+            .inspect_err(|e| tracing::warn!("failed to create refresh token: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        let expires = Utc::now()
+            .checked_add_days(Days::new(30))
+            .expect("to be able to add 30 days");
+
+        let new_session = self
+            .service()
+            .create_session(session.user_id, &hash, Some(expires))
+            .await
+            .inspect_err(|e| tracing::warn!("failed to create new session: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        let access_token = self
+            .state
+            .tokens()
+            .issue_access_token(
+                &session.user_id.to_string(),
+                &new_session.session_id.to_string(),
+                vec![],
+            )
+            .inspect_err(|e| tracing::warn!("failed to issue access token: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        Ok(tonic::Response::new(RefreshTokenResponse {
+            tokens: Some(AuthTokens {
+                access_token: access_token.as_string(),
+                refresh_token,
+                expires_in_seconds: expires.timestamp(),
+            }),
+        }))
     }
 
     async fn logout(
@@ -95,6 +221,25 @@ impl UsersService for UsersServer {
     ) -> std::result::Result<tonic::Response<LogoutResponse>, tonic::Status> {
         // TODO: extract session from auth context and revoke
         Err(tonic::Status::unimplemented("not yet implemented"))
+    }
+
+    async fn token_info(
+        &self,
+        request: tonic::Request<TokenInfoRequest>,
+    ) -> std::result::Result<tonic::Response<TokenInfoResponse>, tonic::Status> {
+        // The auth layer already verified the token and inserted AppClaims.
+        // We just read them back — no database hit needed.
+        let claims = request
+            .extensions()
+            .get::<crate::tokens::AppClaims>()
+            .ok_or_else(|| tonic::Status::internal("missing claims in request extensions"))?;
+
+        Ok(tonic::Response::new(TokenInfoResponse {
+            user_id: claims.user_id.clone(),
+            // The JWT exp claim is validated by the auth layer; returning 0 here
+            // since the client only cares whether the call succeeds or not.
+            expires_at: 0,
+        }))
     }
 
     // ── User CRUD ────────────────────────────────────────────────────

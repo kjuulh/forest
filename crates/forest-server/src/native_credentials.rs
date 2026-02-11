@@ -7,9 +7,7 @@ use argon2::{
 
 use crate::{
     State,
-    native_credentials::requirements::{
-        LowerCaseLetter, MinLength, SpecialCharacter, UpperCaseLetter,
-    },
+    native_credentials::requirements::{LowerCaseLetter, MinLength, UpperCaseLetter},
 };
 
 pub struct NativeCredentials {
@@ -84,7 +82,6 @@ impl NativeCredentials {
                 vec![
                     Arc::new(LowerCaseLetter),
                     Arc::new(UpperCaseLetter),
-                    Arc::new(SpecialCharacter),
                     Arc::new(MinLength(12)),
                 ]
             });

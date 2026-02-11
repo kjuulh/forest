@@ -1,3 +1,5 @@
+use anyhow::Context;
+use base64::{Engine, prelude::BASE64_STANDARD};
 use clap::{Parser, Subcommand};
 
 use crate::{Config, state::State};
@@ -22,6 +24,12 @@ struct Command {
 
     #[arg(long, env = "PASSWORD_SECRET_KEY")]
     password_secret_key: String,
+
+    #[arg(long, env = "ACCESS_TOKEN_SECRET_KEY")]
+    access_token_secret_key: String,
+
+    #[arg(long, env = "REFRESH_TOKEN_SECRET_KEY")]
+    refresh_token_secret_key: String,
 }
 
 #[derive(Subcommand)]
@@ -54,6 +62,12 @@ pub async fn execute() -> anyhow::Result<()> {
         external_host: cli.external_host.clone(),
         terraform_external_host: cli.terraform_external_host.clone(),
         password_secret_key: cli.password_secret_key,
+        refresh_token_secret_key: BASE64_STANDARD
+            .decode(cli.refresh_token_secret_key)
+            .context("refresh token secret was not base64")?,
+        access_token_secret_key: BASE64_STANDARD
+            .decode(cli.access_token_secret_key)
+            .context("access token secret was not base64")?,
     };
     let state = State::new(config).await?;
 

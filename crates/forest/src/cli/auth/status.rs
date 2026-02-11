@@ -1,7 +1,7 @@
 use anyhow::Context;
 use forest_grpc_interface::get_user_request;
 
-use crate::{grpc::GrpcClientState, state::State};
+use crate::{grpc::GrpcClientState, state::State, user_state::UserStateLoaderState};
 
 #[derive(clap::Parser)]
 pub struct StatusCommand {
@@ -20,10 +20,13 @@ impl StatusCommand {
             (Some(id), _) => get_user_request::Identifier::UserId(id.clone()),
             (_, Some(name)) => get_user_request::Identifier::Username(name.clone()),
             (None, None) => {
-                // TODO: read user_id from stored auth token
-                anyhow::bail!(
-                    "provide --user-id or --username (automatic detection requires stored session)"
-                );
+                let state = state
+                    .user_state()
+                    .get_state()
+                    .await?
+                    .context("user is not logged in use either --user-id or --username")?;
+
+                get_user_request::Identifier::UserId(state.user_id)
             }
         };
 

@@ -542,6 +542,19 @@ pub struct AuthTokens {
     #[prost(int64, tag="3")]
     pub expires_in_seconds: i64,
 }
+// ─── Token introspection ─────────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TokenInfoRequest {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TokenInfoResponse {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    /// Unix timestamp (seconds)
+    #[prost(int64, tag="2")]
+    pub expires_at: i64,
+}
 // ─── User CRUD ───────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

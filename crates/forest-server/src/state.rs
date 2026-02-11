@@ -15,6 +15,8 @@ pub struct Config {
     pub external_host: String,
     pub terraform_external_host: String,
     pub password_secret_key: String,
+    pub access_token_secret_key: Vec<u8>,
+    pub refresh_token_secret_key: Vec<u8>,
 }
 
 impl State {

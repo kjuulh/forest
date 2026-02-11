@@ -12,8 +12,8 @@ alias = ["i", "install"]
 run = "cargo install --path crates/forest -f"
 
 [tasks.forest]
-#env = { FOREST_SERVER = "http://localhost:4040" }
-env = { FOREST_SERVER = "https://forest.data.api.understory.io:4000" }
+env = { FOREST_SERVER = "http://localhost:4040" }
+#env = { FOREST_SERVER = "https://forest.data.api.understory.io:4000" }
 dir = "{{ cwd }}"
 run = "cargo run -p forest -- "
 

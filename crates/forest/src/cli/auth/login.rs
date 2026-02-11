@@ -4,7 +4,7 @@ use forest_grpc_interface::login_request;
 use crate::{
     grpc::GrpcClientState,
     state::State,
-    user_state::{UserState, UserStateLoaderState},
+    user_state::{UserState, UserStateLoaderState, compute_refresh_after},
 };
 
 #[derive(clap::Parser)]
@@ -57,11 +57,11 @@ impl LoginCommand {
             println!("Logged in as {} ({})", user.username, user.user_id);
         }
 
-        if let Some(tokens) = &resp.tokens {
-            // TODO: persist tokens to local config
-            println!("Access token: {}", tokens.access_token);
-        }
         let user = resp.user.unwrap();
+        let tokens = resp.tokens.context("no tokens found, login is not valid")?;
+
+        let now = chrono::Utc::now().timestamp();
+        let refresh_after = compute_refresh_after(now, tokens.expires_in_seconds);
 
         state
             .user_state()
@@ -69,7 +69,9 @@ impl LoginCommand {
                 user_id: user.user_id,
                 username: user.username,
                 emails: user.emails.into_iter().map(|e| e.email).collect(),
-                token: resp.tokens.map(|t| t.access_token).unwrap_or_default(),
+                access_token: tokens.access_token,
+                refresh_access: tokens.refresh_token,
+                refresh_after: Some(refresh_after),
             })
             .await?;
 

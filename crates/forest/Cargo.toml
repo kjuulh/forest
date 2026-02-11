@@ -30,6 +30,8 @@ bytes.workspace = true
 prost.workspace = true
 prost-types.workspace = true
 tonic.workspace = true
+tower.workspace = true
+http.workspace = true
 
 serde = { version = "1.0.197", features = ["derive"] }
 uuid = { version = "1.7.0", features = ["v4", "v7"] }

@@ -142,6 +142,16 @@ impl UserService {
     }
 
     pub async fn validate_session(&self, token_hash: &[u8]) -> anyhow::Result<Option<Uuid>> {
+        Ok(self
+            .validate_session_full(token_hash)
+            .await?
+            .map(|s| s.user_id))
+    }
+
+    pub async fn validate_session_full(
+        &self,
+        token_hash: &[u8],
+    ) -> anyhow::Result<Option<ValidatedSession>> {
         let session = self
             .repo
             .get_session_by_token_hash(self.db(), token_hash)
@@ -150,13 +160,20 @@ impl UserService {
             return Ok(None);
         };
 
+        if session.revoked_at.is_some() {
+            return Ok(None);
+        }
+
         if let Some(expires_at) = session.expires_at
             && expires_at < chrono::Utc::now()
         {
             return Ok(None);
         }
 
-        Ok(Some(session.user_id))
+        Ok(Some(ValidatedSession {
+            session_id: session.id,
+            user_id: session.user_id,
+        }))
     }
 
     pub async fn logout(&self, session_id: Uuid) -> anyhow::Result<()> {
@@ -521,6 +538,11 @@ pub struct RegisteredUser {
 pub struct AuthenticatedUser {
     pub user_id: Uuid,
     pub username: String,
+}
+
+pub struct ValidatedSession {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
 }
 
 pub struct CreatedSession {

@@ -1,4 +1,6 @@
-use crate::state::State;
+use anyhow::Context;
+
+use crate::{state::State, user_state::UserStateLoaderState};
 
 mod create;
 mod delete;
@@ -28,7 +30,17 @@ impl TokenCommand {
                 Commands::List(cmd) => cmd.execute(state).await,
                 Commands::Delete(cmd) => cmd.execute(state).await,
             },
-            _ => todo!("return the personal access token"),
+            _ => {
+                let state = state
+                    .user_state()
+                    .get_state()
+                    .await?
+                    .context("user not logged in or expired")?;
+
+                println!("{}", state.access_token);
+
+                Ok(())
+            }
         }
     }
 }
