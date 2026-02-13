@@ -1,6 +1,13 @@
 use anyhow::Context;
+use serde::Serialize;
+use tabled::Tabled;
 
-use crate::{grpc::GrpcClientState, state::State, user_state::UserStateLoaderState};
+use crate::{
+    cli::output::{self, OutputFormat},
+    grpc::GrpcClientState,
+    state::State,
+    user_state::UserStateLoaderState,
+};
 
 #[derive(clap::Parser)]
 pub struct SearchCommand {
@@ -16,8 +23,18 @@ pub struct SearchCommand {
     page_token: String,
 }
 
+#[derive(Tabled, Serialize)]
+struct OrgRow {
+    #[tabled(rename = "ID")]
+    organisation_id: String,
+    #[tabled(rename = "Name")]
+    name: String,
+    #[tabled(rename = "Created")]
+    created_at: String,
+}
+
 impl SearchCommand {
-    pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+    pub async fn execute(&self, state: &State, format: &OutputFormat) -> anyhow::Result<()> {
         let _user_state = state
             .user_state()
             .get_state()
@@ -31,18 +48,39 @@ impl SearchCommand {
             .context("failed to search organisations")?;
 
         if resp.organisations.is_empty() {
-            println!("No organisations found");
+            match format {
+                OutputFormat::Json => print!("[]"),
+                _ => println!("No organisations found"),
+            }
             return Ok(());
         }
 
-        for org in &resp.organisations {
-            println!("{}\t{}", org.organisation_id, org.name);
-        }
+        let rows: Vec<OrgRow> = resp
+            .organisations
+            .iter()
+            .map(|org| {
+                let created_at = org
+                    .created_at
+                    .as_ref()
+                    .and_then(|ts| chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32))
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_default();
 
-        println!("\n{} total", resp.total_count);
+                OrgRow {
+                    organisation_id: org.organisation_id.clone(),
+                    name: org.name.clone(),
+                    created_at,
+                }
+            })
+            .collect();
 
-        if !resp.next_page_token.is_empty() {
-            println!("Next page: --page-token {}", resp.next_page_token);
+        print!("{}", output::render(format, &rows));
+
+        if !matches!(format, OutputFormat::Json) {
+            println!("{} total", resp.total_count);
+            if !resp.next_page_token.is_empty() {
+                println!("Next page: --page-token {}", resp.next_page_token);
+            }
         }
 
         Ok(())

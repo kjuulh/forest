@@ -2,10 +2,14 @@ mod create;
 mod get;
 mod search;
 
-use crate::state::State;
+use crate::{cli::output::OutputFormat, state::State};
 
 #[derive(clap::Parser)]
 pub struct OrganisationCommand {
+    /// Output format
+    #[arg(long, value_enum, default_value_t, global = true)]
+    format: OutputFormat,
+
     #[command(subcommand)]
     commands: Commands,
 }
@@ -23,9 +27,9 @@ enum Commands {
 impl OrganisationCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         match &self.commands {
-            Commands::Create(cmd) => cmd.execute(state).await,
-            Commands::Get(cmd) => cmd.execute(state).await,
-            Commands::Search(cmd) => cmd.execute(state).await,
+            Commands::Create(cmd) => cmd.execute(state, &self.format).await,
+            Commands::Get(cmd) => cmd.execute(state, &self.format).await,
+            Commands::Search(cmd) => cmd.execute(state, &self.format).await,
         }
     }
 }

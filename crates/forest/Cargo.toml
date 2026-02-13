@@ -57,6 +57,7 @@ opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic"] }
 opentelemetry-appender-tracing = "0.31.0"
 tracing-opentelemetry = "0.32.0"
 serde_json = "1.0.145"
+tabled = "0.17.0"
 chrono = "0.4"
 itertools = "0.14.0"
 

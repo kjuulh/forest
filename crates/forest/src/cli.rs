@@ -25,6 +25,7 @@ mod components;
 mod destination;
 mod global;
 mod init;
+pub(crate) mod output;
 mod organisation;
 mod project;
 mod release;

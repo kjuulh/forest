@@ -1,7 +1,14 @@
 use anyhow::Context;
 use forest_grpc_interface::get_organisation_request;
+use serde::Serialize;
+use tabled::Tabled;
 
-use crate::{grpc::GrpcClientState, state::State, user_state::UserStateLoaderState};
+use crate::{
+    cli::output::{self, OutputFormat},
+    grpc::GrpcClientState,
+    state::State,
+    user_state::UserStateLoaderState,
+};
 
 #[derive(clap::Parser)]
 pub struct GetCommand {
@@ -14,8 +21,18 @@ pub struct GetCommand {
     name: Option<String>,
 }
 
+#[derive(Tabled, Serialize)]
+struct OrgRow {
+    #[tabled(rename = "ID")]
+    organisation_id: String,
+    #[tabled(rename = "Name")]
+    name: String,
+    #[tabled(rename = "Created")]
+    created_at: String,
+}
+
 impl GetCommand {
-    pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+    pub async fn execute(&self, state: &State, format: &OutputFormat) -> anyhow::Result<()> {
         let _user_state = state
             .user_state()
             .get_state()
@@ -35,13 +52,19 @@ impl GetCommand {
             .context("failed to get organisation")?
             .ok_or_else(|| anyhow::anyhow!("organisation not found"))?;
 
-        println!("ID:   {}", org.organisation_id);
-        println!("Name: {}", org.name);
-        if let Some(ts) = org.created_at {
-            if let Some(dt) = chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32) {
-                println!("Created: {}", dt.to_rfc3339());
-            }
-        }
+        let created_at = org
+            .created_at
+            .and_then(|ts| chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32))
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_default();
+
+        let rows = vec![OrgRow {
+            organisation_id: org.organisation_id,
+            name: org.name,
+            created_at,
+        }];
+
+        print!("{}", output::render(format, &rows));
 
         Ok(())
     }

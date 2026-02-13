@@ -1,6 +1,13 @@
 use anyhow::Context;
+use serde::Serialize;
+use tabled::Tabled;
 
-use crate::{grpc::GrpcClientState, state::State, user_state::UserStateLoaderState};
+use crate::{
+    cli::output::{self, OutputFormat},
+    grpc::GrpcClientState,
+    state::State,
+    user_state::UserStateLoaderState,
+};
 
 #[derive(clap::Parser)]
 pub struct CreateCommand {
@@ -9,8 +16,16 @@ pub struct CreateCommand {
     name: String,
 }
 
+#[derive(Tabled, Serialize)]
+struct CreatedOrg {
+    #[tabled(rename = "ID")]
+    organisation_id: String,
+    #[tabled(rename = "Name")]
+    name: String,
+}
+
 impl CreateCommand {
-    pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+    pub async fn execute(&self, state: &State, format: &OutputFormat) -> anyhow::Result<()> {
         let _user_state = state
             .user_state()
             .get_state()
@@ -23,10 +38,12 @@ impl CreateCommand {
             .await
             .context("failed to create organisation")?;
 
-        println!(
-            "Created organisation '{}' with id {}",
-            self.name, resp.organisation_id
-        );
+        let rows = vec![CreatedOrg {
+            organisation_id: resp.organisation_id,
+            name: self.name.clone(),
+        }];
+
+        print!("{}", output::render(format, &rows));
 
         Ok(())
     }
