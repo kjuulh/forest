@@ -2,6 +2,7 @@ use chrono::{Days, Utc};
 use forest_grpc_interface::{users_service_server::UsersService, *};
 use uuid::Uuid;
 
+use super::error;
 use crate::{services::users::UserServiceState, state::State, tokens::TokenServiceState};
 
 pub struct UsersServer {
@@ -28,23 +29,20 @@ impl UsersService for UsersServer {
             .service()
             .register(&req.username, &req.email, &req.password)
             .await
-            .inspect_err(|e| tracing::warn!("failed to register user: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         let profile = self
             .service()
             .get_user(registered.user_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to get user after register: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?
+            .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::internal("user not found after registration"))?;
 
         let (refresh_token, hash) = self
             .state
             .tokens()
             .generate_refresh_token()
-            .inspect_err(|e| tracing::warn!("failed to create refresh token: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         let expires = Utc::now()
             .checked_add_days(Days::new(30))
@@ -55,8 +53,7 @@ impl UsersService for UsersServer {
             .user_service()
             .create_session(profile.user_id, &hash, Some(expires))
             .await
-            .inspect_err(|e| tracing::warn!("failed to create session: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         let access_token = self
             .state
@@ -66,8 +63,7 @@ impl UsersService for UsersServer {
                 &session.session_id.to_string(),
                 vec![],
             )
-            .inspect_err(|e| tracing::warn!("failed to issue token: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(RegisterResponse {
             user: Some(profile_to_grpc_user(profile)),
@@ -96,24 +92,21 @@ impl UsersService for UsersServer {
             }
             None => return Err(tonic::Status::invalid_argument("identifier is required")),
         }
-        .inspect_err(|e| tracing::warn!("failed to login: {e:#}"))
-        .map_err(|e| tonic::Status::internal(e.to_string()))?
+        .map_err(error::to_status)?
         .ok_or_else(|| tonic::Status::unauthenticated("invalid credentials"))?;
 
         let profile = self
             .service()
             .get_user(authenticated.user_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to get user after login: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?
+            .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::internal("user not found"))?;
 
         let (refresh_token, hash) = self
             .state
             .tokens()
             .generate_refresh_token()
-            .inspect_err(|e| tracing::warn!("failed to create refresh token: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         let expires = Utc::now()
             .checked_add_days(Days::new(30))
@@ -124,8 +117,7 @@ impl UsersService for UsersServer {
             .user_service()
             .create_session(profile.user_id, &hash, Some(expires))
             .await
-            .inspect_err(|e| tracing::warn!("failed to create session: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         let access_token = self
             .state
@@ -135,8 +127,7 @@ impl UsersService for UsersServer {
                 &session.session_id.to_string(),
                 vec![],
             )
-            .inspect_err(|e| tracing::warn!("failed to issue token: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(LoginResponse {
             user: Some(profile_to_grpc_user(profile)),
@@ -158,31 +149,27 @@ impl UsersService for UsersServer {
             .state
             .tokens()
             .get_token_hash(&req.refresh_token)
-            .inspect_err(|e| tracing::warn!("failed to decode refresh token: {e:#}"))
             .map_err(|e| tonic::Status::unauthenticated(e.to_string()))?;
 
         let session = self
             .service()
             .validate_session_full(&token_hash)
             .await
-            .inspect_err(|e| tracing::warn!("failed to validate session: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?
+            .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::unauthenticated("session expired or revoked"))?;
 
         // Revoke old session
         self.service()
             .logout(session.session_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to revoke old session: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         // Issue new tokens
         let (refresh_token, hash) = self
             .state
             .tokens()
             .generate_refresh_token()
-            .inspect_err(|e| tracing::warn!("failed to create refresh token: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         let expires = Utc::now()
             .checked_add_days(Days::new(30))
@@ -192,8 +179,7 @@ impl UsersService for UsersServer {
             .service()
             .create_session(session.user_id, &hash, Some(expires))
             .await
-            .inspect_err(|e| tracing::warn!("failed to create new session: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         let access_token = self
             .state
@@ -203,8 +189,7 @@ impl UsersService for UsersServer {
                 &new_session.session_id.to_string(),
                 vec![],
             )
-            .inspect_err(|e| tracing::warn!("failed to issue access token: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(RefreshTokenResponse {
             tokens: Some(AuthTokens {
@@ -265,8 +250,7 @@ impl UsersService for UsersServer {
             }
             None => return Err(tonic::Status::invalid_argument("identifier is required")),
         }
-        .inspect_err(|e| tracing::warn!("failed to get user: {e:#}"))
-        .map_err(|e| tonic::Status::internal(e.to_string()))?
+        .map_err(error::to_status)?
         .ok_or_else(|| tonic::Status::not_found("user not found"))?;
 
         Ok(tonic::Response::new(GetUserResponse {
@@ -288,16 +272,14 @@ impl UsersService for UsersServer {
             self.service()
                 .update_username(user_id, &username)
                 .await
-                .inspect_err(|e| tracing::warn!("failed to update username: {e:#}"))
-                .map_err(|e| tonic::Status::internal(e.to_string()))?;
+                .map_err(error::to_status)?;
         }
 
         let profile = self
             .service()
             .get_user(user_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to get user after update: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?
+            .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::not_found("user not found"))?;
 
         Ok(tonic::Response::new(UpdateUserResponse {
@@ -318,8 +300,7 @@ impl UsersService for UsersServer {
         self.service()
             .delete_user(user_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to delete user: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(DeleteUserResponse {}))
     }
@@ -338,14 +319,12 @@ impl UsersService for UsersServer {
 
         let user_list = self
             .service()
-            .list_users(page_size, offset)
+            .list_users(page_size, offset, req.search.as_deref())
             .await
-            .inspect_err(|e| tracing::warn!("failed to list users: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
-        let next_offset = offset + page_size;
-        let next_page_token = if next_offset < user_list.total_count {
-            next_offset.to_string()
+        let next_page_token = if user_list.has_more {
+            (offset + page_size).to_string()
         } else {
             String::new()
         };
@@ -362,7 +341,7 @@ impl UsersService for UsersServer {
                 })
                 .collect(),
             next_page_token,
-            total_count: user_list.total_count as i32,
+            total_count: 0,
         }))
     }
 
@@ -381,8 +360,7 @@ impl UsersService for UsersServer {
         self.service()
             .change_password(user_id, &req.current_password, &req.new_password)
             .await
-            .inspect_err(|e| tracing::warn!("failed to change password: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(ChangePasswordResponse {}))
     }
@@ -402,8 +380,7 @@ impl UsersService for UsersServer {
         self.service()
             .add_email(user_id, &req.email)
             .await
-            .inspect_err(|e| tracing::warn!("failed to add email: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(AddEmailResponse {
             email: Some(UserEmail {
@@ -426,8 +403,7 @@ impl UsersService for UsersServer {
         self.service()
             .verify_email(user_id, &req.email)
             .await
-            .inspect_err(|e| tracing::warn!("failed to verify email: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(VerifyEmailResponse {}))
     }
@@ -445,8 +421,7 @@ impl UsersService for UsersServer {
         self.service()
             .remove_email(user_id, &req.email)
             .await
-            .inspect_err(|e| tracing::warn!("failed to remove email: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(RemoveEmailResponse {}))
     }
@@ -480,8 +455,7 @@ impl UsersService for UsersServer {
         self.service()
             .link_oauth_provider(user_id, &provider_str, "todo_provider_user_id", None, None)
             .await
-            .inspect_err(|e| tracing::warn!("failed to link oauth provider: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(LinkOAuthProviderResponse {
             connection: None,
@@ -504,8 +478,7 @@ impl UsersService for UsersServer {
         self.service()
             .unlink_oauth_provider(user_id, &provider.as_str_name().to_lowercase())
             .await
-            .inspect_err(|e| tracing::warn!("failed to unlink oauth provider: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(UnlinkOAuthProviderResponse {}))
     }
@@ -539,8 +512,7 @@ impl UsersService for UsersServer {
             .service()
             .create_personal_access_token(user_id, &req.name, token_hash, &scopes, expires_at)
             .await
-            .inspect_err(|e| tracing::warn!("failed to create PAT: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(CreatePersonalAccessTokenResponse {
             token: Some(PersonalAccessToken {
@@ -569,8 +541,7 @@ impl UsersService for UsersServer {
             .service()
             .list_personal_access_tokens(user_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to list PATs: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(ListPersonalAccessTokensResponse {
             tokens: tokens.into_iter().map(pat_info_to_grpc).collect(),
@@ -591,8 +562,7 @@ impl UsersService for UsersServer {
         self.service()
             .delete_personal_access_token(token_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to delete PAT: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(DeletePersonalAccessTokenResponse {}))
     }
@@ -627,8 +597,7 @@ impl UsersService for UsersServer {
             .service()
             .setup_mfa(user_id, mfa_type_str, secret_bytes)
             .await
-            .inspect_err(|e| tracing::warn!("failed to setup MFA: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(SetupMfaResponse {
             mfa_id: mfa_id.to_string(),
@@ -654,8 +623,7 @@ impl UsersService for UsersServer {
         self.service()
             .verify_mfa(mfa_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to verify MFA: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(VerifyMfaResponse {}))
     }
@@ -676,8 +644,7 @@ impl UsersService for UsersServer {
         self.service()
             .disable_mfa(user_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to disable MFA: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(DisableMfaResponse {}))
     }

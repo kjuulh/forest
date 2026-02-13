@@ -1,6 +1,7 @@
 use forest_grpc_interface::{organisation_service_server::OrganisationService, *};
 use uuid::Uuid;
 
+use super::error;
 use crate::{services::organisations::OrganisationServiceState, state::State, tokens::AppClaims};
 
 pub struct OrganisationsServer {
@@ -30,8 +31,7 @@ impl OrganisationService for OrganisationsServer {
             .organisation_service()
             .create_organisation(&req.name, creator_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to create organisation: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(CreateOrganisationResponse {
             organisation_id: created.organisation_id.to_string(),
@@ -58,8 +58,7 @@ impl OrganisationService for OrganisationsServer {
             }
             None => return Err(tonic::Status::invalid_argument("identifier is required")),
         }
-        .inspect_err(|e| tracing::warn!("failed to get organisation: {e:#}"))
-        .map_err(|e| tonic::Status::internal(e.to_string()))?
+        .map_err(error::to_status)?
         .ok_or_else(|| tonic::Status::not_found("organisation not found"))?;
 
         Ok(tonic::Response::new(GetOrganisationResponse {
@@ -84,8 +83,7 @@ impl OrganisationService for OrganisationsServer {
             .organisation_service()
             .search_organisations(&req.query, page_size, offset)
             .await
-            .inspect_err(|e| tracing::warn!("failed to search organisations: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         let next_offset = offset + page_size;
         let next_page_token = if next_offset < result.total_count {
@@ -127,8 +125,7 @@ impl OrganisationService for OrganisationsServer {
             .organisation_service()
             .list_my_organisations(user_id, role_filter)
             .await
-            .inspect_err(|e| tracing::warn!("failed to list my organisations: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         let roles: Vec<String> = orgs.iter().map(|o| o.role.clone()).collect();
         let organisations: Vec<Organisation> = orgs.into_iter().map(|o| Organisation {
@@ -179,8 +176,7 @@ impl OrganisationService for OrganisationsServer {
             .organisation_service()
             .add_member(organisation_id, user_id, &req.role, requester_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to add member: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(AddMemberResponse {
             member: Some(member_to_grpc(member)),
@@ -217,8 +213,7 @@ impl OrganisationService for OrganisationsServer {
             .organisation_service()
             .remove_member(organisation_id, user_id, requester_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to remove member: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(RemoveMemberResponse {}))
     }
@@ -254,8 +249,7 @@ impl OrganisationService for OrganisationsServer {
             .organisation_service()
             .update_member_role(organisation_id, user_id, &req.role, requester_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to update member role: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(UpdateMemberRoleResponse {
             member: Some(member_to_grpc(member)),
@@ -290,8 +284,7 @@ impl OrganisationService for OrganisationsServer {
             .organisation_service()
             .list_members(organisation_id, page_size, offset)
             .await
-            .inspect_err(|e| tracing::warn!("failed to list members: {e:#}"))
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(error::to_status)?;
 
         let next_offset = offset + page_size;
         let next_page_token = if next_offset < result.total_count {

@@ -4,9 +4,11 @@ mod remove;
 mod update_role;
 
 use std::fmt;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use forest_grpc_interface::{get_organisation_request, get_user_request};
+use inquire::autocompletion::Replacement;
 
 use crate::{cli::output::OutputFormat, grpc::GrpcClientState, state::State};
 
@@ -136,6 +138,93 @@ pub(crate) async fn prompt_member_select(
 
     let selected = inquire::Select::new("Member:", choices).prompt()?;
     Ok(selected.user_id)
+}
+
+/// Live-search autocomplete that queries the server as the user types.
+#[derive(Clone)]
+struct UserSearchAutocomplete {
+    client: crate::grpc::GrpcClient,
+    /// Cached results: (user_id, username)
+    users: Vec<(String, String)>,
+    last_query: String,
+    last_fetch: Instant,
+    debounce: Duration,
+}
+
+impl UserSearchAutocomplete {
+    fn new(client: crate::grpc::GrpcClient) -> Self {
+        Self {
+            client,
+            users: Vec::new(),
+            last_query: String::new(),
+            last_fetch: Instant::now(),
+            debounce: Duration::from_millis(200),
+        }
+    }
+
+    fn fetch(&mut self, input: &str) {
+        if input.len() < 2 {
+            self.users.clear();
+            self.last_query.clear();
+            return;
+        }
+
+        if input == self.last_query {
+            return;
+        }
+
+        if self.last_fetch.elapsed() < self.debounce {
+            return;
+        }
+
+        let client = self.client.clone();
+        let query = input.to_string();
+
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(client.list_users(20, "", Some(query)))
+        });
+
+        if let Ok(resp) = result {
+            self.users = resp
+                .users
+                .into_iter()
+                .map(|u| (u.user_id, u.username))
+                .collect();
+        }
+
+        self.last_query = input.to_string();
+        self.last_fetch = Instant::now();
+    }
+
+}
+
+impl inquire::Autocomplete for UserSearchAutocomplete {
+    fn get_suggestions(&mut self, input: &str) -> Result<Vec<String>, inquire::CustomUserError> {
+        self.fetch(input);
+        Ok(self.users.iter().map(|(_, u)| u.clone()).collect())
+    }
+
+    fn get_completion(
+        &mut self,
+        _input: &str,
+        highlighted_suggestion: Option<String>,
+    ) -> Result<Replacement, inquire::CustomUserError> {
+        Ok(highlighted_suggestion)
+    }
+}
+
+/// Live-search prompt: as the user types, matching users are fetched from the
+/// server and shown as suggestions. Returns the selected user ID.
+pub(crate) async fn prompt_user_search(state: &State) -> anyhow::Result<String> {
+    let ac = UserSearchAutocomplete::new(state.grpc_client().clone());
+
+    let username = inquire::Text::new("User (search by username or email):")
+        .with_autocomplete(ac)
+        .with_help_message("Type at least 2 characters to search")
+        .prompt()?;
+
+    resolve_user_id(state, &username).await
 }
 
 pub(crate) async fn resolve_user_id(state: &State, user: &str) -> anyhow::Result<String> {

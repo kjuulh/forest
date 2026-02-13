@@ -177,11 +177,13 @@ impl UserService {
     }
 
     pub async fn logout(&self, session_id: Uuid) -> anyhow::Result<()> {
-        self.repo.revoke_session(self.db(), session_id).await
+        self.repo.revoke_session(self.db(), session_id).await?;
+        Ok(())
     }
 
     pub async fn logout_all(&self, user_id: Uuid) -> anyhow::Result<()> {
-        self.repo.revoke_all_user_sessions(self.db(), user_id).await
+        self.repo.revoke_all_user_sessions(self.db(), user_id).await?;
+        Ok(())
     }
 
     // ── User CRUD ────────────────────────────────────────────────────
@@ -258,9 +260,32 @@ impl UserService {
         Ok(())
     }
 
-    pub async fn list_users(&self, page_size: i64, offset: i64) -> anyhow::Result<UserList> {
-        let users = self.repo.list_users(self.db(), page_size, offset).await?;
-        let total = self.repo.count_users(self.db()).await?;
+    pub async fn list_users(
+        &self,
+        page_size: i64,
+        offset: i64,
+        search: Option<&str>,
+    ) -> anyhow::Result<UserList> {
+        // Fetch one extra row to determine if there's a next page.
+        let fetch_limit = page_size + 1;
+
+        let mut users = match search {
+            Some(query) if !query.is_empty() => {
+                self.repo
+                    .search_users(self.db(), query, fetch_limit, offset)
+                    .await?
+            }
+            _ => {
+                self.repo
+                    .list_users(self.db(), fetch_limit, offset)
+                    .await?
+            }
+        };
+
+        let has_more = users.len() as i64 > page_size;
+        if has_more {
+            users.truncate(page_size as usize);
+        }
 
         Ok(UserList {
             users: users
@@ -271,7 +296,7 @@ impl UserService {
                     created_at: u.created_at,
                 })
                 .collect(),
-            total_count: total,
+            has_more,
         })
     }
 
@@ -328,11 +353,13 @@ impl UserService {
     }
 
     pub async fn verify_email(&self, user_id: Uuid, email: &str) -> anyhow::Result<()> {
-        self.repo.verify_user_email(self.db(), user_id, email).await
+        self.repo.verify_user_email(self.db(), user_id, email).await?;
+        Ok(())
     }
 
     pub async fn remove_email(&self, user_id: Uuid, email: &str) -> anyhow::Result<()> {
-        self.repo.delete_user_email(self.db(), user_id, email).await
+        self.repo.delete_user_email(self.db(), user_id, email).await?;
+        Ok(())
     }
 
     // ── OAuth / identity linking ─────────────────────────────────────
@@ -363,7 +390,8 @@ impl UserService {
     pub async fn unlink_oauth_provider(&self, user_id: Uuid, provider: &str) -> anyhow::Result<()> {
         self.repo
             .delete_identity_by_provider(self.db(), user_id, provider)
-            .await
+            .await?;
+        Ok(())
     }
 
     pub async fn find_user_by_oauth(
@@ -499,7 +527,8 @@ impl UserService {
     pub async fn delete_personal_access_token(&self, token_id: Uuid) -> anyhow::Result<()> {
         self.repo
             .delete_personal_access_token(self.db(), token_id)
-            .await
+            .await?;
+        Ok(())
     }
 
     // ── MFA ──────────────────────────────────────────────────────────
@@ -518,11 +547,13 @@ impl UserService {
     }
 
     pub async fn verify_mfa(&self, mfa_id: Uuid) -> anyhow::Result<()> {
-        self.repo.verify_native_mfa(self.db(), mfa_id).await
+        self.repo.verify_native_mfa(self.db(), mfa_id).await?;
+        Ok(())
     }
 
     pub async fn disable_mfa(&self, user_id: Uuid) -> anyhow::Result<()> {
-        self.repo.delete_native_mfa(self.db(), user_id).await
+        self.repo.delete_native_mfa(self.db(), user_id).await?;
+        Ok(())
     }
 }
 
@@ -580,7 +611,7 @@ pub struct UserSummary {
 
 pub struct UserList {
     pub users: Vec<UserSummary>,
-    pub total_count: i64,
+    pub has_more: bool,
 }
 
 pub struct OAuthStateInfo {

@@ -1,6 +1,7 @@
 use sqlx::PgExecutor;
 use uuid::Uuid;
 
+use super::error::DbError;
 use crate::state::State;
 
 pub struct OrganisationRepository {
@@ -53,7 +54,7 @@ impl OrganisationRepository {
         db: impl PgExecutor<'_>,
         id: Uuid,
         name: &str,
-    ) -> anyhow::Result<OrganisationRow> {
+    ) -> Result<OrganisationRow, DbError> {
         let row = sqlx::query_as!(
             OrganisationRow,
             r#"
@@ -159,7 +160,7 @@ impl OrganisationRepository {
         organisation_id: Uuid,
         user_id: Uuid,
         role: &str,
-    ) -> anyhow::Result<OrganisationMemberRow> {
+    ) -> Result<OrganisationMemberRow, DbError> {
         let row = sqlx::query_as!(
             OrganisationMemberRow,
             r#"
@@ -227,7 +228,7 @@ impl OrganisationRepository {
         db: impl PgExecutor<'_>,
         organisation_id: Uuid,
         user_id: Uuid,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), DbError> {
         sqlx::query!(
             "DELETE FROM organisation_members WHERE organisation_id = $1 AND user_id = $2",
             organisation_id,
@@ -245,7 +246,7 @@ impl OrganisationRepository {
         organisation_id: Uuid,
         user_id: Uuid,
         role: &str,
-    ) -> anyhow::Result<OrganisationMemberRow> {
+    ) -> Result<OrganisationMemberRow, DbError> {
         let row = sqlx::query_as!(
             OrganisationMemberRow,
             r#"

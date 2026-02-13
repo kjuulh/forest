@@ -46,9 +46,9 @@ impl AddCommand {
             Some(o) => super::resolve_org_id(state, o).await?,
             None => super::prompt_org_select(state, "admin").await?,
         };
-        let user = match &self.user {
-            Some(u) => u.clone(),
-            None => inquire::Text::new("User (ID or username):").prompt()?,
+        let user_id = match &self.user {
+            Some(u) => super::resolve_user_id(state, u).await?,
+            None => super::prompt_user_search(state).await?,
         };
         let role = match &self.role {
             Some(r) => r.clone(),
@@ -58,7 +58,6 @@ impl AddCommand {
                     .to_string()
             }
         };
-        let user_id = super::resolve_user_id(state, &user).await?;
 
         let resp = state
             .grpc_client()

@@ -25,6 +25,7 @@ use crate::{
 
 mod artifacts;
 mod destinations;
+mod error;
 mod namespaces;
 mod organisations;
 mod registry;

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE provider_native_mfa\n            SET verified = true, updated_at = now()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3e4f8c741eb6593eefd5e0b46b8a9f566d2ceed47a1e9cd025120b35a2fd7440"
+}

@@ -1,6 +1,7 @@
 use sqlx::{PgExecutor, PgPool, Postgres};
 use uuid::Uuid;
 
+use super::error::DbError;
 use crate::state::State;
 
 pub struct UserRepository {
@@ -123,7 +124,7 @@ impl UserRepository {
         db: impl PgExecutor<'_>,
         id: Uuid,
         username: &str,
-    ) -> anyhow::Result<UserRow> {
+    ) -> Result<UserRow, DbError> {
         let row = sqlx::query_as!(
             UserRow,
             r#"
@@ -185,7 +186,7 @@ impl UserRepository {
         db: impl PgExecutor<'_>,
         id: Uuid,
         username: &str,
-    ) -> anyhow::Result<UserRow> {
+    ) -> Result<UserRow, DbError> {
         let row = sqlx::query_as!(
             UserRow,
             r#"
@@ -203,7 +204,7 @@ impl UserRepository {
         Ok(row)
     }
 
-    pub async fn delete_user(&self, db: impl PgExecutor<'_>, id: Uuid) -> anyhow::Result<()> {
+    pub async fn delete_user(&self, db: impl PgExecutor<'_>, id: Uuid) -> Result<(), DbError> {
         sqlx::query!("DELETE FROM users WHERE id = $1", id)
             .execute(db)
             .await?;
@@ -234,12 +235,36 @@ impl UserRepository {
         Ok(rows)
     }
 
-    pub async fn count_users(&self, db: impl PgExecutor<'_>) -> anyhow::Result<i64> {
-        let row = sqlx::query_scalar!("SELECT count(*) FROM users")
-            .fetch_one(db)
-            .await?;
+    pub async fn search_users(
+        &self,
+        db: impl PgExecutor<'_>,
+        query: &str,
+        limit: i64,
+        offset: i64,
+    ) -> anyhow::Result<Vec<UserRow>> {
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id, u.username, u.created_at, u.updated_at
+            FROM users u
+            WHERE u.id IN (
+                SELECT u2.id
+                FROM users u2
+                LEFT JOIN user_emails ue ON ue.user_id = u2.id
+                WHERE u2.username % $1
+                   OR ue.email % $1
+            )
+            ORDER BY similarity(u.username, $1) DESC
+            LIMIT $2 OFFSET $3
+            "#,
+            query,
+            limit,
+            offset,
+        )
+        .fetch_all(db)
+        .await?;
 
-        Ok(row.unwrap_or(0))
+        Ok(rows)
     }
 
     // ── User emails ─────────────────────────────────────────────────
@@ -249,7 +274,7 @@ impl UserRepository {
         db: impl PgExecutor<'_>,
         user_id: Uuid,
         email: &str,
-    ) -> anyhow::Result<UserEmailRow> {
+    ) -> Result<UserEmailRow, DbError> {
         let row = sqlx::query_as!(
             UserEmailRow,
             r#"
@@ -312,7 +337,7 @@ impl UserRepository {
         db: impl PgExecutor<'_>,
         user_id: Uuid,
         email: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), DbError> {
         sqlx::query!(
             r#"
             UPDATE user_emails
@@ -333,7 +358,7 @@ impl UserRepository {
         db: impl PgExecutor<'_>,
         user_id: Uuid,
         email: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), DbError> {
         sqlx::query!(
             "DELETE FROM user_emails WHERE user_id = $1 AND email = $2",
             user_id,
@@ -356,7 +381,7 @@ impl UserRepository {
         provider_user_id: &str,
         provider_email: Option<&str>,
         provider_data: Option<&serde_json::Value>,
-    ) -> anyhow::Result<IdentityRow> {
+    ) -> Result<IdentityRow, DbError> {
         let row = sqlx::query_as!(
             IdentityRow,
             r#"
@@ -419,7 +444,7 @@ impl UserRepository {
         Ok(row)
     }
 
-    pub async fn delete_identity(&self, db: impl PgExecutor<'_>, id: Uuid) -> anyhow::Result<()> {
+    pub async fn delete_identity(&self, db: impl PgExecutor<'_>, id: Uuid) -> Result<(), DbError> {
         sqlx::query!("DELETE FROM identities WHERE id = $1", id)
             .execute(db)
             .await?;
@@ -432,7 +457,7 @@ impl UserRepository {
         db: impl PgExecutor<'_>,
         user_id: Uuid,
         provider: &str,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), DbError> {
         sqlx::query!(
             "DELETE FROM identities WHERE user_id = $1 AND provider = $2",
             user_id,
@@ -452,7 +477,7 @@ impl UserRepository {
         id: Uuid,
         user_id: Uuid,
         password_hash: &[u8],
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), DbError> {
         sqlx::query!(
             r#"
             INSERT INTO provider_native_credentials (id, user_id, password_hash)
@@ -499,7 +524,7 @@ impl UserRepository {
         user_id: Uuid,
         mfa_type: &str,
         secret: &[u8],
-    ) -> anyhow::Result<NativeMfaRow> {
+    ) -> Result<NativeMfaRow, DbError> {
         let row = sqlx::query_as!(
             NativeMfaRow,
             r#"
@@ -538,7 +563,7 @@ impl UserRepository {
         Ok(row)
     }
 
-    pub async fn verify_native_mfa(&self, db: impl PgExecutor<'_>, id: Uuid) -> anyhow::Result<()> {
+    pub async fn verify_native_mfa(&self, db: impl PgExecutor<'_>, id: Uuid) -> Result<(), DbError> {
         sqlx::query!(
             r#"
             UPDATE provider_native_mfa
@@ -553,7 +578,7 @@ impl UserRepository {
         Ok(())
     }
 
-    pub async fn touch_native_mfa(&self, db: impl PgExecutor<'_>, id: Uuid) -> anyhow::Result<()> {
+    pub async fn touch_native_mfa(&self, db: impl PgExecutor<'_>, id: Uuid) -> Result<(), DbError> {
         sqlx::query!(
             r#"
             UPDATE provider_native_mfa
@@ -572,7 +597,7 @@ impl UserRepository {
         &self,
         db: impl PgExecutor<'_>,
         user_id: Uuid,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), DbError> {
         sqlx::query!(
             "DELETE FROM provider_native_mfa WHERE user_id = $1",
             user_id,
@@ -593,7 +618,7 @@ impl UserRepository {
         token_hash: &[u8],
         info: Option<&serde_json::Value>,
         expires_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> anyhow::Result<SessionRow> {
+    ) -> Result<SessionRow, DbError> {
         let row = sqlx::query_as!(
             SessionRow,
             r#"
@@ -653,7 +678,7 @@ impl UserRepository {
         Ok(row)
     }
 
-    pub async fn revoke_session(&self, db: impl PgExecutor<'_>, id: Uuid) -> anyhow::Result<()> {
+    pub async fn revoke_session(&self, db: impl PgExecutor<'_>, id: Uuid) -> Result<(), DbError> {
         sqlx::query!(
             r#"
             UPDATE sessions
@@ -672,7 +697,7 @@ impl UserRepository {
         &self,
         db: impl PgExecutor<'_>,
         user_id: Uuid,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), DbError> {
         sqlx::query!(
             r#"
             UPDATE sessions
@@ -698,7 +723,7 @@ impl UserRepository {
         redirect_uri: Option<&str>,
         data: &serde_json::Value,
         expires_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> anyhow::Result<OAuthStateRow> {
+    ) -> Result<OAuthStateRow, DbError> {
         let row = sqlx::query_as!(
             OAuthStateRow,
             r#"
@@ -743,7 +768,7 @@ impl UserRepository {
         &self,
         db: impl PgExecutor<'_>,
         id: Uuid,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), DbError> {
         sqlx::query!("DELETE FROM provider_oauth_states WHERE id = $1", id)
             .execute(db)
             .await?;
@@ -762,7 +787,7 @@ impl UserRepository {
         token_hash: &[u8],
         scopes: &serde_json::Value,
         expires_at: Option<chrono::DateTime<chrono::Utc>>,
-    ) -> anyhow::Result<PersonalAccessTokenRow> {
+    ) -> Result<PersonalAccessTokenRow, DbError> {
         let row = sqlx::query_as!(
             PersonalAccessTokenRow,
             r#"
@@ -830,7 +855,7 @@ impl UserRepository {
         &self,
         db: impl PgExecutor<'_>,
         id: Uuid,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), DbError> {
         sqlx::query!(
             r#"
             UPDATE personal_access_tokens
@@ -849,7 +874,7 @@ impl UserRepository {
         &self,
         db: impl PgExecutor<'_>,
         id: Uuid,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), DbError> {
         sqlx::query!("DELETE FROM personal_access_tokens WHERE id = $1", id)
             .execute(db)
             .await?;
