@@ -5,6 +5,7 @@ use forest_grpc_interface::{
     artifact_service_client::ArtifactServiceClient,
     destination_service_client::DestinationServiceClient, get_component_files_response::Msg,
     get_projects_request::Query, namespace_service_client::NamespaceServiceClient,
+    organisation_service_client::OrganisationServiceClient,
     registry_service_client::RegistryServiceClient, release_service_client::ReleaseServiceClient,
     users_service_client::UsersServiceClient, *,
 };
@@ -44,6 +45,7 @@ pub struct GrpcClient {
     artifact_client: OnceCell<ArtifactServiceClient<AuthMiddleware<Channel>>>,
     release_client: OnceCell<ReleaseServiceClient<AuthMiddleware<Channel>>>,
     destination_client: OnceCell<DestinationServiceClient<AuthMiddleware<Channel>>>,
+    organisation_client: OnceCell<OrganisationServiceClient<AuthMiddleware<Channel>>>,
     users_client: OnceCell<UsersServiceClient<Channel>>,
     auth_users_client: OnceCell<UsersServiceClient<AuthMiddleware<Channel>>>,
 }
@@ -332,6 +334,68 @@ impl GrpcClient {
             .await?;
 
         Ok(client.clone())
+    }
+
+    async fn organisation_client(
+        &self,
+    ) -> anyhow::Result<OrganisationServiceClient<AuthMiddleware<Channel>>> {
+        let client = self
+            .organisation_client
+            .get_or_try_init(move || async move {
+                let channel = self.auth_channel(self.channel().await?);
+                Ok::<_, anyhow::Error>(OrganisationServiceClient::new(channel))
+            })
+            .await?;
+
+        Ok(client.clone())
+    }
+
+    // ── Organisations ───────────────────────────────────────────────
+
+    pub async fn create_organisation(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<CreateOrganisationResponse> {
+        let mut client = self.organisation_client().await?;
+        let resp = client
+            .create_organisation(CreateOrganisationRequest {
+                name: name.into(),
+            })
+            .await
+            .context("create organisation")?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn get_organisation(
+        &self,
+        identifier: get_organisation_request::Identifier,
+    ) -> anyhow::Result<Option<Organisation>> {
+        let mut client = self.organisation_client().await?;
+        let resp = client
+            .get_organisation(GetOrganisationRequest {
+                identifier: Some(identifier),
+            })
+            .await
+            .context("get organisation")?;
+        Ok(resp.into_inner().organisation)
+    }
+
+    pub async fn search_organisations(
+        &self,
+        query: &str,
+        page_size: i32,
+        page_token: &str,
+    ) -> anyhow::Result<SearchOrganisationsResponse> {
+        let mut client = self.organisation_client().await?;
+        let resp = client
+            .search_organisations(SearchOrganisationsRequest {
+                query: query.into(),
+                page_size,
+                page_token: page_token.into(),
+            })
+            .await
+            .context("search organisations")?;
+        Ok(resp.into_inner())
     }
 
     /// Unauthenticated users client (login, register, refresh_token).
@@ -968,6 +1032,7 @@ impl GrpcClientState for State {
                 artifact_client: OnceCell::const_new(),
                 release_client: OnceCell::const_new(),
                 destination_client: OnceCell::const_new(),
+                organisation_client: OnceCell::const_new(),
                 users_client: OnceCell::const_new(),
                 auth_users_client: OnceCell::const_new(),
             }

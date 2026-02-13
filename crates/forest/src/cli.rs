@@ -12,7 +12,10 @@ use tmp::TmpCommand;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    cli::{destination::DestinationCommand, project::ProjectCommand, release::ReleaseCommand},
+    cli::{
+        destination::DestinationCommand, organisation::OrganisationCommand,
+        project::ProjectCommand, release::ReleaseCommand,
+    },
     state::{Config, State},
 };
 
@@ -22,6 +25,7 @@ mod components;
 mod destination;
 mod global;
 mod init;
+mod organisation;
 mod project;
 mod release;
 mod run;
@@ -54,6 +58,8 @@ enum Commands {
     Project(ProjectCommand),
     Destination(DestinationCommand),
     Release(ReleaseCommand),
+    /// Manage organisations
+    Organisation(OrganisationCommand),
 }
 
 pub async fn execute() -> anyhow::Result<()> {
@@ -135,6 +141,7 @@ impl CommandHandler {
             Commands::Project(cmd) => cmd.execute(state).await,
             Commands::Destination(cmd) => cmd.execute(state).await,
             Commands::Release(cmd) => cmd.execute(state).await,
+            Commands::Organisation(cmd) => cmd.execute(state).await,
         }
     }
 }

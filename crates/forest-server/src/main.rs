@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-// TODO: we should select only the destinations specified in the project
 use tracing_subscriber::EnvFilter;
 
 mod cli;

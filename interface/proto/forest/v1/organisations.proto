@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package forest.v1;
+
+import "google/protobuf/timestamp.proto";
+
+message Organisation {
+  string organisation_id = 1;
+  string name = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message CreateOrganisationRequest {
+  string name = 1;
+}
+message CreateOrganisationResponse {
+  string organisation_id = 1;
+}
+
+message GetOrganisationRequest {
+  oneof identifier {
+    string organisation_id = 1;
+    string name = 2;
+  }
+}
+message GetOrganisationResponse {
+  Organisation organisation = 1;
+}
+
+message SearchOrganisationsRequest {
+  string query = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+message SearchOrganisationsResponse {
+  repeated Organisation organisations = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}
+
+service OrganisationService {
+  rpc CreateOrganisation(CreateOrganisationRequest) returns (CreateOrganisationResponse);
+  rpc GetOrganisation(GetOrganisationRequest) returns (GetOrganisationResponse);
+  rpc SearchOrganisations(SearchOrganisationsRequest) returns (SearchOrganisationsResponse);
+}

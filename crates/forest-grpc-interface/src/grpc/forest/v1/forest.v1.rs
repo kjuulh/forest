@@ -100,6 +100,63 @@ pub struct CreateRequest {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateResponse {
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Organisation {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateOrganisationRequest {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateOrganisationResponse {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOrganisationRequest {
+    #[prost(oneof="get_organisation_request::Identifier", tags="1, 2")]
+    pub identifier: ::core::option::Option<get_organisation_request::Identifier>,
+}
+/// Nested message and enum types in `GetOrganisationRequest`.
+pub mod get_organisation_request {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Identifier {
+        #[prost(string, tag="1")]
+        OrganisationId(::prost::alloc::string::String),
+        #[prost(string, tag="2")]
+        Name(::prost::alloc::string::String),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOrganisationResponse {
+    #[prost(message, optional, tag="1")]
+    pub organisation: ::core::option::Option<Organisation>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SearchOrganisationsRequest {
+    #[prost(string, tag="1")]
+    pub query: ::prost::alloc::string::String,
+    #[prost(int32, tag="2")]
+    pub page_size: i32,
+    #[prost(string, tag="3")]
+    pub page_token: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SearchOrganisationsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub organisations: ::prost::alloc::vec::Vec<Organisation>,
+    #[prost(string, tag="2")]
+    pub next_page_token: ::prost::alloc::string::String,
+    #[prost(int32, tag="3")]
+    pub total_count: i32,
+}
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetComponentsRequest {
 }
