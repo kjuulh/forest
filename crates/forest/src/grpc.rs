@@ -34,6 +34,13 @@ use crate::{
 
 mod interceptor;
 
+/// Convert a `tonic::Status` into a clean `anyhow::Error` containing only the
+/// human-readable message (e.g. "member already exists in this organisation")
+/// rather than the raw debug format with status codes and metadata.
+fn grpc_err(status: tonic::Status) -> anyhow::Error {
+    anyhow::anyhow!("{}", status.message())
+}
+
 #[derive(Clone)]
 pub struct GrpcClient {
     host: String,
@@ -58,7 +65,8 @@ impl GrpcClient {
             .create(CreateRequest {
                 namespace: namespace.into(),
             })
-            .await?;
+            .await
+            .map_err(grpc_err)?;
 
         Ok(())
     }
@@ -75,7 +83,8 @@ impl GrpcClient {
                 name: name.into(),
                 namespace: namespace.into(),
             })
-            .await?;
+            .await
+            .map_err(grpc_err)?;
 
         let resp = resp.into_inner();
 
@@ -96,7 +105,8 @@ impl GrpcClient {
                 namespace: namespace.into(),
                 version: version.into(),
             })
-            .await?;
+            .await
+            .map_err(grpc_err)?;
 
         let resp = resp.into_inner();
 
@@ -120,7 +130,8 @@ impl GrpcClient {
                 namespace: namespace.into(),
                 version: version.into(),
             })
-            .await?;
+            .await
+            .map_err(grpc_err)?;
 
         Ok(UploadContext {
             context_id: res.into_inner().upload_context.parse()?,
@@ -144,7 +155,8 @@ impl GrpcClient {
                 file_path: file_path.to_string_lossy().to_string(),
                 file_content: file_content.into(),
             })
-            .await?;
+            .await
+            .map_err(grpc_err)?;
 
         Ok(())
     }
@@ -159,7 +171,8 @@ impl GrpcClient {
             .commit_upload(CommitUploadRequest {
                 upload_context: context.into(),
             })
-            .await?;
+            .await
+            .map_err(grpc_err)?;
 
         Ok(())
     }
@@ -169,7 +182,8 @@ impl GrpcClient {
 
         let resp = client
             .begin_upload_artifact(BeginUploadArtifactRequest {})
-            .await?;
+            .await
+            .map_err(grpc_err)?;
 
         let resp = resp.into_inner();
 
@@ -180,6 +194,7 @@ impl GrpcClient {
             client
                 .upload_artifact(stream_req)
                 .await
+                .map_err(grpc_err)
                 .context("upload artifact")
                 .inspect_err(|e| tracing::error!("failed to upload file: {:?}", e))
         });
@@ -237,6 +252,7 @@ impl GrpcClient {
                 upload_id: staging_id,
             })
             .await
+            .map_err(grpc_err)
             .context("grpc commit artifact")?;
 
         let msg = res.into_inner();
@@ -362,6 +378,7 @@ impl GrpcClient {
                 name: name.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("create organisation")?;
         Ok(resp.into_inner())
     }
@@ -376,6 +393,7 @@ impl GrpcClient {
                 identifier: Some(identifier),
             })
             .await
+            .map_err(grpc_err)
             .context("get organisation")?;
         Ok(resp.into_inner().organisation)
     }
@@ -394,6 +412,7 @@ impl GrpcClient {
                 page_token: page_token.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("search organisations")?;
         Ok(resp.into_inner())
     }
@@ -408,6 +427,7 @@ impl GrpcClient {
                 role: role.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("list my organisations")?;
         Ok(resp.into_inner())
     }
@@ -428,6 +448,7 @@ impl GrpcClient {
                 role: role.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("add organisation member")?;
         Ok(resp.into_inner())
     }
@@ -444,6 +465,7 @@ impl GrpcClient {
                 user_id: user_id.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("remove organisation member")?;
         Ok(resp.into_inner())
     }
@@ -462,6 +484,7 @@ impl GrpcClient {
                 role: role.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("update organisation member role")?;
         Ok(resp.into_inner())
     }
@@ -480,6 +503,7 @@ impl GrpcClient {
                 page_token: page_token.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("list organisation members")?;
         Ok(resp.into_inner())
     }
@@ -528,6 +552,7 @@ impl GrpcClient {
                 password: password.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("register")?;
         Ok(resp.into_inner())
     }
@@ -544,6 +569,7 @@ impl GrpcClient {
                 password: password.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("login")?;
         Ok(resp.into_inner())
     }
@@ -558,6 +584,7 @@ impl GrpcClient {
                 refresh_token: refresh_token.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("refresh token")?;
         Ok(resp.into_inner())
     }
@@ -569,6 +596,7 @@ impl GrpcClient {
                 refresh_token: refresh_token.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("logout")?;
         Ok(())
     }
@@ -583,6 +611,7 @@ impl GrpcClient {
                 identifier: Some(identifier),
             })
             .await
+            .map_err(grpc_err)
             .context("get user")?;
         Ok(resp.into_inner().user)
     }
@@ -599,6 +628,7 @@ impl GrpcClient {
                 username,
             })
             .await
+            .map_err(grpc_err)
             .context("update user")?;
         Ok(resp.into_inner().user)
     }
@@ -610,6 +640,7 @@ impl GrpcClient {
                 user_id: user_id.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("delete user")?;
         Ok(())
     }
@@ -628,6 +659,7 @@ impl GrpcClient {
                 search,
             })
             .await
+            .map_err(grpc_err)
             .context("list users")?;
         Ok(resp.into_inner())
     }
@@ -646,6 +678,7 @@ impl GrpcClient {
                 new_password: new_password.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("change password")?;
         Ok(())
     }
@@ -666,6 +699,7 @@ impl GrpcClient {
                 expires_in_seconds,
             })
             .await
+            .map_err(grpc_err)
             .context("create personal access token")?;
         Ok(resp.into_inner())
     }
@@ -680,6 +714,7 @@ impl GrpcClient {
                 user_id: user_id.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("list personal access tokens")?;
         Ok(resp.into_inner().tokens)
     }
@@ -691,6 +726,7 @@ impl GrpcClient {
                 token_id: token_id.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("delete personal access token")?;
         Ok(())
     }
@@ -705,10 +741,11 @@ impl GrpcClient {
             .get_component_files(GetComponentFilesRequest {
                 component_id: component_id.into(),
             })
-            .await?;
+            .await
+            .map_err(grpc_err)?;
 
         let mut stream = resp.into_inner();
-        while let Some(msg) = stream.message().await? {
+        while let Some(msg) = stream.message().await.map_err(grpc_err)? {
             let Some(msg) = msg.msg else { return Ok(()) };
 
             match msg {
@@ -734,7 +771,8 @@ impl GrpcClient {
             .get_component_files(GetComponentFilesRequest {
                 component_id: component_id.into(),
             })
-            .await?;
+            .await
+            .map_err(grpc_err)?;
 
         let (mut tx, rx) = futures::channel::mpsc::channel(10);
 
@@ -799,6 +837,7 @@ impl GrpcClient {
                 r#ref: Some(reference.clone().into()),
             })
             .await
+            .map_err(grpc_err)
             .context("annotate artifact")?;
 
         let resp = resp.into_inner();
@@ -815,6 +854,7 @@ impl GrpcClient {
         let resp = client
             .get_artifact_by_slug(GetArtifactBySlugRequest { slug: slug.into() })
             .await
+            .map_err(grpc_err)
             .context("get release annotation by slug")?;
 
         let res = resp.into_inner();
@@ -840,6 +880,7 @@ impl GrpcClient {
                 }),
             })
             .await
+            .map_err(grpc_err)
             .context("get releases by project")?;
 
         let res = resp.into_inner();
@@ -865,6 +906,7 @@ impl GrpcClient {
                 environments: environments.into(),
             })
             .await
+            .map_err(grpc_err)
             .context("release (grpc)")?;
 
         let resp = response.into_inner();
@@ -899,6 +941,7 @@ impl GrpcClient {
                 release_intent_id: release_intent_id.to_string(),
             })
             .await
+            .map_err(grpc_err)
             .context("wait_release (grpc)")?;
 
         let mut stream = response.into_inner();
@@ -906,7 +949,7 @@ impl GrpcClient {
         let mut final_statuses: HashMap<String, forest_models::ReleaseStatus> = HashMap::new();
 
         while let Some(event) = stream.next().await {
-            let event = event.context("stream error")?;
+            let event = event.map_err(grpc_err).context("stream error")?;
 
             match event.event {
                 Some(forest_grpc_interface::wait_release_event::Event::StatusUpdate(status)) => {
@@ -960,6 +1003,7 @@ impl GrpcClient {
         let response = client
             .get_namespaces(GetNamespacesRequest {})
             .await
+            .map_err(grpc_err)
             .context("get namespaces (grpc)")?;
         let resp = response.into_inner();
 
@@ -977,6 +1021,7 @@ impl GrpcClient {
                 query: Some(query),
             })
             .await
+            .map_err(grpc_err)
             .context("get projects (grpc)")?;
         let resp = response.into_inner();
 
@@ -989,6 +1034,7 @@ impl GrpcClient {
         let response = client
             .get_destinations(GetDestinationsRequest {})
             .await
+            .map_err(grpc_err)
             .context("get destinations (grpc)")?;
         let resp = response.into_inner();
 
@@ -1022,6 +1068,7 @@ impl GrpcClient {
                 r#type: Some(destination_type.into()),
             })
             .await
+            .map_err(grpc_err)
             .context("create destination (grpc)")?;
 
         Ok(())
@@ -1039,6 +1086,7 @@ impl GrpcClient {
                 metadata,
             })
             .await
+            .map_err(grpc_err)
             .context("update destination (grpc)")?;
 
         Ok(())
