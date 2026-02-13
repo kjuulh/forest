@@ -2,7 +2,7 @@
 RUST_LOG = "forest=debug,notmad=trace,info"
 
 [tools]
-rust = { version = "1.93.0", components = "rust-src,rust-analyzer" }
+rust = { version = "1.93.1", components = "rust-src,rust-analyzer" }
 
 [tasks.todos]
 run = "hyperlog --local-path ./todos"
