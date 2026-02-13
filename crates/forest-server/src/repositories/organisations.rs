@@ -24,6 +24,23 @@ pub struct OrganisationMemberRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
+pub struct OrganisationMemberWithUsernameRow {
+    pub organisation_id: Uuid,
+    pub user_id: Uuid,
+    pub username: String,
+    pub role: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub struct OrganisationWithRoleRow {
+    pub id: Uuid,
+    pub name: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub role: String,
+}
+
 // -- Repository implementation ------------------------------------------------
 
 impl OrganisationRepository {
@@ -158,6 +175,160 @@ impl OrganisationRepository {
         .await?;
 
         Ok(row)
+    }
+
+    pub async fn get_member(
+        &self,
+        db: impl PgExecutor<'_>,
+        organisation_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<Option<OrganisationMemberRow>> {
+        let row = sqlx::query_as!(
+            OrganisationMemberRow,
+            r#"
+            SELECT organisation_id, user_id, role, created_at, updated_at
+            FROM organisation_members
+            WHERE organisation_id = $1 AND user_id = $2
+            "#,
+            organisation_id,
+            user_id,
+        )
+        .fetch_optional(db)
+        .await?;
+
+        Ok(row)
+    }
+
+    pub async fn get_member_with_username(
+        &self,
+        db: impl PgExecutor<'_>,
+        organisation_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<Option<OrganisationMemberWithUsernameRow>> {
+        let row = sqlx::query_as!(
+            OrganisationMemberWithUsernameRow,
+            r#"
+            SELECT om.organisation_id, om.user_id, u.username, om.role, om.created_at, om.updated_at
+            FROM organisation_members om
+            JOIN users u ON u.id = om.user_id
+            WHERE om.organisation_id = $1 AND om.user_id = $2
+            "#,
+            organisation_id,
+            user_id,
+        )
+        .fetch_optional(db)
+        .await?;
+
+        Ok(row)
+    }
+
+    pub async fn remove_member(
+        &self,
+        db: impl PgExecutor<'_>,
+        organisation_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<()> {
+        sqlx::query!(
+            "DELETE FROM organisation_members WHERE organisation_id = $1 AND user_id = $2",
+            organisation_id,
+            user_id,
+        )
+        .execute(db)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn update_member_role(
+        &self,
+        db: impl PgExecutor<'_>,
+        organisation_id: Uuid,
+        user_id: Uuid,
+        role: &str,
+    ) -> anyhow::Result<OrganisationMemberRow> {
+        let row = sqlx::query_as!(
+            OrganisationMemberRow,
+            r#"
+            UPDATE organisation_members
+            SET role = $3, updated_at = now()
+            WHERE organisation_id = $1 AND user_id = $2
+            RETURNING organisation_id, user_id, role, created_at, updated_at
+            "#,
+            organisation_id,
+            user_id,
+            role,
+        )
+        .fetch_one(db)
+        .await?;
+
+        Ok(row)
+    }
+
+    pub async fn list_members(
+        &self,
+        db: impl PgExecutor<'_>,
+        organisation_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> anyhow::Result<Vec<OrganisationMemberWithUsernameRow>> {
+        let rows = sqlx::query_as!(
+            OrganisationMemberWithUsernameRow,
+            r#"
+            SELECT om.organisation_id, om.user_id, u.username, om.role, om.created_at, om.updated_at
+            FROM organisation_members om
+            JOIN users u ON u.id = om.user_id
+            WHERE om.organisation_id = $1
+            ORDER BY om.created_at ASC
+            LIMIT $2 OFFSET $3
+            "#,
+            organisation_id,
+            limit,
+            offset,
+        )
+        .fetch_all(db)
+        .await?;
+
+        Ok(rows)
+    }
+
+    pub async fn count_members(
+        &self,
+        db: impl PgExecutor<'_>,
+        organisation_id: Uuid,
+    ) -> anyhow::Result<i64> {
+        let row = sqlx::query_scalar!(
+            r#"SELECT count(*) FROM organisation_members WHERE organisation_id = $1"#,
+            organisation_id,
+        )
+        .fetch_one(db)
+        .await?;
+
+        Ok(row.unwrap_or(0))
+    }
+
+    pub async fn list_organisations_by_user(
+        &self,
+        db: impl PgExecutor<'_>,
+        user_id: Uuid,
+        role_filter: Option<&str>,
+    ) -> anyhow::Result<Vec<OrganisationWithRoleRow>> {
+        let rows = sqlx::query_as!(
+            OrganisationWithRoleRow,
+            r#"
+            SELECT o.id, o.name, o.created_at, o.updated_at, om.role
+            FROM organisations o
+            JOIN organisation_members om ON om.organisation_id = o.id
+            WHERE om.user_id = $1
+              AND ($2::text IS NULL OR om.role = $2)
+            ORDER BY o.name ASC
+            "#,
+            user_id,
+            role_filter,
+        )
+        .fetch_all(db)
+        .await?;
+
+        Ok(rows)
     }
 }
 

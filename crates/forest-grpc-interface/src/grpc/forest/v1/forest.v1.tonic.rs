@@ -1717,6 +1717,140 @@ pub mod organisation_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        ///
+        pub async fn list_my_organisations(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListMyOrganisationsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListMyOrganisationsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/ListMyOrganisations",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.OrganisationService",
+                        "ListMyOrganisations",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
+        pub async fn add_member(
+            &mut self,
+            request: impl tonic::IntoRequest<super::AddMemberRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AddMemberResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/AddMember",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("forest.v1.OrganisationService", "AddMember"));
+            self.inner.unary(req, path, codec).await
+        }
+        ///
+        pub async fn remove_member(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RemoveMemberRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RemoveMemberResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/RemoveMember",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("forest.v1.OrganisationService", "RemoveMember"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
+        pub async fn update_member_role(
+            &mut self,
+            request: impl tonic::IntoRequest<super::UpdateMemberRoleRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UpdateMemberRoleResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/UpdateMemberRole",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("forest.v1.OrganisationService", "UpdateMemberRole"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
+        pub async fn list_members(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListMembersRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListMembersResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/ListMembers",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("forest.v1.OrganisationService", "ListMembers"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -1754,6 +1888,46 @@ pub mod organisation_service_server {
             request: tonic::Request<super::SearchOrganisationsRequest>,
         ) -> std::result::Result<
             tonic::Response<super::SearchOrganisationsResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn list_my_organisations(
+            &self,
+            request: tonic::Request<super::ListMyOrganisationsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListMyOrganisationsResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn add_member(
+            &self,
+            request: tonic::Request<super::AddMemberRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AddMemberResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn remove_member(
+            &self,
+            request: tonic::Request<super::RemoveMemberRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RemoveMemberResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn update_member_role(
+            &self,
+            request: tonic::Request<super::UpdateMemberRoleRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UpdateMemberRoleResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn list_members(
+            &self,
+            request: tonic::Request<super::ListMembersRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListMembersResponse>,
             tonic::Status,
         >;
     }
@@ -1966,6 +2140,242 @@ pub mod organisation_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = SearchOrganisationsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/ListMyOrganisations" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListMyOrganisationsSvc<T: OrganisationService>(pub Arc<T>);
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<super::ListMyOrganisationsRequest>
+                    for ListMyOrganisationsSvc<T> {
+                        type Response = super::ListMyOrganisationsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListMyOrganisationsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::list_my_organisations(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListMyOrganisationsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/AddMember" => {
+                    #[allow(non_camel_case_types)]
+                    struct AddMemberSvc<T: OrganisationService>(pub Arc<T>);
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<super::AddMemberRequest>
+                    for AddMemberSvc<T> {
+                        type Response = super::AddMemberResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::AddMemberRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::add_member(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = AddMemberSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/RemoveMember" => {
+                    #[allow(non_camel_case_types)]
+                    struct RemoveMemberSvc<T: OrganisationService>(pub Arc<T>);
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<super::RemoveMemberRequest>
+                    for RemoveMemberSvc<T> {
+                        type Response = super::RemoveMemberResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RemoveMemberRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::remove_member(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = RemoveMemberSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/UpdateMemberRole" => {
+                    #[allow(non_camel_case_types)]
+                    struct UpdateMemberRoleSvc<T: OrganisationService>(pub Arc<T>);
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<super::UpdateMemberRoleRequest>
+                    for UpdateMemberRoleSvc<T> {
+                        type Response = super::UpdateMemberRoleResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::UpdateMemberRoleRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::update_member_role(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = UpdateMemberRoleSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/ListMembers" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListMembersSvc<T: OrganisationService>(pub Arc<T>);
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<super::ListMembersRequest>
+                    for ListMembersSvc<T> {
+                        type Response = super::ListMembersResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListMembersRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::list_members(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListMembersSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

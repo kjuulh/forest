@@ -100,6 +100,224 @@ impl OrganisationService for OrganisationsServer {
             total_count: result.total_count as i32,
         }))
     }
+
+    async fn list_my_organisations(
+        &self,
+        request: tonic::Request<ListMyOrganisationsRequest>,
+    ) -> std::result::Result<tonic::Response<ListMyOrganisationsResponse>, tonic::Status> {
+        let claims = request
+            .extensions()
+            .get::<AppClaims>()
+            .ok_or_else(|| tonic::Status::unauthenticated("missing auth context"))?;
+
+        let user_id = claims
+            .user_id
+            .parse::<Uuid>()
+            .map_err(|_| tonic::Status::internal("invalid user_id in token"))?;
+
+        let req = request.into_inner();
+        let role_filter = if req.role.is_empty() {
+            None
+        } else {
+            Some(req.role.as_str())
+        };
+
+        let orgs = self
+            .state
+            .organisation_service()
+            .list_my_organisations(user_id, role_filter)
+            .await
+            .inspect_err(|e| tracing::warn!("failed to list my organisations: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        let roles: Vec<String> = orgs.iter().map(|o| o.role.clone()).collect();
+        let organisations: Vec<Organisation> = orgs.into_iter().map(|o| Organisation {
+            organisation_id: o.organisation_id.to_string(),
+            name: o.name,
+            created_at: Some(prost_types::Timestamp {
+                seconds: o.created_at.timestamp(),
+                nanos: o.created_at.timestamp_subsec_nanos() as i32,
+            }),
+        }).collect();
+
+        Ok(tonic::Response::new(ListMyOrganisationsResponse {
+            organisations,
+            roles,
+        }))
+    }
+
+    // -- Member management --------------------------------------------------------
+
+    async fn add_member(
+        &self,
+        request: tonic::Request<AddMemberRequest>,
+    ) -> std::result::Result<tonic::Response<AddMemberResponse>, tonic::Status> {
+        let claims = request
+            .extensions()
+            .get::<AppClaims>()
+            .ok_or_else(|| tonic::Status::unauthenticated("missing auth context"))?;
+
+        let requester_id = claims
+            .user_id
+            .parse::<Uuid>()
+            .map_err(|_| tonic::Status::internal("invalid user_id in token"))?;
+
+        let req = request.into_inner();
+
+        let organisation_id = req
+            .organisation_id
+            .parse::<Uuid>()
+            .map_err(|_| tonic::Status::invalid_argument("invalid organisation_id"))?;
+
+        let user_id = req
+            .user_id
+            .parse::<Uuid>()
+            .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+
+        let member = self
+            .state
+            .organisation_service()
+            .add_member(organisation_id, user_id, &req.role, requester_id)
+            .await
+            .inspect_err(|e| tracing::warn!("failed to add member: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        Ok(tonic::Response::new(AddMemberResponse {
+            member: Some(member_to_grpc(member)),
+        }))
+    }
+
+    async fn remove_member(
+        &self,
+        request: tonic::Request<RemoveMemberRequest>,
+    ) -> std::result::Result<tonic::Response<RemoveMemberResponse>, tonic::Status> {
+        let claims = request
+            .extensions()
+            .get::<AppClaims>()
+            .ok_or_else(|| tonic::Status::unauthenticated("missing auth context"))?;
+
+        let requester_id = claims
+            .user_id
+            .parse::<Uuid>()
+            .map_err(|_| tonic::Status::internal("invalid user_id in token"))?;
+
+        let req = request.into_inner();
+
+        let organisation_id = req
+            .organisation_id
+            .parse::<Uuid>()
+            .map_err(|_| tonic::Status::invalid_argument("invalid organisation_id"))?;
+
+        let user_id = req
+            .user_id
+            .parse::<Uuid>()
+            .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+
+        self.state
+            .organisation_service()
+            .remove_member(organisation_id, user_id, requester_id)
+            .await
+            .inspect_err(|e| tracing::warn!("failed to remove member: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        Ok(tonic::Response::new(RemoveMemberResponse {}))
+    }
+
+    async fn update_member_role(
+        &self,
+        request: tonic::Request<UpdateMemberRoleRequest>,
+    ) -> std::result::Result<tonic::Response<UpdateMemberRoleResponse>, tonic::Status> {
+        let claims = request
+            .extensions()
+            .get::<AppClaims>()
+            .ok_or_else(|| tonic::Status::unauthenticated("missing auth context"))?;
+
+        let requester_id = claims
+            .user_id
+            .parse::<Uuid>()
+            .map_err(|_| tonic::Status::internal("invalid user_id in token"))?;
+
+        let req = request.into_inner();
+
+        let organisation_id = req
+            .organisation_id
+            .parse::<Uuid>()
+            .map_err(|_| tonic::Status::invalid_argument("invalid organisation_id"))?;
+
+        let user_id = req
+            .user_id
+            .parse::<Uuid>()
+            .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+
+        let member = self
+            .state
+            .organisation_service()
+            .update_member_role(organisation_id, user_id, &req.role, requester_id)
+            .await
+            .inspect_err(|e| tracing::warn!("failed to update member role: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        Ok(tonic::Response::new(UpdateMemberRoleResponse {
+            member: Some(member_to_grpc(member)),
+        }))
+    }
+
+    async fn list_members(
+        &self,
+        request: tonic::Request<ListMembersRequest>,
+    ) -> std::result::Result<tonic::Response<ListMembersResponse>, tonic::Status> {
+        let _claims = request
+            .extensions()
+            .get::<AppClaims>()
+            .ok_or_else(|| tonic::Status::unauthenticated("missing auth context"))?;
+
+        let req = request.into_inner();
+
+        let organisation_id = req
+            .organisation_id
+            .parse::<Uuid>()
+            .map_err(|_| tonic::Status::invalid_argument("invalid organisation_id"))?;
+
+        let page_size = if req.page_size > 0 {
+            req.page_size as i64
+        } else {
+            50
+        };
+        let offset = req.page_token.parse::<i64>().unwrap_or(0);
+
+        let result = self
+            .state
+            .organisation_service()
+            .list_members(organisation_id, page_size, offset)
+            .await
+            .inspect_err(|e| tracing::warn!("failed to list members: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        let next_offset = offset + page_size;
+        let next_page_token = if next_offset < result.total_count {
+            next_offset.to_string()
+        } else {
+            String::new()
+        };
+
+        Ok(tonic::Response::new(ListMembersResponse {
+            members: result.members.into_iter().map(member_to_grpc).collect(),
+            next_page_token,
+            total_count: result.total_count as i32,
+        }))
+    }
+}
+
+fn member_to_grpc(member: crate::services::organisations::MemberInfo) -> OrganisationMember {
+    OrganisationMember {
+        user_id: member.user_id.to_string(),
+        username: member.username,
+        role: member.role,
+        joined_at: Some(prost_types::Timestamp {
+            seconds: member.joined_at.timestamp(),
+            nanos: member.joined_at.timestamp_subsec_nanos() as i32,
+        }),
+    }
 }
 
 fn org_to_grpc(

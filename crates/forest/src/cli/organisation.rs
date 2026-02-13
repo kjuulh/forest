@@ -1,5 +1,6 @@
 mod create;
 mod get;
+mod member;
 mod search;
 
 use crate::{cli::output::OutputFormat, state::State};
@@ -22,6 +23,8 @@ enum Commands {
     Get(get::GetCommand),
     /// Search organisations by name
     Search(search::SearchCommand),
+    /// Manage organisation members
+    Member(member::MemberCommand),
 }
 
 impl OrganisationCommand {
@@ -30,6 +33,7 @@ impl OrganisationCommand {
             Commands::Create(cmd) => cmd.execute(state, &self.format).await,
             Commands::Get(cmd) => cmd.execute(state, &self.format).await,
             Commands::Search(cmd) => cmd.execute(state, &self.format).await,
+            Commands::Member(cmd) => cmd.execute(state, &self.format).await,
         }
     }
 }

@@ -398,6 +398,92 @@ impl GrpcClient {
         Ok(resp.into_inner())
     }
 
+    pub async fn list_my_organisations(
+        &self,
+        role: &str,
+    ) -> anyhow::Result<ListMyOrganisationsResponse> {
+        let mut client = self.organisation_client().await?;
+        let resp = client
+            .list_my_organisations(ListMyOrganisationsRequest {
+                role: role.into(),
+            })
+            .await
+            .context("list my organisations")?;
+        Ok(resp.into_inner())
+    }
+
+    // -- Organisation Members -----------------------------------------------------
+
+    pub async fn add_organisation_member(
+        &self,
+        organisation_id: &str,
+        user_id: &str,
+        role: &str,
+    ) -> anyhow::Result<AddMemberResponse> {
+        let mut client = self.organisation_client().await?;
+        let resp = client
+            .add_member(AddMemberRequest {
+                organisation_id: organisation_id.into(),
+                user_id: user_id.into(),
+                role: role.into(),
+            })
+            .await
+            .context("add organisation member")?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn remove_organisation_member(
+        &self,
+        organisation_id: &str,
+        user_id: &str,
+    ) -> anyhow::Result<RemoveMemberResponse> {
+        let mut client = self.organisation_client().await?;
+        let resp = client
+            .remove_member(RemoveMemberRequest {
+                organisation_id: organisation_id.into(),
+                user_id: user_id.into(),
+            })
+            .await
+            .context("remove organisation member")?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn update_organisation_member_role(
+        &self,
+        organisation_id: &str,
+        user_id: &str,
+        role: &str,
+    ) -> anyhow::Result<UpdateMemberRoleResponse> {
+        let mut client = self.organisation_client().await?;
+        let resp = client
+            .update_member_role(UpdateMemberRoleRequest {
+                organisation_id: organisation_id.into(),
+                user_id: user_id.into(),
+                role: role.into(),
+            })
+            .await
+            .context("update organisation member role")?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn list_organisation_members(
+        &self,
+        organisation_id: &str,
+        page_size: i32,
+        page_token: &str,
+    ) -> anyhow::Result<ListMembersResponse> {
+        let mut client = self.organisation_client().await?;
+        let resp = client
+            .list_members(ListMembersRequest {
+                organisation_id: organisation_id.into(),
+                page_size,
+                page_token: page_token.into(),
+            })
+            .await
+            .context("list organisation members")?;
+        Ok(resp.into_inner())
+    }
+
     /// Unauthenticated users client (login, register, refresh_token).
     async fn users_client(&self) -> anyhow::Result<UsersServiceClient<Channel>> {
         let client = self
