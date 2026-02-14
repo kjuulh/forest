@@ -3,7 +3,7 @@
   "destination": "eu-west-1.*",
   "destination_type": "forest/terraform@1",
   "component": {
-    "namespace": "forest-contrib",
+    "organisation": "forest-contrib",
     "name": "rust-persistent-service",
     "source": {
       "Local": "../../components/forest-contrib/rust_persistent_service"
@@ -14,12 +14,12 @@
     "name": "service-example",
     "environment": [
       {
-        "value": "my_service=debug,info",
-        "key": "RUST_LOG"
+        "key": "RUST_LOG",
+        "value": "my_service=debug,info"
       },
       {
-        "value": "info",
-        "key": "RUST_LOG"
+        "key": "RUST_LOG",
+        "value": "info"
       }
     ],
     "health_checks": {
@@ -32,23 +32,23 @@
     },
     "ports": [
       {
-        "external": true,
         "name": "external",
+        "external": true,
         "port": 3000
       },
       {
-        "port": 3001,
-        "name": "internal"
+        "name": "internal",
+        "port": 3001
       },
       {
         "external": true,
+        "port": 4000,
         "name": "grpc_external",
-        "subdomain": "grpc",
-        "port": 4000
+        "subdomain": "grpc"
       },
       {
-        "port": 4001,
-        "name": "grpc_internal"
+        "name": "grpc_internal",
+        "port": 4001
       }
     ]
   }

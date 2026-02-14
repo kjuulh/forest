@@ -24,8 +24,8 @@ pub struct PublishCommand {
     #[arg(long = "context-web")]
     context_web: Option<String>,
 
-    #[arg(long = "project-namespace")]
-    project_namespace: String,
+    #[arg(long, short = 'o')]
+    organisation: String,
 
     #[arg(long = "project-name")]
     project_name: String,
@@ -143,7 +143,7 @@ impl PublishCommand {
             web: self.context_web.clone(),
         };
         let project = crate::models::project::Project {
-            namespace: self.project_namespace.clone(),
+            organisation: self.organisation.clone(),
             project: self.project_name.clone(),
         };
 

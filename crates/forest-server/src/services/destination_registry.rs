@@ -4,7 +4,7 @@ use anyhow::Context;
 use forest_models::{Destination, DestinationType};
 use uuid::Uuid;
 
-use crate::State;
+use crate::{repositories::error::DbError, State};
 
 pub struct DestinationRegistry {
     db: sqlx::PgPool,
@@ -13,6 +13,7 @@ pub struct DestinationRegistry {
 impl DestinationRegistry {
     pub async fn create_destination(
         &self,
+        organisation: &str,
         name: &str,
         environment: &str,
         metadata: HashMap<String, String>,
@@ -21,6 +22,7 @@ impl DestinationRegistry {
         sqlx::query!(
             "
                 INSERT INTO destinations (
+                    organisation,
                     name,
                     environment,
                     metadata,
@@ -33,10 +35,11 @@ impl DestinationRegistry {
                     $3,
                     $4,
                     $5,
-                    $6
-
+                    $6,
+                    $7
                 )
                 ",
+            organisation,
             name,
             environment,
             serde_json::to_value(&metadata)?,
@@ -46,7 +49,7 @@ impl DestinationRegistry {
         )
         .execute(&self.db)
         .await
-        .context("create destination (db)")?;
+        .map_err(DbError::from)?;
 
         Ok(())
     }
@@ -82,6 +85,7 @@ impl DestinationRegistry {
         let rec = sqlx::query!(
             "
                 SELECT
+                    organisation,
                     name,
                     metadata,
                     environment,
@@ -101,6 +105,7 @@ impl DestinationRegistry {
         let Some(rec) = rec else { return Ok(None) };
 
         Ok(Some(Destination::new(
+            &rec.organisation,
             &rec.name,
             &rec.environment,
             serde_json::from_value(rec.metadata).context("metadata is invalid")?,

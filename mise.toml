@@ -75,7 +75,6 @@ run = """
 
 [tasks."dev:init"]
 run = """
-mise run dev -- admin create-namespace forest
 mise run dev -- admin deploy-component ./components/* --all --quiet
 """
 

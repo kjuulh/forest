@@ -67,6 +67,9 @@ fn constraint_message_unique(constraint: Option<&str>) -> String {
 /// Friendly message for foreign-key violations.
 fn constraint_message_fk(constraint: Option<&str>) -> String {
     match constraint {
+        Some("fk_projects_organisation") | Some("fk_destinations_organisation") => {
+            "organisation does not exist".to_string()
+        }
         Some(name) => format!("referenced resource not found ({name})"),
         None => "referenced resource not found".to_string(),
     }

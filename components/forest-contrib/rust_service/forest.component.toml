@@ -1,6 +1,6 @@
 [component]
 name = "rust_service"
-namespace = "forest-contrib"
+organisation = "forest-contrib"
 version = "0.0.10"
 
 [init."project"]

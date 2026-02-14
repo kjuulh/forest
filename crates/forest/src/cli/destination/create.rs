@@ -7,6 +7,9 @@ use crate::{grpc::GrpcClientState, state::State};
 
 #[derive(clap::Parser)]
 pub struct CreateCommand {
+    #[arg(long, short = 'o')]
+    organisation: String,
+
     #[arg(long)]
     name: String,
 
@@ -47,6 +50,7 @@ impl CreateCommand {
         state
             .grpc_client()
             .create_destination(
+                &self.organisation,
                 &self.name,
                 &self.environment,
                 metadata,

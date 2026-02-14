@@ -4,12 +4,12 @@ use anyhow::Context;
 use forest_grpc_interface::{
     artifact_service_client::ArtifactServiceClient,
     destination_service_client::DestinationServiceClient, get_component_files_response::Msg,
-    get_projects_request::Query, namespace_service_client::NamespaceServiceClient,
+    get_projects_request::Query,
     organisation_service_client::OrganisationServiceClient,
     registry_service_client::RegistryServiceClient, release_service_client::ReleaseServiceClient,
     users_service_client::UsersServiceClient, *,
 };
-use forest_models::{Destination, DestinationType, Namespace, ProjectName};
+use forest_models::{Destination, DestinationType, OrganisationName, ProjectName};
 use futures::{SinkExt, Stream, TryStreamExt};
 use tokio::{
     sync::{OnceCell, mpsc::Sender},
@@ -47,7 +47,6 @@ pub struct GrpcClient {
     auth_middleware_layer: AuthMiddlewareLayer,
 
     channel: OnceCell<Channel>,
-    namespaces_client: OnceCell<NamespaceServiceClient<AuthMiddleware<Channel>>>,
     registry_client: OnceCell<RegistryServiceClient<AuthMiddleware<Channel>>>,
     artifact_client: OnceCell<ArtifactServiceClient<AuthMiddleware<Channel>>>,
     release_client: OnceCell<ReleaseServiceClient<AuthMiddleware<Channel>>>,
@@ -58,30 +57,17 @@ pub struct GrpcClient {
 }
 
 impl GrpcClient {
-    pub async fn create_namespace(&self, namespace: &str) -> anyhow::Result<()> {
-        let mut namespaces_client = self.namespaces_client().await?;
-
-        namespaces_client
-            .create(CreateRequest {
-                namespace: namespace.into(),
-            })
-            .await
-            .map_err(grpc_err)?;
-
-        Ok(())
-    }
-
     pub async fn get_component(
         &self,
         name: &str,
-        namespace: &str,
+        organisation: &str,
     ) -> anyhow::Result<Option<Component>> {
         let mut client = self.registry_client().await?;
 
         let resp = client
             .get_component(GetComponentRequest {
                 name: name.into(),
-                namespace: namespace.into(),
+                organisation: organisation.into(),
             })
             .await
             .map_err(grpc_err)?;
@@ -94,7 +80,7 @@ impl GrpcClient {
     pub async fn get_component_version(
         &self,
         name: &str,
-        namespace: &str,
+        organisation: &str,
         version: &str,
     ) -> anyhow::Result<Option<Component>> {
         let mut client = self.registry_client().await?;
@@ -102,7 +88,7 @@ impl GrpcClient {
         let resp = client
             .get_component_version(GetComponentVersionRequest {
                 name: name.into(),
-                namespace: namespace.into(),
+                organisation: organisation.into(),
                 version: version.into(),
             })
             .await
@@ -117,7 +103,7 @@ impl GrpcClient {
     pub async fn begin_upload(
         &self,
         name: &str,
-        namespace: &str,
+        organisation: &str,
         version: &str,
     ) -> anyhow::Result<UploadContext> {
         let mut client = self.registry_client().await?;
@@ -127,7 +113,7 @@ impl GrpcClient {
         let res = client
             .begin_upload(BeginUploadRequest {
                 name: name.into(),
-                namespace: namespace.into(),
+                organisation: organisation.into(),
                 version: version.into(),
             })
             .await
@@ -280,20 +266,6 @@ impl GrpcClient {
         ServiceBuilder::new()
             .layer(self.auth_middleware_layer.clone())
             .service(channel)
-    }
-
-    async fn namespaces_client(
-        &self,
-    ) -> anyhow::Result<NamespaceServiceClient<AuthMiddleware<Channel>>> {
-        let client = self
-            .namespaces_client
-            .get_or_try_init(move || async move {
-                let channel = self.auth_channel(self.channel().await?);
-                Ok::<_, anyhow::Error>(NamespaceServiceClient::new(channel))
-            })
-            .await?;
-
-        Ok(client.clone())
     }
 
     async fn release_client(
@@ -867,7 +839,7 @@ impl GrpcClient {
 
     pub async fn get_release_annotations_by_project(
         &self,
-        namespace: &str,
+        organisation: &str,
         project: &str,
     ) -> anyhow::Result<Vec<ReleaseAnnotation>> {
         let mut client = self.release_client().await?;
@@ -875,7 +847,7 @@ impl GrpcClient {
         let resp = client
             .get_artifacts_by_project(GetArtifactsByProjectRequest {
                 project: Some(Project {
-                    namespace: namespace.into(),
+                    organisation: organisation.into(),
                     project: project.into(),
                 }),
             })
@@ -997,22 +969,22 @@ impl GrpcClient {
         Ok(WaitReleaseResult { destinations })
     }
 
-    pub async fn get_namespaces(&self) -> anyhow::Result<Vec<Namespace>> {
+    pub async fn get_organisations(&self) -> anyhow::Result<Vec<OrganisationName>> {
         let mut client = self.release_client().await?;
 
         let response = client
-            .get_namespaces(GetNamespacesRequest {})
+            .get_organisations(GetOrganisationsRequest {})
             .await
             .map_err(grpc_err)
-            .context("get namespaces (grpc)")?;
+            .context("get organisations (grpc)")?;
         let resp = response.into_inner();
 
-        Ok(resp.namespaces.into_iter().map(|r| r.into()).collect())
+        Ok(resp.organisations.into_iter().map(|r| r.into()).collect())
     }
 
     pub async fn get_projects(&self, query: GetProjectsQuery) -> anyhow::Result<Vec<ProjectName>> {
         let query = match query {
-            GetProjectsQuery::Namespace(ns) => Query::Namespace(ns.into()),
+            GetProjectsQuery::Organisation(org) => Query::Organisation(org.into()),
         };
         let mut client = self.release_client().await?;
 
@@ -1028,11 +1000,13 @@ impl GrpcClient {
         Ok(resp.projects.into_iter().map(|r| r.into()).collect())
     }
 
-    pub async fn get_destinations(&self) -> anyhow::Result<Vec<Destination>> {
+    pub async fn get_destinations(&self, organisation: &str) -> anyhow::Result<Vec<Destination>> {
         let mut client = self.destination_client().await?;
 
         let response = client
-            .get_destinations(GetDestinationsRequest {})
+            .get_destinations(GetDestinationsRequest {
+                organisation: organisation.to_string(),
+            })
             .await
             .map_err(grpc_err)
             .context("get destinations (grpc)")?;
@@ -1043,6 +1017,7 @@ impl GrpcClient {
             .into_iter()
             .map(|r| {
                 Destination::new(
+                    &r.organisation,
                     &r.name,
                     &r.environment,
                     r.metadata,
@@ -1054,6 +1029,7 @@ impl GrpcClient {
 
     pub async fn create_destination(
         &self,
+        organisation: &str,
         name: &str,
         environment: &str,
         metadata: HashMap<String, String>,
@@ -1062,6 +1038,7 @@ impl GrpcClient {
         self.destination_client()
             .await?
             .create_destination(CreateDestinationRequest {
+                organisation: organisation.to_string(),
                 name: name.to_string(),
                 environment: environment.to_string(),
                 metadata,
@@ -1094,7 +1071,7 @@ impl GrpcClient {
 }
 
 pub enum GetProjectsQuery {
-    Namespace(Namespace),
+    Organisation(OrganisationName),
 }
 
 pub struct ReleaseResult {
@@ -1161,7 +1138,6 @@ impl GrpcClientState for State {
                 auth_middleware_layer: self.auth_interceptor(),
 
                 channel: OnceCell::const_new(),
-                namespaces_client: OnceCell::const_new(),
                 registry_client: OnceCell::const_new(),
                 artifact_client: OnceCell::const_new(),
                 release_client: OnceCell::const_new(),
@@ -1255,7 +1231,7 @@ impl From<forest_grpc_interface::ArtifactContext> for models::context::ArtifactC
 impl From<crate::models::project::Project> for forest_grpc_interface::Project {
     fn from(value: crate::models::project::Project) -> Self {
         Self {
-            namespace: value.namespace,
+            organisation: value.organisation,
             project: value.project,
         }
     }
@@ -1263,11 +1239,12 @@ impl From<crate::models::project::Project> for forest_grpc_interface::Project {
 impl From<forest_grpc_interface::Project> for crate::models::project::Project {
     fn from(value: forest_grpc_interface::Project) -> Self {
         Self {
-            namespace: value.namespace,
+            organisation: value.organisation,
             project: value.project,
         }
     }
 }
+
 
 impl From<forest_grpc_interface::Ref> for crate::models::reference::Reference {
     fn from(value: forest_grpc_interface::Ref) -> Self {

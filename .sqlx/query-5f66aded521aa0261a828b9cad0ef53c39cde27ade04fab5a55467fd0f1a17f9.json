@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO components (\n                    id,\n                    name,\n                    organisation,\n                    version\n                ) VALUES (\n                    $1,\n                    $2,\n                    $3,\n                    $4\n                )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5f66aded521aa0261a828b9cad0ef53c39cde27ade04fab5a55467fd0f1a17f9"
+}

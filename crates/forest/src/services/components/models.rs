@@ -14,7 +14,7 @@ pub struct Components {}
 pub struct UpstreamProjectDependency {
     pub id: Uuid,
     pub name: String,
-    pub namespace: String,
+    pub organisation: String,
     pub version: semver::Version,
 }
 
@@ -49,8 +49,8 @@ impl TryFrom<(String, project::models::Dependency)> for Dependency {
     fn try_from(
         (name, dependency): (String, project::models::Dependency),
     ) -> Result<Self, Self::Error> {
-        let (namespace, name) = match name.split_once("/") {
-            Some((namespace, dep)) => (namespace, dep),
+        let (organisation, name) = match name.split_once("/") {
+            Some((organisation, dep)) => (organisation, dep),
             None => ("forest", name.as_str()),
         };
 
@@ -72,7 +72,7 @@ impl TryFrom<(String, project::models::Dependency)> for Dependency {
 
         Ok(Self {
             name: name.into(),
-            namespace: namespace.into(),
+            organisation: organisation.into(),
             dependency_type: dep,
         })
     }
@@ -82,8 +82,8 @@ impl TryFrom<(String, GlobalDependency)> for Dependency {
     type Error = anyhow::Error;
 
     fn try_from((name, dependency): (String, GlobalDependency)) -> Result<Self, Self::Error> {
-        let (namespace, name) = match name.split_once("/") {
-            Some((namespace, dep)) => (namespace, dep),
+        let (organisation, name) = match name.split_once("/") {
+            Some((organisation, dep)) => (organisation, dep),
             None => ("forest", name.as_str()),
         };
 
@@ -92,7 +92,7 @@ impl TryFrom<(String, GlobalDependency)> for Dependency {
 
         Ok(Self {
             name: name.into(),
-            namespace: namespace.into(),
+            organisation: organisation.into(),
             dependency_type: DependencyType::Versioned(version),
         })
     }

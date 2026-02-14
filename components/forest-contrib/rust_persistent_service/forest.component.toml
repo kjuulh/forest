@@ -1,6 +1,6 @@
 [component]
 name = "rust-persistent-service"
-namespace = "forest-contrib"
+organisation = "forest-contrib"
 version = "0.0.0"
 
 [commands]

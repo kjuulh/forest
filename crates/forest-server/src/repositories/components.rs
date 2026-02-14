@@ -10,24 +10,24 @@ impl ComponentsRepository {
     pub async fn get_component(
         &self,
         name: &str,
-        namespace: &str,
+        organisation: &str,
     ) -> anyhow::Result<Option<ComponentVersion>> {
         let rec = sqlx::query!(
             r#"
                 SELECT
                     id,
                     name,
-                    namespace,
+                    organisation,
                     version
                 FROM
                    components
                 WHERE
                         name = $1
-                    AND namespace = $2
+                    AND organisation = $2
                 ORDER BY version DESC
             "#,
             name,
-            namespace
+            organisation
         )
         .fetch_optional(&self.db)
         .await?;
@@ -35,7 +35,7 @@ impl ComponentsRepository {
         Ok(rec.map(|r| ComponentVersion {
             id: r.id.to_string(),
             name: r.name,
-            namespace: r.namespace,
+            organisation: r.organisation,
             version: r.version,
         }))
     }
@@ -43,7 +43,7 @@ impl ComponentsRepository {
     pub async fn get_component_version(
         &self,
         name: &str,
-        namespace: &str,
+        organisation: &str,
         version: &str,
     ) -> anyhow::Result<Option<ComponentVersion>> {
         let rec = sqlx::query!(
@@ -51,18 +51,18 @@ impl ComponentsRepository {
                 SELECT
                     id,
                     name,
-                    namespace,
+                    organisation,
                     version
                 FROM
                    components
                 WHERE
                         name = $1
-                    AND namespace = $2
+                    AND organisation = $2
                     AND version = $3
                 ORDER BY version DESC
             "#,
             name,
-            namespace,
+            organisation,
             version
         )
         .fetch_optional(&self.db)
@@ -71,7 +71,7 @@ impl ComponentsRepository {
         Ok(rec.map(|r| ComponentVersion {
             id: r.id.to_string(),
             name: r.name,
-            namespace: r.namespace,
+            organisation: r.organisation,
             version: r.version,
         }))
     }

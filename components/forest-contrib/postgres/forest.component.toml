@@ -1,4 +1,4 @@
 [component]
 name = "postgres"
-namespace = "forest-contrib"
+organisation = "forest-contrib"
 version = "0.0.0"

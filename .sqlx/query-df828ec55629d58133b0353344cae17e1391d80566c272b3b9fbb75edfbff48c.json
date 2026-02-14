@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT\n                    id,\n                    name,\n                    namespace,\n                    version\n                FROM\n                   components\n                WHERE\n                        name = $1\n                    AND namespace = $2\n                ORDER BY version DESC\n            ",
+  "query": "\n                SELECT\n                    id,\n                    name,\n                    organisation,\n                    version\n                FROM\n                   components\n                WHERE\n                        name = $1\n                    AND organisation = $2\n                ORDER BY version DESC\n            ",
   "describe": {
     "columns": [
       {
@@ -15,7 +15,7 @@
       },
       {
         "ordinal": 2,
-        "name": "namespace",
+        "name": "organisation",
         "type_info": "Text"
       },
       {
@@ -37,5 +37,5 @@
       false
     ]
   },
-  "hash": "87ab839d9197e071371c22e59f08b981e037d8472bcac044080fb088196a3f09"
+  "hash": "df828ec55629d58133b0353344cae17e1391d80566c272b3b9fbb75edfbff48c"
 }

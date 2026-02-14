@@ -29,18 +29,18 @@ impl ComponentRegistry {
     pub async fn get_component_version(
         &self,
         name: &str,
-        namespace: &str,
+        organisation: &str,
         version: &str,
     ) -> anyhow::Result<Option<RegistryComponent>> {
         tracing::trace!("get component version");
 
         let component_version = self
             .client
-            .get_component_version(name, namespace, version)
+            .get_component_version(name, organisation, version)
             .await?;
 
         Ok(component_version.map(|c| RegistryComponent {
-            namespace: namespace.into(),
+            organisation: organisation.into(),
             name: name.into(),
             version: c.version,
             id: c.id,

@@ -150,7 +150,7 @@ impl ComponentsService {
                     crate::models::DependencyType::Versioned(version) => {
                         tracing::debug!(
                             "local deps already exists: {}/{}@{}",
-                            dep.namespace,
+                            dep.organisation,
                             dep.name,
                             version
                         );
@@ -158,7 +158,7 @@ impl ComponentsService {
                     crate::models::DependencyType::Local(path) => {
                         tracing::debug!(
                             "local deps already exists: {}/{}#{}",
-                            dep.namespace,
+                            dep.organisation,
                             dep.name,
                             path.display().to_string()
                         );
@@ -173,7 +173,7 @@ impl ComponentsService {
                     tracing::debug!("fetching upstream dep");
                     let upstream_component = self
                         .registry
-                        .get_component_version(&dep.name, &dep.namespace, &version.to_string())
+                        .get_component_version(&dep.name, &dep.organisation, &version.to_string())
                         .await?
                         .ok_or(anyhow::anyhow!("failed to find upstream component"))?;
 
@@ -183,7 +183,7 @@ impl ComponentsService {
 
             // Download deps
             for dep in upstream {
-                self.download_component(&dep.id, &dep.name, &dep.namespace, &dep.version)
+                self.download_component(&dep.id, &dep.name, &dep.organisation, &dep.version)
                     .await?;
             }
         }
@@ -221,7 +221,7 @@ impl ComponentsService {
             DependencyType::Versioned(version) => {
                 let component_version = self
                     .registry
-                    .get_component_version(&dep.name, &dep.namespace, &version.to_string())
+                    .get_component_version(&dep.name, &dep.organisation, &version.to_string())
                     .await
                     .context("failed to get component version")?;
 
@@ -274,17 +274,17 @@ impl ComponentsService {
         &self,
         id: &str,
         name: &str,
-        namespace: &str,
+        organisation: &str,
         version: &str,
     ) -> anyhow::Result<()> {
-        tracing::trace!(name, namespace, version, "downloading component");
+        tracing::trace!(name, organisation, version, "downloading component");
         let mut stream = self.grpc.get_component_files(id).await?;
 
         while let Some(item) = stream.next().await.transpose()? {
             self.component_cache
                 .add_file(
                     name,
-                    namespace,
+                    organisation,
                     version,
                     &item.file_path,
                     &item.file_content,
@@ -321,7 +321,7 @@ impl TryFrom<RegistryComponent> for UpstreamProjectDependency {
         Ok(Self {
             id: value.id.parse()?,
             name: value.name,
-            namespace: value.namespace,
+            organisation: value.organisation,
             version: value.version.parse()?,
         })
     }
@@ -333,7 +333,7 @@ impl TryFrom<CacheComponent> for Dependency {
     fn try_from(value: CacheComponent) -> Result<Self, Self::Error> {
         Ok(Self {
             name: value.name,
-            namespace: value.namespace,
+            organisation: value.organisation,
             dependency_type: DependencyType::Versioned(value.version),
         })
     }

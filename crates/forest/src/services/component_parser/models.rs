@@ -67,7 +67,7 @@ pub enum RawComponentRequirementType {
 #[derive(Default, Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct RawSpecComponent {
     pub name: String,
-    pub namespace: String,
+    pub organisation: String,
     pub version: String,
 }
 

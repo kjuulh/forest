@@ -1,6 +1,6 @@
 [component]
 name = "my_component"
-namespace = "forest"
+organisation = "forest"
 version = "0.0.2"
 
 [templates.rust_service]

@@ -34,7 +34,7 @@ impl RegistryService for RegistryServer {
         let component = self
             .state
             .component_registry()
-            .get_component(&request.name, &request.namespace)
+            .get_component(&request.name, &request.organisation)
             .await
             .inspect_err(|e| tracing::warn!("failed to get components: {:#?}", e))
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
@@ -53,7 +53,7 @@ impl RegistryService for RegistryServer {
         let component = self
             .state
             .component_registry()
-            .get_component_version(&req.name, &req.namespace, &req.version)
+            .get_component_version(&req.name, &req.organisation, &req.version)
             .await
             .inspect_err(|e| tracing::warn!("failed to get component by version: {:#?}", e))
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
@@ -72,7 +72,7 @@ impl RegistryService for RegistryServer {
         let context = self
             .state
             .component_registry()
-            .begin_upload(&request.name, &request.namespace, &request.version)
+            .begin_upload(&request.name, &request.organisation, &request.version)
             .await
             .inspect_err(|e| tracing::warn!("failed to get components: {:#?}", e))
             .map_err(|e| tonic::Status::internal(e.to_string()))?;

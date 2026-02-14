@@ -12,7 +12,7 @@ pub struct GlobalAddCommand {
 }
 
 struct AddComponent {
-    namespace: String,
+    organisation: String,
     name: String,
     version: Option<semver::Version>,
 }
@@ -21,8 +21,8 @@ impl TryFrom<&GlobalAddCommand> for AddComponent {
     type Error = anyhow::Error;
 
     fn try_from(value: &GlobalAddCommand) -> Result<Self, Self::Error> {
-        let (namespace, rest) = match value.component.split_once("/") {
-            Some((namespace, rest)) => (namespace, rest),
+        let (organisation, rest) = match value.component.split_once("/") {
+            Some((organisation, rest)) => (organisation, rest),
             None => {
                 // is forest
                 (
@@ -46,7 +46,7 @@ impl TryFrom<&GlobalAddCommand> for AddComponent {
         };
 
         Ok(Self {
-            namespace: namespace.into(),
+            organisation: organisation.into(),
             name: name.into(),
             version,
         })
@@ -65,7 +65,7 @@ impl GlobalAddCommand {
                     .grpc_client()
                     .get_component_version(
                         &add_command.name,
-                        &add_command.namespace,
+                        &add_command.organisation,
                         &version.to_string(),
                     )
                     .await?
@@ -73,7 +73,7 @@ impl GlobalAddCommand {
             None => {
                 state
                     .grpc_client()
-                    .get_component(&add_command.name, &add_command.namespace)
+                    .get_component(&add_command.name, &add_command.organisation)
                     .await?
             }
         };
@@ -86,7 +86,7 @@ impl GlobalAddCommand {
             .user_config_service()
             .add_dependency(
                 &add_command.name,
-                &add_command.namespace,
+                &add_command.organisation,
                 &component.version,
             )
             .await?;

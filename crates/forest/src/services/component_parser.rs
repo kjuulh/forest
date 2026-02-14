@@ -82,7 +82,7 @@ mod test {
                 component_spec: RawComponentSpec {
                     component: RawSpecComponent {
                         name: "my_component".into(),
-                        namespace: "forest".into(),
+                        organisation: "forest".into(),
                         version: "0.0.2".into()
                     },
                     templates: BTreeMap::from([("rust_service".to_string(), RawSpecTemplate {})]),

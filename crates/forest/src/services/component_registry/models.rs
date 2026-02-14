@@ -1,14 +1,14 @@
 #[derive(Clone, Debug)]
 pub struct RegistryComponent {
     pub id: String,
-    pub namespace: String,
+    pub organisation: String,
     pub name: String,
     pub version: String,
 }
 
 impl RegistryComponent {
     pub fn fqn(&self) -> String {
-        format!("{}/{}@{}", self.namespace, self.name, self.version)
+        format!("{}/{}@{}", self.organisation, self.name, self.version)
     }
 }
 

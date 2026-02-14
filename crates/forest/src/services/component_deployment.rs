@@ -26,7 +26,7 @@ impl ComponentDeploymentService {
             .grpc
             .get_component(
                 &raw_component.component_spec.component.name,
-                &raw_component.component_spec.component.namespace,
+                &raw_component.component_spec.component.organisation,
             )
             .await?;
 
@@ -61,7 +61,7 @@ impl ComponentDeploymentService {
             .grpc
             .begin_upload(
                 &raw_component.component_spec.component.name,
-                &raw_component.component_spec.component.namespace,
+                &raw_component.component_spec.component.organisation,
                 &current_version.to_string(),
             )
             .await?;

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-use forest_models::{Destination, Namespace, ProjectName, ReleaseStatus};
+use forest_models::{Destination, OrganisationName, ProjectName, ReleaseStatus};
+use crate::repositories::error::DbError;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -21,7 +22,7 @@ impl ReleaseRegistry {
         metadata: &HashMap<String, String>,
         source: &Source,
         context: &ArtifactContext,
-        namespace: &str,
+        organisation: &str,
         project: &str,
         reference: &Reference,
     ) -> anyhow::Result<ReleaseAnnotation> {
@@ -37,11 +38,11 @@ impl ReleaseRegistry {
                 SELECT id
                 FROM projects
                 WHERE
-                        namespace = $1
+                        organisation = $1
                     AND project = $2
                 FOR UPDATE
             ",
-            namespace,
+            organisation,
             project
         )
         .fetch_optional(&mut *tx)
@@ -54,19 +55,19 @@ impl ReleaseRegistry {
                 let rec = sqlx::query!(
                     "
                    INSERT INTO projects (
-                       namespace,
+                       organisation,
                        project
                    ) VALUES (
                        $1,
                        $2
                    ) RETURNING id
                    ",
-                    namespace,
+                    organisation,
                     project
                 )
                 .fetch_one(&mut *tx)
                 .await
-                .context("create project")?;
+                .map_err(DbError::from)?;
 
                 rec.id
             }
@@ -115,7 +116,7 @@ impl ReleaseRegistry {
             source: serde_json::from_value(source).context("source")?,
             context: serde_json::from_value(context).context("context")?,
             project: Project {
-                namespace: namespace.to_string(),
+                organisation: organisation.to_string(),
                 project: project.to_string(),
             },
             destinations: Vec::new(),
@@ -379,7 +380,7 @@ impl ReleaseRegistry {
                     a.context,
                     a.project_id,
                     a.created,
-                    p.namespace as namespace,
+                    p.organisation as organisation,
                     p.project as project
                 FROM annotations a
                 JOIN projects p ON a.project_id = p.id
@@ -404,7 +405,7 @@ impl ReleaseRegistry {
             source: serde_json::from_value(rec.source).context("source")?,
             context: serde_json::from_value(rec.context).context("context")?,
             project: Project {
-                namespace: rec.namespace,
+                organisation: rec.organisation,
                 project: rec.project,
             },
             destinations: Vec::new(),
@@ -414,7 +415,7 @@ impl ReleaseRegistry {
 
     pub async fn get_release_annotation_by_project(
         &self,
-        namespace: &str,
+        organisation: &str,
         project: &str,
     ) -> anyhow::Result<Vec<ReleaseAnnotation>> {
         // Use LEFT JOINs to get annotations even if they have no releases/destinations
@@ -431,7 +432,7 @@ impl ReleaseRegistry {
                     a.context            as context,
                     a.project_id         as project_id,
                     a.created            as created,
-                    p.namespace          as namespace,
+                    p.organisation       as organisation,
                     p.project            as project,
                     d.environment        as "environment?",
                     d.name               as "destination_name?",
@@ -444,11 +445,11 @@ impl ReleaseRegistry {
                 LEFT JOIN releases r ON r.release_intent_id = ri.id
                 LEFT JOIN destinations d ON d.id = r.destination_id
                 WHERE
-                        p.namespace = $1
+                        p.organisation = $1
                     AND p.project = $2
                 ORDER BY a.created DESC, a.id
             "#,
-            namespace,
+            organisation,
             project
         )
         .fetch_all(&self.db)
@@ -503,7 +504,7 @@ impl ReleaseRegistry {
                     source: serde_json::from_value(rec.source).context("source")?,
                     context: serde_json::from_value(rec.context).context("context")?,
                     project: Project {
-                        namespace: rec.namespace,
+                        organisation: rec.organisation,
                         project: rec.project,
                     },
                     destinations,
@@ -517,32 +518,32 @@ impl ReleaseRegistry {
         Ok(annotations_map.into_values().collect())
     }
 
-    pub async fn get_namespaces(&self) -> anyhow::Result<Vec<Namespace>> {
+    pub async fn get_organisations(&self) -> anyhow::Result<Vec<OrganisationName>> {
         // TODO: consider if we should cursor this
         let recs = sqlx::query!(
             "
-                SELECT DISTINCT namespace FROM projects;
+                SELECT DISTINCT organisation FROM projects;
             "
         )
         .fetch_all(&self.db)
         .await
-        .context("get namespaces (db)")?;
+        .context("get organisations (db)")?;
 
-        Ok(recs.into_iter().map(|r| r.namespace.into()).collect())
+        Ok(recs.into_iter().map(|r| r.organisation.into()).collect())
     }
 
-    pub async fn get_projects_by_namespace(
+    pub async fn get_projects_by_organisation(
         &self,
-        namespace: &Namespace,
+        organisation: &OrganisationName,
     ) -> anyhow::Result<Vec<ProjectName>> {
         // TODO: consider if we should cursor this
         let recs = sqlx::query!(
             "
                 SELECT project
                 FROM projects
-                WHERE namespace = $1;
+                WHERE organisation = $1;
             ",
-            namespace.as_str(),
+            organisation.as_str(),
         )
         .fetch_all(&self.db)
         .await
@@ -551,20 +552,22 @@ impl ReleaseRegistry {
         Ok(recs.into_iter().map(|r| r.project.into()).collect())
     }
 
-    pub async fn get_destinations(&self) -> anyhow::Result<Vec<Destination>> {
-        // TODO: consider if we should cursor this
+    pub async fn get_destinations(&self, organisation: &str) -> anyhow::Result<Vec<Destination>> {
         let recs = sqlx::query!(
             "
                 SELECT
                     id,
+                    organisation,
                     name,
                     metadata,
                     environment,
                     type_organisation,
                     type_name,
                     type_version
-                FROM destinations 
+                FROM destinations
+                WHERE organisation = $1
             ",
+            organisation,
         )
         .fetch_all(&self.db)
         .await
@@ -573,6 +576,7 @@ impl ReleaseRegistry {
         recs.into_iter()
             .map(|r| {
                 Ok(Destination::new(
+                    &r.organisation,
                     &r.name,
                     &r.environment,
                     serde_json::from_value(r.metadata).context("parse metadata")?,
@@ -619,7 +623,7 @@ pub struct Reference {
 }
 
 pub struct Project {
-    pub namespace: String,
+    pub organisation: String,
     pub project: String,
 }
 

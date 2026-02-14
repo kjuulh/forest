@@ -8,7 +8,7 @@ pub struct GetComponentCommand {
     name: String,
 
     #[arg(long)]
-    namespace: String,
+    organisation: String,
 }
 
 impl GetComponentCommand {
@@ -18,9 +18,9 @@ impl GetComponentCommand {
 
         let Some(component) = state
             .grpc_client()
-            .get_component(&self.name, &self.namespace)
+            .get_component(&self.name, &self.organisation)
             .await
-            .context("failed to create namespace")?
+            .context("failed to get component")?
         else {
             anyhow::bail!("failed to find component");
         };

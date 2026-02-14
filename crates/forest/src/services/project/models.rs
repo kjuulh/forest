@@ -22,6 +22,7 @@ pub enum Command {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Project {
     pub name: String,
+    pub organisation: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

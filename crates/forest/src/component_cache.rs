@@ -31,7 +31,7 @@ impl ComponentCache {
             .await
             .context("failed to get cache")?;
 
-        // cache is [namespace]/[name]/[version]/[component...]
+        // cache is [organisation]/[name]/[version]/[component...]
         if !component_cache_path.exists() {
             tracing::debug!("found no local cache, skipping");
             return Ok(CacheComponents::default());
@@ -40,26 +40,26 @@ impl ComponentCache {
         let mut components = Vec::new();
         tracing::trace!("scanning component cache");
 
-        let mut namespace_entries = tokio::fs::read_dir(component_cache_path)
+        let mut organisation_entries = tokio::fs::read_dir(component_cache_path)
             .await
-            .context("read namespaces")?;
-        while let Some(namespace_entry) = namespace_entries
+            .context("read organisations")?;
+        while let Some(organisation_entry) = organisation_entries
             .next_entry()
             .await
-            .context("read namespaces entry")?
+            .context("read organisations entry")?
         {
             let mut name_entries =
-                tokio::fs::read_dir(namespace_entry.path())
+                tokio::fs::read_dir(organisation_entry.path())
                     .await
                     .context(anyhow::anyhow!(
-                        "read names for namespace: {}",
-                        namespace_entry.path().to_string_lossy()
+                        "read names for organisation: {}",
+                        organisation_entry.path().to_string_lossy()
                     ))?;
 
             while let Some(name_entry) =
                 name_entries.next_entry().await.context(anyhow::anyhow!(
-                    "read name entry for namespace: {}",
-                    namespace_entry.path().to_string_lossy()
+                    "read name entry for organisation: {}",
+                    organisation_entry.path().to_string_lossy()
                 ))?
             {
                 let mut version_entries =
@@ -106,7 +106,7 @@ impl ComponentCache {
         let file_path = self
             .get_component_cache()
             .await?
-            .join(&component.namespace)
+            .join(&component.organisation)
             .join(&component.name)
             .join(component.version.to_string());
 
@@ -116,7 +116,7 @@ impl ComponentCache {
     pub async fn add_file(
         &self,
         name: &str,
-        namespace: &str,
+        organisation: &str,
         version: &str,
         file_path: &str,
         file_content: &[u8],
@@ -124,7 +124,7 @@ impl ComponentCache {
         let file_path = self
             .get_component_cache()
             .await?
-            .join(namespace)
+            .join(organisation)
             .join(name)
             .join(version)
             .join(file_path);

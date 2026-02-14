@@ -52,7 +52,7 @@ impl ReleaseService for ReleaseServer {
                     .map(|s| s.into())
                     .context("context is required")
                     .to_internal_error()?,
-                &proj.namespace,
+                &proj.organisation,
                 &proj.project,
                 &req.r#ref
                     .map(|r| r.into())
@@ -101,7 +101,7 @@ impl ReleaseService for ReleaseServer {
         let release_annotation = self
             .state
             .release_registry()
-            .get_release_annotation_by_project(&project.namespace, &project.project)
+            .get_release_annotation_by_project(&project.organisation, &project.project)
             .await
             .context("get release annotation by project")
             .to_internal_error()?;
@@ -298,23 +298,23 @@ impl ReleaseService for ReleaseServer {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
-    async fn get_namespaces(
+    async fn get_organisations(
         &self,
-        request: tonic::Request<GetNamespacesRequest>,
-    ) -> std::result::Result<tonic::Response<GetNamespacesResponse>, tonic::Status> {
-        tracing::debug!("get namespaces");
+        request: tonic::Request<GetOrganisationsRequest>,
+    ) -> std::result::Result<tonic::Response<GetOrganisationsResponse>, tonic::Status> {
+        tracing::debug!("get organisations");
         let _req = request.into_inner();
 
-        let namespaces = self
+        let organisations = self
             .state
             .release_registry()
-            .get_namespaces()
+            .get_organisations()
             .await
-            .context("failed to find namespaces")
+            .context("failed to find organisations")
             .to_internal_error()?;
 
-        Ok(Response::new(GetNamespacesResponse {
-            namespaces: namespaces.into_iter().map(|n| n.into()).collect(),
+        Ok(Response::new(GetOrganisationsResponse {
+            organisations: organisations.into_iter().map(|n| n.into()).collect(),
         }))
     }
 
@@ -326,10 +326,10 @@ impl ReleaseService for ReleaseServer {
         let req = request.into_inner();
 
         let projects = match req.query.context("query is required").to_internal_error()? {
-            get_projects_request::Query::Namespace(namespace) => self
+            get_projects_request::Query::Organisation(organisation) => self
                 .state
                 .release_registry()
-                .get_projects_by_namespace(&namespace.into())
+                .get_projects_by_organisation(&organisation.into())
                 .await
                 .context("failed to find projects")
                 .to_internal_error()?,
@@ -419,7 +419,7 @@ impl From<release_registry::ArtifactContext> for grpc::ArtifactContext {
 impl From<release_registry::Project> for grpc::Project {
     fn from(value: release_registry::Project) -> Self {
         Self {
-            namespace: value.namespace,
+            organisation: value.organisation,
             project: value.project,
         }
     }

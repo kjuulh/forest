@@ -32,7 +32,7 @@ impl DerefMut for CacheComponents {
 #[derive(Debug, Clone)]
 pub struct CacheComponent {
     pub name: String,
-    pub namespace: String,
+    pub organisation: String,
     pub version: semver::Version,
 
     pub dependencies: Vec<CacheComponentDependency>,
@@ -48,7 +48,7 @@ pub struct CacheComponent {
 impl CacheComponent {
     pub(crate) fn component_ref(&self) -> ComponentReference {
         ComponentReference::new(
-            &self.namespace,
+            &self.organisation,
             &self.name,
             match &self.source {
                 CacheComponentSource::Versioned(version) => {
@@ -67,7 +67,7 @@ impl TryFrom<RawComponent> for CacheComponent {
     fn try_from(value: RawComponent) -> Result<Self, Self::Error> {
         Ok(Self {
             name: value.component_spec.component.name,
-            namespace: value.component_spec.component.namespace,
+            organisation: value.component_spec.component.organisation,
             version: value
                 .component_spec
                 .component
@@ -101,7 +101,7 @@ impl TryFrom<RawComponent> for CacheComponent {
 #[derive(Debug, Clone)]
 pub struct CacheComponentDependency {
     pub name: String,
-    pub namespace: String,
+    pub organisation: String,
     pub version: semver::Version,
 }
 
@@ -109,8 +109,8 @@ impl TryFrom<(String, RawComponentDependency)> for CacheComponentDependency {
     type Error = anyhow::Error;
 
     fn try_from((name, dependency): (String, RawComponentDependency)) -> Result<Self, Self::Error> {
-        let (namespace, name) = match name.split_once("/") {
-            Some((namespace, dep)) => (namespace, dep),
+        let (organisation, name) = match name.split_once("/") {
+            Some((organisation, dep)) => (organisation, dep),
             None => ("forest", name.as_str()),
         };
 
@@ -124,7 +124,7 @@ impl TryFrom<(String, RawComponentDependency)> for CacheComponentDependency {
 
         Ok(Self {
             name: name.into(),
-            namespace: namespace.into(),
+            organisation: organisation.into(),
             version,
         })
     }

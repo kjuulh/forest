@@ -3,15 +3,18 @@ use anyhow::Context;
 use crate::{grpc::GrpcClientState, state::State};
 
 #[derive(clap::Parser)]
-pub struct ListCommand {}
+pub struct ListCommand {
+    #[arg(long, short = 'o')]
+    organisation: String,
+}
 
 impl ListCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let destinations = state
             .grpc_client()
-            .get_destinations()
+            .get_destinations(&self.organisation)
             .await
-            .context("update destination")?;
+            .context("get destinations")?;
 
         if destinations.is_empty() {
             println!("No destinations added yet");

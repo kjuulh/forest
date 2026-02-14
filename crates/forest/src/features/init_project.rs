@@ -119,6 +119,7 @@ ForestProject(
             ForestProject {
                 project: Project {
                     name: "some-name".into(),
+                    organisation: None,
                 },
                 dependencies: BTreeMap::default(),
                 commands: BTreeMap::new(),

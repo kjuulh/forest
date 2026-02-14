@@ -72,14 +72,14 @@ enum LogChannel {
   LOG_CHANNEL_STDERR = 2;
 }
 
-message GetNamespacesRequest {}
-message GetNamespacesResponse {
-  repeated Namespace namespaces = 1;
+message GetOrganisationsRequest {}
+message GetOrganisationsResponse {
+  repeated OrganisationRef organisations = 1;
 }
 
 message GetProjectsRequest {
   oneof query {
-    Namespace namespace = 1;
+    OrganisationRef organisation = 1;
   }
 }
 message GetProjectsResponse {
@@ -95,7 +95,7 @@ service ReleaseService {
 
   rpc GetArtifactBySlug(GetArtifactBySlugRequest) returns (GetArtifactBySlugResponse);
   rpc GetArtifactsByProject(GetArtifactsByProjectRequest) returns (GetArtifactsByProjectResponse);
-  rpc GetNamespaces(GetNamespacesRequest) returns (GetNamespacesResponse);
+  rpc GetOrganisations(GetOrganisationsRequest) returns (GetOrganisationsResponse);
   rpc GetProjects(GetProjectsRequest) returns (GetProjectsResponse);
 }
 
@@ -106,7 +106,7 @@ message Source {
 
 message ArtifactContext {
   string title = 1;
-  optional string description = 2; 
+  optional string description = 2;
   optional string web = 3;
 }
 
@@ -131,7 +131,7 @@ message ArtifactDestination {
 }
 
 message Project {
-  string namespace = 1;
+  string organisation = 1;
   string project = 2;
 }
 
@@ -140,7 +140,6 @@ message Ref {
   optional string branch = 2;
 }
 
-message Namespace {
-  string namespace = 1;
+message OrganisationRef {
+  string organisation = 1;
 }
-

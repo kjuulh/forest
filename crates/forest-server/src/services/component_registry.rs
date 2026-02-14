@@ -13,7 +13,7 @@ pub mod models {
     pub struct ComponentVersion {
         pub id: String,
         pub name: String,
-        pub namespace: String,
+        pub organisation: String,
         pub version: String,
     }
 }
@@ -33,11 +33,11 @@ impl ComponentRegistry {
     pub async fn get_component(
         &self,
         component_name: &str,
-        component_namespace: &str,
+        organisation: &str,
     ) -> anyhow::Result<Option<ComponentVersion>> {
         let component = self
             .component_repository
-            .get_component(component_name, component_namespace)
+            .get_component(component_name, organisation)
             .await?;
 
         Ok(component)
@@ -46,12 +46,12 @@ impl ComponentRegistry {
     pub async fn get_component_version(
         &self,
         name: &str,
-        namespace: &str,
+        organisation: &str,
         version: &str,
     ) -> anyhow::Result<Option<ComponentVersion>> {
         let component = self
             .component_repository
-            .get_component_version(name, namespace, version)
+            .get_component_version(name, organisation, version)
             .await?;
 
         Ok(component)
@@ -61,13 +61,13 @@ impl ComponentRegistry {
     pub async fn begin_upload(
         &self,
         name: &str,
-        namespace: &str,
+        organisation: &str,
         version: &str,
     ) -> anyhow::Result<UploadContext> {
         tracing::debug!("beginning upload");
         let context = self
             .staging
-            .create_staging(name, namespace, version)
+            .create_staging(name, organisation, version)
             .await?;
 
         Ok(UploadContext { context })

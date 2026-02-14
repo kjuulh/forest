@@ -1,10 +1,8 @@
-use create_namespace::CreateNamespaceCommand;
 use deploy_components::DeployComponentCommand;
 use get_component::GetComponentCommand;
 
 use crate::state::State;
 
-mod create_namespace;
 mod deploy_components;
 mod get_component;
 
@@ -17,7 +15,6 @@ pub struct AdminCommand {
 
 #[derive(clap::Subcommand)]
 enum Commands {
-    CreateNamespace(CreateNamespaceCommand),
     DeployComponent(DeployComponentCommand),
     GetComponent(GetComponentCommand),
 }
@@ -25,9 +22,6 @@ enum Commands {
 impl Commands {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         match self {
-            Commands::CreateNamespace(create_namespace_command) => {
-                create_namespace_command.execute(state).await
-            }
             Commands::DeployComponent(cmd) => cmd.execute(state).await,
             Commands::GetComponent(get_component_command) => {
                 get_component_command.execute(state).await

@@ -2,28 +2,30 @@ pub mod users;
 
 use std::{collections::HashMap, fmt::Display, ops::Deref};
 
-pub struct Namespace(String);
-impl Deref for Namespace {
+pub struct OrganisationName(String);
+impl Deref for OrganisationName {
     type Target = String;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
-impl From<String> for Namespace {
+impl From<String> for OrganisationName {
     fn from(value: String) -> Self {
         Self(value)
     }
 }
 
-impl From<Namespace> for forest_grpc_interface::Namespace {
-    fn from(value: Namespace) -> Self {
-        Self { namespace: value.0 }
+impl From<OrganisationName> for forest_grpc_interface::OrganisationRef {
+    fn from(value: OrganisationName) -> Self {
+        Self {
+            organisation: value.0,
+        }
     }
 }
-impl From<forest_grpc_interface::Namespace> for Namespace {
-    fn from(value: forest_grpc_interface::Namespace) -> Self {
-        Self(value.namespace)
+impl From<forest_grpc_interface::OrganisationRef> for OrganisationName {
+    fn from(value: forest_grpc_interface::OrganisationRef) -> Self {
+        Self(value.organisation)
     }
 }
 
@@ -42,14 +44,14 @@ impl From<String> for ProjectName {
 }
 
 pub struct Project {
-    pub namespace: Namespace,
+    pub organisation: OrganisationName,
     pub name: ProjectName,
 }
 
 impl From<forest_grpc_interface::Project> for Project {
     fn from(value: forest_grpc_interface::Project) -> Self {
         Self {
-            namespace: value.namespace.into(),
+            organisation: value.organisation.into(),
             name: value.project.into(),
         }
     }
@@ -57,13 +59,14 @@ impl From<forest_grpc_interface::Project> for Project {
 impl From<Project> for forest_grpc_interface::Project {
     fn from(value: Project) -> Self {
         Self {
-            namespace: value.namespace.to_string(),
+            organisation: value.organisation.to_string(),
             project: value.name.to_string(),
         }
     }
 }
 
 pub struct Destination {
+    pub organisation: String,
     pub name: String,
     pub environment: String,
     pub metadata: HashMap<String, String>,
@@ -73,12 +76,14 @@ pub struct Destination {
 
 impl Destination {
     pub fn new(
+        organisation: &str,
         name: &str,
         environment: &str,
         metadata: HashMap<String, String>,
         destination_type: DestinationType,
     ) -> Self {
         Self {
+            organisation: organisation.into(),
             name: name.into(),
             environment: environment.into(),
             metadata,
@@ -96,6 +101,7 @@ impl Display for Destination {
 impl From<Destination> for forest_grpc_interface::Destination {
     fn from(value: Destination) -> Self {
         Self {
+            organisation: value.organisation,
             name: value.name,
             environment: value.environment,
             r#type: Some(value.destination_type.into()),

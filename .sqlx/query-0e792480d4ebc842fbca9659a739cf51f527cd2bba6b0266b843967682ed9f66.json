@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT DISTINCT namespace FROM projects;\n            ",
+  "query": "\n                SELECT DISTINCT organisation FROM projects;\n            ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "namespace",
+        "name": "organisation",
         "type_info": "Text"
       }
     ],
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "d02d8089c2698176c8b4db49d60a49575df5ebbc83b5670bf90798f5b0c2bd1e"
+  "hash": "0e792480d4ebc842fbca9659a739cf51f527cd2bba6b0266b843967682ed9f66"
 }

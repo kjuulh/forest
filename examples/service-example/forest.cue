@@ -1,4 +1,7 @@
-project: name: "service-example"
+project: {
+	name:         "service-example"
+	organisation: "rawpotion"
+}
 
 _basePath: "../../components"
 _destinationTypes: {

@@ -37,7 +37,7 @@ impl DestinationService for DestinationServer {
 
         self.state
             .destination_registry()
-            .create_destination(&req.name, &req.environment, req.metadata, dest_type)
+            .create_destination(&req.organisation, &req.name, &req.environment, req.metadata, dest_type)
             .await
             .context("create destination")
             .to_internal_error()?;
@@ -66,12 +66,12 @@ impl DestinationService for DestinationServer {
         request: tonic::Request<GetDestinationsRequest>,
     ) -> std::result::Result<tonic::Response<GetDestinationsResponse>, tonic::Status> {
         tracing::debug!("get destinations");
-        let _req = request.into_inner();
+        let req = request.into_inner();
 
         let destinations = self
             .state
             .release_registry()
-            .get_destinations()
+            .get_destinations(&req.organisation)
             .await
             .context("failed to find destinations")
             .to_internal_error()?;

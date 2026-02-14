@@ -11,14 +11,14 @@ impl ComponentStagingRepository {
     pub async fn create_staging(
         &self,
         name: &str,
-        namespace: &str,
+        organisation: &str,
         version: &str,
     ) -> anyhow::Result<Uuid> {
         let rec = sqlx::query!(
             r#"
                    INSERT INTO component_staging (
                        name,
-                       namespace,
+                       organisation,
                        version,
                        status
                    ) VALUES (
@@ -30,7 +30,7 @@ impl ComponentStagingRepository {
                    RETURNING id
                "#,
             name,
-            namespace,
+            organisation,
             version
         )
         .fetch_one(&self.db)
@@ -46,7 +46,7 @@ impl ComponentStagingRepository {
             r#"
                 SELECT
                     name,
-                    namespace,
+                    organisation,
                     version
                 FROM
                     component_staging
@@ -63,7 +63,7 @@ impl ComponentStagingRepository {
                 INSERT INTO components (
                     id,
                     name,
-                    namespace,
+                    organisation,
                     version
                 ) VALUES (
                     $1,
@@ -74,7 +74,7 @@ impl ComponentStagingRepository {
             "#,
             context,
             staging.name,
-            staging.namespace,
+            staging.organisation,
             staging.version,
         )
         .execute(&mut *tx)

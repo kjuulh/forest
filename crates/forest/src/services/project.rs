@@ -43,7 +43,7 @@ impl ProjectParser {
             for (command_name, command) in component.commands {
                 project.commands.insert(
                     crate::models::CommandName::Component {
-                        namespace: Some(component.namespace.clone()),
+                        organisation: Some(component.organisation.clone()),
                         name: component.name.clone(),
                         source: match &component.source {
                             CacheComponentSource::Versioned(version) => {
@@ -86,16 +86,16 @@ impl ProjectParser {
             for dep in project.dependencies.dependencies.iter() {
                 tracing::trace!(
                     name = dep.name,
-                    namespace = dep.namespace,
+                    organisation = dep.organisation,
                     "found component"
                 );
 
-                if dep.namespace == component.namespace && dep.name == component.name {
+                if dep.organisation == component.organisation && dep.name == component.name {
                     match &dep.dependency_type {
                         DependencyType::Versioned(version) if version == &component.version => {
                             tracing::trace!(
                                 name = dep.name,
-                                namespace = dep.namespace,
+                                organisation = dep.organisation,
                                 "adding versioned component"
                             );
                             project_components.push(component.clone())
@@ -103,7 +103,7 @@ impl ProjectParser {
                         DependencyType::Local(path) if path == &component.path => {
                             tracing::trace!(
                                 name = dep.name,
-                                namespace = dep.namespace,
+                                organisation = dep.organisation,
                                 "adding local component"
                             );
                             project_components.push(component.clone())
@@ -255,6 +255,7 @@ impl TryFrom<ForestProject> for Project {
     fn try_from(value: ForestProject) -> Result<Self, Self::Error> {
         Ok(Self {
             name: value.project.name,
+            organisation: value.project.organisation,
             dependencies: crate::models::Dependencies {
                 dependencies: value
                     .dependencies
@@ -266,12 +267,12 @@ impl TryFrom<ForestProject> for Project {
                                 &project_dependency.version
                             }
                             Dependency::Local(dep) => {
-                                let (namespace, name) =
+                                let (organisation, name) =
                                     entry.split_once("/").unwrap_or_else(|| ("forest", &entry));
 
                                 return Ok(crate::models::Dependency {
                                     name: name.into(),
-                                    namespace: namespace.into(),
+                                    organisation: organisation.into(),
                                     dependency_type: crate::models::DependencyType::Local(
                                         dep.path.clone(),
                                     ),
@@ -279,12 +280,12 @@ impl TryFrom<ForestProject> for Project {
                             }
                         };
 
-                        let (namespace, name) =
+                        let (organisation, name) =
                             entry.split_once("/").unwrap_or_else(|| ("forest", &entry));
 
                         Ok(crate::models::Dependency {
                             name: name.into(),
-                            namespace: namespace.into(),
+                            organisation: organisation.into(),
                             dependency_type: crate::models::DependencyType::Versioned(
                                 version.parse().context("parse version")?,
                             ),

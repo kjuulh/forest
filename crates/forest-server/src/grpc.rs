@@ -3,12 +3,10 @@ use std::net::SocketAddr;
 use forest_grpc_interface::{
     artifact_service_server::ArtifactServiceServer,
     destination_service_server::DestinationServiceServer,
-    namespace_service_server::NamespaceServiceServer,
     organisation_service_server::OrganisationServiceServer,
     registry_service_server::RegistryServiceServer, release_service_server::ReleaseServiceServer,
     status_service_server::StatusServiceServer, users_service_server::UsersServiceServer,
 };
-use namespaces::NamespacesServer;
 use notmad::MadError;
 use organisations::OrganisationsServer;
 use registry::RegistryServer;
@@ -26,7 +24,6 @@ use crate::{
 mod artifacts;
 mod destinations;
 mod error;
-mod namespaces;
 mod organisations;
 mod registry;
 mod release;
@@ -54,9 +51,6 @@ impl GrpcServer {
                 state: self.state.clone(),
             }))
             .add_service(RegistryServiceServer::new(RegistryServer {
-                state: self.state.clone(),
-            }))
-            .add_service(NamespaceServiceServer::new(NamespacesServer {
                 state: self.state.clone(),
             }))
             .add_service(ArtifactServiceServer::new(ArtifactServer {

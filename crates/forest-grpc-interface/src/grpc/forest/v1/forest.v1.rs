@@ -44,6 +44,8 @@ pub struct CreateDestinationRequest {
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     #[prost(message, optional, tag="4")]
     pub r#type: ::core::option::Option<DestinationType>,
+    #[prost(string, tag="5")]
+    pub organisation: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateDestinationResponse {
@@ -58,8 +60,10 @@ pub struct UpdateDestinationRequest {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateDestinationResponse {
 }
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetDestinationsRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetDestinationsResponse {
@@ -76,6 +80,8 @@ pub struct Destination {
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     #[prost(message, optional, tag="4")]
     pub r#type: ::core::option::Option<DestinationType>,
+    #[prost(string, tag="5")]
+    pub organisation: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DestinationType {
@@ -91,14 +97,6 @@ pub struct GetStatusRequest {
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetStatusResponse {
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct CreateRequest {
-    #[prost(string, tag="1")]
-    pub namespace: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct CreateResponse {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Organisation {
@@ -251,7 +249,7 @@ pub struct GetComponentRequest {
     #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
-    pub namespace: ::prost::alloc::string::String,
+    pub organisation: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetComponentResponse {
@@ -271,7 +269,7 @@ pub struct GetComponentVersionRequest {
     #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
-    pub namespace: ::prost::alloc::string::String,
+    pub organisation: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
     pub version: ::prost::alloc::string::String,
 }
@@ -287,7 +285,7 @@ pub struct BeginUploadRequest {
     #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
-    pub namespace: ::prost::alloc::string::String,
+    pub organisation: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
     pub version: ::prost::alloc::string::String,
 }
@@ -450,12 +448,12 @@ pub struct ReleaseLogLine {
     pub channel: i32,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetNamespacesRequest {
+pub struct GetOrganisationsRequest {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetNamespacesResponse {
+pub struct GetOrganisationsResponse {
     #[prost(message, repeated, tag="1")]
-    pub namespaces: ::prost::alloc::vec::Vec<Namespace>,
+    pub organisations: ::prost::alloc::vec::Vec<OrganisationRef>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetProjectsRequest {
@@ -467,7 +465,7 @@ pub mod get_projects_request {
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Query {
         #[prost(message, tag="1")]
-        Namespace(super::Namespace),
+        Organisation(super::OrganisationRef),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -528,7 +526,7 @@ pub struct ArtifactDestination {
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Project {
     #[prost(string, tag="1")]
-    pub namespace: ::prost::alloc::string::String,
+    pub organisation: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
     pub project: ::prost::alloc::string::String,
 }
@@ -540,9 +538,9 @@ pub struct Ref {
     pub branch: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct Namespace {
+pub struct OrganisationRef {
     #[prost(string, tag="1")]
-    pub namespace: ::prost::alloc::string::String,
+    pub organisation: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

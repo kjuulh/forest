@@ -59,7 +59,7 @@ pub mod release_annotation {
 pub mod project {
     #[derive(Clone)]
     pub struct Project {
-        pub namespace: String,
+        pub organisation: String,
         pub project: String,
     }
 }
@@ -75,6 +75,7 @@ pub mod reference {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Project {
     pub name: String,
+    pub organisation: Option<String>,
     pub dependencies: Dependencies,
 
     pub commands: BTreeMap<CommandName, Command>,
@@ -96,13 +97,13 @@ pub enum ProjectValue {
 
 impl ProjectValue {
     pub fn get_from_component(&self, component_ref: &ComponentReference) -> Option<ProjectValue> {
-        let (namespace, name) = (&component_ref.namespace, &component_ref.name);
+        let (organisation, name) = (&component_ref.organisation, &component_ref.name);
 
         let ProjectValue::Map(map) = &self else {
             return None;
         };
 
-        let ProjectValue::Map(names) = map.get(namespace)? else {
+        let ProjectValue::Map(names) = map.get(organisation)? else {
             return None;
         };
 
@@ -121,13 +122,13 @@ impl Project {
         &self,
         component_ref: &ComponentReference,
     ) -> Option<&ProjectValue> {
-        let (namespace, name) = (&component_ref.namespace, &component_ref.name);
+        let (organisation, name) = (&component_ref.organisation, &component_ref.name);
 
         let ProjectValue::Map(map) = &self.other else {
             return None;
         };
 
-        let ProjectValue::Map(map) = map.get(namespace)? else {
+        let ProjectValue::Map(map) = map.get(organisation)? else {
             return None;
         };
 
@@ -142,7 +143,7 @@ impl Project {
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub enum CommandName {
     Component {
-        namespace: Option<String>,
+        organisation: Option<String>,
         name: String,
         source: CommandSource,
         command_name: String,
@@ -162,7 +163,7 @@ impl CommandName {
     pub fn to_fqn(&self) -> String {
         match self {
             CommandName::Component {
-                namespace,
+                organisation,
                 name,
                 source,
                 command_name,
@@ -173,7 +174,7 @@ impl CommandName {
                 };
                 format!(
                     "{}/{}{src}:{command_name}",
-                    namespace.as_ref().unwrap_or(&"forest".to_string()),
+                    organisation.as_ref().unwrap_or(&"forest".to_string()),
                     name,
                 )
             }
@@ -184,7 +185,7 @@ impl CommandName {
     pub fn to_component(&self) -> Option<String> {
         match self {
             CommandName::Component {
-                namespace,
+                organisation,
                 name,
                 source,
                 ..
@@ -195,7 +196,7 @@ impl CommandName {
                 };
                 Some(format!(
                     "{}/{}{src}",
-                    namespace.as_ref().unwrap_or(&"forest".to_string()),
+                    organisation.as_ref().unwrap_or(&"forest".to_string()),
                     name,
                 ))
             }
@@ -208,7 +209,7 @@ impl Display for CommandName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CommandName::Component {
-                namespace,
+                organisation,
                 name,
                 source,
                 command_name,
@@ -216,7 +217,7 @@ impl Display for CommandName {
                 write!(
                     f,
                     "{}{}{}:{}",
-                    match &namespace {
+                    match &organisation {
                         Some(item) => format!("{item}/"),
                         None => "".to_string(),
                     },
@@ -239,14 +240,14 @@ impl Display for CommandName {
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Serialize, Deserialize)]
 pub struct ComponentReference {
-    pub namespace: String,
+    pub organisation: String,
     pub name: String,
     pub source: ComponentSource,
 }
 impl ComponentReference {
-    pub(crate) fn new(namespace: &str, name: &str, source: ComponentSource) -> Self {
+    pub(crate) fn new(organisation: &str, name: &str, source: ComponentSource) -> Self {
         Self {
-            namespace: namespace.into(),
+            organisation: organisation.into(),
             name: name.into(),
             source,
         }
@@ -258,7 +259,7 @@ impl Display for ComponentReference {
         write!(
             f,
             "{}/{}{}",
-            self.namespace,
+            self.organisation,
             self.name,
             match &self.source {
                 ComponentSource::Local(path) => format!("#{}", path.to_string_lossy()),
@@ -280,8 +281,8 @@ impl TryFrom<&str> for ComponentReference {
     type Error = anyhow::Error;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let (namespace, rest) = match value.split_once("/") {
-            Some((namespace, rest)) => (namespace, rest),
+        let (organisation, rest) = match value.split_once("/") {
+            Some((organisation, rest)) => (organisation, rest),
             None => ("forest", value),
         };
 
@@ -297,7 +298,7 @@ impl TryFrom<&str> for ComponentReference {
         };
 
         Ok(Self {
-            namespace: namespace.into(),
+            organisation: organisation.into(),
             name: name.into(),
             source,
         })
@@ -358,20 +359,20 @@ impl Dependencies {
         self.dependencies.append(&mut dependencies.dependencies);
     }
 
-    pub(crate) fn get(&self, namespace: &str, name: &str) -> Option<ComponentReference> {
+    pub(crate) fn get(&self, organisation: &str, name: &str) -> Option<ComponentReference> {
         for dep in &self.dependencies {
-            if dep.namespace == namespace && dep.name == name {
+            if dep.organisation == organisation && dep.name == name {
                 match &dep.dependency_type {
                     DependencyType::Versioned(version) => {
                         return Some(ComponentReference::new(
-                            namespace,
+                            organisation,
                             name,
                             ComponentSource::Versioned(version.clone()),
                         ));
                     }
                     DependencyType::Local(path) => {
                         return Some(ComponentReference::new(
-                            namespace,
+                            organisation,
                             name,
                             ComponentSource::Local(path.clone()),
                         ));
@@ -389,7 +390,7 @@ impl Dependencies {
         for dep in &self.dependencies {
             references.push(
                 // TODO: slightly unoptimal, as we have a double loop here
-                self.get(&dep.namespace, &dep.name)
+                self.get(&dep.organisation, &dep.name)
                     .expect("to find dependency we just got"),
             );
         }
@@ -401,7 +402,7 @@ impl Dependencies {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Dependency {
     pub name: DependencyName,
-    pub namespace: DependencyNamespace,
+    pub organisation: DependencyOrganisation,
 
     pub dependency_type: DependencyType,
 }
@@ -413,7 +414,7 @@ pub enum DependencyType {
 }
 
 type DependencyName = String;
-type DependencyNamespace = String;
+type DependencyOrganisation = String;
 type DependencyVersion = semver::Version;
 type DependencyPath = PathBuf;
 

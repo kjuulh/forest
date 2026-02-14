@@ -104,7 +104,7 @@ impl UserConfigService {
     pub(crate) async fn add_dependency(
         &self,
         name: &str,
-        namespace: &str,
+        organisation: &str,
         version: &str,
     ) -> anyhow::Result<()> {
         let config_path = self.locations.get_config().join(USER_CONFIG_FILE);
@@ -132,7 +132,7 @@ impl UserConfigService {
 
         let table = user_config["dependencies"].as_table_mut().unwrap();
 
-        if table.contains_key(name) && table.contains_key(&format!("{namespace}/{name}")) {
+        if table.contains_key(name) && table.contains_key(&format!("{organisation}/{name}")) {
             anyhow::bail!("dependency already exists in user config");
         }
 
@@ -142,10 +142,10 @@ impl UserConfigService {
             toml_edit::Value::String(toml_edit::Formatted::new(version.into())),
         );
 
-        if namespace == "forest" {
+        if organisation == "forest" {
             table[name] = toml_edit::value(toml_edit::Value::InlineTable(dependency_table));
         } else {
-            table[&format!("{namespace}/{name}")] =
+            table[&format!("{organisation}/{name}")] =
                 toml_edit::value(toml_edit::Value::InlineTable(dependency_table));
         }
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT project\n                FROM projects\n                WHERE namespace = $1;\n            ",
+  "query": "\n                SELECT project\n                FROM projects\n                WHERE organisation = $1;\n            ",
   "describe": {
     "columns": [
       {
@@ -18,5 +18,5 @@
       false
     ]
   },
-  "hash": "a180132928af95c7e26999854409e76e07d6c4d66253ce503b915e2d035b1a84"
+  "hash": "eda0b121c53ed371fdf34a7da431a8bceb60787d8a0297a5f4daf78c0519728c"
 }

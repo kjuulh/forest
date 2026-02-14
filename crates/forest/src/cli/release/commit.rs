@@ -16,8 +16,8 @@ pub struct CommitCommand {
     #[arg()]
     slug: Option<String>,
 
-    #[arg(long, short = 'n')]
-    namespace: Option<String>,
+    #[arg(long, short = 'o')]
+    organisation: Option<String>,
 
     #[arg(long, short = 'p')]
     project: Option<String>,
@@ -47,7 +47,7 @@ impl CommitCommand {
         let artifact_id: ArtifactID = match (
             &self.artifact_id,
             &self.slug,
-            &self.namespace,
+            &self.organisation,
             &self.project,
         ) {
             (Some(artifact_id), _, _, _) => artifact_id.parse().context("artifact id")?,
@@ -59,12 +59,12 @@ impl CommitCommand {
                     .context("get release annotation by slug")?
                     .artifact_id
             }
-            (_, _, Some(namespace), Some(project)) => {
+            (_, _, Some(organisation), Some(project)) => {
                 let release_annotations = state
                     .grpc_client()
-                    .get_release_annotations_by_project(namespace, project)
+                    .get_release_annotations_by_project(organisation, project)
                     .await
-                    .context("get releases by namespace and project")?;
+                    .context("get releases by organisation and project")?;
 
                 let display_items: Vec<ReleaseAnnotationDisplay> = release_annotations
                     .into_iter()
@@ -76,7 +76,7 @@ impl CommitCommand {
                 choice.0.artifact_id
             }
             (None, None, _, _) => {
-                todo!(); // TODO: select based on how much namespace / project and ref we receive
+                todo!(); // TODO: select based on how much organisation / project and ref we receive
             }
         };
 
