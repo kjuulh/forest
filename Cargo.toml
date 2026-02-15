@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*", "examples/service-example"]
+members = ["crates/*", "examples/components-v2/crates/ecs-service", "examples/service-example"]
 resolver = "2"
 
 [workspace.package]
@@ -8,10 +8,15 @@ version = "0.1.0"
 [workspace.dependencies]
 forest-models = { path = "crates/forest-models" }
 forest-grpc-interface = { path = "crates/forest-grpc-interface" }
+forest-sdk = { path = "crates/forest-sdk" }
+forest-sdk-codegen = { path = "crates/forest-sdk-codegen" }
 
 anyhow = { version = "1" }
 tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0.145"
 tracing = { version = "0.1", features = ["log"] }
+thiserror = "2"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
 clap = { version = "4", features = ["derive", "env", "string"] }
 dotenvy = { version = "0.15" }
@@ -34,3 +39,4 @@ tonic = { version = "=0.14.2", features = [
   "tls-webpki-roots",
 ] }
 tonic-prost = "=0.14.2"
+insta = "1"

@@ -61,6 +61,7 @@ pub async fn execute() -> anyhow::Result<()> {
     let config = Config {
         external_host: cli.external_host.clone(),
         terraform_external_host: cli.terraform_external_host.clone(),
+
         password_secret_key: cli.password_secret_key,
         refresh_token_secret_key: BASE64_STANDARD
             .decode(cli.refresh_token_secret_key)

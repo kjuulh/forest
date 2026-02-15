@@ -1,0 +1,430 @@
+---
+source: crates/forest-sdk-codegen/tests/test_openapi.rs
+expression: module
+---
+Module {
+    component: Component {
+        name: "ecs-service",
+        org: "forest-contrib",
+        version: "0.1.0",
+    },
+    spec: Spec {
+        fields: [
+            Field {
+                name: "cpu",
+                ty: Named(
+                    "CPU",
+                ),
+                required: true,
+                default_value: Some(
+                    Integer(
+                        256,
+                    ),
+                ),
+                description: None,
+                constraints: [],
+            },
+            Field {
+                name: "environment",
+                ty: Named(
+                    "Environment",
+                ),
+                required: true,
+                default_value: None,
+                description: None,
+                constraints: [],
+            },
+            Field {
+                name: "health_check",
+                ty: Named(
+                    "HealthCheck",
+                ),
+                required: true,
+                default_value: Some(
+                    Object(
+                        Object {
+                            "interval": Number(30),
+                            "path": String("/health"),
+                        },
+                    ),
+                ),
+                description: None,
+                constraints: [],
+            },
+            Field {
+                name: "image",
+                ty: String,
+                required: true,
+                default_value: None,
+                description: None,
+                constraints: [],
+            },
+            Field {
+                name: "memory",
+                ty: Named(
+                    "Memory",
+                ),
+                required: true,
+                default_value: Some(
+                    Integer(
+                        512,
+                    ),
+                ),
+                description: None,
+                constraints: [],
+            },
+            Field {
+                name: "name",
+                ty: String,
+                required: true,
+                default_value: None,
+                description: None,
+                constraints: [
+                    Pattern(
+                        "^[a-z][a-z0-9-]*$",
+                    ),
+                ],
+            },
+            Field {
+                name: "ports",
+                ty: Array(
+                    Named(
+                        "Port",
+                    ),
+                ),
+                required: true,
+                default_value: None,
+                description: None,
+                constraints: [],
+            },
+            Field {
+                name: "replicas",
+                ty: Integer,
+                required: true,
+                default_value: Some(
+                    Integer(
+                        1,
+                    ),
+                ),
+                description: None,
+                constraints: [
+                    Minimum(
+                        1,
+                    ),
+                    Maximum(
+                        100,
+                    ),
+                ],
+            },
+        ],
+    },
+    commands: [
+        Command {
+            name: "prepare",
+            description: "Generate ECS task definition and service manifests",
+            input: StructDef {
+                fields: [],
+            },
+            output: StructDef {
+                fields: [],
+            },
+        },
+        Command {
+            name: "status",
+            description: "Check service health and running count",
+            input: StructDef {
+                fields: [],
+            },
+            output: StructDef {
+                fields: [
+                    Field {
+                        name: "desired",
+                        ty: Integer,
+                        required: true,
+                        default_value: None,
+                        description: None,
+                        constraints: [],
+                    },
+                    Field {
+                        name: "healthy",
+                        ty: Boolean,
+                        required: true,
+                        default_value: None,
+                        description: None,
+                        constraints: [],
+                    },
+                    Field {
+                        name: "running",
+                        ty: Integer,
+                        required: true,
+                        default_value: None,
+                        description: None,
+                        constraints: [],
+                    },
+                ],
+            },
+        },
+    ],
+    hook_groups: [
+        HookGroup {
+            topic: "forest/deployment",
+            actions: [
+                HookAction {
+                    name: "prepare",
+                    description: "Generate ECS task definition and service manifests",
+                    input: StructDef {
+                        fields: [],
+                    },
+                    output: Some(
+                        StructDef {
+                            fields: [],
+                        },
+                    ),
+                },
+                HookAction {
+                    name: "release",
+                    description: "Deploy to ECS",
+                    input: StructDef {
+                        fields: [
+                            Field {
+                                name: "release_id",
+                                ty: String,
+                                required: true,
+                                default_value: None,
+                                description: None,
+                                constraints: [],
+                            },
+                        ],
+                    },
+                    output: Some(
+                        StructDef {
+                            fields: [],
+                        },
+                    ),
+                },
+                HookAction {
+                    name: "rollback",
+                    description: "Roll back to previous task definition",
+                    input: StructDef {
+                        fields: [
+                            Field {
+                                name: "environment",
+                                ty: String,
+                                required: true,
+                                default_value: None,
+                                description: None,
+                                constraints: [],
+                            },
+                            Field {
+                                name: "name",
+                                ty: String,
+                                required: true,
+                                default_value: None,
+                                description: None,
+                                constraints: [],
+                            },
+                            Field {
+                                name: "release_id",
+                                ty: String,
+                                required: true,
+                                default_value: None,
+                                description: None,
+                                constraints: [],
+                            },
+                        ],
+                    },
+                    output: None,
+                },
+            ],
+        },
+    ],
+    type_defs: [
+        TypeDef {
+            name: "CPU",
+            kind: Enum(
+                IntegerEnum(
+                    [
+                        256,
+                        512,
+                        1024,
+                        2048,
+                        4096,
+                    ],
+                ),
+            ),
+        },
+        TypeDef {
+            name: "HealthCheck",
+            kind: Struct(
+                StructDef {
+                    fields: [
+                        Field {
+                            name: "interval",
+                            ty: Integer,
+                            required: true,
+                            default_value: Some(
+                                Integer(
+                                    30,
+                                ),
+                            ),
+                            description: None,
+                            constraints: [
+                                Minimum(
+                                    5,
+                                ),
+                                Maximum(
+                                    300,
+                                ),
+                            ],
+                        },
+                        Field {
+                            name: "path",
+                            ty: String,
+                            required: true,
+                            default_value: Some(
+                                String(
+                                    "/health",
+                                ),
+                            ),
+                            description: None,
+                            constraints: [],
+                        },
+                        Field {
+                            name: "retries",
+                            ty: Integer,
+                            required: true,
+                            default_value: Some(
+                                Integer(
+                                    3,
+                                ),
+                            ),
+                            description: None,
+                            constraints: [
+                                Minimum(
+                                    1,
+                                ),
+                                Maximum(
+                                    10,
+                                ),
+                            ],
+                        },
+                        Field {
+                            name: "timeout",
+                            ty: Integer,
+                            required: true,
+                            default_value: Some(
+                                Integer(
+                                    5,
+                                ),
+                            ),
+                            description: None,
+                            constraints: [
+                                Minimum(
+                                    2,
+                                ),
+                                Maximum(
+                                    60,
+                                ),
+                            ],
+                        },
+                    ],
+                },
+            ),
+        },
+        TypeDef {
+            name: "Memory",
+            kind: Enum(
+                IntegerEnum(
+                    [
+                        512,
+                        1024,
+                        2048,
+                        4096,
+                        8192,
+                    ],
+                ),
+            ),
+        },
+        TypeDef {
+            name: "Port",
+            kind: Struct(
+                StructDef {
+                    fields: [
+                        Field {
+                            name: "external",
+                            ty: Boolean,
+                            required: true,
+                            default_value: Some(
+                                Boolean(
+                                    false,
+                                ),
+                            ),
+                            description: None,
+                            constraints: [],
+                        },
+                        Field {
+                            name: "name",
+                            ty: String,
+                            required: true,
+                            default_value: None,
+                            description: None,
+                            constraints: [],
+                        },
+                        Field {
+                            name: "port",
+                            ty: Integer,
+                            required: true,
+                            default_value: None,
+                            description: None,
+                            constraints: [
+                                Maximum(
+                                    65535,
+                                ),
+                                ExclusiveMinimum(
+                                    0,
+                                ),
+                            ],
+                        },
+                        Field {
+                            name: "protocol",
+                            ty: Named(
+                                "Protocol",
+                            ),
+                            required: true,
+                            default_value: Some(
+                                String(
+                                    "tcp",
+                                ),
+                            ),
+                            description: None,
+                            constraints: [],
+                        },
+                    ],
+                },
+            ),
+        },
+        TypeDef {
+            name: "Protocol",
+            kind: Enum(
+                StringEnum(
+                    [
+                        "tcp",
+                        "udp",
+                    ],
+                ),
+            ),
+        },
+        TypeDef {
+            name: "Environment",
+            kind: Enum(
+                StringEnum(
+                    [
+                        "dev",
+                        "staging",
+                        "prod",
+                    ],
+                ),
+            ),
+        },
+    ],
+}
