@@ -1,7 +1,11 @@
 use list::ListCommand;
 
-use crate::{cli::components::generate::GenerateCommand, state::State};
+use crate::{
+    cli::components::{build::BuildCommand, generate::GenerateCommand},
+    state::State,
+};
 
+mod build;
 mod generate;
 mod list;
 
@@ -16,6 +20,7 @@ pub struct ComponentsCommand {
 enum Commands {
     List(ListCommand),
     Generate(GenerateCommand),
+    Build(BuildCommand),
 }
 
 impl ComponentsCommand {
@@ -23,6 +28,7 @@ impl ComponentsCommand {
         match &self.commands {
             Commands::List(list_command) => list_command.execute(state).await,
             Commands::Generate(cmd) => cmd.execute(state).await,
+            Commands::Build(cmd) => cmd.execute(state).await,
         }
     }
 }

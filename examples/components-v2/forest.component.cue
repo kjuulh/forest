@@ -1,16 +1,5 @@
 package component_v2
 
-#Component: #ForestComponent & {
-	name:    "ecs-service"
-	org:     "forest-contrib"
-	version: "0.1.0"
-
-	codegen: {
-		type:   "rust"
-		output: "./crates/ecs-service/src/"
-	}
-}
-
 // --- Input spec: what callers must/can provide ---
 #Spec: #ForestSpec & {
 	name:  string & =~"^[a-z][a-z0-9-]*$"

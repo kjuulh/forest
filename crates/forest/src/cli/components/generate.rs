@@ -13,7 +13,13 @@ pub struct GenerateCommand {
 impl GenerateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let mut cmd = tokio::process::Command::new("cue");
-        cmd.args(["def", "./", "--out", "openapi"]);
+        cmd.args([
+            "def",
+            "./forest.component.cue",
+            "./spec.cue",
+            "--out",
+            "openapi",
+        ]);
 
         let output = cmd.output().await?;
         let stdout = String::from_utf8(output.stdout)?;

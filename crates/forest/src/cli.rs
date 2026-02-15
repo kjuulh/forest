@@ -26,13 +26,14 @@ mod destination;
 mod global;
 mod init;
 mod organisation;
-pub(crate) mod output;
 mod project;
 mod release;
 mod run;
 mod shell;
 mod template;
 mod tmp;
+
+pub(crate) mod output;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about, subcommand_required = true)]

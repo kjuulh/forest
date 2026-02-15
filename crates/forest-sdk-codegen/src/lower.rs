@@ -12,7 +12,6 @@ pub fn lower(doc: &Document) -> CodegenResult<ir::Module> {
 
 #[derive(Debug, Clone, PartialEq)]
 enum SchemaClass {
-    Component,
     Spec,
     Commands,
     Hooks,
@@ -66,9 +65,7 @@ impl<'a> LoweringContext<'a> {
             SchemaOrRef::Ref(_) => return SchemaClass::UserType,
         };
 
-        if Self::has_allof_ref_matching(schema, "Component") {
-            SchemaClass::Component
-        } else if Self::has_allof_ref_matching(schema, "Spec") {
+        if Self::has_allof_ref_matching(schema, "Spec") {
             SchemaClass::Spec
         } else if Self::has_allof_ref_matching(schema, "Commands") {
             SchemaClass::Commands
@@ -106,9 +103,7 @@ impl<'a> LoweringContext<'a> {
     fn resolve_ref<'b>(&'b self, ref_path: &str) -> CodegenResult<&'a Schema> {
         let path = ref_path
             .strip_prefix("#/components/schemas/")
-            .ok_or_else(|| {
-                Error::LoweringError(format!("unsupported $ref path: {ref_path}"))
-            })?;
+            .ok_or_else(|| Error::LoweringError(format!("unsupported $ref path: {ref_path}")))?;
 
         // Dot-notation: "SchemaName.propertyName"
         if let Some((schema_name, prop_name)) = path.split_once('.') {
@@ -141,9 +136,7 @@ impl<'a> LoweringContext<'a> {
     fn ref_to_type_name(&self, ref_path: &str) -> CodegenResult<String> {
         let path = ref_path
             .strip_prefix("#/components/schemas/")
-            .ok_or_else(|| {
-                Error::LoweringError(format!("unsupported $ref path: {ref_path}"))
-            })?;
+            .ok_or_else(|| Error::LoweringError(format!("unsupported $ref path: {ref_path}")))?;
         // For dot-notation refs, we don't produce a named type reference
         if path.contains('.') {
             return Err(Error::LoweringError(format!(
@@ -333,7 +326,6 @@ impl<'a> LoweringContext<'a> {
     // ── Top-level lowering ───────────────────────────────────────────
 
     fn lower(&self) -> CodegenResult<ir::Module> {
-        let mut component = None;
         let mut spec = None;
         let mut commands = Vec::new();
         let mut hook_groups = Vec::new();
@@ -342,9 +334,6 @@ impl<'a> LoweringContext<'a> {
         for (name, class) in &self.classifications {
             let schema = self.get_schema(name)?;
             match class {
-                SchemaClass::Component => {
-                    component = Some(self.lower_component(schema)?);
-                }
                 SchemaClass::Spec => {
                     spec = Some(self.lower_spec(schema)?);
                 }
@@ -365,11 +354,7 @@ impl<'a> LoweringContext<'a> {
         type_defs.extend(self.promoted_type_defs.borrow_mut().drain(..));
 
         Ok(ir::Module {
-            component: component.ok_or_else(|| {
-                Error::LoweringError("no Component schema found".into())
-            })?,
-            spec: spec
-                .ok_or_else(|| Error::LoweringError("no Spec schema found".into()))?,
+            spec: spec.ok_or_else(|| Error::LoweringError("no Spec schema found".into()))?,
             commands,
             hook_groups,
             type_defs,
@@ -379,9 +364,10 @@ impl<'a> LoweringContext<'a> {
     // ── Component ────────────────────────────────────────────────────
 
     fn lower_component(&self, schema: &Schema) -> CodegenResult<ir::Component> {
-        let props = schema.properties.as_ref().ok_or_else(|| {
-            Error::LoweringError("Component schema has no properties".into())
-        })?;
+        let props = schema
+            .properties
+            .as_ref()
+            .ok_or_else(|| Error::LoweringError("Component schema has no properties".into()))?;
 
         let name = self.extract_single_enum_string(props, "name")?;
         let org = self.extract_single_enum_string(props, "org")?;
@@ -399,20 +385,15 @@ impl<'a> LoweringContext<'a> {
             Some(SchemaOrRef::Schema(s)) => s,
             Some(SchemaOrRef::Ref(r)) => self.resolve_ref(&r.ref_path)?,
             None => {
-                return Err(Error::LoweringError(format!(
-                    "missing property: {field}"
-                )));
+                return Err(Error::LoweringError(format!("missing property: {field}")));
             }
         };
         match &schema.enum_values {
-            Some(vals) if vals.len() == 1 => vals[0]
-                .as_str()
-                .map(|s| s.to_string())
-                .ok_or_else(|| {
-                    Error::LoweringError(format!(
-                        "property {field} enum[0] is not a string"
-                    ))
-                }),
+            Some(vals) if vals.len() == 1 => {
+                vals[0].as_str().map(|s| s.to_string()).ok_or_else(|| {
+                    Error::LoweringError(format!("property {field} enum[0] is not a string"))
+                })
+            }
             _ => Err(Error::LoweringError(format!(
                 "property {field} is not a single-value string enum"
             ))),
@@ -422,9 +403,10 @@ impl<'a> LoweringContext<'a> {
     // ── Spec ─────────────────────────────────────────────────────────
 
     fn lower_spec(&self, schema: &Schema) -> CodegenResult<ir::Spec> {
-        let props = schema.properties.as_ref().ok_or_else(|| {
-            Error::LoweringError("Spec schema has no properties".into())
-        })?;
+        let props = schema
+            .properties
+            .as_ref()
+            .ok_or_else(|| Error::LoweringError("Spec schema has no properties".into()))?;
         let required = self.collect_required_fields(schema);
 
         let mut fields = Vec::new();
@@ -439,9 +421,10 @@ impl<'a> LoweringContext<'a> {
     // ── Commands ─────────────────────────────────────────────────────
 
     fn lower_commands(&self, schema: &Schema) -> CodegenResult<Vec<ir::Command>> {
-        let props = schema.properties.as_ref().ok_or_else(|| {
-            Error::LoweringError("Commands schema has no properties".into())
-        })?;
+        let props = schema
+            .properties
+            .as_ref()
+            .ok_or_else(|| Error::LoweringError("Commands schema has no properties".into()))?;
 
         let mut commands = Vec::new();
         for (cmd_name, cmd_sor) in props {
@@ -467,9 +450,10 @@ impl<'a> LoweringContext<'a> {
     // ── Hooks ────────────────────────────────────────────────────────
 
     fn lower_hooks(&self, schema: &Schema) -> CodegenResult<Vec<ir::HookGroup>> {
-        let props = schema.properties.as_ref().ok_or_else(|| {
-            Error::LoweringError("Hooks schema has no properties".into())
-        })?;
+        let props = schema
+            .properties
+            .as_ref()
+            .ok_or_else(|| Error::LoweringError("Hooks schema has no properties".into()))?;
 
         let mut groups = Vec::new();
         for (topic, topic_sor) in props {
@@ -488,9 +472,10 @@ impl<'a> LoweringContext<'a> {
     }
 
     fn lower_hook_actions(&self, topic_schema: &Schema) -> CodegenResult<Vec<ir::HookAction>> {
-        let props = topic_schema.properties.as_ref().ok_or_else(|| {
-            Error::LoweringError("Hook topic has no properties".into())
-        })?;
+        let props = topic_schema
+            .properties
+            .as_ref()
+            .ok_or_else(|| Error::LoweringError("Hook topic has no properties".into()))?;
 
         let mut actions = Vec::new();
         for (action_name, action_sor) in props {
@@ -562,18 +547,12 @@ impl<'a> LoweringContext<'a> {
             Some(vals) if !vals.is_empty() => vals[0]
                 .as_str()
                 .map(|s| s.to_string())
-                .ok_or_else(|| {
-                    Error::LoweringError("description enum[0] is not a string".into())
-                }),
+                .ok_or_else(|| Error::LoweringError("description enum[0] is not a string".into())),
             _ => Ok(desc_schema.description.clone().unwrap_or_default()),
         }
     }
 
-    fn extract_io_struct(
-        &self,
-        schema: &Schema,
-        field_name: &str,
-    ) -> CodegenResult<ir::StructDef> {
+    fn extract_io_struct(&self, schema: &Schema, field_name: &str) -> CodegenResult<ir::StructDef> {
         let Some(props) = &schema.properties else {
             return Ok(ir::StructDef { fields: vec![] });
         };

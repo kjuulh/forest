@@ -863,6 +863,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "sha2",
  "stringcase",
  "tabled",
  "tokio",

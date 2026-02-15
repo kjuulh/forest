@@ -14,7 +14,6 @@ pub fn emit(module: &Module) -> CodegenResult<String> {
     emit_hook_types(&mut out, &module.hook_groups)?;
     emit_hook_traits(&mut out, &module.hook_groups)?;
     emit_router(&mut out, module)?;
-    emit_component_metadata(&mut out, &module.component)?;
 
     Ok(out)
 }
@@ -268,7 +267,10 @@ fn emit_router(out: &mut String, module: &Module) -> CodegenResult<()> {
     writeln!(out)?;
 
     // ── new() constructor ──
-    writeln!(out, "impl<{type_params_str}> ComponentRouter<{type_params_str}>")?;
+    writeln!(
+        out,
+        "impl<{type_params_str}> ComponentRouter<{type_params_str}>"
+    )?;
     writeln!(out, "where")?;
     writeln!(out, "    {bounds_str},")?;
     writeln!(out, "{{")?;
@@ -359,14 +361,8 @@ fn emit_router(out: &mut String, module: &Module) -> CodegenResult<()> {
                     "                serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)"
                 )?;
             } else {
-                writeln!(
-                    out,
-                    "                self.{field}.{snake}(spec, input)?;"
-                )?;
-                writeln!(
-                    out,
-                    "                Ok(serde_json::Value::Null)"
-                )?;
+                writeln!(out, "                self.{field}.{snake}(spec, input)?;")?;
+                writeln!(out, "                Ok(serde_json::Value::Null)")?;
             }
             writeln!(out, "            }}")?;
         }

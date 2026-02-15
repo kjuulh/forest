@@ -7,7 +7,6 @@
 /// Root of the IR — one module per component.
 #[derive(Debug, Clone)]
 pub struct Module {
-    pub component: Component,
     pub spec: Spec,
     pub commands: Vec<Command>,
     pub hook_groups: Vec<HookGroup>,
