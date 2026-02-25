@@ -5,6 +5,7 @@ use forest_grpc_interface::{
     artifact_service_client::ArtifactServiceClient,
     destination_service_client::DestinationServiceClient, get_component_files_response::Msg,
     get_projects_request::Query,
+    notification_service_client::NotificationServiceClient,
     organisation_service_client::OrganisationServiceClient,
     registry_service_client::RegistryServiceClient, release_service_client::ReleaseServiceClient,
     users_service_client::UsersServiceClient, *,
@@ -54,6 +55,7 @@ pub struct GrpcClient {
     organisation_client: OnceCell<OrganisationServiceClient<AuthMiddleware<Channel>>>,
     users_client: OnceCell<UsersServiceClient<Channel>>,
     auth_users_client: OnceCell<UsersServiceClient<AuthMiddleware<Channel>>>,
+    notification_client: OnceCell<NotificationServiceClient<AuthMiddleware<Channel>>>,
 }
 
 impl GrpcClient {
@@ -478,6 +480,20 @@ impl GrpcClient {
             .map_err(grpc_err)
             .context("list organisation members")?;
         Ok(resp.into_inner())
+    }
+
+    async fn notification_client(
+        &self,
+    ) -> anyhow::Result<NotificationServiceClient<AuthMiddleware<Channel>>> {
+        let client = self
+            .notification_client
+            .get_or_try_init(move || async move {
+                let channel = self.auth_channel(self.channel().await?);
+                Ok::<_, anyhow::Error>(NotificationServiceClient::new(channel))
+            })
+            .await?;
+
+        Ok(client.clone())
     }
 
     /// Unauthenticated users client (login, register, refresh_token).
@@ -1068,6 +1084,85 @@ impl GrpcClient {
 
         Ok(())
     }
+
+    // ── Notifications ────────────────────────────────────────────────
+
+    pub async fn listen_notifications(
+        &self,
+        organisation: Option<&str>,
+        project: Option<&str>,
+    ) -> anyhow::Result<tonic::codec::Streaming<Notification>> {
+        let mut client = self.notification_client().await?;
+
+        let resp = client
+            .listen_notifications(ListenNotificationsRequest {
+                organisation: organisation.map(|s| s.into()),
+                project: project.map(|s| s.into()),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("listen notifications (grpc)")?;
+
+        Ok(resp.into_inner())
+    }
+
+    pub async fn list_notifications(
+        &self,
+        page_size: i32,
+        page_token: &str,
+        organisation: Option<&str>,
+        project: Option<&str>,
+    ) -> anyhow::Result<ListNotificationsResponse> {
+        let mut client = self.notification_client().await?;
+
+        let resp = client
+            .list_notifications(ListNotificationsRequest {
+                page_size,
+                page_token: page_token.into(),
+                organisation: organisation.map(|s| s.into()),
+                project: project.map(|s| s.into()),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("list notifications (grpc)")?;
+
+        Ok(resp.into_inner())
+    }
+
+    pub async fn get_notification_preferences(
+        &self,
+    ) -> anyhow::Result<Vec<NotificationPreference>> {
+        let mut client = self.notification_client().await?;
+
+        let resp = client
+            .get_notification_preferences(GetNotificationPreferencesRequest {})
+            .await
+            .map_err(grpc_err)
+            .context("get notification preferences (grpc)")?;
+
+        Ok(resp.into_inner().preferences)
+    }
+
+    pub async fn set_notification_preference(
+        &self,
+        notification_type: NotificationType,
+        channel: NotificationChannel,
+        enabled: bool,
+    ) -> anyhow::Result<Option<NotificationPreference>> {
+        let mut client = self.notification_client().await?;
+
+        let resp = client
+            .set_notification_preference(SetNotificationPreferenceRequest {
+                notification_type: notification_type.into(),
+                channel: channel.into(),
+                enabled,
+            })
+            .await
+            .map_err(grpc_err)
+            .context("set notification preference (grpc)")?;
+
+        Ok(resp.into_inner().preference)
+    }
 }
 
 pub enum GetProjectsQuery {
@@ -1145,6 +1240,7 @@ impl GrpcClientState for State {
                 organisation_client: OnceCell::const_new(),
                 users_client: OnceCell::const_new(),
                 auth_users_client: OnceCell::const_new(),
+                notification_client: OnceCell::const_new(),
             }
         })
         .clone()

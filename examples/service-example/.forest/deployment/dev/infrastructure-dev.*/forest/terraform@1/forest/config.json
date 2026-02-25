@@ -1,7 +1,7 @@
 {
-  "env": "prod",
-  "destination": "k8s.*",
-  "destination_type": "forest/kubernetes@1",
+  "env": "dev",
+  "destination": "infrastructure-dev.*",
+  "destination_type": "forest/terraform@1",
   "component": {
     "organisation": "forest-contrib",
     "name": "rust-persistent-service",
@@ -10,8 +10,6 @@
     }
   },
   "config": {
-    "replicas": 10,
-    "name": "service-example",
     "environment": [
       {
         "key": "RUST_LOG",
@@ -19,32 +17,34 @@
       },
       {
         "key": "RUST_LOG",
-        "value": "info"
+        "value": "debug"
       }
     ],
+    "replicas": 3,
+    "name": "service-example",
     "health_checks": {
       "live": {
         "http": {
-          "path": "/",
-          "port": 3001
+          "port": 3001,
+          "path": "/"
         }
       }
     },
     "ports": [
       {
-        "name": "external",
         "external": true,
-        "port": 3000
+        "port": 3000,
+        "name": "external"
       },
       {
-        "name": "internal",
-        "port": 3001
+        "port": 3001,
+        "name": "internal"
       },
       {
+        "subdomain": "grpc",
         "external": true,
         "port": 4000,
-        "name": "grpc_external",
-        "subdomain": "grpc"
+        "name": "grpc_external"
       },
       {
         "name": "grpc_internal",

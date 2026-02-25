@@ -4,7 +4,7 @@ use anyhow::Context;
 use forest_models::{Destination, DestinationType};
 use uuid::Uuid;
 
-use crate::{repositories::error::DbError, State};
+use crate::{State, repositories::error::DbError};
 
 pub struct DestinationRegistry {
     db: sqlx::PgPool,
@@ -105,7 +105,7 @@ impl DestinationRegistry {
         let Some(rec) = rec else { return Ok(None) };
 
         Ok(Some(Destination::new(
-            &rec.organisation,
+            &rec.organisation.to_string(),
             &rec.name,
             &rec.environment,
             serde_json::from_value(rec.metadata).context("metadata is invalid")?,

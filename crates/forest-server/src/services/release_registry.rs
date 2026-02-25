@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use crate::repositories::error::DbError;
 use anyhow::Context;
 use forest_models::{Destination, OrganisationName, ProjectName, ReleaseStatus};
-use crate::repositories::error::DbError;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -146,6 +146,8 @@ impl ReleaseRegistry {
         let annotation_id = annotation_rec.id;
         let project_id = annotation_rec.project_id;
 
+        let (organisation, project) = self.get_project_context(&project_id).await?;
+
         let destination_recs = sqlx::query!(
             "SELECT DISTINCT id, name, environment FROM destinations WHERE name = ANY($1) OR environment = ANY($2)",
             &destinations,
@@ -235,6 +237,8 @@ impl ReleaseRegistry {
         Ok(CreatedReleaseIntent {
             release_intent_id: release_intent.id,
             releases: created_releases,
+            organisation,
+            project,
         })
     }
 
@@ -552,6 +556,58 @@ impl ReleaseRegistry {
         Ok(recs.into_iter().map(|r| r.project.into()).collect())
     }
 
+    pub async fn get_project_context(&self, project_id: &Uuid) -> anyhow::Result<(String, String)> {
+        let rec = sqlx::query!(
+            "SELECT organisation, project FROM projects WHERE id = $1",
+            project_id
+        )
+        .fetch_one(&self.db)
+        .await
+        .context("get project context")?;
+
+        Ok((rec.organisation, rec.project))
+    }
+
+    /// Get annotation details by artifact_id (for enriching notifications).
+    pub async fn get_annotation_context(
+        &self,
+        artifact_id: &Uuid,
+    ) -> anyhow::Result<AnnotationContext> {
+        let rec = sqlx::query!(
+            r#"
+            SELECT slug, source, context, ref
+            FROM annotations
+            WHERE artifact_id = $1
+            "#,
+            artifact_id,
+        )
+        .fetch_one(&self.db)
+        .await
+        .context("get annotation context")?;
+
+        let source: Source = serde_json::from_value(rec.source).unwrap_or(Source {
+            username: None,
+            email: None,
+        });
+        let context: ArtifactContext =
+            serde_json::from_value(rec.context).unwrap_or(ArtifactContext {
+                title: String::new(),
+                description: None,
+                web: None,
+            });
+        let reference: Reference = serde_json::from_value(rec.r#ref).unwrap_or(Reference {
+            commit_sha: String::new(),
+            commit_branch: None,
+        });
+
+        Ok(AnnotationContext {
+            slug: rec.slug,
+            source,
+            context,
+            reference,
+        })
+    }
+
     pub async fn get_destinations(&self, organisation: &str) -> anyhow::Result<Vec<Destination>> {
         let recs = sqlx::query!(
             "
@@ -576,7 +632,7 @@ impl ReleaseRegistry {
         recs.into_iter()
             .map(|r| {
                 Ok(Destination::new(
-                    &r.organisation,
+                    &r.organisation.to_string(),
                     &r.name,
                     &r.environment,
                     serde_json::from_value(r.metadata).context("parse metadata")?,
@@ -668,6 +724,8 @@ pub struct ReleaseStatusInfo {
 pub struct CreatedReleaseIntent {
     pub release_intent_id: Uuid,
     pub releases: Vec<CreatedRelease>,
+    pub organisation: String,
+    pub project: String,
 }
 
 pub struct CreatedRelease {
@@ -677,4 +735,11 @@ pub struct CreatedRelease {
 
 pub struct StagedReleaseTx {
     tx: sqlx::Transaction<'static, sqlx::Postgres>,
+}
+
+pub struct AnnotationContext {
+    pub slug: String,
+    pub source: Source,
+    pub context: ArtifactContext,
+    pub reference: Reference,
 }

@@ -7,6 +7,7 @@ use tonic::Response;
 use crate::{
     grpc::artifacts::GrpcErrorExt,
     services::{
+        notification_registry::{NotificationRegistryState, ReleaseContext as NotifReleaseContext},
         release_logs_registry::{LogChannel, ReleaseLogsRegistryState},
         release_registry::{self, ReleaseAnnotation, ReleaseDestination, ReleaseRegistryState},
     },
@@ -34,33 +35,74 @@ impl ReleaseService for ReleaseServer {
             .context("no project found")
             .to_internal_error()?;
 
+        let artifact_id = req
+            .artifact_id
+            .parse::<uuid::Uuid>()
+            .context("artifact id")
+            .to_internal_error()?;
+
+        // Extract source/context/ref info for both the annotate call and notification context
+        let source: release_registry::Source = req
+            .source
+            .map(|s| s.into())
+            .context("source is required")
+            .to_internal_error()?;
+        let art_context: release_registry::ArtifactContext = req
+            .context
+            .map(|s| s.into())
+            .context("context is required")
+            .to_internal_error()?;
+        let reference: release_registry::Reference = req
+            .r#ref
+            .map(|r| r.into())
+            .context("ref is required")
+            .to_internal_error()?;
+
         let artifact = self
             .state
             .release_registry()
             .annotate(
-                &req.artifact_id
-                    .parse::<uuid::Uuid>()
-                    .context("artifact id")
-                    .to_internal_error()?,
+                &artifact_id,
                 &slug,
                 &req.metadata,
-                &req.source
-                    .map(|s| s.into())
-                    .context("source is required")
-                    .to_internal_error()?,
-                &req.context
-                    .map(|s| s.into())
-                    .context("context is required")
-                    .to_internal_error()?,
+                &source,
+                &art_context,
                 &proj.organisation,
                 &proj.project,
-                &req.r#ref
-                    .map(|r| r.into())
-                    .context("ref is required")
-                    .to_internal_error()?,
+                &reference,
             )
             .await
             .to_internal_error()?;
+
+        if let Err(e) = self
+            .state
+            .notification_registry()
+            .create_notification(
+                "RELEASE_ANNOTATED",
+                &format!("Artifact annotated: {}", slug),
+                &format!(
+                    "Artifact {} annotated in {}/{}",
+                    slug, &proj.organisation, &proj.project
+                ),
+                &proj.organisation,
+                &proj.project,
+                &NotifReleaseContext {
+                    slug: Some(slug.clone()),
+                    artifact_id: Some(artifact_id.to_string()),
+                    source_username: source.username.clone(),
+                    source_email: source.email.clone(),
+                    commit_sha: Some(reference.commit_sha.clone()),
+                    commit_branch: reference.commit_branch.clone(),
+                    context_title: Some(art_context.title.clone()),
+                    context_description: art_context.description.clone(),
+                    context_web: art_context.web.clone(),
+                    ..Default::default()
+                },
+            )
+            .await
+        {
+            tracing::warn!("failed to create annotation notification: {e:#}");
+        }
 
         Ok(Response::new(AnnotateReleaseResponse {
             artifact: Some(artifact.into()),
@@ -118,20 +160,75 @@ impl ReleaseService for ReleaseServer {
         tracing::debug!("release");
         let req = request.into_inner();
 
+        let artifact_id: uuid::Uuid = req
+            .artifact_id
+            .parse()
+            .context("artifact id")
+            .to_internal_error()?;
+
         let created = self
             .state
             .release_registry()
-            .release(
-                &req.artifact_id
-                    .parse()
-                    .context("artifact id")
-                    .to_internal_error()?,
-                req.destinations,
-                req.environments,
-            )
+            .release(&artifact_id, req.destinations, req.environments)
             .await
             .context("release")
             .to_internal_error()?;
+
+        let dest_count = created.releases.len();
+        let dest_names: Vec<String> = created
+            .releases
+            .iter()
+            .map(|r| r.destination.clone())
+            .collect();
+
+        // Fetch annotation context to enrich the started notification
+        let ann_ctx = self
+            .state
+            .release_registry()
+            .get_annotation_context(&artifact_id)
+            .await
+            .ok();
+
+        if let Err(e) = self
+            .state
+            .notification_registry()
+            .create_notification(
+                "RELEASE_STARTED",
+                &format!(
+                    "Release started: {}/{}",
+                    &created.organisation, &created.project
+                ),
+                &format!("Release staged to {} destination(s)", dest_count),
+                &created.organisation,
+                &created.project,
+                &NotifReleaseContext {
+                    slug: ann_ctx.as_ref().map(|a| a.slug.clone()),
+                    artifact_id: Some(artifact_id.to_string()),
+                    release_intent_id: Some(created.release_intent_id.to_string()),
+                    destination: if dest_names.len() == 1 {
+                        Some(dest_names[0].clone())
+                    } else {
+                        None
+                    },
+                    destination_count: dest_count as i32,
+                    source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
+                    source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
+                    commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),
+                    commit_branch: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.reference.commit_branch.clone()),
+                    context_title: ann_ctx.as_ref().map(|a| a.context.title.clone()),
+                    context_description: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.context.description.clone()),
+                    context_web: ann_ctx.as_ref().and_then(|a| a.context.web.clone()),
+                    ..Default::default()
+                },
+            )
+            .await
+        {
+            tracing::warn!("failed to create release started notification: {e:#}");
+        }
 
         Ok(Response::new(ReleaseResponse {
             intents: created
@@ -169,8 +266,10 @@ impl ReleaseService for ReleaseServer {
         tokio::spawn(async move {
             let poll_interval = std::time::Duration::from_millis(500);
             // Track last status per destination
-            let mut last_statuses: std::collections::HashMap<uuid::Uuid, forest_models::ReleaseStatus> =
-                std::collections::HashMap::new();
+            let mut last_statuses: std::collections::HashMap<
+                uuid::Uuid,
+                forest_models::ReleaseStatus,
+            > = std::collections::HashMap::new();
             // Track log cursors per destination
             let mut log_cursors: std::collections::HashMap<uuid::Uuid, i64> =
                 std::collections::HashMap::new();
@@ -322,8 +421,8 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<GetProjectsRequest>,
     ) -> std::result::Result<tonic::Response<GetProjectsResponse>, tonic::Status> {
-        tracing::debug!("get projects");
         let req = request.into_inner();
+        tracing::debug!("get projects: {req:?}");
 
         let projects = match req.query.context("query is required").to_internal_error()? {
             get_projects_request::Query::Organisation(organisation) => self

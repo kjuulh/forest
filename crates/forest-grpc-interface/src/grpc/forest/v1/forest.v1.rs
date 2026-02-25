@@ -98,6 +98,187 @@ pub struct GetStatusRequest {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetStatusResponse {
 }
+/// Rich context about the release that triggered the notification.
+/// Integrations decide which fields to use.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReleaseContext {
+    #[prost(string, tag="1")]
+    pub slug: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub project: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub artifact_id: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(string, tag="7")]
+    pub environment: ::prost::alloc::string::String,
+    /// Source info
+    #[prost(string, tag="8")]
+    pub source_username: ::prost::alloc::string::String,
+    #[prost(string, tag="9")]
+    pub source_email: ::prost::alloc::string::String,
+    /// Git ref
+    #[prost(string, tag="10")]
+    pub commit_sha: ::prost::alloc::string::String,
+    #[prost(string, tag="11")]
+    pub commit_branch: ::prost::alloc::string::String,
+    /// Artifact context
+    #[prost(string, tag="12")]
+    pub context_title: ::prost::alloc::string::String,
+    #[prost(string, tag="13")]
+    pub context_description: ::prost::alloc::string::String,
+    #[prost(string, tag="14")]
+    pub context_web: ::prost::alloc::string::String,
+    /// Error info (populated on failure)
+    #[prost(string, tag="15")]
+    pub error_message: ::prost::alloc::string::String,
+    /// Number of destinations involved
+    #[prost(int32, tag="16")]
+    pub destination_count: i32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Notification {
+    #[prost(string, tag="1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(enumeration="NotificationType", tag="2")]
+    pub notification_type: i32,
+    #[prost(string, tag="3")]
+    pub title: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub body: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
+    pub project: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="7")]
+    pub release_context: ::core::option::Option<ReleaseContext>,
+    #[prost(string, tag="8")]
+    pub created_at: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NotificationPreference {
+    #[prost(enumeration="NotificationType", tag="1")]
+    pub notification_type: i32,
+    #[prost(enumeration="NotificationChannel", tag="2")]
+    pub channel: i32,
+    #[prost(bool, tag="3")]
+    pub enabled: bool,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetNotificationPreferencesRequest {
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetNotificationPreferencesResponse {
+    #[prost(message, repeated, tag="1")]
+    pub preferences: ::prost::alloc::vec::Vec<NotificationPreference>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetNotificationPreferenceRequest {
+    #[prost(enumeration="NotificationType", tag="1")]
+    pub notification_type: i32,
+    #[prost(enumeration="NotificationChannel", tag="2")]
+    pub channel: i32,
+    #[prost(bool, tag="3")]
+    pub enabled: bool,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetNotificationPreferenceResponse {
+    #[prost(message, optional, tag="1")]
+    pub preference: ::core::option::Option<NotificationPreference>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListenNotificationsRequest {
+    #[prost(string, optional, tag="1")]
+    pub organisation: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="2")]
+    pub project: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListNotificationsRequest {
+    #[prost(int32, tag="1")]
+    pub page_size: i32,
+    #[prost(string, tag="2")]
+    pub page_token: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="3")]
+    pub organisation: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="4")]
+    pub project: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListNotificationsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub notifications: ::prost::alloc::vec::Vec<Notification>,
+    #[prost(string, tag="2")]
+    pub next_page_token: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum NotificationType {
+    Unspecified = 0,
+    ReleaseAnnotated = 1,
+    ReleaseStarted = 2,
+    ReleaseSucceeded = 3,
+    ReleaseFailed = 4,
+}
+impl NotificationType {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "NOTIFICATION_TYPE_UNSPECIFIED",
+            Self::ReleaseAnnotated => "NOTIFICATION_TYPE_RELEASE_ANNOTATED",
+            Self::ReleaseStarted => "NOTIFICATION_TYPE_RELEASE_STARTED",
+            Self::ReleaseSucceeded => "NOTIFICATION_TYPE_RELEASE_SUCCEEDED",
+            Self::ReleaseFailed => "NOTIFICATION_TYPE_RELEASE_FAILED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "NOTIFICATION_TYPE_UNSPECIFIED" => Some(Self::Unspecified),
+            "NOTIFICATION_TYPE_RELEASE_ANNOTATED" => Some(Self::ReleaseAnnotated),
+            "NOTIFICATION_TYPE_RELEASE_STARTED" => Some(Self::ReleaseStarted),
+            "NOTIFICATION_TYPE_RELEASE_SUCCEEDED" => Some(Self::ReleaseSucceeded),
+            "NOTIFICATION_TYPE_RELEASE_FAILED" => Some(Self::ReleaseFailed),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum NotificationChannel {
+    Unspecified = 0,
+    Cli = 1,
+    Slack = 2,
+}
+impl NotificationChannel {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "NOTIFICATION_CHANNEL_UNSPECIFIED",
+            Self::Cli => "NOTIFICATION_CHANNEL_CLI",
+            Self::Slack => "NOTIFICATION_CHANNEL_SLACK",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "NOTIFICATION_CHANNEL_UNSPECIFIED" => Some(Self::Unspecified),
+            "NOTIFICATION_CHANNEL_CLI" => Some(Self::Cli),
+            "NOTIFICATION_CHANNEL_SLACK" => Some(Self::Slack),
+            _ => None,
+        }
+    }
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Organisation {
     #[prost(string, tag="1")]

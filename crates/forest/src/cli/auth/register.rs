@@ -29,19 +29,25 @@ impl RegisterCommand {
             None => inquire::Text::new("Email:").prompt()?,
         };
 
-        let password = inquire::Password::new("Password:")
-            .with_display_mode(inquire::PasswordDisplayMode::Masked)
-            .without_confirmation()
-            .prompt()?;
+        let password = if let Ok(p) = std::env::var("FOREST_PASSWORD") {
+            p
+        } else {
+            let password = inquire::Password::new("Password:")
+                .with_display_mode(inquire::PasswordDisplayMode::Masked)
+                .without_confirmation()
+                .prompt()?;
 
-        let confirm = inquire::Password::new("Confirm password:")
-            .with_display_mode(inquire::PasswordDisplayMode::Masked)
-            .without_confirmation()
-            .prompt()?;
+            let confirm = inquire::Password::new("Confirm password:")
+                .with_display_mode(inquire::PasswordDisplayMode::Masked)
+                .without_confirmation()
+                .prompt()?;
 
-        if password != confirm {
-            anyhow::bail!("passwords do not match");
-        }
+            if password != confirm {
+                anyhow::bail!("passwords do not match");
+            }
+
+            password
+        };
 
         let resp = state
             .grpc_client()

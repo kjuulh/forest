@@ -21,8 +21,7 @@ forest: deployment: enabled: true
 	env: {
 		dev: {
 			destinations: [
-				{destination: "k8s.*", type: _destinationTypes.kubernetes},
-				{destination: "eu-west-1.*", type: _destinationTypes.terraform},
+				{destination: "infrastructure-dev.*", type: _destinationTypes.terraform},
 			]
 			config: {
 				replicas: 3
@@ -32,10 +31,9 @@ forest: deployment: enabled: true
 			}
 		}
 
-		prod: {
+		data: {
 			destinations: [
-				{destination: "k8s.*", type: _destinationTypes.kubernetes},
-				{destination: "eu-west-1.*", type: _destinationTypes.terraform},
+				{destination: "infrastructure-data.*", type: _destinationTypes.terraform},
 			]
 			config: {
 				replicas: 10

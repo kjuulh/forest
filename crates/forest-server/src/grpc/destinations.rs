@@ -23,6 +23,8 @@ impl DestinationService for DestinationServer {
     ) -> std::result::Result<tonic::Response<CreateDestinationResponse>, tonic::Status> {
         let req = request.into_inner();
 
+        tracing::debug!("create destination: {:?}", req);
+
         let dest_type: forest_models::DestinationType = req
             .r#type
             .context("destination type is required")
@@ -37,7 +39,13 @@ impl DestinationService for DestinationServer {
 
         self.state
             .destination_registry()
-            .create_destination(&req.organisation, &req.name, &req.environment, req.metadata, dest_type)
+            .create_destination(
+                &req.organisation,
+                &req.name,
+                &req.environment,
+                req.metadata,
+                dest_type,
+            )
             .await
             .context("create destination")
             .to_internal_error()?;

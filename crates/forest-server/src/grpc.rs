@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use forest_grpc_interface::{
     artifact_service_server::ArtifactServiceServer,
     destination_service_server::DestinationServiceServer,
+    notification_service_server::NotificationServiceServer,
     organisation_service_server::OrganisationServiceServer,
     registry_service_server::RegistryServiceServer, release_service_server::ReleaseServiceServer,
     status_service_server::StatusServiceServer, users_service_server::UsersServiceServer,
@@ -24,6 +25,7 @@ use crate::{
 mod artifacts;
 mod destinations;
 mod error;
+mod notifications;
 mod organisations;
 mod registry;
 mod release;
@@ -68,6 +70,11 @@ impl GrpcServer {
             .add_service(OrganisationServiceServer::new(OrganisationsServer {
                 state: self.state.clone(),
             }))
+            .add_service(NotificationServiceServer::new(
+                notifications::NotificationsServer {
+                    state: self.state.clone(),
+                },
+            ))
             .serve_with_shutdown(
                 self.host,
                 async move { cancellation_token.cancelled().await },

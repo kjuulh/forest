@@ -42,10 +42,14 @@ impl LoginCommand {
             }
         };
 
-        let password = inquire::Password::new("Password:")
-            .with_display_mode(inquire::PasswordDisplayMode::Masked)
-            .without_confirmation()
-            .prompt()?;
+        let password = if let Ok(p) = std::env::var("FOREST_PASSWORD") {
+            p
+        } else {
+            inquire::Password::new("Password:")
+                .with_display_mode(inquire::PasswordDisplayMode::Masked)
+                .without_confirmation()
+                .prompt()?
+        };
 
         let resp = state
             .grpc_client()
