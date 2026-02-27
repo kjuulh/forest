@@ -61,6 +61,14 @@ pub struct UpdateDestinationRequest {
 pub struct UpdateDestinationResponse {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteDestinationRequest {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteDestinationResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetDestinationsRequest {
     #[prost(string, tag="1")]
     pub organisation: ::prost::alloc::string::String,

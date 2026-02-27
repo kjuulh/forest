@@ -69,6 +69,22 @@ impl DestinationService for DestinationServer {
         Ok(Response::new(UpdateDestinationResponse {}))
     }
 
+    async fn delete_destination(
+        &self,
+        request: tonic::Request<DeleteDestinationRequest>,
+    ) -> std::result::Result<tonic::Response<DeleteDestinationResponse>, tonic::Status> {
+        let req = request.into_inner();
+
+        self.state
+            .destination_registry()
+            .delete_destination(&req.name)
+            .await
+            .context("delete destination")
+            .to_internal_error()?;
+
+        Ok(Response::new(DeleteDestinationResponse {}))
+    }
+
     async fn get_destinations(
         &self,
         request: tonic::Request<GetDestinationsRequest>,

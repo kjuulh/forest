@@ -1085,6 +1085,19 @@ impl GrpcClient {
         Ok(())
     }
 
+    pub async fn delete_destination(&self, name: &str) -> anyhow::Result<()> {
+        self.destination_client()
+            .await?
+            .delete_destination(DeleteDestinationRequest {
+                name: name.to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("delete destination (grpc)")?;
+
+        Ok(())
+    }
+
     // ── Notifications ────────────────────────────────────────────────
 
     pub async fn listen_notifications(

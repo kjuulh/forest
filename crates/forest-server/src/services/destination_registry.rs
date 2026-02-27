@@ -81,6 +81,22 @@ impl DestinationRegistry {
         Ok(())
     }
 
+    pub async fn delete_destination(&self, name: &str) -> anyhow::Result<()> {
+        let res = sqlx::query!(
+            "DELETE FROM destinations WHERE name = $1",
+            name,
+        )
+        .execute(&self.db)
+        .await
+        .context("delete destination (db)")?;
+
+        if res.rows_affected() != 1 {
+            anyhow::bail!("delete failed, destination was not found")
+        }
+
+        Ok(())
+    }
+
     pub(crate) async fn get(&self, destination_id: &Uuid) -> anyhow::Result<Option<Destination>> {
         let rec = sqlx::query!(
             "

@@ -1,9 +1,12 @@
 use crate::{
-    cli::destination::{create::CreateCommand, list::ListCommand, update::UpdateCommand},
+    cli::destination::{
+        create::CreateCommand, delete::DeleteCommand, list::ListCommand, update::UpdateCommand,
+    },
     state::State,
 };
 
 mod create;
+mod delete;
 mod list;
 mod update;
 
@@ -17,6 +20,7 @@ pub struct DestinationCommand {
 enum Commands {
     Create(CreateCommand),
     Update(UpdateCommand),
+    Delete(DeleteCommand),
     List(ListCommand),
 }
 
@@ -25,6 +29,7 @@ impl DestinationCommand {
         match &self.commands {
             Commands::Create(cmd) => cmd.execute(state).await,
             Commands::Update(cmd) => cmd.execute(state).await,
+            Commands::Delete(cmd) => cmd.execute(state).await,
             Commands::List(cmd) => cmd.execute(state).await,
         }
     }
