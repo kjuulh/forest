@@ -8,6 +8,7 @@ _componentPath: "../rust-service-component"
 
 _destinationTypes: {
 	kubernetes: "forest/kubernetes@1"
+	flux:       "forest/flux@1"
 }
 
 dependencies: {
@@ -22,6 +23,7 @@ forest: deployment: enabled: true
 		dev: {
 			destinations: [
 				{destination: "k8s-dev.*", type: _destinationTypes.kubernetes},
+				{destination: "flux-dev.*", type: _destinationTypes.flux},
 			]
 			config: {
 				replicas: 1
@@ -39,6 +41,7 @@ forest: deployment: enabled: true
 		staging: {
 			destinations: [
 				{destination: "k8s-staging.*", type: _destinationTypes.kubernetes},
+				{destination: "flux-staging.*", type: _destinationTypes.flux},
 			]
 			config: {
 				replicas: 2
@@ -56,6 +59,7 @@ forest: deployment: enabled: true
 		prod: {
 			destinations: [
 				{destination: "k8s-prod.*", type: _destinationTypes.kubernetes},
+				{destination: "flux-prod.*", type: _destinationTypes.flux},
 			]
 			config: {
 				replicas: 3
@@ -73,7 +77,7 @@ forest: deployment: enabled: true
 
 	config: {
 		name:  "rust-podinfo"
-		image: "registry.example.com/rawpotion/rust-podinfo"
+		image: "k3d-forest-test-registry:5000/rust-podinfo:test"
 		ports: [
 			{name: "http", port: 8080, external: true},
 			{name: "internal", port: 8081},
@@ -88,9 +92,7 @@ forest: deployment: enabled: true
 				port: 8081
 			}
 		}
-		environment: [
-			{key: "RUST_LOG", value: "rust_podinfo=info"},
-		]
+		environment: []
 	}
 }
 

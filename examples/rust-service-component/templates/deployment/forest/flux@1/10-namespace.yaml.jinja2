@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ config.name }}
+  labels:
+    app.kubernetes.io/name: {{ config.name }}
+    app.kubernetes.io/managed-by: forest

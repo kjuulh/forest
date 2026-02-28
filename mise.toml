@@ -109,6 +109,19 @@ run = "./scripts/k3d-manager.sh cleanup"
 [tasks."k8s:list"]
 run = "./scripts/k3d-manager.sh list"
 
+[tasks."k8s:flux:test"]
+dir = "./examples/rust-podinfo"
+run = "./k3d-flux-test.sh"
+description = "Run k3d + Flux v2 integration test"
+
+[tasks."k8s:flux:cleanup"]
+run = """
+k3d cluster delete forest-flux-test 2>/dev/null || true
+k3d registry delete forest-test-registry 2>/dev/null || true
+docker rm -f forest-gitea 2>/dev/null || true
+"""
+description = "Clean up k3d flux test resources"
+
 [tasks.test]
 run = "cargo nextest run"
 

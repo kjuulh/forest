@@ -61,11 +61,11 @@ impl ComponentParserState for State {
 
 #[cfg(test)]
 mod test {
-    use std::{collections::BTreeMap, path::PathBuf};
+    use std::path::PathBuf;
 
     use crate::services::component_parser::{
         ComponentParser,
-        models::{RawComponent, RawComponentSpec, RawSpecComponent, RawSpecTemplate},
+        models::RawSpecComponent,
     };
 
     #[tokio::test]
@@ -73,27 +73,37 @@ mod test {
         let parser = ComponentParser {};
 
         let raw_component = parser
-            .parse(&PathBuf::from("../../examples/my_component/"))
+            .parse(&PathBuf::from(
+                "../../examples/rust-service-component/",
+            ))
             .await?;
 
         assert_eq!(
-            RawComponent {
-                path: PathBuf::from("../../examples/my_component/"),
-                component_spec: RawComponentSpec {
-                    component: RawSpecComponent {
-                        name: "my_component".into(),
-                        organisation: "forest".into(),
-                        version: "0.0.2".into()
-                    },
-                    templates: BTreeMap::from([("rust_service".to_string(), RawSpecTemplate {})]),
-                    init: BTreeMap::default(),
-                    requirements: BTreeMap::default(),
-                    dependencies: BTreeMap::default(),
-                    commands: BTreeMap::new(),
-                }
-            },
-            raw_component
+            raw_component.path,
+            PathBuf::from("../../examples/rust-service-component/")
         );
+        assert_eq!(
+            raw_component.component_spec.component,
+            RawSpecComponent {
+                name: "rust-service".into(),
+                organisation: "forest-contrib".into(),
+                version: "0.1.0".into()
+            }
+        );
+
+        let commands = &raw_component.component_spec.commands;
+        assert!(commands.contains_key("build"), "missing 'build' command");
+        assert!(
+            commands.contains_key("validate"),
+            "missing 'validate' command"
+        );
+        assert!(commands.contains_key("test"), "missing 'test' command");
+        assert!(
+            commands.contains_key("docker-build"),
+            "missing 'docker-build' command"
+        );
+        assert!(commands.contains_key("status"), "missing 'status' command");
+        assert_eq!(commands.len(), 5);
 
         Ok(())
     }

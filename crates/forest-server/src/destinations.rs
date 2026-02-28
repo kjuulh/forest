@@ -1,10 +1,11 @@
-use std::{fmt::Display, sync::Arc};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 
 use forest_models::Destination;
 
 use crate::{
     State,
     destinations::{
+        fluxv1::FluxV1Destination,
         kubernetesv1::KubernetesV1Destination,
         logger::DestinationLogger,
         terraformv1::{TerraformStateStoreState, TerraformV1Destination},
@@ -16,6 +17,7 @@ use crate::{
     temp_dir::TempDirectoriesState,
 };
 
+pub mod fluxv1;
 pub mod kubernetesv1;
 pub mod terraformv1;
 
@@ -37,6 +39,17 @@ impl DestinationService {
         }
     }
 
+    pub fn new_flux_v1(state: &State, release_logs_registry: ReleaseLogsRegistry) -> Self {
+        Self::new(
+            FluxV1Destination {
+                temp: state.temp_directories(),
+                artifact_files: state.artifact_staging_registry(),
+                db: state.db.clone(),
+            },
+            release_logs_registry,
+        )
+    }
+
     pub fn new_kubernetes_v1(release_logs_registry: ReleaseLogsRegistry) -> Self {
         Self::new(KubernetesV1Destination {}, release_logs_registry)
     }
@@ -55,6 +68,10 @@ impl DestinationService {
     #[inline(always)]
     pub fn name(&self) -> DestinationIndex {
         self.inner.name()
+    }
+
+    pub fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
+        self.inner.validate_metadata(metadata)
     }
 
     pub(crate) async fn prepare(
@@ -91,6 +108,13 @@ impl DestinationService {
 #[async_trait::async_trait]
 pub trait DestinationEdge {
     fn name(&self) -> DestinationIndex;
+
+    /// Validate that the given metadata contains all required fields for this
+    /// destination type. Called during destination creation.
+    #[allow(unused_variables)]
+    fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
+        Ok(())
+    }
 
     #[allow(unused_variables)]
     async fn prepare(

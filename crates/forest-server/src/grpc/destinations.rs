@@ -31,10 +31,15 @@ impl DestinationService for DestinationServer {
             .to_internal_error()?
             .into();
 
-        self.state
-            .destination_services()
+        let dest_services = self.state.destination_services();
+        let dest_svc = dest_services
             .get_destination(&dest_type.organisation, &dest_type.name, dest_type.version)
             .context("failed to find destination implementation")
+            .to_internal_error()?;
+
+        dest_svc
+            .validate_metadata(&req.metadata)
+            .context("invalid destination metadata")
             .to_internal_error()?;
 
         self.state
