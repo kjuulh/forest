@@ -1,5 +1,0 @@
-{
-  "name": "notifications-test",
-  "replicas": 1,
-  "image": "test/notifications-test:latest"
-}

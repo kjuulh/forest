@@ -1,6 +1,0 @@
-[component]
-name = "my_component"
-organisation = "forest"
-version = "0.0.2"
-
-[templates.rust_service]
