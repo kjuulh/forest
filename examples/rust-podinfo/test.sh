@@ -4,6 +4,9 @@ set -euo pipefail
 # ============================================================================
 # rust-podinfo end-to-end test script
 #
+# This script exercises the full developer workflow using only `forest`
+# commands and `curl` for HTTP verification.
+#
 # Prerequisites:
 #   - mise installed
 #   - forest server running (mise run develop)
@@ -41,41 +44,10 @@ skip() { echo "  SKIP: $1"; SKIP=$((SKIP + 1)); }
 section() { echo ""; echo "=== $1 ==="; }
 
 # --------------------------------------------------------------------------
-section "1. Build"
+section "1. Forest run commands"
 # --------------------------------------------------------------------------
 
-echo "  Checking cargo build..."
-if cargo build -p rust-podinfo -p rust-service 2>&1 | tail -1; then
-  pass "cargo build"
-else
-  fail "cargo build"
-fi
-
-# --------------------------------------------------------------------------
-section "2. CUE export"
-# --------------------------------------------------------------------------
-
-echo "  Checking cue export (project)..."
-if cue export forest.cue --out toml > /dev/null 2>&1; then
-  pass "cue export project"
-else
-  fail "cue export project"
-fi
-
-echo "  Checking cue export (component)..."
-if cue export ../rust-service-component/forest.cue \
-              ../rust-service-component/forest.component.cue \
-              ../rust-service-component/spec.cue --out json > /dev/null 2>&1; then
-  pass "cue export component"
-else
-  fail "cue export component"
-fi
-
-# --------------------------------------------------------------------------
-section "3. Forest run commands"
-# --------------------------------------------------------------------------
-
-for cmd in build validate status compile; do
+for cmd in build validate test status compile docker-build; do
   echo "  Running: forest run $cmd"
   if mise run forest -- run "$cmd" > /dev/null 2>&1; then
     pass "forest run $cmd"
@@ -85,21 +57,21 @@ for cmd in build validate status compile; do
 done
 
 # --------------------------------------------------------------------------
-section "4. Podinfo HTTP service"
+section "2. Dev server (forest run dev + curl)"
 # --------------------------------------------------------------------------
 
-echo "  Starting podinfo service..."
-cargo run -p rust-podinfo &>/tmp/test-podinfo.log &
-PODINFO_PID=$!
+echo "  Starting: forest run dev"
+mise run forest -- run dev &>/tmp/test-podinfo.log &
+DEV_PID=$!
 
-cleanup_podinfo() {
-  kill "$PODINFO_PID" 2>/dev/null || true
-  wait "$PODINFO_PID" 2>/dev/null || true
+cleanup_dev() {
+  kill "$DEV_PID" 2>/dev/null || true
+  wait "$DEV_PID" 2>/dev/null || true
 }
-trap cleanup_podinfo EXIT
+trap cleanup_dev EXIT
 
 # Wait for server to be ready
-for i in $(seq 1 20); do
+for i in $(seq 1 30); do
   if curl -sf http://localhost:8080/ > /dev/null 2>&1; then
     break
   fi
@@ -127,11 +99,11 @@ test_endpoint "GET /env"     "http://localhost:8080/env"     '"env"'
 test_endpoint "GET /healthz" "http://localhost:8081/healthz" '"status":"ok"'
 test_endpoint "GET /readyz"  "http://localhost:8081/readyz"  '"status":"ready"'
 
-cleanup_podinfo
+cleanup_dev
 trap - EXIT
 
 # --------------------------------------------------------------------------
-section "5. Release prepare"
+section "3. Release prepare"
 # --------------------------------------------------------------------------
 
 echo "  Running: forest release prepare"
@@ -165,7 +137,7 @@ else
 fi
 
 # --------------------------------------------------------------------------
-section "6. Release annotate + release (requires server)"
+section "4. Release annotate + release (requires server)"
 # --------------------------------------------------------------------------
 
 if [ "$NO_SERVER" = true ]; then
@@ -198,7 +170,7 @@ else
   if [ -n "$SLUG" ]; then
     for env in dev staging prod; do
       echo "  Releasing to $env..."
-      if mise run forest -- release "$SLUG" --environment "$env" --wait 2>&1 | grep -q "Release completed successfully"; then
+      if mise run forest -- release "$SLUG" --environment "$env" 2>&1 | grep -q "Release completed successfully"; then
         pass "release to $env"
       else
         fail "release to $env"

@@ -2,3 +2,4 @@ target/
 .cuddle/
 .terraform/
 .non/
+.forest/

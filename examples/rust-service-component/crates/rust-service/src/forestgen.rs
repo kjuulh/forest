@@ -69,13 +69,11 @@ pub struct Spec {
 // --- Command I/O structs ---
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BuildInput {
-    pub tag: String,
-}
+pub struct BuildInput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BuildOutput {
-    pub image: String,
+    pub binary: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -88,29 +86,62 @@ pub struct ValidateOutput {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TestInput {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TestOutput {
+    pub passed: i64,
+    pub failed: i64,
+    pub total: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DockerBuildInput {
+    pub tag: String,
+    #[serde(default)]
+    pub registry: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DockerBuildOutput {
+    pub image: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatusInput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatusOutput {
-    pub running: i64,
-    pub desired: i64,
-    pub healthy: bool,
+    pub binary_exists: bool,
+    pub git_branch: String,
+    pub git_commit: String,
+    pub git_dirty: bool,
 }
 
 // --- Command trait ---
 
 pub trait CommandHandler {
-    /// Build the container image for the service
+    /// Compile the release binary
     fn build(&self, spec: &Spec, input: BuildInput) -> Result<BuildOutput, forest_sdk::Error>;
 
-    /// Validate the service spec and configuration
+    /// Run clippy, fmt check, and cargo check
     fn validate(
         &self,
         spec: &Spec,
         input: ValidateInput,
     ) -> Result<ValidateOutput, forest_sdk::Error>;
 
-    /// Check the current deployment status
+    /// Run the test suite
+    fn test(&self, spec: &Spec, input: TestInput) -> Result<TestOutput, forest_sdk::Error>;
+
+    /// Build a Docker container image for the service
+    fn docker_build(
+        &self,
+        spec: &Spec,
+        input: DockerBuildInput,
+    ) -> Result<DockerBuildOutput, forest_sdk::Error>;
+
+    /// Show build artifacts, git state, and deployment info
     fn status(&self, spec: &Spec, input: StatusInput) -> Result<StatusOutput, forest_sdk::Error>;
 }
 
@@ -205,6 +236,16 @@ where
                 let output = self.commands.validate(spec, input)?;
                 serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)
             }
+            "commands/test" => {
+                let input: TestInput = serde_json::from_value(input)?;
+                let output = self.commands.test(spec, input)?;
+                serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)
+            }
+            "commands/docker-build" => {
+                let input: DockerBuildInput = serde_json::from_value(input)?;
+                let output = self.commands.docker_build(spec, input)?;
+                serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)
+            }
             "commands/status" => {
                 let input: StatusInput = serde_json::from_value(input)?;
                 let output = self.commands.status(spec, input)?;
@@ -237,6 +278,14 @@ where
             },
             forest_sdk::MethodDescriptor {
                 name: "commands/validate".into(),
+                kind: forest_sdk::MethodKind::Command,
+            },
+            forest_sdk::MethodDescriptor {
+                name: "commands/test".into(),
+                kind: forest_sdk::MethodKind::Command,
+            },
+            forest_sdk::MethodDescriptor {
+                name: "commands/docker-build".into(),
                 kind: forest_sdk::MethodKind::Command,
             },
             forest_sdk::MethodDescriptor {

@@ -3,11 +3,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Context;
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
-use axum::Json;
 use notmad::{Component, ComponentInfo, MadError};
 use serde::Serialize;
 use tokio::net::TcpListener;
@@ -76,9 +76,7 @@ async fn version_handler() -> impl IntoResponse {
 async fn env_handler() -> impl IntoResponse {
     let env: Vec<EnvEntry> = std::env::vars()
         .filter(|(key, _)| {
-            key.starts_with("RUST_LOG")
-                || key.starts_with("PODINFO_")
-                || key.starts_with("FOREST_")
+            key.starts_with("RUST_LOG") || key.starts_with("PODINFO_") || key.starts_with("FOREST_")
         })
         .map(|(key, value)| EnvEntry { key, value })
         .collect();

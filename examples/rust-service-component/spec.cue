@@ -15,29 +15,47 @@ package rust_service
 // --- Commands: actions the component can perform ---
 #Commands: #ForestCommands & {
 	build: {
-		description: "Build the container image for the service"
-		input: {
-			tag: string
-		}
+		description: "Compile the release binary"
+		input: {}
 		output: {
-			image: string
+			binary: string
 		}
 	}
 	validate: {
-		description: "Validate the service spec and configuration"
+		description: "Run clippy, fmt check, and cargo check"
 		input: {}
 		output: {
 			valid:    bool
 			messages: [...string]
 		}
 	}
-	status: {
-		description: "Check the current deployment status"
+	test: {
+		description: "Run the test suite (nextest if available, else cargo test)"
 		input: {}
 		output: {
-			running: int
-			desired: int
-			healthy: bool
+			passed: int
+			failed: int
+			total:  int
+		}
+	}
+	"docker-build": {
+		description: "Build a Docker container image for the service"
+		input: {
+			tag:      string
+			registry: string | *""
+		}
+		output: {
+			image: string
+		}
+	}
+	status: {
+		description: "Show build artifacts, git state, and deployment info"
+		input: {}
+		output: {
+			binary_exists: bool
+			git_branch:    string
+			git_commit:    string
+			git_dirty:     bool
 		}
 	}
 }

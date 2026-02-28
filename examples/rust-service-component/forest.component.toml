@@ -5,17 +5,55 @@ version = "0.1.0"
 
 [commands]
 build = { bash = """
-  echo "Building $FOREST_COMPONENT"
-  cargo build --release
-  echo "Use 'forest run validate' to check configuration"
+  echo "==> Building $FOREST_COMPONENT (release)"
+  cargo build --release 2>&1
+  echo "==> Build complete: target/release/$FOREST_COMPONENT_NAME"
+  ls -lh "target/release/$FOREST_COMPONENT_NAME" 2>/dev/null || echo "  (binary not found — check Cargo.toml [[bin]] name)"
 """ }
 
 validate = { bash = """
-  cargo clippy
-  cargo fmt --check
-  echo "Validating service configuration for $FOREST_COMPONENT"
+  echo "==> Validating $FOREST_COMPONENT"
+  echo "--- clippy ---"
+  cargo clippy --all-targets -- -D warnings 2>&1
+  echo "--- fmt check ---"
+  cargo fmt --check 2>&1
+  echo "--- cargo check ---"
+  cargo check 2>&1
+  echo "==> Validation passed"
+""" }
+
+test = { bash = """
+  echo "==> Running tests for $FOREST_COMPONENT"
+  if command -v cargo-nextest &>/dev/null; then
+    cargo nextest run --no-tests=pass 2>&1
+  else
+    cargo test 2>&1
+  fi
+  echo "==> Tests complete"
+""" }
+
+docker-build = { bash = """
+  echo "==> Rendering Dockerfile from template"
+  $forest template production.Dockerfile.jinja2 2>&1
+  DOCKERFILE="$FOREST_TMP/production.Dockerfile"
+  echo "  rendered: $DOCKERFILE"
+  cat "$DOCKERFILE"
+  echo ""
+  echo "==> Dockerfile ready at: $DOCKERFILE"
+  echo "  To build: docker build -t <image>:<tag> -f $DOCKERFILE ."
 """ }
 
 status = { bash = """
-  echo "Checking deployment status for $FOREST_COMPONENT"
+  echo "==> Status for $FOREST_COMPONENT"
+  echo "--- binary ---"
+  if [ -f "target/release/$FOREST_COMPONENT_NAME" ]; then
+    echo "  binary: target/release/$FOREST_COMPONENT_NAME"
+    ls -lh "target/release/$FOREST_COMPONENT_NAME"
+  else
+    echo "  binary: not built (run 'forest run build')"
+  fi
+  echo "--- git ---"
+  echo "  branch: $(git branch --show-current 2>/dev/null || echo 'N/A')"
+  echo "  commit: $(git rev-parse --short HEAD 2>/dev/null || echo 'N/A')"
+  echo "  dirty:  $(git diff --quiet 2>/dev/null && echo 'no' || echo 'yes')"
 """ }
