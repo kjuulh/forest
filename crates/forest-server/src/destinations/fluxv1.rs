@@ -63,6 +63,9 @@ struct FluxMetadata {
     git_author_name: String,
     git_author_email: String,
     local_path: Option<PathBuf>,
+    /// Optional webhook URL to trigger Flux reconciliation after push.
+    /// Typically points at a Flux Receiver endpoint.
+    reconcile_url: Option<String>,
 }
 
 impl FluxMetadata {
@@ -111,6 +114,7 @@ impl FluxMetadata {
                 .cloned()
                 .unwrap_or_else(|| "forest@release.local".to_string()),
             local_path,
+            reconcile_url: metadata.get("reconcile_url").cloned(),
         })
     }
 
@@ -651,6 +655,11 @@ spec:
                     .context("git push")?;
 
                     logger.log_stdout("[flux@1] release pushed successfully");
+
+                    // Trigger Flux reconciliation if a webhook URL is configured
+                    if let Some(url) = &meta.reconcile_url {
+                        Self::trigger_reconciliation(logger, url).await;
+                    }
                 } else {
                     logger.log_stdout("[flux@1] no changes to push, gitops repo is up to date");
                 }
@@ -658,6 +667,34 @@ spec:
         }
 
         Ok(())
+    }
+
+    // ====== RECONCILIATION ======
+
+    async fn trigger_reconciliation(logger: &DestinationLogger, url: &str) {
+        logger.log_stdout(&format!("[flux@1] triggering reconciliation via {url}"));
+        match reqwest::Client::new()
+            .post(url)
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                logger.log_stdout("[flux@1] reconciliation triggered successfully");
+            }
+            Ok(resp) => {
+                logger.log_stdout(&format!(
+                    "[flux@1] reconciliation webhook returned {}",
+                    resp.status()
+                ));
+            }
+            Err(e) => {
+                logger.log_stdout(&format!(
+                    "[flux@1] reconciliation webhook failed: {e} (non-fatal)"
+                ));
+            }
+        }
     }
 
     // ====== COMMAND EXECUTION ======
@@ -1085,6 +1122,7 @@ mod tests {
             git_author_name: "test".into(),
             git_author_email: "test@test".into(),
             local_path: Some(local_root.path().to_path_buf()),
+            reconcile_url: None,
         };
 
         let manifest_files = vec![

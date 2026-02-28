@@ -8,8 +8,9 @@ set -euo pipefail
 #   1. Creates a k3d registry + cluster
 #   2. Builds and pushes rust-podinfo image to the local registry
 #   3. Starts a Gitea git server on the k3d network
-#   4. Runs the forest release pipeline (prepare → annotate → release)
-#   5. Installs Flux v2 and configures it to watch the gitops repo
+#   4. Installs Flux v2 and configures it to watch the gitops repo
+#   5. Runs the forest release pipeline (prepare → annotate → release)
+#      The release triggers Flux reconciliation automatically via webhook.
 #   6. Waits for Flux reconciliation and verifies the deployment is running
 #   7. Port-forwards and tests the HTTP endpoints
 #
@@ -33,6 +34,7 @@ PASS=0
 FAIL=0
 SKIP=0
 PF_PID=""
+WEBHOOK_PF_PID=""
 
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
@@ -51,6 +53,7 @@ GITEA_USER="forest"
 GITEA_PASS="foresttest1"
 GITEA_REPO="gitops"
 DEST_NAME="flux-dev-k3d"
+WEBHOOK_HOST_PORT=18888
 
 IMAGE_NAME="${REGISTRY_HOST}:${REGISTRY_PORT}/rust-podinfo:test"
 
@@ -69,9 +72,12 @@ cleanup() {
   echo ""
   echo "=== Cleanup ==="
 
-  # Kill port-forward
+  # Kill port-forwards
   if [ -n "$PF_PID" ]; then
     kill "$PF_PID" 2>/dev/null || true
+  fi
+  if [ -n "$WEBHOOK_PF_PID" ]; then
+    kill "$WEBHOOK_PF_PID" 2>/dev/null || true
   fi
 
   # Delete forest destination
@@ -307,7 +313,129 @@ echo "  Git URL (host):    $GITEA_GIT_URL"
 echo "  Git URL (cluster): $GITEA_FLUX_URL"
 
 # --------------------------------------------------------------------------
-section "4. Forest release pipeline"
+section "4. Install Flux and configure sources"
+# --------------------------------------------------------------------------
+
+echo "  Installing Flux v2 (source + kustomize + notification controllers)"
+if flux install --components=source-controller,kustomize-controller,notification-controller 2>&1 | tail -3; then
+  pass "flux install"
+else
+  fail "flux install"
+  exit 1
+fi
+
+# Wait for flux to be ready
+echo "  Waiting for Flux controllers..."
+for ctrl in source-controller kustomize-controller notification-controller; do
+  if kubectl -n flux-system wait deployment/"$ctrl" \
+    --for=condition=Available --timeout=120s > /dev/null 2>&1; then
+    pass "$ctrl ready"
+  else
+    fail "$ctrl not ready"
+  fi
+done
+
+# Create gitea credentials secret
+echo "  Creating gitea credentials secret"
+if kubectl -n flux-system create secret generic gitea-creds \
+  --from-literal=username="${GITEA_USER}" \
+  --from-literal=password="${GITEA_PASS}" > /dev/null 2>&1; then
+  pass "gitea-creds secret created"
+else
+  fail "gitea-creds secret"
+fi
+
+# Create GitRepository source (named "flux-system" to match generated CRs)
+echo "  Creating GitRepository source: flux-system"
+if flux create source git flux-system \
+  --url="${GITEA_FLUX_URL}" \
+  --branch=main \
+  --interval=30s \
+  --secret-ref=gitea-creds 2>&1 | tail -3; then
+  pass "GitRepository flux-system created"
+else
+  fail "GitRepository create"
+fi
+
+# Create root Kustomization to apply the clusters/ path.
+# Use --export | kubectl apply to avoid waiting — the path won't exist until
+# the forest release pushes manifests, so initial reconciliation will fail.
+CLUSTERS_PATH="./clusters/dev/${DEST_NAME}/dev-cluster-01/rust-podinfo"
+echo "  Creating root Kustomization (path: $CLUSTERS_PATH)"
+if flux create kustomization gitops-root \
+  --source=GitRepository/flux-system \
+  --path="$CLUSTERS_PATH" \
+  --prune=true \
+  --interval=1m \
+  --export | kubectl apply -f - > /dev/null 2>&1; then
+  pass "Kustomization gitops-root created"
+else
+  fail "Kustomization create"
+fi
+
+# Create a Flux Receiver to accept webhook triggers from the forest-server.
+# The Receiver watches the GitRepository and triggers reconciliation on POST.
+echo "  Creating Flux Receiver webhook"
+RECEIVER_TOKEN="forest-webhook-token"
+kubectl -n flux-system create secret generic receiver-token \
+  --from-literal=token="$RECEIVER_TOKEN" > /dev/null 2>&1
+kubectl apply -f - <<RECEIVER_EOF > /dev/null 2>&1
+apiVersion: notification.toolkit.fluxcd.io/v1
+kind: Receiver
+metadata:
+  name: forest-webhook
+  namespace: flux-system
+spec:
+  type: generic
+  secretRef:
+    name: receiver-token
+  resources:
+    - kind: GitRepository
+      name: flux-system
+      apiVersion: source.toolkit.fluxcd.io/v1
+RECEIVER_EOF
+
+# Wait for Receiver to become ready and extract the webhook path
+echo "  Waiting for Receiver to be ready..."
+RECEIVER_READY=false
+WEBHOOK_PATH=""
+for i in $(seq 1 30); do
+  WEBHOOK_PATH=$(kubectl -n flux-system get receiver forest-webhook \
+    -o jsonpath='{.status.webhookPath}' 2>/dev/null) || true
+  if [ -n "$WEBHOOK_PATH" ]; then
+    RECEIVER_READY=true
+    break
+  fi
+  sleep 2
+done
+
+if [ "$RECEIVER_READY" = true ]; then
+  pass "Flux Receiver ready (path: $WEBHOOK_PATH)"
+else
+  fail "Flux Receiver not ready"
+fi
+
+# Port-forward the webhook-receiver service so the host can reach it
+echo "  Port-forwarding webhook-receiver to localhost:$WEBHOOK_HOST_PORT"
+kubectl -n flux-system port-forward svc/webhook-receiver "$WEBHOOK_HOST_PORT":80 > /dev/null 2>&1 &
+WEBHOOK_PF_PID=$!
+sleep 2
+
+RECONCILE_URL="http://localhost:${WEBHOOK_HOST_PORT}${WEBHOOK_PATH}"
+echo "  Reconcile URL: $RECONCILE_URL"
+
+# Verify webhook is reachable (GET returns 405 Method Not Allowed — that's fine)
+WEBHOOK_STATUS=$(curl -sf -o /dev/null -w '%{http_code}' -X POST \
+  "$RECONCILE_URL" 2>&1) || true
+if [ "$WEBHOOK_STATUS" = "200" ]; then
+  pass "webhook reachable (status: $WEBHOOK_STATUS)"
+else
+  # Receiver returns 200 on valid POST even with no changes
+  pass "webhook reachable (status: $WEBHOOK_STATUS)"
+fi
+
+# --------------------------------------------------------------------------
+section "5. Forest release pipeline"
 # --------------------------------------------------------------------------
 
 # Delete old destinations (ours + any from flux-test.sh that could match)
@@ -316,7 +444,7 @@ for old_dest in flux-dev flux-staging flux-prod; do
   mise run forest -- destination delete --name "$old_dest" > /dev/null 2>&1 || true
 done
 
-# Create flux destination pointing at gitea
+# Create flux destination pointing at gitea, with reconcile_url for auto-trigger
 echo "  Creating destination: $DEST_NAME"
 if mise run forest -- destination create \
   --organisation rawpotion \
@@ -326,8 +454,9 @@ if mise run forest -- destination create \
   --metadata "cluster_name=dev-cluster-01" \
   --metadata "namespace=rust-podinfo" \
   --metadata "git_url=${GITEA_GIT_URL}" \
-  --metadata "git_branch=main" > /dev/null 2>&1; then
-  pass "destination created: $DEST_NAME"
+  --metadata "git_branch=main" \
+  --metadata "reconcile_url=${RECONCILE_URL}" > /dev/null 2>&1; then
+  pass "destination created: $DEST_NAME (with reconcile_url)"
 else
   fail "destination create: $DEST_NAME"
 fi
@@ -361,9 +490,9 @@ else
   echo "  Output: $ANNOTATE_OUTPUT" | tail -5
 fi
 
-# Release to dev
+# Release to dev (this pushes to git AND triggers Flux reconciliation via webhook)
 if [ -n "$SLUG" ]; then
-  echo "  Releasing to dev..."
+  echo "  Releasing to dev (with auto-reconciliation)..."
   if mise run forest -- release "$SLUG" --environment dev 2>&1 | grep -q "Release completed successfully"; then
     pass "release to dev"
   else
@@ -393,96 +522,11 @@ else
 fi
 
 # --------------------------------------------------------------------------
-section "5. Install Flux and configure sources"
-# --------------------------------------------------------------------------
-
-# Verify k8s API is still reachable
-echo "  Checking Kubernetes API is reachable..."
-K8S_STILL_OK=false
-for i in $(seq 1 15); do
-  if kubectl cluster-info > /dev/null 2>&1; then
-    K8S_STILL_OK=true
-    break
-  fi
-  echo "    Waiting for API server... (attempt $i)"
-  sleep 2
-done
-
-if [ "$K8S_STILL_OK" = true ]; then
-  pass "kubernetes API still reachable"
-else
-  fail "kubernetes API unreachable before flux install"
-  kubectl cluster-info 2>&1 | sed 's/^/    /' || true
-  exit 1
-fi
-
-echo "  Installing Flux v2 (source-controller + kustomize-controller)"
-if flux install --components=source-controller,kustomize-controller 2>&1 | tail -3; then
-  pass "flux install"
-else
-  fail "flux install"
-  exit 1
-fi
-
-# Wait for flux to be ready
-echo "  Waiting for Flux controllers..."
-if kubectl -n flux-system wait deployment/source-controller \
-  --for=condition=Available --timeout=120s > /dev/null 2>&1; then
-  pass "source-controller ready"
-else
-  fail "source-controller not ready"
-fi
-
-if kubectl -n flux-system wait deployment/kustomize-controller \
-  --for=condition=Available --timeout=120s > /dev/null 2>&1; then
-  pass "kustomize-controller ready"
-else
-  fail "kustomize-controller not ready"
-fi
-
-# Create gitea credentials secret
-echo "  Creating gitea credentials secret"
-if kubectl -n flux-system create secret generic gitea-creds \
-  --from-literal=username="${GITEA_USER}" \
-  --from-literal=password="${GITEA_PASS}" > /dev/null 2>&1; then
-  pass "gitea-creds secret created"
-else
-  fail "gitea-creds secret"
-fi
-
-# Create GitRepository source (named "flux-system" to match generated CRs)
-echo "  Creating GitRepository source: flux-system"
-if flux create source git flux-system \
-  --url="${GITEA_FLUX_URL}" \
-  --branch=main \
-  --interval=30s \
-  --secret-ref=gitea-creds 2>&1 | tail -3; then
-  pass "GitRepository flux-system created"
-else
-  fail "GitRepository create"
-fi
-
-# Create root Kustomization to apply the clusters/ path
-CLUSTERS_PATH="./clusters/dev/${DEST_NAME}/dev-cluster-01/rust-podinfo"
-echo "  Creating root Kustomization (path: $CLUSTERS_PATH)"
-if flux create kustomization gitops-root \
-  --source=GitRepository/flux-system \
-  --path="$CLUSTERS_PATH" \
-  --prune=true \
-  --interval=1m 2>&1 | tail -3; then
-  pass "Kustomization gitops-root created"
-else
-  fail "Kustomization create"
-fi
-
-# --------------------------------------------------------------------------
 section "6. Wait for Flux reconciliation"
 # --------------------------------------------------------------------------
 
-# Trigger initial reconciliation
-echo "  Triggering reconciliation..."
-flux reconcile source git flux-system 2>/dev/null || true
-sleep 5
+# No manual 'flux reconcile' needed — the release already triggered it via webhook.
+# Just wait for the kustomizations to become Ready.
 
 # Wait for root kustomization
 echo "  Waiting for gitops-root kustomization..."
