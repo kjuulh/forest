@@ -11,7 +11,7 @@ pub struct GenerateCommand {
 }
 
 impl GenerateCommand {
-    pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+    pub async fn execute(&self, _state: &State) -> anyhow::Result<()> {
         let mut cmd = tokio::process::Command::new("cue");
         cmd.args([
             "def",

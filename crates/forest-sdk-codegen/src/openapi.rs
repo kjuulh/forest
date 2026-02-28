@@ -130,7 +130,7 @@ pub mod models {
     #[serde(untagged)]
     pub enum ParameterOrRef {
         Ref(Reference),
-        Parameter(Parameter),
+        Parameter(Box<Parameter>),
     }
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -181,7 +181,7 @@ pub mod models {
     #[serde(untagged)]
     pub enum HeaderOrRef {
         Ref(Reference),
-        Header(Header),
+        Header(Box<Header>),
     }
 
     #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -211,7 +211,7 @@ pub mod models {
     #[serde(untagged)]
     pub enum SchemaOrRef {
         Ref(Reference),
-        Schema(Schema),
+        Schema(Box<Schema>),
     }
 
     #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -3,7 +3,7 @@
 /// One [`Module`] is produced per component and captures all the
 /// Forest-specific semantics (component identity, spec, commands, hooks,
 /// user-defined types) without any trace of OpenAPI syntax.
-
+///
 /// Root of the IR — one module per component.
 #[derive(Debug, Clone)]
 pub struct Module {

@@ -35,6 +35,24 @@ pub struct PublishCommand {
 
     #[arg(long = "commit-branch")]
     commit_branch: Option<String>,
+
+    #[arg(long = "source-type")]
+    source_type: Option<String>,
+
+    #[arg(long = "run-url")]
+    run_url: Option<String>,
+
+    #[arg(long = "context-pr")]
+    context_pr: Option<String>,
+
+    #[arg(long = "commit-message")]
+    commit_message: Option<String>,
+
+    #[arg(long)]
+    version: Option<String>,
+
+    #[arg(long = "repo-url")]
+    repo_url: Option<String>,
 }
 
 static LARGE_PAYOAD: [u8; 4000000] = [b'a'; 4000000];
@@ -136,11 +154,14 @@ impl PublishCommand {
         let source = Source {
             username: self.source_username.clone(),
             email: self.source_email.clone(),
+            source_type: self.source_type.clone(),
+            run_url: self.run_url.clone(),
         };
         let context = crate::models::context::ArtifactContext {
             title: self.context_title.clone(),
             description: self.context_description.clone(),
             web: self.context_web.clone(),
+            pr: self.context_pr.clone(),
         };
         let project = crate::models::project::Project {
             organisation: self.organisation.clone(),
@@ -153,6 +174,9 @@ impl PublishCommand {
                 .clone()
                 .context("commit sha not found : (TODO get from context)")?,
             commit_branch: self.commit_branch.clone(),
+            commit_message: self.commit_message.clone(),
+            version: self.version.clone(),
+            repo_url: self.repo_url.clone(),
         };
 
         let slug = grpc

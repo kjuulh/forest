@@ -668,6 +668,10 @@ pub struct Source {
     pub user: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(string, optional, tag="2")]
     pub email: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="3")]
+    pub source_type: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="4")]
+    pub run_url: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ArtifactContext {
@@ -677,6 +681,8 @@ pub struct ArtifactContext {
     pub description: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(string, optional, tag="3")]
     pub web: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="4")]
+    pub pr: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Artifact {
@@ -725,6 +731,12 @@ pub struct Ref {
     pub commit_sha: ::prost::alloc::string::String,
     #[prost(string, optional, tag="2")]
     pub branch: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="3")]
+    pub commit_message: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="4")]
+    pub version: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="5")]
+    pub repo_url: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct OrganisationRef {

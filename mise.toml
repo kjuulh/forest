@@ -1,5 +1,6 @@
 [env]
 RUST_LOG = "forest=debug,notmad=trace,info"
+_.file = ".env"
 
 [tools]
 rust = { version = "1.93", components = "rust-src,rust-analyzer" }
@@ -92,9 +93,11 @@ env = { PGPASSWORD = "devpassword" }
 run = "psql -h localhost -p 5432 -U devuser -d dev"
 
 [tasks."db:migrate"]
+depends = ["local:up"]
 run = "cargo sqlx migrate run --source ./crates/forest-server/migrations/"
 
 [tasks."db:prepare"]
+depends = ["db:migrate"]
 run = "cargo sqlx prepare --workspace"
 
 [tasks."k8s:up"]
@@ -116,3 +119,11 @@ run = "buf generate"
 [tasks."generate"]
 alias = ["g", "gen"]
 depends = ["generate:proto"]
+
+[tasks."ci:pr"]
+run = "cargo run -p ci -- pr"
+description = "Run CI PR pipeline via Dagger"
+
+[tasks."ci:main"]
+run = "cargo run -p ci -- main"
+description = "Run CI main pipeline via Dagger"

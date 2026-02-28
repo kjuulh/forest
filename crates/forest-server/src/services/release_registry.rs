@@ -588,16 +588,22 @@ impl ReleaseRegistry {
         let source: Source = serde_json::from_value(rec.source).unwrap_or(Source {
             username: None,
             email: None,
+            source_type: None,
+            run_url: None,
         });
         let context: ArtifactContext =
             serde_json::from_value(rec.context).unwrap_or(ArtifactContext {
                 title: String::new(),
                 description: None,
                 web: None,
+                pr: None,
             });
         let reference: Reference = serde_json::from_value(rec.r#ref).unwrap_or(Reference {
             commit_sha: String::new(),
             commit_branch: None,
+            commit_message: None,
+            version: None,
+            repo_url: None,
         });
 
         Ok(AnnotationContext {
@@ -663,6 +669,10 @@ impl ReleaseRegistryState for State {
 pub struct Source {
     pub username: Option<String>,
     pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_url: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -670,12 +680,20 @@ pub struct ArtifactContext {
     pub title: String,
     pub description: Option<String>,
     pub web: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Reference {
     pub commit_sha: String,
     pub commit_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_url: Option<String>,
 }
 
 pub struct Project {

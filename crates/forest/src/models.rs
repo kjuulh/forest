@@ -16,6 +16,8 @@ pub mod source {
     pub struct Source {
         pub username: Option<String>,
         pub email: Option<String>,
+        pub source_type: Option<String>,
+        pub run_url: Option<String>,
     }
 }
 
@@ -25,6 +27,7 @@ pub mod context {
         pub title: String,
         pub description: Option<String>,
         pub web: Option<String>,
+        pub pr: Option<String>,
     }
 }
 
@@ -69,6 +72,9 @@ pub mod reference {
     pub struct Reference {
         pub commit_sha: String,
         pub commit_branch: Option<String>,
+        pub commit_message: Option<String>,
+        pub version: Option<String>,
+        pub repo_url: Option<String>,
     }
 }
 

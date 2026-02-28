@@ -39,6 +39,18 @@ pub struct ReleaseContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_web: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_pr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
     #[serde(default)]
     pub destination_count: i32,

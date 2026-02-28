@@ -63,8 +63,8 @@ impl Scheduler {
                     .commit_release_status(&staged_release, tx, ReleaseStatus::Success)
                     .await?;
 
-                if let Some((ref org, ref project)) = project_context {
-                    if let Err(e) = self
+                if let Some((ref org, ref project)) = project_context
+                    && let Err(e) = self
                         .notification_registry
                         .create_notification(
                             "RELEASE_SUCCEEDED",
@@ -93,12 +93,27 @@ impl Scheduler {
                                 source_email: ann_ctx
                                     .as_ref()
                                     .and_then(|a| a.source.email.clone()),
+                                source_type: ann_ctx
+                                    .as_ref()
+                                    .and_then(|a| a.source.source_type.clone()),
+                                run_url: ann_ctx
+                                    .as_ref()
+                                    .and_then(|a| a.source.run_url.clone()),
                                 commit_sha: ann_ctx
                                     .as_ref()
                                     .map(|a| a.reference.commit_sha.clone()),
                                 commit_branch: ann_ctx
                                     .as_ref()
                                     .and_then(|a| a.reference.commit_branch.clone()),
+                                commit_message: ann_ctx
+                                    .as_ref()
+                                    .and_then(|a| a.reference.commit_message.clone()),
+                                version: ann_ctx
+                                    .as_ref()
+                                    .and_then(|a| a.reference.version.clone()),
+                                repo_url: ann_ctx
+                                    .as_ref()
+                                    .and_then(|a| a.reference.repo_url.clone()),
                                 context_title: ann_ctx
                                     .as_ref()
                                     .map(|a| a.context.title.clone()),
@@ -108,13 +123,15 @@ impl Scheduler {
                                 context_web: ann_ctx
                                     .as_ref()
                                     .and_then(|a| a.context.web.clone()),
+                                context_pr: ann_ctx
+                                    .as_ref()
+                                    .and_then(|a| a.context.pr.clone()),
                                 ..Default::default()
                             },
                         )
                         .await
-                    {
-                        tracing::warn!("failed to create success notification: {e:#}");
-                    }
+                {
+                    tracing::warn!("failed to create success notification: {e:#}");
                 }
             }
             Err(e) => {
@@ -124,8 +141,8 @@ impl Scheduler {
                     .commit_release_status(&staged_release, tx, ReleaseStatus::Failure)
                     .await?;
 
-                if let Some((ref org, ref project)) = project_context {
-                    if let Err(e2) = self
+                if let Some((ref org, ref project)) = project_context
+                    && let Err(e2) = self
                         .notification_registry
                         .create_notification(
                             "RELEASE_FAILED",
@@ -155,12 +172,27 @@ impl Scheduler {
                                 source_email: ann_ctx
                                     .as_ref()
                                     .and_then(|a| a.source.email.clone()),
+                                source_type: ann_ctx
+                                    .as_ref()
+                                    .and_then(|a| a.source.source_type.clone()),
+                                run_url: ann_ctx
+                                    .as_ref()
+                                    .and_then(|a| a.source.run_url.clone()),
                                 commit_sha: ann_ctx
                                     .as_ref()
                                     .map(|a| a.reference.commit_sha.clone()),
                                 commit_branch: ann_ctx
                                     .as_ref()
                                     .and_then(|a| a.reference.commit_branch.clone()),
+                                commit_message: ann_ctx
+                                    .as_ref()
+                                    .and_then(|a| a.reference.commit_message.clone()),
+                                version: ann_ctx
+                                    .as_ref()
+                                    .and_then(|a| a.reference.version.clone()),
+                                repo_url: ann_ctx
+                                    .as_ref()
+                                    .and_then(|a| a.reference.repo_url.clone()),
                                 context_title: ann_ctx
                                     .as_ref()
                                     .map(|a| a.context.title.clone()),
@@ -170,14 +202,16 @@ impl Scheduler {
                                 context_web: ann_ctx
                                     .as_ref()
                                     .and_then(|a| a.context.web.clone()),
+                                context_pr: ann_ctx
+                                    .as_ref()
+                                    .and_then(|a| a.context.pr.clone()),
                                 error_message: Some(format!("{e:#}")),
                                 ..Default::default()
                             },
                         )
                         .await
-                    {
-                        tracing::warn!("failed to create failure notification: {e2:#}");
-                    }
+                {
+                    tracing::warn!("failed to create failure notification: {e2:#}");
                 }
             }
         }

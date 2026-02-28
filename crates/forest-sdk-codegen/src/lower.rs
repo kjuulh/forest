@@ -152,12 +152,12 @@ impl<'a> LoweringContext<'a> {
         let mut required: Vec<String> = schema.required.clone().unwrap_or_default();
         if let Some(all_of) = &schema.all_of {
             for item in all_of {
-                if let SchemaOrRef::Schema(s) = item {
-                    if let Some(req) = &s.required {
-                        for r in req {
-                            if !required.contains(r) {
-                                required.push(r.clone());
-                            }
+                if let SchemaOrRef::Schema(s) = item
+                    && let Some(req) = &s.required
+                {
+                    for r in req {
+                        if !required.contains(r) {
+                            required.push(r.clone());
                         }
                     }
                 }
@@ -188,11 +188,11 @@ impl<'a> LoweringContext<'a> {
         // Handle oneOf by preferring a $ref branch
         if let Some(one_of) = &schema.one_of {
             for variant in one_of {
-                if let SchemaOrRef::Ref(r) = variant {
-                    if !r.ref_path.contains('.') {
-                        let name = self.ref_to_type_name(&r.ref_path)?;
-                        return Ok(ir::TypeRef::Named(name));
-                    }
+                if let SchemaOrRef::Ref(r) = variant
+                    && !r.ref_path.contains('.')
+                {
+                    let name = self.ref_to_type_name(&r.ref_path)?;
+                    return Ok(ir::TypeRef::Named(name));
                 }
             }
         }
@@ -281,21 +281,21 @@ impl<'a> LoweringContext<'a> {
     /// Multi-value inline enums are matched against existing types or promoted
     /// to new named types.
     fn lower_field_type(&self, field_name: &str, schema: &Schema) -> CodegenResult<ir::TypeRef> {
-        if let Some(enum_vals) = &schema.enum_values {
-            if enum_vals.len() > 1 {
-                // Try to match an existing user type with the same enum values
-                if let Some(type_name) = self.find_matching_enum_type(schema, enum_vals) {
-                    return Ok(ir::TypeRef::Named(type_name));
-                }
-                // Promote to a new named type
-                let promoted_name = to_pascal_case(field_name);
-                let enum_def = lower_enum_values(schema, enum_vals)?;
-                self.promoted_type_defs.borrow_mut().push(ir::TypeDef {
-                    name: promoted_name.clone(),
-                    kind: ir::TypeDefKind::Enum(enum_def),
-                });
-                return Ok(ir::TypeRef::Named(promoted_name));
+        if let Some(enum_vals) = &schema.enum_values
+            && enum_vals.len() > 1
+        {
+            // Try to match an existing user type with the same enum values
+            if let Some(type_name) = self.find_matching_enum_type(schema, enum_vals) {
+                return Ok(ir::TypeRef::Named(type_name));
             }
+            // Promote to a new named type
+            let promoted_name = to_pascal_case(field_name);
+            let enum_def = lower_enum_values(schema, enum_vals)?;
+            self.promoted_type_defs.borrow_mut().push(ir::TypeDef {
+                name: promoted_name.clone(),
+                kind: ir::TypeDefKind::Enum(enum_def),
+            });
+            return Ok(ir::TypeRef::Named(promoted_name));
         }
 
         self.lower_schema_type_ref(schema)
@@ -314,10 +314,11 @@ impl<'a> LoweringContext<'a> {
             let Ok(candidate) = self.get_schema(name) else {
                 continue;
             };
-            if let Some(candidate_vals) = &candidate.enum_values {
-                if candidate.schema_type == schema.schema_type && candidate_vals == enum_vals {
-                    return Some(name.clone());
-                }
+            if let Some(candidate_vals) = &candidate.enum_values
+                && candidate.schema_type == schema.schema_type
+                && candidate_vals == enum_vals
+            {
+                return Some(name.clone());
             }
         }
         None
@@ -363,6 +364,7 @@ impl<'a> LoweringContext<'a> {
 
     // ── Component ────────────────────────────────────────────────────
 
+    #[allow(dead_code)]
     fn lower_component(&self, schema: &Schema) -> CodegenResult<ir::Component> {
         let props = schema
             .properties
@@ -376,6 +378,7 @@ impl<'a> LoweringContext<'a> {
         Ok(ir::Component { name, org, version })
     }
 
+    #[allow(dead_code)]
     fn extract_single_enum_string(
         &self,
         props: &BTreeMap<String, SchemaOrRef>,
@@ -625,25 +628,25 @@ fn lower_default_value(v: &serde_json::Value) -> ir::DefaultValue {
 fn lower_constraints(schema: &Schema) -> Vec<ir::Constraint> {
     let mut constraints = Vec::new();
 
-    if let Some(n) = &schema.minimum {
-        if let Some(i) = n.as_i64() {
-            constraints.push(ir::Constraint::Minimum(i));
-        }
+    if let Some(n) = &schema.minimum
+        && let Some(i) = n.as_i64()
+    {
+        constraints.push(ir::Constraint::Minimum(i));
     }
-    if let Some(n) = &schema.maximum {
-        if let Some(i) = n.as_i64() {
-            constraints.push(ir::Constraint::Maximum(i));
-        }
+    if let Some(n) = &schema.maximum
+        && let Some(i) = n.as_i64()
+    {
+        constraints.push(ir::Constraint::Maximum(i));
     }
     if let Some(v) = &schema.exclusive_minimum {
         if let Some(true) = v.as_bool() {
             // OpenAPI 3.0 boolean style — shift minimum by 1
-            if let Some(n) = &schema.minimum {
-                if let Some(i) = n.as_i64() {
-                    // Replace Minimum with ExclusiveMinimum
-                    constraints.retain(|c| !matches!(c, ir::Constraint::Minimum(_)));
-                    constraints.push(ir::Constraint::ExclusiveMinimum(i));
-                }
+            if let Some(n) = &schema.minimum
+                && let Some(i) = n.as_i64()
+            {
+                // Replace Minimum with ExclusiveMinimum
+                constraints.retain(|c| !matches!(c, ir::Constraint::Minimum(_)));
+                constraints.push(ir::Constraint::ExclusiveMinimum(i));
             }
         } else if let Some(i) = v.as_i64() {
             // OpenAPI 3.1 number style
@@ -652,11 +655,11 @@ fn lower_constraints(schema: &Schema) -> Vec<ir::Constraint> {
     }
     if let Some(v) = &schema.exclusive_maximum {
         if let Some(true) = v.as_bool() {
-            if let Some(n) = &schema.maximum {
-                if let Some(i) = n.as_i64() {
-                    constraints.retain(|c| !matches!(c, ir::Constraint::Maximum(_)));
-                    constraints.push(ir::Constraint::ExclusiveMaximum(i));
-                }
+            if let Some(n) = &schema.maximum
+                && let Some(i) = n.as_i64()
+            {
+                constraints.retain(|c| !matches!(c, ir::Constraint::Maximum(_)));
+                constraints.push(ir::Constraint::ExclusiveMaximum(i));
             }
         } else if let Some(i) = v.as_i64() {
             constraints.push(ir::Constraint::ExclusiveMaximum(i));
@@ -685,7 +688,7 @@ fn lower_constraints(schema: &Schema) -> Vec<ir::Constraint> {
 }
 
 pub fn to_pascal_case(s: &str) -> String {
-    s.split(|c: char| c == '_' || c == '-' || c == '/')
+    s.split(['_', '-', '/'])
         .filter(|seg| !seg.is_empty())
         .map(|seg| {
             let mut chars = seg.chars();

@@ -1272,6 +1272,7 @@ impl From<crate::models::context::ArtifactContext> for forest_grpc_interface::Ar
             title: value.title,
             description: value.description,
             web: value.web,
+            pr: value.pr,
         }
     }
 }
@@ -1281,6 +1282,8 @@ impl From<crate::models::source::Source> for forest_grpc_interface::Source {
         Self {
             user: value.username,
             email: value.email,
+            source_type: value.source_type,
+            run_url: value.run_url,
         }
     }
 }
@@ -1323,6 +1326,8 @@ impl From<forest_grpc_interface::Source> for models::source::Source {
         Self {
             username: value.user,
             email: value.email,
+            source_type: value.source_type,
+            run_url: value.run_url,
         }
     }
 }
@@ -1333,6 +1338,7 @@ impl From<forest_grpc_interface::ArtifactContext> for models::context::ArtifactC
             title: value.title,
             description: value.description,
             web: value.web,
+            pr: value.pr,
         }
     }
 }
@@ -1360,6 +1366,9 @@ impl From<forest_grpc_interface::Ref> for crate::models::reference::Reference {
         Self {
             commit_sha: value.commit_sha,
             commit_branch: value.branch,
+            commit_message: value.commit_message,
+            version: value.version,
+            repo_url: value.repo_url,
         }
     }
 }
@@ -1368,6 +1377,9 @@ impl From<crate::models::reference::Reference> for forest_grpc_interface::Ref {
         Self {
             commit_sha: value.commit_sha,
             branch: value.commit_branch,
+            commit_message: value.commit_message,
+            version: value.version,
+            repo_url: value.repo_url,
         }
     }
 }

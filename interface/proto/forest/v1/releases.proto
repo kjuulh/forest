@@ -102,12 +102,15 @@ service ReleaseService {
 message Source {
   optional string user = 1;
   optional string email = 2;
+  optional string source_type = 3;
+  optional string run_url = 4;
 }
 
 message ArtifactContext {
   string title = 1;
   optional string description = 2;
   optional string web = 3;
+  optional string pr = 4;
 }
 
 message Artifact {
@@ -138,6 +141,9 @@ message Project {
 message Ref {
   string commit_sha = 1;
   optional string branch = 2;
+  optional string commit_message = 3;
+  optional string version = 4;
+  optional string repo_url = 5;
 }
 
 message OrganisationRef {

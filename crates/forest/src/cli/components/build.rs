@@ -131,7 +131,7 @@ fn resolve_targets(
     let mut targets = Vec::new();
 
     for (os, arches) in architectures {
-        for (arch, _) in arches {
+        for arch in arches.keys() {
             let mut target = BuildTarget {
                 os: os.clone(),
                 arch: arch.clone(),

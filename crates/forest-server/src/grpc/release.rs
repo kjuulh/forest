@@ -91,11 +91,17 @@ impl ReleaseService for ReleaseServer {
                     artifact_id: Some(artifact_id.to_string()),
                     source_username: source.username.clone(),
                     source_email: source.email.clone(),
+                    source_type: source.source_type.clone(),
+                    run_url: source.run_url.clone(),
                     commit_sha: Some(reference.commit_sha.clone()),
                     commit_branch: reference.commit_branch.clone(),
+                    commit_message: reference.commit_message.clone(),
+                    version: reference.version.clone(),
+                    repo_url: reference.repo_url.clone(),
                     context_title: Some(art_context.title.clone()),
                     context_description: art_context.description.clone(),
                     context_web: art_context.web.clone(),
+                    context_pr: art_context.pr.clone(),
                     ..Default::default()
                 },
             )
@@ -213,15 +219,29 @@ impl ReleaseService for ReleaseServer {
                     destination_count: dest_count as i32,
                     source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
                     source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
+                    source_type: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.source.source_type.clone()),
+                    run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
                     commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),
                     commit_branch: ann_ctx
                         .as_ref()
                         .and_then(|a| a.reference.commit_branch.clone()),
+                    commit_message: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.reference.commit_message.clone()),
+                    version: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.reference.version.clone()),
+                    repo_url: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.reference.repo_url.clone()),
                     context_title: ann_ctx.as_ref().map(|a| a.context.title.clone()),
                     context_description: ann_ctx
                         .as_ref()
                         .and_then(|a| a.context.description.clone()),
                     context_web: ann_ctx.as_ref().and_then(|a| a.context.web.clone()),
+                    context_pr: ann_ctx.as_ref().and_then(|a| a.context.pr.clone()),
                     ..Default::default()
                 },
             )
@@ -446,6 +466,7 @@ impl From<grpc::ArtifactContext> for crate::services::release_registry::Artifact
             title: value.title,
             description: value.description,
             web: value.web,
+            pr: value.pr,
         }
     }
 }
@@ -455,6 +476,8 @@ impl From<grpc::Source> for crate::services::release_registry::Source {
         Self {
             username: value.user,
             email: value.email,
+            source_type: value.source_type,
+            run_url: value.run_url,
         }
     }
 }
@@ -464,6 +487,9 @@ impl From<grpc::Ref> for crate::services::release_registry::Reference {
         Self {
             commit_sha: value.commit_sha,
             commit_branch: value.branch,
+            commit_message: value.commit_message,
+            version: value.version,
+            repo_url: value.repo_url,
         }
     }
 }
@@ -501,6 +527,8 @@ impl From<release_registry::Source> for grpc::Source {
         Self {
             user: value.username,
             email: value.email,
+            source_type: value.source_type,
+            run_url: value.run_url,
         }
     }
 }
@@ -511,6 +539,7 @@ impl From<release_registry::ArtifactContext> for grpc::ArtifactContext {
             title: value.title,
             description: value.description,
             web: value.web,
+            pr: value.pr,
         }
     }
 }

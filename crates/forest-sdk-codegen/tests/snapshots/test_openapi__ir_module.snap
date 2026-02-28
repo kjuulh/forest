@@ -3,11 +3,6 @@ source: crates/forest-sdk-codegen/tests/test_openapi.rs
 expression: module
 ---
 Module {
-    component: Component {
-        name: "ecs-service",
-        org: "forest-contrib",
-        version: "0.1.0",
-    },
     spec: Spec {
         fields: [
             Field {
@@ -251,6 +246,39 @@ Module {
                         4096,
                     ],
                 ),
+            ),
+        },
+        TypeDef {
+            name: "Component",
+            kind: Struct(
+                StructDef {
+                    fields: [
+                        Field {
+                            name: "name",
+                            ty: String,
+                            required: true,
+                            default_value: None,
+                            description: None,
+                            constraints: [],
+                        },
+                        Field {
+                            name: "org",
+                            ty: String,
+                            required: true,
+                            default_value: None,
+                            description: None,
+                            constraints: [],
+                        },
+                        Field {
+                            name: "version",
+                            ty: String,
+                            required: true,
+                            default_value: None,
+                            description: None,
+                            constraints: [],
+                        },
+                    ],
+                },
             ),
         },
         TypeDef {

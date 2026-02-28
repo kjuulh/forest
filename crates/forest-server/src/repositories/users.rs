@@ -372,6 +372,7 @@ impl UserRepository {
 
     // ── Identities ──────────────────────────────────────────────────
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_identity(
         &self,
         db: impl PgExecutor<'_>,
@@ -714,6 +715,7 @@ impl UserRepository {
 
     // ── OAuth state ─────────────────────────────────────────────────
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_oauth_state(
         &self,
         db: impl PgExecutor<'_>,
@@ -778,6 +780,7 @@ impl UserRepository {
 
     // ── Personal access tokens ──────────────────────────────────────
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_personal_access_token(
         &self,
         db: impl PgExecutor<'_>,

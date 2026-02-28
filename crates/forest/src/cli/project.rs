@@ -16,7 +16,7 @@ pub struct ProjectCommand {
 #[derive(clap::Subcommand)]
 enum Commands {
     Init(InitCommand),
-    Publish(PublishCommand),
+    Publish(Box<PublishCommand>),
     List(ListCommand),
 }
 

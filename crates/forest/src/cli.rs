@@ -60,7 +60,7 @@ enum Commands {
     Tmp(TmpCommand),
     Project(ProjectCommand),
     Destination(DestinationCommand),
-    Release(ReleaseCommand),
+    Release(Box<ReleaseCommand>),
     /// Manage organisations
     Organisation(OrganisationCommand),
     /// Manage and listen for notifications
