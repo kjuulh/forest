@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rust-podinfo
+  labels:
+    app.kubernetes.io/name: rust-podinfo
+    app.kubernetes.io/managed-by: forest

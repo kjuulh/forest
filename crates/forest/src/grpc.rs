@@ -202,8 +202,9 @@ impl GrpcClient {
         file_content: &str,
         env: &str,
         destination: &str,
+        category: &str,
     ) -> anyhow::Result<()> {
-        tracing::info!("uploading file: {}", handle.staging_id);
+        tracing::info!("uploading file: {} (category: {})", handle.staging_id, category);
 
         handle
             .tx
@@ -213,6 +214,7 @@ impl GrpcClient {
                 destination: destination.into(),
                 file_name: file_name.into(),
                 file_content: file_content.into(),
+                category: category.into(),
             })
             .await?;
 

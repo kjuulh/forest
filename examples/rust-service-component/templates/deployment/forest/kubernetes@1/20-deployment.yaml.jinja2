@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ config.name }}
+  namespace: {{ config.name }}
+  labels:
+    app.kubernetes.io/name: {{ config.name }}
+    app.kubernetes.io/managed-by: forest
+spec:
+  replicas: {{ config.replicas | default(1) }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ config.name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ config.name }}
+    spec:
+      containers:
+        - name: {{ config.name }}
+          image: {{ config.image }}
+          imagePullPolicy: IfNotPresent
+          {%- if config.ports %}
+          ports:
+          {%- for port in config.ports %}
+            - name: {{ port.name }}
+              containerPort: {{ port.port }}
+              protocol: {{ port.protocol | default('TCP') | to_upper }}
+          {%- endfor %}
+          {%- endif %}
+          {%- if config.environment %}
+          env:
+          {%- for item in config.environment %}
+            - name: "{{ item.key }}"
+              value: "{{ item.value }}"
+          {%- endfor %}
+          {%- endif %}
+          resources:
+            {%- if config.resources %}
+            requests:
+              cpu: "{{ config.resources.requests.cpu }}"
+              memory: "{{ config.resources.requests.memory }}"
+            limits:
+              cpu: "{{ config.resources.limits.cpu }}"
+              memory: "{{ config.resources.limits.memory }}"
+            {%- else %}
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+            {%- endif %}
+          {%- if config.health_checks %}
+          {%- if config.health_checks.liveness %}
+          livenessProbe:
+            httpGet:
+              path: {{ config.health_checks.liveness.path }}
+              port: {{ config.health_checks.liveness.port }}
+            initialDelaySeconds: {{ config.health_checks.liveness.initial_delay_seconds | default(10) }}
+            periodSeconds: {{ config.health_checks.liveness.period_seconds | default(10) }}
+            timeoutSeconds: {{ config.health_checks.liveness.timeout_seconds | default(3) }}
+            failureThreshold: {{ config.health_checks.liveness.failure_threshold | default(3) }}
+          {%- endif %}
+          {%- if config.health_checks.readiness %}
+          readinessProbe:
+            httpGet:
+              path: {{ config.health_checks.readiness.path }}
+              port: {{ config.health_checks.readiness.port }}
+            initialDelaySeconds: {{ config.health_checks.readiness.initial_delay_seconds | default(5) }}
+            periodSeconds: {{ config.health_checks.readiness.period_seconds | default(5) }}
+            timeoutSeconds: {{ config.health_checks.readiness.timeout_seconds | default(3) }}
+            failureThreshold: {{ config.health_checks.readiness.failure_threshold | default(3) }}
+          {%- endif %}
+          {%- endif %}

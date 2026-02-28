@@ -32,7 +32,7 @@ impl ReleaseCommand {
             Some(Commands::Annotate(cmd)) => cmd.execute(state).await?,
             Some(Commands::Release(cmd)) => cmd.execute(state).await?,
             None => {
-                let cmd = self.release.as_ref().unwrap();
+                let cmd = self.release.as_ref().cloned().unwrap_or_default();
                 cmd.execute(state).await?
             }
         }

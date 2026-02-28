@@ -15,6 +15,9 @@ message UploadArtifactRequest {
 
   string file_name = 4;
   string file_content = 5;
+
+  // Category of the file: "deployment" (default), "spec", or "attachment"
+  string category = 6;
 }
 message UploadArtifactResponse {}
 

@@ -47,13 +47,19 @@ impl ArtifactService for ArtifactServer {
             .transpose()
             .inspect_err(|e| tracing::warn!("had error: {}", e))?
         {
-            tracing::info!("uploading file: file_name: {}", msg.file_name);
+            tracing::info!("uploading file: file_name: {} (category: {})", msg.file_name, msg.category);
 
             let upload_staging_id: StagingArtifactID = msg
                 .upload_id
                 .try_into()
                 .context("artifact id")
                 .to_internal_error()?;
+
+            let category = if msg.category.is_empty() {
+                "deployment"
+            } else {
+                &msg.category
+            };
 
             staging
                 .upload_file(
@@ -62,6 +68,7 @@ impl ArtifactService for ArtifactServer {
                     &msg.file_content,
                     &msg.env,
                     &msg.destination,
+                    category,
                 )
                 .await
                 .to_internal_error()?;

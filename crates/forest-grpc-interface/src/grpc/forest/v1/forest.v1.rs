@@ -20,6 +20,9 @@ pub struct UploadArtifactRequest {
     pub file_name: ::prost::alloc::string::String,
     #[prost(string, tag="5")]
     pub file_content: ::prost::alloc::string::String,
+    /// Category of the file: "deployment" (default), "spec", or "attachment"
+    #[prost(string, tag="6")]
+    pub category: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UploadArtifactResponse {

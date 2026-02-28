@@ -1,0 +1,21 @@
+[component]
+name = "rust-service"
+organisation = "forest-contrib"
+version = "0.1.0"
+
+[commands]
+build = { bash = """
+  echo "Building $FOREST_COMPONENT"
+  cargo build --release
+  echo "Use 'forest run validate' to check configuration"
+""" }
+
+validate = { bash = """
+  cargo clippy
+  cargo fmt --check
+  echo "Validating service configuration for $FOREST_COMPONENT"
+""" }
+
+status = { bash = """
+  echo "Checking deployment status for $FOREST_COMPONENT"
+""" }

@@ -2981,6 +2981,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-podinfo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "notmad",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "rust-service"
+version = "0.1.0"
+dependencies = [
+ "forest-sdk",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

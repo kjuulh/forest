@@ -1,0 +1,23 @@
+{%- if config.ports %}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ config.name }}
+  namespace: {{ config.name }}
+  labels:
+    app.kubernetes.io/name: {{ config.name }}
+    app.kubernetes.io/managed-by: forest
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ config.name }}
+  ports:
+  {%- for port in config.ports %}
+  {%- if port.external %}
+    - name: {{ port.name }}
+      port: {{ port.port }}
+      targetPort: {{ port.port }}
+      protocol: {{ port.protocol | default('TCP') | to_upper }}
+  {%- endif %}
+  {%- endfor %}
+{%- endif %}

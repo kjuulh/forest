@@ -53,9 +53,19 @@ pub struct PublishCommand {
 
     #[arg(long = "repo-url")]
     repo_url: Option<String>,
-}
 
-static LARGE_PAYOAD: [u8; 4000000] = [b'a'; 4000000];
+    /// Path to the spec file (e.g. forest.cue). Auto-detected from cwd if not specified.
+    #[arg(long = "spec-file")]
+    spec_file: Option<String>,
+
+    /// Skip uploading the spec file even if one is found.
+    #[arg(long = "no-spec")]
+    no_spec: bool,
+
+    /// Additional files to include as attachments. Can be specified multiple times.
+    #[arg(long = "include-file")]
+    include_files: Vec<String>,
+}
 
 impl PublishCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
@@ -116,25 +126,83 @@ impl PublishCommand {
                 &file_content,
                 &env.as_os_str().to_string_lossy(),
                 &destination,
+                "deployment",
             )
             .await
             .context("upload file")?;
         }
 
-        // let large_payload = str::from_utf8(&LARGE_PAYOAD).unwrap();
+        // Upload spec file
+        if !self.no_spec {
+            let spec_path = if let Some(ref spec) = self.spec_file {
+                let p = std::path::PathBuf::from(spec);
+                if p.exists() {
+                    Some(p)
+                } else {
+                    anyhow::bail!("specified spec file does not exist: {}", spec);
+                }
+            } else {
+                ["forest.cue", "forest.toml", "forest.ncl", "forest.yaml"]
+                    .iter()
+                    .map(std::path::PathBuf::from)
+                    .find(|p| p.exists())
+            };
 
-        // for i in 0..9 {
-        //     tracing::info!("uploading file: {}", i);
-        //     grpc.upload_artifact_file(
-        //         &upload_handle,
-        //         &i.to_string(),
-        //         large_payload,
-        //         "some-env",
-        //         "some-dest",
-        //     )
-        //     .await
-        //     .context("upload first file")?;
-        // }
+            if let Some(spec_path) = spec_path {
+                let file_name = spec_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "forest.cue".to_string());
+                let file_content = tokio::fs::read_to_string(&spec_path)
+                    .await
+                    .context(format!("failed to read spec file: {}", spec_path.display()))?;
+
+                tracing::info!("uploading spec file: {}", file_name);
+                grpc.upload_artifact_file(
+                    &upload_handle,
+                    &file_name,
+                    &file_content,
+                    "",
+                    "",
+                    "spec",
+                )
+                .await
+                .context("upload spec file")?;
+            } else {
+                tracing::debug!("no spec file found, skipping spec upload");
+            }
+        }
+
+        // Upload additional include files
+        for include_path_str in &self.include_files {
+            let include_path = std::path::PathBuf::from(include_path_str);
+            if !include_path.exists() {
+                anyhow::bail!("include file does not exist: {}", include_path_str);
+            }
+
+            let file_name = include_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| include_path_str.clone());
+            let file_content = tokio::fs::read_to_string(&include_path)
+                .await
+                .context(format!(
+                    "failed to read include file: {}",
+                    include_path.display()
+                ))?;
+
+            tracing::info!("uploading attachment: {}", file_name);
+            grpc.upload_artifact_file(
+                &upload_handle,
+                &file_name,
+                &file_content,
+                "",
+                "",
+                "attachment",
+            )
+            .await
+            .context(format!("upload include file: {}", include_path_str))?;
+        }
 
         let artifact_id = grpc
             .commit_artifact_upload(upload_handle)

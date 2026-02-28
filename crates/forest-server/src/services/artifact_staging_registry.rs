@@ -44,6 +44,7 @@ impl ArtifactStagingRegistry {
         file_content: &str,
         env: &str,
         destination: &str,
+        category: &str,
     ) -> anyhow::Result<()> {
         let blob_entry = sqlx::query!(
             r#"
@@ -67,20 +68,23 @@ impl ArtifactStagingRegistry {
                     env,
                     destination,
                     file_name,
-                    file_content
+                    file_content,
+                    category
                 ) VALUES (
                     $1,
                     $2,
                     $3,
                     $4,
-                    $5
+                    $5,
+                    $6
                 )
             "#,
             id.id(),
             env,
             destination,
             file_name,
-            blob_id
+            blob_id,
+            category
         )
         .execute(&self.db)
         .await
@@ -110,10 +114,44 @@ impl ArtifactStagingRegistry {
                     file.file_content = blob.id
                 WHERE
                         artifact_staging_id = $1
-                    AND env = $2;
+                    AND env = $2
+                    AND category = 'deployment';
             ",
             artifact_id,
             env
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        Ok(recs
+            .into_iter()
+            .flat_map(|r| Some((PathBuf::from(r.file_name), r.file_content?)))
+            .collect())
+    }
+
+    pub async fn get_spec_files(
+        &self,
+        id: &uuid::Uuid,
+    ) -> anyhow::Result<Vec<(PathBuf, String)>> {
+        let rec = sqlx::query!("SELECT artifact_id FROM artifacts WHERE id = $1", id)
+            .fetch_one(&self.db)
+            .await
+            .context("get artifact id")?;
+        let artifact_id = rec.artifact_id;
+
+        let recs = sqlx::query!(
+            "
+                SELECT
+                    file.file_name as file_name,
+                    blob.content as file_content
+                FROM artifact_files file
+                JOIN blob_storage blob ON
+                    file.file_content = blob.id
+                WHERE
+                        artifact_staging_id = $1
+                    AND category = 'spec';
+            ",
+            artifact_id
         )
         .fetch_all(&self.db)
         .await?;
