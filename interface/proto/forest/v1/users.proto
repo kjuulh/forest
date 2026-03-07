@@ -18,6 +18,9 @@ service UsersService {
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
 
+  // Stats
+  rpc GetUserStats(GetUserStatsRequest) returns (GetUserStatsResponse);
+
   // Password management
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
 
@@ -279,6 +282,28 @@ message DeletePersonalAccessTokenRequest {
 }
 
 message DeletePersonalAccessTokenResponse {}
+
+// ─── Stats ──────────────────────────────────────────────────────────
+
+message GetUserStatsRequest {
+  oneof identifier {
+    string user_id = 1;
+    string username = 2;
+  }
+}
+
+message GetUserStatsResponse {
+  UserStats stats = 1;
+}
+
+message UserStats {
+  int64 total_releases = 1;
+  int64 successful_releases = 2;
+  int64 failed_releases = 3;
+  int64 in_progress_releases = 4;
+  int64 total_annotations = 5;
+  int64 total_uploads = 6;
+}
 
 // ─── MFA ─────────────────────────────────────────────────────────────
 

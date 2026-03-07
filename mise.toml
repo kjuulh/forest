@@ -109,10 +109,25 @@ run = "./scripts/k3d-manager.sh cleanup"
 [tasks."k8s:list"]
 run = "./scripts/k3d-manager.sh list"
 
+[tasks."flux:test"]
+dir = "./examples/rust-podinfo"
+run = "./flux-test.sh flux"
+description = "Run Flux v2 destination test (in-process, bare git)"
+
+[tasks."flux:runner-test"]
+dir = "./examples/rust-podinfo"
+run = "./flux-test.sh flux-runner"
+description = "Run Flux v2 destination test via distributed runner (no k3d)"
+
 [tasks."k8s:flux:test"]
 dir = "./examples/rust-podinfo"
-run = "./k3d-flux-test.sh"
+run = "./flux-test.sh k3d-flux"
 description = "Run k3d + Flux v2 integration test"
+
+[tasks."k8s:flux:runner-test"]
+dir = "./examples/rust-podinfo"
+run = "./flux-test.sh k3d-flux-runner"
+description = "Run k3d + Flux v2 integration test via distributed runner"
 
 [tasks."k8s:flux:cleanup"]
 run = """

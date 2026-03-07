@@ -88,6 +88,32 @@ message GetProjectsResponse {
 
 
 
+message GetReleasesByActorRequest {
+  string actor_id = 1;        // user_id or app_id
+  string actor_type = 2;      // "user" or "app"
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message GetReleasesByActorResponse {
+  repeated ReleaseIntentSummary releases = 1;
+  string next_page_token = 2;
+}
+
+message ReleaseIntentSummary {
+  string release_intent_id = 1;
+  string artifact_id = 2;
+  Project project = 3;
+  repeated ReleaseDestinationStatus destinations = 4;
+  string created_at = 5;
+}
+
+message ReleaseDestinationStatus {
+  string destination = 1;
+  string environment = 2;
+  string status = 3;
+}
+
 service ReleaseService {
   rpc AnnotateRelease(AnnotateReleaseRequest) returns (AnnotateReleaseResponse);
   rpc Release(ReleaseRequest) returns (ReleaseResponse);
@@ -95,6 +121,7 @@ service ReleaseService {
 
   rpc GetArtifactBySlug(GetArtifactBySlugRequest) returns (GetArtifactBySlugResponse);
   rpc GetArtifactsByProject(GetArtifactsByProjectRequest) returns (GetArtifactsByProjectResponse);
+  rpc GetReleasesByActor(GetReleasesByActorRequest) returns (GetReleasesByActorResponse);
   rpc GetOrganisations(GetOrganisationsRequest) returns (GetOrganisationsResponse);
   rpc GetProjects(GetProjectsRequest) returns (GetProjectsResponse);
 }

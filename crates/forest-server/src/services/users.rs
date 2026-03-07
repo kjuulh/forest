@@ -300,6 +300,57 @@ impl UserService {
         })
     }
 
+    // ── User stats ────────────────────────────────────────────────────
+
+    pub async fn get_user_stats(&self, user_id: Uuid) -> anyhow::Result<UserStats> {
+        let release_stats = sqlx::query!(
+            r#"
+            SELECT
+                count(*) as "total!",
+                count(*) FILTER (WHERE r.status = 'SUCCESS') as "successful!",
+                count(*) FILTER (WHERE r.status = 'FAILURE') as "failed!",
+                count(*) FILTER (WHERE r.status IN ('STAGED', 'RUNNING')) as "in_progress!"
+            FROM release_intents ri
+            JOIN releases r ON r.release_intent_id = ri.id
+            WHERE ri.actor_id = $1 AND ri.actor_type = 'user'
+            "#,
+            user_id
+        )
+        .fetch_one(self.db())
+        .await?;
+
+        let annotation_count = sqlx::query!(
+            r#"
+            SELECT count(*) as "total!"
+            FROM annotations
+            WHERE actor_id = $1 AND actor_type = 'user'
+            "#,
+            user_id
+        )
+        .fetch_one(self.db())
+        .await?;
+
+        let upload_count = sqlx::query!(
+            r#"
+            SELECT count(*) as "total!"
+            FROM artifact_staging
+            WHERE actor_id = $1 AND actor_type = 'user'
+            "#,
+            user_id
+        )
+        .fetch_one(self.db())
+        .await?;
+
+        Ok(UserStats {
+            total_releases: release_stats.total,
+            successful_releases: release_stats.successful,
+            failed_releases: release_stats.failed,
+            in_progress_releases: release_stats.in_progress,
+            total_annotations: annotation_count.total,
+            total_uploads: upload_count.total,
+        })
+    }
+
     // ── Password management ──────────────────────────────────────────
 
     pub async fn change_password(
@@ -612,6 +663,15 @@ pub struct UserSummary {
 pub struct UserList {
     pub users: Vec<UserSummary>,
     pub has_more: bool,
+}
+
+pub struct UserStats {
+    pub total_releases: i64,
+    pub successful_releases: i64,
+    pub failed_releases: i64,
+    pub in_progress_releases: i64,
+    pub total_annotations: i64,
+    pub total_uploads: i64,
 }
 
 pub struct OAuthStateInfo {

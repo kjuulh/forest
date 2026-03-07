@@ -18,6 +18,7 @@ use crate::{
 };
 
 pub mod fluxv1;
+pub mod in_process_backend;
 pub mod kubernetesv1;
 pub mod terraformv1;
 

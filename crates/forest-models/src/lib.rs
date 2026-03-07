@@ -145,6 +145,7 @@ impl From<forest_grpc_interface::DestinationType> for DestinationType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReleaseStatus {
     Staged,
+    Running,
     Success,
     Failure,
 }
@@ -153,6 +154,7 @@ impl ReleaseStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
             ReleaseStatus::Staged => "STAGED",
+            ReleaseStatus::Running => "RUNNING",
             ReleaseStatus::Success => "SUCCESS",
             ReleaseStatus::Failure => "FAILURE",
         }
@@ -160,6 +162,10 @@ impl ReleaseStatus {
 
     pub fn is_finalized(&self) -> bool {
         matches!(self, ReleaseStatus::Success | ReleaseStatus::Failure)
+    }
+
+    pub fn is_running(&self) -> bool {
+        matches!(self, ReleaseStatus::Running)
     }
 
     pub fn is_success(&self) -> bool {
@@ -183,6 +189,7 @@ impl std::str::FromStr for ReleaseStatus {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "STAGED" => Ok(ReleaseStatus::Staged),
+            "RUNNING" => Ok(ReleaseStatus::Running),
             "SUCCESS" => Ok(ReleaseStatus::Success),
             "FAILURE" => Ok(ReleaseStatus::Failure),
             _ => Err(format!("unknown release status: {}", s)),

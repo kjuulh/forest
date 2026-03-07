@@ -1,27 +1,4 @@
-#![allow(dead_code)]
-
 use tracing_subscriber::EnvFilter;
-
-mod cli;
-mod repositories;
-mod servehttp;
-mod services;
-
-mod checks;
-
-mod native_credentials;
-
-mod state;
-pub use state::*;
-
-mod destination_services;
-mod destinations;
-
-mod grpc;
-mod scheduler;
-mod temp_dir;
-
-mod tokens;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -49,7 +26,6 @@ async fn main() -> anyhow::Result<()> {
                 .init();
         }
         _ => {
-            // default to pretty logging
             tracing_subscriber::fmt()
                 .pretty()
                 .with_env_filter(
@@ -59,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    cli::execute().await?;
+    forest_server::cli::execute().await?;
 
     Ok(())
 }

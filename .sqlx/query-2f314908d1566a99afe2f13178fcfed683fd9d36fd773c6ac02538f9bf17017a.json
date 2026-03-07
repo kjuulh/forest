@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT at.app_id, a.organisation_id\n        FROM app_tokens at\n        JOIN apps a ON at.app_id = a.id\n        WHERE at.token_hash = $1\n          AND at.revoked = false\n          AND a.suspended = false\n          AND (at.expires_at IS NULL OR at.expires_at > now())\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "app_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "organisation_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "2f314908d1566a99afe2f13178fcfed683fd9d36fd773c6ac02538f9bf17017a"
+}

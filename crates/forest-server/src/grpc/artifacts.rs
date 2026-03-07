@@ -4,6 +4,7 @@ use forest_grpc_interface::{artifact_service_server::ArtifactService, *};
 use tonic::Response;
 
 use crate::{
+    actor::Actor,
     services::artifact_staging_registry::{ArtifactStagingRegistryState, StagingArtifactID},
     state::State,
 };
@@ -18,12 +19,18 @@ impl ArtifactService for ArtifactServer {
         &self,
         request: tonic::Request<BeginUploadArtifactRequest>,
     ) -> std::result::Result<tonic::Response<BeginUploadArtifactResponse>, tonic::Status> {
+        let actor = request
+            .extensions()
+            .get::<Actor>()
+            .cloned()
+            .ok_or_else(|| tonic::Status::unauthenticated("missing actor"))?;
+
         let _req = request.into_inner();
 
         let id = self
             .state
             .artifact_staging_registry()
-            .create_staging_entry()
+            .create_staging_entry(&actor)
             .await
             .context("create staging entry")
             .to_internal_error()?;

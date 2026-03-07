@@ -1,0 +1,38 @@
+[package]
+name = "forest-runner"
+edition = "2024"
+version.workspace = true
+
+[lib]
+name = "forest_runner"
+path = "src/lib.rs"
+
+[[bin]]
+name = "forest-runner"
+path = "src/main.rs"
+
+[dependencies]
+forest-grpc-interface.workspace = true
+
+anyhow.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+
+uuid = { version = "1.7.0", features = ["v4", "v7"] }
+tokio-stream = "0.1"
+serde_yaml = "0.9"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+notmad = "0.11.0"
+tokio-util = "0.7.15"
+
+[dev-dependencies]
+tempfile = "3"

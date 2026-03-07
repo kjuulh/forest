@@ -19,12 +19,24 @@ impl DestinationRegistry {
         metadata: HashMap<String, String>,
         destination_type: DestinationType,
     ) -> anyhow::Result<()> {
+        // Resolve environment name to environment_id
+        let env = sqlx::query!(
+            "SELECT id FROM environments WHERE organisation = $1 AND name = $2",
+            organisation,
+            environment,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("lookup environment")?
+        .context("environment not found for this organisation")?;
+
         sqlx::query!(
             "
                 INSERT INTO destinations (
                     organisation,
                     name,
                     environment,
+                    environment_id,
                     metadata,
                     type_organisation,
                     type_name,
@@ -36,12 +48,14 @@ impl DestinationRegistry {
                     $4,
                     $5,
                     $6,
-                    $7
+                    $7,
+                    $8
                 )
                 ",
             organisation,
             name,
             environment,
+            env.id,
             serde_json::to_value(&metadata)?,
             destination_type.organisation,
             destination_type.name,

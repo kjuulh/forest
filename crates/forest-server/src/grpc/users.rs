@@ -345,6 +345,48 @@ impl UsersService for UsersServer {
         }))
     }
 
+    // ── Stats ────────────────────────────────────────────────────────
+
+    async fn get_user_stats(
+        &self,
+        request: tonic::Request<GetUserStatsRequest>,
+    ) -> std::result::Result<tonic::Response<GetUserStatsResponse>, tonic::Status> {
+        let req = request.into_inner();
+
+        let user_id = match req.identifier {
+            Some(get_user_stats_request::Identifier::UserId(id)) => id
+                .parse::<Uuid>()
+                .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?,
+            Some(get_user_stats_request::Identifier::Username(username)) => {
+                let profile = self
+                    .service()
+                    .get_user_by_username(&username)
+                    .await
+                    .map_err(error::to_status)?
+                    .ok_or_else(|| tonic::Status::not_found("user not found"))?;
+                profile.user_id
+            }
+            None => return Err(tonic::Status::invalid_argument("identifier is required")),
+        };
+
+        let stats = self
+            .service()
+            .get_user_stats(user_id)
+            .await
+            .map_err(error::to_status)?;
+
+        Ok(tonic::Response::new(GetUserStatsResponse {
+            stats: Some(UserStats {
+                total_releases: stats.total_releases,
+                successful_releases: stats.successful_releases,
+                failed_releases: stats.failed_releases,
+                in_progress_releases: stats.in_progress_releases,
+                total_annotations: stats.total_annotations,
+                total_uploads: stats.total_uploads,
+            }),
+        }))
+    }
+
     // ── Password management ──────────────────────────────────────────
 
     async fn change_password(

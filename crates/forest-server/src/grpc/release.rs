@@ -5,6 +5,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::Response;
 
 use crate::{
+    actor::Actor,
     grpc::artifacts::GrpcErrorExt,
     services::{
         notification_registry::{NotificationRegistryState, ReleaseContext as NotifReleaseContext},
@@ -25,6 +26,12 @@ impl ReleaseService for ReleaseServer {
         request: tonic::Request<AnnotateReleaseRequest>,
     ) -> std::result::Result<tonic::Response<AnnotateReleaseResponse>, tonic::Status> {
         tracing::debug!("annotate release");
+
+        let actor = request
+            .extensions()
+            .get::<Actor>()
+            .cloned()
+            .ok_or_else(|| tonic::Status::unauthenticated("missing actor"))?;
 
         let req = request.into_inner();
 
@@ -70,6 +77,7 @@ impl ReleaseService for ReleaseServer {
                 &proj.organisation,
                 &proj.project,
                 &reference,
+                &actor,
             )
             .await
             .to_internal_error()?;
@@ -164,6 +172,13 @@ impl ReleaseService for ReleaseServer {
         request: tonic::Request<ReleaseRequest>,
     ) -> std::result::Result<tonic::Response<ReleaseResponse>, tonic::Status> {
         tracing::debug!("release");
+
+        let actor = request
+            .extensions()
+            .get::<Actor>()
+            .cloned()
+            .ok_or_else(|| tonic::Status::unauthenticated("missing actor"))?;
+
         let req = request.into_inner();
 
         let artifact_id: uuid::Uuid = req
@@ -175,7 +190,7 @@ impl ReleaseService for ReleaseServer {
         let created = self
             .state
             .release_registry()
-            .release(&artifact_id, req.destinations, req.environments)
+            .release(&artifact_id, req.destinations, req.environments, &actor)
             .await
             .context("release")
             .to_internal_error()?;
@@ -415,6 +430,76 @@ impl ReleaseService for ReleaseServer {
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn get_releases_by_actor(
+        &self,
+        request: tonic::Request<GetReleasesByActorRequest>,
+    ) -> std::result::Result<tonic::Response<GetReleasesByActorResponse>, tonic::Status> {
+        let _actor = request
+            .extensions()
+            .get::<Actor>()
+            .cloned()
+            .ok_or_else(|| tonic::Status::unauthenticated("missing actor"))?;
+
+        let req = request.into_inner();
+
+        let actor_id: uuid::Uuid = req
+            .actor_id
+            .parse()
+            .context("invalid actor_id")
+            .to_internal_error()?;
+
+        let valid_types = ["user", "app"];
+        if !valid_types.contains(&req.actor_type.as_str()) {
+            return Err(tonic::Status::invalid_argument(
+                "actor_type must be 'user' or 'app'",
+            ));
+        }
+
+        let page_size = if req.page_size > 0 {
+            req.page_size as i64
+        } else {
+            20
+        };
+        let offset = req.page_token.parse::<i64>().unwrap_or(0);
+
+        let results = self
+            .state
+            .release_registry()
+            .get_releases_by_actor(&actor_id, &req.actor_type, page_size, offset)
+            .await
+            .context("get releases by actor")
+            .to_internal_error()?;
+
+        let has_more = results.len() as i64 >= page_size;
+        let next_page_token = if has_more {
+            (offset + page_size).to_string()
+        } else {
+            String::new()
+        };
+
+        Ok(Response::new(GetReleasesByActorResponse {
+            releases: results
+                .into_iter()
+                .map(|r| ReleaseIntentSummary {
+                    release_intent_id: r.release_intent_id.to_string(),
+                    artifact_id: r.artifact_id.to_string(),
+                    project: Some(r.project.into()),
+                    destinations: r
+                        .destinations
+                        .into_iter()
+                        .map(|d| ReleaseDestinationStatus {
+                            destination: d.destination,
+                            environment: d.environment,
+                            status: d.status,
+                        })
+                        .collect(),
+                    created_at: r.created_at.to_rfc3339(),
+                })
+                .collect(),
+            next_page_token,
+        }))
     }
 
     async fn get_organisations(

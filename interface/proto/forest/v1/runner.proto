@@ -1,0 +1,212 @@
+syntax = "proto3";
+
+package forest.v1;
+
+// RunnerService is exposed by the forest-server. Runners (workers) call these
+// RPCs to register for work, fetch release artifacts, stream logs, and report
+// completion. Authentication for all post-assignment RPCs uses a release-scoped
+// opaque token rather than the regular JWT flow.
+service RunnerService {
+  // Bidirectional stream used for runner registration and work assignment.
+  // The runner sends a RunnerRegister as its first message, then periodic
+  // RunnerHeartbeat messages. The server responds with a RegisterAck followed
+  // by WorkAssignment messages when releases matching the runner's capabilities
+  // become available.
+  rpc RegisterRunner(stream RunnerMessage) returns (stream ServerMessage);
+
+  // Fetch the artifact files for a release assigned to this runner.
+  // Scoped by the release_token received in the WorkAssignment.
+  rpc GetReleaseFiles(GetReleaseFilesRequest) returns (stream ReleaseFile);
+
+  // Stream log lines back to the server for real-time display.
+  // Each message must include the release_token for authentication.
+  rpc PushLogs(stream PushLogRequest) returns (PushLogResponse);
+
+  // Fetch the original spec files for a release.
+  // Scoped by the release_token received in the WorkAssignment.
+  rpc GetSpecFiles(GetSpecFilesRequest) returns (stream ReleaseFile);
+
+  // Fetch the annotation (metadata context) for a release.
+  rpc GetReleaseAnnotation(GetReleaseAnnotationRequest) returns (ReleaseAnnotationResponse);
+
+  // Fetch project info (organisation + project name) for a release.
+  rpc GetProjectInfo(GetProjectInfoRequest) returns (ProjectInfoResponse);
+
+  // Report the final outcome of a release (success or failure).
+  // This commits the release status and revokes the token.
+  rpc CompleteRelease(CompleteReleaseRequest) returns (CompleteReleaseResponse);
+}
+
+// ============================================================================
+// Connect stream: Runner → Server
+// ============================================================================
+
+message RunnerMessage {
+  oneof message {
+    RunnerRegister register = 1;
+    RunnerHeartbeat heartbeat = 2;
+    WorkAck work_ack = 3;
+  }
+}
+
+// First message a runner sends on the Connect stream.
+message RunnerRegister {
+  // Runner-chosen unique identifier. If empty, the server assigns one.
+  string runner_id = 1;
+  // Destination types this runner can handle.
+  repeated DestinationCapability capabilities = 2;
+  // Maximum number of simultaneous releases this runner can process.
+  int32 max_concurrent = 3;
+}
+
+// Describes a destination type the runner supports.
+message DestinationCapability {
+  string organisation = 1;
+  string name = 2;
+  uint64 version = 3;
+}
+
+// Periodic keepalive sent by the runner (recommended every 10s).
+message RunnerHeartbeat {
+  // Current number of in-progress releases on this runner.
+  int32 active_releases = 1;
+}
+
+// Runner's response to a WorkAssignment.
+message WorkAck {
+  string release_token = 1;
+  // false = runner rejects the work (e.g., overloaded). The server will
+  // reassign or fall back to in-process execution.
+  bool accepted = 2;
+}
+
+// ============================================================================
+// Connect stream: Server → Runner
+// ============================================================================
+
+message ServerMessage {
+  oneof message {
+    RegisterAck register_ack = 1;
+    WorkAssignment work_assignment = 2;
+  }
+}
+
+// Server response to RunnerRegister.
+message RegisterAck {
+  // Server-confirmed (or server-assigned) runner ID.
+  string runner_id = 1;
+  bool accepted = 2;
+  string reason = 3;
+}
+
+// Work assignment pushed to a runner when a matching release is available.
+message WorkAssignment {
+  // Scoped opaque auth token. Use this for GetReleaseFiles, PushLogs,
+  // and CompleteRelease. The token restricts access to only the data
+  // associated with this specific release.
+  string release_token = 1;
+  string release_id = 2;
+  string release_intent_id = 3;
+  string artifact_id = 4;
+  string destination_id = 5;
+  // Full destination configuration including metadata.
+  DestinationInfo destination = 6;
+}
+
+// Destination configuration sent with the work assignment.
+message DestinationInfo {
+  string name = 1;
+  string environment = 2;
+  map<string, string> metadata = 3;
+  DestinationCapability type = 4;
+  string organisation = 5;
+}
+
+// ============================================================================
+// GetReleaseFiles
+// ============================================================================
+
+message GetReleaseFilesRequest {
+  string release_token = 1;
+}
+
+message ReleaseFile {
+  string file_name = 1;
+  string file_content = 2;
+}
+
+// ============================================================================
+// GetSpecFiles
+// ============================================================================
+
+message GetSpecFilesRequest {
+  string release_token = 1;
+}
+
+// ============================================================================
+// GetReleaseAnnotation
+// ============================================================================
+
+message GetReleaseAnnotationRequest {
+  string release_token = 1;
+}
+
+message ReleaseAnnotationResponse {
+  string slug = 1;
+  string source_username = 2;
+  string source_email = 3;
+  string context_title = 4;
+  string context_description = 5;
+  string context_web = 6;
+  string reference_version = 7;
+  string reference_commit_sha = 8;
+  string reference_commit_branch = 9;
+  string reference_commit_message = 10;
+  string created_at = 11;
+}
+
+// ============================================================================
+// GetProjectInfo
+// ============================================================================
+
+message GetProjectInfoRequest {
+  string release_token = 1;
+}
+
+message ProjectInfoResponse {
+  string organisation = 1;
+  string project = 2;
+}
+
+// ============================================================================
+// PushLogs
+// ============================================================================
+
+message PushLogRequest {
+  string release_token = 1;
+  // "stdout" or "stderr"
+  string channel = 2;
+  string line = 3;
+  uint64 timestamp = 4;
+}
+
+message PushLogResponse {}
+
+// ============================================================================
+// CompleteRelease
+// ============================================================================
+
+message CompleteReleaseRequest {
+  string release_token = 1;
+  ReleaseOutcome outcome = 2;
+  // Error description when outcome is FAILURE.
+  string error_message = 3;
+}
+
+enum ReleaseOutcome {
+  RELEASE_OUTCOME_UNSPECIFIED = 0;
+  RELEASE_OUTCOME_SUCCESS = 1;
+  RELEASE_OUTCOME_FAILURE = 2;
+}
+
+message CompleteReleaseResponse {}

@@ -1,0 +1,98 @@
+[2m2026-03-01T00:43:36.738383Z[0m [32m INFO[0m [2mforest_runner[0m[2m:[0m starting forest-runner [3mrunner_id[0m[2m=[0mtest-runner-1 [3mserver[0m[2m=[0mhttp://127.0.0.1:14040 [3mcapabilities[0m[2m=[0m["forest/flux/1"] [3mmax_concurrent[0m[2m=[0m4
+[2m2026-03-01T00:43:36.738442Z[0m [32m INFO[0m [2mnotmad[0m[2m:[0m running mad setup
+[2m2026-03-01T00:43:36.738573Z[0m [32m INFO[0m [2mforest_runner::service[0m[2m:[0m connecting to forest-server...
+[2m2026-03-01T00:43:36.740498Z[0m [32m INFO[0m [2mforest_runner::service[0m[2m:[0m connected and registered
+[2m2026-03-01T00:43:40.796990Z[0m [32m INFO[0m [2mforest_runner::service[0m[2m:[0m received work assignment [3mrelease_token[0m[2m=[0m75620c82353029ab7ae1acda38fb4e80ea6ed9e93ed9b92753f65d296a23f13e [3mrelease_id[0m[2m=[0mcb38e171-ebc6-4d95-b313-7ee6f5645f6f
+[2m2026-03-01T00:43:40.797088Z[0m [32m INFO[0m [2mforest_runner::executor[0m[2m:[0m fetching release data [3mrelease_token[0m[2m=[0m"75620c82353029ab7ae1acda38fb4e80ea6ed9e93ed9b92753f65d296a23f13e" [3mdestination[0m[2m=[0m"flux-dev"
+[2m2026-03-01T00:43:40.810109Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git clone --depth 1 --branch main --single-branch file:///home/kjuulh/git/src.rawpotion.io/rawpotion/forest/examples/rust-podinfo/.flux-runner-test/bare.git repo [3mcwd[0m[2m=[0m/tmp/forest-runner-7f00f7d6-3c0b-4f9e-a7fa-e29461e656aa/work-80ecf3e2-b99e-416a-80fb-ef5c53e55719
+[2m2026-03-01T00:43:40.816072Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1: Cloning into 'repo'...
+[2m2026-03-01T00:43:40.816094Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:40.816504Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git add -A [3mcwd[0m[2m=[0m/tmp/forest-runner-7f00f7d6-3c0b-4f9e-a7fa-e29461e656aa/work-80ecf3e2-b99e-416a-80fb-ef5c53e55719/repo
+[2m2026-03-01T00:43:40.817816Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:40.817837Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git diff --cached --quiet [3mcwd[0m[2m=[0m/tmp/forest-runner-7f00f7d6-3c0b-4f9e-a7fa-e29461e656aa/work-80ecf3e2-b99e-416a-80fb-ef5c53e55719/repo
+[2m2026-03-01T00:43:40.818459Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git diff --cached --stat [3mcwd[0m[2m=[0m/tmp/forest-runner-7f00f7d6-3c0b-4f9e-a7fa-e29461e656aa/work-80ecf3e2-b99e-416a-80fb-ef5c53e55719/repo
+[2m2026-03-01T00:43:40.819163Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../dev-cluster-01/rust-podinfo/kustomization.yaml |   4 +
+[2m2026-03-01T00:43:40.819181Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rust-podinfo/rawpotion-rust-podinfo.yaml       |  15 +++
+[2m2026-03-01T00:43:40.819186Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/.forest/config.yaml     |  37 ++++++++
+[2m2026-03-01T00:43:40.819190Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/.forest/release.yaml    |  19 ++++
+[2m2026-03-01T00:43:40.819193Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/.forest/spec.yaml       | 103 +++++++++++++++++++++
+[2m2026-03-01T00:43:40.819198Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/10-namespace.yaml       |   7 ++
+[2m2026-03-01T00:43:40.819201Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/20-deployment.yaml      |  62 +++++++++++++
+[2m2026-03-01T00:43:40.819205Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/30-service.yaml         |  18 ++++
+[2m2026-03-01T00:43:40.819209Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/kustomization.yaml      |   6 ++
+[2m2026-03-01T00:43:40.819225Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  9 files changed, 271 insertions(+)
+[2m2026-03-01T00:43:40.819229Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:40.821197Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m destination is not a match: files: k8s-dev.*, destination_name: flux-dev
+[2m2026-03-01T00:43:40.824446Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git clone --depth 1 --branch main --single-branch file:///home/kjuulh/git/src.rawpotion.io/rawpotion/forest/examples/rust-podinfo/.flux-runner-test/bare.git repo [3mcwd[0m[2m=[0m/tmp/forest-runner-7f00f7d6-3c0b-4f9e-a7fa-e29461e656aa/work-d8a7adfa-cc82-4136-b9a3-f3440eb16e56
+[2m2026-03-01T00:43:40.830356Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1: Cloning into 'repo'...
+[2m2026-03-01T00:43:40.830372Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:40.830784Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git add -A [3mcwd[0m[2m=[0m/tmp/forest-runner-7f00f7d6-3c0b-4f9e-a7fa-e29461e656aa/work-d8a7adfa-cc82-4136-b9a3-f3440eb16e56/repo
+[2m2026-03-01T00:43:40.832169Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:40.832179Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git diff --cached --quiet [3mcwd[0m[2m=[0m/tmp/forest-runner-7f00f7d6-3c0b-4f9e-a7fa-e29461e656aa/work-d8a7adfa-cc82-4136-b9a3-f3440eb16e56/repo
+[2m2026-03-01T00:43:40.832756Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git -c user.name=forest-release -c user.email=forest@release.local commit -m release: dev/rawpotion-rust-podinfo to flux-dev/dev-cluster-01 [3mcwd[0m[2m=[0m/tmp/forest-runner-7f00f7d6-3c0b-4f9e-a7fa-e29461e656aa/work-d8a7adfa-cc82-4136-b9a3-f3440eb16e56/repo
+[2m2026-03-01T00:43:40.839493Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1: [main 6d101d5] release: dev/rawpotion-rust-podinfo to flux-dev/dev-cluster-01
+[2m2026-03-01T00:43:40.839501Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  9 files changed, 271 insertions(+)
+[2m2026-03-01T00:43:40.839504Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 clusters/dev/flux-dev/dev-cluster-01/rust-podinfo/kustomization.yaml
+[2m2026-03-01T00:43:40.839509Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 clusters/dev/flux-dev/dev-cluster-01/rust-podinfo/rawpotion-rust-podinfo.yaml
+[2m2026-03-01T00:43:40.839514Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/dev/flux-dev/dev-cluster-01/rust-podinfo/rawpotion-rust-podinfo/.forest/config.yaml
+[2m2026-03-01T00:43:40.839519Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/dev/flux-dev/dev-cluster-01/rust-podinfo/rawpotion-rust-podinfo/.forest/release.yaml
+[2m2026-03-01T00:43:40.839524Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/dev/flux-dev/dev-cluster-01/rust-podinfo/rawpotion-rust-podinfo/.forest/spec.yaml
+[2m2026-03-01T00:43:40.839528Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/dev/flux-dev/dev-cluster-01/rust-podinfo/rawpotion-rust-podinfo/10-namespace.yaml
+[2m2026-03-01T00:43:40.839532Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/dev/flux-dev/dev-cluster-01/rust-podinfo/rawpotion-rust-podinfo/20-deployment.yaml
+[2m2026-03-01T00:43:40.839543Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/dev/flux-dev/dev-cluster-01/rust-podinfo/rawpotion-rust-podinfo/30-service.yaml
+[2m2026-03-01T00:43:40.839547Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/dev/flux-dev/dev-cluster-01/rust-podinfo/rawpotion-rust-podinfo/kustomization.yaml
+[2m2026-03-01T00:43:40.839553Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:40.839558Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git push origin main [3mcwd[0m[2m=[0m/tmp/forest-runner-7f00f7d6-3c0b-4f9e-a7fa-e29461e656aa/work-d8a7adfa-cc82-4136-b9a3-f3440eb16e56/repo
+[2m2026-03-01T00:43:40.852424Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1: To file:///home/kjuulh/git/src.rawpotion.io/rawpotion/forest/examples/rust-podinfo/.flux-runner-test/bare.git
+[2m2026-03-01T00:43:40.852442Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:    68ed986..6d101d5  main -> main
+[2m2026-03-01T00:43:40.852447Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:40.854443Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m destination is not a match: files: k8s-dev.*, destination_name: flux-dev
+[2m2026-03-01T00:43:40.855164Z[0m [32m INFO[0m [2mforest_runner::executor[0m[2m:[0m release completed successfully [3mrelease_token[0m[2m=[0m"75620c82353029ab7ae1acda38fb4e80ea6ed9e93ed9b92753f65d296a23f13e"
+[2m2026-03-01T00:43:50.761270Z[0m [32m INFO[0m [2mforest_runner::service[0m[2m:[0m received work assignment [3mrelease_token[0m[2m=[0m46368749621579e0198bf6ef4b7b0148bcd9dc09188abde2752a4e0ba2a10ded [3mrelease_id[0m[2m=[0mcd358d1e-1136-4a08-ac37-df8227cb23bf
+[2m2026-03-01T00:43:50.761381Z[0m [32m INFO[0m [2mforest_runner::executor[0m[2m:[0m fetching release data [3mrelease_token[0m[2m=[0m"46368749621579e0198bf6ef4b7b0148bcd9dc09188abde2752a4e0ba2a10ded" [3mdestination[0m[2m=[0m"flux-prod"
+[2m2026-03-01T00:43:50.771037Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m destination is not a match: files: k8s-prod.*, destination_name: flux-prod
+[2m2026-03-01T00:43:50.773866Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git clone --depth 1 --branch main --single-branch file:///home/kjuulh/git/src.rawpotion.io/rawpotion/forest/examples/rust-podinfo/.flux-runner-test/bare.git repo [3mcwd[0m[2m=[0m/tmp/forest-runner-231e8fef-e50d-4376-a047-5b9e57360866/work-aeee0c82-cd35-405a-bd9c-d8d866f99e80
+[2m2026-03-01T00:43:50.781742Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1: Cloning into 'repo'...
+[2m2026-03-01T00:43:50.781763Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:50.782175Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git add -A [3mcwd[0m[2m=[0m/tmp/forest-runner-231e8fef-e50d-4376-a047-5b9e57360866/work-aeee0c82-cd35-405a-bd9c-d8d866f99e80/repo
+[2m2026-03-01T00:43:50.783121Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:50.783131Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git diff --cached --quiet [3mcwd[0m[2m=[0m/tmp/forest-runner-231e8fef-e50d-4376-a047-5b9e57360866/work-aeee0c82-cd35-405a-bd9c-d8d866f99e80/repo
+[2m2026-03-01T00:43:50.783743Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git diff --cached --stat [3mcwd[0m[2m=[0m/tmp/forest-runner-231e8fef-e50d-4376-a047-5b9e57360866/work-aeee0c82-cd35-405a-bd9c-d8d866f99e80/repo
+[2m2026-03-01T00:43:50.784988Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rust-podinfo/kustomization.yaml                |   4 +
+[2m2026-03-01T00:43:50.785018Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rust-podinfo/rawpotion-rust-podinfo.yaml       |  15 +++
+[2m2026-03-01T00:43:50.785022Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/.forest/config.yaml     |  37 ++++++++
+[2m2026-03-01T00:43:50.785027Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/.forest/release.yaml    |  19 ++++
+[2m2026-03-01T00:43:50.785031Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/.forest/spec.yaml       | 103 +++++++++++++++++++++
+[2m2026-03-01T00:43:50.785036Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/10-namespace.yaml       |   7 ++
+[2m2026-03-01T00:43:50.785039Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/20-deployment.yaml      |  62 +++++++++++++
+[2m2026-03-01T00:43:50.785043Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/30-service.yaml         |  18 ++++
+[2m2026-03-01T00:43:50.785046Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  .../rawpotion-rust-podinfo/kustomization.yaml      |   6 ++
+[2m2026-03-01T00:43:50.785051Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  9 files changed, 271 insertions(+)
+[2m2026-03-01T00:43:50.785055Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:50.787982Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m destination is not a match: files: k8s-prod.*, destination_name: flux-prod
+[2m2026-03-01T00:43:50.790995Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git clone --depth 1 --branch main --single-branch file:///home/kjuulh/git/src.rawpotion.io/rawpotion/forest/examples/rust-podinfo/.flux-runner-test/bare.git repo [3mcwd[0m[2m=[0m/tmp/forest-runner-231e8fef-e50d-4376-a047-5b9e57360866/work-644d948f-a2c4-4c91-a498-8cff2b69f7f0
+[2m2026-03-01T00:43:50.798757Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1: Cloning into 'repo'...
+[2m2026-03-01T00:43:50.798786Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:50.799135Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git add -A [3mcwd[0m[2m=[0m/tmp/forest-runner-231e8fef-e50d-4376-a047-5b9e57360866/work-644d948f-a2c4-4c91-a498-8cff2b69f7f0/repo
+[2m2026-03-01T00:43:50.800137Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:50.800148Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git diff --cached --quiet [3mcwd[0m[2m=[0m/tmp/forest-runner-231e8fef-e50d-4376-a047-5b9e57360866/work-644d948f-a2c4-4c91-a498-8cff2b69f7f0/repo
+[2m2026-03-01T00:43:50.800771Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git -c user.name=forest-release -c user.email=forest@release.local commit -m release: prod/rawpotion-rust-podinfo to flux-prod/prod-cluster-01 [3mcwd[0m[2m=[0m/tmp/forest-runner-231e8fef-e50d-4376-a047-5b9e57360866/work-644d948f-a2c4-4c91-a498-8cff2b69f7f0/repo
+[2m2026-03-01T00:43:50.807393Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1: [main 8a908e4] release: prod/rawpotion-rust-podinfo to flux-prod/prod-cluster-01
+[2m2026-03-01T00:43:50.807436Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  9 files changed, 271 insertions(+)
+[2m2026-03-01T00:43:50.807440Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 clusters/prod/flux-prod/prod-cluster-01/rust-podinfo/kustomization.yaml
+[2m2026-03-01T00:43:50.807456Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 clusters/prod/flux-prod/prod-cluster-01/rust-podinfo/rawpotion-rust-podinfo.yaml
+[2m2026-03-01T00:43:50.807459Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/prod/flux-prod/prod-cluster-01/rust-podinfo/rawpotion-rust-podinfo/.forest/config.yaml
+[2m2026-03-01T00:43:50.807463Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/prod/flux-prod/prod-cluster-01/rust-podinfo/rawpotion-rust-podinfo/.forest/release.yaml
+[2m2026-03-01T00:43:50.807466Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/prod/flux-prod/prod-cluster-01/rust-podinfo/rawpotion-rust-podinfo/.forest/spec.yaml
+[2m2026-03-01T00:43:50.807470Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/prod/flux-prod/prod-cluster-01/rust-podinfo/rawpotion-rust-podinfo/10-namespace.yaml
+[2m2026-03-01T00:43:50.807473Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/prod/flux-prod/prod-cluster-01/rust-podinfo/rawpotion-rust-podinfo/20-deployment.yaml
+[2m2026-03-01T00:43:50.807477Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/prod/flux-prod/prod-cluster-01/rust-podinfo/rawpotion-rust-podinfo/30-service.yaml
+[2m2026-03-01T00:43:50.807480Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:  create mode 100644 releases/prod/flux-prod/prod-cluster-01/rust-podinfo/rawpotion-rust-podinfo/kustomization.yaml
+[2m2026-03-01T00:43:50.807485Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:50.807498Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m running git push origin main [3mcwd[0m[2m=[0m/tmp/forest-runner-231e8fef-e50d-4376-a047-5b9e57360866/work-644d948f-a2c4-4c91-a498-8cff2b69f7f0/repo
+[2m2026-03-01T00:43:50.817392Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1: To file:///home/kjuulh/git/src.rawpotion.io/rawpotion/forest/examples/rust-podinfo/.flux-runner-test/bare.git
+[2m2026-03-01T00:43:50.817409Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m flux@1:    c357446..8a908e4  main -> main
+[2m2026-03-01T00:43:50.817413Z[0m [34mDEBUG[0m [2mforest_runner::destinations::fluxv1[0m[2m:[0m git command success
+[2m2026-03-01T00:43:50.818012Z[0m [32m INFO[0m [2mforest_runner::executor[0m[2m:[0m release completed successfully [3mrelease_token[0m[2m=[0m"46368749621579e0198bf6ef4b7b0148bcd9dc09188abde2752a4e0ba2a10ded"
+[2m2026-03-01T00:43:57.184248Z[0m [32m INFO[0m [2mforest_runner::service[0m[2m:[0m runner shutting down
+[2m2026-03-01T00:43:57.184378Z[0m [32m INFO[0m [2mnotmad[0m[2m:[0m mad is closed down

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::{State, services::artifact_staging_registry::ArtifactID};
+use crate::{State, actor::Actor, services::artifact_staging_registry::ArtifactID};
 
 pub struct ReleaseRegistry {
     db: PgPool,
@@ -25,6 +25,7 @@ impl ReleaseRegistry {
         organisation: &str,
         project: &str,
         reference: &Reference,
+        actor: &Actor,
     ) -> anyhow::Result<ReleaseAnnotation> {
         let metadata = serde_json::to_value(metadata)?;
         let source = serde_json::to_value(source)?;
@@ -73,6 +74,9 @@ impl ReleaseRegistry {
             }
         };
 
+        let actor_id = actor.actor_id();
+        let actor_type = actor.actor_type();
+
         let annotation_rec = sqlx::query!(
             "
                 INSERT INTO annotations (
@@ -82,7 +86,9 @@ impl ReleaseRegistry {
                     source,
                     context,
                     project_id,
-                    ref
+                    ref,
+                    actor_id,
+                    actor_type
                 ) VALUES (
                     $1,
                     $2,
@@ -90,7 +96,9 @@ impl ReleaseRegistry {
                     $4,
                     $5,
                     $6,
-                    $7
+                    $7,
+                    $8,
+                    $9
                 )
                 RETURNING id, created
             ",
@@ -101,6 +109,8 @@ impl ReleaseRegistry {
             context,
             project_id,
             reference,
+            actor_id,
+            actor_type,
         )
         .fetch_one(&mut *tx)
         .await
@@ -129,6 +139,7 @@ impl ReleaseRegistry {
         artifact_id: &ArtifactID,
         destinations: Vec<String>,
         environments: Vec<String>,
+        actor: &Actor,
     ) -> anyhow::Result<CreatedReleaseIntent> {
         let annotation_rec = sqlx::query!(
             "
@@ -149,7 +160,12 @@ impl ReleaseRegistry {
         let (organisation, project) = self.get_project_context(&project_id).await?;
 
         let destination_recs = sqlx::query!(
-            "SELECT DISTINCT id, name, environment FROM destinations WHERE name = ANY($1) OR environment = ANY($2)",
+            r#"
+            SELECT DISTINCT d.id, d.name, d.environment
+            FROM destinations d
+            LEFT JOIN environments e ON d.environment_id = e.id
+            WHERE d.name = ANY($1) OR e.name = ANY($2)
+            "#,
             &destinations,
             &environments
         )
@@ -168,23 +184,32 @@ impl ReleaseRegistry {
         // TODO: should likely be pushed to a leader, such that we have consistency in which thing is actually released and so on
         let mut tx = self.db.begin().await?;
 
+        let actor_id = actor.actor_id();
+        let actor_type = actor.actor_type();
+
         // 1. Create ONE release_intent for this release request
         let release_intent = sqlx::query!(
             "
             INSERT INTO release_intents (
                 artifact,
                 annotation_id,
-                project_id
+                project_id,
+                actor_id,
+                actor_type
             ) VALUES (
                 $1,
                 $2,
-                $3
+                $3,
+                $4,
+                $5
             )
             RETURNING id
             ",
             artifact_id,
             annotation_id,
-            project_id
+            project_id,
+            actor_id,
+            actor_type,
         )
         .fetch_one(&mut *tx)
         .await
@@ -365,6 +390,45 @@ impl ReleaseRegistry {
             "committing final release status"
         );
         staged_release_tx.tx.commit().await?;
+
+        Ok(())
+    }
+
+    /// Update the status of a release without a pre-existing transaction.
+    /// Used by the runner's CompleteRelease handler where no scheduler transaction exists.
+    pub async fn set_release_status(
+        &self,
+        release_id: &Uuid,
+        status: ReleaseStatus,
+    ) -> anyhow::Result<()> {
+        let status_str = status.as_str();
+        let res = sqlx::query!(
+            "
+                UPDATE releases
+                SET
+                    status = $2,
+                    updated = now()
+                WHERE id = $1
+            ",
+            release_id,
+            status_str
+        )
+        .execute(&self.db)
+        .await
+        .context("update release status (runner)")?;
+
+        if res.rows_affected() != 1 {
+            anyhow::bail!(
+                "set_release_status failed to update row: {}",
+                release_id
+            );
+        }
+
+        tracing::debug!(
+            release_id = %release_id,
+            %status,
+            "release status updated by runner"
+        );
 
         Ok(())
     }
@@ -614,6 +678,86 @@ impl ReleaseRegistry {
         })
     }
 
+    pub async fn get_releases_by_actor(
+        &self,
+        actor_id: &Uuid,
+        actor_type: &str,
+        limit: i64,
+        offset: i64,
+    ) -> anyhow::Result<Vec<ReleaseIntentSummary>> {
+        let fetch_limit = limit + 1;
+
+        let recs = sqlx::query!(
+            r#"
+            SELECT
+                ri.id as release_intent_id,
+                ri.artifact as artifact_id,
+                ri.created as created_at,
+                p.organisation,
+                p.project,
+                d.name as "destination_name?",
+                d.environment as "destination_env?",
+                r.status as "status?"
+            FROM release_intents ri
+            JOIN projects p ON ri.project_id = p.id
+            LEFT JOIN releases r ON r.release_intent_id = ri.id
+            LEFT JOIN destinations d ON r.destination_id = d.id
+            WHERE ri.actor_id = $1 AND ri.actor_type = $2
+            ORDER BY ri.created DESC
+            LIMIT $3 OFFSET $4
+            "#,
+            actor_id,
+            actor_type,
+            fetch_limit,
+            offset,
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("get_releases_by_actor")?;
+
+        // Group by release_intent_id
+        let mut map: indexmap::IndexMap<Uuid, ReleaseIntentSummary> = indexmap::IndexMap::new();
+
+        for rec in recs {
+            let dest = match (rec.destination_name, rec.destination_env, rec.status) {
+                (Some(name), Some(env), Some(status)) => Some(ReleaseDestinationStatus {
+                    destination: name,
+                    environment: env,
+                    status,
+                }),
+                _ => None,
+            };
+
+            if let Some(entry) = map.get_mut(&rec.release_intent_id) {
+                if let Some(d) = dest {
+                    entry.destinations.push(d);
+                }
+            } else {
+                let mut destinations = Vec::new();
+                if let Some(d) = dest {
+                    destinations.push(d);
+                }
+                map.insert(
+                    rec.release_intent_id,
+                    ReleaseIntentSummary {
+                        release_intent_id: rec.release_intent_id,
+                        artifact_id: rec.artifact_id,
+                        project: Project {
+                            organisation: rec.organisation,
+                            project: rec.project,
+                        },
+                        destinations,
+                        created_at: rec.created_at,
+                    },
+                );
+            }
+        }
+
+        let mut results: Vec<ReleaseIntentSummary> = map.into_values().collect();
+        results.truncate(limit as usize);
+        Ok(results)
+    }
+
     pub async fn get_destinations(&self, organisation: &str) -> anyhow::Result<Vec<Destination>> {
         let recs = sqlx::query!(
             "
@@ -753,6 +897,20 @@ pub struct CreatedRelease {
 
 pub struct StagedReleaseTx {
     tx: sqlx::Transaction<'static, sqlx::Postgres>,
+}
+
+pub struct ReleaseIntentSummary {
+    pub release_intent_id: Uuid,
+    pub artifact_id: Uuid,
+    pub project: Project,
+    pub destinations: Vec<ReleaseDestinationStatus>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub struct ReleaseDestinationStatus {
+    pub destination: String,
+    pub environment: String,
+    pub status: String,
 }
 
 pub struct AnnotationContext {

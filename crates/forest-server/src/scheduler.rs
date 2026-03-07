@@ -1,4 +1,7 @@
+use std::time::Duration;
+
 use anyhow::Context;
+use forest_grpc_interface::{DestinationInfo, WorkAssignment};
 use forest_models::ReleaseStatus;
 use notmad::{Component, ComponentInfo, MadError};
 use tokio_util::sync::CancellationToken;
@@ -6,17 +9,27 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     State,
     destination_services::{DestinationServices, DestinationServicesState},
-    destinations::logger::DestinationLogger,
+    destinations::{DestinationIndex, logger::DestinationLogger},
+    runner_manager::RunnerManager,
     services::{
         destination_registry::{DestinationRegistry, DestinationRegistryState},
-        notification_registry::{
-            NotificationRegistry, NotificationRegistryState,
-            ReleaseContext as NotifReleaseContext,
-        },
+        notification_registry::{NotificationRegistry, NotificationRegistryState},
+        release_finalizer,
         release_logs_registry::{ReleaseLogsRegistry, ReleaseLogsRegistryState},
         release_registry::{ReleaseItem, ReleaseRegistry, ReleaseRegistryState},
+        release_token_registry::{
+            ReleaseTokenRegistry, ReleaseTokenRegistryState, ReleaseTokenScope,
+        },
     },
 };
+
+enum ScheduleResult {
+    /// Release was executed in-process and completed (success).
+    InProcessComplete,
+    /// Release was assigned to a remote runner. Status is now RUNNING.
+    /// The runner will call CompleteRelease when done.
+    RemoteAssigned,
+}
 
 pub struct Scheduler {
     release_registry: ReleaseRegistry,
@@ -24,9 +37,32 @@ pub struct Scheduler {
     destination_registry: DestinationRegistry,
     notification_registry: NotificationRegistry,
     destinations: DestinationServices,
+    runner_manager: RunnerManager,
+    release_token_registry: ReleaseTokenRegistry,
+    disable_in_process: bool,
 }
 
 impl Scheduler {
+    pub fn new(state: &State, runner_manager: RunnerManager, disable_in_process: bool) -> Self {
+        use crate::destination_services::DestinationServicesState;
+        use crate::services::destination_registry::DestinationRegistryState;
+        use crate::services::notification_registry::NotificationRegistryState;
+        use crate::services::release_logs_registry::ReleaseLogsRegistryState;
+        use crate::services::release_registry::ReleaseRegistryState;
+        use crate::services::release_token_registry::ReleaseTokenRegistryState;
+
+        Self {
+            release_registry: state.release_registry(),
+            release_log_registry: state.release_logs_registry(),
+            destinations: state.destination_services(),
+            destination_registry: state.destination_registry(),
+            notification_registry: state.notification_registry(),
+            runner_manager,
+            release_token_registry: state.release_token_registry(),
+            disable_in_process,
+        }
+    }
+
     pub async fn handle(&self, _cancellation: &CancellationToken) -> anyhow::Result<()> {
         let Some((staged_release, tx)) = self.release_registry.get_staged_release().await? else {
             return Ok(());
@@ -34,102 +70,31 @@ impl Scheduler {
 
         tracing::info!(id =% staged_release.id, "begin processing release");
 
-        // Get project context, destination name, and annotation context for notifications
-        let project_context = self
-            .release_registry
-            .get_project_context(&staged_release.project_id)
-            .await
-            .ok();
-
-        let dest = self
-            .destination_registry
-            .get(&staged_release.destination_id)
-            .await
-            .ok()
-            .flatten();
-        let dest_name = dest.as_ref().map(|d| d.name.clone());
-        let dest_env = dest.as_ref().map(|d| d.environment.clone());
-
-        let ann_ctx = self
-            .release_registry
-            .get_annotation_context(&staged_release.artifact)
-            .await
-            .ok();
-
         let res = self.schedule_destination(&staged_release).await;
         match res {
-            Ok(_) => {
+            Ok(ScheduleResult::RemoteAssigned) => {
+                // Remote runner took the work. Transition to RUNNING.
+                // The runner's CompleteRelease call will finalize status + notifications.
+                self.release_registry
+                    .commit_release_status(&staged_release, tx, ReleaseStatus::Running)
+                    .await?;
+            }
+            Ok(ScheduleResult::InProcessComplete) => {
+                // In-process execution succeeded. Commit SUCCESS + notification.
                 self.release_registry
                     .commit_release_status(&staged_release, tx, ReleaseStatus::Success)
                     .await?;
 
-                if let Some((ref org, ref project)) = project_context
-                    && let Err(e) = self
-                        .notification_registry
-                        .create_notification(
-                            "RELEASE_SUCCEEDED",
-                            &format!("Release succeeded: {}/{}", org, project),
-                            &format!(
-                                "Release {} completed successfully{}",
-                                staged_release.id,
-                                dest_name
-                                    .as_ref()
-                                    .map(|d| format!(" to {}", d))
-                                    .unwrap_or_default()
-                            ),
-                            org,
-                            project,
-                            &NotifReleaseContext {
-                                slug: ann_ctx.as_ref().map(|a| a.slug.clone()),
-                                artifact_id: Some(staged_release.artifact.to_string()),
-                                release_intent_id: Some(
-                                    staged_release.release_intent_id.to_string(),
-                                ),
-                                destination: dest_name.clone(),
-                                environment: dest_env.clone(),
-                                source_username: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.source.username.clone()),
-                                source_email: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.source.email.clone()),
-                                source_type: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.source.source_type.clone()),
-                                run_url: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.source.run_url.clone()),
-                                commit_sha: ann_ctx
-                                    .as_ref()
-                                    .map(|a| a.reference.commit_sha.clone()),
-                                commit_branch: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.reference.commit_branch.clone()),
-                                commit_message: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.reference.commit_message.clone()),
-                                version: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.reference.version.clone()),
-                                repo_url: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.reference.repo_url.clone()),
-                                context_title: ann_ctx
-                                    .as_ref()
-                                    .map(|a| a.context.title.clone()),
-                                context_description: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.context.description.clone()),
-                                context_web: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.context.web.clone()),
-                                context_pr: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.context.pr.clone()),
-                                ..Default::default()
-                            },
-                        )
-                        .await
+                // Fire-and-forget notification
+                if let Err(e) = release_finalizer::send_notification(
+                    &self.release_registry,
+                    &self.notification_registry,
+                    &self.destination_registry,
+                    &staged_release,
+                    ReleaseStatus::Success,
+                    None,
+                )
+                .await
                 {
                     tracing::warn!("failed to create success notification: {e:#}");
                 }
@@ -141,75 +106,15 @@ impl Scheduler {
                     .commit_release_status(&staged_release, tx, ReleaseStatus::Failure)
                     .await?;
 
-                if let Some((ref org, ref project)) = project_context
-                    && let Err(e2) = self
-                        .notification_registry
-                        .create_notification(
-                            "RELEASE_FAILED",
-                            &format!("Release failed: {}/{}", org, project),
-                            &format!(
-                                "Release {} failed: {}{}",
-                                staged_release.id,
-                                e,
-                                dest_name
-                                    .as_ref()
-                                    .map(|d| format!(" (dest: {})", d))
-                                    .unwrap_or_default()
-                            ),
-                            org,
-                            project,
-                            &NotifReleaseContext {
-                                slug: ann_ctx.as_ref().map(|a| a.slug.clone()),
-                                artifact_id: Some(staged_release.artifact.to_string()),
-                                release_intent_id: Some(
-                                    staged_release.release_intent_id.to_string(),
-                                ),
-                                destination: dest_name.clone(),
-                                environment: dest_env.clone(),
-                                source_username: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.source.username.clone()),
-                                source_email: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.source.email.clone()),
-                                source_type: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.source.source_type.clone()),
-                                run_url: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.source.run_url.clone()),
-                                commit_sha: ann_ctx
-                                    .as_ref()
-                                    .map(|a| a.reference.commit_sha.clone()),
-                                commit_branch: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.reference.commit_branch.clone()),
-                                commit_message: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.reference.commit_message.clone()),
-                                version: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.reference.version.clone()),
-                                repo_url: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.reference.repo_url.clone()),
-                                context_title: ann_ctx
-                                    .as_ref()
-                                    .map(|a| a.context.title.clone()),
-                                context_description: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.context.description.clone()),
-                                context_web: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.context.web.clone()),
-                                context_pr: ann_ctx
-                                    .as_ref()
-                                    .and_then(|a| a.context.pr.clone()),
-                                error_message: Some(format!("{e:#}")),
-                                ..Default::default()
-                            },
-                        )
-                        .await
+                if let Err(e2) = release_finalizer::send_notification(
+                    &self.release_registry,
+                    &self.notification_registry,
+                    &self.destination_registry,
+                    &staged_release,
+                    ReleaseStatus::Failure,
+                    Some(&format!("{e:#}")),
+                )
+                .await
                 {
                     tracing::warn!("failed to create failure notification: {e2:#}");
                 }
@@ -219,12 +124,89 @@ impl Scheduler {
         Ok(())
     }
 
-    async fn schedule_destination(&self, staged_release: &ReleaseItem) -> anyhow::Result<()> {
+    async fn schedule_destination(
+        &self,
+        staged_release: &ReleaseItem,
+    ) -> anyhow::Result<ScheduleResult> {
         let dest = self
             .destination_registry
             .get(&staged_release.destination_id)
             .await?
             .context("failed to find a destination")?;
+
+        let dest_index = DestinationIndex {
+            organisation: dest.destination_type.organisation.clone(),
+            name: dest.destination_type.name.clone(),
+            version: dest.destination_type.version,
+        };
+
+        // Try remote runner first
+        if let Some((runner_id, work_sender)) = self.runner_manager.try_assign(&dest_index).await {
+            // Create a scoped token for this release
+            let token = self
+                .release_token_registry
+                .create_token(
+                    ReleaseTokenScope {
+                        release_id: staged_release.id,
+                        release_intent_id: staged_release.release_intent_id,
+                        artifact_id: staged_release.artifact,
+                        destination_id: staged_release.destination_id,
+                        project_id: staged_release.project_id,
+                        environment: dest.environment.clone(),
+                        runner_id: runner_id.clone(),
+                    },
+                    Duration::from_secs(3600), // 1 hour TTL
+                )
+                .await?;
+
+            let dest_cap = forest_grpc_interface::DestinationCapability {
+                organisation: dest.destination_type.organisation.clone(),
+                name: dest.destination_type.name.clone(),
+                version: dest.destination_type.version as u64,
+            };
+
+            let assignment = WorkAssignment {
+                release_token: token,
+                release_id: staged_release.id.to_string(),
+                release_intent_id: staged_release.release_intent_id.to_string(),
+                artifact_id: staged_release.artifact.to_string(),
+                destination_id: staged_release.destination_id.to_string(),
+                destination: Some(DestinationInfo {
+                    name: dest.name.clone(),
+                    environment: dest.environment.clone(),
+                    metadata: dest.metadata.clone(),
+                    r#type: Some(dest_cap),
+                    organisation: dest.organisation.clone(),
+                }),
+            };
+
+            match work_sender.send(assignment).await {
+                Ok(()) => {
+                    tracing::info!(
+                        runner_id = %runner_id,
+                        release_id = %staged_release.id,
+                        destination = %dest.name,
+                        "assigned release to remote runner"
+                    );
+                    return Ok(ScheduleResult::RemoteAssigned);
+                }
+                Err(_) => {
+                    // Runner channel closed — fall through to in-process
+                    tracing::warn!(
+                        runner_id = %runner_id,
+                        "failed to send work to runner (channel closed), falling back to in-process"
+                    );
+                }
+            }
+        }
+
+        // Fallback: in-process execution
+        if self.disable_in_process {
+            anyhow::bail!(
+                "no remote runner available for {} and in-process execution is disabled",
+                dest_index
+            );
+        }
 
         let dest_svc = self
             .destinations
@@ -244,9 +226,9 @@ impl Scheduler {
         dest_svc.prepare(&logger, staged_release, &dest).await?;
         dest_svc.release(&logger, staged_release, &dest).await?;
 
-        tracing::info!("release to destination success");
+        tracing::info!("release to destination success (in-process)");
 
-        Ok(())
+        Ok(ScheduleResult::InProcessComplete)
     }
 }
 
@@ -275,17 +257,20 @@ impl Component for Scheduler {
 }
 
 pub trait SchedulerState {
-    fn scheduler(&self) -> Scheduler;
+    fn scheduler(&self, runner_manager: RunnerManager, disable_in_process: bool) -> Scheduler;
 }
 
 impl SchedulerState for State {
-    fn scheduler(&self) -> Scheduler {
+    fn scheduler(&self, runner_manager: RunnerManager, disable_in_process: bool) -> Scheduler {
         Scheduler {
             release_registry: self.release_registry(),
             release_log_registry: self.release_logs_registry(),
             destinations: self.destination_services(),
             destination_registry: self.destination_registry(),
             notification_registry: self.notification_registry(),
+            runner_manager,
+            release_token_registry: self.release_token_registry(),
+            disable_in_process,
         }
     }
 }

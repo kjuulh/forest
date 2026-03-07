@@ -7,28 +7,37 @@ use std::{
 use anyhow::Context;
 use sqlx::PgPool;
 
-use crate::state::State;
+use crate::{actor::Actor, state::State};
 
+#[derive(Clone)]
 pub struct ArtifactStagingRegistry {
     db: PgPool,
 }
 
 impl ArtifactStagingRegistry {
-    pub async fn create_staging_entry(&self) -> anyhow::Result<StagingArtifactID> {
+    pub async fn create_staging_entry(&self, actor: &Actor) -> anyhow::Result<StagingArtifactID> {
         let id = StagingArtifactID::new();
+        let actor_id = actor.actor_id();
+        let actor_type = actor.actor_type();
 
         sqlx::query!(
             r#"
                 INSERT INTO artifact_staging
                 (
-                    artifact_id
+                    artifact_id,
+                    actor_id,
+                    actor_type
                 )
                 VALUES
                 (
-                    $1
+                    $1,
+                    $2,
+                    $3
                 )
             "#,
-            id.id()
+            id.id(),
+            actor_id,
+            actor_type,
         )
         .execute(&self.db)
         .await

@@ -1,11 +1,14 @@
 use std::net::SocketAddr;
 
 use forest_grpc_interface::{
+    app_service_server::AppServiceServer,
     artifact_service_server::ArtifactServiceServer,
     destination_service_server::DestinationServiceServer,
+    environment_service_server::EnvironmentServiceServer,
     notification_service_server::NotificationServiceServer,
     organisation_service_server::OrganisationServiceServer,
     registry_service_server::RegistryServiceServer, release_service_server::ReleaseServiceServer,
+    runner_service_server::RunnerServiceServer,
     status_service_server::StatusServiceServer, users_service_server::UsersServiceServer,
 };
 use notmad::MadError;
@@ -19,22 +22,27 @@ use crate::{
         artifacts::ArtifactServer, destinations::DestinationServer, release::ReleaseServer,
         users::UsersServer,
     },
+    runner_manager::RunnerManager,
     state::State,
 };
 
+mod apps;
 mod artifacts;
 mod destinations;
+mod environments;
 mod error;
 mod notifications;
 mod organisations;
 mod registry;
 mod release;
+pub mod runner;
 mod status;
 mod users;
 
 pub struct GrpcServer {
     pub host: SocketAddr,
     pub state: State,
+    pub runner_manager: RunnerManager,
 }
 
 impl GrpcServer {
@@ -70,11 +78,23 @@ impl GrpcServer {
             .add_service(OrganisationServiceServer::new(OrganisationsServer {
                 state: self.state.clone(),
             }))
+            .add_service(AppServiceServer::new(apps::AppsServer {
+                state: self.state.clone(),
+            }))
+            .add_service(EnvironmentServiceServer::new(
+                environments::EnvironmentsServer {
+                    state: self.state.clone(),
+                },
+            ))
             .add_service(NotificationServiceServer::new(
                 notifications::NotificationsServer {
                     state: self.state.clone(),
                 },
             ))
+            .add_service(RunnerServiceServer::new(runner::RunnerServer {
+                state: self.state.clone(),
+                runner_manager: self.runner_manager.clone(),
+            }))
             .serve_with_shutdown(
                 self.host,
                 async move { cancellation_token.cancelled().await },
