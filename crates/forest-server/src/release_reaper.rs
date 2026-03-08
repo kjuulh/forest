@@ -111,36 +111,6 @@ impl ReleaseReaper {
             }
         }
 
-        // Complete expired wait stages in pipelines
-        match self.release_event_store.find_expired_wait_stages().await {
-            Ok(expired) => {
-                for wait_stage in expired {
-                    tracing::info!(
-                        release_intent_id = %wait_stage.release_intent_id,
-                        stage_id = %wait_stage.stage_id,
-                        "completing expired wait stage"
-                    );
-                    if let Err(e) = self
-                        .release_event_store
-                        .complete_wait_stage(
-                            &wait_stage.release_intent_id,
-                            &wait_stage.stage_id,
-                        )
-                        .await
-                    {
-                        tracing::warn!(
-                            release_intent_id = %wait_stage.release_intent_id,
-                            stage_id = %wait_stage.stage_id,
-                            "failed to complete wait stage: {e:#}"
-                        );
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::error!("failed to find expired wait stages: {e:#}");
-            }
-        }
-
         self.runner_manager.reap_stale(self.assigned_timeout).await;
 
         Ok(())

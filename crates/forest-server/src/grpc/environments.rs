@@ -4,7 +4,10 @@ use tonic::Response;
 
 use crate::{
     grpc::artifacts::GrpcErrorExt,
-    services::environment_registry::{EnvironmentRecord, EnvironmentRegistryState},
+    services::{
+        environment_registry::{EnvironmentRecord, EnvironmentRegistryState},
+        event_bus::{EventBusState, EventPayload},
+    },
     state::State,
 };
 
@@ -43,6 +46,15 @@ impl EnvironmentService for EnvironmentsServer {
             .await
             .context("create environment")
             .to_internal_error()?;
+
+        self.state.event_bus().emit(EventPayload {
+            organisation: req.organisation.clone(),
+            project: String::new(),
+            resource_type: "environment",
+            action: "created",
+            resource_id: rec.id.to_string(),
+            metadata: [("name".into(), req.name.clone())].into(),
+        }).await;
 
         Ok(Response::new(CreateEnvironmentResponse {
             environment: Some(record_to_grpc(rec)),
@@ -126,6 +138,15 @@ impl EnvironmentService for EnvironmentsServer {
             .context("update environment")
             .to_internal_error()?;
 
+        self.state.event_bus().emit(EventPayload {
+            organisation: rec.organisation.clone(),
+            project: String::new(),
+            resource_type: "environment",
+            action: "updated",
+            resource_id: id.to_string(),
+            metadata: [("name".into(), rec.name.clone())].into(),
+        }).await;
+
         Ok(Response::new(UpdateEnvironmentResponse {
             environment: Some(record_to_grpc(rec)),
         }))
@@ -148,6 +169,15 @@ impl EnvironmentService for EnvironmentsServer {
             .await
             .context("delete environment")
             .to_internal_error()?;
+
+        self.state.event_bus().emit(EventPayload {
+            organisation: String::new(),
+            project: String::new(),
+            resource_type: "environment",
+            action: "deleted",
+            resource_id: id.to_string(),
+            metadata: Default::default(),
+        }).await;
 
         Ok(Response::new(DeleteEnvironmentResponse {}))
     }

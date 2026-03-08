@@ -55,7 +55,20 @@ message WaitReleaseEvent {
   oneof event {
     ReleaseStatusUpdate status_update = 1;
     ReleaseLogLine log_line = 2;
+    PipelineStageUpdate stage_update = 3;
   }
+}
+
+// Streamed in WaitRelease for pipeline releases: reports stage status changes.
+message PipelineStageUpdate {
+  string stage_id = 1;
+  string stage_type = 2;       // "deploy", "wait"
+  string status = 3;           // PENDING, ACTIVE, SUCCEEDED, FAILED, CANCELLED
+  optional string queued_at = 4;
+  optional string started_at = 5;
+  optional string completed_at = 6;
+  optional string wait_until = 7;
+  optional string error_message = 8;
 }
 
 message ReleaseStatusUpdate {
@@ -90,6 +103,13 @@ message GetProjectsResponse {
   repeated string projects = 1;
 }
 
+message CreateProjectRequest {
+  string organisation = 1;
+  string project = 2;
+}
+message CreateProjectResponse {
+  Project project = 1;
+}
 
 
 message GetReleasesByActorRequest {
@@ -125,6 +145,65 @@ message GetDestinationStatesRequest {
 
 message GetDestinationStatesResponse {
   repeated DestinationState destinations = 1;
+  // Active pipeline runs affecting these destinations (if any).
+  repeated PipelineRunState pipeline_runs = 2;
+}
+
+// ── Release intent states (release-centric view) ─────────────────────
+
+message GetReleaseIntentStatesRequest {
+  string organisation = 1;
+  optional string project = 2;
+  // When true, also include recently completed release intents.
+  bool include_completed = 3;
+}
+
+message GetReleaseIntentStatesResponse {
+  repeated ReleaseIntentState release_intents = 1;
+}
+
+// Full state of a release intent: pipeline stages + individual release steps.
+message ReleaseIntentState {
+  string release_intent_id = 1;
+  string artifact_id = 2;
+  string project = 3;
+  string created_at = 4;
+  // Pipeline stages (empty for non-pipeline releases).
+  repeated PipelineStageState stages = 5;
+  // All release_states rows for this intent (deploy steps).
+  repeated ReleaseStepState steps = 6;
+}
+
+// Status of a single pipeline stage (saga coordinator view).
+message PipelineStageState {
+  string stage_id = 1;
+  repeated string depends_on = 2;
+  PipelineRunStageType stage_type = 3;
+  PipelineRunStageStatus status = 4;
+  // Consistent timestamps for all stage types.
+  optional string queued_at = 5;
+  optional string started_at = 6;
+  optional string completed_at = 7;
+  optional string error_message = 8;
+  // Type-specific context.
+  optional string environment = 9;       // deploy stages
+  optional int64 duration_seconds = 10;  // wait stages
+  optional string wait_until = 11;       // wait stages
+  repeated string release_ids = 12;      // deploy stages: individual release IDs
+}
+
+// Status of a single release step (release_states row).
+message ReleaseStepState {
+  string release_id = 1;
+  optional string stage_id = 2;
+  string destination_name = 3;
+  string environment = 4;
+  string status = 5;
+  optional string queued_at = 6;
+  optional string assigned_at = 7;
+  optional string started_at = 8;
+  optional string completed_at = 9;
+  optional string error_message = 10;
 }
 
 message DestinationState {
@@ -138,6 +217,55 @@ message DestinationState {
   optional string queued_at = 8;
   optional string completed_at = 9;
   optional int32 queue_position = 10;
+  // Pipeline context: set when this release was created by a pipeline stage.
+  optional string release_intent_id = 11;
+  optional string stage_id = 12;
+  // When a runner was assigned to this release.
+  optional string assigned_at = 13;
+  // When the runner actually started executing.
+  optional string started_at = 14;
+}
+
+// ── Pipeline run progress ────────────────────────────────────────────
+
+// Snapshot of an active (or recently completed) pipeline run.
+message PipelineRunState {
+  string release_intent_id = 1;
+  string artifact_id = 2;
+  string created_at = 3;
+  repeated PipelineRunStage stages = 4;
+}
+
+// Status of a single stage within a pipeline run.
+message PipelineRunStage {
+  string stage_id = 1;
+  repeated string depends_on = 2;
+  PipelineRunStageType stage_type = 3;
+  PipelineRunStageStatus status = 4;
+  // Type-specific context
+  optional string environment = 5;       // deploy stages
+  optional int64 duration_seconds = 6;   // wait stages
+  optional string queued_at = 7;         // when dependencies were met
+  optional string started_at = 8;
+  optional string completed_at = 9;
+  optional string error_message = 10;
+  optional string wait_until = 11;
+  repeated string release_ids = 12;      // deploy stages: individual release IDs
+}
+
+enum PipelineRunStageType {
+  PIPELINE_RUN_STAGE_TYPE_UNSPECIFIED = 0;
+  PIPELINE_RUN_STAGE_TYPE_DEPLOY = 1;
+  PIPELINE_RUN_STAGE_TYPE_WAIT = 2;
+}
+
+enum PipelineRunStageStatus {
+  PIPELINE_RUN_STAGE_STATUS_UNSPECIFIED = 0;
+  PIPELINE_RUN_STAGE_STATUS_PENDING = 1;
+  PIPELINE_RUN_STAGE_STATUS_ACTIVE = 2;
+  PIPELINE_RUN_STAGE_STATUS_SUCCEEDED = 3;
+  PIPELINE_RUN_STAGE_STATUS_FAILED = 4;
+  PIPELINE_RUN_STAGE_STATUS_CANCELLED = 5;
 }
 
 service ReleaseService {
@@ -150,7 +278,9 @@ service ReleaseService {
   rpc GetReleasesByActor(GetReleasesByActorRequest) returns (GetReleasesByActorResponse);
   rpc GetOrganisations(GetOrganisationsRequest) returns (GetOrganisationsResponse);
   rpc GetProjects(GetProjectsRequest) returns (GetProjectsResponse);
+  rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
   rpc GetDestinationStates(GetDestinationStatesRequest) returns (GetDestinationStatesResponse);
+  rpc GetReleaseIntentStates(GetReleaseIntentStatesRequest) returns (GetReleaseIntentStatesResponse);
 }
 
 message Source {
@@ -177,6 +307,7 @@ message Artifact {
   Project project = 7;
   repeated ArtifactDestination destinations = 8;
   string created_at = 9;
+  Ref ref = 10;
 }
 
 message ArtifactDestination {

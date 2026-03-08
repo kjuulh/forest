@@ -20,6 +20,7 @@ pub mod grpc;
 pub mod release_reaper;
 pub mod runner_manager;
 pub mod scheduler;
+pub mod intent_coordinator;
 mod temp_dir;
 
 pub mod tokens;

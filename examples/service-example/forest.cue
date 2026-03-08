@@ -24,20 +24,34 @@ forest: deployment: enabled: true
 				{destination: "infrastructure-dev.*", type: _destinationTypes.terraform},
 			]
 			config: {
-				replicas: 3
+				replicas: 2
 				environment: [
 					{key: "RUST_LOG", value: "debug"},
 				]
 			}
 		}
 
-		data: {
+		staging: {
 			destinations: [
-				{destination: "infrastructure-data.*", type: _destinationTypes.terraform},
+				{destination: "infrastructure-staging.*", type: _destinationTypes.terraform},
 			]
 			config: {
-				replicas: 10
-				environment: [{key: "RUST_LOG", value: "info"}]
+				replicas: 3
+				environment: [
+					{key: "RUST_LOG", value: "info"},
+				]
+			}
+		}
+
+		prod: {
+			destinations: [
+				{destination: "infrastructure-prod.*", type: _destinationTypes.terraform},
+			]
+			config: {
+				replicas: 5
+				environment: [
+					{key: "RUST_LOG", value: "warn"},
+				]
 			}
 		}}
 

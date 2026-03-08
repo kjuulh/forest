@@ -1,5 +1,6 @@
 pub mod apps;
-pub mod auto_release_policy;
+pub mod policy;
+pub mod trigger;
 pub mod component_registry;
 
 pub mod artifact_registry;
@@ -7,6 +8,7 @@ pub mod artifact_staging_registry;
 pub mod destination_registry;
 pub mod environment_registry;
 pub mod event_bus;
+pub mod event_subscription;
 pub mod release_logs_registry;
 pub mod release_registry;
 

@@ -298,6 +298,7 @@ CREATE TABLE annotations (
     updated TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX idx_annotations_slug ON annotations (slug);
+CREATE INDEX idx_annotations_project_created ON annotations (project_id, created DESC);
 
 -- ═══════════════════════════════════════════════════════════════════
 -- Release Intents
@@ -312,11 +313,19 @@ CREATE TABLE release_intents (
     actor_type TEXT,
     stages JSONB,        -- DAG definition from client (null = single deploy, no pipeline)
     stage_states JSONB,  -- runtime state per node: { "node-id": { "status": "...", ... } }
+    status TEXT NOT NULL DEFAULT 'ACTIVE',  -- ACTIVE, SUCCEEDED, FAILED, CANCELLED
+    next_evaluate_at TIMESTAMPTZ,           -- when the coordinator should next evaluate this intent
     created TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_release_intent_project_id ON release_intents (project_id);
 CREATE INDEX idx_release_intent_artifact ON release_intents (artifact);
+CREATE INDEX idx_release_intents_active_evaluate
+    ON release_intents (next_evaluate_at)
+    WHERE status = 'ACTIVE';
+CREATE UNIQUE INDEX idx_release_intents_active_artifact
+    ON release_intents (artifact)
+    WHERE status = 'ACTIVE' AND stages IS NOT NULL;
 
 -- ═══════════════════════════════════════════════════════════════════
 -- Event-sourced Release States
@@ -356,6 +365,13 @@ CREATE INDEX idx_release_states_stage
 CREATE INDEX idx_release_queue_position
     ON release_states (project_id, destination_id, queued_at ASC)
     WHERE status = 'QUEUED';
+
+CREATE INDEX idx_release_states_project_status
+    ON release_states (project_id, status);
+
+CREATE INDEX idx_release_states_soak
+    ON release_states (project_id, artifact_id, status)
+    WHERE status = 'SUCCEEDED';
 
 -- ═══════════════════════════════════════════════════════════════════
 -- Release Events (append-only audit log)
@@ -443,10 +459,10 @@ CREATE UNIQUE INDEX idx_notification_prefs_unique
     ON notification_preferences (user_id, notification_type, channel);
 
 -- ═══════════════════════════════════════════════════════════════════
--- Auto-release Policies
+-- Triggers (auto-release on annotation match)
 -- ═══════════════════════════════════════════════════════════════════
 
-CREATE TABLE auto_release_policies (
+CREATE TABLE triggers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
@@ -464,7 +480,24 @@ CREATE TABLE auto_release_policies (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(project_id, name)
 );
-CREATE INDEX idx_auto_release_policies_project ON auto_release_policies (project_id) WHERE enabled = true;
+CREATE INDEX idx_triggers_project ON triggers (project_id) WHERE enabled = true;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- Policies (deployment guardrails: soak times, branch restrictions)
+-- ═══════════════════════════════════════════════════════════════════
+
+CREATE TABLE policies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    policy_type TEXT NOT NULL,  -- 'soak_time' | 'branch_restriction'
+    config JSONB NOT NULL,      -- type-specific configuration
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(project_id, name)
+);
+CREATE INDEX idx_policies_project ON policies (project_id) WHERE enabled = true;
 
 -- ═══════════════════════════════════════════════════════════════════
 -- Release Pipelines (reusable DAG recipes per project)
@@ -499,3 +532,36 @@ CREATE TABLE org_events (
 );
 CREATE INDEX idx_org_events_org_seq ON org_events (organisation, sequence);
 CREATE INDEX idx_org_events_project_seq ON org_events (organisation, project, sequence) WHERE project != '';
+
+-- ═══════════════════════════════════════════════════════════════════
+-- Event Subscriptions (durable cursors for third-party consumers)
+-- ═══════════════════════════════════════════════════════════════════
+
+CREATE TABLE event_subscriptions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organisation TEXT NOT NULL REFERENCES organisations(name),
+    name TEXT NOT NULL,
+
+    -- Filters (empty array = all)
+    resource_types TEXT[] NOT NULL DEFAULT '{}',
+    actions TEXT[] NOT NULL DEFAULT '{}',
+    projects TEXT[] NOT NULL DEFAULT '{}',
+
+    -- Cursor: last acknowledged org_events.sequence
+    cursor BIGINT NOT NULL DEFAULT 0,
+
+    -- Status
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'paused')),
+
+    -- Ownership
+    created_by_app_id UUID REFERENCES apps(id),
+    created_by_user_id UUID REFERENCES users(id),
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    UNIQUE(organisation, name)
+);
+CREATE INDEX idx_event_subscriptions_active
+    ON event_subscriptions (organisation) WHERE status = 'active';

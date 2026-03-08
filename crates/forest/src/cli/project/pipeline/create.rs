@@ -2,6 +2,8 @@ use anyhow::Context;
 
 use crate::{cli::prompts, grpc::GrpcClientState, state::State};
 
+use super::parse_stages_from_json;
+
 #[derive(clap::Parser)]
 pub struct CreateCommand {
     #[arg(long, short = 'o')]
@@ -14,7 +16,7 @@ pub struct CreateCommand {
     #[arg(long)]
     name: Option<String>,
 
-    /// Pipeline stages as JSON (DAG definition)
+    /// Pipeline stages as JSON
     #[arg(long)]
     stages_json: Option<String>,
 
@@ -49,13 +51,11 @@ impl CreateCommand {
             inquire::Text::new("Stages JSON:").prompt()?
         };
 
-        // Validate JSON locally before sending
-        serde_json::from_str::<serde_json::Value>(&stages_json)
-            .context("invalid JSON for stages")?;
+        let stages = parse_stages_from_json(&stages_json)?;
 
         let pipeline = state
             .grpc_client()
-            .create_release_pipeline(&organisation, &project, &name, &stages_json)
+            .create_release_pipeline(&organisation, &project, &name, stages)
             .await
             .context("create release pipeline")?;
 

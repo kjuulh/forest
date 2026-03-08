@@ -126,6 +126,7 @@ impl ReleaseRegistry {
             metadata: serde_json::from_value(metadata).context("metadata")?,
             source: serde_json::from_value(source).context("source")?,
             context: serde_json::from_value(context).context("context")?,
+            reference: serde_json::from_value(reference).context("ref")?,
             project: Project {
                 organisation: organisation.to_string(),
                 project: project.to_string(),
@@ -276,6 +277,7 @@ impl ReleaseRegistry {
             releases: created_releases,
             organisation,
             project,
+            activated_stages: Vec::new(),
         })
     }
 
@@ -289,30 +291,32 @@ impl ReleaseRegistry {
         organisation: &str,
         project: &str,
         actor: &Actor,
-        event_store: &crate::services::release_event_store::ReleaseEventStore,
-        force: bool,
+        _event_store: &crate::services::release_event_store::ReleaseEventStore,
+        _force: bool,
         pipeline_rec: crate::services::release_pipeline::PipelineRecord,
     ) -> anyhow::Result<CreatedReleaseIntent> {
-        use crate::services::release_pipeline::{
-            PipelineStages, find_ready_stages, init_stage_states, StageState, StageStatus,
-        };
+        use crate::services::release_pipeline::{PipelineStages, init_stage_states};
 
         let stages: PipelineStages = serde_json::from_value(pipeline_rec.stages)
             .context("parse pipeline stages")?;
 
-        let mut stage_states = init_stage_states(&stages);
+        let stage_states = init_stage_states(&stages);
         let stages_json = serde_json::to_value(&stages)?;
         let stage_states_json = serde_json::to_value(&stage_states)?;
 
         let actor_id = actor.actor_id();
         let actor_type = actor.actor_type();
 
-        // Create release intent with pipeline data
+        // Idempotent: if an ACTIVE pipeline intent already exists for this artifact,
+        // the partial unique index (idx_release_intents_active_artifact) will catch it
+        // and we return the existing intent instead.
         let release_intent = sqlx::query!(
             "INSERT INTO release_intents (
                 artifact, annotation_id, project_id,
                 actor_id, actor_type, stages, stage_states
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (artifact) WHERE status = 'ACTIVE' AND stages IS NOT NULL
+            DO UPDATE SET updated = now()
             RETURNING id",
             artifact_id,
             annotation_id,
@@ -326,120 +330,17 @@ impl ReleaseRegistry {
         .await
         .context("create pipeline release_intent")?;
 
-        let mut created_releases = Vec::new();
-        let now = chrono::Utc::now().to_rfc3339();
-
-        // Activate root stages (those with no dependencies)
-        let ready = find_ready_stages(&stages, &stage_states);
-
-        for stage_id in &ready {
-            let Some(stage_def) = stages.get(stage_id) else {
-                continue;
-            };
-
-            match stage_def.stage_type.as_str() {
-                "deploy" => {
-                    let env = stage_def.environment.as_deref().unwrap_or("");
-
-                    let dest_recs = sqlx::query!(
-                        r#"SELECT d.id, d.name, d.environment
-                         FROM destinations d
-                         JOIN environments e ON d.environment_id = e.id
-                         WHERE e.name = $1"#,
-                        env,
-                    )
-                    .fetch_all(&self.db)
-                    .await
-                    .context("resolve destinations for pipeline stage")?;
-
-                    let mut release_ids = Vec::new();
-                    for dest in &dest_recs {
-                        use crate::services::release_event_store::CreateReleaseParams;
-
-                        let rid = event_store
-                            .create_release(CreateReleaseParams {
-                                release_intent_id: release_intent.id,
-                                project_id: *project_id,
-                                destination_id: dest.id,
-                                artifact_id: *artifact_id,
-                                actor: actor.clone(),
-                                force,
-                                stage_id: Some(stage_id.clone()),
-                            })
-                            .await
-                            .context("create pipeline release")?;
-
-                        release_ids.push(rid.to_string());
-                        created_releases.push(CreatedRelease {
-                            destination: dest.name.clone(),
-                            environment: dest.environment.clone(),
-                        });
-                    }
-
-                    stage_states.insert(
-                        stage_id.clone(),
-                        StageState {
-                            status: StageStatus::Active,
-                            release_ids: Some(release_ids),
-                            started_at: Some(now.clone()),
-                            ..StageState::pending()
-                        },
-                    );
-
-                    tracing::info!(
-                        release_intent_id = %release_intent.id,
-                        stage_id,
-                        dest_count = dest_recs.len(),
-                        "pipeline: activated root deploy stage"
-                    );
-                }
-                "wait" => {
-                    let duration = stage_def.duration_seconds.unwrap_or(0);
-                    let wait_until = chrono::Utc::now() + chrono::Duration::seconds(duration);
-
-                    stage_states.insert(
-                        stage_id.clone(),
-                        StageState {
-                            status: StageStatus::Active,
-                            started_at: Some(now.clone()),
-                            wait_until: Some(wait_until.to_rfc3339()),
-                            ..StageState::pending()
-                        },
-                    );
-
-                    tracing::info!(
-                        release_intent_id = %release_intent.id,
-                        stage_id,
-                        duration,
-                        "pipeline: activated root wait stage"
-                    );
-                }
-                other => {
-                    tracing::warn!(
-                        stage_id,
-                        stage_type = other,
-                        "pipeline: unknown stage type, skipping"
-                    );
-                }
-            }
-        }
-
-        // Persist updated stage_states after activating root stages
-        let stage_states_json = serde_json::to_value(&stage_states)?;
-        sqlx::query!(
-            "UPDATE release_intents SET stage_states = $2 WHERE id = $1",
-            release_intent.id,
-            stage_states_json,
-        )
-        .execute(&self.db)
-        .await
-        .context("update stage_states after root activation")?;
+        tracing::info!(
+            release_intent_id = %release_intent.id,
+            "pipeline: created intent with all stages PENDING, coordinator will activate"
+        );
 
         Ok(CreatedReleaseIntent {
             release_intent_id: release_intent.id,
-            releases: created_releases,
+            releases: Vec::new(),
             organisation: organisation.to_string(),
             project: project.to_string(),
+            activated_stages: Vec::new(),
         })
     }
 
@@ -499,6 +400,7 @@ impl ReleaseRegistry {
                     a.metadata,
                     a.source,
                     a.context,
+                    a.ref,
                     a.project_id,
                     a.created,
                     p.organisation as organisation,
@@ -525,6 +427,7 @@ impl ReleaseRegistry {
             metadata: serde_json::from_value(rec.metadata).context("metadata")?,
             source: serde_json::from_value(rec.source).context("source")?,
             context: serde_json::from_value(rec.context).context("context")?,
+            reference: serde_json::from_value(rec.r#ref).context("ref")?,
             project: Project {
                 organisation: rec.organisation,
                 project: rec.project,
@@ -550,6 +453,7 @@ impl ReleaseRegistry {
                     a.metadata           as metadata,
                     a.source             as source,
                     a.context            as context,
+                    a.ref                as ref,
                     a.project_id         as project_id,
                     a.created            as created,
                     p.organisation       as organisation,
@@ -578,6 +482,7 @@ impl ReleaseRegistry {
                 metadata: serde_json::from_value(rec.metadata).context("metadata")?,
                 source: serde_json::from_value(rec.source).context("source")?,
                 context: serde_json::from_value(rec.context).context("context")?,
+                reference: serde_json::from_value(rec.r#ref).context("ref")?,
                 project: Project {
                     organisation: rec.organisation,
                     project: rec.project,
@@ -626,6 +531,28 @@ impl ReleaseRegistry {
         Ok(recs.into_iter().map(|r| r.project.into()).collect())
     }
 
+    pub async fn create_project(
+        &self,
+        organisation: &str,
+        project: &str,
+    ) -> anyhow::Result<Uuid> {
+        let rec = sqlx::query!(
+            "
+            INSERT INTO projects (organisation, project)
+            VALUES ($1, $2)
+            ON CONFLICT (organisation, project) DO UPDATE SET organisation = $1
+            RETURNING id
+            ",
+            organisation,
+            project
+        )
+        .fetch_one(&self.db)
+        .await
+        .context("create project")?;
+
+        Ok(rec.id)
+    }
+
     pub async fn get_project_id(
         &self,
         organisation: &str,
@@ -653,6 +580,21 @@ impl ReleaseRegistry {
         .context("get project context")?;
 
         Ok((rec.organisation, rec.project))
+    }
+
+    pub async fn get_project_id_from_artifact(
+        &self,
+        artifact_id: &Uuid,
+    ) -> anyhow::Result<Uuid> {
+        let rec = sqlx::query_scalar!(
+            r#"SELECT project_id as "project_id!" FROM annotations WHERE artifact_id = $1"#,
+            artifact_id
+        )
+        .fetch_one(&self.db)
+        .await
+        .context("get project from artifact")?;
+
+        Ok(rec)
     }
 
     /// Get annotation details by artifact_id (for enriching notifications).
@@ -875,6 +817,7 @@ pub struct ReleaseAnnotation {
     pub metadata: HashMap<String, String>,
     pub source: Source,
     pub context: ArtifactContext,
+    pub reference: Reference,
     pub project: Project,
     pub destinations: Vec<ReleaseDestination>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -912,6 +855,13 @@ pub struct CreatedReleaseIntent {
     pub releases: Vec<CreatedRelease>,
     pub organisation: String,
     pub project: String,
+    /// Stages that were activated during creation (for NATS signaling).
+    pub activated_stages: Vec<ActivatedStage>,
+}
+
+pub struct ActivatedStage {
+    pub stage_id: String,
+    pub stage_type: crate::services::release_pipeline::StageType,
 }
 
 pub struct CreatedRelease {

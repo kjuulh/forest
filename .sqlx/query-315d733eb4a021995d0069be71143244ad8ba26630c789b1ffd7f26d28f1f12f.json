@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE event_subscriptions SET\n                status = COALESCE($3, status),\n                resource_types = CASE WHEN $4 THEN $5 ELSE resource_types END,\n                actions = CASE WHEN $4 THEN $6 ELSE actions END,\n                projects = CASE WHEN $4 THEN $7 ELSE projects END,\n                updated_at = now()\n               WHERE organisation = $1 AND name = $2\n               RETURNING id, organisation, name, resource_types, actions, projects,\n                         status, cursor, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "organisation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "resource_types",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 4,
+        "name": "actions",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 5,
+        "name": "projects",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "cursor",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "TextArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "315d733eb4a021995d0069be71143244ad8ba26630c789b1ffd7f26d28f1f12f"
+}

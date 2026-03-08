@@ -9,9 +9,11 @@ pub struct AnnotateCommand {
     #[arg(long)]
     metadata: Vec<String>,
 
+    /// Source username (only used by app tokens; ignored for user tokens)
     #[arg(long = "source-username")]
     source_username: Option<String>,
 
+    /// Source email (only used by app tokens; ignored for user tokens)
     #[arg(long = "source-email")]
     source_email: Option<String>,
 

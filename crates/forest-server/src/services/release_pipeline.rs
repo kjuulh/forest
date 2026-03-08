@@ -14,21 +14,45 @@ pub type PipelineStages = HashMap<String, StageDefinition>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StageDefinition {
-    /// Stage type: "deploy", "wait", "build", "monitor", "manual"
-    #[serde(rename = "type")]
-    pub stage_type: String,
-
     /// Which stages must complete before this one starts.
     #[serde(default)]
     pub depends_on: Vec<String>,
 
-    /// For deploy stages: the environment name (resolved to destinations at runtime).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<String>,
+    /// The stage configuration — determines both the type and its parameters.
+    #[serde(flatten)]
+    pub config: StageConfig,
+}
 
-    /// For wait stages: how long to wait (seconds).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_seconds: Option<i64>,
+/// Tagged enum for stage types. Each variant carries exactly the config it needs.
+/// Serializes with `"type": "deploy"` / `"type": "wait"` discriminator, and
+/// the variant fields are flattened into the parent object.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum StageConfig {
+    Deploy {
+        environment: String,
+    },
+    Wait {
+        duration_seconds: i64,
+    },
+}
+
+impl StageDefinition {
+    pub fn deploy(environment: impl Into<String>, depends_on: Vec<String>) -> Self {
+        Self {
+            depends_on,
+            config: StageConfig::Deploy {
+                environment: environment.into(),
+            },
+        }
+    }
+
+    pub fn wait(duration_seconds: i64, depends_on: Vec<String>) -> Self {
+        Self {
+            depends_on,
+            config: StageConfig::Wait { duration_seconds },
+        }
+    }
 }
 
 // ── Runtime state types (stored in release_intents.stage_states) ─────────
@@ -39,18 +63,24 @@ pub type StageStates = HashMap<String, StageState>;
 pub struct StageState {
     pub status: StageStatus,
 
-    /// UUIDs of release_states rows created for this stage (deploy stages).
+    /// When this stage became eligible to run (dependencies met).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub release_ids: Option<Vec<String>>,
+    pub queued_at: Option<String>,
+
+    /// When this stage actually started executing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+
+    /// When this stage reached a terminal state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
 
+    /// UUIDs of release_states rows created for this stage (deploy stages).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub started_at: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub completed_at: Option<String>,
+    pub release_ids: Option<Vec<String>>,
 
     /// For wait stages: ISO8601 timestamp when the wait expires.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -71,19 +101,52 @@ impl StageState {
     pub fn pending() -> Self {
         Self {
             status: StageStatus::Pending,
-            release_ids: None,
-            error_message: None,
+            queued_at: None,
             started_at: None,
             completed_at: None,
+            error_message: None,
+            release_ids: None,
             wait_until: None,
+        }
+    }
+}
+
+/// Simple stage type discriminator (derived from StageConfig).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StageType {
+    Deploy,
+    Wait,
+}
+
+impl StageType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Deploy => "deploy",
+            Self::Wait => "wait",
+        }
+    }
+}
+
+impl std::fmt::Display for StageType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl StageConfig {
+    pub fn stage_type(&self) -> StageType {
+        match self {
+            Self::Deploy { .. } => StageType::Deploy,
+            Self::Wait { .. } => StageType::Wait,
         }
     }
 }
 
 // ── DAG validation ───────────────────────────────────────────────────────
 
-/// Validate a pipeline definition: check for missing dependencies, cycles,
-/// and that all stages have valid types with required config.
+/// Validate a pipeline definition: check for missing dependencies and cycles.
+/// Type-level validation is handled by the enum — no invalid type strings possible.
 pub fn validate_pipeline(stages: &PipelineStages) -> anyhow::Result<()> {
     if stages.is_empty() {
         anyhow::bail!("pipeline must have at least one stage");
@@ -91,7 +154,6 @@ pub fn validate_pipeline(stages: &PipelineStages) -> anyhow::Result<()> {
 
     let ids: HashSet<&str> = stages.keys().map(|s| s.as_str()).collect();
 
-    // Check all depends_on references exist
     for (id, def) in stages {
         for dep in &def.depends_on {
             if !ids.contains(dep.as_str()) {
@@ -99,23 +161,6 @@ pub fn validate_pipeline(stages: &PipelineStages) -> anyhow::Result<()> {
             }
             if dep == id {
                 anyhow::bail!("stage '{id}' depends on itself");
-            }
-        }
-
-        // Validate stage type + required config
-        match def.stage_type.as_str() {
-            "deploy" => {
-                if def.environment.is_none() {
-                    anyhow::bail!("deploy stage '{id}' requires an 'environment' field");
-                }
-            }
-            "wait" => {
-                if def.duration_seconds.is_none() {
-                    anyhow::bail!("wait stage '{id}' requires a 'duration_seconds' field");
-                }
-            }
-            other => {
-                anyhow::bail!("unknown stage type '{other}' for stage '{id}'");
             }
         }
     }
@@ -226,6 +271,13 @@ pub struct PipelineRecord {
     pub enabled: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl PipelineRecord {
+    /// Deserialize the stored JSON back into typed stages.
+    pub fn parse_stages(&self) -> anyhow::Result<PipelineStages> {
+        serde_json::from_value(self.stages.clone()).context("parse pipeline stages from DB")
+    }
 }
 
 pub struct CreatePipelineParams {
@@ -396,21 +448,11 @@ mod tests {
         let mut stages = PipelineStages::new();
         stages.insert(
             "deploy-dev".into(),
-            StageDefinition {
-                stage_type: "deploy".into(),
-                depends_on: vec![],
-                environment: Some("dev".into()),
-                duration_seconds: None,
-            },
+            StageDefinition::deploy("dev", vec![]),
         );
         stages.insert(
             "deploy-prod".into(),
-            StageDefinition {
-                stage_type: "deploy".into(),
-                depends_on: vec!["deploy-dev".into()],
-                environment: Some("prod".into()),
-                duration_seconds: None,
-            },
+            StageDefinition::deploy("prod", vec!["deploy-dev".into()]),
         );
         assert!(validate_pipeline(&stages).is_ok());
     }
@@ -420,21 +462,11 @@ mod tests {
         let mut stages = PipelineStages::new();
         stages.insert(
             "a".into(),
-            StageDefinition {
-                stage_type: "deploy".into(),
-                depends_on: vec!["b".into()],
-                environment: Some("dev".into()),
-                duration_seconds: None,
-            },
+            StageDefinition::deploy("dev", vec!["b".into()]),
         );
         stages.insert(
             "b".into(),
-            StageDefinition {
-                stage_type: "deploy".into(),
-                depends_on: vec!["a".into()],
-                environment: Some("prod".into()),
-                duration_seconds: None,
-            },
+            StageDefinition::deploy("prod", vec!["a".into()]),
         );
         let err = validate_pipeline(&stages).unwrap_err();
         assert!(err.to_string().contains("cycle"));
@@ -445,47 +477,10 @@ mod tests {
         let mut stages = PipelineStages::new();
         stages.insert(
             "deploy".into(),
-            StageDefinition {
-                stage_type: "deploy".into(),
-                depends_on: vec!["nonexistent".into()],
-                environment: Some("dev".into()),
-                duration_seconds: None,
-            },
+            StageDefinition::deploy("dev", vec!["nonexistent".into()]),
         );
         let err = validate_pipeline(&stages).unwrap_err();
         assert!(err.to_string().contains("does not exist"));
-    }
-
-    #[test]
-    fn test_validate_pipeline_deploy_no_env() {
-        let mut stages = PipelineStages::new();
-        stages.insert(
-            "deploy".into(),
-            StageDefinition {
-                stage_type: "deploy".into(),
-                depends_on: vec![],
-                environment: None,
-                duration_seconds: None,
-            },
-        );
-        let err = validate_pipeline(&stages).unwrap_err();
-        assert!(err.to_string().contains("environment"));
-    }
-
-    #[test]
-    fn test_validate_pipeline_wait_no_duration() {
-        let mut stages = PipelineStages::new();
-        stages.insert(
-            "soak".into(),
-            StageDefinition {
-                stage_type: "wait".into(),
-                depends_on: vec![],
-                environment: None,
-                duration_seconds: None,
-            },
-        );
-        let err = validate_pipeline(&stages).unwrap_err();
-        assert!(err.to_string().contains("duration_seconds"));
     }
 
     #[test]
@@ -493,30 +488,15 @@ mod tests {
         let mut stages = PipelineStages::new();
         stages.insert(
             "deploy-dev".into(),
-            StageDefinition {
-                stage_type: "deploy".into(),
-                depends_on: vec![],
-                environment: Some("dev".into()),
-                duration_seconds: None,
-            },
+            StageDefinition::deploy("dev", vec![]),
         );
         stages.insert(
             "soak".into(),
-            StageDefinition {
-                stage_type: "wait".into(),
-                depends_on: vec!["deploy-dev".into()],
-                environment: None,
-                duration_seconds: Some(300),
-            },
+            StageDefinition::wait(300, vec!["deploy-dev".into()]),
         );
         stages.insert(
             "deploy-prod".into(),
-            StageDefinition {
-                stage_type: "deploy".into(),
-                depends_on: vec!["soak".into()],
-                environment: Some("prod".into()),
-                duration_seconds: None,
-            },
+            StageDefinition::deploy("prod", vec!["soak".into()]),
         );
 
         // All pending: only root should be ready
@@ -534,5 +514,53 @@ mod tests {
         states.get_mut("soak").unwrap().status = StageStatus::Succeeded;
         let ready = find_ready_stages(&stages, &states);
         assert_eq!(ready, vec!["deploy-prod"]);
+    }
+
+    #[test]
+    fn test_serde_roundtrip() {
+        let mut stages = PipelineStages::new();
+        stages.insert(
+            "deploy-dev".into(),
+            StageDefinition::deploy("dev", vec![]),
+        );
+        stages.insert(
+            "soak".into(),
+            StageDefinition::wait(300, vec!["deploy-dev".into()]),
+        );
+
+        let json = serde_json::to_string_pretty(&stages).unwrap();
+        let parsed: PipelineStages = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(stages.len(), parsed.len());
+        match &parsed["deploy-dev"].config {
+            StageConfig::Deploy { environment } => assert_eq!(environment, "dev"),
+            _ => panic!("expected deploy stage"),
+        }
+        match &parsed["soak"].config {
+            StageConfig::Wait { duration_seconds } => assert_eq!(*duration_seconds, 300),
+            _ => panic!("expected wait stage"),
+        }
+    }
+
+    #[test]
+    fn test_backward_compat_json() {
+        // Old-format JSON should still deserialize correctly
+        let json = r#"{
+            "deploy-dev": {
+                "type": "deploy",
+                "depends_on": [],
+                "environment": "dev"
+            },
+            "soak": {
+                "type": "wait",
+                "depends_on": ["deploy-dev"],
+                "duration_seconds": 300
+            }
+        }"#;
+
+        let stages: PipelineStages = serde_json::from_str(json).unwrap();
+        assert_eq!(stages.len(), 2);
+        assert!(matches!(stages["deploy-dev"].config, StageConfig::Deploy { .. }));
+        assert!(matches!(stages["soak"].config, StageConfig::Wait { .. }));
     }
 }

@@ -2,8 +2,8 @@ use std::net::SocketAddr;
 
 use crate::{
     checks::Checks, destinations::terraformv1::TerraformV1ServerState, grpc,
-    release_reaper::ReleaseReaper, runner_manager::RunnerManager, scheduler::SchedulerState,
-    servehttp::ServeHttp, state::State,
+    intent_coordinator::IntentCoordinator, release_reaper::ReleaseReaper,
+    runner_manager::RunnerManager, scheduler::SchedulerState, servehttp::ServeHttp, state::State,
 };
 
 #[derive(clap::Parser)]
@@ -46,6 +46,7 @@ impl ServeCommand {
             .add(state.terraform_v1_server(self.terraform_host))
             .add(state.scheduler(runner_manager.clone(), self.disable_in_process))
             .add(ReleaseReaper::new(state, runner_manager.clone()))
+            .add(IntentCoordinator::new(state))
             .add(state.drop_queue.clone())
             .run()
             .await?;

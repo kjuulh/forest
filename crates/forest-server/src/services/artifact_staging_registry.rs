@@ -171,6 +171,50 @@ impl ArtifactStagingRegistry {
             .collect())
     }
 
+    pub async fn get_artifact_files(
+        &self,
+        artifact_id: &uuid::Uuid,
+        category: Option<&str>,
+    ) -> anyhow::Result<Vec<ArtifactFileEntry>> {
+        let rec = sqlx::query!("SELECT artifact_id FROM artifacts WHERE id = $1", artifact_id)
+            .fetch_one(&self.db)
+            .await
+            .context("get artifact id")?;
+        let staging_id = rec.artifact_id;
+
+        let recs = sqlx::query!(
+            r#"
+                SELECT
+                    file.file_name,
+                    file.category,
+                    file.env,
+                    file.destination,
+                    blob.content
+                FROM artifact_files file
+                JOIN blob_storage blob ON file.file_content = blob.id
+                WHERE file.artifact_staging_id = $1
+                  AND ($2::text IS NULL OR file.category = $2)
+                ORDER BY file.category, file.file_name
+            "#,
+            staging_id,
+            category,
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("get artifact files")?;
+
+        Ok(recs
+            .into_iter()
+            .map(|r| ArtifactFileEntry {
+                file_name: r.file_name,
+                category: r.category,
+                env: r.env,
+                destination: r.destination,
+                content: r.content.unwrap_or_default(),
+            })
+            .collect())
+    }
+
     pub async fn commit_staging(&self, id: &StagingArtifactID) -> anyhow::Result<ArtifactID> {
         let rec = sqlx::query!(
             "
@@ -188,6 +232,14 @@ impl ArtifactStagingRegistry {
 
         Ok(rec.id)
     }
+}
+
+pub struct ArtifactFileEntry {
+    pub file_name: String,
+    pub category: String,
+    pub env: String,
+    pub destination: String,
+    pub content: String,
 }
 
 pub struct StagingArtifactID {

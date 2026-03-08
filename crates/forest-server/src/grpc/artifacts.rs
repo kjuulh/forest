@@ -108,6 +108,71 @@ impl ArtifactService for ArtifactServer {
             artifact_id: id.to_string(),
         }))
     }
+
+    async fn get_artifact_spec(
+        &self,
+        request: tonic::Request<GetArtifactSpecRequest>,
+    ) -> std::result::Result<tonic::Response<GetArtifactSpecResponse>, tonic::Status> {
+        let req = request.into_inner();
+
+        let artifact_id: uuid::Uuid = req
+            .artifact_id
+            .parse()
+            .context("artifact_id")
+            .to_internal_error()?;
+
+        let spec_files = self
+            .state
+            .artifact_staging_registry()
+            .get_spec_files(&artifact_id)
+            .await
+            .to_internal_error()?;
+
+        // Return the forest.cue file, or the first spec file if forest.cue isn't found
+        let content = spec_files
+            .iter()
+            .find(|(path, _)| path.file_name().is_some_and(|n| n == "forest.cue"))
+            .or_else(|| spec_files.first())
+            .map(|(_, content)| content.clone())
+            .unwrap_or_default();
+
+        Ok(Response::new(GetArtifactSpecResponse { content }))
+    }
+
+    async fn get_artifact_files(
+        &self,
+        request: tonic::Request<GetArtifactFilesRequest>,
+    ) -> std::result::Result<tonic::Response<GetArtifactFilesResponse>, tonic::Status> {
+        let req = request.into_inner();
+
+        let artifact_id: uuid::Uuid = req
+            .artifact_id
+            .parse()
+            .context("artifact_id")
+            .to_internal_error()?;
+
+        let category = req.category.as_deref().filter(|c| !c.is_empty());
+
+        let files = self
+            .state
+            .artifact_staging_registry()
+            .get_artifact_files(&artifact_id, category)
+            .await
+            .to_internal_error()?;
+
+        Ok(Response::new(GetArtifactFilesResponse {
+            files: files
+                .into_iter()
+                .map(|f| ArtifactFile {
+                    file_name: f.file_name,
+                    category: f.category,
+                    env: f.env,
+                    destination: f.destination,
+                    content: f.content,
+                })
+                .collect(),
+        }))
+    }
 }
 
 pub trait GrpcErrorExt<T> {

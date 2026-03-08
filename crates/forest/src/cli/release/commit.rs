@@ -4,7 +4,7 @@ use anyhow::Context;
 
 use crate::{
     grpc::{GetProjectsQuery, GrpcClientState},
-    models::{artifacts::ArtifactID, release_annotation::{ReleaseAnnotation, ReleaseDestination}},
+    models::{artifacts::ArtifactID, release_annotation::ReleaseAnnotation},
     state::State,
 };
 
@@ -70,12 +70,12 @@ impl CommitCommand {
                     None => prompt_project_select(state, &organisation).await?,
                 };
 
-                // Fetch annotations and current destination states in parallel
-                let (release_annotations, dest_states) = tokio::try_join!(
+                // Fetch annotations and release intent states in parallel
+                let (release_annotations, intent_states) = tokio::try_join!(
                     grpc.get_release_annotations_by_project(&organisation, &project),
-                    grpc.get_destination_states(&organisation, Some(&project)),
+                    grpc.get_release_intent_states(&organisation, Some(&project), true),
                 )
-                .context("get releases and destination states")?;
+                .context("get releases and states")?;
 
                 if release_annotations.is_empty() {
                     anyhow::bail!(
@@ -85,52 +85,59 @@ impl CommitCommand {
                     );
                 }
 
-                // Build a map: artifact_id -> list of (destination_name, environment, status)
+                // Determine "current" per destination: the most recently created
+                // intent that succeeded on that destination wins.
+                // Intents are returned ordered by created DESC, so first seen wins.
+                let mut current_per_dest: std::collections::HashMap<String, String> =
+                    std::collections::HashMap::new();
+                for intent in &intent_states.release_intents {
+                    for step in &intent.steps {
+                        if step.status == "SUCCEEDED" {
+                            current_per_dest
+                                .entry(step.destination_name.clone())
+                                .or_insert_with(|| intent.artifact_id.clone());
+                        }
+                    }
+                }
+
+                // Build a map: artifact_id -> list of dest display entries
                 let mut dest_by_artifact: std::collections::HashMap<
                     String,
-                    Vec<(String, String, String)>,
+                    Vec<DestDisplay>,
                 > = std::collections::HashMap::new();
-                for ds in &dest_states {
-                    if let (Some(artifact_id), Some(status)) = (&ds.artifact_id, &ds.status) {
+                for intent in &intent_states.release_intents {
+                    for step in &intent.steps {
+                        let is_current = current_per_dest
+                            .get(&step.destination_name)
+                            .is_some_and(|aid| *aid == intent.artifact_id);
                         dest_by_artifact
-                            .entry(artifact_id.clone())
+                            .entry(intent.artifact_id.clone())
                             .or_default()
-                            .push((
-                                ds.destination_name.clone(),
-                                ds.environment.clone(),
-                                status.clone(),
-                            ));
+                            .push(DestDisplay {
+                                name: step.destination_name.clone(),
+                                environment: step.environment.clone(),
+                                status: step.status.clone(),
+                                is_current,
+                            });
                     }
                 }
 
                 let display_items: Vec<ReleaseAnnotationDisplay> = release_annotations
                     .into_iter()
-                    .map(|mut ann| {
-                        // Enrich annotation with current destination states
-                        if let Some(dests) =
-                            dest_by_artifact.get(&ann.artifact_id.to_string())
-                        {
-                            ann.destinations = dests
-                                .iter()
-                                .map(|(name, env, status)| {
-                                    ReleaseDestination {
-                                        name: name.clone(),
-                                        environment: env.clone(),
-                                        type_organisation: String::new(),
-                                        type_name: String::new(),
-                                        type_version: 0,
-                                        status: status.clone(),
-                                    }
-                                })
-                                .collect();
+                    .map(|ann| {
+                        let dests = dest_by_artifact
+                            .remove(&ann.artifact_id.to_string())
+                            .unwrap_or_default();
+                        ReleaseAnnotationDisplay {
+                            annotation: ann,
+                            dests,
                         }
-                        ReleaseAnnotationDisplay(ann)
                     })
                     .collect();
 
                 let choice = inquire::Select::new("Select a release:", display_items).prompt()?;
 
-                choice.0.artifact_id
+                choice.annotation.artifact_id
             }
         };
 
@@ -304,38 +311,49 @@ async fn prompt_environment_select(state: &State, organisation: &str) -> anyhow:
     Ok(selected)
 }
 
+struct DestDisplay {
+    name: String,
+    environment: String,
+    status: String,
+    is_current: bool,
+}
+
 /// Wrapper for ReleaseAnnotation that provides custom Display for inquire Select
-struct ReleaseAnnotationDisplay(ReleaseAnnotation);
+struct ReleaseAnnotationDisplay {
+    annotation: ReleaseAnnotation,
+    dests: Vec<DestDisplay>,
+}
 
 impl Display for ReleaseAnnotationDisplay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let annotation = &self.0;
+        let created = self.annotation.created_at.format("%Y-%m-%d %H:%M");
+        write!(f, "{}: {}", created, self.annotation.context.title)?;
 
-        let created = annotation.created_at.format("%Y-%m-%d %H:%M");
-        write!(f, "{}: {}", created, annotation.context.title)?;
-
-        if !annotation.destinations.is_empty() {
+        if !self.dests.is_empty() {
             // Group destinations by environment
-            let mut by_env: std::collections::BTreeMap<&str, Vec<(&str, &str)>> =
+            let mut by_env: std::collections::BTreeMap<&str, Vec<&DestDisplay>> =
                 std::collections::BTreeMap::new();
-            for dest in &annotation.destinations {
-                by_env
-                    .entry(&dest.environment)
-                    .or_default()
-                    .push((&dest.name, &dest.status));
+            for dest in &self.dests {
+                by_env.entry(&dest.environment).or_default().push(dest);
             }
 
             for (env, dests) in &by_env {
                 write!(f, "\n    {}:", env)?;
-                for (name, status) in dests {
-                    let icon = match *status {
-                        "SUCCEEDED" => "✓",
-                        "RUNNING" => "▶",
-                        "ASSIGNED" => "◉",
-                        "QUEUED" => "◌",
-                        _ => "•",
+                for dest in dests {
+                    let icon = if dest.is_current {
+                        match dest.status.as_str() {
+                            "SUCCEEDED" => "✓",
+                            "RUNNING" => "▶",
+                            "ASSIGNED" => "◉",
+                            "QUEUED" => "◌",
+                            "FAILED" | "TIMED_OUT" | "CANCELLED" => "✗",
+                            _ => "•",
+                        }
+                    } else {
+                        // Previously deployed, now superseded
+                        "·"
                     };
-                    write!(f, "\n    {icon} {name}")?;
+                    write!(f, "\n    {icon} {}", dest.name)?;
                 }
             }
         }

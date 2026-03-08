@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id as \"id!\"\n         FROM release_intents\n         WHERE status = 'ACTIVE'\n           AND stages IS NOT NULL\n           AND (next_evaluate_at IS NULL OR next_evaluate_at <= now())\n         LIMIT 50",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7032bc905ec072b49521e77a7bd760d6fe64a50c76b94f6684b3710c32947670"
+}

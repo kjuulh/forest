@@ -37,7 +37,7 @@ pub mod release_annotation {
     use chrono::{DateTime, Utc};
     use uuid::Uuid;
 
-    use crate::models::{context::ArtifactContext, source::Source};
+    use crate::models::{context::ArtifactContext, reference::Reference, source::Source};
 
     pub struct ReleaseAnnotation {
         pub id: Uuid,
@@ -46,6 +46,7 @@ pub mod release_annotation {
         pub metadata: HashMap<String, String>,
         pub source: Source,
         pub context: ArtifactContext,
+        pub reference: Option<Reference>,
         pub destinations: Vec<ReleaseDestination>,
         pub created_at: DateTime<Utc>,
     }

@@ -21,6 +21,7 @@ use crate::{
         },
         release_finalizer,
         release_logs_registry::{ReleaseLogsRegistry, ReleaseLogsRegistryState},
+        policy::{PolicyRegistry, PolicyRegistryState, PolicyType},
         release_registry::{ReleaseItem, ReleaseRegistry, ReleaseRegistryState},
         release_token_registry::{
             ReleaseTokenRegistry, ReleaseTokenRegistryState, ReleaseTokenScope,
@@ -38,6 +39,7 @@ struct SchedulerInner {
     runner_manager: RunnerManager,
     release_token_registry: ReleaseTokenRegistry,
     release_event_store: ReleaseEventStore,
+    policy_registry: PolicyRegistry,
     disable_in_process: bool,
 }
 
@@ -58,6 +60,7 @@ impl Scheduler {
                 runner_manager,
                 release_token_registry: state.release_token_registry(),
                 release_event_store: state.release_event_store(),
+                policy_registry: state.policy_registry(),
                 disable_in_process,
             }),
             nats: state.nats.clone(),
@@ -99,6 +102,32 @@ impl SchedulerInner {
             .get(&release_state.destination_id)
             .await?
             .context("failed to find a destination")?;
+
+        // Check soak_time policies before dispatching.
+        // Branch restriction is enforced at the gRPC layer where branch info is available;
+        // the scheduler only handles soak_time deferral.
+        let evaluations = self
+            .policy_registry
+            .evaluate_for_environment(
+                &release_state.project_id,
+                &dest.environment,
+                None,
+            )
+            .await
+            .unwrap_or_default();
+
+        for eval in &evaluations {
+            if !eval.passed && eval.policy_type == PolicyType::SoakTime {
+                tracing::debug!(
+                    %release_id,
+                    policy = %eval.policy_name,
+                    env = %dest.environment,
+                    "scheduler: release deferred by soak_time policy — {}",
+                    eval.reason,
+                );
+                return Ok(());
+            }
+        }
 
         let dest_index = DestinationIndex {
             organisation: dest.destination_type.organisation.clone(),

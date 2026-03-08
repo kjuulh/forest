@@ -1,12 +1,16 @@
 use anyhow::Context;
-use forest_grpc_interface::{release_pipeline_service_server::ReleasePipelineService, *};
+use forest_grpc_interface::{
+    pipeline_stage, release_pipeline_service_server::ReleasePipelineService,
+    DeployStageConfig, PipelineStage, WaitStageConfig, *,
+};
 use tonic::Response;
 
 use crate::{
     grpc::artifacts::GrpcErrorExt,
     services::{
         release_pipeline::{
-            CreatePipelineParams, PipelineStages, ReleasePipelineRegistryState, UpdatePipelineParams,
+            CreatePipelineParams, PipelineStages, ReleasePipelineRegistryState,
+            StageConfig, StageDefinition, UpdatePipelineParams,
         },
         release_registry::ReleaseRegistryState,
     },
@@ -17,17 +21,75 @@ pub struct ReleasePipelinesServer {
     pub state: State,
 }
 
+// ── Proto <-> Domain conversions ─────────────────────────────────────
+
+fn stages_to_proto(stages: &PipelineStages) -> Vec<PipelineStage> {
+    stages
+        .iter()
+        .map(|(id, def)| {
+            let config = match &def.config {
+                StageConfig::Deploy { environment } => {
+                    Some(pipeline_stage::Config::Deploy(DeployStageConfig {
+                        environment: environment.clone(),
+                    }))
+                }
+                StageConfig::Wait { duration_seconds } => {
+                    Some(pipeline_stage::Config::Wait(WaitStageConfig {
+                        duration_seconds: *duration_seconds,
+                    }))
+                }
+            };
+
+            PipelineStage {
+                id: id.clone(),
+                depends_on: def.depends_on.clone(),
+                config,
+            }
+        })
+        .collect()
+}
+
+fn stages_from_proto(proto_stages: Vec<PipelineStage>) -> anyhow::Result<PipelineStages> {
+    let mut stages = PipelineStages::new();
+    for ps in proto_stages {
+        if ps.id.is_empty() {
+            anyhow::bail!("stage id must not be empty");
+        }
+
+        let config = match ps.config {
+            Some(pipeline_stage::Config::Deploy(c)) => StageConfig::Deploy {
+                environment: c.environment,
+            },
+            Some(pipeline_stage::Config::Wait(c)) => StageConfig::Wait {
+                duration_seconds: c.duration_seconds,
+            },
+            None => anyhow::bail!("stage '{}' is missing a config (deploy or wait)", ps.id),
+        };
+
+        let def = StageDefinition {
+            depends_on: ps.depends_on,
+            config,
+        };
+
+        if stages.insert(ps.id.clone(), def).is_some() {
+            anyhow::bail!("duplicate stage id '{}'", ps.id);
+        }
+    }
+    Ok(stages)
+}
+
 fn record_to_grpc(
     r: crate::services::release_pipeline::PipelineRecord,
-) -> ReleasePipeline {
-    ReleasePipeline {
+) -> anyhow::Result<ReleasePipeline> {
+    let stages = r.parse_stages()?;
+    Ok(ReleasePipeline {
         id: r.id.to_string(),
         name: r.name,
         enabled: r.enabled,
-        stages_json: r.stages.to_string(),
+        stages: stages_to_proto(&stages),
         created_at: r.created_at.to_rfc3339(),
         updated_at: r.updated_at.to_rfc3339(),
-    }
+    })
 }
 
 #[async_trait::async_trait]
@@ -51,8 +113,8 @@ impl ReleasePipelineService for ReleasePipelinesServer {
             .context("resolve project")
             .to_internal_error()?;
 
-        let stages: PipelineStages = serde_json::from_str(&req.stages_json)
-            .context("invalid stages_json")
+        let stages = stages_from_proto(req.stages)
+            .context("invalid stages")
             .to_internal_error()?;
 
         let rec = self
@@ -68,7 +130,7 @@ impl ReleasePipelineService for ReleasePipelinesServer {
             .to_internal_error()?;
 
         Ok(Response::new(CreateReleasePipelineResponse {
-            pipeline: Some(record_to_grpc(rec)),
+            pipeline: Some(record_to_grpc(rec).to_internal_error()?),
         }))
     }
 
@@ -91,10 +153,10 @@ impl ReleasePipelineService for ReleasePipelinesServer {
             .context("resolve project")
             .to_internal_error()?;
 
-        let stages = if let Some(json) = req.stages_json {
+        let stages = if req.update_stages {
             Some(
-                serde_json::from_str::<PipelineStages>(&json)
-                    .context("invalid stages_json")
+                stages_from_proto(req.stages)
+                    .context("invalid stages")
                     .to_internal_error()?,
             )
         } else {
@@ -117,7 +179,7 @@ impl ReleasePipelineService for ReleasePipelinesServer {
             .to_internal_error()?;
 
         Ok(Response::new(UpdateReleasePipelineResponse {
-            pipeline: Some(record_to_grpc(rec)),
+            pipeline: Some(record_to_grpc(rec).to_internal_error()?),
         }))
     }
 
@@ -177,8 +239,12 @@ impl ReleasePipelineService for ReleasePipelinesServer {
             .context("list release pipelines")
             .to_internal_error()?;
 
-        Ok(Response::new(ListReleasePipelinesResponse {
-            pipelines: recs.into_iter().map(record_to_grpc).collect(),
-        }))
+        let pipelines = recs
+            .into_iter()
+            .map(record_to_grpc)
+            .collect::<anyhow::Result<Vec<_>>>()
+            .to_internal_error()?;
+
+        Ok(Response::new(ListReleasePipelinesResponse { pipelines }))
     }
 }

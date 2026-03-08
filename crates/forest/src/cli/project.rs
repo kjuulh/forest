@@ -1,17 +1,20 @@
 use crate::{
     cli::project::{
-        auto_release::AutoReleaseCommand, init::InitCommand, list::ListCommand,
-        pipeline::PipelineCommand, publish::PublishCommand, releases::ReleasesCommand,
+        create::CreateCommand, init::InitCommand, list::ListCommand,
+        pipeline::PipelineCommand, policy::PolicyCommand, publish::PublishCommand,
+        releases::ReleasesCommand, trigger::TriggerCommand,
     },
     state::State,
 };
 
-mod auto_release;
+mod create;
 mod init;
 mod list;
 mod pipeline;
+mod policy;
 mod publish;
 pub(crate) mod releases;
+mod trigger;
 
 #[derive(clap::Parser)]
 pub struct ProjectCommand {
@@ -21,13 +24,17 @@ pub struct ProjectCommand {
 
 #[derive(clap::Subcommand)]
 enum Commands {
+    /// Create a project in an organisation
+    Create(CreateCommand),
     Init(InitCommand),
     Publish(Box<PublishCommand>),
     List(ListCommand),
     /// Show current release state per destination for a project
     Releases(ReleasesCommand),
-    /// Manage auto-release policies for a project
-    AutoRelease(AutoReleaseCommand),
+    /// Manage release triggers for a project
+    Trigger(TriggerCommand),
+    /// Manage deployment policies (guardrails) for a project
+    Policy(PolicyCommand),
     /// Manage release pipelines for a project
     Pipeline(PipelineCommand),
 }
@@ -35,11 +42,13 @@ enum Commands {
 impl ProjectCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         match &self.commands {
+            Commands::Create(cmd) => cmd.execute(state).await,
             Commands::Init(cmd) => cmd.execute(state).await,
             Commands::Publish(cmd) => cmd.execute(state).await,
             Commands::List(cmd) => cmd.execute(state).await,
             Commands::Releases(cmd) => cmd.execute(state).await,
-            Commands::AutoRelease(cmd) => cmd.execute(state).await,
+            Commands::Trigger(cmd) => cmd.execute(state).await,
+            Commands::Policy(cmd) => cmd.execute(state).await,
             Commands::Pipeline(cmd) => cmd.execute(state).await,
         }
     }

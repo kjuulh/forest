@@ -36,15 +36,7 @@ impl CreateCommand {
                 .filter(|s| !s.is_empty()),
         };
 
-        let sort_order = match self.sort_order {
-            Some(s) => s,
-            None => inquire::Text::new("Sort order:")
-                .with_default("0")
-                .prompt()?
-                .parse()
-                .context("sort order must be a number")?,
-        };
-
+        let sort_order = self.sort_order.unwrap_or(0);
         let env = state
             .grpc_client()
             .create_environment(&organisation, &name, description.as_deref(), sort_order)

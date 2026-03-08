@@ -77,8 +77,8 @@ pub struct CreateReleaseParams {
 
 #[derive(Clone)]
 pub struct ReleaseEventStore {
-    db: PgPool,
-    nats: async_nats::Client,
+    pub(crate) db: PgPool,
+    pub(crate) nats: async_nats::Client,
 }
 
 impl ReleaseEventStore {
@@ -295,6 +295,32 @@ impl ReleaseEventStore {
             }
         }
 
+        // Write org event into outbox (same transaction)
+        let org_project = sqlx::query!(
+            "SELECT organisation, project FROM projects WHERE id = $1",
+            project_id,
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if let Some(ref op) = org_project {
+            let event_metadata = serde_json::json!({
+                "status": target_status,
+                "release_id": release_id.to_string(),
+                "intent_id": release_intent_id.to_string(),
+            });
+            sqlx::query!(
+                r#"INSERT INTO org_events (organisation, project, resource_type, action, resource_id, metadata)
+                   VALUES ($1, $2, 'release', 'status_changed', $3, $4)"#,
+                op.organisation,
+                op.project,
+                release_id.to_string(),
+                event_metadata,
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
         tx.commit().await?;
 
         // Publish status change to NATS (best-effort)
@@ -309,6 +335,12 @@ impl ReleaseEventStore {
             .await
         {
             tracing::warn!("failed to publish release status to NATS: {e}");
+        }
+
+        // Nudge org event listeners
+        if let Some(ref op) = org_project {
+            let org_subject = format!("forest.events.{}", op.organisation);
+            let _ = self.nats.publish(org_subject, "".into()).await;
         }
 
         // On terminal events, signal the next queued release for this destination
@@ -334,18 +366,15 @@ impl ReleaseEventStore {
                     .await;
             }
 
-            // If this release belongs to a pipeline stage, try to advance the pipeline
-            if let Some(ref stage_id) = stage_id {
-                if let Err(e) = self
-                    .advance_pipeline(&release_intent_id, stage_id, event_type)
-                    .await
-                {
-                    tracing::warn!(
-                        %release_intent_id,
-                        stage_id,
-                        "failed to advance pipeline: {e:#}"
-                    );
-                }
+            // If this release belongs to a pipeline, signal the coordinator to re-evaluate
+            if stage_id.is_some() {
+                let _ = self
+                    .nats
+                    .publish(
+                        "forest.intent.evaluate",
+                        release_intent_id.to_string().into(),
+                    )
+                    .await;
             }
         }
 
@@ -520,22 +549,26 @@ impl ReleaseEventStore {
                 d.name as destination_name,
                 d.environment,
                 r.release_id as "release_id!",
+                r.release_intent_id as "release_intent_id!",
                 r.artifact_id as "artifact_id!",
                 r.status as "status!",
                 r.error_message,
                 r.queued_at as "queued_at!",
+                r.assigned_at,
+                r.started_at,
                 r.completed_at,
-                r.queue_pos as queue_position
+                r.queue_pos as queue_position,
+                r.stage_id
             FROM destinations d
             JOIN (
-                SELECT release_id, destination_id, artifact_id, status,
-                       error_message, queued_at, completed_at,
-                       NULL::bigint as queue_pos
+                SELECT release_id, release_intent_id, destination_id, artifact_id, status,
+                       error_message, queued_at, assigned_at, started_at, completed_at,
+                       NULL::bigint as queue_pos, stage_id
                 FROM current_release
                 UNION ALL
-                SELECT release_id, destination_id, artifact_id, status,
-                       error_message, queued_at, completed_at,
-                       queue_pos
+                SELECT release_id, release_intent_id, destination_id, artifact_id, status,
+                       error_message, queued_at, assigned_at, started_at, completed_at,
+                       queue_pos, stage_id
                 FROM in_flight
             ) r ON r.destination_id = d.id
             WHERE d.organisation = $1
@@ -548,6 +581,160 @@ impl ReleaseEventStore {
         .context("get destination states")?;
 
         Ok(rows)
+    }
+
+    /// Get active pipeline runs (release_intents that have a stages DAG and
+    /// at least one non-terminal stage) for a given organisation/project.
+    ///
+    /// A pipeline is considered active if either:
+    /// - It has in-flight release_states (deploy stages: QUEUED/ASSIGNED/RUNNING), OR
+    /// - Its stage_states JSONB contains any PENDING or ACTIVE stage (covers wait stages
+    ///   and deploy stages that haven't created release_states yet).
+    pub async fn get_active_pipeline_runs(
+        &self,
+        organisation: &str,
+        project_id: Option<&Uuid>,
+    ) -> anyhow::Result<Vec<PipelineRunRow>> {
+        let rows = sqlx::query_as!(
+            PipelineRunRow,
+            r#"SELECT
+                ri.id as release_intent_id,
+                ri.artifact as artifact_id,
+                ri.created as created_at,
+                ri.stages,
+                ri.stage_states
+            FROM release_intents ri
+            JOIN projects p ON ri.project_id = p.id
+            WHERE p.organisation = $1
+              AND ($2::uuid IS NULL OR ri.project_id = $2)
+              AND ri.stages IS NOT NULL
+              AND (
+                  -- Deploy stages: check release_states rows
+                  EXISTS (
+                      SELECT 1 FROM release_states rs
+                      WHERE rs.release_intent_id = ri.id
+                        AND rs.status IN ('QUEUED', 'ASSIGNED', 'RUNNING')
+                  )
+                  OR
+                  -- Wait stages (and any non-terminal stage in the JSONB):
+                  -- check if any stage value has status PENDING or ACTIVE
+                  EXISTS (
+                      SELECT 1
+                      FROM jsonb_each(ri.stage_states) AS s(key, val)
+                      WHERE val->>'status' IN ('PENDING', 'ACTIVE')
+                  )
+              )
+            ORDER BY ri.created DESC"#,
+            organisation,
+            project_id,
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("get active pipeline runs")?;
+
+        Ok(rows)
+    }
+
+    /// Get release intent states: a release-centric view that returns
+    /// intent metadata, pipeline stages, and all release steps.
+    pub async fn get_release_intent_states(
+        &self,
+        organisation: &str,
+        project_id: Option<&Uuid>,
+        include_completed: bool,
+    ) -> anyhow::Result<Vec<(ReleaseIntentRow, Vec<ReleaseStepRow>)>> {
+        // Fetch release intents
+        let intents = sqlx::query_as!(
+            ReleaseIntentRow,
+            r#"SELECT
+                ri.id as release_intent_id,
+                ri.artifact as artifact_id,
+                p.project as project,
+                ri.created as created_at,
+                ri.stages,
+                ri.stage_states
+            FROM release_intents ri
+            JOIN projects p ON ri.project_id = p.id
+            WHERE p.organisation = $1
+              AND ($2::uuid IS NULL OR ri.project_id = $2)
+              AND (
+                  $3::bool
+                  OR EXISTS (
+                      SELECT 1 FROM release_states rs
+                      WHERE rs.release_intent_id = ri.id
+                        AND rs.status IN ('QUEUED', 'ASSIGNED', 'RUNNING')
+                  )
+                  OR (
+                      ri.stage_states IS NOT NULL
+                      AND EXISTS (
+                          SELECT 1
+                          FROM jsonb_each(ri.stage_states) AS s(key, val)
+                          WHERE val->>'status' IN ('PENDING', 'ACTIVE')
+                      )
+                  )
+              )
+            ORDER BY ri.created DESC
+            LIMIT 50"#,
+            organisation,
+            project_id,
+            include_completed,
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("get release intent states")?;
+
+        if intents.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let intent_ids: Vec<Uuid> = intents.iter().map(|i| i.release_intent_id).collect();
+
+        // Fetch all release steps for these intents in one query
+        let steps = sqlx::query_as!(
+            ReleaseStepRow,
+            r#"SELECT
+                rs.release_id,
+                rs.release_intent_id,
+                rs.stage_id,
+                d.name as destination_name,
+                d.environment,
+                rs.status,
+                rs.queued_at,
+                rs.assigned_at,
+                rs.started_at,
+                rs.completed_at,
+                rs.error_message
+            FROM release_states rs
+            JOIN destinations d ON d.id = rs.destination_id
+            WHERE rs.release_intent_id = ANY($1)
+            ORDER BY rs.queued_at ASC"#,
+            &intent_ids,
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("get release steps for intents")?;
+
+        // Group steps by intent
+        let mut steps_by_intent: std::collections::HashMap<Uuid, Vec<ReleaseStepRow>> =
+            std::collections::HashMap::new();
+        for step in steps {
+            steps_by_intent
+                .entry(step.release_intent_id)
+                .or_default()
+                .push(step);
+        }
+
+        let results = intents
+            .into_iter()
+            .map(|intent| {
+                let intent_steps = steps_by_intent
+                    .remove(&intent.release_intent_id)
+                    .unwrap_or_default();
+                (intent, intent_steps)
+            })
+            .collect();
+
+        Ok(results)
     }
 
     /// Find stuck releases for the reaper.
@@ -597,358 +784,6 @@ impl ReleaseEventStore {
         Ok(())
     }
 
-    /// Advance a pipeline after a stage's release reaches a terminal state.
-    /// Checks if all releases for the completed stage are done, updates stage_states,
-    /// and activates the next ready stages in the DAG.
-    pub async fn advance_pipeline(
-        &self,
-        release_intent_id: &Uuid,
-        completed_stage_id: &str,
-        _event_type: ReleaseEventType,
-    ) -> anyhow::Result<()> {
-        use crate::services::release_pipeline::{
-            PipelineStages, StageState, StageStates, StageStatus, find_ready_stages,
-            has_failed_dependency,
-        };
-
-        let mut tx = self.db.begin().await?;
-
-        // Lock the release intent and load pipeline data
-        let intent = sqlx::query!(
-            "SELECT id, artifact, project_id, stages, stage_states
-             FROM release_intents
-             WHERE id = $1
-             FOR UPDATE",
-            release_intent_id,
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .context("load release intent for pipeline advancement")?;
-
-        let Some(stages_json) = intent.stages else {
-            // No pipeline — nothing to advance
-            return Ok(());
-        };
-
-        let stages: PipelineStages =
-            serde_json::from_value(stages_json).context("parse pipeline stages")?;
-
-        let mut stage_states: StageStates = intent
-            .stage_states
-            .map(|v| serde_json::from_value(v))
-            .transpose()
-            .context("parse stage_states")?
-            .unwrap_or_default();
-
-        // Check if ALL releases for the completed stage are terminal
-        let stage_releases = sqlx::query!(
-            "SELECT release_id, status FROM release_states
-             WHERE release_intent_id = $1 AND stage_id = $2",
-            release_intent_id,
-            completed_stage_id,
-        )
-        .fetch_all(&mut *tx)
-        .await?;
-
-        let all_succeeded = stage_releases
-            .iter()
-            .all(|r| r.status == "SUCCEEDED");
-        let any_failed = stage_releases
-            .iter()
-            .any(|r| matches!(r.status.as_str(), "FAILED" | "CANCELLED" | "TIMED_OUT"));
-        let all_terminal = stage_releases
-            .iter()
-            .all(|r| matches!(r.status.as_str(), "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT"));
-
-        if !all_terminal {
-            // Not all releases for this stage are done yet — wait
-            tx.commit().await?;
-            return Ok(());
-        }
-
-        let now = chrono::Utc::now().to_rfc3339();
-
-        // Update the completed stage's state
-        if all_succeeded {
-            if let Some(state) = stage_states.get_mut(completed_stage_id) {
-                state.status = StageStatus::Succeeded;
-                state.completed_at = Some(now.clone());
-            }
-        } else if any_failed {
-            if let Some(state) = stage_states.get_mut(completed_stage_id) {
-                state.status = StageStatus::Failed;
-                state.completed_at = Some(now.clone());
-            }
-        }
-
-        // Cancel all PENDING stages whose dependencies have failed
-        let stage_ids: Vec<String> = stages.keys().cloned().collect();
-        for stage_id in &stage_ids {
-            let is_pending = stage_states
-                .get(stage_id)
-                .map_or(true, |s| s.status == StageStatus::Pending);
-            if is_pending && has_failed_dependency(stage_id, &stages, &stage_states) {
-                stage_states.insert(
-                    stage_id.clone(),
-                    StageState {
-                        status: StageStatus::Cancelled,
-                        error_message: Some("upstream stage failed".into()),
-                        completed_at: Some(now.clone()),
-                        ..StageState::pending()
-                    },
-                );
-            }
-        }
-
-        // Find next ready stages and activate them
-        let ready = find_ready_stages(&stages, &stage_states);
-        let mut new_release_ids: Vec<Uuid> = Vec::new();
-
-        for stage_id in &ready {
-            let Some(stage_def) = stages.get(stage_id) else {
-                continue;
-            };
-
-            match stage_def.stage_type.as_str() {
-                "deploy" => {
-                    let env = stage_def.environment.as_deref().unwrap_or("");
-
-                    // Resolve environment -> destinations
-                    let dest_recs = sqlx::query!(
-                        r#"SELECT d.id
-                         FROM destinations d
-                         JOIN environments e ON d.environment_id = e.id
-                         WHERE e.name = $1"#,
-                        env,
-                    )
-                    .fetch_all(&mut *tx)
-                    .await
-                    .context("resolve destinations for stage")?;
-
-                    let mut release_ids = Vec::new();
-                    for dest in &dest_recs {
-                        let rid = Uuid::now_v7();
-                        sqlx::query!(
-                            "INSERT INTO release_states (
-                                release_id, release_intent_id, project_id,
-                                destination_id, artifact_id, status, stage_id
-                            ) VALUES ($1, $2, $3, $4, $5, 'QUEUED', $6)",
-                            rid,
-                            release_intent_id,
-                            intent.project_id,
-                            dest.id,
-                            intent.artifact,
-                            stage_id.as_str(),
-                        )
-                        .execute(&mut *tx)
-                        .await?;
-
-                        sqlx::query!(
-                            "INSERT INTO release_events (
-                                release_id, event_type, payload
-                            ) VALUES ($1, 'release.requested', '{}')",
-                            rid,
-                        )
-                        .execute(&mut *tx)
-                        .await?;
-
-                        release_ids.push(rid.to_string());
-                        new_release_ids.push(rid);
-                    }
-
-                    stage_states.insert(
-                        stage_id.clone(),
-                        StageState {
-                            status: StageStatus::Active,
-                            release_ids: Some(release_ids),
-                            started_at: Some(now.clone()),
-                            ..StageState::pending()
-                        },
-                    );
-
-                    tracing::info!(
-                        %release_intent_id,
-                        stage_id,
-                        dest_count = dest_recs.len(),
-                        "pipeline: activated deploy stage"
-                    );
-                }
-                "wait" => {
-                    let duration = stage_def.duration_seconds.unwrap_or(0);
-                    let wait_until = chrono::Utc::now()
-                        + chrono::Duration::seconds(duration);
-
-                    stage_states.insert(
-                        stage_id.clone(),
-                        StageState {
-                            status: StageStatus::Active,
-                            started_at: Some(now.clone()),
-                            wait_until: Some(wait_until.to_rfc3339()),
-                            ..StageState::pending()
-                        },
-                    );
-
-                    tracing::info!(
-                        %release_intent_id,
-                        stage_id,
-                        duration,
-                        "pipeline: activated wait stage (until {})",
-                        wait_until
-                    );
-                }
-                other => {
-                    tracing::warn!(
-                        %release_intent_id,
-                        stage_id,
-                        stage_type = other,
-                        "pipeline: unknown stage type, skipping"
-                    );
-                }
-            }
-        }
-
-        // Persist updated stage_states
-        let stage_states_json = serde_json::to_value(&stage_states)?;
-        sqlx::query!(
-            "UPDATE release_intents SET stage_states = $2 WHERE id = $1",
-            release_intent_id,
-            stage_states_json,
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
-
-        // Signal newly queued releases via NATS (after commit)
-        for rid in new_release_ids {
-            let _ = self
-                .nats
-                .publish("forest.release.queued", rid.to_string().into())
-                .await;
-        }
-
-        // Publish stage status updates
-        let nats_subject = format!("forest.release.status.{}", release_intent_id);
-        let nats_payload = serde_json::json!({
-            "stage_id": completed_stage_id,
-            "stage_status": if all_succeeded { "SUCCEEDED" } else { "FAILED" },
-        });
-        let _ = self
-            .nats
-            .publish(nats_subject, nats_payload.to_string().into())
-            .await;
-
-        Ok(())
-    }
-
-    /// Find wait stages that have expired. Returns (release_intent_id, stage_id) pairs.
-    pub async fn find_expired_wait_stages(&self) -> anyhow::Result<Vec<ExpiredWaitStage>> {
-        // Query intents that have active wait stages.
-        // We check the JSONB for stages with status=ACTIVE and wait_until in the past.
-        let rows = sqlx::query_as!(
-            ExpiredWaitStageRow,
-            r#"SELECT id as release_intent_id, stages, stage_states
-             FROM release_intents
-             WHERE stage_states IS NOT NULL
-               AND stages IS NOT NULL
-             FOR UPDATE SKIP LOCKED"#,
-        )
-        .fetch_all(&self.db)
-        .await?;
-
-        use crate::services::release_pipeline::{StageStates, StageStatus};
-
-        let mut expired = Vec::new();
-        let now = chrono::Utc::now();
-
-        for row in rows {
-            let Some(stage_states_json) = row.stage_states else {
-                continue;
-            };
-            let stage_states: StageStates = match serde_json::from_value(stage_states_json) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-
-            for (stage_id, state) in &stage_states {
-                if state.status != StageStatus::Active {
-                    continue;
-                }
-                if let Some(ref wait_until_str) = state.wait_until {
-                    if let Ok(wait_until) = chrono::DateTime::parse_from_rfc3339(wait_until_str) {
-                        if wait_until <= now {
-                            expired.push(ExpiredWaitStage {
-                                release_intent_id: row.release_intent_id,
-                                stage_id: stage_id.clone(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(expired)
-    }
-
-    /// Complete a wait stage that has expired, marking it SUCCEEDED
-    /// and advancing the pipeline.
-    pub async fn complete_wait_stage(
-        &self,
-        release_intent_id: &Uuid,
-        stage_id: &str,
-    ) -> anyhow::Result<()> {
-        use crate::services::release_pipeline::{StageStates, StageStatus};
-
-        let mut tx = self.db.begin().await?;
-
-        let intent = sqlx::query!(
-            "SELECT stage_states FROM release_intents WHERE id = $1 FOR UPDATE",
-            release_intent_id,
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-
-        let Some(stage_states_json) = intent.stage_states else {
-            return Ok(());
-        };
-
-        let mut stage_states: StageStates =
-            serde_json::from_value(stage_states_json).context("parse stage_states")?;
-
-        let Some(state) = stage_states.get_mut(stage_id) else {
-            return Ok(());
-        };
-
-        if state.status != StageStatus::Active {
-            return Ok(());
-        }
-
-        state.status = StageStatus::Succeeded;
-        state.completed_at = Some(chrono::Utc::now().to_rfc3339());
-
-        let stage_states_json = serde_json::to_value(&stage_states)?;
-        sqlx::query!(
-            "UPDATE release_intents SET stage_states = $2 WHERE id = $1",
-            release_intent_id,
-            stage_states_json,
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
-
-        tracing::info!(
-            %release_intent_id,
-            stage_id,
-            "pipeline: wait stage completed"
-        );
-
-        // Use advance_pipeline with a dummy Succeeded event to trigger next stages
-        self.advance_pipeline(release_intent_id, stage_id, ReleaseEventType::Succeeded)
-            .await?;
-
-        Ok(())
-    }
 
     /// Find releases with stale heartbeats.
     pub async fn find_stale_heartbeats(
@@ -1017,7 +852,6 @@ pub struct ReleaseIntentSummaryRow {
 }
 
 /// A single release row in the destination state view.
-/// `kind` is either "current" (latest completed) or "queued" (in-flight).
 pub struct DestinationReleaseRow {
     pub destination_id: Uuid,
     pub destination_name: String,
@@ -1027,8 +861,21 @@ pub struct DestinationReleaseRow {
     pub status: String,
     pub error_message: Option<String>,
     pub queued_at: chrono::DateTime<chrono::Utc>,
+    pub assigned_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub started_at: Option<chrono::DateTime<chrono::Utc>>,
     pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
     pub queue_position: Option<i64>,
+    pub release_intent_id: Uuid,
+    pub stage_id: Option<String>,
+}
+
+/// An active pipeline run with its stage definitions and runtime states.
+pub struct PipelineRunRow {
+    pub release_intent_id: Uuid,
+    pub artifact_id: Uuid,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub stages: Option<serde_json::Value>,
+    pub stage_states: Option<serde_json::Value>,
 }
 
 pub struct StuckRelease {
@@ -1038,15 +885,31 @@ pub struct StuckRelease {
     pub runner_id: Option<String>,
 }
 
-struct ExpiredWaitStageRow {
+
+
+// ── Release intent states (release-centric view) ─────────────────────
+
+pub struct ReleaseIntentRow {
     pub release_intent_id: Uuid,
+    pub artifact_id: Uuid,
+    pub project: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
     pub stages: Option<serde_json::Value>,
     pub stage_states: Option<serde_json::Value>,
 }
 
-pub struct ExpiredWaitStage {
+pub struct ReleaseStepRow {
+    pub release_id: Uuid,
     pub release_intent_id: Uuid,
-    pub stage_id: String,
+    pub stage_id: Option<String>,
+    pub destination_name: String,
+    pub environment: String,
+    pub status: String,
+    pub queued_at: chrono::DateTime<chrono::Utc>,
+    pub assigned_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub started_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub error_message: Option<String>,
 }
 
 pub trait ReleaseEventStoreState {
@@ -1060,4 +923,93 @@ impl ReleaseEventStoreState for State {
             nats: self.nats.clone(),
         }
     }
+}
+
+/// Check soak_time policies for a target environment within a transaction.
+/// Returns `Some(reason)` if blocked, `None` if all policies pass.
+pub(crate) async fn check_soak_time_policies(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    project_id: &Uuid,
+    artifact_id: &Uuid,
+    target_environment: &str,
+) -> anyhow::Result<Option<String>> {
+    // Load enabled soak_time policies for this project
+    let policies = sqlx::query!(
+        r#"SELECT name, config
+        FROM policies
+        WHERE project_id = $1
+          AND enabled = true
+          AND policy_type = 'soak_time'"#,
+        project_id,
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .context("load soak_time policies")?;
+
+    for policy in policies {
+        let config: serde_json::Value = policy.config;
+        let target = config
+            .get("target_environment")
+            .and_then(|v: &serde_json::Value| v.as_str())
+            .unwrap_or("");
+
+        if target != target_environment {
+            continue;
+        }
+
+        let source_env = config
+            .get("source_environment")
+            .and_then(|v: &serde_json::Value| v.as_str())
+            .unwrap_or("");
+        let duration_secs = config
+            .get("duration_seconds")
+            .and_then(|v: &serde_json::Value| v.as_i64())
+            .unwrap_or(0);
+
+        // Find the most recent successful release of THIS artifact to the source environment.
+        // Scoping by artifact prevents unrelated dev deploys from resetting the soak clock.
+        let last_success = sqlx::query_scalar!(
+            r#"SELECT MAX(rs.updated_at) as "max_updated_at"
+            FROM release_states rs
+            JOIN destinations d ON rs.destination_id = d.id
+            WHERE rs.project_id = $1
+              AND rs.artifact_id = $2
+              AND d.environment = $3
+              AND rs.status = 'SUCCEEDED'"#,
+            project_id,
+            artifact_id,
+            source_env,
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .context("check soak time in pipeline")?;
+
+        match last_success {
+            Some(ts) => {
+                let elapsed = chrono::Utc::now() - ts;
+                let required = chrono::Duration::seconds(duration_secs);
+                if elapsed < required {
+                    let remaining = (required - elapsed).num_seconds();
+                    return Ok(Some(format!(
+                        "policy '{}': {}s remaining ({}s elapsed, {}s required after {} deploy)",
+                        policy.name,
+                        remaining,
+                        elapsed.num_seconds(),
+                        duration_secs,
+                        source_env,
+                    )));
+                }
+            }
+            None => {
+                // No deploy to source env yet — soak time not applicable
+                tracing::debug!(
+                    policy = %policy.name,
+                    source_env,
+                    "no successful deploy to source env yet — soak time not applicable"
+                );
+            }
+        }
+    }
+
+    Ok(None)
 }

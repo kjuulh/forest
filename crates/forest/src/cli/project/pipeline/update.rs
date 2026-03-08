@@ -2,6 +2,8 @@ use anyhow::Context;
 
 use crate::{cli::prompts, grpc::GrpcClientState, state::State};
 
+use super::parse_stages_from_json;
+
 #[derive(clap::Parser)]
 pub struct UpdateCommand {
     #[arg(long, short = 'o')]
@@ -44,14 +46,14 @@ impl UpdateCommand {
             None => inquire::Text::new("Pipeline name:").prompt()?,
         };
 
-        let stages_json = if let Some(path) = &self.stages_file {
+        let stages = if let Some(path) = &self.stages_file {
             let json = std::fs::read_to_string(path)
                 .context(format!("read stages file: {path}"))?;
-            serde_json::from_str::<serde_json::Value>(&json)
-                .context("invalid JSON for stages")?;
-            Some(json)
+            Some(parse_stages_from_json(&json)?)
+        } else if let Some(json) = &self.stages_json {
+            Some(parse_stages_from_json(json)?)
         } else {
-            self.stages_json.clone()
+            None
         };
 
         let pipeline = state
@@ -61,7 +63,7 @@ impl UpdateCommand {
                 &project,
                 &name,
                 self.enabled,
-                stages_json,
+                stages,
             )
             .await
             .context("update release pipeline")?;
