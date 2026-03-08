@@ -3,6 +3,7 @@ use std::sync::{LazyLock, OnceLock};
 
 use forest_grpc_interface::artifact_service_client::ArtifactServiceClient;
 use forest_grpc_interface::destination_service_client::DestinationServiceClient;
+use forest_grpc_interface::environment_service_client::EnvironmentServiceClient;
 use forest_grpc_interface::organisation_service_client::OrganisationServiceClient;
 use forest_grpc_interface::release_service_client::ReleaseServiceClient;
 use forest_grpc_interface::users_service_client::UsersServiceClient;
@@ -33,6 +34,10 @@ impl Fixture {
 
     pub fn destinations(&self) -> DestinationServiceClient<Channel> {
         DestinationServiceClient::new(self.channel.clone())
+    }
+
+    pub fn environments(&self) -> EnvironmentServiceClient<Channel> {
+        EnvironmentServiceClient::new(self.channel.clone())
     }
 }
 
@@ -102,25 +107,16 @@ pub async fn fixture() -> anyhow::Result<Fixture> {
                 });
             }
 
-            // Start scheduler with fast poll for tests
+            // Start scheduler as a Component
             {
                 let state = state.clone();
                 let runner_manager = runner_manager.clone();
+                let cancel = cancel.clone();
                 FIXTURE_RUNTIME.spawn(async move {
+                    use notmad::Component;
                     let sched =
                         forest_server::scheduler::Scheduler::new(&state, runner_manager, false);
-                    let cancel = tokio_util::sync::CancellationToken::new();
-                    let mut interval =
-                        tokio::time::interval(std::time::Duration::from_millis(500));
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                    loop {
-                        tokio::select! {
-                            _ = cancel.cancelled() => break,
-                            _ = interval.tick() => {
-                                sched.handle(&cancel).await.ok();
-                            }
-                        }
-                    }
+                    sched.run(cancel).await.ok();
                 });
             }
 
@@ -144,16 +140,18 @@ pub async fn fixture() -> anyhow::Result<Fixture> {
 
 async fn clean_database(db: &sqlx::PgPool) {
     let tables = [
+        "release_events",
         "release_logs",
-        "releases",
-        "release_intents",
+        "release_states",
         "release_tokens",
+        "release_intents",
         "annotations",
         "artifact_files",
         "artifacts",
         "artifact_staging",
         "blob_storage",
         "destinations",
+        "environments",
         "notifications",
         "user_sessions",
         "user_emails",

@@ -36,6 +36,8 @@ impl WhenReleaseFlow for When<ReleaseFlowData> {
                     artifact_id,
                     destinations: vec![destination],
                     environments: vec![],
+                    force: false,
+                    use_pipeline: false,
                 },
             ))
             .await?;
@@ -78,7 +80,10 @@ impl WhenReleaseFlow for When<ReleaseFlowData> {
                                     event.event
                                 {
                                     let status = update.status.as_str();
-                                    if status == "SUCCESS" || status == "FAILURE" {
+                                    if matches!(
+                                        status,
+                                        "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT"
+                                    ) {
                                         return update.status;
                                     }
                                 }

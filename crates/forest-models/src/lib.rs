@@ -144,24 +144,36 @@ impl From<forest_grpc_interface::DestinationType> for DestinationType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReleaseStatus {
-    Staged,
+    Queued,
+    Assigned,
     Running,
-    Success,
-    Failure,
+    Succeeded,
+    Failed,
+    Cancelled,
+    TimedOut,
 }
 
 impl ReleaseStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
-            ReleaseStatus::Staged => "STAGED",
+            ReleaseStatus::Queued => "QUEUED",
+            ReleaseStatus::Assigned => "ASSIGNED",
             ReleaseStatus::Running => "RUNNING",
-            ReleaseStatus::Success => "SUCCESS",
-            ReleaseStatus::Failure => "FAILURE",
+            ReleaseStatus::Succeeded => "SUCCEEDED",
+            ReleaseStatus::Failed => "FAILED",
+            ReleaseStatus::Cancelled => "CANCELLED",
+            ReleaseStatus::TimedOut => "TIMED_OUT",
         }
     }
 
     pub fn is_finalized(&self) -> bool {
-        matches!(self, ReleaseStatus::Success | ReleaseStatus::Failure)
+        matches!(
+            self,
+            ReleaseStatus::Succeeded
+                | ReleaseStatus::Failed
+                | ReleaseStatus::Cancelled
+                | ReleaseStatus::TimedOut
+        )
     }
 
     pub fn is_running(&self) -> bool {
@@ -169,11 +181,11 @@ impl ReleaseStatus {
     }
 
     pub fn is_success(&self) -> bool {
-        matches!(self, ReleaseStatus::Success)
+        matches!(self, ReleaseStatus::Succeeded)
     }
 
     pub fn is_failure(&self) -> bool {
-        matches!(self, ReleaseStatus::Failure)
+        matches!(self, ReleaseStatus::Failed)
     }
 }
 
@@ -188,10 +200,17 @@ impl std::str::FromStr for ReleaseStatus {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "STAGED" => Ok(ReleaseStatus::Staged),
+            "QUEUED" => Ok(ReleaseStatus::Queued),
+            "ASSIGNED" => Ok(ReleaseStatus::Assigned),
             "RUNNING" => Ok(ReleaseStatus::Running),
-            "SUCCESS" => Ok(ReleaseStatus::Success),
-            "FAILURE" => Ok(ReleaseStatus::Failure),
+            "SUCCEEDED" => Ok(ReleaseStatus::Succeeded),
+            "FAILED" => Ok(ReleaseStatus::Failed),
+            "CANCELLED" => Ok(ReleaseStatus::Cancelled),
+            "TIMED_OUT" => Ok(ReleaseStatus::TimedOut),
+            // Backward compatibility with old status values
+            "STAGED" => Ok(ReleaseStatus::Queued),
+            "SUCCESS" => Ok(ReleaseStatus::Succeeded),
+            "FAILURE" => Ok(ReleaseStatus::Failed),
             _ => Err(format!("unknown release status: {}", s)),
         }
     }

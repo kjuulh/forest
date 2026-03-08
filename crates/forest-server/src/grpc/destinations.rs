@@ -6,7 +6,9 @@ use crate::{
     destination_services::DestinationServicesState,
     grpc::artifacts::GrpcErrorExt,
     services::{
-        destination_registry::DestinationRegistryState, release_registry::ReleaseRegistryState,
+        destination_registry::DestinationRegistryState,
+        event_bus::{EventBusState, EventPayload},
+        release_registry::ReleaseRegistryState,
     },
     state::State,
 };
@@ -55,6 +57,15 @@ impl DestinationService for DestinationServer {
             .context("create destination")
             .to_internal_error()?;
 
+        self.state.event_bus().emit(EventPayload {
+            organisation: req.organisation.clone(),
+            project: String::new(),
+            resource_type: "destination",
+            action: "created",
+            resource_id: req.name.clone(),
+            metadata: [("environment".into(), req.environment.clone())].into(),
+        }).await;
+
         Ok(Response::new(CreateDestinationResponse {}))
     }
 
@@ -70,6 +81,15 @@ impl DestinationService for DestinationServer {
             .await
             .context("update destination")
             .to_internal_error()?;
+
+        self.state.event_bus().emit(EventPayload {
+            organisation: String::new(),
+            project: String::new(),
+            resource_type: "destination",
+            action: "updated",
+            resource_id: req.name.clone(),
+            metadata: Default::default(),
+        }).await;
 
         Ok(Response::new(UpdateDestinationResponse {}))
     }
@@ -87,7 +107,34 @@ impl DestinationService for DestinationServer {
             .context("delete destination")
             .to_internal_error()?;
 
+        self.state.event_bus().emit(EventPayload {
+            organisation: String::new(),
+            project: String::new(),
+            resource_type: "destination",
+            action: "deleted",
+            resource_id: req.name.clone(),
+            metadata: Default::default(),
+        }).await;
+
         Ok(Response::new(DeleteDestinationResponse {}))
+    }
+
+    async fn list_destination_types(
+        &self,
+        _request: tonic::Request<ListDestinationTypesRequest>,
+    ) -> std::result::Result<tonic::Response<ListDestinationTypesResponse>, tonic::Status> {
+        let dest_services = self.state.destination_services();
+        let types = dest_services
+            .list_types()
+            .into_iter()
+            .map(|idx| DestinationType {
+                organisation: idx.organisation,
+                name: idx.name,
+                version: idx.version as u64,
+            })
+            .collect();
+
+        Ok(Response::new(ListDestinationTypesResponse { types }))
     }
 
     async fn get_destinations(

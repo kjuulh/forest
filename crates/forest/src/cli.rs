@@ -13,8 +13,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     cli::{
-        destination::DestinationCommand, notifications::NotificationsCommand,
-        organisation::OrganisationCommand, project::ProjectCommand, release::ReleaseCommand,
+        destination::DestinationCommand, environment::EnvironmentCommand,
+        notifications::NotificationsCommand, organisation::OrganisationCommand,
+        project::ProjectCommand, release::ReleaseCommand,
     },
     state::{Config, State},
 };
@@ -23,6 +24,7 @@ mod admin;
 mod auth;
 mod components;
 mod destination;
+mod environment;
 mod global;
 mod init;
 mod notifications;
@@ -35,6 +37,7 @@ mod template;
 mod tmp;
 
 pub(crate) mod output;
+pub(crate) mod prompts;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about, subcommand_required = true)]
@@ -60,6 +63,8 @@ enum Commands {
     Tmp(TmpCommand),
     Project(ProjectCommand),
     Destination(DestinationCommand),
+    /// Manage environments
+    Environment(EnvironmentCommand),
     Release(Box<ReleaseCommand>),
     /// Manage organisations
     Organisation(OrganisationCommand),
@@ -145,6 +150,7 @@ impl CommandHandler {
             Commands::Tmp(cmd) => cmd.execute(state).await,
             Commands::Project(cmd) => cmd.execute(state).await,
             Commands::Destination(cmd) => cmd.execute(state).await,
+            Commands::Environment(cmd) => cmd.execute(state).await,
             Commands::Release(cmd) => cmd.execute(state).await,
             Commands::Organisation(cmd) => cmd.execute(state).await,
             Commands::Notifications(cmd) => cmd.execute(state).await,

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id\n                         FROM destinations d\n                         JOIN environments e ON d.environment_id = e.id\n                         WHERE e.name = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "270566bc13c0574d556a22c8f2c3b48f478c95438e65c90e8f244c63216a768f"
+}

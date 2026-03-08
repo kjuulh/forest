@@ -12,6 +12,10 @@ pub struct DestinationServices {
 }
 
 impl DestinationServices {
+    pub fn list_types(&self) -> Vec<DestinationIndex> {
+        self.services.iter().map(|s| s.name()).collect()
+    }
+
     pub fn get_destination(
         &self,
         organisation: &str,

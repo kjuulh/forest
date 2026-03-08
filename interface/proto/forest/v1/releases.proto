@@ -31,6 +31,10 @@ message ReleaseRequest {
   string artifact_id = 1;
   repeated string destinations = 2;
   repeated string environments = 3;
+  bool force = 4;
+  // When true, use the project's release pipeline (DAG) instead of
+  // deploying directly to the specified destinations/environments.
+  bool use_pipeline = 5;
 }
 message ReleaseResponse {
   // List of release intents created (one per destination)
@@ -114,6 +118,28 @@ message ReleaseDestinationStatus {
   string status = 3;
 }
 
+message GetDestinationStatesRequest {
+  string organisation = 1;
+  optional string project = 2;
+}
+
+message GetDestinationStatesResponse {
+  repeated DestinationState destinations = 1;
+}
+
+message DestinationState {
+  string destination_id = 1;
+  string destination_name = 2;
+  string environment = 3;
+  optional string release_id = 4;
+  optional string artifact_id = 5;
+  optional string status = 6;
+  optional string error_message = 7;
+  optional string queued_at = 8;
+  optional string completed_at = 9;
+  optional int32 queue_position = 10;
+}
+
 service ReleaseService {
   rpc AnnotateRelease(AnnotateReleaseRequest) returns (AnnotateReleaseResponse);
   rpc Release(ReleaseRequest) returns (ReleaseResponse);
@@ -124,6 +150,7 @@ service ReleaseService {
   rpc GetReleasesByActor(GetReleasesByActorRequest) returns (GetReleasesByActorResponse);
   rpc GetOrganisations(GetOrganisationsRequest) returns (GetOrganisationsResponse);
   rpc GetProjects(GetProjectsRequest) returns (GetProjectsResponse);
+  rpc GetDestinationStates(GetDestinationStatesRequest) returns (GetDestinationStatesResponse);
 }
 
 message Source {
@@ -158,6 +185,7 @@ message ArtifactDestination {
   string type_organisation = 3;
   string type_name = 4;
   uint64 type_version = 5;
+  string status = 6;
 }
 
 message Project {

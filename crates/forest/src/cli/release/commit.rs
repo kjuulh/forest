@@ -4,7 +4,7 @@ use anyhow::Context;
 
 use crate::{
     grpc::{GetProjectsQuery, GrpcClientState},
-    models::{artifacts::ArtifactID, release_annotation::ReleaseAnnotation},
+    models::{artifacts::ArtifactID, release_annotation::{ReleaseAnnotation, ReleaseDestination}},
     state::State,
 };
 
@@ -34,6 +34,14 @@ pub struct CommitCommand {
     /// Skip waiting for the release to complete
     #[arg(long)]
     no_wait: bool,
+
+    /// Force release: cancel queued releases and jump to front of queue
+    #[arg(long)]
+    force: bool,
+
+    /// Use the project's release pipeline instead of deploying directly
+    #[arg(long)]
+    pipeline: bool,
 }
 
 impl CommitCommand {
@@ -62,11 +70,12 @@ impl CommitCommand {
                     None => prompt_project_select(state, &organisation).await?,
                 };
 
-                // Select a release annotation
-                let release_annotations = grpc
-                    .get_release_annotations_by_project(&organisation, &project)
-                    .await
-                    .context("get releases by organisation and project")?;
+                // Fetch annotations and current destination states in parallel
+                let (release_annotations, dest_states) = tokio::try_join!(
+                    grpc.get_release_annotations_by_project(&organisation, &project),
+                    grpc.get_destination_states(&organisation, Some(&project)),
+                )
+                .context("get releases and destination states")?;
 
                 if release_annotations.is_empty() {
                     anyhow::bail!(
@@ -76,9 +85,47 @@ impl CommitCommand {
                     );
                 }
 
+                // Build a map: artifact_id -> list of (destination_name, environment, status)
+                let mut dest_by_artifact: std::collections::HashMap<
+                    String,
+                    Vec<(String, String, String)>,
+                > = std::collections::HashMap::new();
+                for ds in &dest_states {
+                    if let (Some(artifact_id), Some(status)) = (&ds.artifact_id, &ds.status) {
+                        dest_by_artifact
+                            .entry(artifact_id.clone())
+                            .or_default()
+                            .push((
+                                ds.destination_name.clone(),
+                                ds.environment.clone(),
+                                status.clone(),
+                            ));
+                    }
+                }
+
                 let display_items: Vec<ReleaseAnnotationDisplay> = release_annotations
                     .into_iter()
-                    .map(ReleaseAnnotationDisplay)
+                    .map(|mut ann| {
+                        // Enrich annotation with current destination states
+                        if let Some(dests) =
+                            dest_by_artifact.get(&ann.artifact_id.to_string())
+                        {
+                            ann.destinations = dests
+                                .iter()
+                                .map(|(name, env, status)| {
+                                    ReleaseDestination {
+                                        name: name.clone(),
+                                        environment: env.clone(),
+                                        type_organisation: String::new(),
+                                        type_name: String::new(),
+                                        type_version: 0,
+                                        status: status.clone(),
+                                    }
+                                })
+                                .collect();
+                        }
+                        ReleaseAnnotationDisplay(ann)
+                    })
                     .collect();
 
                 let choice = inquire::Select::new("Select a release:", display_items).prompt()?;
@@ -119,6 +166,8 @@ impl CommitCommand {
                 artifact_id,
                 &destination,
                 std::slice::from_ref(&environment),
+                self.force,
+                self.pipeline,
             )
             .await
             .context("release")?;
@@ -267,19 +316,26 @@ impl Display for ReleaseAnnotationDisplay {
 
         if !annotation.destinations.is_empty() {
             // Group destinations by environment
-            let mut by_env: std::collections::BTreeMap<&str, Vec<&str>> =
+            let mut by_env: std::collections::BTreeMap<&str, Vec<(&str, &str)>> =
                 std::collections::BTreeMap::new();
             for dest in &annotation.destinations {
                 by_env
                     .entry(&dest.environment)
                     .or_default()
-                    .push(&dest.name);
+                    .push((&dest.name, &dest.status));
             }
 
-            for (env, names) in &by_env {
+            for (env, dests) in &by_env {
                 write!(f, "\n    {}:", env)?;
-                for name in names {
-                    write!(f, "\n    - {}", name)?;
+                for (name, status) in dests {
+                    let icon = match *status {
+                        "SUCCEEDED" => "✓",
+                        "RUNNING" => "▶",
+                        "ASSIGNED" => "◉",
+                        "QUEUED" => "◌",
+                        _ => "•",
+                    };
+                    write!(f, "\n    {icon} {name}")?;
                 }
             }
         }

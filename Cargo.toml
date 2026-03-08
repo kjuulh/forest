@@ -47,4 +47,5 @@ tonic = { version = "=0.14.2", features = [
   "tls-webpki-roots",
 ] }
 tonic-prost = "=0.14.2"
+async-nats = "0.40"
 insta = "1"

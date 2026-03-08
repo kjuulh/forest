@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE release_states\n                 SET status = 'CANCELLED', error_message = 'superseded by force release',\n                     completed_at = now(), updated_at = now()\n                 WHERE project_id = $1 AND destination_id = $2 AND status = 'QUEUED'\n                 RETURNING release_id, release_intent_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "release_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_intent_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ccdff1fd82b93b0251dfd22aaf571236413361ad1921a8695e35012ec38768bd"
+}

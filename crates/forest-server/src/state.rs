@@ -5,6 +5,7 @@ use sqlx::PgPool;
 #[derive(Clone)]
 pub struct State {
     pub db: PgPool,
+    pub nats: async_nats::Client,
     pub drop_queue: DropQueue,
 
     pub config: Config,
@@ -32,8 +33,15 @@ impl State {
             .run(&pool)
             .await?;
 
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let nats = async_nats::connect(&nats_url)
+            .await
+            .context("failed to connect to NATS")?;
+
         Ok(Self {
             db: pool,
+            nats,
             drop_queue: DropQueue::new(),
             config,
         })

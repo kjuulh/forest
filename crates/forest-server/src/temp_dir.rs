@@ -56,7 +56,11 @@ impl TempDirectories {
 
         let mut entries = tokio::fs::read_dir(base).await?;
         while let Some(entry) = entries.next_entry().await? {
-            let metadata = entry.metadata().await?;
+            let metadata = match entry.metadata().await {
+                Ok(m) => m,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e.into()),
+            };
             let path = entry.path();
 
             directories.add(path, metadata.modified()?);
@@ -162,9 +166,14 @@ impl TempDirectory {
     }
 
     async fn remove(&self) -> anyhow::Result<()> {
-        tokio::fs::remove_dir_all(self.path()).await?;
-
-        Ok(())
+        match tokio::fs::remove_dir_all(self.path()).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                tracing::debug!(path = %self.path().display(), "temp dir already removed");
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     fn path(&self) -> &Path {

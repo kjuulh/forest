@@ -73,7 +73,30 @@ pub struct RunnerSession {
     inbound: tonic::Streaming<forest_grpc_interface::ServerMessage>,
 }
 
+/// A lightweight handle that can send heartbeats without borrowing the full session.
+#[derive(Clone)]
+pub struct HeartbeatSender {
+    outbound_tx: mpsc::UnboundedSender<RunnerMessage>,
+}
+
+impl HeartbeatSender {
+    pub fn send_heartbeat(&self, active_releases: i32) {
+        let _ = self.outbound_tx.send(RunnerMessage {
+            message: Some(runner_message::Message::Heartbeat(RunnerHeartbeat {
+                active_releases,
+            })),
+        });
+    }
+}
+
 impl RunnerSession {
+    /// Get a clone-able heartbeat sender for background tasks.
+    pub fn clone_heartbeat_sender(&self) -> HeartbeatSender {
+        HeartbeatSender {
+            outbound_tx: self.outbound_tx.clone(),
+        }
+    }
+
     /// Wait for the next work assignment from the server.
     /// Returns None if the stream is closed.
     pub async fn next_work(&mut self) -> Option<WorkAssignment> {

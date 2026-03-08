@@ -307,11 +307,11 @@ impl UserService {
             r#"
             SELECT
                 count(*) as "total!",
-                count(*) FILTER (WHERE r.status = 'SUCCESS') as "successful!",
-                count(*) FILTER (WHERE r.status = 'FAILURE') as "failed!",
-                count(*) FILTER (WHERE r.status IN ('STAGED', 'RUNNING')) as "in_progress!"
+                count(*) FILTER (WHERE r.status = 'SUCCEEDED') as "successful!",
+                count(*) FILTER (WHERE r.status = 'FAILED') as "failed!",
+                count(*) FILTER (WHERE r.status IN ('QUEUED', 'ASSIGNED', 'RUNNING')) as "in_progress!"
             FROM release_intents ri
-            JOIN releases r ON r.release_intent_id = ri.id
+            JOIN release_states r ON r.release_intent_id = ri.id
             WHERE ri.actor_id = $1 AND ri.actor_type = 'user'
             "#,
             user_id

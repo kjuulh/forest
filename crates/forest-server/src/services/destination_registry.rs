@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::{State, repositories::error::DbError};
 
+#[derive(Clone)]
 pub struct DestinationRegistry {
     db: sqlx::PgPool,
 }

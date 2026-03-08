@@ -166,6 +166,444 @@ pub struct CommitArtifactResponse {
     pub artifact_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AnnotateReleaseRequest {
+    #[prost(string, tag="1")]
+    pub artifact_id: ::prost::alloc::string::String,
+    #[prost(map="string, string", tag="2")]
+    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, optional, tag="3")]
+    pub source: ::core::option::Option<Source>,
+    #[prost(message, optional, tag="4")]
+    pub context: ::core::option::Option<ArtifactContext>,
+    #[prost(message, optional, tag="5")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(message, optional, tag="6")]
+    pub r#ref: ::core::option::Option<Ref>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AnnotateReleaseResponse {
+    #[prost(message, optional, tag="1")]
+    pub artifact: ::core::option::Option<Artifact>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetArtifactBySlugRequest {
+    #[prost(string, tag="1")]
+    pub slug: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetArtifactBySlugResponse {
+    #[prost(message, optional, tag="1")]
+    pub artifact: ::core::option::Option<Artifact>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetArtifactsByProjectRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetArtifactsByProjectResponse {
+    #[prost(message, repeated, tag="1")]
+    pub artifact: ::prost::alloc::vec::Vec<Artifact>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReleaseRequest {
+    #[prost(string, tag="1")]
+    pub artifact_id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="2")]
+    pub destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="3")]
+    pub environments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(bool, tag="4")]
+    pub force: bool,
+    /// When true, use the project's release pipeline (DAG) instead of
+    /// deploying directly to the specified destinations/environments.
+    #[prost(bool, tag="5")]
+    pub use_pipeline: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReleaseResponse {
+    /// List of release intents created (one per destination)
+    #[prost(message, repeated, tag="1")]
+    pub intents: ::prost::alloc::vec::Vec<ReleaseIntent>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReleaseIntent {
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub environment: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WaitReleaseRequest {
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WaitReleaseEvent {
+    #[prost(oneof="wait_release_event::Event", tags="1, 2")]
+    pub event: ::core::option::Option<wait_release_event::Event>,
+}
+/// Nested message and enum types in `WaitReleaseEvent`.
+pub mod wait_release_event {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Event {
+        #[prost(message, tag="1")]
+        StatusUpdate(super::ReleaseStatusUpdate),
+        #[prost(message, tag="2")]
+        LogLine(super::ReleaseLogLine),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReleaseStatusUpdate {
+    #[prost(string, tag="1")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub status: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReleaseLogLine {
+    #[prost(string, tag="1")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub line: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub timestamp: ::prost::alloc::string::String,
+    #[prost(enumeration="LogChannel", tag="4")]
+    pub channel: i32,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOrganisationsRequest {
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetOrganisationsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub organisations: ::prost::alloc::vec::Vec<OrganisationRef>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetProjectsRequest {
+    #[prost(oneof="get_projects_request::Query", tags="1")]
+    pub query: ::core::option::Option<get_projects_request::Query>,
+}
+/// Nested message and enum types in `GetProjectsRequest`.
+pub mod get_projects_request {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Query {
+        #[prost(message, tag="1")]
+        Organisation(super::OrganisationRef),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetProjectsResponse {
+    #[prost(string, repeated, tag="1")]
+    pub projects: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetReleasesByActorRequest {
+    /// user_id or app_id
+    #[prost(string, tag="1")]
+    pub actor_id: ::prost::alloc::string::String,
+    /// "user" or "app"
+    #[prost(string, tag="2")]
+    pub actor_type: ::prost::alloc::string::String,
+    #[prost(int32, tag="3")]
+    pub page_size: i32,
+    #[prost(string, tag="4")]
+    pub page_token: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetReleasesByActorResponse {
+    #[prost(message, repeated, tag="1")]
+    pub releases: ::prost::alloc::vec::Vec<ReleaseIntentSummary>,
+    #[prost(string, tag="2")]
+    pub next_page_token: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReleaseIntentSummary {
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub artifact_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(message, repeated, tag="4")]
+    pub destinations: ::prost::alloc::vec::Vec<ReleaseDestinationStatus>,
+    #[prost(string, tag="5")]
+    pub created_at: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReleaseDestinationStatus {
+    #[prost(string, tag="1")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub environment: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub status: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetDestinationStatesRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="2")]
+    pub project: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetDestinationStatesResponse {
+    #[prost(message, repeated, tag="1")]
+    pub destinations: ::prost::alloc::vec::Vec<DestinationState>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DestinationState {
+    #[prost(string, tag="1")]
+    pub destination_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub destination_name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub environment: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="4")]
+    pub release_id: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="5")]
+    pub artifact_id: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="6")]
+    pub status: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="7")]
+    pub error_message: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="8")]
+    pub queued_at: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="9")]
+    pub completed_at: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(int32, optional, tag="10")]
+    pub queue_position: ::core::option::Option<i32>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Source {
+    #[prost(string, optional, tag="1")]
+    pub user: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="2")]
+    pub email: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="3")]
+    pub source_type: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="4")]
+    pub run_url: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ArtifactContext {
+    #[prost(string, tag="1")]
+    pub title: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="2")]
+    pub description: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="3")]
+    pub web: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="4")]
+    pub pr: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Artifact {
+    #[prost(string, tag="1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub artifact_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub slug: ::prost::alloc::string::String,
+    #[prost(map="string, string", tag="4")]
+    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, optional, tag="5")]
+    pub source: ::core::option::Option<Source>,
+    #[prost(message, optional, tag="6")]
+    pub context: ::core::option::Option<ArtifactContext>,
+    #[prost(message, optional, tag="7")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(message, repeated, tag="8")]
+    pub destinations: ::prost::alloc::vec::Vec<ArtifactDestination>,
+    #[prost(string, tag="9")]
+    pub created_at: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ArtifactDestination {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub environment: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub type_organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub type_name: ::prost::alloc::string::String,
+    #[prost(uint64, tag="5")]
+    pub type_version: u64,
+    #[prost(string, tag="6")]
+    pub status: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Project {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub project: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Ref {
+    #[prost(string, tag="1")]
+    pub commit_sha: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="2")]
+    pub branch: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="3")]
+    pub commit_message: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="4")]
+    pub version: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="5")]
+    pub repo_url: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OrganisationRef {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum LogChannel {
+    Unspecified = 0,
+    Stdout = 1,
+    Stderr = 2,
+}
+impl LogChannel {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "LOG_CHANNEL_UNSPECIFIED",
+            Self::Stdout => "LOG_CHANNEL_STDOUT",
+            Self::Stderr => "LOG_CHANNEL_STDERR",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "LOG_CHANNEL_UNSPECIFIED" => Some(Self::Unspecified),
+            "LOG_CHANNEL_STDOUT" => Some(Self::Stdout),
+            "LOG_CHANNEL_STDERR" => Some(Self::Stderr),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AutoReleasePolicy {
+    #[prost(string, tag="1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag="3")]
+    pub enabled: bool,
+    #[prost(string, optional, tag="4")]
+    pub branch_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="5")]
+    pub title_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="6")]
+    pub author_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="7")]
+    pub commit_message_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="8")]
+    pub source_type_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="9")]
+    pub target_environments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="10")]
+    pub target_destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(bool, tag="11")]
+    pub force_release: bool,
+    #[prost(string, tag="12")]
+    pub created_at: ::prost::alloc::string::String,
+    #[prost(string, tag="13")]
+    pub updated_at: ::prost::alloc::string::String,
+    /// When true, trigger the project's release pipeline instead of
+    /// deploying directly to target destinations/environments.
+    #[prost(bool, tag="14")]
+    pub use_pipeline: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateAutoReleasePolicyRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="3")]
+    pub branch_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="4")]
+    pub title_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="5")]
+    pub author_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="6")]
+    pub commit_message_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="7")]
+    pub source_type_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="8")]
+    pub target_environments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="9")]
+    pub target_destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(bool, tag="10")]
+    pub force_release: bool,
+    #[prost(bool, tag="11")]
+    pub use_pipeline: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateAutoReleasePolicyResponse {
+    #[prost(message, optional, tag="1")]
+    pub policy: ::core::option::Option<AutoReleasePolicy>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateAutoReleasePolicyRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, optional, tag="3")]
+    pub enabled: ::core::option::Option<bool>,
+    #[prost(string, optional, tag="4")]
+    pub branch_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="5")]
+    pub title_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="6")]
+    pub author_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="7")]
+    pub commit_message_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="8")]
+    pub source_type_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="9")]
+    pub target_environments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="10")]
+    pub target_destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(bool, optional, tag="11")]
+    pub force_release: ::core::option::Option<bool>,
+    #[prost(bool, optional, tag="12")]
+    pub use_pipeline: ::core::option::Option<bool>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateAutoReleasePolicyResponse {
+    #[prost(message, optional, tag="1")]
+    pub policy: ::core::option::Option<AutoReleasePolicy>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteAutoReleasePolicyRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteAutoReleasePolicyResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListAutoReleasePoliciesRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListAutoReleasePoliciesResponse {
+    #[prost(message, repeated, tag="1")]
+    pub policies: ::prost::alloc::vec::Vec<AutoReleasePolicy>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateDestinationRequest {
     #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
@@ -208,6 +646,14 @@ pub struct GetDestinationsRequest {
 pub struct GetDestinationsResponse {
     #[prost(message, repeated, tag="1")]
     pub destinations: ::prost::alloc::vec::Vec<Destination>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListDestinationTypesRequest {
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListDestinationTypesResponse {
+    #[prost(message, repeated, tag="1")]
+    pub types: ::prost::alloc::vec::Vec<DestinationType>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Destination {
@@ -320,6 +766,52 @@ pub struct DeleteEnvironmentRequest {
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteEnvironmentResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SubscribeEventsRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    /// optional — empty means all projects in org
+    #[prost(string, tag="2")]
+    pub project: ::prost::alloc::string::String,
+    /// optional filter: "release", "destination", etc.
+    #[prost(string, repeated, tag="3")]
+    pub resource_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// optional filter: "created", "updated", etc.
+    #[prost(string, repeated, tag="4")]
+    pub actions: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// 0 = latest only, >0 = replay from that sequence
+    #[prost(int64, tag="5")]
+    pub since_sequence: i64,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OrgEvent {
+    /// monotonic cursor — client stores this for reconnect
+    #[prost(int64, tag="1")]
+    pub sequence: i64,
+    /// UUID, dedup key
+    #[prost(string, tag="2")]
+    pub event_id: ::prost::alloc::string::String,
+    /// RFC 3339
+    #[prost(string, tag="3")]
+    pub timestamp: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub organisation: ::prost::alloc::string::String,
+    /// empty for org-level events
+    #[prost(string, tag="5")]
+    pub project: ::prost::alloc::string::String,
+    /// "release", "destination", "environment", "pipeline", "artifact", "policy", "app", "organisation"
+    #[prost(string, tag="6")]
+    pub resource_type: ::prost::alloc::string::String,
+    /// "created", "updated", "deleted", "status_changed"
+    #[prost(string, tag="7")]
+    pub action: ::prost::alloc::string::String,
+    /// ID of the changed resource
+    #[prost(string, tag="8")]
+    pub resource_id: ::prost::alloc::string::String,
+    /// lightweight context (e.g. "status" → "SUCCEEDED")
+    #[prost(map="string, string", tag="9")]
+    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetStatusRequest {
@@ -755,282 +1247,178 @@ pub struct ComponentFile {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Done {
 }
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct AnnotateReleaseRequest {
-    #[prost(string, tag="1")]
-    pub artifact_id: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="2")]
-    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(message, optional, tag="3")]
-    pub source: ::core::option::Option<Source>,
-    #[prost(message, optional, tag="4")]
-    pub context: ::core::option::Option<ArtifactContext>,
-    #[prost(message, optional, tag="5")]
-    pub project: ::core::option::Option<Project>,
-    #[prost(message, optional, tag="6")]
-    pub r#ref: ::core::option::Option<Ref>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct AnnotateReleaseResponse {
-    #[prost(message, optional, tag="1")]
-    pub artifact: ::core::option::Option<Artifact>,
-}
+// ── Per-type config messages ─────────────────────────────────────────
+
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetArtifactBySlugRequest {
+pub struct DeployStageConfig {
     #[prost(string, tag="1")]
-    pub slug: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetArtifactBySlugResponse {
-    #[prost(message, optional, tag="1")]
-    pub artifact: ::core::option::Option<Artifact>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetArtifactsByProjectRequest {
-    #[prost(message, optional, tag="1")]
-    pub project: ::core::option::Option<Project>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetArtifactsByProjectResponse {
-    #[prost(message, repeated, tag="1")]
-    pub artifact: ::prost::alloc::vec::Vec<Artifact>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ReleaseRequest {
-    #[prost(string, tag="1")]
-    pub artifact_id: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="2")]
-    pub destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="3")]
-    pub environments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ReleaseResponse {
-    /// List of release intents created (one per destination)
-    #[prost(message, repeated, tag="1")]
-    pub intents: ::prost::alloc::vec::Vec<ReleaseIntent>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ReleaseIntent {
-    #[prost(string, tag="1")]
-    pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
     pub environment: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct WaitReleaseRequest {
-    #[prost(string, tag="1")]
-    pub release_intent_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct WaitReleaseEvent {
-    #[prost(oneof="wait_release_event::Event", tags="1, 2")]
-    pub event: ::core::option::Option<wait_release_event::Event>,
-}
-/// Nested message and enum types in `WaitReleaseEvent`.
-pub mod wait_release_event {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
-    pub enum Event {
-        #[prost(message, tag="1")]
-        StatusUpdate(super::ReleaseStatusUpdate),
-        #[prost(message, tag="2")]
-        LogLine(super::ReleaseLogLine),
-    }
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ReleaseStatusUpdate {
-    #[prost(string, tag="1")]
-    pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub status: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ReleaseLogLine {
-    #[prost(string, tag="1")]
-    pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub line: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub timestamp: ::prost::alloc::string::String,
-    #[prost(enumeration="LogChannel", tag="4")]
-    pub channel: i32,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetOrganisationsRequest {
+pub struct WaitStageConfig {
+    #[prost(int64, tag="1")]
+    pub duration_seconds: i64,
 }
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetOrganisationsResponse {
-    #[prost(message, repeated, tag="1")]
-    pub organisations: ::prost::alloc::vec::Vec<OrganisationRef>,
-}
+// ── A single pipeline stage ──────────────────────────────────────────
+
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetProjectsRequest {
-    #[prost(oneof="get_projects_request::Query", tags="1")]
-    pub query: ::core::option::Option<get_projects_request::Query>,
+pub struct PipelineStage {
+    #[prost(string, tag="1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="2")]
+    pub depends_on: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(oneof="pipeline_stage::Config", tags="10, 11")]
+    pub config: ::core::option::Option<pipeline_stage::Config>,
 }
-/// Nested message and enum types in `GetProjectsRequest`.
-pub mod get_projects_request {
+/// Nested message and enum types in `PipelineStage`.
+pub mod pipeline_stage {
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
-    pub enum Query {
-        #[prost(message, tag="1")]
-        Organisation(super::OrganisationRef),
+    pub enum Config {
+        #[prost(message, tag="10")]
+        Deploy(super::DeployStageConfig),
+        #[prost(message, tag="11")]
+        Wait(super::WaitStageConfig),
     }
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetProjectsResponse {
-    #[prost(string, repeated, tag="1")]
-    pub projects: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetReleasesByActorRequest {
-    /// user_id or app_id
-    #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
-    /// "user" or "app"
-    #[prost(string, tag="2")]
-    pub actor_type: ::prost::alloc::string::String,
-    #[prost(int32, tag="3")]
-    pub page_size: i32,
-    #[prost(string, tag="4")]
-    pub page_token: ::prost::alloc::string::String,
-}
+// ── Pipeline resource ────────────────────────────────────────────────
+
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetReleasesByActorResponse {
-    #[prost(message, repeated, tag="1")]
-    pub releases: ::prost::alloc::vec::Vec<ReleaseIntentSummary>,
-    #[prost(string, tag="2")]
-    pub next_page_token: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ReleaseIntentSummary {
-    #[prost(string, tag="1")]
-    pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub artifact_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
-    pub project: ::core::option::Option<Project>,
-    #[prost(message, repeated, tag="4")]
-    pub destinations: ::prost::alloc::vec::Vec<ReleaseDestinationStatus>,
-    #[prost(string, tag="5")]
-    pub created_at: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ReleaseDestinationStatus {
-    #[prost(string, tag="1")]
-    pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub environment: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub status: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct Source {
-    #[prost(string, optional, tag="1")]
-    pub user: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="2")]
-    pub email: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="3")]
-    pub source_type: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="4")]
-    pub run_url: ::core::option::Option<::prost::alloc::string::String>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ArtifactContext {
-    #[prost(string, tag="1")]
-    pub title: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="2")]
-    pub description: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="3")]
-    pub web: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="4")]
-    pub pr: ::core::option::Option<::prost::alloc::string::String>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct Artifact {
+pub struct ReleasePipeline {
     #[prost(string, tag="1")]
     pub id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
-    pub artifact_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub slug: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="4")]
-    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(message, optional, tag="5")]
-    pub source: ::core::option::Option<Source>,
-    #[prost(message, optional, tag="6")]
-    pub context: ::core::option::Option<ArtifactContext>,
-    #[prost(message, optional, tag="7")]
-    pub project: ::core::option::Option<Project>,
-    #[prost(message, repeated, tag="8")]
-    pub destinations: ::prost::alloc::vec::Vec<ArtifactDestination>,
-    #[prost(string, tag="9")]
-    pub created_at: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ArtifactDestination {
-    #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag="3")]
+    pub enabled: bool,
+    #[prost(message, repeated, tag="4")]
+    pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
+    #[prost(string, tag="5")]
+    pub created_at: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
+    pub updated_at: ::prost::alloc::string::String,
+}
+// ── CRUD messages ────────────────────────────────────────────────────
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateReleasePipelineRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
     #[prost(string, tag="2")]
-    pub environment: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub type_organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
-    pub type_name: ::prost::alloc::string::String,
-    #[prost(uint64, tag="5")]
-    pub type_version: u64,
+    pub name: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="3")]
+    pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct Project {
-    #[prost(string, tag="1")]
-    pub organisation: ::prost::alloc::string::String,
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateReleasePipelineResponse {
+    #[prost(message, optional, tag="1")]
+    pub pipeline: ::core::option::Option<ReleasePipeline>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateReleasePipelineRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
     #[prost(string, tag="2")]
-    pub project: ::prost::alloc::string::String,
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, optional, tag="3")]
+    pub enabled: ::core::option::Option<bool>,
+    /// When set, replaces all stages. When absent, stages are unchanged.
+    #[prost(message, repeated, tag="4")]
+    pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
+    #[prost(bool, tag="5")]
+    pub update_stages: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateReleasePipelineResponse {
+    #[prost(message, optional, tag="1")]
+    pub pipeline: ::core::option::Option<ReleasePipeline>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct Ref {
-    #[prost(string, tag="1")]
-    pub commit_sha: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="2")]
-    pub branch: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="3")]
-    pub commit_message: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="4")]
-    pub version: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="5")]
-    pub repo_url: ::core::option::Option<::prost::alloc::string::String>,
+pub struct DeleteReleasePipelineRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteReleasePipelineResponse {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OrganisationRef {
-    #[prost(string, tag="1")]
-    pub organisation: ::prost::alloc::string::String,
+pub struct ListReleasePipelinesRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListReleasePipelinesResponse {
+    #[prost(message, repeated, tag="1")]
+    pub pipelines: ::prost::alloc::vec::Vec<ReleasePipeline>,
+}
+// ── Stage type enum (useful for UI dropdowns / filtering) ────────────
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
-pub enum LogChannel {
+pub enum StageType {
     Unspecified = 0,
-    Stdout = 1,
-    Stderr = 2,
+    Deploy = 1,
+    Wait = 2,
 }
-impl LogChannel {
+impl StageType {
     /// String value of the enum field names used in the ProtoBuf definition.
     ///
     /// The values are not transformed in any way and thus are considered stable
     /// (if the ProtoBuf definition does not change) and safe for programmatic use.
     pub fn as_str_name(&self) -> &'static str {
         match self {
-            Self::Unspecified => "LOG_CHANNEL_UNSPECIFIED",
-            Self::Stdout => "LOG_CHANNEL_STDOUT",
-            Self::Stderr => "LOG_CHANNEL_STDERR",
+            Self::Unspecified => "STAGE_TYPE_UNSPECIFIED",
+            Self::Deploy => "STAGE_TYPE_DEPLOY",
+            Self::Wait => "STAGE_TYPE_WAIT",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
-            "LOG_CHANNEL_UNSPECIFIED" => Some(Self::Unspecified),
-            "LOG_CHANNEL_STDOUT" => Some(Self::Stdout),
-            "LOG_CHANNEL_STDERR" => Some(Self::Stderr),
+            "STAGE_TYPE_UNSPECIFIED" => Some(Self::Unspecified),
+            "STAGE_TYPE_DEPLOY" => Some(Self::Deploy),
+            "STAGE_TYPE_WAIT" => Some(Self::Wait),
+            _ => None,
+        }
+    }
+}
+// ── Runtime stage status (for observing pipeline progress) ───────────
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum PipelineStageStatus {
+    Unspecified = 0,
+    Pending = 1,
+    Active = 2,
+    Succeeded = 3,
+    Failed = 4,
+    Cancelled = 5,
+}
+impl PipelineStageStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "PIPELINE_STAGE_STATUS_UNSPECIFIED",
+            Self::Pending => "PIPELINE_STAGE_STATUS_PENDING",
+            Self::Active => "PIPELINE_STAGE_STATUS_ACTIVE",
+            Self::Succeeded => "PIPELINE_STAGE_STATUS_SUCCEEDED",
+            Self::Failed => "PIPELINE_STAGE_STATUS_FAILED",
+            Self::Cancelled => "PIPELINE_STAGE_STATUS_CANCELLED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "PIPELINE_STAGE_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "PIPELINE_STAGE_STATUS_PENDING" => Some(Self::Pending),
+            "PIPELINE_STAGE_STATUS_ACTIVE" => Some(Self::Active),
+            "PIPELINE_STAGE_STATUS_SUCCEEDED" => Some(Self::Succeeded),
+            "PIPELINE_STAGE_STATUS_FAILED" => Some(Self::Failed),
+            "PIPELINE_STAGE_STATUS_CANCELLED" => Some(Self::Cancelled),
             _ => None,
         }
     }

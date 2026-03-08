@@ -14,6 +14,9 @@ use crate::{
         artifact_staging_registry::ArtifactStagingRegistryState,
         destination_registry::DestinationRegistryState,
         notification_registry::NotificationRegistryState,
+        release_event_store::{
+            EventPayload, ReleaseEventStoreState, ReleaseEventType,
+        },
         release_finalizer,
         release_logs_registry::{
             LogChannel, LogLine, ReleaseLogsRegistryState,
@@ -100,6 +103,7 @@ impl RunnerService for RunnerServer {
         // Spawn the bidirectional stream handler
         let runner_manager = self.runner_manager.clone();
         let runner_id_clone = runner_id.clone();
+        let state_clone = self.state.clone();
 
         tokio::spawn(async move {
             let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(15));
@@ -135,9 +139,42 @@ impl RunnerService for RunnerServer {
                                             &runner_id_clone,
                                             hb.active_releases,
                                         ).await;
+                                        // Update heartbeat timestamp for all active releases on this runner
+                                        if let Err(e) = state_clone.release_event_store()
+                                            .heartbeat_runner_releases(&runner_id_clone)
+                                            .await
+                                        {
+                                            tracing::warn!(
+                                                runner_id = %runner_id_clone,
+                                                "failed to update release heartbeats: {e}"
+                                            );
+                                        }
                                     }
-                                    Some(runner_message::Message::WorkAck(_ack)) => {
-                                        // TODO: handle work rejection
+                                    Some(runner_message::Message::WorkAck(ack)) => {
+                                        // Transition ASSIGNED -> RUNNING when runner acks
+                                        if ack.accepted {
+                                            let event_store = state_clone.release_event_store();
+                                            let token_registry = state_clone.release_token_registry();
+                                            if let Ok(Some(scope)) = token_registry
+                                                .validate_token(&ack.release_token)
+                                                .await
+                                            {
+                                                if let Err(e) = event_store
+                                                    .emit_event(
+                                                        scope.release_id,
+                                                        ReleaseEventType::Started,
+                                                        EventPayload::default(),
+                                                        None,
+                                                    )
+                                                    .await
+                                                {
+                                                    tracing::warn!(
+                                                        release_id = %scope.release_id,
+                                                        "failed to transition to RUNNING: {e}"
+                                                    );
+                                                }
+                                            }
+                                        }
                                     }
                                     _ => {}
                                 }
@@ -160,6 +197,43 @@ impl RunnerService for RunnerServer {
             // Unregister runner on disconnect
             runner_manager.unregister_runner(&runner_id_clone).await;
             tracing::info!(runner_id = %runner_id_clone, "runner stream closed");
+
+            // Recovery: fail any in-flight releases for this runner
+            let token_registry = state_clone.release_token_registry();
+            let event_store = state_clone.release_event_store();
+
+            match token_registry.revoke_runner_tokens(&runner_id_clone).await {
+                Ok(revoked) => {
+                    for scope in revoked {
+                        if let Err(e) = event_store
+                            .emit_event(
+                                scope.release_id,
+                                ReleaseEventType::Failed,
+                                EventPayload {
+                                    error_message: Some(format!(
+                                        "runner {} disconnected",
+                                        runner_id_clone
+                                    )),
+                                    ..Default::default()
+                                },
+                                None,
+                            )
+                            .await
+                        {
+                            tracing::warn!(
+                                release_id = %scope.release_id,
+                                "failed to fail orphaned release: {e}"
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        runner_id = %runner_id_clone,
+                        "failed to revoke runner tokens: {e}"
+                    );
+                }
+            }
         });
 
         Ok(Response::new(
@@ -433,8 +507,8 @@ impl RunnerService for RunnerServer {
             })?;
 
         let status = match req.outcome() {
-            ReleaseOutcome::Success => ReleaseStatus::Success,
-            ReleaseOutcome::Failure => ReleaseStatus::Failure,
+            ReleaseOutcome::Success => ReleaseStatus::Succeeded,
+            ReleaseOutcome::Failure => ReleaseStatus::Failed,
             ReleaseOutcome::Unspecified => {
                 return Err(tonic::Status::invalid_argument(
                     "outcome must be SUCCESS or FAILURE",
@@ -448,8 +522,9 @@ impl RunnerService for RunnerServer {
             None
         };
 
-        // Finalize: update status + create notification
+        // Finalize: emit event + create notification
         release_finalizer::finalize_release(
+            &self.state.release_event_store(),
             &self.state.release_registry(),
             &self.state.notification_registry(),
             &self.state.destination_registry(),

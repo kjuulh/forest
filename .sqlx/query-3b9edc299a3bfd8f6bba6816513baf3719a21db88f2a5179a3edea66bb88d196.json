@@ -1,0 +1,116 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO auto_release_policies (\n                project_id, name,\n                branch_pattern, title_pattern, author_pattern,\n                commit_message_pattern, source_type_pattern,\n                target_environments, target_destinations,\n                force_release, use_pipeline\n            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n            RETURNING\n                id, project_id, name, enabled,\n                branch_pattern, title_pattern, author_pattern,\n                commit_message_pattern, source_type_pattern,\n                target_environments, target_destinations,\n                force_release, use_pipeline, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "branch_pattern",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "title_pattern",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "author_pattern",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "commit_message_pattern",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "source_type_pattern",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "target_environments",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 10,
+        "name": "target_destinations",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 11,
+        "name": "force_release",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "use_pipeline",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "TextArray",
+        "TextArray",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3b9edc299a3bfd8f6bba6816513baf3719a21db88f2a5179a3edea66bb88d196"
+}

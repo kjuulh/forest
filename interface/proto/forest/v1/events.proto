@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package forest.v1;
+
+service EventService {
+  // Server-streaming: client subscribes, receives events until disconnect.
+  // Events are persisted — use since_sequence to replay from a known point.
+  rpc Subscribe(SubscribeEventsRequest) returns (stream OrgEvent);
+}
+
+message SubscribeEventsRequest {
+  string organisation = 1;
+  string project = 2;                 // optional — empty means all projects in org
+  repeated string resource_types = 3; // optional filter: "release", "destination", etc.
+  repeated string actions = 4;        // optional filter: "created", "updated", etc.
+  int64 since_sequence = 5;           // 0 = latest only, >0 = replay from that sequence
+}
+
+message OrgEvent {
+  int64 sequence = 1;           // monotonic cursor — client stores this for reconnect
+  string event_id = 2;          // UUID, dedup key
+  string timestamp = 3;         // RFC 3339
+  string organisation = 4;
+  string project = 5;           // empty for org-level events
+  string resource_type = 6;     // "release", "destination", "environment", "pipeline", "artifact", "policy", "app", "organisation"
+  string action = 7;            // "created", "updated", "deleted", "status_changed"
+  string resource_id = 8;       // ID of the changed resource
+  map<string, string> metadata = 9; // lightweight context (e.g. "status" → "SUCCEEDED")
+}

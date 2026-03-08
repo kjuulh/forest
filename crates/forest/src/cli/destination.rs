@@ -1,6 +1,7 @@
 use crate::{
     cli::destination::{
-        create::CreateCommand, delete::DeleteCommand, list::ListCommand, update::UpdateCommand,
+        create::CreateCommand, delete::DeleteCommand, list::ListCommand, types::TypesCommand,
+        update::UpdateCommand,
     },
     state::State,
 };
@@ -8,6 +9,7 @@ use crate::{
 mod create;
 mod delete;
 mod list;
+mod types;
 mod update;
 
 #[derive(clap::Parser)]
@@ -22,6 +24,8 @@ enum Commands {
     Update(UpdateCommand),
     Delete(DeleteCommand),
     List(ListCommand),
+    /// List available destination types
+    Types(TypesCommand),
 }
 
 impl DestinationCommand {
@@ -31,6 +35,7 @@ impl DestinationCommand {
             Commands::Update(cmd) => cmd.execute(state).await,
             Commands::Delete(cmd) => cmd.execute(state).await,
             Commands::List(cmd) => cmd.execute(state).await,
+            Commands::Types(cmd) => cmd.execute(state).await,
         }
     }
 }

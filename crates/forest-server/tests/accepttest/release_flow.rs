@@ -24,6 +24,8 @@ async fn test_full_release_flow() -> anyhow::Result<()> {
         .await
         .an_organisation(&org)
         .await
+        .an_environment("accept-env")
+        .await
         .a_destination("accept-dest", "accept-env")
         .await
         .an_uploaded_artifact()
@@ -57,6 +59,8 @@ async fn test_annotate_and_retrieve_artifact() -> anyhow::Result<()> {
         .a_registered_user()
         .await
         .an_organisation(&org)
+        .await
+        .an_environment("retrieve-env")
         .await
         .a_destination("retrieve-dest", "retrieve-env")
         .await

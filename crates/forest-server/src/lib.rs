@@ -17,6 +17,7 @@ pub mod destination_services;
 pub mod destinations;
 
 pub mod grpc;
+pub mod release_reaper;
 pub mod runner_manager;
 pub mod scheduler;
 mod temp_dir;

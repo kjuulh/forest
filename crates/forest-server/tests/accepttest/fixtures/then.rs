@@ -22,7 +22,10 @@ impl ThenReleaseFlow for Then<ReleaseFlowData> {
     async fn release_is_in_terminal_state(self) -> anyhow::Result<Self> {
         let status = self.data().terminal_status.clone();
         assert!(
-            status == "SUCCESS" || status == "FAILURE",
+            matches!(
+                status.as_str(),
+                "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT"
+            ),
             "release should be in terminal state, got: {}",
             status
         );

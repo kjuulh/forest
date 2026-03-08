@@ -3,7 +3,10 @@ use std::{collections::HashMap, path::Path, sync::OnceLock};
 use anyhow::Context;
 use forest_grpc_interface::{
     artifact_service_client::ArtifactServiceClient,
-    destination_service_client::DestinationServiceClient, get_component_files_response::Msg,
+    auto_release_policy_service_client::AutoReleasePolicyServiceClient,
+    destination_service_client::DestinationServiceClient,
+    environment_service_client::EnvironmentServiceClient, get_component_files_response::Msg,
+    release_pipeline_service_client::ReleasePipelineServiceClient,
     get_projects_request::Query,
     notification_service_client::NotificationServiceClient,
     organisation_service_client::OrganisationServiceClient,
@@ -56,6 +59,11 @@ pub struct GrpcClient {
     users_client: OnceCell<UsersServiceClient<Channel>>,
     auth_users_client: OnceCell<UsersServiceClient<AuthMiddleware<Channel>>>,
     notification_client: OnceCell<NotificationServiceClient<AuthMiddleware<Channel>>>,
+    environment_client: OnceCell<EnvironmentServiceClient<AuthMiddleware<Channel>>>,
+    auto_release_policy_client:
+        OnceCell<AutoReleasePolicyServiceClient<AuthMiddleware<Channel>>>,
+    release_pipeline_client:
+        OnceCell<ReleasePipelineServiceClient<AuthMiddleware<Channel>>>,
 }
 
 impl GrpcClient {
@@ -322,6 +330,20 @@ impl GrpcClient {
             .get_or_try_init(move || async move {
                 let channel = self.auth_channel(self.channel().await?);
                 Ok::<_, anyhow::Error>(DestinationServiceClient::new(channel))
+            })
+            .await?;
+
+        Ok(client.clone())
+    }
+
+    async fn environment_client(
+        &self,
+    ) -> anyhow::Result<EnvironmentServiceClient<AuthMiddleware<Channel>>> {
+        let client = self
+            .environment_client
+            .get_or_try_init(move || async move {
+                let channel = self.auth_channel(self.channel().await?);
+                Ok::<_, anyhow::Error>(EnvironmentServiceClient::new(channel))
             })
             .await?;
 
@@ -886,6 +908,8 @@ impl GrpcClient {
         artifact_id: Uuid,
         destination: &[String],
         environments: &[String],
+        force: bool,
+        use_pipeline: bool,
     ) -> anyhow::Result<ReleaseResult> {
         let mut client = self.release_client().await?;
 
@@ -894,6 +918,8 @@ impl GrpcClient {
                 artifact_id: artifact_id.to_string(),
                 destinations: destination.into(),
                 environments: environments.into(),
+                force,
+                use_pipeline,
             })
             .await
             .map_err(grpc_err)
@@ -1018,6 +1044,27 @@ impl GrpcClient {
         Ok(resp.projects.into_iter().map(|r| r.into()).collect())
     }
 
+    pub async fn list_destination_types(&self) -> anyhow::Result<Vec<DestinationType>> {
+        let mut client = self.destination_client().await?;
+
+        let response = client
+            .list_destination_types(ListDestinationTypesRequest {})
+            .await
+            .map_err(grpc_err)
+            .context("list destination types (grpc)")?;
+        let resp = response.into_inner();
+
+        Ok(resp
+            .types
+            .into_iter()
+            .map(|t| DestinationType {
+                organisation: t.organisation.into(),
+                name: t.name.into(),
+                version: t.version as usize,
+            })
+            .collect())
+    }
+
     pub async fn get_destinations(&self, organisation: &str) -> anyhow::Result<Vec<Destination>> {
         let mut client = self.destination_client().await?;
 
@@ -1098,6 +1145,383 @@ impl GrpcClient {
             .context("delete destination (grpc)")?;
 
         Ok(())
+    }
+
+    // ── Destination States ────────────────────────────────────────────
+
+    pub async fn get_destination_states(
+        &self,
+        organisation: &str,
+        project: Option<&str>,
+    ) -> anyhow::Result<Vec<forest_grpc_interface::DestinationState>> {
+        let mut client = self.release_client().await?;
+        let resp = client
+            .get_destination_states(GetDestinationStatesRequest {
+                organisation: organisation.to_string(),
+                project: project.map(|p| p.to_string()),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("get destination states (grpc)")?;
+
+        Ok(resp.into_inner().destinations)
+    }
+
+    // ── Environments ─────────────────────────────────────────────────
+
+    pub async fn list_environments(
+        &self,
+        organisation: &str,
+    ) -> anyhow::Result<Vec<Environment>> {
+        let mut client = self.environment_client().await?;
+        let resp = client
+            .list_environments(ListEnvironmentsRequest {
+                organisation: organisation.to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("list environments (grpc)")?;
+
+        Ok(resp.into_inner().environments)
+    }
+
+    pub async fn create_environment(
+        &self,
+        organisation: &str,
+        name: &str,
+        description: Option<&str>,
+        sort_order: i32,
+    ) -> anyhow::Result<Environment> {
+        let mut client = self.environment_client().await?;
+        let resp = client
+            .create_environment(CreateEnvironmentRequest {
+                organisation: organisation.to_string(),
+                name: name.to_string(),
+                description: description.map(|s| s.to_string()),
+                sort_order,
+            })
+            .await
+            .map_err(grpc_err)
+            .context("create environment (grpc)")?;
+
+        resp.into_inner()
+            .environment
+            .ok_or_else(|| anyhow::anyhow!("no environment in response"))
+    }
+
+    pub async fn get_environment(
+        &self,
+        organisation: &str,
+        name: &str,
+    ) -> anyhow::Result<Environment> {
+        let mut client = self.environment_client().await?;
+        let resp = client
+            .get_environment(GetEnvironmentRequest {
+                identifier: Some(get_environment_request::Identifier::Lookup(
+                    EnvironmentLookup {
+                        organisation: organisation.to_string(),
+                        name: name.to_string(),
+                    },
+                )),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("get environment (grpc)")?;
+
+        resp.into_inner()
+            .environment
+            .ok_or_else(|| anyhow::anyhow!("environment not found"))
+    }
+
+    pub async fn update_environment(
+        &self,
+        id: &str,
+        description: Option<&str>,
+        sort_order: Option<i32>,
+    ) -> anyhow::Result<Environment> {
+        let mut client = self.environment_client().await?;
+        let resp = client
+            .update_environment(UpdateEnvironmentRequest {
+                id: id.to_string(),
+                description: description.map(|s| s.to_string()),
+                sort_order,
+            })
+            .await
+            .map_err(grpc_err)
+            .context("update environment (grpc)")?;
+
+        resp.into_inner()
+            .environment
+            .ok_or_else(|| anyhow::anyhow!("no environment in response"))
+    }
+
+    pub async fn delete_environment(&self, id: &str) -> anyhow::Result<()> {
+        self.environment_client()
+            .await?
+            .delete_environment(DeleteEnvironmentRequest {
+                id: id.to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("delete environment (grpc)")?;
+
+        Ok(())
+    }
+
+    // ── Auto-Release Policies ────────────────────────────────────────
+
+    async fn auto_release_policy_client(
+        &self,
+    ) -> anyhow::Result<AutoReleasePolicyServiceClient<AuthMiddleware<Channel>>> {
+        let client = self
+            .auto_release_policy_client
+            .get_or_try_init(move || async move {
+                let channel = self.auth_channel(self.channel().await?);
+                Ok::<_, anyhow::Error>(AutoReleasePolicyServiceClient::new(channel))
+            })
+            .await?;
+
+        Ok(client.clone())
+    }
+
+    pub async fn create_auto_release_policy(
+        &self,
+        organisation: &str,
+        project: &str,
+        name: &str,
+        branch_pattern: Option<String>,
+        title_pattern: Option<String>,
+        author_pattern: Option<String>,
+        commit_message_pattern: Option<String>,
+        source_type_pattern: Option<String>,
+        target_environments: Vec<String>,
+        target_destinations: Vec<String>,
+        force_release: bool,
+        use_pipeline: bool,
+    ) -> anyhow::Result<AutoReleasePolicy> {
+        let mut client = self.auto_release_policy_client().await?;
+        let resp = client
+            .create_auto_release_policy(CreateAutoReleasePolicyRequest {
+                project: Some(Project {
+                    organisation: organisation.to_string(),
+                    project: project.to_string(),
+                }),
+                name: name.to_string(),
+                branch_pattern,
+                title_pattern,
+                author_pattern,
+                commit_message_pattern,
+                source_type_pattern,
+                target_environments,
+                target_destinations,
+                force_release,
+                use_pipeline,
+            })
+            .await
+            .map_err(grpc_err)
+            .context("create auto release policy (grpc)")?;
+
+        resp.into_inner()
+            .policy
+            .ok_or_else(|| anyhow::anyhow!("no policy in response"))
+    }
+
+    pub async fn update_auto_release_policy(
+        &self,
+        organisation: &str,
+        project: &str,
+        name: &str,
+        enabled: Option<bool>,
+        branch_pattern: Option<String>,
+        title_pattern: Option<String>,
+        author_pattern: Option<String>,
+        commit_message_pattern: Option<String>,
+        source_type_pattern: Option<String>,
+        target_environments: Vec<String>,
+        target_destinations: Vec<String>,
+        force_release: Option<bool>,
+        use_pipeline: Option<bool>,
+    ) -> anyhow::Result<AutoReleasePolicy> {
+        let mut client = self.auto_release_policy_client().await?;
+        let resp = client
+            .update_auto_release_policy(UpdateAutoReleasePolicyRequest {
+                project: Some(Project {
+                    organisation: organisation.to_string(),
+                    project: project.to_string(),
+                }),
+                name: name.to_string(),
+                enabled,
+                branch_pattern,
+                title_pattern,
+                author_pattern,
+                commit_message_pattern,
+                source_type_pattern,
+                target_environments,
+                target_destinations,
+                force_release,
+                use_pipeline,
+            })
+            .await
+            .map_err(grpc_err)
+            .context("update auto release policy (grpc)")?;
+
+        resp.into_inner()
+            .policy
+            .ok_or_else(|| anyhow::anyhow!("no policy in response"))
+    }
+
+    pub async fn delete_auto_release_policy(
+        &self,
+        organisation: &str,
+        project: &str,
+        name: &str,
+    ) -> anyhow::Result<()> {
+        let mut client = self.auto_release_policy_client().await?;
+        client
+            .delete_auto_release_policy(DeleteAutoReleasePolicyRequest {
+                project: Some(Project {
+                    organisation: organisation.to_string(),
+                    project: project.to_string(),
+                }),
+                name: name.to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("delete auto release policy (grpc)")?;
+
+        Ok(())
+    }
+
+    pub async fn list_auto_release_policies(
+        &self,
+        organisation: &str,
+        project: &str,
+    ) -> anyhow::Result<Vec<AutoReleasePolicy>> {
+        let mut client = self.auto_release_policy_client().await?;
+        let resp = client
+            .list_auto_release_policies(ListAutoReleasePoliciesRequest {
+                project: Some(Project {
+                    organisation: organisation.to_string(),
+                    project: project.to_string(),
+                }),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("list auto release policies (grpc)")?;
+
+        Ok(resp.into_inner().policies)
+    }
+
+    // ── Release Pipelines ─────────────────────────────────────────────
+
+    async fn release_pipeline_client(
+        &self,
+    ) -> anyhow::Result<ReleasePipelineServiceClient<AuthMiddleware<Channel>>> {
+        let client = self
+            .release_pipeline_client
+            .get_or_try_init(move || async move {
+                let channel = self.auth_channel(self.channel().await?);
+                Ok::<_, anyhow::Error>(ReleasePipelineServiceClient::new(channel))
+            })
+            .await?;
+
+        Ok(client.clone())
+    }
+
+    pub async fn create_release_pipeline(
+        &self,
+        organisation: &str,
+        project: &str,
+        name: &str,
+        stages_json: &str,
+    ) -> anyhow::Result<ReleasePipeline> {
+        let mut client = self.release_pipeline_client().await?;
+        let resp = client
+            .create_release_pipeline(CreateReleasePipelineRequest {
+                project: Some(Project {
+                    organisation: organisation.to_string(),
+                    project: project.to_string(),
+                }),
+                name: name.to_string(),
+                stages_json: stages_json.to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("create release pipeline (grpc)")?;
+
+        resp.into_inner()
+            .pipeline
+            .ok_or_else(|| anyhow::anyhow!("no pipeline in response"))
+    }
+
+    pub async fn update_release_pipeline(
+        &self,
+        organisation: &str,
+        project: &str,
+        name: &str,
+        enabled: Option<bool>,
+        stages_json: Option<String>,
+    ) -> anyhow::Result<ReleasePipeline> {
+        let mut client = self.release_pipeline_client().await?;
+        let resp = client
+            .update_release_pipeline(UpdateReleasePipelineRequest {
+                project: Some(Project {
+                    organisation: organisation.to_string(),
+                    project: project.to_string(),
+                }),
+                name: name.to_string(),
+                enabled,
+                stages_json,
+            })
+            .await
+            .map_err(grpc_err)
+            .context("update release pipeline (grpc)")?;
+
+        resp.into_inner()
+            .pipeline
+            .ok_or_else(|| anyhow::anyhow!("no pipeline in response"))
+    }
+
+    pub async fn delete_release_pipeline(
+        &self,
+        organisation: &str,
+        project: &str,
+        name: &str,
+    ) -> anyhow::Result<()> {
+        let mut client = self.release_pipeline_client().await?;
+        client
+            .delete_release_pipeline(DeleteReleasePipelineRequest {
+                project: Some(Project {
+                    organisation: organisation.to_string(),
+                    project: project.to_string(),
+                }),
+                name: name.to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("delete release pipeline (grpc)")?;
+
+        Ok(())
+    }
+
+    pub async fn list_release_pipelines(
+        &self,
+        organisation: &str,
+        project: &str,
+    ) -> anyhow::Result<Vec<ReleasePipeline>> {
+        let mut client = self.release_pipeline_client().await?;
+        let resp = client
+            .list_release_pipelines(ListReleasePipelinesRequest {
+                project: Some(Project {
+                    organisation: organisation.to_string(),
+                    project: project.to_string(),
+                }),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("list release pipelines (grpc)")?;
+
+        Ok(resp.into_inner().pipelines)
     }
 
     // ── Notifications ────────────────────────────────────────────────
@@ -1256,6 +1680,9 @@ impl GrpcClientState for State {
                 users_client: OnceCell::const_new(),
                 auth_users_client: OnceCell::const_new(),
                 notification_client: OnceCell::const_new(),
+                environment_client: OnceCell::const_new(),
+                auto_release_policy_client: OnceCell::const_new(),
+                release_pipeline_client: OnceCell::const_new(),
             }
         })
         .clone()
@@ -1319,6 +1746,7 @@ impl From<forest_grpc_interface::ArtifactDestination>
             type_organisation: value.type_organisation,
             type_name: value.type_name,
             type_version: value.type_version,
+            status: value.status,
         }
     }
 }

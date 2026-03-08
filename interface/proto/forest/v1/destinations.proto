@@ -29,11 +29,17 @@ message GetDestinationsResponse {
   repeated Destination destinations = 1;
 }
 
+message ListDestinationTypesRequest {}
+message ListDestinationTypesResponse {
+  repeated DestinationType types = 1;
+}
+
 service DestinationService {
   rpc CreateDestination(CreateDestinationRequest) returns (CreateDestinationResponse) {}
   rpc UpdateDestination(UpdateDestinationRequest) returns (UpdateDestinationResponse) {}
   rpc DeleteDestination(DeleteDestinationRequest) returns (DeleteDestinationResponse) {}
   rpc GetDestinations(GetDestinationsRequest) returns (GetDestinationsResponse);
+  rpc ListDestinationTypes(ListDestinationTypesRequest) returns (ListDestinationTypesResponse);
 }
 
 message Destination {

@@ -49,27 +49,49 @@ impl RunnerService {
 
         tracing::info!("connected and registered");
 
-        loop {
-            session.send_heartbeat(self.executor.active_count());
-
-            match session.next_work().await {
-                Some(assignment) => {
-                    tracing::info!(
-                        release_token = %assignment.release_token,
-                        release_id = %assignment.release_id,
-                        "received work assignment"
-                    );
-
-                    if let Err(e) = self.executor.execute(&mut session, &assignment).await {
-                        tracing::error!(error = %e, "work execution failed");
+        // Spawn a background task that sends heartbeats every 30 seconds
+        let heartbeat_session = session.clone_heartbeat_sender();
+        let heartbeat_executor = self.executor.clone();
+        let heartbeat_token = CancellationToken::new();
+        let heartbeat_cancel = heartbeat_token.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    _ = heartbeat_cancel.cancelled() => break,
+                    _ = interval.tick() => {
+                        heartbeat_session.send_heartbeat(heartbeat_executor.active_count());
                     }
                 }
-                None => {
-                    tracing::warn!("server stream closed");
-                    return Ok(());
+            }
+        });
+
+        let result = async {
+            loop {
+                match session.next_work().await {
+                    Some(assignment) => {
+                        tracing::info!(
+                            release_token = %assignment.release_token,
+                            release_id = %assignment.release_id,
+                            "received work assignment"
+                        );
+
+                        if let Err(e) = self.executor.execute(&mut session, &assignment).await {
+                            tracing::error!(error = %e, "work execution failed");
+                        }
+                    }
+                    None => {
+                        tracing::warn!("server stream closed");
+                        return Ok::<(), anyhow::Error>(());
+                    }
                 }
             }
         }
+        .await;
+
+        heartbeat_token.cancel();
+        result
     }
 }
 

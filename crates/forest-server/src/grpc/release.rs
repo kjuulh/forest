@@ -1,5 +1,6 @@
 use anyhow::Context;
 use forest_grpc_interface::{release_service_server::ReleaseService, *};
+use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Response;
@@ -8,8 +9,11 @@ use crate::{
     actor::Actor,
     grpc::artifacts::GrpcErrorExt,
     services::{
+        auto_release_policy::{AnnotationMatchData, AutoReleasePolicyRegistryState},
         notification_registry::{NotificationRegistryState, ReleaseContext as NotifReleaseContext},
+        release_event_store::ReleaseEventStoreState,
         release_logs_registry::{LogChannel, ReleaseLogsRegistryState},
+        release_pipeline::ReleasePipelineRegistryState,
         release_registry::{self, ReleaseAnnotation, ReleaseDestination, ReleaseRegistryState},
     },
     state::State,
@@ -118,6 +122,70 @@ impl ReleaseService for ReleaseServer {
             tracing::warn!("failed to create annotation notification: {e:#}");
         }
 
+        // Evaluate auto-release policies
+        let match_data =
+            AnnotationMatchData::from_parts(&source, &art_context, &reference);
+
+        let project_id = self
+            .state
+            .release_registry()
+            .get_project_id(&proj.organisation, &proj.project)
+            .await;
+
+        if let Ok(project_id) = project_id {
+            match self
+                .state
+                .auto_release_policy_registry()
+                .evaluate(&project_id, &match_data)
+                .await
+            {
+                Ok(policy_matches) => {
+                    for policy_match in policy_matches {
+                        tracing::info!(
+                            policy = %policy_match.policy_name,
+                            org = %proj.organisation,
+                            project = %proj.project,
+                            "auto-release policy matched, triggering release"
+                        );
+
+                        match self
+                            .state
+                            .release_registry()
+                            .release(
+                                &artifact_id,
+                                policy_match.target_destinations,
+                                policy_match.target_environments,
+                                &actor,
+                                &self.state.release_event_store(),
+                                policy_match.force_release,
+                                policy_match.use_pipeline,
+                                &self.state.release_pipeline_registry(),
+                            )
+                            .await
+                        {
+                            Ok(created) => {
+                                tracing::info!(
+                                    policy = %policy_match.policy_name,
+                                    intent_id = %created.release_intent_id,
+                                    destinations = created.releases.len(),
+                                    "auto-release triggered successfully"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    policy = %policy_match.policy_name,
+                                    "auto-release failed: {e:#}"
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("failed to evaluate auto-release policies: {e:#}");
+                }
+            }
+        }
+
         Ok(Response::new(AnnotateReleaseResponse {
             artifact: Some(artifact.into()),
         }))
@@ -190,7 +258,16 @@ impl ReleaseService for ReleaseServer {
         let created = self
             .state
             .release_registry()
-            .release(&artifact_id, req.destinations, req.environments, &actor)
+            .release(
+                &artifact_id,
+                req.destinations,
+                req.environments,
+                &actor,
+                &self.state.release_event_store(),
+                req.force,
+                req.use_pipeline,
+                &self.state.release_pipeline_registry(),
+            )
             .await
             .context("release")
             .to_internal_error()?;
@@ -297,34 +374,55 @@ impl ReleaseService for ReleaseServer {
         let release_registry = self.state.release_registry();
         let logs_registry = self.state.release_logs_registry();
 
-        // Spawn a task to poll and send status updates and logs for all destinations
+        let nats = self.state.nats.clone();
+
+        // Spawn a task that subscribes to NATS status changes and streams updates
         tokio::spawn(async move {
-            let poll_interval = std::time::Duration::from_millis(500);
-            // Track last status per destination
+            // Subscribe to status changes for this intent
+            let nats_subject = format!("forest.release.status.{}", release_intent_id);
+            let mut nats_sub = match nats.subscribe(nats_subject).await {
+                Ok(sub) => sub,
+                Err(e) => {
+                    let _ = tx
+                        .send(Err(tonic::Status::internal(format!(
+                            "failed to subscribe to NATS: {e}"
+                        ))))
+                        .await;
+                    return;
+                }
+            };
+
             let mut last_statuses: std::collections::HashMap<
                 uuid::Uuid,
                 forest_models::ReleaseStatus,
             > = std::collections::HashMap::new();
-            // Track log cursors per destination
             let mut log_cursors: std::collections::HashMap<uuid::Uuid, i64> =
                 std::collections::HashMap::new();
 
+            let mut fallback_interval =
+                tokio::time::interval(std::time::Duration::from_secs(2));
+            fallback_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
             loop {
+                // Wait for either a NATS notification or the fallback timer
+                tokio::select! {
+                    _msg = nats_sub.next() => {}
+                    _ = fallback_interval.tick() => {}
+                }
+
+                // Fetch current state and stream updates
                 match release_registry
                     .get_release_status_by_intent(&release_intent_id)
                     .await
                 {
                     Ok(status_infos) => {
                         if status_infos.is_empty() {
-                            // No releases found yet for this intent, keep polling
-                            tokio::time::sleep(poll_interval).await;
                             continue;
                         }
 
                         let mut all_finalized = true;
 
                         for status_info in &status_infos {
-                            // Check if status changed for this destination
                             let status_changed = last_statuses
                                 .get(&status_info.destination_id)
                                 .map(|prev| *prev != status_info.status)
@@ -348,7 +446,6 @@ impl ReleaseService for ReleaseServer {
                                 }
                             }
 
-                            // Poll for new log blocks for this destination
                             let log_cursor =
                                 *log_cursors.get(&status_info.destination_id).unwrap_or(&-1);
 
@@ -362,13 +459,11 @@ impl ReleaseService for ReleaseServer {
                             {
                                 Ok(log_blocks) => {
                                     for block in log_blocks {
-                                        // Update cursor for this destination
                                         if block.sequence > log_cursor {
                                             log_cursors
                                                 .insert(status_info.destination_id, block.sequence);
                                         }
 
-                                        // Send each log line from the block
                                         for log_line in block.log_lines {
                                             let event = WaitReleaseEvent {
                                                 event: Some(wait_release_event::Event::LogLine(
@@ -409,7 +504,6 @@ impl ReleaseService for ReleaseServer {
                             }
                         }
 
-                        // If all destinations are finalized, we're done
                         if all_finalized {
                             break;
                         }
@@ -424,8 +518,6 @@ impl ReleaseService for ReleaseServer {
                         break;
                     }
                 }
-
-                tokio::time::sleep(poll_interval).await;
             }
         });
 
@@ -543,6 +635,54 @@ impl ReleaseService for ReleaseServer {
             projects: projects.into_iter().map(|n| n.to_string()).collect(),
         }))
     }
+
+    async fn get_destination_states(
+        &self,
+        request: tonic::Request<GetDestinationStatesRequest>,
+    ) -> std::result::Result<tonic::Response<GetDestinationStatesResponse>, tonic::Status> {
+        let req = request.into_inner();
+
+        let project_id = if let Some(project) = &req.project {
+            let id = self
+                .state
+                .release_registry()
+                .get_project_id(&req.organisation, project)
+                .await
+                .context("resolve project")
+                .to_internal_error()?;
+            Some(id)
+        } else {
+            None
+        };
+
+        let rows = self
+            .state
+            .release_event_store()
+            .get_destination_states(&req.organisation, project_id.as_ref())
+            .await
+            .context("get destination states")
+            .to_internal_error()?;
+
+        let destinations = rows
+            .into_iter()
+            .map(|r| {
+                forest_grpc_interface::DestinationState {
+                    destination_id: r.destination_id.to_string(),
+                    destination_name: r.destination_name,
+                    environment: r.environment,
+                    release_id: Some(r.release_id.to_string()),
+                    artifact_id: Some(r.artifact_id.to_string()),
+                    status: Some(r.status),
+                    error_message: r.error_message,
+                    queued_at: Some(r.queued_at.to_rfc3339()),
+                    completed_at: r.completed_at.map(|t| t.to_rfc3339()),
+                    queue_position: r.queue_position.map(|p| p as i32),
+                }
+            })
+            .collect();
+
+        Ok(Response::new(GetDestinationStatesResponse { destinations }))
+    }
 }
 
 impl From<grpc::ArtifactContext> for crate::services::release_registry::ArtifactContext {
@@ -603,6 +743,7 @@ impl From<ReleaseDestination> for ArtifactDestination {
             type_organisation: value.type_organisation,
             type_name: value.type_name,
             type_version: value.type_version as u64,
+            status: value.status,
         }
     }
 }

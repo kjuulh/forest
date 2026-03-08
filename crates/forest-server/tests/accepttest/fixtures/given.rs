@@ -17,6 +17,7 @@ fn authed_request<T>(token: &str, inner: T) -> tonic::Request<T> {
 pub trait GivenReleaseFlow {
     async fn a_registered_user(self) -> Self;
     async fn an_organisation(self, name: &str) -> Self;
+    async fn an_environment(self, name: &str) -> Self;
     async fn a_destination(self, name: &str, environment: &str) -> Self;
     async fn an_uploaded_artifact(self) -> Self;
     async fn an_annotated_release(self) -> Self;
@@ -59,6 +60,30 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
             .expect("create organisation");
 
         self.data_mut().organisation = name.into();
+
+        self
+    }
+
+    async fn an_environment(self, name: &str) -> Self {
+        let mut env_client = self.fixture().environments();
+
+        let (token, org) = {
+            let data = self.data();
+            (data.auth_token.clone(), data.organisation.clone())
+        };
+
+        env_client
+            .create_environment(authed_request(
+                &token,
+                CreateEnvironmentRequest {
+                    organisation: org,
+                    name: name.into(),
+                    description: None,
+                    sort_order: 0,
+                },
+            ))
+            .await
+            .expect("create environment");
 
         self
     }

@@ -3,13 +3,18 @@ use std::net::SocketAddr;
 use forest_grpc_interface::{
     app_service_server::AppServiceServer,
     artifact_service_server::ArtifactServiceServer,
+    auto_release_policy_service_server::AutoReleasePolicyServiceServer,
     destination_service_server::DestinationServiceServer,
     environment_service_server::EnvironmentServiceServer,
+    event_service_server::EventServiceServer,
     notification_service_server::NotificationServiceServer,
     organisation_service_server::OrganisationServiceServer,
-    registry_service_server::RegistryServiceServer, release_service_server::ReleaseServiceServer,
+    registry_service_server::RegistryServiceServer,
+    release_pipeline_service_server::ReleasePipelineServiceServer,
+    release_service_server::ReleaseServiceServer,
     runner_service_server::RunnerServiceServer,
-    status_service_server::StatusServiceServer, users_service_server::UsersServiceServer,
+    status_service_server::StatusServiceServer,
+    users_service_server::UsersServiceServer,
 };
 use notmad::MadError;
 use organisations::OrganisationsServer;
@@ -28,7 +33,10 @@ use crate::{
 
 mod apps;
 mod artifacts;
+mod auto_release_policies;
 mod destinations;
+mod events;
+mod release_pipelines;
 mod environments;
 mod error;
 mod notifications;
@@ -91,6 +99,19 @@ impl GrpcServer {
                     state: self.state.clone(),
                 },
             ))
+            .add_service(AutoReleasePolicyServiceServer::new(
+                auto_release_policies::AutoReleasePoliciesServer {
+                    state: self.state.clone(),
+                },
+            ))
+            .add_service(ReleasePipelineServiceServer::new(
+                release_pipelines::ReleasePipelinesServer {
+                    state: self.state.clone(),
+                },
+            ))
+            .add_service(EventServiceServer::new(events::EventsServer {
+                state: self.state.clone(),
+            }))
             .add_service(RunnerServiceServer::new(runner::RunnerServer {
                 state: self.state.clone(),
                 runner_manager: self.runner_manager.clone(),

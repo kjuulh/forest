@@ -56,6 +56,7 @@ pub mod release_annotation {
         pub type_organisation: String,
         pub type_name: String,
         pub type_version: u64,
+        pub status: String,
     }
 }
 

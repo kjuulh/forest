@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package forest.v1;
+
+import "forest/v1/releases.proto";
+
+message AutoReleasePolicy {
+    string id = 1;
+    string name = 2;
+    bool enabled = 3;
+    optional string branch_pattern = 4;
+    optional string title_pattern = 5;
+    optional string author_pattern = 6;
+    optional string commit_message_pattern = 7;
+    optional string source_type_pattern = 8;
+    repeated string target_environments = 9;
+    repeated string target_destinations = 10;
+    bool force_release = 11;
+    string created_at = 12;
+    string updated_at = 13;
+    // When true, trigger the project's release pipeline instead of
+    // deploying directly to target destinations/environments.
+    bool use_pipeline = 14;
+}
+
+message CreateAutoReleasePolicyRequest {
+    Project project = 1;
+    string name = 2;
+    optional string branch_pattern = 3;
+    optional string title_pattern = 4;
+    optional string author_pattern = 5;
+    optional string commit_message_pattern = 6;
+    optional string source_type_pattern = 7;
+    repeated string target_environments = 8;
+    repeated string target_destinations = 9;
+    bool force_release = 10;
+    bool use_pipeline = 11;
+}
+message CreateAutoReleasePolicyResponse {
+    AutoReleasePolicy policy = 1;
+}
+
+message UpdateAutoReleasePolicyRequest {
+    Project project = 1;
+    string name = 2;
+    optional bool enabled = 3;
+    optional string branch_pattern = 4;
+    optional string title_pattern = 5;
+    optional string author_pattern = 6;
+    optional string commit_message_pattern = 7;
+    optional string source_type_pattern = 8;
+    repeated string target_environments = 9;
+    repeated string target_destinations = 10;
+    optional bool force_release = 11;
+    optional bool use_pipeline = 12;
+}
+message UpdateAutoReleasePolicyResponse {
+    AutoReleasePolicy policy = 1;
+}
+
+message DeleteAutoReleasePolicyRequest {
+    Project project = 1;
+    string name = 2;
+}
+message DeleteAutoReleasePolicyResponse {}
+
+message ListAutoReleasePoliciesRequest {
+    Project project = 1;
+}
+message ListAutoReleasePoliciesResponse {
+    repeated AutoReleasePolicy policies = 1;
+}
+
+service AutoReleasePolicyService {
+    rpc CreateAutoReleasePolicy(CreateAutoReleasePolicyRequest) returns (CreateAutoReleasePolicyResponse);
+    rpc UpdateAutoReleasePolicy(UpdateAutoReleasePolicyRequest) returns (UpdateAutoReleasePolicyResponse);
+    rpc DeleteAutoReleasePolicy(DeleteAutoReleasePolicyRequest) returns (DeleteAutoReleasePolicyResponse);
+    rpc ListAutoReleasePolicies(ListAutoReleasePoliciesRequest) returns (ListAutoReleasePoliciesResponse);
+}

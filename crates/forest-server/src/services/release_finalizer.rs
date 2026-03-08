@@ -4,12 +4,14 @@ use uuid::Uuid;
 use super::{
     destination_registry::DestinationRegistry,
     notification_registry::{NotificationRegistry, ReleaseContext as NotifReleaseContext},
+    release_event_store::{EventPayload, ReleaseEventStore, ReleaseEventType},
     release_registry::{ReleaseItem, ReleaseRegistry},
 };
 
-/// Update release status AND create a notification.
+/// Emit a release event AND create a notification.
 /// Used by the CompleteRelease gRPC handler (runner path).
 pub async fn finalize_release(
+    release_event_store: &ReleaseEventStore,
     release_registry: &ReleaseRegistry,
     notification_registry: &NotificationRegistry,
     destination_registry: &DestinationRegistry,
@@ -21,9 +23,28 @@ pub async fn finalize_release(
     status: ReleaseStatus,
     error_message: Option<&str>,
 ) -> anyhow::Result<()> {
-    release_registry
-        .set_release_status(release_id, status)
-        .await?;
+    if status.is_success() {
+        release_event_store
+            .emit_event(
+                *release_id,
+                ReleaseEventType::Succeeded,
+                EventPayload::default(),
+                None,
+            )
+            .await?;
+    } else {
+        release_event_store
+            .emit_event(
+                *release_id,
+                ReleaseEventType::Failed,
+                EventPayload {
+                    error_message: error_message.map(|s| s.to_string()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await?;
+    }
 
     create_release_notification(
         release_registry,
@@ -41,7 +62,7 @@ pub async fn finalize_release(
 }
 
 /// Create a release notification without updating status.
-/// Used by the Scheduler (in-process path) which manages its own status via transactions.
+/// Used by the Scheduler (in-process path) which manages its own events.
 pub async fn send_notification(
     release_registry: &ReleaseRegistry,
     notification_registry: &NotificationRegistry,

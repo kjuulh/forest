@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO release_events (\n                                release_id, event_type, payload\n                            ) VALUES ($1, 'release.requested', '{}')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "adff1fe017d7cda9fe245bf0bb2f5677344147482dac4906834ca0b051223f90"
+}
