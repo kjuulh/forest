@@ -45,6 +45,10 @@ impl EventSubscriptionService for EventSubscriptionsServer {
                 organisation_id: _,
             }) => (Some(*app_id), None),
             Some(Actor::User { user_id }) => (None, Some(*user_id)),
+            Some(Actor::ServiceAccount { service_account_id }) => {
+                // Service accounts are tracked via their id in the app_id column
+                (Some(*service_account_id), None)
+            }
             None => (None, None),
         };
 

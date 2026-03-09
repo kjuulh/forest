@@ -49,6 +49,34 @@ async fn resolve_app_token(db: &sqlx::PgPool, raw_token: &str) -> anyhow::Result
     }))
 }
 
+/// Compare the incoming token against the pre-hashed service account key
+/// held in memory (loaded from `FOREST_SERVICE_ACCOUNT_API_KEY` at startup).
+fn resolve_service_account_token(
+    expected_hash: Option<&[u8]>,
+    raw_token: &str,
+) -> Option<Actor> {
+    let expected = expected_hash?;
+    let incoming = sha2::Sha256::digest(raw_token.as_bytes());
+    if constant_time_eq(incoming.as_slice(), expected) {
+        Some(Actor::ServiceAccount {
+            service_account_id: uuid::Uuid::nil(),
+        })
+    } else {
+        None
+    }
+}
+
+/// Constant-time comparison to avoid timing side-channels.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
+}
+
 #[derive(Clone)]
 pub struct AuthMiddlewareLayer {
     state: State,
@@ -148,10 +176,10 @@ where
                 }
             };
 
-            // Try JWT first (user tokens)
+            // 1. Try JWT (user tokens)
             let access_token = AccessToken::new_from(&token);
-            if let Ok(access_token) = access_token {
-                if let Ok(claims) = state.tokens().verify_access_token(&access_token) {
+            if let Ok(access_token) = access_token
+                && let Ok(claims) = state.tokens().verify_access_token(&access_token) {
                     let user_id: uuid::Uuid = match claims.user_id.parse() {
                         Ok(id) => id,
                         Err(_) => {
@@ -163,16 +191,24 @@ where
                     req.extensions_mut().insert(claims);
                     return inner.call(req).await;
                 }
+
+            // 2. Try service account API key (in-memory, no DB hit)
+            if let Some(actor) = resolve_service_account_token(
+                state.config.service_account_token_hash.as_deref(),
+                &token,
+            ) {
+                req.extensions_mut().insert(actor);
+                return inner.call(req).await;
             }
 
-            // Fall back to app token lookup
+            // 3. Fall back to app token lookup (DB)
             match resolve_app_token(&state.db, &token).await {
                 Ok(Some(actor)) => {
                     req.extensions_mut().insert(actor);
                     inner.call(req).await
                 }
                 Ok(None) => {
-                    tracing::warn!(path = %path, "token verification failed: no matching user or app token");
+                    tracing::warn!(path = %path, "token verification failed: no matching user, app, or service account token");
                     Ok(grpc_unauthenticated("token verification failed"))
                 }
                 Err(e) => {

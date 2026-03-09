@@ -155,6 +155,9 @@ async fn create_release_notification(
             .as_ref()
             .and_then(|a| a.source.username.clone()),
         source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
+        source_user_id: ann_ctx
+            .as_ref()
+            .and_then(|a| a.source.user_id.clone()),
         source_type: ann_ctx
             .as_ref()
             .and_then(|a| a.source.source_type.clone()),

@@ -209,7 +209,7 @@ pub fn find_ready_stages(stages: &PipelineStages, states: &StageStates) -> Vec<S
     let mut ready = Vec::new();
     for (id, def) in stages {
         let state = states.get(id);
-        let is_pending = state.map_or(true, |s| s.status == StageStatus::Pending);
+        let is_pending = state.is_none_or(|s| s.status == StageStatus::Pending);
         if !is_pending {
             continue;
         }
@@ -217,7 +217,7 @@ pub fn find_ready_stages(stages: &PipelineStages, states: &StageStates) -> Vec<S
         let all_deps_succeeded = def.depends_on.iter().all(|dep| {
             states
                 .get(dep)
-                .map_or(false, |s| s.status == StageStatus::Succeeded)
+                .is_some_and(|s| s.status == StageStatus::Succeeded)
         });
 
         if all_deps_succeeded {
@@ -237,7 +237,7 @@ pub fn has_failed_dependency(
         return false;
     };
     def.depends_on.iter().any(|dep| {
-        states.get(dep).map_or(false, |s| {
+        states.get(dep).is_some_and(|s| {
             matches!(s.status, StageStatus::Failed | StageStatus::Cancelled)
         })
     })

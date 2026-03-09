@@ -1,4 +1,3 @@
-use anyhow::Context;
 use forest_grpc_interface::{notification_service_server::NotificationService, *};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -6,6 +5,7 @@ use tonic::Response;
 use uuid::Uuid;
 
 use crate::{
+    actor::Actor,
     grpc::artifacts::GrpcErrorExt,
     services::notification_registry::{NotificationRecord, NotificationRegistryState},
     state::State,
@@ -16,6 +16,24 @@ pub struct NotificationsServer {
     pub state: State,
 }
 
+/// Extract the actor's identity from request extensions.
+/// Prefers `AppClaims` (JWT user tokens) and falls back to `Actor`
+/// (service accounts and app tokens).
+fn extract_actor_id(
+    extensions: &http::Extensions,
+) -> Result<Uuid, tonic::Status> {
+    if let Some(claims) = extensions.get::<AppClaims>() {
+        return claims
+            .user_id
+            .parse()
+            .map_err(|_| tonic::Status::internal("invalid user_id in token"));
+    }
+    if let Some(actor) = extensions.get::<Actor>() {
+        return Ok(actor.actor_id());
+    }
+    Err(tonic::Status::unauthenticated("missing auth context"))
+}
+
 #[async_trait::async_trait]
 impl NotificationService for NotificationsServer {
     async fn get_notification_preferences(
@@ -23,16 +41,7 @@ impl NotificationService for NotificationsServer {
         request: tonic::Request<GetNotificationPreferencesRequest>,
     ) -> std::result::Result<tonic::Response<GetNotificationPreferencesResponse>, tonic::Status>
     {
-        let claims = request
-            .extensions()
-            .get::<AppClaims>()
-            .ok_or_else(|| tonic::Status::unauthenticated("missing auth context"))?;
-
-        let user_id: Uuid = claims
-            .user_id
-            .parse()
-            .context("invalid user_id")
-            .to_internal_error()?;
+        let user_id = extract_actor_id(request.extensions())?;
 
         let prefs = self
             .state
@@ -58,16 +67,7 @@ impl NotificationService for NotificationsServer {
         request: tonic::Request<SetNotificationPreferenceRequest>,
     ) -> std::result::Result<tonic::Response<SetNotificationPreferenceResponse>, tonic::Status>
     {
-        let claims = request
-            .extensions()
-            .get::<AppClaims>()
-            .ok_or_else(|| tonic::Status::unauthenticated("missing auth context"))?;
-
-        let user_id: Uuid = claims
-            .user_id
-            .parse()
-            .context("invalid user_id")
-            .to_internal_error()?;
+        let user_id = extract_actor_id(request.extensions())?;
 
         let req = request.into_inner();
         let ntype = notification_type_to_str(req.notification_type());
@@ -97,17 +97,7 @@ impl NotificationService for NotificationsServer {
     ) -> std::result::Result<tonic::Response<Self::ListenNotificationsStream>, tonic::Status> {
         tracing::debug!("listen_notifications stream");
 
-        let claims = request
-            .extensions()
-            .get::<AppClaims>()
-            .ok_or_else(|| tonic::Status::unauthenticated("missing auth context"))?
-            .clone();
-
-        let user_id: Uuid = claims
-            .user_id
-            .parse()
-            .context("invalid user_id")
-            .to_internal_error()?;
+        let user_id = extract_actor_id(request.extensions())?;
 
         let req = request.into_inner();
         let organisation = req.organisation;
@@ -168,16 +158,7 @@ impl NotificationService for NotificationsServer {
         &self,
         request: tonic::Request<ListNotificationsRequest>,
     ) -> std::result::Result<tonic::Response<ListNotificationsResponse>, tonic::Status> {
-        let claims = request
-            .extensions()
-            .get::<AppClaims>()
-            .ok_or_else(|| tonic::Status::unauthenticated("missing auth context"))?;
-
-        let user_id: Uuid = claims
-            .user_id
-            .parse()
-            .context("invalid user_id")
-            .to_internal_error()?;
+        let user_id = extract_actor_id(request.extensions())?;
 
         let req = request.into_inner();
         let limit = if req.page_size > 0 {
@@ -263,6 +244,7 @@ fn release_context_to_grpc(
         environment: ctx.environment.unwrap_or_default(),
         source_username: ctx.source_username.unwrap_or_default(),
         source_email: ctx.source_email.unwrap_or_default(),
+        source_user_id: ctx.source_user_id.unwrap_or_default(),
         commit_sha: ctx.commit_sha.unwrap_or_default(),
         commit_branch: ctx.commit_branch.unwrap_or_default(),
         context_title: ctx.context_title.unwrap_or_default(),

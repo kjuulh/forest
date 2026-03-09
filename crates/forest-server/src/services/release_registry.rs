@@ -617,6 +617,7 @@ impl ReleaseRegistry {
         let source: Source = serde_json::from_value(rec.source).unwrap_or(Source {
             username: None,
             email: None,
+            user_id: None,
             source_type: None,
             run_url: None,
         });
@@ -778,6 +779,8 @@ impl ReleaseRegistryState for State {
 pub struct Source {
     pub username: Option<String>,
     pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

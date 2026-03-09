@@ -201,6 +201,7 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
                     source: Some(Source {
                         user: Some("test-user".into()),
                         email: Some("test@example.com".into()),
+                        user_id: None,
                         source_type: Some("ci".into()),
                         run_url: Some("https://ci.example.com/run/123".into()),
                     }),

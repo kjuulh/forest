@@ -149,6 +149,12 @@ pub struct FileStream {
     >,
 }
 
+impl Default for FileStream {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileStream {
     pub fn new() -> Self {
         let (tx, rx) = futures::channel::mpsc::channel(10);

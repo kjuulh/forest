@@ -29,6 +29,7 @@ message ReleaseContext {
   // Source info
   string source_username = 8;
   string source_email = 9;
+  string source_user_id = 17;
   // Git ref
   string commit_sha = 10;
   string commit_branch = 11;

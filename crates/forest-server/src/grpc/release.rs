@@ -64,18 +64,28 @@ impl ReleaseService for ReleaseServer {
             .context("source is required")
             .to_internal_error()?;
 
-        // For human users, always resolve identity from the DB.
-        // Apps (CI systems etc.) are allowed to pass along third-party user info.
-        if let Actor::User { user_id } = &actor {
-            let user = self
-                .state
-                .user_service()
-                .get_user(*user_id)
-                .await
-                .to_internal_error()?
-                .ok_or_else(|| tonic::Status::internal("authenticated user not found in DB"))?;
-            source.username = Some(user.username);
-            source.email = user.emails.into_iter().next().map(|e| e.email);
+        // Always stamp the actor identity on the source.
+        // For human users, resolve username/email from the DB.
+        // Apps and service accounts keep whatever the caller passed but still get their actor ID.
+        match &actor {
+            Actor::User { user_id } => {
+                let user = self
+                    .state
+                    .user_service()
+                    .get_user(*user_id)
+                    .await
+                    .to_internal_error()?
+                    .ok_or_else(|| tonic::Status::internal("authenticated user not found in DB"))?;
+                source.username = Some(user.username);
+                source.email = user.emails.into_iter().next().map(|e| e.email);
+                source.user_id = Some(user_id.to_string());
+            }
+            Actor::App { app_id, .. } => {
+                source.user_id = Some(app_id.to_string());
+            }
+            Actor::ServiceAccount { service_account_id } => {
+                source.user_id = Some(service_account_id.to_string());
+            }
         }
         let art_context: release_registry::ArtifactContext = req
             .context
@@ -122,6 +132,10 @@ impl ReleaseService for ReleaseServer {
                     artifact_id: Some(artifact_id.to_string()),
                     source_username: source.username.clone(),
                     source_email: source.email.clone(),
+                    source_user_id: match &actor {
+                        Actor::User { user_id } => Some(user_id.to_string()),
+                        _ => None,
+                    },
                     source_type: source.source_type.clone(),
                     run_url: source.run_url.clone(),
                     commit_sha: Some(reference.commit_sha.clone()),
@@ -446,6 +460,10 @@ impl ReleaseService for ReleaseServer {
                     destination_count: dest_count as i32,
                     source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
                     source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
+                    source_user_id: match &actor {
+                        Actor::User { user_id } => Some(user_id.to_string()),
+                        _ => None,
+                    },
                     source_type: ann_ctx
                         .as_ref()
                         .and_then(|a| a.source.source_type.clone()),
@@ -579,8 +597,7 @@ impl ReleaseService for ReleaseServer {
                 )
                 .fetch_optional(&db)
                 .await
-                {
-                    if let (Some(stages_json), Some(stage_states_json)) =
+                    && let (Some(stages_json), Some(stage_states_json)) =
                         (&intent_row.stages, &intent_row.stage_states)
                     {
                         use crate::services::release_pipeline::{
@@ -595,7 +612,7 @@ impl ReleaseService for ReleaseServer {
                                 let status_str = format!("{:?}", state.status).to_uppercase();
                                 let changed = last_stage_statuses
                                     .get(stage_id)
-                                    .map_or(true, |prev| *prev != status_str);
+                                    .is_none_or(|prev| *prev != status_str);
 
                                 if changed {
                                     last_stage_statuses
@@ -632,7 +649,6 @@ impl ReleaseService for ReleaseServer {
                             }
                         }
                     }
-                }
 
                 // Fetch current state and stream updates
                 match release_registry
@@ -1134,14 +1150,14 @@ fn pipeline_run_to_proto(
 
     let stages: PipelineStages = row
         .stages
-        .map(|v| serde_json::from_value(v))
+        .map(serde_json::from_value)
         .transpose()
         .context("parse pipeline stages")?
         .unwrap_or_default();
 
     let stage_states: StageStates = row
         .stage_states
-        .map(|v| serde_json::from_value(v))
+        .map(serde_json::from_value)
         .transpose()
         .context("parse stage states")?
         .unwrap_or_default();
@@ -1212,6 +1228,7 @@ impl From<grpc::Source> for crate::services::release_registry::Source {
         Self {
             username: value.user,
             email: value.email,
+            user_id: None, // set server-side from the authenticated actor
             source_type: value.source_type,
             run_url: value.run_url,
         }
@@ -1277,6 +1294,7 @@ impl From<release_registry::Source> for grpc::Source {
         Self {
             user: value.username,
             email: value.email,
+            user_id: value.user_id,
             source_type: value.source_type,
             run_url: value.run_url,
         }

@@ -288,6 +288,8 @@ message Source {
   optional string email = 2;
   optional string source_type = 3;
   optional string run_url = 4;
+  // The actor ID (user, app, or service account UUID) that created this annotation.
+  optional string user_id = 5;
 }
 
 message ArtifactContext {

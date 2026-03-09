@@ -42,6 +42,7 @@ impl DestinationServicesState for State {
             services: Arc::new(vec![
                 DestinationService::new_flux_v1(self, release_logs_registry.clone()),
                 DestinationService::new_kubernetes_v1(release_logs_registry.clone()),
+                DestinationService::new_forage_v1(release_logs_registry.clone()),
                 DestinationService::new_terraform_v1(self, release_logs_registry),
             ]),
         }

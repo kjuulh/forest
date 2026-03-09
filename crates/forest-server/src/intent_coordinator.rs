@@ -153,7 +153,7 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
 
     let mut stage_states: StageStates = intent
         .stage_states
-        .map(|v| serde_json::from_value(v))
+        .map(serde_json::from_value)
         .transpose()
         .context("parse stage_states")?
         .unwrap_or_else(|| init_stage_states(&stages));
@@ -247,8 +247,8 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
             }
             StageConfig::Wait { .. } => {
                 // Check if wait_until has passed
-                if let Some(ref wait_until_str) = current.wait_until {
-                    if let Ok(wait_until) = chrono::DateTime::parse_from_rfc3339(wait_until_str) {
+                if let Some(ref wait_until_str) = current.wait_until
+                    && let Ok(wait_until) = chrono::DateTime::parse_from_rfc3339(wait_until_str) {
                         let wait_until_utc = wait_until.with_timezone(&chrono::Utc);
                         if wait_until_utc <= now {
                             let mut updated = current.clone();
@@ -264,7 +264,6 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                             });
                         }
                     }
-                }
             }
         }
     }
@@ -276,7 +275,7 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
         for stage_id in &all_stage_ids {
             let is_pending = stage_states
                 .get(stage_id)
-                .map_or(true, |s| s.status == StageStatus::Pending);
+                .is_none_or(|s| s.status == StageStatus::Pending);
             if is_pending && has_failed_dependency(stage_id, &stages, &stage_states) {
                 stage_states.insert(
                     stage_id.clone(),

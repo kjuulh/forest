@@ -16,6 +16,7 @@ pub mod source {
     pub struct Source {
         pub username: Option<String>,
         pub email: Option<String>,
+        pub user_id: Option<String>,
         pub source_type: Option<String>,
         pub run_url: Option<String>,
     }

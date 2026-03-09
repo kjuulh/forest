@@ -1,7 +1,8 @@
-#![allow(dead_code)]
+#![allow(dead_code, clippy::too_many_arguments)]
 
 pub mod actor;
 pub mod cli;
+pub mod domains;
 mod repositories;
 mod servehttp;
 pub mod services;

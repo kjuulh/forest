@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT\n                    a.id                 as id,\n                    a.artifact_id        as artifact_id,\n                    a.slug               as slug,\n                    a.metadata           as metadata,\n                    a.source             as source,\n                    a.context            as context,\n                    a.project_id         as project_id,\n                    a.created            as created,\n                    p.organisation       as organisation,\n                    p.project            as project\n                FROM annotations a\n                JOIN projects p ON a.project_id = p.id\n                WHERE\n                        p.organisation = $1\n                    AND p.project = $2\n                ORDER BY a.created DESC, a.id\n            ",
+  "query": "\n                SELECT\n                    a.id,\n                    a.artifact_id,\n                    a.slug,\n                    a.metadata,\n                    a.source,\n                    a.context,\n                    a.ref,\n                    a.project_id,\n                    a.created,\n                    p.organisation as organisation,\n                    p.project as project\n                FROM annotations a\n                JOIN projects p ON a.project_id = p.id\n                WHERE\n                    slug = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -35,28 +35,32 @@
       },
       {
         "ordinal": 6,
+        "name": "ref",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 7,
         "name": "project_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "created",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "organisation",
         "type_info": "Text"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "project",
         "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
         "Text"
       ]
     },
@@ -70,8 +74,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "c8e7ac83792fccc3b21cda8d74174faa4a6c10f01ce7cb47a16fc8293baba29f"
+  "hash": "14ed299097638b4a6b6c0a2c44da85c2f63a63027d08ddc3de9d1b6bfb699ef4"
 }

@@ -247,6 +247,12 @@ pub struct StagingArtifactID {
     created: SystemTime,
 }
 
+impl Default for StagingArtifactID {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StagingArtifactID {
     pub fn new() -> Self {
         Self {

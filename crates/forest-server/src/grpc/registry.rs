@@ -6,7 +6,9 @@ use forest_grpc_interface::{registry_service_server::RegistryService, *};
 use uuid::Uuid;
 
 use crate::{
-    services::component_registry::{ComponentRegistryState, FileStream, models::ComponentVersion},
+    services::component_aggregate::{
+        ComponentServiceState, ComponentVersion, FileStream,
+    },
     state::State,
 };
 
@@ -33,10 +35,10 @@ impl RegistryService for RegistryServer {
 
         let component = self
             .state
-            .component_registry()
+            .component_service()
             .get_component(&request.name, &request.organisation)
             .await
-            .inspect_err(|e| tracing::warn!("failed to get components: {:#?}", e))
+            .inspect_err(|e| tracing::warn!("failed to get component: {e:#}"))
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
         Ok(tonic::Response::new(GetComponentResponse {
@@ -52,10 +54,10 @@ impl RegistryService for RegistryServer {
 
         let component = self
             .state
-            .component_registry()
+            .component_service()
             .get_component_version(&req.name, &req.organisation, &req.version)
             .await
-            .inspect_err(|e| tracing::warn!("failed to get component by version: {:#?}", e))
+            .inspect_err(|e| tracing::warn!("failed to get component version: {e:#}"))
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
         Ok(tonic::Response::new(GetComponentVersionResponse {
@@ -69,16 +71,16 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<BeginUploadResponse>, tonic::Status> {
         let request = request.into_inner();
 
-        let context = self
+        let upload_id = self
             .state
-            .component_registry()
-            .begin_upload(&request.name, &request.organisation, &request.version)
+            .component_service()
+            .begin_upload(&request.organisation, &request.name, &request.version)
             .await
-            .inspect_err(|e| tracing::warn!("failed to get components: {:#?}", e))
+            .inspect_err(|e| tracing::warn!("failed to begin upload: {e:#}"))
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
         Ok(tonic::Response::new(BeginUploadResponse {
-            upload_context: context.into(),
+            upload_context: upload_id.to_string(),
         }))
     }
 
@@ -88,18 +90,17 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<UploadFileResponse>, tonic::Status> {
         let request = request.into_inner();
 
+        let upload_id: Uuid = request
+            .upload_context
+            .parse()
+            .context("invalid upload_context UUID")
+            .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
+
         self.state
-            .component_registry()
-            .upload_file(
-                request
-                    .upload_context
-                    .try_into()
-                    .map_err(|e: anyhow::Error| tonic::Status::invalid_argument(e.to_string()))?,
-                request.file_path,
-                &request.file_content,
-            )
+            .component_service()
+            .upload_file(upload_id, &request.file_path, &request.file_content)
             .await
-            .inspect_err(|e| tracing::warn!("failed to upload file: {:#?}", e))
+            .inspect_err(|e| tracing::warn!("failed to upload file: {e:#}"))
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
         Ok(tonic::Response::new(UploadFileResponse {}))
@@ -111,16 +112,17 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<CommitUploadResponse>, tonic::Status> {
         let request = request.into_inner();
 
+        let upload_id: Uuid = request
+            .upload_context
+            .parse()
+            .context("invalid upload_context UUID")
+            .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
+
         self.state
-            .component_registry()
-            .commit(
-                request
-                    .upload_context
-                    .try_into()
-                    .map_err(|e: anyhow::Error| tonic::Status::invalid_argument(e.to_string()))?,
-            )
+            .component_service()
+            .commit_upload(upload_id)
             .await
-            .inspect_err(|e| tracing::warn!("failed to commit upload: {:#?}", e))
+            .inspect_err(|e| tracing::warn!("failed to commit upload: {e:#}"))
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
         Ok(tonic::Response::new(CommitUploadResponse {}))
@@ -138,7 +140,6 @@ impl RegistryService for RegistryServer {
         let request = request.into_inner();
 
         let mut stream = FileStream::new();
-
         let take_stream = stream.take_stream();
 
         let component_id: Uuid = request
@@ -147,10 +148,10 @@ impl RegistryService for RegistryServer {
             .context("failed to parse uuid")
             .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
 
-        let s = self.state.clone();
+        let service = self.state.component_service();
         tokio::spawn(async move {
-            if let Err(e) = s.component_registry().get_files(component_id, stream).await {
-                tracing::error!("failed to send files: {:#?}", e);
+            if let Err(e) = service.get_files(component_id, stream).await {
+                tracing::error!("failed to send files: {e:#}");
             }
         });
 

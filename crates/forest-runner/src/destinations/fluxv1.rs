@@ -102,11 +102,10 @@ impl FluxMetadata {
             .as_ref()
             .context("git_url required for git mode")?;
 
-        if let (Some(username), Some(token)) = (&self.git_username, &self.git_token) {
-            if let Some(rest) = url.strip_prefix("https://") {
+        if let (Some(username), Some(token)) = (&self.git_username, &self.git_token)
+            && let Some(rest) = url.strip_prefix("https://") {
                 return Ok(format!("https://{}:{}@{}", username, token, rest));
             }
-        }
 
         Ok(url.clone())
     }

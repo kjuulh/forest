@@ -18,6 +18,7 @@ forest-grpc-interface = { path = "crates/forest-grpc-interface" }
 forest-runner = { path = "crates/forest-runner" }
 forest-sdk = { path = "crates/forest-sdk" }
 forest-sdk-codegen = { path = "crates/forest-sdk-codegen" }
+forest-event-store = { path = "crates/forest-event-store" }
 
 anyhow = { version = "1" }
 tokio = { version = "1", features = ["full"] }

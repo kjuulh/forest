@@ -87,7 +87,6 @@ forest project trigger create \
   --project service-example \
   --name "deploy-main-via-pipeline" \
   --branch '^main$' \
-  --source-type 'github_actions' \
   --env dev --env staging --env prod \
   --use-pipeline
 

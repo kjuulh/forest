@@ -1,6 +1,7 @@
 use anyhow::Context;
 use base64::{Engine, prelude::BASE64_STANDARD};
 use clap::{Parser, Subcommand};
+use sha2::Digest;
 
 use crate::{Config, state::State};
 
@@ -69,6 +70,14 @@ pub async fn execute() -> anyhow::Result<()> {
         access_token_secret_key: BASE64_STANDARD
             .decode(cli.access_token_secret_key)
             .context("access token secret was not base64")?,
+
+        service_account_token_hash: std::env::var("FOREST_SERVICE_ACCOUNT_API_KEY")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|key| {
+                tracing::info!("service account API key configured");
+                sha2::Sha256::digest(key.as_bytes()).to_vec()
+            }),
     };
     let state = State::new(config).await?;
 

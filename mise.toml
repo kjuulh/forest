@@ -140,6 +140,21 @@ description = "Clean up k3d flux test resources"
 [tasks.test]
 run = "cargo nextest run"
 
+[tasks."test:event-store"]
+depends = ["local:up"]
+description = "Run forest-event-store integration tests"
+run = "cargo nextest run -p forest-event-store"
+
+[tasks."fuzz:event-store"]
+dir = "./crates/forest-event-store"
+description = "Run forest-event-store fuzz targets (10s each by default)"
+run = """
+for target in fuzz_event_serde fuzz_aggregate_fold fuzz_hydrate; do
+  echo "=== Fuzzing $target ==="
+  cargo +nightly fuzz run "$target" -- -max_total_time=${FUZZ_SECONDS:-10}
+done
+"""
+
 
 [tasks."generate:proto"]
 run = "buf generate"

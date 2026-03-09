@@ -5,6 +5,7 @@ use forest_grpc_interface::artifact_service_client::ArtifactServiceClient;
 use forest_grpc_interface::destination_service_client::DestinationServiceClient;
 use forest_grpc_interface::environment_service_client::EnvironmentServiceClient;
 use forest_grpc_interface::organisation_service_client::OrganisationServiceClient;
+use forest_grpc_interface::registry_service_client::RegistryServiceClient;
 use forest_grpc_interface::release_service_client::ReleaseServiceClient;
 use forest_grpc_interface::users_service_client::UsersServiceClient;
 use tonic::transport::Channel;
@@ -39,6 +40,10 @@ impl Fixture {
     pub fn environments(&self) -> EnvironmentServiceClient<Channel> {
         EnvironmentServiceClient::new(self.channel.clone())
     }
+
+    pub fn registry(&self) -> RegistryServiceClient<Channel> {
+        RegistryServiceClient::new(self.channel.clone())
+    }
 }
 
 /// Dedicated runtime that outlives all tests, so spawned server/scheduler tasks
@@ -71,6 +76,7 @@ pub async fn fixture() -> anyhow::Result<Fixture> {
                 password_secret_key: "test-password-secret-key-32chars".into(),
                 access_token_secret_key: b"test-access-token-secret-key-32b".to_vec(),
                 refresh_token_secret_key: b"test-refresh-token-secret-key32b".to_vec(),
+                service_account_token_hash: None,
             };
 
             let state = forest_server::State::new(config)
@@ -150,6 +156,9 @@ async fn clean_database(db: &sqlx::PgPool) {
         "artifacts",
         "artifact_staging",
         "blob_storage",
+        "component_files",
+        "component_staging",
+        "components",
         "destinations",
         "environments",
         "notifications",
@@ -162,6 +171,8 @@ async fn clean_database(db: &sqlx::PgPool) {
         "organisation_members",
         "organisations",
         "projects",
+        "es_events",
+        "es_streams",
     ];
     for table in tables {
         let query = format!("DELETE FROM {}", table);

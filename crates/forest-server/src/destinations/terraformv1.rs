@@ -489,6 +489,21 @@ impl TerraformV1Destination {
             .env("CI", "true")
             .envs(tf_envs);
 
+        // Point at a network mirror (pull-through cache) so ephemeral work
+        // dirs don't hit GitHub directly for provider downloads.
+        if let Ok(mirror_url) = std::env::var("FOREST_TERRAFORM_PROVIDER_MIRROR_URL") {
+            let cli_config = path.join(".terraformrc");
+            tokio::fs::write(
+                &cli_config,
+                format!(
+                    "provider_installation {{\n  network_mirror {{\n    url = \"{mirror_url}\"\n  }}\n}}\n"
+                ),
+            )
+            .await
+            .ok();
+            cmd.env("TF_CLI_CONFIG_FILE", &cli_config);
+        }
+
         for (k, v) in &destination.metadata {
             cmd.env(format!("TF_VAR_{}", k), v);
         }

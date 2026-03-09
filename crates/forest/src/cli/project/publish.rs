@@ -224,6 +224,7 @@ impl PublishCommand {
         let source = Source {
             username: self.source_username.clone(),
             email: self.source_email.clone(),
+            user_id: None, // set server-side from auth token
             source_type: self.source_type.clone(),
             run_url: self.run_url.clone(),
         };

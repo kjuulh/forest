@@ -272,6 +272,8 @@ CREATE TABLE artifact_files (
     updated TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE INDEX idx_artifact_files_staging ON artifact_files (artifact_staging_id);
+
 CREATE TABLE artifacts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     artifact_id UUID NOT NULL,

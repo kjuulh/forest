@@ -42,6 +42,12 @@ impl DestinationCapability {
     }
 }
 
+impl Default for RunnerManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RunnerManager {
     pub fn new() -> Self {
         Self {

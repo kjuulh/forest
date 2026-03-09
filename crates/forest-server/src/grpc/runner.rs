@@ -158,8 +158,7 @@ impl RunnerService for RunnerServer {
                                             if let Ok(Some(scope)) = token_registry
                                                 .validate_token(&ack.release_token)
                                                 .await
-                                            {
-                                                if let Err(e) = event_store
+                                                && let Err(e) = event_store
                                                     .emit_event(
                                                         scope.release_id,
                                                         ReleaseEventType::Started,
@@ -173,7 +172,6 @@ impl RunnerService for RunnerServer {
                                                         "failed to transition to RUNNING: {e}"
                                                     );
                                                 }
-                                            }
                                         }
                                     }
                                     _ => {}
@@ -474,8 +472,8 @@ impl RunnerService for RunnerServer {
         }
 
         // Flush remaining
-        if !buffer.is_empty() {
-            if let Some(scope) = &validated_scope {
+        if !buffer.is_empty()
+            && let Some(scope) = &validated_scope {
                 let _ = logs_registry
                     .insert_log_block(
                         attempt,
@@ -486,7 +484,6 @@ impl RunnerService for RunnerServer {
                     )
                     .await;
             }
-        }
 
         Ok(Response::new(PushLogResponse {}))
     }

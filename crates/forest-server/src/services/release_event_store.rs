@@ -375,10 +375,78 @@ impl ReleaseEventStore {
                         release_intent_id.to_string().into(),
                     )
                     .await;
+            } else {
+                // Direct intent (no pipeline) — finalize if all child releases are terminal
+                self.try_finalize_direct_intent(&release_intent_id).await;
             }
         }
 
         Ok(())
+    }
+
+    /// Finalize a direct (non-pipeline) intent when all child releases are terminal.
+    async fn try_finalize_direct_intent(&self, intent_id: &Uuid) {
+        let result: Result<_, anyhow::Error> = async {
+            // Check if this is a direct intent (no stages) that's still ACTIVE
+            let intent = sqlx::query!(
+                "SELECT id, stages, status FROM release_intents WHERE id = $1",
+                intent_id,
+            )
+            .fetch_optional(&self.db)
+            .await?;
+
+            let Some(intent) = intent else { return Ok(()) };
+            if intent.stages.is_some() || intent.status != "ACTIVE" {
+                return Ok(());
+            }
+
+            // Check if all child releases are terminal
+            let non_terminal = sqlx::query_scalar!(
+                r#"SELECT count(*) as "count!" FROM release_states
+                 WHERE release_intent_id = $1
+                   AND status NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT')"#,
+                intent_id,
+            )
+            .fetch_one(&self.db)
+            .await?;
+
+            if non_terminal > 0 {
+                return Ok(());
+            }
+
+            // All terminal — determine intent status
+            let any_failed = sqlx::query_scalar!(
+                r#"SELECT count(*) as "count!" FROM release_states
+                 WHERE release_intent_id = $1
+                   AND status IN ('FAILED', 'TIMED_OUT')"#,
+                intent_id,
+            )
+            .fetch_one(&self.db)
+            .await?;
+
+            let intent_status = if any_failed > 0 { "FAILED" } else { "SUCCEEDED" };
+
+            sqlx::query!(
+                "UPDATE release_intents SET status = $1, updated = now() WHERE id = $2",
+                intent_status,
+                intent_id,
+            )
+            .execute(&self.db)
+            .await?;
+
+            tracing::debug!(
+                %intent_id,
+                status = intent_status,
+                "finalized direct intent"
+            );
+
+            Ok(())
+        }
+        .await;
+
+        if let Err(e) = result {
+            tracing::warn!(%intent_id, "failed to finalize direct intent: {e:#}");
+        }
     }
 
     /// Pick up queued releases for the fallback sweep.

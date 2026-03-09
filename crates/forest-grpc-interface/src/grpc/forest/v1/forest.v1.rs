@@ -528,6 +528,1101 @@ pub struct ListEventSubscriptionsResponse {
     #[prost(message, repeated, tag="1")]
     pub subscriptions: ::prost::alloc::vec::Vec<EventSubscription>,
 }
+/// ---------------------------------------------------------------------------
+/// Apply
+/// ---------------------------------------------------------------------------
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ApplyResourcesRequest {
+    /// Caller-chosen idempotency key (release_state id works well).
+    #[prost(string, tag="1")]
+    pub apply_id: ::prost::alloc::string::String,
+    /// Namespace / tenant isolation — maps to the forest organisation.
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
+    /// The ordered list of resources to reconcile.  Forage processes them in
+    /// order so that dependencies (e.g. Service before HTTPRoute) are met.
+    #[prost(message, repeated, tag="3")]
+    pub resources: ::prost::alloc::vec::Vec<ForageResource>,
+    /// Labels propagated to every resource for bookkeeping.
+    #[prost(map="string, string", tag="4")]
+    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApplyResourcesResponse {
+    /// Server-generated rollout id for status tracking.
+    #[prost(string, tag="1")]
+    pub rollout_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchRolloutRequest {
+    #[prost(string, tag="1")]
+    pub rollout_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RolloutEvent {
+    #[prost(string, tag="1")]
+    pub resource_name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub resource_kind: ::prost::alloc::string::String,
+    #[prost(enumeration="RolloutStatus", tag="3")]
+    pub status: i32,
+    #[prost(string, tag="4")]
+    pub message: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeleteResourcesRequest {
+    #[prost(string, tag="1")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Selector labels — all resources matching these labels are removed.
+    #[prost(map="string, string", tag="2")]
+    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteResourcesResponse {
+}
+/// ===========================================================================
+/// Resource envelope — every item in the apply list is one of these.
+/// ===========================================================================
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ForageResource {
+    /// Unique name within the namespace (e.g. "my-api", "my-api-worker").
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(oneof="forage_resource::Spec", tags="10, 11, 12, 13, 14")]
+    pub spec: ::core::option::Option<forage_resource::Spec>,
+}
+/// Nested message and enum types in `ForageResource`.
+pub mod forage_resource {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Spec {
+        #[prost(message, tag="10")]
+        ContainerService(super::ContainerServiceSpec),
+        #[prost(message, tag="11")]
+        Service(super::ServiceSpec),
+        #[prost(message, tag="12")]
+        Route(super::RouteSpec),
+        #[prost(message, tag="13")]
+        CronJob(super::CronJobSpec),
+        #[prost(message, tag="14")]
+        Job(super::JobSpec),
+    }
+}
+/// ===========================================================================
+///   ContainerServiceSpec — the primary workload.
+///   Combines the concerns of Deployment + Pod in a single cohesive spec.
+/// ===========================================================================
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ContainerServiceSpec {
+    /// ---- Scheduling & scaling ------------------------------------------------
+    #[prost(message, optional, tag="1")]
+    pub scaling: ::core::option::Option<ScalingPolicy>,
+    /// ---- Pod-level settings --------------------------------------------------
+    /// Main application container (exactly one required).
+    #[prost(message, optional, tag="2")]
+    pub container: ::core::option::Option<Container>,
+    /// Optional sidecar containers that share the pod network.
+    #[prost(message, repeated, tag="3")]
+    pub sidecars: ::prost::alloc::vec::Vec<Container>,
+    /// Init containers run sequentially before the main container starts.
+    #[prost(message, repeated, tag="4")]
+    pub init_containers: ::prost::alloc::vec::Vec<Container>,
+    /// ---- Volumes available to all containers in the pod ----------------------
+    #[prost(message, repeated, tag="5")]
+    pub volumes: ::prost::alloc::vec::Vec<Volume>,
+    /// ---- Update strategy -----------------------------------------------------
+    #[prost(message, optional, tag="6")]
+    pub update_strategy: ::core::option::Option<UpdateStrategy>,
+    /// ---- Pod-level configuration ---------------------------------------------
+    #[prost(message, optional, tag="7")]
+    pub pod_config: ::core::option::Option<PodConfig>,
+}
+/// ---------------------------------------------------------------------------
+///   Container — describes a single OCI container.
+/// ---------------------------------------------------------------------------
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Container {
+    /// Human-readable name (must be unique within the pod).
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    /// OCI image reference, e.g. "registry.forage.sh/org/app:v1.2.3".
+    #[prost(string, tag="2")]
+    pub image: ::prost::alloc::string::String,
+    /// Override the image entrypoint.
+    #[prost(string, repeated, tag="3")]
+    pub command: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Arguments passed to the entrypoint.
+    #[prost(string, repeated, tag="4")]
+    pub args: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Working directory inside the container.
+    #[prost(string, tag="5")]
+    pub working_dir: ::prost::alloc::string::String,
+    /// Environment variables — static values and references.
+    #[prost(message, repeated, tag="6")]
+    pub env: ::prost::alloc::vec::Vec<EnvVar>,
+    /// Ports the container listens on.
+    #[prost(message, repeated, tag="7")]
+    pub ports: ::prost::alloc::vec::Vec<ContainerPort>,
+    /// Resource requests and limits.
+    #[prost(message, optional, tag="8")]
+    pub resources: ::core::option::Option<ResourceRequirements>,
+    /// Volume mounts into this container's filesystem.
+    #[prost(message, repeated, tag="9")]
+    pub volume_mounts: ::prost::alloc::vec::Vec<VolumeMount>,
+    /// Health probes.
+    #[prost(message, optional, tag="10")]
+    pub liveness_probe: ::core::option::Option<Probe>,
+    #[prost(message, optional, tag="11")]
+    pub readiness_probe: ::core::option::Option<Probe>,
+    #[prost(message, optional, tag="12")]
+    pub startup_probe: ::core::option::Option<Probe>,
+    /// Lifecycle hooks.
+    #[prost(message, optional, tag="13")]
+    pub lifecycle: ::core::option::Option<Lifecycle>,
+    /// Security context for this container.
+    #[prost(message, optional, tag="14")]
+    pub security_context: ::core::option::Option<ContainerSecurityContext>,
+    /// Image pull policy: "Always", "IfNotPresent", "Never".
+    #[prost(string, tag="15")]
+    pub image_pull_policy: ::prost::alloc::string::String,
+    /// Whether stdin / tty are allocated (usually false for services).
+    #[prost(bool, tag="16")]
+    pub stdin: bool,
+    #[prost(bool, tag="17")]
+    pub tty: bool,
+}
+/// ---------------------------------------------------------------------------
+///   Environment variables
+/// ---------------------------------------------------------------------------
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct EnvVar {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(oneof="env_var::ValueSource", tags="2, 3, 4, 5, 6")]
+    pub value_source: ::core::option::Option<env_var::ValueSource>,
+}
+/// Nested message and enum types in `EnvVar`.
+pub mod env_var {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum ValueSource {
+        /// Literal value.
+        #[prost(string, tag="2")]
+        Value(::prost::alloc::string::String),
+        /// Reference to a secret key.
+        #[prost(message, tag="3")]
+        SecretRef(super::SecretKeyRef),
+        /// Reference to a config-map key.
+        #[prost(message, tag="4")]
+        ConfigRef(super::ConfigKeyRef),
+        /// Downward-API field (e.g. "metadata.name", "status.podIP").
+        #[prost(string, tag="5")]
+        FieldRef(::prost::alloc::string::String),
+        /// Resource field (e.g. "limits.cpu").
+        #[prost(string, tag="6")]
+        ResourceFieldRef(::prost::alloc::string::String),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SecretKeyRef {
+    #[prost(string, tag="1")]
+    pub secret_name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub key: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ConfigKeyRef {
+    #[prost(string, tag="1")]
+    pub config_name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub key: ::prost::alloc::string::String,
+}
+/// ---------------------------------------------------------------------------
+///   Ports
+/// ---------------------------------------------------------------------------
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ContainerPort {
+    /// Friendly name (e.g. "http", "grpc", "metrics").
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    /// The port number inside the container.
+    #[prost(uint32, tag="2")]
+    pub container_port: u32,
+    /// Protocol: TCP (default), UDP, SCTP.
+    #[prost(string, tag="3")]
+    pub protocol: ::prost::alloc::string::String,
+}
+/// ---------------------------------------------------------------------------
+///   Resources
+/// ---------------------------------------------------------------------------
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ResourceRequirements {
+    #[prost(message, optional, tag="1")]
+    pub requests: ::core::option::Option<ResourceList>,
+    #[prost(message, optional, tag="2")]
+    pub limits: ::core::option::Option<ResourceList>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ResourceList {
+    /// CPU in Kubernetes quantity format: "100m", "0.5", "2".
+    #[prost(string, tag="1")]
+    pub cpu: ::prost::alloc::string::String,
+    /// Memory in Kubernetes quantity format: "128Mi", "1Gi".
+    #[prost(string, tag="2")]
+    pub memory: ::prost::alloc::string::String,
+    /// Ephemeral storage: "1Gi".
+    #[prost(string, tag="3")]
+    pub ephemeral_storage: ::prost::alloc::string::String,
+    /// GPU / accelerator requests (e.g. "nvidia.com/gpu": "1").
+    #[prost(map="string, string", tag="4")]
+    pub extended: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+/// ---------------------------------------------------------------------------
+///   Volumes & mounts
+/// ---------------------------------------------------------------------------
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Volume {
+    /// Volume name referenced by VolumeMount.name.
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(oneof="volume::Source", tags="10, 11, 12, 13, 14, 15")]
+    pub source: ::core::option::Option<volume::Source>,
+}
+/// Nested message and enum types in `Volume`.
+pub mod volume {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Source {
+        #[prost(message, tag="10")]
+        EmptyDir(super::EmptyDirVolume),
+        #[prost(message, tag="11")]
+        Secret(super::SecretVolume),
+        #[prost(message, tag="12")]
+        ConfigMap(super::ConfigMapVolume),
+        #[prost(message, tag="13")]
+        Pvc(super::PvcVolume),
+        #[prost(message, tag="14")]
+        HostPath(super::HostPathVolume),
+        #[prost(message, tag="15")]
+        Nfs(super::NfsVolume),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct EmptyDirVolume {
+    /// "Memory" for tmpfs, empty for node disk.
+    #[prost(string, tag="1")]
+    pub medium: ::prost::alloc::string::String,
+    /// Size limit (e.g. "256Mi").  Empty means node default.
+    #[prost(string, tag="2")]
+    pub size_limit: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SecretVolume {
+    #[prost(string, tag="1")]
+    pub secret_name: ::prost::alloc::string::String,
+    /// Optional: mount only specific keys.
+    #[prost(message, repeated, tag="2")]
+    pub items: ::prost::alloc::vec::Vec<KeyToPath>,
+    /// Octal file mode (e.g. 0644). Default 0644.
+    #[prost(uint32, tag="3")]
+    pub default_mode: u32,
+    #[prost(bool, tag="4")]
+    pub optional: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ConfigMapVolume {
+    #[prost(string, tag="1")]
+    pub config_map_name: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
+    pub items: ::prost::alloc::vec::Vec<KeyToPath>,
+    #[prost(uint32, tag="3")]
+    pub default_mode: u32,
+    #[prost(bool, tag="4")]
+    pub optional: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct KeyToPath {
+    #[prost(string, tag="1")]
+    pub key: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub path: ::prost::alloc::string::String,
+    #[prost(uint32, tag="3")]
+    pub mode: u32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PvcVolume {
+    #[prost(string, tag="1")]
+    pub claim_name: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
+    pub read_only: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct HostPathVolume {
+    #[prost(string, tag="1")]
+    pub path: ::prost::alloc::string::String,
+    /// "Directory", "File", "DirectoryOrCreate", "FileOrCreate", etc.
+    #[prost(string, tag="2")]
+    pub r#type: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NfsVolume {
+    #[prost(string, tag="1")]
+    pub server: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub path: ::prost::alloc::string::String,
+    #[prost(bool, tag="3")]
+    pub read_only: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VolumeMount {
+    /// Must match a Volume.name.
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    /// Absolute path inside the container.
+    #[prost(string, tag="2")]
+    pub mount_path: ::prost::alloc::string::String,
+    /// Optional sub-path within the volume.
+    #[prost(string, tag="3")]
+    pub sub_path: ::prost::alloc::string::String,
+    #[prost(bool, tag="4")]
+    pub read_only: bool,
+}
+/// ---------------------------------------------------------------------------
+///   Probes
+/// ---------------------------------------------------------------------------
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Probe {
+    #[prost(uint32, tag="10")]
+    pub initial_delay_seconds: u32,
+    #[prost(uint32, tag="11")]
+    pub period_seconds: u32,
+    #[prost(uint32, tag="12")]
+    pub timeout_seconds: u32,
+    #[prost(uint32, tag="13")]
+    pub success_threshold: u32,
+    #[prost(uint32, tag="14")]
+    pub failure_threshold: u32,
+    #[prost(oneof="probe::Handler", tags="1, 2, 3, 4")]
+    pub handler: ::core::option::Option<probe::Handler>,
+}
+/// Nested message and enum types in `Probe`.
+pub mod probe {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Handler {
+        #[prost(message, tag="1")]
+        HttpGet(super::HttpGetProbe),
+        #[prost(message, tag="2")]
+        TcpSocket(super::TcpSocketProbe),
+        #[prost(message, tag="3")]
+        Exec(super::ExecProbe),
+        #[prost(message, tag="4")]
+        Grpc(super::GrpcProbe),
+    }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct HttpGetProbe {
+    #[prost(string, tag="1")]
+    pub path: ::prost::alloc::string::String,
+    #[prost(uint32, tag="2")]
+    pub port: u32,
+    /// "HTTP" or "HTTPS"
+    #[prost(string, tag="3")]
+    pub scheme: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="4")]
+    pub http_headers: ::prost::alloc::vec::Vec<HttpHeader>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct HttpHeader {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub value: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TcpSocketProbe {
+    #[prost(uint32, tag="1")]
+    pub port: u32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExecProbe {
+    #[prost(string, repeated, tag="1")]
+    pub command: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GrpcProbe {
+    #[prost(uint32, tag="1")]
+    pub port: u32,
+    #[prost(string, tag="2")]
+    pub service: ::prost::alloc::string::String,
+}
+/// ---------------------------------------------------------------------------
+///   Lifecycle hooks
+/// ---------------------------------------------------------------------------
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Lifecycle {
+    #[prost(message, optional, tag="1")]
+    pub post_start: ::core::option::Option<LifecycleHandler>,
+    #[prost(message, optional, tag="2")]
+    pub pre_stop: ::core::option::Option<LifecycleHandler>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct LifecycleHandler {
+    #[prost(oneof="lifecycle_handler::Action", tags="1, 2, 3")]
+    pub action: ::core::option::Option<lifecycle_handler::Action>,
+}
+/// Nested message and enum types in `LifecycleHandler`.
+pub mod lifecycle_handler {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Action {
+        #[prost(message, tag="1")]
+        Exec(super::ExecProbe),
+        #[prost(message, tag="2")]
+        HttpGet(super::HttpGetProbe),
+        #[prost(message, tag="3")]
+        TcpSocket(super::TcpSocketProbe),
+    }
+}
+/// ---------------------------------------------------------------------------
+///   Security
+/// ---------------------------------------------------------------------------
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ContainerSecurityContext {
+    #[prost(bool, tag="1")]
+    pub run_as_non_root: bool,
+    #[prost(int64, tag="2")]
+    pub run_as_user: i64,
+    #[prost(int64, tag="3")]
+    pub run_as_group: i64,
+    #[prost(bool, tag="4")]
+    pub read_only_root_filesystem: bool,
+    #[prost(bool, tag="5")]
+    pub privileged: bool,
+    #[prost(bool, tag="6")]
+    pub allow_privilege_escalation: bool,
+    #[prost(message, optional, tag="7")]
+    pub capabilities: ::core::option::Option<Capabilities>,
+    /// SELinux options (optional).
+    #[prost(string, tag="8")]
+    pub se_linux_type: ::prost::alloc::string::String,
+    /// Seccomp profile: "RuntimeDefault", "Unconfined", or a localhost path.
+    #[prost(string, tag="9")]
+    pub seccomp_profile: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Capabilities {
+    #[prost(string, repeated, tag="1")]
+    pub add: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="2")]
+    pub drop: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PodSecurityContext {
+    #[prost(int64, tag="1")]
+    pub run_as_user: i64,
+    #[prost(int64, tag="2")]
+    pub run_as_group: i64,
+    #[prost(bool, tag="3")]
+    pub run_as_non_root: bool,
+    #[prost(int64, tag="4")]
+    pub fs_group: i64,
+    /// Supplemental groups for all containers.
+    #[prost(int64, repeated, tag="5")]
+    pub supplemental_groups: ::prost::alloc::vec::Vec<i64>,
+    /// "OnRootMismatch" or "Always".
+    #[prost(string, tag="6")]
+    pub fs_group_change_policy: ::prost::alloc::string::String,
+    #[prost(string, tag="7")]
+    pub seccomp_profile: ::prost::alloc::string::String,
+}
+/// ---------------------------------------------------------------------------
+///   Scaling
+/// ---------------------------------------------------------------------------
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ScalingPolicy {
+    /// Fixed replica count (used when autoscaling is not configured).
+    #[prost(uint32, tag="1")]
+    pub replicas: u32,
+    /// Optional horizontal autoscaler.
+    #[prost(message, optional, tag="2")]
+    pub autoscaling: ::core::option::Option<AutoscalingPolicy>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AutoscalingPolicy {
+    #[prost(uint32, tag="1")]
+    pub min_replicas: u32,
+    #[prost(uint32, tag="2")]
+    pub max_replicas: u32,
+    /// Target average CPU utilisation percentage (e.g. 70).
+    #[prost(uint32, tag="3")]
+    pub target_cpu_utilization_percent: u32,
+    /// Target average memory utilisation percentage.
+    #[prost(uint32, tag="4")]
+    pub target_memory_utilization_percent: u32,
+    /// Custom metrics (e.g. queue depth, RPS).
+    #[prost(message, repeated, tag="5")]
+    pub custom_metrics: ::prost::alloc::vec::Vec<CustomMetric>,
+    /// Scale-down stabilisation window.
+    #[prost(message, optional, tag="6")]
+    pub scale_down_stabilization: ::core::option::Option<::prost_types::Duration>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CustomMetric {
+    /// Metric name as exposed by the metrics adapter.
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    /// One of "Value", "AverageValue", "Utilization".
+    #[prost(string, tag="2")]
+    pub target_type: ::prost::alloc::string::String,
+    /// Target threshold (interpretation depends on target_type).
+    #[prost(string, tag="3")]
+    pub target_value: ::prost::alloc::string::String,
+}
+/// ---------------------------------------------------------------------------
+///   Update strategy
+/// ---------------------------------------------------------------------------
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateStrategy {
+    /// "RollingUpdate" (default) or "Recreate".
+    #[prost(string, tag="1")]
+    pub r#type: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
+    pub rolling_update: ::core::option::Option<RollingUpdateConfig>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RollingUpdateConfig {
+    /// Absolute number or percentage (e.g. "1", "25%").
+    #[prost(string, tag="1")]
+    pub max_unavailable: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub max_surge: ::prost::alloc::string::String,
+}
+/// ---------------------------------------------------------------------------
+///   Pod-level configuration
+/// ---------------------------------------------------------------------------
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PodConfig {
+    /// Service account name for RBAC / workload identity.
+    #[prost(string, tag="1")]
+    pub service_account_name: ::prost::alloc::string::String,
+    /// Restart policy: "Always" (default for services), "OnFailure", "Never".
+    #[prost(string, tag="2")]
+    pub restart_policy: ::prost::alloc::string::String,
+    /// Graceful shutdown window.
+    #[prost(uint32, tag="3")]
+    pub termination_grace_period_seconds: u32,
+    /// DNS policy: "ClusterFirst" (default), "Default", "None".
+    #[prost(string, tag="4")]
+    pub dns_policy: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="5")]
+    pub dns_config: ::core::option::Option<PodDnsConfig>,
+    /// Host networking (rare, but needed for some infra workloads).
+    #[prost(bool, tag="6")]
+    pub host_network: bool,
+    /// Node scheduling.
+    #[prost(map="string, string", tag="7")]
+    pub node_selector: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, repeated, tag="8")]
+    pub tolerations: ::prost::alloc::vec::Vec<Toleration>,
+    #[prost(message, optional, tag="9")]
+    pub affinity: ::core::option::Option<Affinity>,
+    /// Topology spread constraints for HA.
+    #[prost(message, repeated, tag="10")]
+    pub topology_spread_constraints: ::prost::alloc::vec::Vec<TopologySpreadConstraint>,
+    /// Image pull secrets.
+    #[prost(string, repeated, tag="11")]
+    pub image_pull_secrets: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Pod-level security context.
+    #[prost(message, optional, tag="12")]
+    pub security_context: ::core::option::Option<PodSecurityContext>,
+    /// Priority class name for preemption.
+    #[prost(string, tag="13")]
+    pub priority_class_name: ::prost::alloc::string::String,
+    /// Runtime class (e.g. "gvisor", "kata").
+    #[prost(string, tag="14")]
+    pub runtime_class_name: ::prost::alloc::string::String,
+    /// Annotations passed to the pod template (not the workload resource).
+    #[prost(map="string, string", tag="15")]
+    pub annotations: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Labels passed to the pod template.
+    #[prost(map="string, string", tag="16")]
+    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PodDnsConfig {
+    #[prost(string, repeated, tag="1")]
+    pub nameservers: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="2")]
+    pub searches: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(message, repeated, tag="3")]
+    pub options: ::prost::alloc::vec::Vec<DnsOption>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DnsOption {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub value: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Toleration {
+    #[prost(string, tag="1")]
+    pub key: ::prost::alloc::string::String,
+    /// "Equal" or "Exists".
+    #[prost(string, tag="2")]
+    pub operator: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub value: ::prost::alloc::string::String,
+    /// "NoSchedule", "PreferNoSchedule", "NoExecute".
+    #[prost(string, tag="4")]
+    pub effect: ::prost::alloc::string::String,
+    /// Toleration seconds for NoExecute.
+    #[prost(int64, tag="5")]
+    pub toleration_seconds: i64,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Affinity {
+    #[prost(message, optional, tag="1")]
+    pub node_affinity: ::core::option::Option<NodeAffinity>,
+    #[prost(message, optional, tag="2")]
+    pub pod_affinity: ::core::option::Option<PodAffinity>,
+    #[prost(message, optional, tag="3")]
+    pub pod_anti_affinity: ::core::option::Option<PodAntiAffinity>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NodeAffinity {
+    #[prost(message, repeated, tag="1")]
+    pub preferred: ::prost::alloc::vec::Vec<PreferredSchedulingTerm>,
+    #[prost(message, optional, tag="2")]
+    pub required: ::core::option::Option<NodeSelector>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PreferredSchedulingTerm {
+    #[prost(int32, tag="1")]
+    pub weight: i32,
+    #[prost(message, optional, tag="2")]
+    pub preference: ::core::option::Option<NodeSelectorTerm>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NodeSelector {
+    #[prost(message, repeated, tag="1")]
+    pub terms: ::prost::alloc::vec::Vec<NodeSelectorTerm>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NodeSelectorTerm {
+    #[prost(message, repeated, tag="1")]
+    pub match_expressions: ::prost::alloc::vec::Vec<NodeSelectorRequirement>,
+    #[prost(message, repeated, tag="2")]
+    pub match_fields: ::prost::alloc::vec::Vec<NodeSelectorRequirement>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NodeSelectorRequirement {
+    #[prost(string, tag="1")]
+    pub key: ::prost::alloc::string::String,
+    /// "In", "NotIn", "Exists", "DoesNotExist", "Gt", "Lt".
+    #[prost(string, tag="2")]
+    pub operator: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="3")]
+    pub values: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PodAffinity {
+    #[prost(message, repeated, tag="1")]
+    pub preferred: ::prost::alloc::vec::Vec<WeightedPodAffinityTerm>,
+    #[prost(message, repeated, tag="2")]
+    pub required: ::prost::alloc::vec::Vec<PodAffinityTerm>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PodAntiAffinity {
+    #[prost(message, repeated, tag="1")]
+    pub preferred: ::prost::alloc::vec::Vec<WeightedPodAffinityTerm>,
+    #[prost(message, repeated, tag="2")]
+    pub required: ::prost::alloc::vec::Vec<PodAffinityTerm>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WeightedPodAffinityTerm {
+    #[prost(int32, tag="1")]
+    pub weight: i32,
+    #[prost(message, optional, tag="2")]
+    pub term: ::core::option::Option<PodAffinityTerm>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PodAffinityTerm {
+    #[prost(message, optional, tag="1")]
+    pub label_selector: ::core::option::Option<LabelSelector>,
+    #[prost(string, tag="2")]
+    pub topology_key: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="3")]
+    pub namespaces: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct LabelSelector {
+    #[prost(map="string, string", tag="1")]
+    pub match_labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, repeated, tag="2")]
+    pub match_expressions: ::prost::alloc::vec::Vec<LabelSelectorRequirement>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LabelSelectorRequirement {
+    #[prost(string, tag="1")]
+    pub key: ::prost::alloc::string::String,
+    /// "In", "NotIn", "Exists", "DoesNotExist".
+    #[prost(string, tag="2")]
+    pub operator: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="3")]
+    pub values: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TopologySpreadConstraint {
+    /// Max difference in spread (e.g. 1 for even distribution).
+    #[prost(int32, tag="1")]
+    pub max_skew: i32,
+    /// "zone", "hostname", or any node label.
+    #[prost(string, tag="2")]
+    pub topology_key: ::prost::alloc::string::String,
+    /// "DoNotSchedule" or "ScheduleAnyway".
+    #[prost(string, tag="3")]
+    pub when_unsatisfiable: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="4")]
+    pub label_selector: ::core::option::Option<LabelSelector>,
+}
+/// ===========================================================================
+///   ServiceSpec — L4 load balancing & service discovery.
+///   Combines Service + optional gateway route into one resource when desired.
+/// ===========================================================================
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ServiceSpec {
+    /// The ContainerServiceSpec name this service fronts.
+    #[prost(string, tag="1")]
+    pub target: ::prost::alloc::string::String,
+    /// Service type: "ClusterIP" (default), "NodePort", "LoadBalancer", "Headless".
+    #[prost(string, tag="2")]
+    pub r#type: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="3")]
+    pub ports: ::prost::alloc::vec::Vec<ServicePort>,
+    /// Session affinity: "None" (default), "ClientIP".
+    #[prost(string, tag="4")]
+    pub session_affinity: ::prost::alloc::string::String,
+    /// Optional: expose this service externally via the gateway.
+    /// Setting this is equivalent to creating a separate RouteSpec.
+    /// Allows combining Service + Route into one resource for simpler configs.
+    #[prost(message, optional, tag="5")]
+    pub inline_route: ::core::option::Option<InlineRoute>,
+    /// Extra annotations on the Service object (e.g. cloud LB configs).
+    #[prost(map="string, string", tag="6")]
+    pub annotations: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ServicePort {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(uint32, tag="2")]
+    pub port: u32,
+    #[prost(uint32, tag="3")]
+    pub target_port: u32,
+    /// TCP, UDP, SCTP
+    #[prost(string, tag="4")]
+    pub protocol: ::prost::alloc::string::String,
+    /// Only for NodePort type.
+    #[prost(uint32, tag="5")]
+    pub node_port: u32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct InlineRoute {
+    /// Hostname(s) to match (e.g. "api.example.com").
+    #[prost(string, repeated, tag="1")]
+    pub hostnames: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Path matching rules.  If empty, matches all paths to the first port.
+    #[prost(message, repeated, tag="2")]
+    pub rules: ::prost::alloc::vec::Vec<RouteRule>,
+    /// TLS configuration.
+    #[prost(message, optional, tag="3")]
+    pub tls: ::core::option::Option<RouteTls>,
+}
+/// ===========================================================================
+///   RouteSpec — Gateway API HTTPRoute (standalone).
+///   Use this when you need routing rules separate from the service definition.
+/// ===========================================================================
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RouteSpec {
+    /// The ServiceSpec name this route targets.
+    #[prost(string, tag="1")]
+    pub target_service: ::prost::alloc::string::String,
+    /// Hostname(s) this route matches.
+    #[prost(string, repeated, tag="2")]
+    pub hostnames: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Matching & routing rules.
+    #[prost(message, repeated, tag="3")]
+    pub rules: ::prost::alloc::vec::Vec<RouteRule>,
+    /// TLS termination config.
+    #[prost(message, optional, tag="4")]
+    pub tls: ::core::option::Option<RouteTls>,
+    /// Which gateway to attach to (empty = cluster default).
+    #[prost(string, tag="5")]
+    pub gateway_ref: ::prost::alloc::string::String,
+    /// Route priority / ordering.
+    #[prost(int32, tag="6")]
+    pub priority: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RouteRule {
+    /// Path matching.
+    #[prost(message, repeated, tag="1")]
+    pub matches: ::prost::alloc::vec::Vec<RouteMatch>,
+    /// Backend(s) traffic is sent to.
+    #[prost(message, repeated, tag="2")]
+    pub backends: ::prost::alloc::vec::Vec<RouteBackend>,
+    /// Request / response filters applied to this rule.
+    #[prost(message, repeated, tag="3")]
+    pub filters: ::prost::alloc::vec::Vec<RouteFilter>,
+    /// Timeout for the entire request.
+    #[prost(message, optional, tag="4")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RouteMatch {
+    /// Path match.
+    #[prost(message, optional, tag="1")]
+    pub path: ::core::option::Option<PathMatch>,
+    /// Header conditions.
+    #[prost(message, repeated, tag="2")]
+    pub headers: ::prost::alloc::vec::Vec<HeaderMatch>,
+    /// Query parameter conditions.
+    #[prost(message, repeated, tag="3")]
+    pub query_params: ::prost::alloc::vec::Vec<QueryParamMatch>,
+    /// HTTP method constraint.
+    #[prost(string, tag="4")]
+    pub method: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PathMatch {
+    /// "Exact", "PathPrefix" (default), "RegularExpression".
+    #[prost(string, tag="1")]
+    pub r#type: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub value: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct HeaderMatch {
+    /// "Exact" (default), "RegularExpression".
+    #[prost(string, tag="1")]
+    pub r#type: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub value: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct QueryParamMatch {
+    #[prost(string, tag="1")]
+    pub r#type: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub value: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RouteBackend {
+    /// Service name.
+    #[prost(string, tag="1")]
+    pub service: ::prost::alloc::string::String,
+    /// Port on the backend service.
+    #[prost(uint32, tag="2")]
+    pub port: u32,
+    /// Traffic weight for canary / blue-green (1-100).
+    #[prost(uint32, tag="3")]
+    pub weight: u32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RouteFilter {
+    #[prost(oneof="route_filter::Filter", tags="1, 2, 3, 4, 5")]
+    pub filter: ::core::option::Option<route_filter::Filter>,
+}
+/// Nested message and enum types in `RouteFilter`.
+pub mod route_filter {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Filter {
+        #[prost(message, tag="1")]
+        RequestHeaderModifier(super::RequestHeaderModifier),
+        #[prost(message, tag="2")]
+        ResponseHeaderModifier(super::ResponseHeaderModifier),
+        #[prost(message, tag="3")]
+        RequestRedirect(super::RequestRedirect),
+        #[prost(message, tag="4")]
+        UrlRewrite(super::UrlRewrite),
+        #[prost(message, tag="5")]
+        RequestMirror(super::RequestMirror),
+    }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RequestHeaderModifier {
+    #[prost(map="string, string", tag="1")]
+    pub set: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map="string, string", tag="2")]
+    pub add: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="3")]
+    pub remove: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ResponseHeaderModifier {
+    #[prost(map="string, string", tag="1")]
+    pub set: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map="string, string", tag="2")]
+    pub add: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="3")]
+    pub remove: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RequestRedirect {
+    #[prost(string, tag="1")]
+    pub scheme: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub hostname: ::prost::alloc::string::String,
+    #[prost(uint32, tag="3")]
+    pub port: u32,
+    #[prost(string, tag="4")]
+    pub path: ::prost::alloc::string::String,
+    /// 301, 302, etc.
+    #[prost(uint32, tag="5")]
+    pub status_code: u32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UrlRewrite {
+    #[prost(string, tag="1")]
+    pub hostname: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
+    pub path: ::core::option::Option<PathMatch>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RequestMirror {
+    #[prost(string, tag="1")]
+    pub service: ::prost::alloc::string::String,
+    #[prost(uint32, tag="2")]
+    pub port: u32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RouteTls {
+    /// "Terminate" (default) or "Passthrough".
+    #[prost(string, tag="1")]
+    pub mode: ::prost::alloc::string::String,
+    /// Secret name containing the TLS certificate.
+    #[prost(string, tag="2")]
+    pub certificate_ref: ::prost::alloc::string::String,
+}
+/// ===========================================================================
+///   CronJobSpec — scheduled workload.
+/// ===========================================================================
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CronJobSpec {
+    /// Cron schedule (e.g. "*/5 * * * *").
+    #[prost(string, tag="1")]
+    pub schedule: ::prost::alloc::string::String,
+    /// Timezone (e.g. "Europe/Copenhagen").  Empty = UTC.
+    #[prost(string, tag="2")]
+    pub timezone: ::prost::alloc::string::String,
+    /// Container that runs the job.
+    #[prost(message, optional, tag="3")]
+    pub container: ::core::option::Option<Container>,
+    /// Volumes for the job pod.
+    #[prost(message, repeated, tag="4")]
+    pub volumes: ::prost::alloc::vec::Vec<Volume>,
+    /// Job-level config.
+    #[prost(message, optional, tag="5")]
+    pub job_config: ::core::option::Option<JobConfig>,
+    /// Pod-level config (node selector, tolerations, etc.).
+    #[prost(message, optional, tag="6")]
+    pub pod_config: ::core::option::Option<PodConfig>,
+    /// "Allow", "Forbid", "Replace".
+    #[prost(string, tag="7")]
+    pub concurrency_policy: ::prost::alloc::string::String,
+    /// Number of successful/failed jobs to retain.
+    #[prost(uint32, tag="8")]
+    pub successful_jobs_history_limit: u32,
+    #[prost(uint32, tag="9")]
+    pub failed_jobs_history_limit: u32,
+    /// Suspend the cron schedule.
+    #[prost(bool, tag="10")]
+    pub suspend: bool,
+    /// Deadline in seconds for starting the job if it missed its schedule.
+    #[prost(int64, tag="11")]
+    pub starting_deadline_seconds: i64,
+}
+/// ===========================================================================
+///   JobSpec — one-shot workload.
+/// ===========================================================================
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct JobSpec {
+    /// Container that runs the job.
+    #[prost(message, optional, tag="1")]
+    pub container: ::core::option::Option<Container>,
+    /// Volumes for the job pod.
+    #[prost(message, repeated, tag="2")]
+    pub volumes: ::prost::alloc::vec::Vec<Volume>,
+    /// Job-level config.
+    #[prost(message, optional, tag="3")]
+    pub job_config: ::core::option::Option<JobConfig>,
+    /// Pod-level config.
+    #[prost(message, optional, tag="4")]
+    pub pod_config: ::core::option::Option<PodConfig>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct JobConfig {
+    /// Number of times the job should complete successfully.
+    #[prost(uint32, tag="1")]
+    pub completions: u32,
+    /// Max parallel pods.
+    #[prost(uint32, tag="2")]
+    pub parallelism: u32,
+    /// "NonIndexed" (default) or "Indexed".
+    #[prost(string, tag="3")]
+    pub completion_mode: ::prost::alloc::string::String,
+    /// Number of retries before marking failed.
+    #[prost(uint32, tag="4")]
+    pub backoff_limit: u32,
+    /// Active deadline (seconds) — job killed if it runs longer.
+    #[prost(int64, tag="5")]
+    pub active_deadline_seconds: i64,
+    /// TTL after finished (seconds) — auto-cleanup.
+    #[prost(int64, tag="6")]
+    pub ttl_seconds_after_finished: i64,
+    /// Restart policy: "OnFailure" (default) or "Never".
+    #[prost(string, tag="7")]
+    pub restart_policy: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum RolloutStatus {
+    Unspecified = 0,
+    Pending = 1,
+    InProgress = 2,
+    Succeeded = 3,
+    Failed = 4,
+    RolledBack = 5,
+}
+impl RolloutStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "ROLLOUT_STATUS_UNSPECIFIED",
+            Self::Pending => "ROLLOUT_STATUS_PENDING",
+            Self::InProgress => "ROLLOUT_STATUS_IN_PROGRESS",
+            Self::Succeeded => "ROLLOUT_STATUS_SUCCEEDED",
+            Self::Failed => "ROLLOUT_STATUS_FAILED",
+            Self::RolledBack => "ROLLOUT_STATUS_ROLLED_BACK",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "ROLLOUT_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "ROLLOUT_STATUS_PENDING" => Some(Self::Pending),
+            "ROLLOUT_STATUS_IN_PROGRESS" => Some(Self::InProgress),
+            "ROLLOUT_STATUS_SUCCEEDED" => Some(Self::Succeeded),
+            "ROLLOUT_STATUS_FAILED" => Some(Self::Failed),
+            "ROLLOUT_STATUS_ROLLED_BACK" => Some(Self::RolledBack),
+            _ => None,
+        }
+    }
+}
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetStatusRequest {
 }
@@ -557,6 +1652,8 @@ pub struct ReleaseContext {
     pub source_username: ::prost::alloc::string::String,
     #[prost(string, tag="9")]
     pub source_email: ::prost::alloc::string::String,
+    #[prost(string, tag="17")]
+    pub source_user_id: ::prost::alloc::string::String,
     /// Git ref
     #[prost(string, tag="10")]
     pub commit_sha: ::prost::alloc::string::String,
@@ -1268,6 +2365,9 @@ pub struct Source {
     pub source_type: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(string, optional, tag="4")]
     pub run_url: ::core::option::Option<::prost::alloc::string::String>,
+    /// The actor ID (user, app, or service account UUID) that created this annotation.
+    #[prost(string, optional, tag="5")]
+    pub user_id: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ArtifactContext {

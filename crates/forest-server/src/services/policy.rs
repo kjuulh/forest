@@ -39,8 +39,12 @@ impl PolicyType {
             PolicyType::BranchRestriction => "branch_restriction",
         }
     }
+}
 
-    pub fn from_str(s: &str) -> anyhow::Result<Self> {
+impl std::str::FromStr for PolicyType {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> anyhow::Result<Self> {
         match s {
             "soak_time" => Ok(PolicyType::SoakTime),
             "branch_restriction" => Ok(PolicyType::BranchRestriction),

@@ -1113,8 +1113,8 @@ impl GrpcClient {
             .types
             .into_iter()
             .map(|t| DestinationType {
-                organisation: t.organisation.into(),
-                name: t.name.into(),
+                organisation: t.organisation,
+                name: t.name,
                 version: t.version as usize,
             })
             .collect())
@@ -2087,6 +2087,7 @@ impl From<crate::models::source::Source> for forest_grpc_interface::Source {
         Self {
             user: value.username,
             email: value.email,
+            user_id: value.user_id,
             source_type: value.source_type,
             run_url: value.run_url,
         }
@@ -2133,6 +2134,7 @@ impl From<forest_grpc_interface::Source> for models::source::Source {
         Self {
             username: value.user,
             email: value.email,
+            user_id: value.user_id,
             source_type: value.source_type,
             run_url: value.run_url,
         }

@@ -29,6 +29,8 @@ pub struct ReleaseContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_user_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit_branch: Option<String>,

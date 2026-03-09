@@ -1,0 +1,33 @@
+[package]
+name = "forest-event-store"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+futures.workspace = true
+
+sqlx = { version = "0.8", features = [
+  "runtime-tokio",
+  "tls-rustls-aws-lc-rs",
+  "postgres",
+  "uuid",
+  "chrono",
+  "json",
+] }
+uuid = { version = "1.7.0", features = ["v4", "v7"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+tracing-subscriber.workspace = true
+dotenvy.workspace = true
+uuid = { version = "1.7.0", features = ["v4", "v7"] }
+insta.workspace = true
+proptest = "1"
+rand.workspace = true
