@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-use forest_grpc_interface::{pipeline_stage, DeployStageConfig, PipelineStage, WaitStageConfig};
+use forest_grpc_interface::{pipeline_stage, DeployStageConfig, PipelineStage, PlanStageConfig, WaitStageConfig};
 use serde::Deserialize;
 
 use crate::state::State;
@@ -48,6 +48,7 @@ impl PipelineCommand {
 enum JsonStageConfig {
     Deploy { environment: String },
     Wait { duration_seconds: i64 },
+    Plan { environment: String, #[serde(default)] auto_approve: bool },
 }
 
 #[derive(Deserialize)]
@@ -72,6 +73,9 @@ pub fn parse_stages_from_json(json: &str) -> anyhow::Result<Vec<PipelineStage>> 
                 }
                 JsonStageConfig::Wait { duration_seconds } => {
                     pipeline_stage::Config::Wait(WaitStageConfig { duration_seconds })
+                }
+                JsonStageConfig::Plan { environment, auto_approve } => {
+                    pipeline_stage::Config::Plan(PlanStageConfig { environment, auto_approve })
                 }
             };
 
@@ -100,6 +104,10 @@ pub fn format_stages(stages: &[PipelineStage]) -> String {
             }
             Some(pipeline_stage::Config::Wait(c)) => {
                 format!("wait({}s)", c.duration_seconds)
+            }
+            Some(pipeline_stage::Config::Plan(c)) => {
+                let auto = if c.auto_approve { ", auto" } else { "" };
+                format!("plan({}{})", c.environment, auto)
             }
             None => "unknown".to_string(),
         };

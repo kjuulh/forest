@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
 
 use anyhow::Context;
-use forest_grpc_interface::ReleaseOutcome;
+use forest_grpc_interface::{ReleaseMode, ReleaseOutcome};
 
 use crate::backend::DestinationConfig;
 use crate::backend::remote::RemoteBackend;
@@ -156,18 +156,30 @@ impl Executor {
             backend: Box::new(backend),
         };
 
+        let is_plan_mode = ReleaseMode::try_from(assignment.mode)
+            .unwrap_or(ReleaseMode::Deploy) == ReleaseMode::Plan;
+
         // Run the destination handler
-        let result = run_destination(handler.as_ref(), &ctx).await;
+        let result = if is_plan_mode {
+            run_destination_plan(handler.as_ref(), &ctx).await
+        } else {
+            run_destination(handler.as_ref(), &ctx).await.map(|()| None)
+        };
 
         // Cleanup temp dir (best effort)
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 
         // Report completion
         match &result {
-            Ok(()) => {
+            Ok(plan_output) => {
                 tracing::info!(release_token, "release completed successfully");
                 session
-                    .complete_release(release_token, ReleaseOutcome::Success, None)
+                    .complete_release(
+                        release_token,
+                        ReleaseOutcome::Success,
+                        None,
+                        plan_output.as_deref(),
+                    )
                     .await?;
             }
             Err(e) => {
@@ -179,12 +191,13 @@ impl Executor {
                         release_token,
                         ReleaseOutcome::Failure,
                         Some(&error_msg),
+                        None,
                     )
                     .await?;
             }
         }
 
-        result
+        result.map(|_| ())
     }
 }
 
@@ -201,6 +214,20 @@ async fn run_destination(
         .await
         .context("destination release failed")?;
     Ok(())
+}
+
+async fn run_destination_plan(
+    handler: &dyn RunnerDestination,
+    ctx: &RunnerContext,
+) -> anyhow::Result<Option<String>> {
+    handler
+        .prepare(ctx)
+        .await
+        .context("destination prepare failed")?;
+    handler
+        .plan(ctx)
+        .await
+        .context("destination plan failed")
 }
 
 /// RAII guard that decrements active count on drop.

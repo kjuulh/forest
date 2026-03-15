@@ -3,7 +3,7 @@ use forest_grpc_interface::{environment_service_server::EnvironmentService, *};
 use tonic::Response;
 
 use crate::{
-    grpc::artifacts::GrpcErrorExt,
+    grpc::{artifacts::GrpcErrorExt, authorize},
     services::{
         environment_registry::{EnvironmentRecord, EnvironmentRegistryState},
         event_bus::{EventBusState, EventPayload},
@@ -32,7 +32,15 @@ impl EnvironmentService for EnvironmentsServer {
         &self,
         request: tonic::Request<CreateEnvironmentRequest>,
     ) -> Result<Response<CreateEnvironmentResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
+        let _authz = authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let rec = self
             .state
@@ -65,6 +73,7 @@ impl EnvironmentService for EnvironmentsServer {
         &self,
         request: tonic::Request<GetEnvironmentRequest>,
     ) -> Result<Response<GetEnvironmentResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let identifier = req
@@ -95,6 +104,14 @@ impl EnvironmentService for EnvironmentsServer {
             .context("environment not found")
             .to_internal_error()?;
 
+        let _authz = authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &rec.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
+
         Ok(Response::new(GetEnvironmentResponse {
             environment: Some(record_to_grpc(rec)),
         }))
@@ -104,7 +121,15 @@ impl EnvironmentService for EnvironmentsServer {
         &self,
         request: tonic::Request<ListEnvironmentsRequest>,
     ) -> Result<Response<ListEnvironmentsResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
+        let _authz = authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let recs = self
             .state
@@ -123,12 +148,31 @@ impl EnvironmentService for EnvironmentsServer {
         &self,
         request: tonic::Request<UpdateEnvironmentRequest>,
     ) -> Result<Response<UpdateEnvironmentResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
         let id: uuid::Uuid = req
             .id
             .parse()
             .context("invalid id")
             .to_internal_error()?;
+        let org_name = sqlx::query_scalar!(
+            "SELECT organisation FROM environments WHERE id = $1",
+            id
+        )
+        .fetch_optional(&self.state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("authz: {e}");
+            tonic::Status::internal("lookup failed")
+        })?
+        .ok_or_else(|| tonic::Status::not_found("environment not found"))?;
+        let _authz = authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &org_name,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let rec = self
             .state
@@ -156,12 +200,31 @@ impl EnvironmentService for EnvironmentsServer {
         &self,
         request: tonic::Request<DeleteEnvironmentRequest>,
     ) -> Result<Response<DeleteEnvironmentResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
         let id: uuid::Uuid = req
             .id
             .parse()
             .context("invalid id")
             .to_internal_error()?;
+        let org_name = sqlx::query_scalar!(
+            "SELECT organisation FROM environments WHERE id = $1",
+            id
+        )
+        .fetch_optional(&self.state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("authz: {e}");
+            tonic::Status::internal("lookup failed")
+        })?
+        .ok_or_else(|| tonic::Status::not_found("environment not found"))?;
+        let _authz = authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &org_name,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         self.state
             .environment_registry()

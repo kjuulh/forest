@@ -475,6 +475,38 @@ impl ReleaseRegistry {
         let mut annotations: Vec<ReleaseAnnotation> = Vec::new();
 
         for rec in recs {
+            // Fetch destinations that have release_states for this artifact
+            let dest_rows = sqlx::query!(
+                r#"SELECT DISTINCT
+                    d.name as "name!",
+                    d.environment as "environment!",
+                    d.type_organisation as "type_organisation!",
+                    d.type_name as "type_name!",
+                    d.type_version as "type_version!",
+                    rs.status as "status!"
+                FROM release_states rs
+                JOIN destinations d ON rs.destination_id = d.id
+                WHERE rs.artifact_id = $1
+                  AND rs.mode = 'deploy'
+                ORDER BY d.name"#,
+                rec.artifact_id,
+            )
+            .fetch_all(&self.db)
+            .await
+            .context("get destinations for annotation")?;
+
+            let destinations = dest_rows
+                .into_iter()
+                .map(|d| ReleaseDestination {
+                    name: d.name,
+                    environment: d.environment,
+                    type_organisation: d.type_organisation,
+                    type_name: d.type_name,
+                    type_version: d.type_version,
+                    status: d.status,
+                })
+                .collect();
+
             let annotation = ReleaseAnnotation {
                 id: rec.id,
                 artifact_id: rec.artifact_id,
@@ -487,7 +519,7 @@ impl ReleaseRegistry {
                     organisation: rec.organisation,
                     project: rec.project,
                 },
-                destinations: Vec::new(),
+                destinations,
                 created_at: rec.created,
             };
 

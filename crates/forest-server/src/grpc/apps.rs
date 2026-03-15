@@ -3,21 +3,13 @@ use uuid::Uuid;
 
 use crate::{
     actor::Actor,
-    grpc::artifacts::GrpcErrorExt,
-    services::apps::AppServiceState,
+    grpc::{artifacts::GrpcErrorExt, authorize},
+    services::app_aggregate::AppAggregateServiceState,
     state::State,
 };
 
 pub struct AppsServer {
     pub state: State,
-}
-
-fn extract_actor(request: &tonic::Request<impl std::any::Any>) -> Result<Actor, tonic::Status> {
-    request
-        .extensions()
-        .get::<Actor>()
-        .cloned()
-        .ok_or_else(|| tonic::Status::unauthenticated("missing actor"))
 }
 
 fn require_user(actor: &Actor) -> Result<Uuid, tonic::Status> {
@@ -35,7 +27,7 @@ impl AppService for AppsServer {
         &self,
         request: tonic::Request<CreateAppRequest>,
     ) -> Result<tonic::Response<CreateAppResponse>, tonic::Status> {
-        let actor = extract_actor(&request)?;
+        let actor = authorize::extract_actor(&request)?;
         let user_id = require_user(&actor)?;
         let req = request.into_inner();
 
@@ -44,12 +36,20 @@ impl AppService for AppsServer {
             .parse()
             .map_err(|_| tonic::Status::invalid_argument("invalid organisation_id"))?;
 
+        let _authz = authorize::require_org_access_by_id(
+            &self.state.db,
+            &actor,
+            org_id,
+            authorize::OrgRole::Member,
+        )
+        .await?;
+
         let permissions =
             serde_json::to_value(&req.permissions).map_err(|e| tonic::Status::internal(e.to_string()))?;
 
         let app = self
             .state
-            .app_service()
+            .app_aggregate_service()
             .create_app(
                 org_id,
                 &req.name,
@@ -73,7 +73,7 @@ impl AppService for AppsServer {
         &self,
         request: tonic::Request<GetAppRequest>,
     ) -> Result<tonic::Response<GetAppResponse>, tonic::Status> {
-        let _actor = extract_actor(&request)?;
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let app_id: Uuid = req
@@ -81,9 +81,26 @@ impl AppService for AppsServer {
             .parse()
             .map_err(|_| tonic::Status::invalid_argument("invalid app_id"))?;
 
+        let org_id = sqlx::query_scalar!("SELECT organisation_id FROM apps WHERE id = $1", app_id)
+            .fetch_optional(&self.state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("authz: {e}");
+                tonic::Status::internal("lookup failed")
+            })?
+            .ok_or_else(|| tonic::Status::not_found("app not found"))?;
+
+        let _authz = authorize::require_org_access_by_id(
+            &self.state.db,
+            &actor,
+            org_id,
+            authorize::OrgRole::Member,
+        )
+        .await?;
+
         let app = self
             .state
-            .app_service()
+            .app_aggregate_service()
             .get_app(app_id)
             .await
             .to_internal_error()?
@@ -98,7 +115,7 @@ impl AppService for AppsServer {
         &self,
         request: tonic::Request<ListAppsRequest>,
     ) -> Result<tonic::Response<ListAppsResponse>, tonic::Status> {
-        let _actor = extract_actor(&request)?;
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let org_id: Uuid = req
@@ -106,9 +123,17 @@ impl AppService for AppsServer {
             .parse()
             .map_err(|_| tonic::Status::invalid_argument("invalid organisation_id"))?;
 
+        let _authz = authorize::require_org_access_by_id(
+            &self.state.db,
+            &actor,
+            org_id,
+            authorize::OrgRole::Member,
+        )
+        .await?;
+
         let apps = self
             .state
-            .app_service()
+            .app_aggregate_service()
             .list_apps(org_id)
             .await
             .to_internal_error()?;
@@ -122,7 +147,7 @@ impl AppService for AppsServer {
         &self,
         request: tonic::Request<DeleteAppRequest>,
     ) -> Result<tonic::Response<DeleteAppResponse>, tonic::Status> {
-        let actor = extract_actor(&request)?;
+        let actor = authorize::extract_actor(&request)?;
         let _user_id = require_user(&actor)?;
         let req = request.into_inner();
 
@@ -131,8 +156,25 @@ impl AppService for AppsServer {
             .parse()
             .map_err(|_| tonic::Status::invalid_argument("invalid app_id"))?;
 
+        let org_id = sqlx::query_scalar!("SELECT organisation_id FROM apps WHERE id = $1", app_id)
+            .fetch_optional(&self.state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("authz: {e}");
+                tonic::Status::internal("lookup failed")
+            })?
+            .ok_or_else(|| tonic::Status::not_found("app not found"))?;
+
+        let _authz = authorize::require_org_access_by_id(
+            &self.state.db,
+            &actor,
+            org_id,
+            authorize::OrgRole::Member,
+        )
+        .await?;
+
         self.state
-            .app_service()
+            .app_aggregate_service()
             .delete_app(app_id)
             .await
             .to_internal_error()?;
@@ -144,7 +186,7 @@ impl AppService for AppsServer {
         &self,
         request: tonic::Request<SuspendAppRequest>,
     ) -> Result<tonic::Response<SuspendAppResponse>, tonic::Status> {
-        let actor = extract_actor(&request)?;
+        let actor = authorize::extract_actor(&request)?;
         let _user_id = require_user(&actor)?;
         let req = request.into_inner();
 
@@ -153,8 +195,25 @@ impl AppService for AppsServer {
             .parse()
             .map_err(|_| tonic::Status::invalid_argument("invalid app_id"))?;
 
+        let org_id = sqlx::query_scalar!("SELECT organisation_id FROM apps WHERE id = $1", app_id)
+            .fetch_optional(&self.state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("authz: {e}");
+                tonic::Status::internal("lookup failed")
+            })?
+            .ok_or_else(|| tonic::Status::not_found("app not found"))?;
+
+        let _authz = authorize::require_org_access_by_id(
+            &self.state.db,
+            &actor,
+            org_id,
+            authorize::OrgRole::Member,
+        )
+        .await?;
+
         self.state
-            .app_service()
+            .app_aggregate_service()
             .suspend_app(app_id, req.suspended)
             .await
             .to_internal_error()?;
@@ -168,7 +227,7 @@ impl AppService for AppsServer {
         &self,
         request: tonic::Request<CreateAppTokenRequest>,
     ) -> Result<tonic::Response<CreateAppTokenResponse>, tonic::Status> {
-        let actor = extract_actor(&request)?;
+        let actor = authorize::extract_actor(&request)?;
         let _user_id = require_user(&actor)?;
         let req = request.into_inner();
 
@@ -176,6 +235,23 @@ impl AppService for AppsServer {
             .app_id
             .parse()
             .map_err(|_| tonic::Status::invalid_argument("invalid app_id"))?;
+
+        let org_id = sqlx::query_scalar!("SELECT organisation_id FROM apps WHERE id = $1", app_id)
+            .fetch_optional(&self.state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("authz: {e}");
+                tonic::Status::internal("lookup failed")
+            })?
+            .ok_or_else(|| tonic::Status::not_found("app not found"))?;
+
+        let _authz = authorize::require_org_access_by_id(
+            &self.state.db,
+            &actor,
+            org_id,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let expires_at = if req.expires_in_seconds > 0 {
             Some(chrono::Utc::now() + chrono::Duration::seconds(req.expires_in_seconds))
@@ -185,7 +261,7 @@ impl AppService for AppsServer {
 
         let created = self
             .state
-            .app_service()
+            .app_aggregate_service()
             .create_token(app_id, &req.name, expires_at)
             .await
             .to_internal_error()?;
@@ -207,7 +283,7 @@ impl AppService for AppsServer {
         &self,
         request: tonic::Request<ListAppTokensRequest>,
     ) -> Result<tonic::Response<ListAppTokensResponse>, tonic::Status> {
-        let _actor = extract_actor(&request)?;
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let app_id: Uuid = req
@@ -215,9 +291,26 @@ impl AppService for AppsServer {
             .parse()
             .map_err(|_| tonic::Status::invalid_argument("invalid app_id"))?;
 
+        let org_id = sqlx::query_scalar!("SELECT organisation_id FROM apps WHERE id = $1", app_id)
+            .fetch_optional(&self.state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!("authz: {e}");
+                tonic::Status::internal("lookup failed")
+            })?
+            .ok_or_else(|| tonic::Status::not_found("app not found"))?;
+
+        let _authz = authorize::require_org_access_by_id(
+            &self.state.db,
+            &actor,
+            org_id,
+            authorize::OrgRole::Member,
+        )
+        .await?;
+
         let tokens = self
             .state
-            .app_service()
+            .app_aggregate_service()
             .list_tokens(app_id)
             .await
             .to_internal_error()?;
@@ -231,7 +324,7 @@ impl AppService for AppsServer {
         &self,
         request: tonic::Request<RevokeAppTokenRequest>,
     ) -> Result<tonic::Response<RevokeAppTokenResponse>, tonic::Status> {
-        let actor = extract_actor(&request)?;
+        let actor = authorize::extract_actor(&request)?;
         let _user_id = require_user(&actor)?;
         let req = request.into_inner();
 
@@ -240,8 +333,28 @@ impl AppService for AppsServer {
             .parse()
             .map_err(|_| tonic::Status::invalid_argument("invalid token_id"))?;
 
+        let org_id = sqlx::query_scalar!(
+            "SELECT a.organisation_id FROM app_tokens t JOIN apps a ON a.id = t.app_id WHERE t.id = $1",
+            token_id
+        )
+        .fetch_optional(&self.state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("authz: {e}");
+            tonic::Status::internal("lookup failed")
+        })?
+        .ok_or_else(|| tonic::Status::not_found("app not found"))?;
+
+        let _authz = authorize::require_org_access_by_id(
+            &self.state.db,
+            &actor,
+            org_id,
+            authorize::OrgRole::Member,
+        )
+        .await?;
+
         self.state
-            .app_service()
+            .app_aggregate_service()
             .revoke_token(token_id)
             .await
             .to_internal_error()?;

@@ -92,6 +92,10 @@ run = "docker compose -f ./templates/docker-compose.yaml logs -f"
 env = { PGPASSWORD = "devpassword" }
 run = "psql -h localhost -p 5432 -U devuser -d dev"
 
+[tasks."db:exec"]
+env = { PGPASSWORD = "devpassword" }
+run = 'psql -h localhost -p 5432 -U devuser -d dev -c {{arg(name="sql")}}'
+
 [tasks."db:migrate"]
 depends = ["local:up"]
 run = "cargo sqlx migrate run --source ./crates/forest-server/migrations/"

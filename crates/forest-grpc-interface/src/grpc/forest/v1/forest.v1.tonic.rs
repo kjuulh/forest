@@ -6382,6 +6382,78 @@ pub mod release_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        pub async fn approve_plan_stage(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ApprovePlanStageRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ApprovePlanStageResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.ReleaseService/ApprovePlanStage",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("forest.v1.ReleaseService", "ApprovePlanStage"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn reject_plan_stage(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RejectPlanStageRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RejectPlanStageResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.ReleaseService/RejectPlanStage",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("forest.v1.ReleaseService", "RejectPlanStage"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_plan_output(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetPlanOutputRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetPlanOutputResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.ReleaseService/GetPlanOutput",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("forest.v1.ReleaseService", "GetPlanOutput"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -6475,6 +6547,27 @@ pub mod release_service_server {
             request: tonic::Request<super::GetReleaseIntentStatesRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetReleaseIntentStatesResponse>,
+            tonic::Status,
+        >;
+        async fn approve_plan_stage(
+            &self,
+            request: tonic::Request<super::ApprovePlanStageRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ApprovePlanStageResponse>,
+            tonic::Status,
+        >;
+        async fn reject_plan_stage(
+            &self,
+            request: tonic::Request<super::RejectPlanStageRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RejectPlanStageResponse>,
+            tonic::Status,
+        >;
+        async fn get_plan_output(
+            &self,
+            request: tonic::Request<super::GetPlanOutputRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetPlanOutputResponse>,
             tonic::Status,
         >;
     }
@@ -7069,6 +7162,144 @@ pub mod release_service_server {
                     };
                     Box::pin(fut)
                 }
+                "/forest.v1.ReleaseService/ApprovePlanStage" => {
+                    #[allow(non_camel_case_types)]
+                    struct ApprovePlanStageSvc<T: ReleaseService>(pub Arc<T>);
+                    impl<
+                        T: ReleaseService,
+                    > tonic::server::UnaryService<super::ApprovePlanStageRequest>
+                    for ApprovePlanStageSvc<T> {
+                        type Response = super::ApprovePlanStageResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ApprovePlanStageRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ReleaseService>::approve_plan_stage(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ApprovePlanStageSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.ReleaseService/RejectPlanStage" => {
+                    #[allow(non_camel_case_types)]
+                    struct RejectPlanStageSvc<T: ReleaseService>(pub Arc<T>);
+                    impl<
+                        T: ReleaseService,
+                    > tonic::server::UnaryService<super::RejectPlanStageRequest>
+                    for RejectPlanStageSvc<T> {
+                        type Response = super::RejectPlanStageResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RejectPlanStageRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ReleaseService>::reject_plan_stage(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = RejectPlanStageSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.ReleaseService/GetPlanOutput" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetPlanOutputSvc<T: ReleaseService>(pub Arc<T>);
+                    impl<
+                        T: ReleaseService,
+                    > tonic::server::UnaryService<super::GetPlanOutputRequest>
+                    for GetPlanOutputSvc<T> {
+                        type Response = super::GetPlanOutputResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetPlanOutputRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ReleaseService>::get_plan_output(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetPlanOutputSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
                 _ => {
                     Box::pin(async move {
                         let mut response = http::Response::new(
@@ -7326,6 +7557,90 @@ pub mod policy_service_client {
                 .insert(GrpcMethod::new("forest.v1.PolicyService", "EvaluatePolicies"));
             self.inner.unary(req, path, codec).await
         }
+        ///
+        pub async fn external_approve_release(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ExternalApproveReleaseRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ExternalApproveReleaseResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.PolicyService/ExternalApproveRelease",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("forest.v1.PolicyService", "ExternalApproveRelease"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
+        pub async fn external_reject_release(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ExternalRejectReleaseRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ExternalRejectReleaseResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.PolicyService/ExternalRejectRelease",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("forest.v1.PolicyService", "ExternalRejectRelease"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
+        pub async fn get_external_approval_state(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetExternalApprovalStateRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetExternalApprovalStateResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.PolicyService/GetExternalApprovalState",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.PolicyService",
+                        "GetExternalApprovalState",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -7379,6 +7694,30 @@ pub mod policy_service_server {
             request: tonic::Request<super::EvaluatePoliciesRequest>,
         ) -> std::result::Result<
             tonic::Response<super::EvaluatePoliciesResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn external_approve_release(
+            &self,
+            request: tonic::Request<super::ExternalApproveReleaseRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ExternalApproveReleaseResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn external_reject_release(
+            &self,
+            request: tonic::Request<super::ExternalRejectReleaseRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ExternalRejectReleaseResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn get_external_approval_state(
+            &self,
+            request: tonic::Request<super::GetExternalApprovalStateRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetExternalApprovalStateResponse>,
             tonic::Status,
         >;
     }
@@ -7670,6 +8009,155 @@ pub mod policy_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = EvaluatePoliciesSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.PolicyService/ExternalApproveRelease" => {
+                    #[allow(non_camel_case_types)]
+                    struct ExternalApproveReleaseSvc<T: PolicyService>(pub Arc<T>);
+                    impl<
+                        T: PolicyService,
+                    > tonic::server::UnaryService<super::ExternalApproveReleaseRequest>
+                    for ExternalApproveReleaseSvc<T> {
+                        type Response = super::ExternalApproveReleaseResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ExternalApproveReleaseRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as PolicyService>::external_approve_release(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ExternalApproveReleaseSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.PolicyService/ExternalRejectRelease" => {
+                    #[allow(non_camel_case_types)]
+                    struct ExternalRejectReleaseSvc<T: PolicyService>(pub Arc<T>);
+                    impl<
+                        T: PolicyService,
+                    > tonic::server::UnaryService<super::ExternalRejectReleaseRequest>
+                    for ExternalRejectReleaseSvc<T> {
+                        type Response = super::ExternalRejectReleaseResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ExternalRejectReleaseRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as PolicyService>::external_reject_release(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ExternalRejectReleaseSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.PolicyService/GetExternalApprovalState" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetExternalApprovalStateSvc<T: PolicyService>(pub Arc<T>);
+                    impl<
+                        T: PolicyService,
+                    > tonic::server::UnaryService<super::GetExternalApprovalStateRequest>
+                    for GetExternalApprovalStateSvc<T> {
+                        type Response = super::GetExternalApprovalStateResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::GetExternalApprovalStateRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as PolicyService>::get_external_approval_state(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetExternalApprovalStateSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

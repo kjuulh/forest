@@ -38,6 +38,7 @@ impl WhenReleaseFlow for When<ReleaseFlowData> {
                     environments: vec![],
                     force: false,
                     use_pipeline: false,
+                    prepare_only: false,
                 },
             ))
             .await?;

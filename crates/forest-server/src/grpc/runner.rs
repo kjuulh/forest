@@ -519,6 +519,23 @@ impl RunnerService for RunnerServer {
             None
         };
 
+        // Store plan output if provided (plan mode releases)
+        #[allow(clippy::collapsible_if)]
+        if let Some(ref plan_output) = req.plan_output
+            && !plan_output.is_empty()
+        {
+            if let Err(e) = sqlx::query!(
+                "UPDATE release_states SET plan_output = $2 WHERE release_id = $1",
+                scope.release_id,
+                plan_output,
+            )
+            .execute(&self.state.db)
+            .await
+            {
+                tracing::warn!(%scope.release_id, "failed to store plan output: {e:#}");
+            }
+        }
+
         // Finalize: emit event + create notification
         release_finalizer::finalize_release(
             &self.state.release_event_store(),

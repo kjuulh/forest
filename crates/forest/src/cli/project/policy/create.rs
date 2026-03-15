@@ -132,6 +132,10 @@ fn print_policy_details(policy: &forest_grpc_interface::Policy) {
             println!("  target env:     {}", br.target_environment);
             println!("  branch pattern: {}", br.branch_pattern);
         }
+        Some(forest_grpc_interface::policy::Config::ExternalApproval(ea)) => {
+            println!("  target env:          {}", ea.target_environment);
+            println!("  required approvals:  {}", ea.required_approvals);
+        }
         None => {}
     }
 }

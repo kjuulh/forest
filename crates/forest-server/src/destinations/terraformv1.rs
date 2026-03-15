@@ -467,6 +467,172 @@ impl TerraformV1Destination {
         Ok(())
     }
 
+    /// Run terraform init + plan, capturing stdout as the plan output string.
+    async fn run_capture(
+        &self,
+        logger: &DestinationLogger,
+        release: &ReleaseItem,
+        destination: &Destination,
+    ) -> anyhow::Result<String> {
+        let project_id = &release.project_id;
+        let state_id = self.tf_state.state_id(destination, &project_id.to_string());
+        let (id, password) = self.tf_state.urls(state_id).await;
+
+        let base = format!("{}/{id}", self.tf_state.external_url.trim_end_matches("/"));
+        let lock = format!("{base}/lock");
+        let unlock = format!("{base}/unlock");
+
+        let tf_envs = HashMap::from([
+            ("TF_HTTP_ADDRESS", base.as_str()),
+            ("TF_HTTP_UNLOCK_ADDRESS", unlock.as_str()),
+            ("TF_HTTP_LOCK_ADDRESS", lock.as_str()),
+            ("TF_HTTP_PASSWORD", password.as_str()),
+        ]);
+
+        let temp_dir = self.temp.create_emphemeral_temp().await?;
+        let files = self
+            .artifact_files
+            .get_files_for_release(&release.artifact, &destination.environment)
+            .await
+            .context("get files for release")?;
+
+        for (path, content) in files {
+            let path = temp_dir.join(path);
+            if let Some(parent) = path.parent() {
+                tokio::fs::create_dir_all(parent).await.context("create dir")?;
+            }
+            let mut file = tokio::fs::File::create_new(path).await.context("create file")?;
+            file.write_all(content.as_bytes()).await.context("write")?;
+            file.flush().await.context("flush")?;
+        }
+
+        let env_dir = &temp_dir.join(&destination.environment);
+        let mut env_dir_entries = tokio::fs::read_dir(env_dir)
+            .await
+            .context("read dir found no destinations for env")?;
+
+        let mut plan_output = String::new();
+        let mut matched = false;
+
+        while let Some(env_dir_entry) = env_dir_entries.next_entry().await? {
+            if !env_dir_entry.file_type().await?.is_dir() {
+                continue;
+            }
+            let entry_name = env_dir_entry.file_name().to_string_lossy().to_string();
+            if let Ok(re) = regex::Regex::new(&entry_name) {
+                if !re.is_match(&destination.name) { continue; }
+            } else if entry_name != destination.name {
+                continue;
+            }
+
+            matched = true;
+            let dir = env_dir
+                .join(&entry_name)
+                .join(&destination.destination_type.organisation)
+                .join(format!("{}@{}", destination.destination_type.name, destination.destination_type.version));
+
+            // init
+            self.run_command(logger, destination, &dir, &tf_envs, &["init"])
+                .await
+                .context("terraform init")?;
+
+            // plan — capture stdout
+            plan_output = self
+                .run_command_capture(logger, destination, &dir, &tf_envs, &["plan"])
+                .await
+                .context("terraform plan")?;
+        }
+
+        if !matched {
+            anyhow::bail!("failed to find a destination match for submitted release");
+        }
+
+        Ok(plan_output)
+    }
+
+    /// Like `run_command` but also captures and returns stdout.
+    async fn run_command_capture(
+        &self,
+        logger: &DestinationLogger,
+        destination: &Destination,
+        path: &std::path::Path,
+        tf_envs: &HashMap<&str, &str>,
+        args: &[&str],
+    ) -> anyhow::Result<String> {
+        tracing::debug!(path =% path.display(), "running terraform {} (capture)", args.join(" "));
+
+        let exe = std::env::var("TERRAFORM_EXE").unwrap_or("terraform".to_string());
+
+        let mut cmd = tokio::process::Command::new(exe);
+        cmd.current_dir(path)
+            .env("NO_COLOR", "1")
+            .env("TF_IN_AUTOMATION", "true")
+            .env("TF_HTTP_LOCK_METHOD", "POST")
+            .env("TF_HTTP_UNLOCK_METHOD", "POST")
+            .env("TF_HTTP_USERNAME", "forest-terraform-v1")
+            .env("CI", "true")
+            .envs(tf_envs);
+
+        if let Ok(mirror_url) = std::env::var("FOREST_TERRAFORM_PROVIDER_MIRROR_URL") {
+            let cli_config = path.join(".terraformrc");
+            tokio::fs::write(
+                &cli_config,
+                format!("provider_installation {{\n  network_mirror {{\n    url = \"{mirror_url}\"\n  }}\n}}\n"),
+            )
+            .await
+            .ok();
+            cmd.env("TF_CLI_CONFIG_FILE", &cli_config);
+        }
+
+        for (k, v) in &destination.metadata {
+            cmd.env(format!("TF_VAR_{}", k), v);
+        }
+
+        let mut proc = cmd
+            .args(args)
+            .arg("-no-color")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?;
+
+        let captured = Arc::new(tokio::sync::Mutex::new(String::new()));
+
+        if let Some(stdout) = proc.stdout.take() {
+            let logger = logger.clone();
+            let captured = captured.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stdout).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::debug!("terraform@1: {}", line);
+                    logger.log_stdout(&line);
+                    let mut buf = captured.lock().await;
+                    if !buf.is_empty() { buf.push('\n'); }
+                    buf.push_str(&line);
+                }
+            });
+        }
+        if let Some(stderr) = proc.stderr.take() {
+            let logger = logger.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::debug!("terraform@1: {}", line);
+                    logger.log_stderr(&line);
+                }
+            });
+        }
+
+        let exit = proc.wait().await.context("terraform failed")?;
+        if !exit.success() {
+            anyhow::bail!("terraform failed: {}", exit.code().unwrap_or(-1));
+        }
+
+        let output = captured.lock().await.clone();
+        Ok(output)
+    }
+
     async fn run_command(
         &self,
         logger: &DestinationLogger,
@@ -579,9 +745,26 @@ impl DestinationEdge for TerraformV1Destination {
     ) -> anyhow::Result<()> {
         self.run(logger, release, destination, Mode::Apply)
             .await
-            .context("terraform plan failed")?;
+            .context("terraform apply failed")?;
 
         Ok(())
+    }
+
+    async fn plan(
+        &self,
+        logger: &DestinationLogger,
+        release: &ReleaseItem,
+        destination: &Destination,
+    ) -> anyhow::Result<Option<String>> {
+        let output = self.run_capture(logger, release, destination)
+            .await
+            .context("terraform plan failed")?;
+
+        Ok(Some(output))
+    }
+
+    fn supports_plan(&self) -> bool {
+        true
     }
 }
 

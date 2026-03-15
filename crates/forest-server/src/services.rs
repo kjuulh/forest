@@ -1,6 +1,8 @@
 pub mod apps;
+pub mod app_aggregate;
 pub mod policy;
-pub mod trigger;
+pub mod policy_aggregate;
+pub mod trigger_aggregate;
 pub mod component_aggregate;
 pub mod component_registry;
 

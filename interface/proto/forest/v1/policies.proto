@@ -10,6 +10,7 @@ enum PolicyType {
     POLICY_TYPE_UNSPECIFIED = 0;
     POLICY_TYPE_SOAK_TIME = 1;
     POLICY_TYPE_BRANCH_RESTRICTION = 2;
+    POLICY_TYPE_EXTERNAL_APPROVAL = 3;
 }
 
 message SoakTimeConfig {
@@ -28,6 +29,27 @@ message BranchRestrictionConfig {
     string branch_pattern = 2;
 }
 
+message ExternalApprovalConfig {
+    string target_environment = 1;
+    int32 required_approvals = 2;
+}
+
+// ── External approval state ─────────────────────────────────────────
+
+message ExternalApprovalState {
+    int32 required_approvals = 1;
+    int32 current_approvals = 2;
+    repeated ExternalApprovalDecisionEntry decisions = 3;
+}
+
+message ExternalApprovalDecisionEntry {
+    string user_id = 1;
+    string username = 2;
+    string decision = 3;
+    string decided_at = 4;
+    optional string comment = 5;
+}
+
 // ── Policy resource ─────────────────────────────────────────────────
 
 message Policy {
@@ -39,6 +61,7 @@ message Policy {
     oneof config {
         SoakTimeConfig soak_time = 10;
         BranchRestrictionConfig branch_restriction = 11;
+        ExternalApprovalConfig external_approval = 12;
     }
 
     string created_at = 20;
@@ -53,6 +76,7 @@ message PolicyEvaluation {
     bool passed = 3;
     // Human-readable explanation when blocked
     string reason = 4;
+    optional ExternalApprovalState external_approval_state = 10;
 }
 
 // ── CRUD messages ───────────────────────────────────────────────────
@@ -64,6 +88,7 @@ message CreatePolicyRequest {
     oneof config {
         SoakTimeConfig soak_time = 10;
         BranchRestrictionConfig branch_restriction = 11;
+        ExternalApprovalConfig external_approval = 12;
     }
 }
 message CreatePolicyResponse {
@@ -77,6 +102,7 @@ message UpdatePolicyRequest {
     oneof config {
         SoakTimeConfig soak_time = 10;
         BranchRestrictionConfig branch_restriction = 11;
+        ExternalApprovalConfig external_approval = 12;
     }
 }
 message UpdatePolicyResponse {
@@ -101,10 +127,43 @@ message EvaluatePoliciesRequest {
     string target_environment = 2;
     // For branch restriction checks
     optional string branch = 3;
+    optional string release_intent_id = 4;
 }
 message EvaluatePoliciesResponse {
     repeated PolicyEvaluation evaluations = 1;
     bool all_passed = 2;
+}
+
+// ── External approval RPC messages ──────────────────────────────────
+
+message ExternalApproveReleaseRequest {
+    Project project = 1;
+    string release_intent_id = 2;
+    string target_environment = 3;
+    optional string comment = 4;
+    bool force_bypass = 5;
+}
+message ExternalApproveReleaseResponse {
+    ExternalApprovalState state = 1;
+}
+
+message ExternalRejectReleaseRequest {
+    Project project = 1;
+    string release_intent_id = 2;
+    string target_environment = 3;
+    optional string comment = 4;
+}
+message ExternalRejectReleaseResponse {
+    ExternalApprovalState state = 1;
+}
+
+message GetExternalApprovalStateRequest {
+    Project project = 1;
+    string release_intent_id = 2;
+    string target_environment = 3;
+}
+message GetExternalApprovalStateResponse {
+    ExternalApprovalState state = 1;
 }
 
 service PolicyService {
@@ -113,4 +172,7 @@ service PolicyService {
     rpc DeletePolicy(DeletePolicyRequest) returns (DeletePolicyResponse);
     rpc ListPolicies(ListPoliciesRequest) returns (ListPoliciesResponse);
     rpc EvaluatePolicies(EvaluatePoliciesRequest) returns (EvaluatePoliciesResponse);
+    rpc ExternalApproveRelease(ExternalApproveReleaseRequest) returns (ExternalApproveReleaseResponse);
+    rpc ExternalRejectRelease(ExternalRejectReleaseRequest) returns (ExternalRejectReleaseResponse);
+    rpc GetExternalApprovalState(GetExternalApprovalStateRequest) returns (GetExternalApprovalStateResponse);
 }

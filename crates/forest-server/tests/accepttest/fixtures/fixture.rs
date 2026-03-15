@@ -81,12 +81,9 @@ pub async fn fixture() -> anyhow::Result<Fixture> {
 
             let state = forest_server::State::new(config)
                 .await
-                .expect("failed to create state (is DATABASE_URL set?)");
+                .expect("failed to create state (is DATABASE_URL or TEST_DATABASE_URL set?)");
 
             let db = state.db.clone();
-
-            // Clean test data
-            clean_database(&db).await;
 
             // Bind to random port
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -142,42 +139,6 @@ pub async fn fixture() -> anyhow::Result<Fixture> {
 
 
     Ok(fixture.clone())
-}
-
-async fn clean_database(db: &sqlx::PgPool) {
-    let tables = [
-        "release_events",
-        "release_logs",
-        "release_states",
-        "release_tokens",
-        "release_intents",
-        "annotations",
-        "artifact_files",
-        "artifacts",
-        "artifact_staging",
-        "blob_storage",
-        "component_files",
-        "component_staging",
-        "components",
-        "destinations",
-        "environments",
-        "notifications",
-        "user_sessions",
-        "user_emails",
-        "personal_access_tokens",
-        "user_mfa",
-        "user_oauth_connections",
-        "users",
-        "organisation_members",
-        "organisations",
-        "projects",
-        "es_events",
-        "es_streams",
-    ];
-    for table in tables {
-        let query = format!("DELETE FROM {}", table);
-        sqlx::query(&query).execute(db).await.ok();
-    }
 }
 
 async fn probe_grpc(addr: SocketAddr) {

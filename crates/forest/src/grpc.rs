@@ -926,6 +926,7 @@ impl GrpcClient {
                 environments: environments.into(),
                 force,
                 use_pipeline,
+                prepare_only: false,
             })
             .await
             .map_err(grpc_err)
@@ -1619,6 +1620,7 @@ impl GrpcClient {
                 }),
                 target_environment: target_environment.to_string(),
                 branch,
+                release_intent_id: None,
             })
             .await
             .map_err(grpc_err)

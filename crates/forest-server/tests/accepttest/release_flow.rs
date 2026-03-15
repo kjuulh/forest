@@ -18,15 +18,18 @@ async fn test_full_release_flow() -> anyhow::Result<()> {
     let (given, when, then) = testcase::<ReleaseFlowData>().await?;
 
     // Given
-    let org = format!("test-org-{}", uuid::Uuid::now_v7());
+    let suffix = uuid::Uuid::now_v7();
+    let org = format!("test-org-{suffix}");
+    let dest = format!("accept-dest-{suffix}");
+    let env = format!("accept-env-{suffix}");
     given
         .a_registered_user()
         .await
         .an_organisation(&org)
         .await
-        .an_environment("accept-env")
+        .an_environment(&env)
         .await
-        .a_destination("accept-dest", "accept-env")
+        .a_destination(&dest, &env)
         .await
         .an_uploaded_artifact()
         .await
@@ -54,15 +57,18 @@ async fn test_full_release_flow() -> anyhow::Result<()> {
 async fn test_annotate_and_retrieve_artifact() -> anyhow::Result<()> {
     let (given, _when, then) = testcase::<ReleaseFlowData>().await?;
 
-    let org = format!("test-org-{}", uuid::Uuid::now_v7());
+    let suffix = uuid::Uuid::now_v7();
+    let org = format!("test-org-{suffix}");
+    let dest = format!("retrieve-dest-{suffix}");
+    let env = format!("retrieve-env-{suffix}");
     given
         .a_registered_user()
         .await
         .an_organisation(&org)
         .await
-        .an_environment("retrieve-env")
+        .an_environment(&env)
         .await
-        .a_destination("retrieve-dest", "retrieve-env")
+        .a_destination(&dest, &env)
         .await
         .an_uploaded_artifact()
         .await

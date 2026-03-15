@@ -35,6 +35,8 @@ message ReleaseRequest {
   // When true, use the project's release pipeline (DAG) instead of
   // deploying directly to the specified destinations/environments.
   bool use_pipeline = 5;
+  // When true, create a plan-only pipeline (single Plan stage, no deploy).
+  bool prepare_only = 6;
 }
 message ReleaseResponse {
   // List of release intents created (one per destination)
@@ -69,6 +71,7 @@ message PipelineStageUpdate {
   optional string completed_at = 6;
   optional string wait_until = 7;
   optional string error_message = 8;
+  optional string approval_status = 9;
 }
 
 message ReleaseStatusUpdate {
@@ -186,10 +189,12 @@ message PipelineStageState {
   optional string completed_at = 7;
   optional string error_message = 8;
   // Type-specific context.
-  optional string environment = 9;       // deploy stages
+  optional string environment = 9;       // deploy/plan stages
   optional int64 duration_seconds = 10;  // wait stages
   optional string wait_until = 11;       // wait stages
-  repeated string release_ids = 12;      // deploy stages: individual release IDs
+  repeated string release_ids = 12;      // deploy/plan stages: individual release IDs
+  optional string approval_status = 13;  // plan stages: AWAITING_APPROVAL, APPROVED, REJECTED
+  optional bool auto_approve = 14;       // plan stages
 }
 
 // Status of a single release step (release_states row).
@@ -251,12 +256,15 @@ message PipelineRunStage {
   optional string error_message = 10;
   optional string wait_until = 11;
   repeated string release_ids = 12;      // deploy stages: individual release IDs
+  optional string approval_status = 13;  // plan stages: AWAITING_APPROVAL, APPROVED, REJECTED
+  optional bool auto_approve = 14;       // plan stages
 }
 
 enum PipelineRunStageType {
   PIPELINE_RUN_STAGE_TYPE_UNSPECIFIED = 0;
   PIPELINE_RUN_STAGE_TYPE_DEPLOY = 1;
   PIPELINE_RUN_STAGE_TYPE_WAIT = 2;
+  PIPELINE_RUN_STAGE_TYPE_PLAN = 3;
 }
 
 enum PipelineRunStageStatus {
@@ -266,6 +274,39 @@ enum PipelineRunStageStatus {
   PIPELINE_RUN_STAGE_STATUS_SUCCEEDED = 3;
   PIPELINE_RUN_STAGE_STATUS_FAILED = 4;
   PIPELINE_RUN_STAGE_STATUS_CANCELLED = 5;
+  PIPELINE_RUN_STAGE_STATUS_AWAITING_APPROVAL = 6;
+}
+
+// ── Plan stage approval ──────────────────────────────────────────────
+
+message ApprovePlanStageRequest {
+  string release_intent_id = 1;
+  string stage_id = 2;
+}
+message ApprovePlanStageResponse {}
+
+message RejectPlanStageRequest {
+  string release_intent_id = 1;
+  string stage_id = 2;
+  optional string reason = 3;
+}
+message RejectPlanStageResponse {}
+
+message GetPlanOutputRequest {
+  string release_intent_id = 1;
+  string stage_id = 2;
+}
+message GetPlanOutputResponse {
+  string plan_output = 1;            // deprecated: use outputs
+  string status = 2;                 // RUNNING, AWAITING_APPROVAL, APPROVED, REJECTED
+  repeated PlanDestinationOutput outputs = 3;
+}
+
+message PlanDestinationOutput {
+  string destination_id = 1;
+  string destination_name = 2;
+  string plan_output = 3;
+  string status = 4;                 // SUCCEEDED, FAILED, RUNNING, etc.
 }
 
 service ReleaseService {
@@ -281,6 +322,10 @@ service ReleaseService {
   rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
   rpc GetDestinationStates(GetDestinationStatesRequest) returns (GetDestinationStatesResponse);
   rpc GetReleaseIntentStates(GetReleaseIntentStatesRequest) returns (GetReleaseIntentStatesResponse);
+
+  rpc ApprovePlanStage(ApprovePlanStageRequest) returns (ApprovePlanStageResponse);
+  rpc RejectPlanStage(RejectPlanStageRequest) returns (RejectPlanStageResponse);
+  rpc GetPlanOutput(GetPlanOutputRequest) returns (GetPlanOutputResponse);
 }
 
 message Source {

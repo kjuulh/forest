@@ -25,6 +25,13 @@ pub trait RunnerDestination: Send + Sync {
 
     /// Execute the release.
     async fn release(&self, ctx: &RunnerContext) -> anyhow::Result<()>;
+
+    /// Run plan/dry-run phase. Returns captured plan output text, or None if
+    /// this destination doesn't support plan mode.
+    async fn plan(&self, ctx: &RunnerContext) -> anyhow::Result<Option<String>> {
+        let _ = ctx;
+        Ok(None)
+    }
 }
 
 /// Context provided to a `RunnerDestination` during execution.

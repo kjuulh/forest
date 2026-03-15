@@ -182,7 +182,7 @@ pub trait GrpcErrorExt<T> {
 
 impl<T> GrpcErrorExt<T> for anyhow::Result<T> {
     fn to_internal_error(self) -> Result<T, tonic::Status> {
-        self.inspect_err(|e| tracing::error!("create staging failed: {:?}", e))
+        self.inspect_err(|e| tracing::error!(error = %e, "grpc internal error: {e:#}"))
             .map_err(|e| tonic::Status::internal(e.to_string()))
     }
 }

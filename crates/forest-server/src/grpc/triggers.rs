@@ -3,9 +3,10 @@ use forest_grpc_interface::{trigger_service_server::TriggerService, *};
 use tonic::Response;
 
 use crate::{
-    grpc::artifacts::GrpcErrorExt,
+    domains::trigger::{TriggerPatterns, TriggerTargets},
+    grpc::{artifacts::GrpcErrorExt, authorize},
     services::{
-        trigger::{CreateTriggerParams, TriggerRegistryState, UpdateTriggerParams},
+        trigger_aggregate::{TriggerAggregateServiceState, TriggerRecord},
         event_bus::{EventBusState, EventPayload},
         release_registry::ReleaseRegistryState,
     },
@@ -16,7 +17,7 @@ pub struct TriggersServer {
     pub state: State,
 }
 
-fn record_to_grpc(r: crate::services::trigger::TriggerRecord) -> Trigger {
+fn record_to_grpc(r: TriggerRecord) -> Trigger {
     Trigger {
         id: r.id.to_string(),
         name: r.name,
@@ -41,12 +42,21 @@ impl TriggerService for TriggersServer {
         &self,
         request: tonic::Request<CreateTriggerRequest>,
     ) -> Result<Response<CreateTriggerResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let project = req
             .project
             .context("project is required")
             .to_internal_error()?;
+
+        let _authz = authorize::require_project_access(
+            &self.state.db,
+            &actor,
+            &project,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let project_id = self
             .state
@@ -58,20 +68,24 @@ impl TriggerService for TriggersServer {
 
         let rec = self
             .state
-            .trigger_registry()
-            .create(CreateTriggerParams {
+            .trigger_aggregate_service()
+            .create(
                 project_id,
-                name: req.name,
-                branch_pattern: req.branch_pattern,
-                title_pattern: req.title_pattern,
-                author_pattern: req.author_pattern,
-                commit_message_pattern: req.commit_message_pattern,
-                source_type_pattern: req.source_type_pattern,
-                target_environments: req.target_environments,
-                target_destinations: req.target_destinations,
-                force_release: req.force_release,
-                use_pipeline: req.use_pipeline,
-            })
+                req.name,
+                TriggerPatterns {
+                    branch: req.branch_pattern,
+                    title: req.title_pattern,
+                    author: req.author_pattern,
+                    commit_message: req.commit_message_pattern,
+                    source_type: req.source_type_pattern,
+                },
+                TriggerTargets {
+                    environments: req.target_environments,
+                    destinations: req.target_destinations,
+                },
+                req.force_release,
+                req.use_pipeline,
+            )
             .await
             .context("create trigger")
             .to_internal_error()?;
@@ -97,12 +111,21 @@ impl TriggerService for TriggersServer {
         &self,
         request: tonic::Request<UpdateTriggerRequest>,
     ) -> Result<Response<UpdateTriggerResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let project = req
             .project
             .context("project is required")
             .to_internal_error()?;
+
+        let _authz = authorize::require_project_access(
+            &self.state.db,
+            &actor,
+            &project,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let project_id = self
             .state
@@ -112,32 +135,45 @@ impl TriggerService for TriggersServer {
             .context("resolve project")
             .to_internal_error()?;
 
+        // Build patterns only if any pattern field is set
+        let patterns = if req.branch_pattern.is_some()
+            || req.title_pattern.is_some()
+            || req.author_pattern.is_some()
+            || req.commit_message_pattern.is_some()
+            || req.source_type_pattern.is_some()
+        {
+            Some(TriggerPatterns {
+                branch: req.branch_pattern,
+                title: req.title_pattern,
+                author: req.author_pattern,
+                commit_message: req.commit_message_pattern,
+                source_type: req.source_type_pattern,
+            })
+        } else {
+            None
+        };
+
+        let targets = if !req.target_environments.is_empty() || !req.target_destinations.is_empty()
+        {
+            Some(TriggerTargets {
+                environments: req.target_environments,
+                destinations: req.target_destinations,
+            })
+        } else {
+            None
+        };
+
         let rec = self
             .state
-            .trigger_registry()
+            .trigger_aggregate_service()
             .update(
                 &project_id,
                 &req.name,
-                UpdateTriggerParams {
-                    enabled: req.enabled,
-                    branch_pattern: req.branch_pattern,
-                    title_pattern: req.title_pattern,
-                    author_pattern: req.author_pattern,
-                    commit_message_pattern: req.commit_message_pattern,
-                    source_type_pattern: req.source_type_pattern,
-                    target_environments: if req.target_environments.is_empty() {
-                        None
-                    } else {
-                        Some(req.target_environments)
-                    },
-                    target_destinations: if req.target_destinations.is_empty() {
-                        None
-                    } else {
-                        Some(req.target_destinations)
-                    },
-                    force_release: req.force_release,
-                    use_pipeline: req.use_pipeline,
-                },
+                req.enabled,
+                patterns,
+                targets,
+                req.force_release,
+                req.use_pipeline,
             )
             .await
             .context("update trigger")
@@ -164,12 +200,21 @@ impl TriggerService for TriggersServer {
         &self,
         request: tonic::Request<DeleteTriggerRequest>,
     ) -> Result<Response<DeleteTriggerResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let project = req
             .project
             .context("project is required")
             .to_internal_error()?;
+
+        let _authz = authorize::require_project_access(
+            &self.state.db,
+            &actor,
+            &project,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let project_id = self
             .state
@@ -180,7 +225,7 @@ impl TriggerService for TriggersServer {
             .to_internal_error()?;
 
         self.state
-            .trigger_registry()
+            .trigger_aggregate_service()
             .delete(&project_id, &req.name)
             .await
             .context("delete trigger")
@@ -205,12 +250,21 @@ impl TriggerService for TriggersServer {
         &self,
         request: tonic::Request<ListTriggersRequest>,
     ) -> Result<Response<ListTriggersResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let project = req
             .project
             .context("project is required")
             .to_internal_error()?;
+
+        let _authz = authorize::require_project_access(
+            &self.state.db,
+            &actor,
+            &project,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let project_id = self
             .state
@@ -222,7 +276,7 @@ impl TriggerService for TriggersServer {
 
         let recs = self
             .state
-            .trigger_registry()
+            .trigger_aggregate_service()
             .list(&project_id)
             .await
             .context("list triggers")

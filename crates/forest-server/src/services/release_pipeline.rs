@@ -35,6 +35,12 @@ pub enum StageConfig {
     Wait {
         duration_seconds: i64,
     },
+    Plan {
+        environment: String,
+        /// When true, auto-approve after plan succeeds (no manual gate).
+        #[serde(default)]
+        auto_approve: bool,
+    },
 }
 
 impl StageDefinition {
@@ -51,6 +57,16 @@ impl StageDefinition {
         Self {
             depends_on,
             config: StageConfig::Wait { duration_seconds },
+        }
+    }
+
+    pub fn plan(environment: impl Into<String>, auto_approve: bool, depends_on: Vec<String>) -> Self {
+        Self {
+            depends_on,
+            config: StageConfig::Plan {
+                environment: environment.into(),
+                auto_approve,
+            },
         }
     }
 }
@@ -85,6 +101,26 @@ pub struct StageState {
     /// For wait stages: ISO8601 timestamp when the wait expires.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<String>,
+
+    /// For plan stages: tracks approval lifecycle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_status: Option<ApprovalStatus>,
+
+    /// When approval was granted/rejected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_at: Option<String>,
+
+    /// Who approved/rejected (actor_id).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ApprovalStatus {
+    AwaitingApproval,
+    Approved,
+    Rejected,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +143,9 @@ impl StageState {
             error_message: None,
             release_ids: None,
             wait_until: None,
+            approval_status: None,
+            approval_at: None,
+            approved_by: None,
         }
     }
 }
@@ -117,6 +156,7 @@ impl StageState {
 pub enum StageType {
     Deploy,
     Wait,
+    Plan,
 }
 
 impl StageType {
@@ -124,6 +164,7 @@ impl StageType {
         match self {
             Self::Deploy => "deploy",
             Self::Wait => "wait",
+            Self::Plan => "plan",
         }
     }
 }
@@ -139,6 +180,7 @@ impl StageConfig {
         match self {
             Self::Deploy { .. } => StageType::Deploy,
             Self::Wait { .. } => StageType::Wait,
+            Self::Plan { .. } => StageType::Plan,
         }
     }
 }
@@ -562,5 +604,110 @@ mod tests {
         assert_eq!(stages.len(), 2);
         assert!(matches!(stages["deploy-dev"].config, StageConfig::Deploy { .. }));
         assert!(matches!(stages["soak"].config, StageConfig::Wait { .. }));
+    }
+
+    #[test]
+    fn test_plan_stage_serde() {
+        let mut stages = PipelineStages::new();
+        stages.insert(
+            "plan-prod".into(),
+            StageDefinition::plan("prod", false, vec![]),
+        );
+        stages.insert(
+            "deploy-prod".into(),
+            StageDefinition::deploy("prod", vec!["plan-prod".into()]),
+        );
+
+        let json = serde_json::to_string_pretty(&stages).unwrap();
+        let parsed: PipelineStages = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.len(), 2);
+        match &parsed["plan-prod"].config {
+            StageConfig::Plan { environment, auto_approve } => {
+                assert_eq!(environment, "prod");
+                assert!(!auto_approve);
+            }
+            _ => panic!("expected plan stage"),
+        }
+    }
+
+    #[test]
+    fn test_plan_stage_auto_approve_serde() {
+        let json = r#"{
+            "plan-prod": {
+                "type": "plan",
+                "depends_on": [],
+                "environment": "prod",
+                "auto_approve": true
+            }
+        }"#;
+
+        let stages: PipelineStages = serde_json::from_str(json).unwrap();
+        match &stages["plan-prod"].config {
+            StageConfig::Plan { environment, auto_approve } => {
+                assert_eq!(environment, "prod");
+                assert!(auto_approve);
+            }
+            _ => panic!("expected plan stage"),
+        }
+    }
+
+    #[test]
+    fn test_plan_stage_auto_approve_defaults_false() {
+        let json = r#"{
+            "plan-prod": {
+                "type": "plan",
+                "depends_on": [],
+                "environment": "prod"
+            }
+        }"#;
+
+        let stages: PipelineStages = serde_json::from_str(json).unwrap();
+        match &stages["plan-prod"].config {
+            StageConfig::Plan { auto_approve, .. } => {
+                assert!(!auto_approve);
+            }
+            _ => panic!("expected plan stage"),
+        }
+    }
+
+    #[test]
+    fn test_plan_then_deploy_pipeline() {
+        let mut stages = PipelineStages::new();
+        stages.insert(
+            "plan-prod".into(),
+            StageDefinition::plan("prod", false, vec![]),
+        );
+        stages.insert(
+            "deploy-prod".into(),
+            StageDefinition::deploy("prod", vec!["plan-prod".into()]),
+        );
+
+        assert!(validate_pipeline(&stages).is_ok());
+
+        let states = init_stage_states(&stages);
+        let ready = find_ready_stages(&stages, &states);
+        assert_eq!(ready, vec!["plan-prod"]);
+
+        // After plan succeeds, deploy should be ready
+        let mut states = states;
+        states.get_mut("plan-prod").unwrap().status = StageStatus::Succeeded;
+        let ready = find_ready_stages(&stages, &states);
+        assert_eq!(ready, vec!["deploy-prod"]);
+    }
+
+    #[test]
+    fn test_approval_status_serde() {
+        let state = StageState {
+            status: StageStatus::Active,
+            approval_status: Some(ApprovalStatus::AwaitingApproval),
+            ..StageState::pending()
+        };
+
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("AWAITING_APPROVAL"));
+
+        let parsed: StageState = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.approval_status, Some(ApprovalStatus::AwaitingApproval));
     }
 }

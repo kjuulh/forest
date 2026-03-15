@@ -234,12 +234,14 @@ impl RunnerSession {
         release_token: &str,
         outcome: forest_grpc_interface::ReleaseOutcome,
         error_message: Option<&str>,
+        plan_output: Option<&str>,
     ) -> anyhow::Result<()> {
         self.client
             .complete_release(forest_grpc_interface::CompleteReleaseRequest {
                 release_token: release_token.to_string(),
                 outcome: outcome.into(),
                 error_message: error_message.unwrap_or_default().to_string(),
+                plan_output: plan_output.map(|s| s.to_string()),
             })
             .await
             .context("failed to complete release")?;

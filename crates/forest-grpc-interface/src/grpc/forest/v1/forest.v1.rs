@@ -2006,6 +2006,9 @@ pub struct ReleaseRequest {
     /// deploying directly to the specified destinations/environments.
     #[prost(bool, tag="5")]
     pub use_pipeline: bool,
+    /// When true, create a plan-only pipeline (single Plan stage, no deploy).
+    #[prost(bool, tag="6")]
+    pub prepare_only: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReleaseResponse {
@@ -2065,6 +2068,8 @@ pub struct PipelineStageUpdate {
     pub wait_until: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(string, optional, tag="8")]
     pub error_message: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="9")]
+    pub approval_status: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReleaseStatusUpdate {
@@ -2236,7 +2241,7 @@ pub struct PipelineStageState {
     pub error_message: ::core::option::Option<::prost::alloc::string::String>,
     /// Type-specific context.
     ///
-    /// deploy stages
+    /// deploy/plan stages
     #[prost(string, optional, tag="9")]
     pub environment: ::core::option::Option<::prost::alloc::string::String>,
     /// wait stages
@@ -2245,9 +2250,15 @@ pub struct PipelineStageState {
     /// wait stages
     #[prost(string, optional, tag="11")]
     pub wait_until: ::core::option::Option<::prost::alloc::string::String>,
-    /// deploy stages: individual release IDs
+    /// deploy/plan stages: individual release IDs
     #[prost(string, repeated, tag="12")]
     pub release_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// plan stages: AWAITING_APPROVAL, APPROVED, REJECTED
+    #[prost(string, optional, tag="13")]
+    pub approval_status: ::core::option::Option<::prost::alloc::string::String>,
+    /// plan stages
+    #[prost(bool, optional, tag="14")]
+    pub auto_approve: ::core::option::Option<bool>,
 }
 /// Status of a single release step (release_states row).
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2354,6 +2365,66 @@ pub struct PipelineRunStage {
     /// deploy stages: individual release IDs
     #[prost(string, repeated, tag="12")]
     pub release_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// plan stages: AWAITING_APPROVAL, APPROVED, REJECTED
+    #[prost(string, optional, tag="13")]
+    pub approval_status: ::core::option::Option<::prost::alloc::string::String>,
+    /// plan stages
+    #[prost(bool, optional, tag="14")]
+    pub auto_approve: ::core::option::Option<bool>,
+}
+// ── Plan stage approval ──────────────────────────────────────────────
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApprovePlanStageRequest {
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub stage_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApprovePlanStageResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RejectPlanStageRequest {
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub stage_id: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="3")]
+    pub reason: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RejectPlanStageResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetPlanOutputRequest {
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub stage_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetPlanOutputResponse {
+    /// deprecated: use outputs
+    #[prost(string, tag="1")]
+    pub plan_output: ::prost::alloc::string::String,
+    /// RUNNING, AWAITING_APPROVAL, APPROVED, REJECTED
+    #[prost(string, tag="2")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="3")]
+    pub outputs: ::prost::alloc::vec::Vec<PlanDestinationOutput>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PlanDestinationOutput {
+    #[prost(string, tag="1")]
+    pub destination_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub destination_name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub plan_output: ::prost::alloc::string::String,
+    /// SUCCEEDED, FAILED, RUNNING, etc.
+    #[prost(string, tag="4")]
+    pub status: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Source {
@@ -2478,6 +2549,7 @@ pub enum PipelineRunStageType {
     Unspecified = 0,
     Deploy = 1,
     Wait = 2,
+    Plan = 3,
 }
 impl PipelineRunStageType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -2489,6 +2561,7 @@ impl PipelineRunStageType {
             Self::Unspecified => "PIPELINE_RUN_STAGE_TYPE_UNSPECIFIED",
             Self::Deploy => "PIPELINE_RUN_STAGE_TYPE_DEPLOY",
             Self::Wait => "PIPELINE_RUN_STAGE_TYPE_WAIT",
+            Self::Plan => "PIPELINE_RUN_STAGE_TYPE_PLAN",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -2497,6 +2570,7 @@ impl PipelineRunStageType {
             "PIPELINE_RUN_STAGE_TYPE_UNSPECIFIED" => Some(Self::Unspecified),
             "PIPELINE_RUN_STAGE_TYPE_DEPLOY" => Some(Self::Deploy),
             "PIPELINE_RUN_STAGE_TYPE_WAIT" => Some(Self::Wait),
+            "PIPELINE_RUN_STAGE_TYPE_PLAN" => Some(Self::Plan),
             _ => None,
         }
     }
@@ -2510,6 +2584,7 @@ pub enum PipelineRunStageStatus {
     Succeeded = 3,
     Failed = 4,
     Cancelled = 5,
+    AwaitingApproval = 6,
 }
 impl PipelineRunStageStatus {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -2524,6 +2599,7 @@ impl PipelineRunStageStatus {
             Self::Succeeded => "PIPELINE_RUN_STAGE_STATUS_SUCCEEDED",
             Self::Failed => "PIPELINE_RUN_STAGE_STATUS_FAILED",
             Self::Cancelled => "PIPELINE_RUN_STAGE_STATUS_CANCELLED",
+            Self::AwaitingApproval => "PIPELINE_RUN_STAGE_STATUS_AWAITING_APPROVAL",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -2535,6 +2611,7 @@ impl PipelineRunStageStatus {
             "PIPELINE_RUN_STAGE_STATUS_SUCCEEDED" => Some(Self::Succeeded),
             "PIPELINE_RUN_STAGE_STATUS_FAILED" => Some(Self::Failed),
             "PIPELINE_RUN_STAGE_STATUS_CANCELLED" => Some(Self::Cancelled),
+            "PIPELINE_RUN_STAGE_STATUS_AWAITING_APPROVAL" => Some(Self::AwaitingApproval),
             _ => None,
         }
     }
@@ -2560,6 +2637,37 @@ pub struct BranchRestrictionConfig {
     #[prost(string, tag="2")]
     pub branch_pattern: ::prost::alloc::string::String,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExternalApprovalConfig {
+    #[prost(string, tag="1")]
+    pub target_environment: ::prost::alloc::string::String,
+    #[prost(int32, tag="2")]
+    pub required_approvals: i32,
+}
+// ── External approval state ─────────────────────────────────────────
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ExternalApprovalState {
+    #[prost(int32, tag="1")]
+    pub required_approvals: i32,
+    #[prost(int32, tag="2")]
+    pub current_approvals: i32,
+    #[prost(message, repeated, tag="3")]
+    pub decisions: ::prost::alloc::vec::Vec<ExternalApprovalDecisionEntry>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExternalApprovalDecisionEntry {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub username: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub decision: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub decided_at: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="5")]
+    pub comment: ::core::option::Option<::prost::alloc::string::String>,
+}
 // ── Policy resource ─────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2576,7 +2684,7 @@ pub struct Policy {
     pub created_at: ::prost::alloc::string::String,
     #[prost(string, tag="21")]
     pub updated_at: ::prost::alloc::string::String,
-    #[prost(oneof="policy::Config", tags="10, 11")]
+    #[prost(oneof="policy::Config", tags="10, 11, 12")]
     pub config: ::core::option::Option<policy::Config>,
 }
 /// Nested message and enum types in `Policy`.
@@ -2587,11 +2695,13 @@ pub mod policy {
         SoakTime(super::SoakTimeConfig),
         #[prost(message, tag="11")]
         BranchRestriction(super::BranchRestrictionConfig),
+        #[prost(message, tag="12")]
+        ExternalApproval(super::ExternalApprovalConfig),
     }
 }
 // ── Policy evaluation result ────────────────────────────────────────
 
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PolicyEvaluation {
     #[prost(string, tag="1")]
     pub policy_name: ::prost::alloc::string::String,
@@ -2602,6 +2712,8 @@ pub struct PolicyEvaluation {
     /// Human-readable explanation when blocked
     #[prost(string, tag="4")]
     pub reason: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="10")]
+    pub external_approval_state: ::core::option::Option<ExternalApprovalState>,
 }
 // ── CRUD messages ───────────────────────────────────────────────────
 
@@ -2613,7 +2725,7 @@ pub struct CreatePolicyRequest {
     pub name: ::prost::alloc::string::String,
     #[prost(enumeration="PolicyType", tag="3")]
     pub policy_type: i32,
-    #[prost(oneof="create_policy_request::Config", tags="10, 11")]
+    #[prost(oneof="create_policy_request::Config", tags="10, 11, 12")]
     pub config: ::core::option::Option<create_policy_request::Config>,
 }
 /// Nested message and enum types in `CreatePolicyRequest`.
@@ -2624,6 +2736,8 @@ pub mod create_policy_request {
         SoakTime(super::SoakTimeConfig),
         #[prost(message, tag="11")]
         BranchRestriction(super::BranchRestrictionConfig),
+        #[prost(message, tag="12")]
+        ExternalApproval(super::ExternalApprovalConfig),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2639,7 +2753,7 @@ pub struct UpdatePolicyRequest {
     pub name: ::prost::alloc::string::String,
     #[prost(bool, optional, tag="3")]
     pub enabled: ::core::option::Option<bool>,
-    #[prost(oneof="update_policy_request::Config", tags="10, 11")]
+    #[prost(oneof="update_policy_request::Config", tags="10, 11, 12")]
     pub config: ::core::option::Option<update_policy_request::Config>,
 }
 /// Nested message and enum types in `UpdatePolicyRequest`.
@@ -2650,6 +2764,8 @@ pub mod update_policy_request {
         SoakTime(super::SoakTimeConfig),
         #[prost(message, tag="11")]
         BranchRestriction(super::BranchRestrictionConfig),
+        #[prost(message, tag="12")]
+        ExternalApproval(super::ExternalApprovalConfig),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2686,6 +2802,8 @@ pub struct EvaluatePoliciesRequest {
     /// For branch restriction checks
     #[prost(string, optional, tag="3")]
     pub branch: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="4")]
+    pub release_intent_id: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EvaluatePoliciesResponse {
@@ -2693,6 +2811,56 @@ pub struct EvaluatePoliciesResponse {
     pub evaluations: ::prost::alloc::vec::Vec<PolicyEvaluation>,
     #[prost(bool, tag="2")]
     pub all_passed: bool,
+}
+// ── External approval RPC messages ──────────────────────────────────
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExternalApproveReleaseRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(string, tag="2")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub target_environment: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="4")]
+    pub comment: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(bool, tag="5")]
+    pub force_bypass: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ExternalApproveReleaseResponse {
+    #[prost(message, optional, tag="1")]
+    pub state: ::core::option::Option<ExternalApprovalState>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExternalRejectReleaseRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(string, tag="2")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub target_environment: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="4")]
+    pub comment: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ExternalRejectReleaseResponse {
+    #[prost(message, optional, tag="1")]
+    pub state: ::core::option::Option<ExternalApprovalState>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetExternalApprovalStateRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(string, tag="2")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub target_environment: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetExternalApprovalStateResponse {
+    #[prost(message, optional, tag="1")]
+    pub state: ::core::option::Option<ExternalApprovalState>,
 }
 // ── Policy types ────────────────────────────────────────────────────
 
@@ -2702,6 +2870,7 @@ pub enum PolicyType {
     Unspecified = 0,
     SoakTime = 1,
     BranchRestriction = 2,
+    ExternalApproval = 3,
 }
 impl PolicyType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -2713,6 +2882,7 @@ impl PolicyType {
             Self::Unspecified => "POLICY_TYPE_UNSPECIFIED",
             Self::SoakTime => "POLICY_TYPE_SOAK_TIME",
             Self::BranchRestriction => "POLICY_TYPE_BRANCH_RESTRICTION",
+            Self::ExternalApproval => "POLICY_TYPE_EXTERNAL_APPROVAL",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -2721,6 +2891,7 @@ impl PolicyType {
             "POLICY_TYPE_UNSPECIFIED" => Some(Self::Unspecified),
             "POLICY_TYPE_SOAK_TIME" => Some(Self::SoakTime),
             "POLICY_TYPE_BRANCH_RESTRICTION" => Some(Self::BranchRestriction),
+            "POLICY_TYPE_EXTERNAL_APPROVAL" => Some(Self::ExternalApproval),
             _ => None,
         }
     }
@@ -2844,6 +3015,13 @@ pub struct WaitStageConfig {
     #[prost(int64, tag="1")]
     pub duration_seconds: i64,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PlanStageConfig {
+    #[prost(string, tag="1")]
+    pub environment: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
+    pub auto_approve: bool,
+}
 // ── A single pipeline stage ──────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2852,7 +3030,7 @@ pub struct PipelineStage {
     pub id: ::prost::alloc::string::String,
     #[prost(string, repeated, tag="2")]
     pub depends_on: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(oneof="pipeline_stage::Config", tags="10, 11")]
+    #[prost(oneof="pipeline_stage::Config", tags="10, 11, 12")]
     pub config: ::core::option::Option<pipeline_stage::Config>,
 }
 /// Nested message and enum types in `PipelineStage`.
@@ -2863,6 +3041,8 @@ pub mod pipeline_stage {
         Deploy(super::DeployStageConfig),
         #[prost(message, tag="11")]
         Wait(super::WaitStageConfig),
+        #[prost(message, tag="12")]
+        Plan(super::PlanStageConfig),
     }
 }
 // ── Pipeline resource ────────────────────────────────────────────────
@@ -2945,6 +3125,7 @@ pub enum StageType {
     Unspecified = 0,
     Deploy = 1,
     Wait = 2,
+    Plan = 3,
 }
 impl StageType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -2956,6 +3137,7 @@ impl StageType {
             Self::Unspecified => "STAGE_TYPE_UNSPECIFIED",
             Self::Deploy => "STAGE_TYPE_DEPLOY",
             Self::Wait => "STAGE_TYPE_WAIT",
+            Self::Plan => "STAGE_TYPE_PLAN",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -2964,6 +3146,7 @@ impl StageType {
             "STAGE_TYPE_UNSPECIFIED" => Some(Self::Unspecified),
             "STAGE_TYPE_DEPLOY" => Some(Self::Deploy),
             "STAGE_TYPE_WAIT" => Some(Self::Wait),
+            "STAGE_TYPE_PLAN" => Some(Self::Plan),
             _ => None,
         }
     }
@@ -2979,6 +3162,7 @@ pub enum PipelineStageStatus {
     Succeeded = 3,
     Failed = 4,
     Cancelled = 5,
+    AwaitingApproval = 6,
 }
 impl PipelineStageStatus {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -2993,6 +3177,7 @@ impl PipelineStageStatus {
             Self::Succeeded => "PIPELINE_STAGE_STATUS_SUCCEEDED",
             Self::Failed => "PIPELINE_STAGE_STATUS_FAILED",
             Self::Cancelled => "PIPELINE_STAGE_STATUS_CANCELLED",
+            Self::AwaitingApproval => "PIPELINE_STAGE_STATUS_AWAITING_APPROVAL",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -3004,6 +3189,7 @@ impl PipelineStageStatus {
             "PIPELINE_STAGE_STATUS_SUCCEEDED" => Some(Self::Succeeded),
             "PIPELINE_STAGE_STATUS_FAILED" => Some(Self::Failed),
             "PIPELINE_STAGE_STATUS_CANCELLED" => Some(Self::Cancelled),
+            "PIPELINE_STAGE_STATUS_AWAITING_APPROVAL" => Some(Self::AwaitingApproval),
             _ => None,
         }
     }
@@ -3118,6 +3304,9 @@ pub struct WorkAssignment {
     /// Full destination configuration including metadata.
     #[prost(message, optional, tag="6")]
     pub destination: ::core::option::Option<DestinationInfo>,
+    /// Execution mode. Defaults to DEPLOY if unset.
+    #[prost(enumeration="ReleaseMode", tag="7")]
+    pub mode: i32,
 }
 /// Destination configuration sent with the work assignment.
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -3240,9 +3429,46 @@ pub struct CompleteReleaseRequest {
     /// Error description when outcome is FAILURE.
     #[prost(string, tag="3")]
     pub error_message: ::prost::alloc::string::String,
+    /// Plan output text when mode was "plan" and outcome is SUCCESS.
+    /// Stored in release_states.plan_output for UI review.
+    #[prost(string, optional, tag="4")]
+    pub plan_output: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CompleteReleaseResponse {
+}
+/// Execution mode for a work assignment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ReleaseMode {
+    Unspecified = 0,
+    /// Normal deployment execution.
+    Deploy = 1,
+    /// Dry-run / plan only (e.g. terraform plan). Runner should capture
+    /// plan output and include it in CompleteRelease.plan_output.
+    Plan = 2,
+}
+impl ReleaseMode {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "RELEASE_MODE_UNSPECIFIED",
+            Self::Deploy => "RELEASE_MODE_DEPLOY",
+            Self::Plan => "RELEASE_MODE_PLAN",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "RELEASE_MODE_UNSPECIFIED" => Some(Self::Unspecified),
+            "RELEASE_MODE_DEPLOY" => Some(Self::Deploy),
+            "RELEASE_MODE_PLAN" => Some(Self::Plan),
+            _ => None,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

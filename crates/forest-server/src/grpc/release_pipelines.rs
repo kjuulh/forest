@@ -1,7 +1,7 @@
 use anyhow::Context;
 use forest_grpc_interface::{
     pipeline_stage, release_pipeline_service_server::ReleasePipelineService,
-    DeployStageConfig, PipelineStage, WaitStageConfig, *,
+    DeployStageConfig, PipelineStage, PlanStageConfig, WaitStageConfig, *,
 };
 use tonic::Response;
 
@@ -38,6 +38,12 @@ fn stages_to_proto(stages: &PipelineStages) -> Vec<PipelineStage> {
                         duration_seconds: *duration_seconds,
                     }))
                 }
+                StageConfig::Plan { environment, auto_approve } => {
+                    Some(pipeline_stage::Config::Plan(PlanStageConfig {
+                        environment: environment.clone(),
+                        auto_approve: *auto_approve,
+                    }))
+                }
             };
 
             PipelineStage {
@@ -63,7 +69,11 @@ fn stages_from_proto(proto_stages: Vec<PipelineStage>) -> anyhow::Result<Pipelin
             Some(pipeline_stage::Config::Wait(c)) => StageConfig::Wait {
                 duration_seconds: c.duration_seconds,
             },
-            None => anyhow::bail!("stage '{}' is missing a config (deploy or wait)", ps.id),
+            Some(pipeline_stage::Config::Plan(c)) => StageConfig::Plan {
+                environment: c.environment,
+                auto_approve: c.auto_approve,
+            },
+            None => anyhow::bail!("stage '{}' is missing a config (deploy, wait, or plan)", ps.id),
         };
 
         let def = StageDefinition {

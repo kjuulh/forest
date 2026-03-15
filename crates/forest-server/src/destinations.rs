@@ -107,6 +107,23 @@ impl DestinationService {
             .await
     }
 
+    pub(crate) async fn plan(
+        &self,
+        logger: &DestinationLogger,
+        staged_release: &ReleaseItem,
+        destination: &Destination,
+    ) -> anyhow::Result<Option<String>> {
+        tracing::debug!(id =% staged_release.id, destination =% self.name(), "running plan");
+
+        self.inner
+            .plan(logger, staged_release, destination)
+            .await
+    }
+
+    pub fn supports_plan(&self) -> bool {
+        self.inner.supports_plan()
+    }
+
     fn create_logger(&self, staged_release: &ReleaseItem) -> DestinationLogger {
         DestinationLogger::new(staged_release.clone(), self.release_logs_registry.clone())
     }
@@ -138,6 +155,23 @@ pub trait DestinationEdge {
         release: &ReleaseItem,
         destination: &Destination,
     ) -> anyhow::Result<()>;
+
+    /// Run the plan/dry-run phase for this destination (e.g. terraform plan).
+    /// Returns the captured plan output text, or None if not supported.
+    #[allow(unused_variables)]
+    async fn plan(
+        &self,
+        logger: &DestinationLogger,
+        release: &ReleaseItem,
+        destination: &Destination,
+    ) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
+
+    /// Whether this destination type supports the plan phase.
+    fn supports_plan(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

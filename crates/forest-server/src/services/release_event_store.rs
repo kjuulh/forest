@@ -504,7 +504,8 @@ impl ReleaseEventStore {
                 release_id, release_intent_id, project_id,
                 destination_id, artifact_id, status,
                 runner_id, error_message,
-                queued_at, assigned_at, started_at, completed_at, updated_at
+                queued_at, assigned_at, started_at, completed_at, updated_at,
+                mode, plan_output
              FROM release_states
              WHERE release_id = $1",
             release_id,
@@ -897,6 +898,8 @@ pub struct ReleaseState {
     pub started_at: Option<chrono::DateTime<chrono::Utc>>,
     pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub mode: String,
+    pub plan_output: Option<String>,
 }
 
 pub struct ReleaseStateWithDestination {
@@ -991,6 +994,47 @@ impl ReleaseEventStoreState for State {
             nats: self.nats.clone(),
         }
     }
+}
+
+/// Check approval policies for a target environment within a transaction.
+/// Returns `Some(reason)` if blocked, `None` if all policies pass.
+pub(crate) async fn check_approval_policies(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    project_id: &Uuid,
+    release_intent_id: Uuid,
+    target_environment: &str,
+) -> anyhow::Result<Option<String>> {
+    let policies = sqlx::query!(
+        r#"SELECT name, config FROM policies WHERE project_id = $1 AND enabled = true AND policy_type = 'approval'"#,
+        project_id,
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .context("load approval policies")?;
+
+    for policy in policies {
+        let config: serde_json::Value = policy.config;
+        let target = config.get("target_environment").and_then(|v| v.as_str()).unwrap_or("");
+        if target != target_environment { continue; }
+        let required = config.get("required_approvals").and_then(|v| v.as_i64()).unwrap_or(1);
+
+        let approved_count = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!" FROM approval_decisions
+             WHERE release_intent_id = $1 AND target_environment = $2 AND decision = 'approved'"#,
+            release_intent_id, target_environment,
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .context("count approvals in pipeline")?;
+
+        if approved_count < required {
+            return Ok(Some(format!(
+                "policy '{}': awaiting approval ({}/{} approvals)",
+                policy.name, approved_count, required
+            )));
+        }
+    }
+    Ok(None)
 }
 
 /// Check soak_time policies for a target environment within a transaction.

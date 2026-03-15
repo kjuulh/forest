@@ -7,10 +7,10 @@ use notmad::{Component, ComponentInfo, MadError};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::services::release_event_store::check_soak_time_policies;
+use crate::services::release_event_store::{check_approval_policies, check_soak_time_policies};
 use crate::services::release_pipeline::{
-    PipelineStages, StageConfig, StageState, StageStates, StageStatus, find_ready_stages,
-    has_failed_dependency, init_stage_states, is_pipeline_complete,
+    ApprovalStatus, PipelineStages, StageConfig, StageState, StageStates, StageStatus,
+    find_ready_stages, has_failed_dependency, init_stage_states, is_pipeline_complete,
 };
 use crate::State;
 
@@ -265,6 +265,88 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                         }
                     }
             }
+            StageConfig::Plan { auto_approve, .. } => {
+                // Plan stages work like deploy stages but with an approval gate
+                let stage_releases = releases_by_stage.get(stage_id);
+                let releases: &[ReleaseRow] = stage_releases
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+
+                if releases.is_empty() {
+                    // ACTIVE plan stage with no child releases — this can happen if
+                    // activation was blocked after setting status=Active. Reset to
+                    // Pending so Step 4 re-attempts activation.
+                    tracing::info!(%intent_id, stage_id, "coordinator: resetting empty plan stage to Pending for re-activation");
+                    let mut updated = current.clone();
+                    updated.status = StageStatus::Pending;
+                    stage_states.insert(stage_id.clone(), updated);
+                    changed = true;
+                    continue;
+                }
+
+                let all_terminal = releases.iter().all(|r| {
+                    matches!(
+                        r.status.as_str(),
+                        "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT"
+                    )
+                });
+                if !all_terminal {
+                    continue;
+                }
+
+                let all_succeeded = releases.iter().all(|r| r.status == "SUCCEEDED");
+                let mut updated = current.clone();
+
+                if !all_succeeded {
+                    // Plan execution itself failed
+                    updated.status = StageStatus::Failed;
+                    updated.completed_at = Some(now_str.clone());
+                    let errors: Vec<String> = releases
+                        .iter()
+                        .filter(|r| r.status != "SUCCEEDED")
+                        .filter_map(|r| r.error_message.clone())
+                        .collect();
+                    if !errors.is_empty() {
+                        updated.error_message = Some(errors.join("; "));
+                    }
+                    stage_states.insert(stage_id.clone(), updated);
+                    changed = true;
+                } else if *auto_approve {
+                    // Auto-approve: plan succeeded, skip approval gate
+                    updated.status = StageStatus::Succeeded;
+                    updated.completed_at = Some(now_str.clone());
+                    updated.approval_status = Some(ApprovalStatus::Approved);
+                    updated.approval_at = Some(now_str.clone());
+                    stage_states.insert(stage_id.clone(), updated);
+                    changed = true;
+                } else {
+                    // Manual approval required
+                    match current.approval_status {
+                        Some(ApprovalStatus::Approved) => {
+                            updated.status = StageStatus::Succeeded;
+                            updated.completed_at = Some(now_str.clone());
+                            stage_states.insert(stage_id.clone(), updated);
+                            changed = true;
+                        }
+                        Some(ApprovalStatus::Rejected) => {
+                            updated.status = StageStatus::Failed;
+                            updated.completed_at = Some(now_str.clone());
+                            updated.error_message = Some("plan rejected".into());
+                            stage_states.insert(stage_id.clone(), updated);
+                            changed = true;
+                        }
+                        _ => {
+                            // Plan succeeded but no approval yet — set awaiting
+                            if current.approval_status.is_none() {
+                                updated.approval_status = Some(ApprovalStatus::AwaitingApproval);
+                                stage_states.insert(stage_id.clone(), updated);
+                                changed = true;
+                            }
+                            // Stay Active, don't complete
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -322,6 +404,13 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                         Some(existing) => existing.min(retry_at),
                         None => retry_at,
                     });
+                    continue;
+                }
+
+                let approval_blocked =
+                    check_approval_policies(&mut tx, &intent.project_id, intent_id, environment).await?;
+                if let Some(reason) = approval_blocked {
+                    tracing::debug!(%intent_id, stage_id, environment, "coordinator: deploy stage blocked by approval — {reason}");
                     continue;
                 }
 
@@ -436,6 +525,115 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                     stage_id,
                     duration_seconds,
                     "coordinator: activated wait stage (until {wait_until})"
+                );
+            }
+            StageConfig::Plan { environment, .. } => {
+                // Plan stages work like deploy but create releases in plan mode
+                let soak_blocked =
+                    check_soak_time_policies(&mut tx, &intent.project_id, &intent.artifact, environment).await?;
+
+                if let Some(reason) = soak_blocked {
+                    tracing::debug!(
+                        %intent_id,
+                        stage_id,
+                        environment,
+                        "coordinator: plan stage blocked by soak_time — {reason}"
+                    );
+                    let retry_at = now + chrono::Duration::seconds(30);
+                    earliest_timer = Some(match earliest_timer {
+                        Some(existing) => existing.min(retry_at),
+                        None => retry_at,
+                    });
+                    continue;
+                }
+
+                // Plan stages skip external approval checks — the plan is a dry-run
+                // that should execute so users can review the output before approving.
+                // The plan stage has its own built-in approval gate (AWAITING_APPROVAL).
+
+                // Resolve environment -> destinations
+                let dest_recs = sqlx::query!(
+                    r#"SELECT d.id
+                     FROM destinations d
+                     JOIN environments e ON d.environment_id = e.id
+                     WHERE e.name = $1"#,
+                    environment.as_str(),
+                )
+                .fetch_all(&mut *tx)
+                .await
+                .context("resolve destinations for plan stage")?;
+
+                if dest_recs.is_empty() {
+                    stage_states.insert(
+                        stage_id.clone(),
+                        StageState {
+                            status: StageStatus::Failed,
+                            error_message: Some(format!(
+                                "no destinations configured for environment '{environment}'"
+                            )),
+                            completed_at: Some(now_str.clone()),
+                            ..StageState::pending()
+                        },
+                    );
+                    changed = true;
+                    tracing::warn!(
+                        %intent_id,
+                        stage_id,
+                        environment,
+                        "coordinator: plan stage failed — no destinations for environment"
+                    );
+                    continue;
+                }
+
+                let mut release_ids = Vec::new();
+                for dest in &dest_recs {
+                    let rid = Uuid::now_v7();
+                    sqlx::query!(
+                        "INSERT INTO release_states (
+                            release_id, release_intent_id, project_id,
+                            destination_id, artifact_id, status, stage_id, mode
+                        ) VALUES ($1, $2, $3, $4, $5, 'QUEUED', $6, 'plan')",
+                        rid,
+                        intent_id,
+                        intent.project_id,
+                        dest.id,
+                        intent.artifact,
+                        stage_id.as_str(),
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+
+                    sqlx::query!(
+                        "INSERT INTO release_events (
+                            release_id, event_type, payload
+                        ) VALUES ($1, 'release.requested', '{}')",
+                        rid,
+                    )
+                    .execute(&mut *tx)
+                    .await?;
+
+                    release_ids.push(rid.to_string());
+                    new_release_ids.push(rid);
+                }
+
+                stage_states.insert(
+                    stage_id.clone(),
+                    StageState {
+                        status: StageStatus::Active,
+                        queued_at: Some(now_str.clone()),
+                        started_at: Some(now_str.clone()),
+                        release_ids: Some(release_ids),
+                        ..StageState::pending()
+                    },
+                );
+                changed = true;
+
+                tracing::info!(
+                    %intent_id,
+                    stage_id,
+                    environment,
+                    dest_count = dest_recs.len(),
+                    "coordinator: activated plan stage"
                 );
             }
         }

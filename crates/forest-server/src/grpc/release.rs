@@ -2,17 +2,27 @@ use anyhow::Context;
 use forest_grpc_interface::{
     release_service_server::ReleaseService, PipelineStageUpdate, *,
 };
+
+#[derive(sqlx::FromRow)]
+struct PlanOutputRow {
+    destination_id: Uuid,
+    plan_output: Option<String>,
+    status: String,
+    destination_name: String,
+}
 use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Response;
+use uuid::Uuid;
 
 use crate::{
     actor::Actor,
-    grpc::artifacts::GrpcErrorExt,
+    domains::trigger::AnnotationMatchData,
+    grpc::{artifacts::GrpcErrorExt, authorize},
     services::{
         policy::{PolicyRegistryState, PolicyType},
-        trigger::{AnnotationMatchData, TriggerRegistryState},
+        trigger_aggregate::TriggerAggregateServiceState,
         event_bus::{EventBusState, EventPayload},
         notification_registry::{NotificationRegistryState, ReleaseContext as NotifReleaseContext},
         release_event_store::ReleaseEventStoreState,
@@ -36,12 +46,7 @@ impl ReleaseService for ReleaseServer {
     ) -> std::result::Result<tonic::Response<AnnotateReleaseResponse>, tonic::Status> {
         tracing::debug!("annotate release");
 
-        let actor = request
-            .extensions()
-            .get::<Actor>()
-            .cloned()
-            .ok_or_else(|| tonic::Status::unauthenticated("missing actor"))?;
-
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let slug = petname::petname(3, "-").expect("to be able to generate slug");
@@ -50,6 +55,10 @@ impl ReleaseService for ReleaseServer {
             .project
             .context("no project found")
             .to_internal_error()?;
+
+        authorize::require_org_access(
+            &self.state.db, &actor, &proj.organisation, authorize::OrgRole::Member,
+        ).await?;
 
         let artifact_id = req
             .artifact_id
@@ -192,7 +201,7 @@ impl ReleaseService for ReleaseServer {
 
         match self
             .state
-            .trigger_registry()
+            .trigger_aggregate_service()
             .evaluate(&project_id, &match_data)
             .await
         {
@@ -206,7 +215,7 @@ impl ReleaseService for ReleaseServer {
                         let evals = self
                             .state
                             .policy_registry()
-                            .evaluate_for_environment(&project_id, env, branch)
+                            .evaluate_for_environment(&project_id, env, branch, None)
                             .await
                             .unwrap_or_default();
                         for eval in &evals {
@@ -316,12 +325,17 @@ impl ReleaseService for ReleaseServer {
         request: tonic::Request<GetArtifactsByProjectRequest>,
     ) -> std::result::Result<tonic::Response<GetArtifactsByProjectResponse>, tonic::Status> {
         tracing::debug!("get artifact by project");
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let project = req
             .project
             .ok_or(anyhow::anyhow!("project is required"))
             .to_internal_error()?;
+
+        authorize::require_org_access(
+            &self.state.db, &actor, &project.organisation, authorize::OrgRole::Member,
+        ).await?;
 
         let release_annotation = self
             .state
@@ -342,12 +356,7 @@ impl ReleaseService for ReleaseServer {
     ) -> std::result::Result<tonic::Response<ReleaseResponse>, tonic::Status> {
         tracing::debug!("release");
 
-        let actor = request
-            .extensions()
-            .get::<Actor>()
-            .cloned()
-            .ok_or_else(|| tonic::Status::unauthenticated("missing actor"))?;
-
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let artifact_id: uuid::Uuid = req
@@ -355,6 +364,25 @@ impl ReleaseService for ReleaseServer {
             .parse()
             .context("artifact id")
             .to_internal_error()?;
+
+        // Authorize: look up the org from the artifact's project
+        let release_org = sqlx::query_scalar!(
+            r#"SELECT p.organisation FROM annotations a
+             JOIN projects p ON a.project_id = p.id
+             WHERE a.artifact_id = $1
+             LIMIT 1"#,
+            artifact_id,
+        )
+        .fetch_optional(&self.state.db)
+        .await
+        .context("resolve artifact org")
+        .to_internal_error()?;
+
+        if let Some(ref org_name) = release_org {
+            authorize::require_org_access(
+                &self.state.db, &actor, org_name, authorize::OrgRole::Member,
+            ).await?;
+        }
 
         // Evaluate branch restriction policies before releasing
         let ann_ctx_for_policy = self
@@ -385,7 +413,7 @@ impl ReleaseService for ReleaseServer {
                 let evaluations = self
                     .state
                     .policy_registry()
-                    .evaluate_for_environment(&project_id, env, branch_for_policy.as_deref())
+                    .evaluate_for_environment(&project_id, env, branch_for_policy.as_deref(), None)
                     .await
                     .unwrap_or_default();
 
@@ -622,6 +650,7 @@ impl ReleaseService for ReleaseServer {
                                         match &def.config {
                                             StageConfig::Deploy { .. } => "deploy",
                                             StageConfig::Wait { .. } => "wait",
+                                            StageConfig::Plan { .. } => "plan",
                                         }
                                     }).unwrap_or("unknown");
 
@@ -637,6 +666,7 @@ impl ReleaseService for ReleaseServer {
                                                     completed_at: state.completed_at.clone(),
                                                     wait_until: state.wait_until.clone(),
                                                     error_message: state.error_message.clone(),
+                                                    approval_status: state.approval_status.map(|a| format!("{:?}", a).to_uppercase()),
                                                 },
                                             ),
                                         ),
@@ -885,8 +915,16 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<GetProjectsRequest>,
     ) -> std::result::Result<tonic::Response<GetProjectsResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
         tracing::debug!("get projects: {req:?}");
+
+        // Check org membership before listing projects
+        if let Some(get_projects_request::Query::Organisation(ref org)) = req.query {
+            authorize::require_org_access(
+                &self.state.db, &actor, &org.organisation, authorize::OrgRole::Member,
+            ).await?;
+        }
 
         let projects = match req.query.context("query is required").to_internal_error()? {
             get_projects_request::Query::Organisation(organisation) => self
@@ -907,7 +945,12 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<CreateProjectRequest>,
     ) -> std::result::Result<tonic::Response<CreateProjectResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
+
+        authorize::require_org_access(
+            &self.state.db, &actor, &req.organisation, authorize::OrgRole::Member,
+        ).await?;
         tracing::debug!(
             organisation = %req.organisation,
             project = %req.project,
@@ -933,7 +976,12 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<GetDestinationStatesRequest>,
     ) -> std::result::Result<tonic::Response<GetDestinationStatesResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
+
+        authorize::require_org_access(
+            &self.state.db, &actor, &req.organisation, authorize::OrgRole::Member,
+        ).await?;
 
         let project_id = if let Some(project) = &req.project {
             let id = self
@@ -990,7 +1038,12 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<GetReleaseIntentStatesRequest>,
     ) -> std::result::Result<tonic::Response<GetReleaseIntentStatesResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
+
+        authorize::require_org_access(
+            &self.state.db, &actor, &req.organisation, authorize::OrgRole::Member,
+        ).await?;
 
         let project_id = if let Some(project) = &req.project {
             let id = self
@@ -1048,6 +1101,267 @@ impl ReleaseService for ReleaseServer {
             release_intents,
         }))
     }
+
+    async fn approve_plan_stage(
+        &self,
+        request: tonic::Request<ApprovePlanStageRequest>,
+    ) -> Result<Response<ApprovePlanStageResponse>, tonic::Status> {
+        use crate::services::release_pipeline::{ApprovalStatus, PipelineStages, StageConfig, StageStates};
+
+        let req = request.into_inner();
+        let intent_id: Uuid = req.release_intent_id.parse()
+            .context("invalid release_intent_id")
+            .to_internal_error()?;
+
+        let mut tx = self.state.db.begin().await
+            .context("begin tx")
+            .to_internal_error()?;
+
+        let intent = sqlx::query!(
+            "SELECT stages, stage_states, status FROM release_intents WHERE id = $1 FOR UPDATE",
+            intent_id,
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .context("fetch intent")
+        .to_internal_error()?
+        .context("release intent not found")
+        .to_internal_error()?;
+
+        if intent.status != "ACTIVE" {
+            return Err(tonic::Status::failed_precondition("intent is not active"));
+        }
+
+        let stages: PipelineStages = intent.stages
+            .context("intent has no pipeline stages")
+            .to_internal_error()
+            .and_then(|v| serde_json::from_value(v).context("parse stages").to_internal_error())?;
+
+        let stage_def = stages.get(&req.stage_id)
+            .ok_or_else(|| tonic::Status::not_found(format!("stage '{}' not found", req.stage_id)))?;
+
+        if !matches!(stage_def.config, StageConfig::Plan { .. }) {
+            return Err(tonic::Status::failed_precondition("stage is not a plan stage"));
+        }
+
+        let mut stage_states: StageStates = intent.stage_states
+            .map(serde_json::from_value)
+            .transpose()
+            .context("parse stage_states")
+            .to_internal_error()?
+            .unwrap_or_default();
+
+        let state = stage_states.get_mut(&req.stage_id)
+            .ok_or_else(|| tonic::Status::not_found("stage state not found"))?;
+
+        if state.approval_status != Some(ApprovalStatus::AwaitingApproval) {
+            return Err(tonic::Status::failed_precondition("stage is not awaiting approval"));
+        }
+
+        state.approval_status = Some(ApprovalStatus::Approved);
+        state.approval_at = Some(chrono::Utc::now().to_rfc3339());
+
+        let stage_states_json = serde_json::to_value(&stage_states)
+            .context("serialize stage_states")
+            .to_internal_error()?;
+
+        sqlx::query!(
+            "UPDATE release_intents SET stage_states = $2 WHERE id = $1",
+            intent_id,
+            stage_states_json,
+        )
+        .execute(&mut *tx)
+        .await
+        .context("update intent")
+        .to_internal_error()?;
+
+        tx.commit().await.context("commit").to_internal_error()?;
+
+        // Nudge coordinator to re-evaluate
+        let _ = self.state.nats.publish(
+            "forest.intent.evaluate",
+            intent_id.to_string().into(),
+        ).await;
+
+        Ok(Response::new(ApprovePlanStageResponse {}))
+    }
+
+    async fn reject_plan_stage(
+        &self,
+        request: tonic::Request<RejectPlanStageRequest>,
+    ) -> Result<Response<RejectPlanStageResponse>, tonic::Status> {
+        use crate::services::release_pipeline::{ApprovalStatus, PipelineStages, StageConfig, StageStates};
+
+        let req = request.into_inner();
+        let intent_id: Uuid = req.release_intent_id.parse()
+            .context("invalid release_intent_id")
+            .to_internal_error()?;
+
+        let mut tx = self.state.db.begin().await
+            .context("begin tx")
+            .to_internal_error()?;
+
+        let intent = sqlx::query!(
+            "SELECT stages, stage_states, status FROM release_intents WHERE id = $1 FOR UPDATE",
+            intent_id,
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .context("fetch intent")
+        .to_internal_error()?
+        .context("release intent not found")
+        .to_internal_error()?;
+
+        if intent.status != "ACTIVE" {
+            return Err(tonic::Status::failed_precondition("intent is not active"));
+        }
+
+        let stages: PipelineStages = intent.stages
+            .context("intent has no pipeline stages")
+            .to_internal_error()
+            .and_then(|v| serde_json::from_value(v).context("parse stages").to_internal_error())?;
+
+        let stage_def = stages.get(&req.stage_id)
+            .ok_or_else(|| tonic::Status::not_found(format!("stage '{}' not found", req.stage_id)))?;
+
+        if !matches!(stage_def.config, StageConfig::Plan { .. }) {
+            return Err(tonic::Status::failed_precondition("stage is not a plan stage"));
+        }
+
+        let mut stage_states: StageStates = intent.stage_states
+            .map(serde_json::from_value)
+            .transpose()
+            .context("parse stage_states")
+            .to_internal_error()?
+            .unwrap_or_default();
+
+        let state = stage_states.get_mut(&req.stage_id)
+            .ok_or_else(|| tonic::Status::not_found("stage state not found"))?;
+
+        if state.approval_status != Some(ApprovalStatus::AwaitingApproval) {
+            return Err(tonic::Status::failed_precondition("stage is not awaiting approval"));
+        }
+
+        state.approval_status = Some(ApprovalStatus::Rejected);
+        state.approval_at = Some(chrono::Utc::now().to_rfc3339());
+
+        let stage_states_json = serde_json::to_value(&stage_states)
+            .context("serialize stage_states")
+            .to_internal_error()?;
+
+        sqlx::query!(
+            "UPDATE release_intents SET stage_states = $2 WHERE id = $1",
+            intent_id,
+            stage_states_json,
+        )
+        .execute(&mut *tx)
+        .await
+        .context("update intent")
+        .to_internal_error()?;
+
+        tx.commit().await.context("commit").to_internal_error()?;
+
+        // Nudge coordinator to re-evaluate
+        let _ = self.state.nats.publish(
+            "forest.intent.evaluate",
+            intent_id.to_string().into(),
+        ).await;
+
+        Ok(Response::new(RejectPlanStageResponse {}))
+    }
+
+    async fn get_plan_output(
+        &self,
+        request: tonic::Request<GetPlanOutputRequest>,
+    ) -> Result<Response<GetPlanOutputResponse>, tonic::Status> {
+        use crate::services::release_pipeline::{PipelineStages, StageConfig, StageStates};
+
+        let req = request.into_inner();
+        let intent_id: Uuid = req.release_intent_id.parse()
+            .context("invalid release_intent_id")
+            .to_internal_error()?;
+
+        let intent = sqlx::query!(
+            "SELECT stages, stage_states FROM release_intents WHERE id = $1",
+            intent_id,
+        )
+        .fetch_optional(&self.state.db)
+        .await
+        .context("fetch intent")
+        .to_internal_error()?
+        .context("release intent not found")
+        .to_internal_error()?;
+
+        let stages: PipelineStages = intent.stages
+            .context("intent has no pipeline stages")
+            .to_internal_error()
+            .and_then(|v| serde_json::from_value(v).context("parse stages").to_internal_error())?;
+
+        let stage_def = stages.get(&req.stage_id)
+            .ok_or_else(|| tonic::Status::not_found(format!("stage '{}' not found", req.stage_id)))?;
+
+        if !matches!(stage_def.config, StageConfig::Plan { .. }) {
+            return Err(tonic::Status::failed_precondition("stage is not a plan stage"));
+        }
+
+        let stage_states: StageStates = intent.stage_states
+            .map(serde_json::from_value)
+            .transpose()
+            .context("parse stage_states")
+            .to_internal_error()?
+            .unwrap_or_default();
+
+        let stage_state = stage_states.get(&req.stage_id);
+
+        // Collect plan outputs from all child release_states for this stage
+        let plan_rows: Vec<PlanOutputRow> = sqlx::query_as(
+            r#"SELECT rs.destination_id, rs.plan_output, rs.status,
+                      d.name as destination_name
+               FROM release_states rs
+               JOIN destinations d ON d.id = rs.destination_id
+               WHERE rs.release_intent_id = $1
+                 AND rs.stage_id = $2
+                 AND rs.mode = 'plan'"#,
+        )
+        .bind(intent_id)
+        .bind(&req.stage_id)
+        .fetch_all(&self.state.db)
+        .await
+        .context("fetch plan outputs")
+        .to_internal_error()?;
+
+        let outputs: Vec<PlanDestinationOutput> = plan_rows
+            .iter()
+            .map(|r| PlanDestinationOutput {
+                destination_id: r.destination_id.to_string(),
+                destination_name: r.destination_name.clone(),
+                plan_output: r.plan_output.clone().unwrap_or_default(),
+                status: r.status.clone(),
+            })
+            .collect();
+
+        // Backward compat: first non-empty output
+        let plan_output = outputs.iter()
+            .find(|o| !o.plan_output.is_empty())
+            .map(|o| o.plan_output.clone())
+            .unwrap_or_default();
+
+        let status = if let Some(s) = stage_state {
+            if let Some(approval) = s.approval_status {
+                format!("{:?}", approval).to_uppercase()
+            } else {
+                format!("{:?}", s.status).to_uppercase()
+            }
+        } else {
+            "PENDING".to_string()
+        };
+
+        Ok(Response::new(GetPlanOutputResponse {
+            plan_output,
+            status,
+            outputs,
+        }))
+    }
 }
 
 fn stage_status_to_proto(
@@ -1065,18 +1379,26 @@ fn stage_status_to_proto(
 
 fn stage_def_to_type_fields(
     config: &crate::services::release_pipeline::StageConfig,
-) -> (i32, Option<String>, Option<i64>) {
+) -> (i32, Option<String>, Option<i64>, Option<bool>) {
     use crate::services::release_pipeline::StageConfig;
     match config {
         StageConfig::Deploy { environment } => (
             forest_grpc_interface::PipelineRunStageType::Deploy as i32,
             Some(environment.clone()),
             None,
+            None,
         ),
         StageConfig::Wait { duration_seconds } => (
             forest_grpc_interface::PipelineRunStageType::Wait as i32,
             None,
             Some(*duration_seconds),
+            None,
+        ),
+        StageConfig::Plan { environment, auto_approve } => (
+            forest_grpc_interface::PipelineRunStageType::Plan as i32,
+            Some(environment.clone()),
+            None,
+            Some(*auto_approve),
         ),
     }
 }
@@ -1104,10 +1426,10 @@ fn intent_to_stage_states(
     stages
         .iter()
         .map(|(id, def)| {
-            let (stage_type, environment, duration_seconds) = stage_def_to_type_fields(&def.config);
+            let (stage_type, environment, duration_seconds, auto_approve) = stage_def_to_type_fields(&def.config);
             let state = stage_states.get(id);
 
-            let (status, queued_at, started_at, completed_at, error_message, wait_until, release_ids) =
+            let (status, queued_at, started_at, completed_at, error_message, wait_until, release_ids, approval_status) =
                 if let Some(s) = state {
                     (
                         stage_status_to_proto(&s.status) as i32,
@@ -1117,11 +1439,12 @@ fn intent_to_stage_states(
                         s.error_message.clone(),
                         s.wait_until.clone(),
                         s.release_ids.clone().unwrap_or_default(),
+                        s.approval_status.map(|a| format!("{:?}", a).to_uppercase()),
                     )
                 } else {
                     (
                         forest_grpc_interface::PipelineRunStageStatus::Pending as i32,
-                        None, None, None, None, None, Vec::new(),
+                        None, None, None, None, None, Vec::new(), None,
                     )
                 };
 
@@ -1138,6 +1461,8 @@ fn intent_to_stage_states(
                 duration_seconds,
                 wait_until,
                 release_ids,
+                approval_status,
+                auto_approve,
             }
         })
         .collect()
@@ -1165,11 +1490,11 @@ fn pipeline_run_to_proto(
     let proto_stages = stages
         .iter()
         .map(|(id, def)| {
-            let (stage_type, environment, duration_seconds) =
+            let (stage_type, environment, duration_seconds, auto_approve) =
                 stage_def_to_type_fields(&def.config);
             let state = stage_states.get(id);
 
-            let (status, queued_at, started_at, completed_at, error_message, wait_until, release_ids) =
+            let (status, queued_at, started_at, completed_at, error_message, wait_until, release_ids, approval_status) =
                 if let Some(s) = state {
                     (
                         stage_status_to_proto(&s.status) as i32,
@@ -1179,11 +1504,12 @@ fn pipeline_run_to_proto(
                         s.error_message.clone(),
                         s.wait_until.clone(),
                         s.release_ids.clone().unwrap_or_default(),
+                        s.approval_status.map(|a| format!("{:?}", a).to_uppercase()),
                     )
                 } else {
                     (
                         forest_grpc_interface::PipelineRunStageStatus::Pending as i32,
-                        None, None, None, None, None, Vec::new(),
+                        None, None, None, None, None, Vec::new(), None,
                     )
                 };
 
@@ -1200,6 +1526,8 @@ fn pipeline_run_to_proto(
                 error_message,
                 wait_until,
                 release_ids,
+                approval_status,
+                auto_approve,
             }
         })
         .collect();

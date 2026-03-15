@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
-use forest_grpc_interface::{DestinationInfo, WorkAssignment};
+use forest_grpc_interface::{DestinationInfo, ReleaseMode, WorkAssignment};
 use forest_models::ReleaseStatus;
 use futures::StreamExt;
 use notmad::{Component, ComponentInfo, MadError};
@@ -112,6 +112,7 @@ impl SchedulerInner {
                 &release_state.project_id,
                 &dest.environment,
                 None,
+                None,
             )
             .await
             .unwrap_or_default();
@@ -188,6 +189,12 @@ impl SchedulerInner {
                 version: dest.destination_type.version as u64,
             };
 
+            let mode = if release_state.mode == "plan" {
+                ReleaseMode::Plan
+            } else {
+                ReleaseMode::Deploy
+            };
+
             let assignment = WorkAssignment {
                 release_token: token,
                 release_id: release_id.to_string(),
@@ -201,6 +208,7 @@ impl SchedulerInner {
                     r#type: Some(dest_cap),
                     organisation: dest.organisation.clone(),
                 }),
+                mode: mode.into(),
             };
 
             match work_sender.send(assignment).await {
@@ -318,9 +326,27 @@ impl SchedulerInner {
             }
         });
 
+        let is_plan_mode = release_state.mode == "plan";
+
         let result = async {
-            dest_svc.prepare(&logger, &release_item, &dest).await?;
-            dest_svc.release(&logger, &release_item, &dest).await?;
+            if is_plan_mode {
+                // Plan mode: run the plan phase only, capture output
+                dest_svc.prepare(&logger, &release_item, &dest).await?;
+                let plan_output = dest_svc.plan(&logger, &release_item, &dest).await?;
+                if let Some(output) = plan_output {
+                    sqlx::query!(
+                        "UPDATE release_states SET plan_output = $2 WHERE release_id = $1",
+                        release_id,
+                        output,
+                    )
+                    .execute(&self.release_event_store.db)
+                    .await?;
+                }
+            } else {
+                // Normal deploy mode
+                dest_svc.prepare(&logger, &release_item, &dest).await?;
+                dest_svc.release(&logger, &release_item, &dest).await?;
+            }
             Ok::<(), anyhow::Error>(())
         }
         .await;

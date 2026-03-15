@@ -99,6 +99,16 @@ message RegisterAck {
   string reason = 3;
 }
 
+// Execution mode for a work assignment.
+enum ReleaseMode {
+  RELEASE_MODE_UNSPECIFIED = 0;
+  // Normal deployment execution.
+  RELEASE_MODE_DEPLOY = 1;
+  // Dry-run / plan only (e.g. terraform plan). Runner should capture
+  // plan output and include it in CompleteRelease.plan_output.
+  RELEASE_MODE_PLAN = 2;
+}
+
 // Work assignment pushed to a runner when a matching release is available.
 message WorkAssignment {
   // Scoped opaque auth token. Use this for GetReleaseFiles, PushLogs,
@@ -111,6 +121,8 @@ message WorkAssignment {
   string destination_id = 5;
   // Full destination configuration including metadata.
   DestinationInfo destination = 6;
+  // Execution mode. Defaults to DEPLOY if unset.
+  ReleaseMode mode = 7;
 }
 
 // Destination configuration sent with the work assignment.
@@ -201,6 +213,9 @@ message CompleteReleaseRequest {
   ReleaseOutcome outcome = 2;
   // Error description when outcome is FAILURE.
   string error_message = 3;
+  // Plan output text when mode was "plan" and outcome is SUCCESS.
+  // Stored in release_states.plan_output for UI review.
+  optional string plan_output = 4;
 }
 
 enum ReleaseOutcome {

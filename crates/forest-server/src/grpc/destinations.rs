@@ -4,7 +4,7 @@ use tonic::Response;
 
 use crate::{
     destination_services::DestinationServicesState,
-    grpc::artifacts::GrpcErrorExt,
+    grpc::{artifacts::GrpcErrorExt, authorize},
     services::{
         destination_aggregate::DestinationAggregateServiceState,
         event_bus::{EventBusState, EventPayload},
@@ -23,7 +23,15 @@ impl DestinationService for DestinationServer {
         &self,
         request: tonic::Request<CreateDestinationRequest>,
     ) -> std::result::Result<tonic::Response<CreateDestinationResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
+        let _authz = authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         tracing::debug!("create destination: {:?}", req);
 
@@ -75,7 +83,26 @@ impl DestinationService for DestinationServer {
         &self,
         request: tonic::Request<UpdateDestinationRequest>,
     ) -> std::result::Result<tonic::Response<UpdateDestinationResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
+        let org = sqlx::query_scalar!(
+            "SELECT organisation FROM destinations WHERE name = $1",
+            req.name
+        )
+        .fetch_optional(&self.state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("authz: {e}");
+            tonic::Status::internal("lookup failed")
+        })?
+        .ok_or_else(|| tonic::Status::not_found("destination not found"))?;
+        let _authz = authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &org,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         self.state
             .destination_aggregate_service()
@@ -100,7 +127,26 @@ impl DestinationService for DestinationServer {
         &self,
         request: tonic::Request<DeleteDestinationRequest>,
     ) -> std::result::Result<tonic::Response<DeleteDestinationResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
+        let org = sqlx::query_scalar!(
+            "SELECT organisation FROM destinations WHERE name = $1",
+            req.name
+        )
+        .fetch_optional(&self.state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("authz: {e}");
+            tonic::Status::internal("lookup failed")
+        })?
+        .ok_or_else(|| tonic::Status::not_found("destination not found"))?;
+        let _authz = authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &org,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         self.state
             .destination_aggregate_service()
@@ -144,7 +190,15 @@ impl DestinationService for DestinationServer {
         request: tonic::Request<GetDestinationsRequest>,
     ) -> std::result::Result<tonic::Response<GetDestinationsResponse>, tonic::Status> {
         tracing::debug!("get destinations");
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
+        let _authz = authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let destinations = self
             .state

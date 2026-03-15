@@ -35,6 +35,7 @@ use crate::{
 
 mod apps;
 mod artifacts;
+pub(crate) mod authorize;
 mod policies;
 mod triggers;
 mod destinations;
