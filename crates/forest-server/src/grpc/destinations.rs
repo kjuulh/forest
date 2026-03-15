@@ -6,7 +6,7 @@ use crate::{
     destination_services::DestinationServicesState,
     grpc::artifacts::GrpcErrorExt,
     services::{
-        destination_registry::DestinationRegistryState,
+        destination_aggregate::DestinationAggregateServiceState,
         event_bus::{EventBusState, EventPayload},
         release_registry::ReleaseRegistryState,
     },
@@ -45,13 +45,15 @@ impl DestinationService for DestinationServer {
             .to_internal_error()?;
 
         self.state
-            .destination_registry()
+            .destination_aggregate_service()
             .create_destination(
                 &req.organisation,
                 &req.name,
                 &req.environment,
                 req.metadata,
-                dest_type,
+                &dest_type.organisation,
+                &dest_type.name,
+                dest_type.version as u32,
             )
             .await
             .context("create destination")
@@ -76,8 +78,8 @@ impl DestinationService for DestinationServer {
         let req = request.into_inner();
 
         self.state
-            .destination_registry()
-            .update_destination(&req.name, req.metadata)
+            .destination_aggregate_service()
+            .update_metadata(&req.name, req.metadata)
             .await
             .context("update destination")
             .to_internal_error()?;
@@ -101,7 +103,7 @@ impl DestinationService for DestinationServer {
         let req = request.into_inner();
 
         self.state
-            .destination_registry()
+            .destination_aggregate_service()
             .delete_destination(&req.name)
             .await
             .context("delete destination")
