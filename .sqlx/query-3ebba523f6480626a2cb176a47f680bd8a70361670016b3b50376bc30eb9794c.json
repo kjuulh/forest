@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT organisation, project FROM projects WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "organisation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "project",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "3ebba523f6480626a2cb176a47f680bd8a70361670016b3b50376bc30eb9794c"
+}

@@ -875,6 +875,8 @@ pub struct ReleaseItem {
     pub project_id: Uuid,
     pub destination_id: Uuid,
     pub status: String,
+    /// Project name (resolved from project_id for downstream consumers).
+    pub project: String,
 }
 
 pub struct ReleaseStatusInfo {

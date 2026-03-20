@@ -136,6 +136,12 @@ impl SchedulerInner {
             version: dest.destination_type.version,
         };
 
+        let (_, project_name) = self
+            .release_registry
+            .get_project_context(&release_state.project_id)
+            .await
+            .unwrap_or_else(|_| (dest.organisation.clone(), "unknown".into()));
+
         let release_item = ReleaseItem {
             id: release_id,
             release_intent_id: release_state.release_intent_id,
@@ -143,6 +149,7 @@ impl SchedulerInner {
             project_id: release_state.project_id,
             destination_id: release_state.destination_id,
             status: release_state.status.clone(),
+            project: project_name,
         };
 
         // Try remote runner first

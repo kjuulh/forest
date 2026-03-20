@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE destinations\n                SET\n                    metadata = $1\n                WHERE\n                    name = $2\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e28fa60374a3e74abc43524e6ddf5a6abfe66d36b1be61772ea4dbf6d464203e"
+}

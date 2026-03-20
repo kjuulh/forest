@@ -7,6 +7,7 @@ _basePath: "../../components"
 _destinationTypes: {
 	kubernetes: "forest/kubernetes@1"
 	terraform:  "forest/terraform@1"
+	forage:     "forage/containers@1"
 }
 
 dependencies: {
@@ -22,6 +23,7 @@ forest: deployment: enabled: true
 		dev: {
 			destinations: [
 				{destination: "infrastructure-dev.*", type: _destinationTypes.terraform},
+				{destination: "forage/*", type: _destinationTypes.forage},
 			]
 			config: {
 				replicas: 2

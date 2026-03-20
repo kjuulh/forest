@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO artifacts (\n                    artifact_id\n                ) VALUES (\n                    $1\n                ) RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f726718f5b9fa6fe4b591d8c3c1e87dcf6aeeab4bb8b72ad07e384776036a457"
+}

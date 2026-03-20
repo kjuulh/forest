@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT count(*) as \"total!\"\n            FROM artifact_staging\n            WHERE actor_id = $1 AND actor_type = 'user'\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8a4dd5ca9861d5a15d61884aa69d7952cd54a2b91b933233c3d119fa2c956919"
+}

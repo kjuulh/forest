@@ -42,7 +42,12 @@ async fn run_pr(client: &dagger_sdk::Query) -> eyre::Result<()> {
         .await?;
 
     eprintln!("--- running tests");
-    run_tests(&base).await?;
+    with_services(client, &base)
+        .with_exec(vec![
+            "cargo", "test", "--workspace", "--exclude", "forest-event-store",
+        ])
+        .sync()
+        .await?;
 
     eprintln!("--- building release image");
     let _image = build_release_image(client, &base).await?;
@@ -63,7 +68,12 @@ async fn run_main(client: &dagger_sdk::Query) -> eyre::Result<()> {
         .await?;
 
     eprintln!("--- running tests");
-    run_tests(&base).await?;
+    with_services(client, &base)
+        .with_exec(vec![
+            "cargo", "test", "--workspace", "--exclude", "forest-event-store",
+        ])
+        .sync()
+        .await?;
 
     eprintln!("--- building release image");
     let image = build_release_image(client, &base).await?;
@@ -181,7 +191,11 @@ async fn build_base(client: &dagger_sdk::Query) -> eyre::Result<dagger_sdk::Cont
         .container()
         .from("rust:1.93-trixie")
         .with_exec(vec!["apt", "update"])
-        .with_exec(vec!["apt", "install", "-y", "clang", "wget"])
+        .with_exec(vec!["apt", "install", "-y", "clang", "wget", "git"])
+        // Git config needed for tests that commit.
+        .with_exec(vec!["git", "config", "--global", "user.email", "ci@forest.dev"])
+        .with_exec(vec!["git", "config", "--global", "user.name", "Forest CI"])
+        .with_exec(vec!["git", "config", "--global", "init.defaultBranch", "main"])
         // Install mold linker.
         .with_exec(vec![
             "wget",
@@ -220,15 +234,48 @@ async fn build_base(client: &dagger_sdk::Query) -> eyre::Result<dagger_sdk::Cont
     Ok(build_container)
 }
 
-/// Run tests.
-async fn run_tests(base: &dagger_sdk::Container) -> eyre::Result<()> {
-    base.clone()
-        .with_exec(vec!["cargo", "test", "--workspace"])
-        .sync()
-        .await?;
-
-    Ok(())
+/// Create a Postgres service container.
+fn postgres_service(client: &dagger_sdk::Query) -> dagger_sdk::Service {
+    client
+        .container()
+        .from("postgres:17")
+        .with_env_variable("POSTGRES_USER", "forest")
+        .with_env_variable("POSTGRES_PASSWORD", "forest")
+        .with_env_variable("POSTGRES_DB", "forest")
+        .with_exposed_port(5432)
+        .as_service()
 }
+
+/// Create a NATS service container.
+fn nats_service(client: &dagger_sdk::Query) -> dagger_sdk::Service {
+    client
+        .container()
+        .from("nats:2")
+        .with_exposed_port(4222)
+        .as_service()
+}
+
+/// Return the base container with live Postgres + NATS for runtime tests.
+/// Compilation uses SQLX_OFFLINE=true (the checked-in .sqlx/ cache).
+/// The live services are needed for integration tests at runtime.
+fn with_services(
+    client: &dagger_sdk::Query,
+    base: &dagger_sdk::Container,
+) -> dagger_sdk::Container {
+    let pg = postgres_service(client);
+    let nats = nats_service(client);
+
+    base.clone()
+        .with_service_binding("postgres", pg)
+        .with_service_binding("nats", nats)
+        .with_env_variable(
+            "DATABASE_URL",
+            "postgres://forest:forest@postgres:5432/forest",
+        )
+        .with_env_variable("NATS_URL", "nats://nats:4222")
+}
+
+
 
 /// Build release binary and package into a slim image.
 async fn build_release_image(

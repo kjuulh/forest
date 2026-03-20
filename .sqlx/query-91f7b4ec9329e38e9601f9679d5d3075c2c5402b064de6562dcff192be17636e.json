@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                n.id,\n                n.sequence,\n                n.notification_type,\n                n.title,\n                n.body,\n                n.organisation,\n                n.project,\n                n.release_context,\n                n.created_at\n            FROM notifications n\n            WHERE n.sequence > $1\n              AND ($2::text IS NULL OR n.organisation = $2)\n              AND ($3::text IS NULL OR n.project = $3)\n              AND NOT EXISTS (\n                  SELECT 1 FROM notification_preferences np\n                  WHERE np.user_id = $4\n                    AND np.notification_type = n.notification_type\n                    AND np.channel = 'CLI'\n                    AND np.enabled = false\n              )\n            ORDER BY n.sequence ASC\n            LIMIT $5\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "sequence",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "notification_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "body",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "organisation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "project",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "release_context",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "91f7b4ec9329e38e9601f9679d5d3075c2c5402b064de6562dcff192be17636e"
+}
