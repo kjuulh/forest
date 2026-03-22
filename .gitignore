@@ -3,3 +3,4 @@ target/
 .terraform/
 .non/
 .forest/
+dist/
