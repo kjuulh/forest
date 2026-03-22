@@ -4,3 +4,4 @@ target/
 .non/
 .forest/
 dist/
+.env
