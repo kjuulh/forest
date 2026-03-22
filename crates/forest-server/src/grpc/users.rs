@@ -1,5 +1,6 @@
 use chrono::{Days, Utc};
 use forest_grpc_interface::{users_service_server::UsersService, *};
+use sha2::Digest;
 use uuid::Uuid;
 
 use super::error;
@@ -538,9 +539,10 @@ impl UsersService for UsersServer {
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
 
-        // TODO: generate raw token, hash it, store hash
-        let raw_token = Uuid::now_v7().to_string();
-        let token_hash = raw_token.as_bytes();
+        let mut raw_bytes = [0u8; 32];
+        rand::fill(&mut raw_bytes[..]);
+        let raw_token = hex::encode(raw_bytes);
+        let token_hash = sha2::Sha256::digest(raw_token.as_bytes()).to_vec();
         let scopes = serde_json::to_value(&req.scopes)
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
@@ -552,7 +554,7 @@ impl UsersService for UsersServer {
 
         let token_id = self
             .service()
-            .create_personal_access_token(user_id, &req.name, token_hash, &scopes, expires_at)
+            .create_personal_access_token(user_id, &req.name, &token_hash, &scopes, expires_at)
             .await
             .map_err(error::to_status)?;
 

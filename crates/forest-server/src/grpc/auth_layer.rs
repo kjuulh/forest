@@ -12,6 +12,42 @@ use crate::{
     tokens::{AccessToken, TokenServiceState},
 };
 
+async fn resolve_personal_access_token(
+    db: &sqlx::PgPool,
+    raw_token: &str,
+) -> anyhow::Result<Option<Actor>> {
+    let token_hash = sha2::Sha256::digest(raw_token.as_bytes()).to_vec();
+
+    let row = sqlx::query!(
+        r#"
+        SELECT id, user_id
+        FROM personal_access_tokens
+        WHERE token_hash = $1
+          AND (expires_at IS NULL OR expires_at > now())
+        "#,
+        &token_hash
+    )
+    .fetch_optional(db)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    // Touch last_used
+    sqlx::query!(
+        "UPDATE personal_access_tokens SET last_used = now() WHERE id = $1",
+        row.id
+    )
+    .execute(db)
+    .await
+    .ok();
+
+    Ok(Some(Actor::User {
+        user_id: row.user_id,
+    }))
+}
+
 async fn resolve_app_token(db: &sqlx::PgPool, raw_token: &str) -> anyhow::Result<Option<Actor>> {
     let token_hash = sha2::Sha256::digest(raw_token.as_bytes()).to_vec();
 
@@ -201,7 +237,19 @@ where
                 return inner.call(req).await;
             }
 
-            // 3. Fall back to app token lookup (DB)
+            // 3. Try personal access token (DB — resolves to Actor::User)
+            match resolve_personal_access_token(&state.db, &token).await {
+                Ok(Some(actor)) => {
+                    req.extensions_mut().insert(actor);
+                    return inner.call(req).await;
+                }
+                Ok(None) => {} // not a PAT, try next
+                Err(e) => {
+                    tracing::warn!(path = %path, error = %e, "PAT lookup failed");
+                }
+            }
+
+            // 4. Fall back to app token lookup (DB)
             match resolve_app_token(&state.db, &token).await {
                 Ok(Some(actor)) => {
                     req.extensions_mut().insert(actor);

@@ -106,6 +106,19 @@ where
         let last_validated = self.last_validated.clone();
 
         Box::pin(async move {
+            // If FOREST_TOKEN is set (e.g. in CI), use it directly — no refresh or validation.
+            if let Ok(pat) = std::env::var("FOREST_TOKEN") {
+                if !pat.is_empty() {
+                    let mut req = req;
+                    req.headers_mut().insert(
+                        http::header::AUTHORIZATION,
+                        http::HeaderValue::from_str(&format!("Bearer {}", pat))
+                            .map_err(|e| -> BoxError { e.into() })?,
+                    );
+                    return inner.call(req).await.map_err(Into::into);
+                }
+            }
+
             let mut user_state = loader
                 .get_state()
                 .await
