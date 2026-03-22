@@ -300,7 +300,16 @@ async fn build_release_image(
     // and includes libgcc + ca-certificates with no shell or package manager.
     let final_image = client
         .container()
-        .from("gcr.io/distroless/cc-debian13")
+        .from("debian:13-slim")
+        .with_exec(vec!["apt", "update"])
+        .with_exec(vec![
+            "apt",
+            "install",
+            "-y",
+            "--no-install-recommends",
+            "git",
+            "ca-certificates",
+        ])
         .with_file(format!("/usr/local/bin/{BIN_NAME}"), binary)
         .with_exec(vec![BIN_NAME, "--help"]);
 
@@ -355,7 +364,11 @@ async fn publish_image(
 /// When `publish` is true, runs `mise run release` (requires GITEA_TOKEN).
 /// When false, runs `mise run release-snapshot` (local dry run).
 async fn run_goreleaser(client: &dagger_sdk::Query, publish: bool) -> eyre::Result<()> {
-    let task = if publish { "release" } else { "release-snapshot" };
+    let task = if publish {
+        "release"
+    } else {
+        "release-snapshot"
+    };
     eprintln!("==> GoReleaser pipeline: {task}");
 
     // Load the full repo (goreleaser needs git history for changelog/tags).
@@ -370,15 +383,21 @@ async fn run_goreleaser(client: &dagger_sdk::Query, publish: bool) -> eyre::Resu
     let container = client
         .container()
         .from("debian:trixie-slim")
+        .with_exec(vec!["apt-get", "update"])
         .with_exec(vec![
-            "apt-get", "update",
+            "apt-get",
+            "install",
+            "-y",
+            "--no-install-recommends",
+            "ca-certificates",
+            "curl",
+            "git",
+            "build-essential",
         ])
         .with_exec(vec![
-            "apt-get", "install", "-y", "--no-install-recommends",
-            "ca-certificates", "curl", "git", "build-essential",
-        ])
-        .with_exec(vec![
-            "sh", "-c", "curl https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh",
+            "sh",
+            "-c",
+            "curl https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh",
         ])
         .with_env_variable("MISE_YES", "1")
         .with_env_variable("MISE_TRUSTED_CONFIG_PATHS", "/build")
@@ -394,17 +413,13 @@ async fn run_goreleaser(client: &dagger_sdk::Query, publish: bool) -> eyre::Resu
     let container = if publish {
         let token = std::env::var("GITEA_TOKEN")
             .or_else(|_| std::env::var("CI_REGISTRY_PASSWORD"))
-            .map_err(|_| eyre::eyre!("GITEA_TOKEN or CI_REGISTRY_PASSWORD must be set for release"))?;
+            .map_err(|_| {
+                eyre::eyre!("GITEA_TOKEN or CI_REGISTRY_PASSWORD must be set for release")
+            })?;
 
         container
-            .with_secret_variable(
-                "GITEA_TOKEN",
-                client.set_secret("gitea-token", &token),
-            )
-            .with_secret_variable(
-                "RELEASE_TOKEN",
-                client.set_secret("release-token", &token),
-            )
+            .with_secret_variable("GITEA_TOKEN", client.set_secret("gitea-token", &token))
+            .with_secret_variable("RELEASE_TOKEN", client.set_secret("release-token", &token))
     } else {
         container
     };
