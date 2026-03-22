@@ -40,7 +40,7 @@ gitea_urls:
 
 release:
   gitea:
-    owner: kjuulh
+    owner: rawpotion
     name: forest
   draft: false
   prerelease: auto
