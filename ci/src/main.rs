@@ -12,6 +12,10 @@ enum Cli {
     Pr,
     /// Run main branch pipeline (check + test + build + publish)
     Main,
+    /// Build forest CLI release snapshot (dry run, no publish)
+    ReleaseSnapshot,
+    /// Build and publish forest CLI release via GoReleaser
+    Release,
 }
 
 #[tokio::main]
@@ -22,6 +26,8 @@ async fn main() -> eyre::Result<()> {
         match cli {
             Cli::Pr => run_pr(&client).await?,
             Cli::Main => run_main(&client).await?,
+            Cli::ReleaseSnapshot => run_goreleaser(&client, false).await?,
+            Cli::Release => run_goreleaser(&client, true).await?,
         }
         Ok(())
     })
@@ -44,7 +50,11 @@ async fn run_pr(client: &dagger_sdk::Query) -> eyre::Result<()> {
     eprintln!("--- running tests");
     with_services(client, &base)
         .with_exec(vec![
-            "cargo", "test", "--workspace", "--exclude", "forest-event-store",
+            "cargo",
+            "test",
+            "--workspace",
+            "--exclude",
+            "forest-event-store",
         ])
         .sync()
         .await?;
@@ -70,7 +80,11 @@ async fn run_main(client: &dagger_sdk::Query) -> eyre::Result<()> {
     eprintln!("--- running tests");
     with_services(client, &base)
         .with_exec(vec![
-            "cargo", "test", "--workspace", "--exclude", "forest-event-store",
+            "cargo",
+            "test",
+            "--workspace",
+            "--exclude",
+            "forest-event-store",
         ])
         .sync()
         .await?;
@@ -113,11 +127,7 @@ fn load_dep_source(client: &dagger_sdk::Query) -> eyre::Result<dagger_sdk::Direc
     let src = client.host().directory_opts(
         ".",
         dagger_sdk::HostDirectoryOptsBuilder::default()
-            .include(vec![
-                "**/Cargo.toml",
-                "Cargo.lock",
-                ".sqlx/**",
-            ])
+            .include(vec!["**/Cargo.toml", "Cargo.lock", ".sqlx/**"])
             .build()?,
     );
     Ok(src)
@@ -275,8 +285,6 @@ fn with_services(
         .with_env_variable("NATS_URL", "nats://nats:4222")
 }
 
-
-
 /// Build release binary and package into a slim image.
 async fn build_release_image(
     client: &dagger_sdk::Query,
@@ -340,6 +348,73 @@ async fn publish_image(
         eprintln!("--- published {image_ref}");
     }
 
+    Ok(())
+}
+
+/// Build the goreleaser container (mirrors Dockerfile.release) and run goreleaser.
+/// When `publish` is true, runs `mise run release` (requires GITEA_TOKEN).
+/// When false, runs `mise run release-snapshot` (local dry run).
+async fn run_goreleaser(client: &dagger_sdk::Query, publish: bool) -> eyre::Result<()> {
+    let task = if publish { "release" } else { "release-snapshot" };
+    eprintln!("==> GoReleaser pipeline: {task}");
+
+    // Load the full repo (goreleaser needs git history for changelog/tags).
+    let src = client.host().directory_opts(
+        ".",
+        dagger_sdk::HostDirectoryOptsBuilder::default()
+            .exclude(vec!["target", "dist", "node_modules"])
+            .build()?,
+    );
+
+    // Build the release container: debian + mise (rust, goreleaser, zig, cargo-zigbuild).
+    let container = client
+        .container()
+        .from("debian:trixie-slim")
+        .with_exec(vec![
+            "apt-get", "update",
+        ])
+        .with_exec(vec![
+            "apt-get", "install", "-y", "--no-install-recommends",
+            "ca-certificates", "curl", "git", "build-essential",
+        ])
+        .with_exec(vec![
+            "sh", "-c", "curl https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh",
+        ])
+        .with_env_variable("MISE_YES", "1")
+        .with_env_variable("MISE_TRUSTED_CONFIG_PATHS", "/build")
+        .with_workdir("/build")
+        // Copy mise.toml first and install tools (cacheable layer).
+        .with_file("/build/mise.toml", src.file("mise.toml"))
+        .with_exec(vec!["mise", "trust"])
+        .with_exec(vec!["mise", "install"])
+        // Now copy the full source.
+        .with_directory("/build", src);
+
+    // Pass secrets for publishing.
+    let container = if publish {
+        let token = std::env::var("GITEA_TOKEN")
+            .or_else(|_| std::env::var("CI_REGISTRY_PASSWORD"))
+            .map_err(|_| eyre::eyre!("GITEA_TOKEN or CI_REGISTRY_PASSWORD must be set for release"))?;
+
+        container
+            .with_secret_variable(
+                "GITEA_TOKEN",
+                client.set_secret("gitea-token", &token),
+            )
+            .with_secret_variable(
+                "RELEASE_TOKEN",
+                client.set_secret("release-token", &token),
+            )
+    } else {
+        container
+    };
+
+    container
+        .with_exec(vec!["mise", "run", task])
+        .sync()
+        .await?;
+
+    eprintln!("==> GoReleaser {task} complete");
     Ok(())
 }
 

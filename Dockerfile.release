@@ -1,0 +1,23 @@
+FROM debian:trixie-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install mise to a location already on PATH
+ENV MISE_INSTALL_PATH="/usr/local/bin/mise"
+RUN curl https://mise.run | sh
+
+WORKDIR /build
+COPY mise.toml .
+RUN mise trust && mise install
+
+COPY . .
+
+ENV MISE_YES=1
+ENV MISE_TRUSTED_CONFIG_PATHS="/build"
+ENTRYPOINT ["mise", "run"]
+CMD ["release"]

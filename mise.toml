@@ -4,6 +4,9 @@ _.file = ".env"
 
 [tools]
 rust = { version = "1.93", components = "rust-src,rust-analyzer" }
+goreleaser = "latest"
+zig = "latest"
+"cargo:cargo-zigbuild" = "latest"
 
 [tasks.todos]
 run = "hyperlog --local-path ./todos"
@@ -174,3 +177,26 @@ description = "Run CI PR pipeline via Dagger"
 [tasks."ci:main"]
 run = "cargo run -p ci -- main"
 description = "Run CI main pipeline via Dagger"
+
+[tasks."ci:release"]
+run = "cargo run -p ci -- release"
+description = "Run CI release pipeline via Dagger (GoReleaser, publishes to Gitea)"
+
+[tasks."ci:release-snapshot"]
+run = "cargo run -p ci -- release-snapshot"
+description = "Run CI release snapshot via Dagger (GoReleaser dry run)"
+
+[tasks.release]
+run = "goreleaser release --clean"
+description = "Create a release using GoReleaser (requires GITEA_TOKEN and a git tag)"
+
+[tasks.release-snapshot]
+run = "goreleaser release --snapshot --clean"
+description = "Build a local snapshot release without publishing"
+
+[tasks.release-docker]
+run = """
+docker build -f Dockerfile.release -t forest-release .
+docker run --rm forest-release release-snapshot
+"""
+description = "Test the release Docker image locally (snapshot mode)"
