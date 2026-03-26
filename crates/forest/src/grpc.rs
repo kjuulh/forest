@@ -592,6 +592,23 @@ impl GrpcClient {
         Ok(resp.into_inner())
     }
 
+    pub async fn verify_login_mfa(
+        &self,
+        mfa_session_token: &str,
+        code: &str,
+    ) -> anyhow::Result<VerifyLoginMfaResponse> {
+        let mut client = self.users_client().await?;
+        let resp = client
+            .verify_login_mfa(VerifyLoginMfaRequest {
+                mfa_session_token: mfa_session_token.into(),
+                code: code.into(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("verify login mfa")?;
+        Ok(resp.into_inner())
+    }
+
     pub async fn refresh_token(
         &self,
         refresh_token: &str,

@@ -57,12 +57,28 @@ impl LoginCommand {
             .await
             .context("failed to login")?;
 
-        if resp.mfa_required {
-            anyhow::bail!("MFA is required for this account. Use the web interface to sign in.");
-        }
+        let (user, tokens) = if resp.mfa_required {
+            println!("Two-factor authentication required.");
+            let code = inquire::Text::new("TOTP code:")
+                .with_placeholder("123456")
+                .prompt()?;
 
-        let user = resp.user.context("no user in login response")?;
-        let tokens = resp.tokens.context("no tokens in login response")?;
+            let mfa_resp = state
+                .grpc_client()
+                .verify_login_mfa(&resp.mfa_session_token, &code)
+                .await
+                .context("MFA verification failed")?;
+
+            (
+                mfa_resp.user.context("no user in MFA response")?,
+                mfa_resp.tokens.context("no tokens in MFA response")?,
+            )
+        } else {
+            (
+                resp.user.context("no user in login response")?,
+                resp.tokens.context("no tokens in login response")?,
+            )
+        };
         println!("Logged in as {} ({})", user.username, user.user_id);
 
         let now = chrono::Utc::now().timestamp();
