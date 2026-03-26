@@ -149,6 +149,7 @@ fn requires_auth(path: &str) -> bool {
         "/forest.v1.UsersService/Register",
         "/forest.v1.UsersService/Login",
         "/forest.v1.UsersService/RefreshToken",
+        "/forest.v1.UsersService/VerifyLoginMfa",
         "/forest.v1.StatusService/",
         // Runner service uses release-scoped tokens, not JWT
         "/forest.v1.RunnerService/",
