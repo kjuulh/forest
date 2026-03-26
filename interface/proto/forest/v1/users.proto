@@ -71,6 +71,7 @@ enum OAuthProvider {
   OAUTH_PROVIDER_GOOGLE = 2;
   OAUTH_PROVIDER_GITLAB = 3;
   OAUTH_PROVIDER_MICROSOFT = 4;
+  OAUTH_PROVIDER_MAGIC_LINK = 5;
 }
 
 message OAuthConnection {

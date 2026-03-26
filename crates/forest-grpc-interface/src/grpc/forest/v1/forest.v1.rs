@@ -4047,6 +4047,7 @@ pub enum OAuthProvider {
     OauthProviderGoogle = 2,
     OauthProviderGitlab = 3,
     OauthProviderMicrosoft = 4,
+    OauthProviderMagicLink = 5,
 }
 impl OAuthProvider {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -4060,6 +4061,7 @@ impl OAuthProvider {
             Self::OauthProviderGoogle => "OAUTH_PROVIDER_GOOGLE",
             Self::OauthProviderGitlab => "OAUTH_PROVIDER_GITLAB",
             Self::OauthProviderMicrosoft => "OAUTH_PROVIDER_MICROSOFT",
+            Self::OauthProviderMagicLink => "OAUTH_PROVIDER_MAGIC_LINK",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -4070,6 +4072,7 @@ impl OAuthProvider {
             "OAUTH_PROVIDER_GOOGLE" => Some(Self::OauthProviderGoogle),
             "OAUTH_PROVIDER_GITLAB" => Some(Self::OauthProviderGitlab),
             "OAUTH_PROVIDER_MICROSOFT" => Some(Self::OauthProviderMicrosoft),
+            "OAUTH_PROVIDER_MAGIC_LINK" => Some(Self::OauthProviderMagicLink),
             _ => None,
         }
     }
