@@ -842,6 +842,7 @@ impl GrpcClient {
         context: &ArtifactContext,
         project: &models::project::Project,
         reference: &models::reference::Reference,
+        annotation_only: bool,
     ) -> anyhow::Result<String> {
         let mut client = self.release_client().await?;
 
@@ -853,6 +854,7 @@ impl GrpcClient {
                 context: Some(context.clone().into()),
                 project: Some(project.clone().into()),
                 r#ref: Some(reference.clone().into()),
+                annotation_only,
             })
             .await
             .map_err(grpc_err)

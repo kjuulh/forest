@@ -11,37 +11,37 @@ use crate::{
 #[derive(Clone, Default, clap::Args)]
 pub struct CommitCommand {
     #[arg(long = "artifact-id", alias = "id")]
-    artifact_id: Option<String>,
+    pub(crate) artifact_id: Option<String>,
 
     #[arg()]
-    slug: Option<String>,
+    pub(crate) slug: Option<String>,
 
     #[arg(long, short = 'o')]
-    organisation: Option<String>,
+    pub(crate) organisation: Option<String>,
 
     #[arg(long, short = 'p')]
-    project: Option<String>,
+    pub(crate) project: Option<String>,
 
     #[arg(long = "ref", short = 'r')]
-    r#ref: Option<String>,
+    pub(crate) r#ref: Option<String>,
 
     #[arg(long, short = 'e', alias = "env")]
-    environment: Option<String>,
+    pub(crate) environment: Option<String>,
 
     #[arg(long, short = 'd')]
-    destination: Option<Vec<String>>,
+    pub(crate) destination: Option<Vec<String>>,
 
     /// Skip waiting for the release to complete
     #[arg(long)]
-    no_wait: bool,
+    pub(crate) no_wait: bool,
 
     /// Force release: cancel queued releases and jump to front of queue
     #[arg(long)]
-    force: bool,
+    pub(crate) force: bool,
 
     /// Use the project's release pipeline instead of deploying directly
     #[arg(long)]
-    pipeline: bool,
+    pub(crate) pipeline: bool,
 }
 
 impl CommitCommand {

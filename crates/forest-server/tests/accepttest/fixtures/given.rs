@@ -218,6 +218,7 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
                         version: Some("1.0.0".into()),
                         repo_url: Some("https://example.com/repo".into()),
                     }),
+                    annotation_only: false,
                 },
             ))
             .await

@@ -382,6 +382,7 @@ async fn user_cannot_release_to_other_orgs_destination() {
                     version: None,
                     repo_url: None,
                 }),
+                annotation_only: false,
             },
         ))
         .await;

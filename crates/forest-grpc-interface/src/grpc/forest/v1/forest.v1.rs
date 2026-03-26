@@ -1985,6 +1985,9 @@ pub struct AnnotateReleaseRequest {
     pub project: ::core::option::Option<Project>,
     #[prost(message, optional, tag="6")]
     pub r#ref: ::core::option::Option<Ref>,
+    /// When true, skip automatic trigger evaluation (no auto-release from policies).
+    #[prost(bool, tag="7")]
+    pub annotation_only: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnnotateReleaseResponse {

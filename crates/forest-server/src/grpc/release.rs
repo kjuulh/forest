@@ -173,6 +173,15 @@ impl ReleaseService for ReleaseServer {
             metadata: [("slug".into(), slug.clone())].into(),
         }).await;
 
+        // When annotation_only is set, skip trigger evaluation entirely
+        // (used by `forest release create` to avoid auto-releases).
+        if req.annotation_only {
+            tracing::debug!("annotation_only=true, skipping trigger evaluation");
+            return Ok(Response::new(AnnotateReleaseResponse {
+                artifact: Some(artifact.into()),
+            }));
+        }
+
         // Evaluate triggers
         let match_data =
             AnnotationMatchData::from_parts(&source, &art_context, &reference);

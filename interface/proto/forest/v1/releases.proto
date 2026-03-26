@@ -9,6 +9,8 @@ message AnnotateReleaseRequest {
   ArtifactContext context = 4;
   Project project = 5;
   Ref ref = 6;
+  // When true, skip automatic trigger evaluation (no auto-release from policies).
+  bool annotation_only = 7;
 }
 message AnnotateReleaseResponse {
   Artifact artifact = 1;

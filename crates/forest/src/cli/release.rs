@@ -1,11 +1,15 @@
 use crate::{
-    cli::release::{annotate::AnnotateCommand, commit::CommitCommand, prepare::PrepareCommand},
+    cli::release::{
+        annotate::AnnotateCommand, commit::CommitCommand, create::CreateCommand,
+        prepare::PrepareCommand,
+    },
     state::State,
 };
 
-mod annotate;
-mod commit;
-mod prepare;
+pub(crate) mod annotate;
+pub(crate) mod commit;
+mod create;
+pub(crate) mod prepare;
 
 #[derive(clap::Parser)]
 #[clap(subcommand_required = false, args_conflicts_with_subcommands = true)]
@@ -23,6 +27,8 @@ pub enum Commands {
     Prepare(PrepareCommand),
     Annotate(AnnotateCommand),
     Release(CommitCommand),
+    /// Prepare, annotate, and release in one step (annotation-only, no auto-release from triggers).
+    Create(CreateCommand),
 }
 
 impl ReleaseCommand {
@@ -31,6 +37,7 @@ impl ReleaseCommand {
             Some(Commands::Prepare(cmd)) => cmd.execute(state).await?,
             Some(Commands::Annotate(cmd)) => cmd.execute(state).await?,
             Some(Commands::Release(cmd)) => cmd.execute(state).await?,
+            Some(Commands::Create(cmd)) => cmd.execute(state).await?,
             None => {
                 let cmd = self.release.as_ref().cloned().unwrap_or_default();
                 cmd.execute(state).await?

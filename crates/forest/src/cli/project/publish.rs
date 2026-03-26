@@ -258,6 +258,7 @@ impl PublishCommand {
                 &context,
                 &project,
                 &reference,
+                false,
             )
             .await
             .context("annotate artifact")?;
