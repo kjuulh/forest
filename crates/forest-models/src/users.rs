@@ -60,6 +60,7 @@ pub enum OAuthProvider {
     Google,
     Gitlab,
     Microsoft,
+    MagicLink,
 }
 
 impl OAuthProvider {
@@ -69,6 +70,7 @@ impl OAuthProvider {
             Self::Google => "google",
             Self::Gitlab => "gitlab",
             Self::Microsoft => "microsoft",
+            Self::MagicLink => "magic-link",
         }
     }
 }
@@ -82,6 +84,7 @@ impl std::str::FromStr for OAuthProvider {
             "google" => Ok(Self::Google),
             "gitlab" => Ok(Self::Gitlab),
             "microsoft" => Ok(Self::Microsoft),
+            "magic-link" => Ok(Self::MagicLink),
             _ => Err(format!("unknown oauth provider: {s}")),
         }
     }
@@ -94,6 +97,7 @@ impl From<OAuthProvider> for forest_grpc_interface::OAuthProvider {
             OAuthProvider::Google => Self::OauthProviderGoogle,
             OAuthProvider::Gitlab => Self::OauthProviderGitlab,
             OAuthProvider::Microsoft => Self::OauthProviderMicrosoft,
+            OAuthProvider::MagicLink => Self::OauthProviderMagicLink,
         }
     }
 }
@@ -107,6 +111,7 @@ impl TryFrom<forest_grpc_interface::OAuthProvider> for OAuthProvider {
             forest_grpc_interface::OAuthProvider::OauthProviderGoogle => Ok(Self::Google),
             forest_grpc_interface::OAuthProvider::OauthProviderGitlab => Ok(Self::Gitlab),
             forest_grpc_interface::OAuthProvider::OauthProviderMicrosoft => Ok(Self::Microsoft),
+            forest_grpc_interface::OAuthProvider::OauthProviderMagicLink => Ok(Self::MagicLink),
             forest_grpc_interface::OAuthProvider::OauthProviderUnspecified => {
                 Err("unspecified oauth provider".into())
             }
