@@ -144,6 +144,8 @@ impl DestinationRegistry {
                 organisation: rec.type_organisation,
                 name: rec.type_name,
                 version: rec.type_version as usize,
+                description: String::new(),
+                fields: vec![],
             },
         )))
     }

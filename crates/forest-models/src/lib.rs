@@ -110,15 +110,39 @@ impl From<Destination> for forest_grpc_interface::Destination {
     }
 }
 
+pub struct MetadataFieldSchema {
+    pub name: String,
+    pub label: String,
+    pub description: String,
+    pub required: bool,
+    pub field_type: String,
+    pub default_value: String,
+}
+
 pub struct DestinationType {
     pub organisation: String,
     pub name: String,
     pub version: usize,
+    pub description: String,
+    pub fields: Vec<MetadataFieldSchema>,
 }
 
 impl Display for DestinationType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}/{}@{}", self.organisation, self.name, self.version)
+    }
+}
+
+impl From<MetadataFieldSchema> for forest_grpc_interface::MetadataFieldSchema {
+    fn from(value: MetadataFieldSchema) -> Self {
+        Self {
+            name: value.name,
+            label: value.label,
+            description: value.description,
+            required: value.required,
+            field_type: value.field_type,
+            default_value: value.default_value,
+        }
     }
 }
 
@@ -128,6 +152,8 @@ impl From<DestinationType> for forest_grpc_interface::DestinationType {
             organisation: value.organisation,
             name: value.name,
             version: value.version as u64,
+            description: value.description,
+            fields: value.fields.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -138,6 +164,8 @@ impl From<forest_grpc_interface::DestinationType> for DestinationType {
             organisation: value.organisation,
             name: value.name,
             version: value.version as usize,
+            description: value.description,
+            fields: vec![],
         }
     }
 }

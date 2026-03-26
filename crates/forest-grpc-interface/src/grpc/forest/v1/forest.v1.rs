@@ -268,7 +268,7 @@ pub struct Destination {
     #[prost(string, tag="5")]
     pub organisation: ::prost::alloc::string::String,
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DestinationType {
     #[prost(string, tag="1")]
     pub organisation: ::prost::alloc::string::String,
@@ -276,6 +276,25 @@ pub struct DestinationType {
     pub name: ::prost::alloc::string::String,
     #[prost(uint64, tag="3")]
     pub version: u64,
+    #[prost(string, tag="4")]
+    pub description: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="5")]
+    pub fields: ::prost::alloc::vec::Vec<MetadataFieldSchema>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct MetadataFieldSchema {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub label: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub description: ::prost::alloc::string::String,
+    #[prost(bool, tag="4")]
+    pub required: bool,
+    #[prost(string, tag="5")]
+    pub field_type: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
+    pub default_value: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Environment {

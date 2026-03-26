@@ -724,6 +724,37 @@ impl DestinationEdge for TerraformV1Destination {
             version: 1,
         }
     }
+
+    fn description(&self) -> &str {
+        "Provision infrastructure with Terraform using an HTTP backend for remote state."
+    }
+
+    fn metadata_schema(&self) -> Vec<forest_models::MetadataFieldSchema> {
+        // Terraform passes all metadata keys as TF_VAR_* environment variables.
+        // The fields below document the keys consumed by the runner itself; any
+        // additional keys are forwarded verbatim to the Terraform configuration.
+        vec![
+            forest_models::MetadataFieldSchema {
+                name: "tf_workspace".into(),
+                label: "Terraform Workspace".into(),
+                description: "Terraform workspace name. Defaults to the environment name when unset."
+                    .into(),
+                required: false,
+                field_type: "text".into(),
+                default_value: String::new(),
+            },
+            forest_models::MetadataFieldSchema {
+                name: "tf_parallelism".into(),
+                label: "Parallelism".into(),
+                description: "Number of concurrent resource operations (terraform -parallelism)."
+                    .into(),
+                required: false,
+                field_type: "number".into(),
+                default_value: "10".into(),
+            },
+        ]
+    }
+
     async fn prepare(
         &self,
         logger: &DestinationLogger,

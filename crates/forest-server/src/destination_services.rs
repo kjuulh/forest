@@ -12,8 +12,28 @@ pub struct DestinationServices {
 }
 
 impl DestinationServices {
-    pub fn list_types(&self) -> Vec<DestinationIndex> {
+    /// Returns lightweight identity records used for internal lookups.
+    pub fn list_indexes(&self) -> Vec<DestinationIndex> {
         self.services.iter().map(|s| s.name()).collect()
+    }
+
+    /// Returns the full domain model for every registered destination type,
+    /// including description and metadata field schemas. Used by the gRPC
+    /// `ListDestinationTypes` handler.
+    pub fn list_types(&self) -> Vec<forest_models::DestinationType> {
+        self.services
+            .iter()
+            .map(|s| {
+                let idx = s.name();
+                forest_models::DestinationType {
+                    organisation: idx.organisation,
+                    name: idx.name,
+                    version: idx.version,
+                    description: s.description().to_owned(),
+                    fields: s.metadata_schema(),
+                }
+            })
+            .collect()
     }
 
     pub fn get_destination(

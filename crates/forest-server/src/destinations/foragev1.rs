@@ -28,6 +28,58 @@ impl DestinationEdge for ForageV1Destination {
         }
     }
 
+    fn description(&self) -> &str {
+        "Deploy container workloads to a Forage-managed cluster via gRPC."
+    }
+
+    fn metadata_schema(&self) -> Vec<forest_models::MetadataFieldSchema> {
+        vec![
+            forest_models::MetadataFieldSchema {
+                name: "forage_url".into(),
+                label: "Forage URL".into(),
+                description: "Forage cluster gRPC endpoint (e.g. http://forage.example.com:4050)."
+                    .into(),
+                required: true,
+                field_type: "url".into(),
+                default_value: String::new(),
+            },
+            forest_models::MetadataFieldSchema {
+                name: "namespace".into(),
+                label: "Namespace".into(),
+                description: "Namespace for resource isolation (usually the organisation name)."
+                    .into(),
+                required: true,
+                field_type: "text".into(),
+                default_value: String::new(),
+            },
+            forest_models::MetadataFieldSchema {
+                name: "region".into(),
+                label: "Region".into(),
+                description: "Deployment region for compute placement.".into(),
+                required: false,
+                field_type: "text".into(),
+                default_value: "eu-west-1".into(),
+            },
+            forest_models::MetadataFieldSchema {
+                name: "image".into(),
+                label: "Container Image".into(),
+                description: "Container image override. Defaults to registry.forage.sh/{org}/{name}."
+                    .into(),
+                required: false,
+                field_type: "text".into(),
+                default_value: String::new(),
+            },
+            forest_models::MetadataFieldSchema {
+                name: "replicas".into(),
+                label: "Replicas".into(),
+                description: "Number of container replicas to run.".into(),
+                required: false,
+                field_type: "number".into(),
+                default_value: "1".into(),
+            },
+        ]
+    }
+
     fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
         ForageV1Metadata::validate(metadata)
     }

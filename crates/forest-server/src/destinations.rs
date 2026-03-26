@@ -77,6 +77,14 @@ impl DestinationService {
         self.inner.name()
     }
 
+    pub fn description(&self) -> &str {
+        self.inner.description()
+    }
+
+    pub fn metadata_schema(&self) -> Vec<forest_models::MetadataFieldSchema> {
+        self.inner.metadata_schema()
+    }
+
     pub fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
         self.inner.validate_metadata(metadata)
     }
@@ -132,6 +140,18 @@ impl DestinationService {
 #[async_trait::async_trait]
 pub trait DestinationEdge {
     fn name(&self) -> DestinationIndex;
+
+    /// Human-readable description of this destination type.
+    fn description(&self) -> &str {
+        ""
+    }
+
+    /// Declared metadata field schemas for this destination type.
+    /// Used to populate `DestinationType.fields` in the gRPC response so
+    /// clients can render a dynamic creation form.
+    fn metadata_schema(&self) -> Vec<forest_models::MetadataFieldSchema> {
+        vec![]
+    }
 
     /// Validate that the given metadata contains all required fields for this
     /// destination type. Called during destination creation.

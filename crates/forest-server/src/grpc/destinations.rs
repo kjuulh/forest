@@ -175,11 +175,7 @@ impl DestinationService for DestinationServer {
         let types = dest_services
             .list_types()
             .into_iter()
-            .map(|idx| DestinationType {
-                organisation: idx.organisation,
-                name: idx.name,
-                version: idx.version as u64,
-            })
+            .map(Into::into)
             .collect();
 
         Ok(Response::new(ListDestinationTypesResponse { types }))

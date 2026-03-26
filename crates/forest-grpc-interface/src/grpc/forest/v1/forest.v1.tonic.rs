@@ -1464,6 +1464,7 @@ pub mod destination_service_client {
     )]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    ///
     #[derive(Debug, Clone)]
     pub struct DestinationServiceClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -1544,6 +1545,7 @@ pub mod destination_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
+        ///
         pub async fn create_destination(
             &mut self,
             request: impl tonic::IntoRequest<super::CreateDestinationRequest>,
@@ -1570,6 +1572,7 @@ pub mod destination_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        ///
         pub async fn update_destination(
             &mut self,
             request: impl tonic::IntoRequest<super::UpdateDestinationRequest>,
@@ -1596,6 +1599,7 @@ pub mod destination_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        ///
         pub async fn delete_destination(
             &mut self,
             request: impl tonic::IntoRequest<super::DeleteDestinationRequest>,
@@ -1692,6 +1696,7 @@ pub mod destination_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with DestinationServiceServer.
     #[async_trait]
     pub trait DestinationService: std::marker::Send + std::marker::Sync + 'static {
+        ///
         async fn create_destination(
             &self,
             request: tonic::Request<super::CreateDestinationRequest>,
@@ -1699,6 +1704,7 @@ pub mod destination_service_server {
             tonic::Response<super::CreateDestinationResponse>,
             tonic::Status,
         >;
+        ///
         async fn update_destination(
             &self,
             request: tonic::Request<super::UpdateDestinationRequest>,
@@ -1706,6 +1712,7 @@ pub mod destination_service_server {
             tonic::Response<super::UpdateDestinationResponse>,
             tonic::Status,
         >;
+        ///
         async fn delete_destination(
             &self,
             request: tonic::Request<super::DeleteDestinationRequest>,
@@ -1728,6 +1735,7 @@ pub mod destination_service_server {
             tonic::Status,
         >;
     }
+    ///
     #[derive(Debug)]
     pub struct DestinationServiceServer<T> {
         inner: Arc<T>,

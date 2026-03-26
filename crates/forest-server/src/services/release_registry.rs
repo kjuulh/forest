@@ -788,6 +788,8 @@ impl ReleaseRegistry {
                         organisation: r.type_organisation,
                         name: r.type_name,
                         version: r.type_version as usize,
+                        description: String::new(),
+                        fields: vec![],
                     },
                 ))
             })

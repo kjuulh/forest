@@ -54,4 +54,15 @@ message DestinationType {
   string organisation = 1;
   string name = 2;
   uint64 version = 3;
+  string description = 4;
+  repeated MetadataFieldSchema fields = 5;
+}
+
+message MetadataFieldSchema {
+  string name = 1;
+  string label = 2;
+  string description = 3;
+  bool required = 4;
+  string field_type = 5;
+  string default_value = 6;
 }
