@@ -1119,6 +1119,8 @@ impl GrpcClient {
                 organisation: t.organisation,
                 name: t.name,
                 version: t.version as usize,
+                description: t.description,
+                fields: vec![],
             })
             .collect())
     }

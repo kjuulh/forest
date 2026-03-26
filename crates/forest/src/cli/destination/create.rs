@@ -58,6 +58,8 @@ impl CreateCommand {
                     organisation: organisation.into(),
                     name: name.into(),
                     version,
+                    description: String::new(),
+                    fields: vec![],
                 },
             )
             .await
