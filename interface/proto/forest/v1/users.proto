@@ -214,10 +214,16 @@ message RemoveEmailResponse {}
 
 // ─── OAuth / Social login ────────────────────────────────────────────
 
+// OAuthLoginRequest accepts pre-verified identity info from a trusted caller
+// (e.g. Forage). The caller is responsible for the actual OIDC exchange with
+// the provider — Forest just stores the identity and issues tokens.
+// Requires service-account bearer auth.
 message OAuthLoginRequest {
   OAuthProvider provider = 1;
-  string authorization_code = 2;
-  string redirect_uri = 3;
+  string provider_user_id = 2;       // unique user ID from the provider (e.g. Google "sub")
+  string provider_email = 3;         // verified email from the provider
+  string provider_display_name = 4;  // display name for profile seeding (optional)
+  string provider_data_json = 5;     // arbitrary provider data as JSON (optional)
 }
 
 message OAuthLoginResponse {
@@ -229,8 +235,8 @@ message OAuthLoginResponse {
 message LinkOAuthProviderRequest {
   string user_id = 1;
   OAuthProvider provider = 2;
-  string authorization_code = 3;
-  string redirect_uri = 4;
+  string provider_user_id = 3;
+  string provider_email = 4;
 }
 
 message LinkOAuthProviderResponse {

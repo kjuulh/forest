@@ -76,6 +76,33 @@ impl UserService {
         })
     }
 
+    /// Create a user from an OAuth provider — no password, email marked as verified.
+    pub async fn register_oauth_user(
+        &self,
+        username: &str,
+        email: &str,
+    ) -> anyhow::Result<RegisteredUser> {
+        let mut tx = self.repo.begin().await?;
+
+        let user_id = Uuid::now_v7();
+        let user = self
+            .repo
+            .create_user(tx.as_executor(), user_id, username)
+            .await?;
+        self.repo
+            .add_user_email(tx.as_executor(), user_id, email)
+            .await?;
+
+        tx.commit().await?;
+
+        Ok(RegisteredUser {
+            user_id: user.id,
+            username: user.username,
+            email: email.to_string(),
+            created_at: user.created_at,
+        })
+    }
+
     pub async fn login_by_username(
         &self,
         username: &str,

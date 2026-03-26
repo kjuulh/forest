@@ -4,7 +4,7 @@ use sha2::Digest;
 use uuid::Uuid;
 
 use super::error;
-use crate::{services::users::UserServiceState, state::State, tokens::TokenServiceState};
+use crate::{actor::Actor, services::users::UserServiceState, state::State, tokens::TokenServiceState};
 
 pub struct UsersServer {
     pub state: State,
@@ -473,10 +473,116 @@ impl UsersService for UsersServer {
 
     async fn o_auth_login(
         &self,
-        _request: tonic::Request<OAuthLoginRequest>,
+        request: tonic::Request<OAuthLoginRequest>,
     ) -> std::result::Result<tonic::Response<OAuthLoginResponse>, tonic::Status> {
-        // TODO: implement OAuth login flow
-        Err(tonic::Status::unimplemented("not yet implemented"))
+        // Require service-account auth — only trusted callers (e.g. Forage)
+        // can submit pre-verified identity info.
+        let actor = request.extensions().get::<Actor>().cloned();
+        match &actor {
+            Some(Actor::ServiceAccount { .. }) => {}
+            _ => {
+                return Err(tonic::Status::permission_denied(
+                    "OAuth login requires service account authentication",
+                ));
+            }
+        }
+
+        let req = request.into_inner();
+
+        let provider = forest_grpc_interface::OAuthProvider::try_from(req.provider)
+            .map_err(|_| tonic::Status::invalid_argument("invalid provider"))?;
+        let provider_str = provider.as_str_name().to_lowercase();
+
+        if req.provider_user_id.is_empty() {
+            return Err(tonic::Status::invalid_argument("provider_user_id is required"));
+        }
+        if req.provider_email.is_empty() {
+            return Err(tonic::Status::invalid_argument("provider_email is required"));
+        }
+
+        // Look up existing user by OAuth identity.
+        let existing_user_id = self
+            .service()
+            .find_user_by_oauth(&provider_str, &req.provider_user_id)
+            .await
+            .map_err(error::to_status)?;
+
+        let (user_id, is_new_user) = if let Some(uid) = existing_user_id {
+            (uid, false)
+        } else {
+            // Create a new user with a placeholder username (user will pick one later).
+            let placeholder_username = format!("user-{}", Uuid::now_v7().simple());
+            let registered = self
+                .service()
+                .register_oauth_user(&placeholder_username, &req.provider_email)
+                .await
+                .map_err(error::to_status)?;
+
+            // Link the OAuth identity.
+            let provider_data = if req.provider_data_json.is_empty() {
+                None
+            } else {
+                serde_json::from_str(&req.provider_data_json).ok()
+            };
+            self.service()
+                .link_oauth_provider(
+                    registered.user_id,
+                    &provider_str,
+                    &req.provider_user_id,
+                    Some(&req.provider_email),
+                    provider_data.as_ref(),
+                )
+                .await
+                .map_err(error::to_status)?;
+
+            (registered.user_id, true)
+        };
+
+        // Load user profile.
+        let profile = self
+            .service()
+            .get_user(user_id)
+            .await
+            .map_err(error::to_status)?
+            .ok_or_else(|| tonic::Status::internal("user not found after OAuth login"))?;
+
+        // Issue tokens (same pattern as register/login).
+        let (refresh_token, hash) = self
+            .state
+            .tokens()
+            .generate_refresh_token()
+            .map_err(error::to_status)?;
+
+        let expires = Utc::now()
+            .checked_add_days(Days::new(30))
+            .expect("to be able to add 30 days");
+
+        let session = self
+            .state
+            .user_service()
+            .create_session(user_id, &hash, Some(expires))
+            .await
+            .map_err(error::to_status)?;
+
+        let access_token = self
+            .state
+            .tokens()
+            .issue_access_token(
+                &user_id.to_string(),
+                &session.session_id.to_string(),
+                vec![],
+            )
+            .map_err(error::to_status)?;
+
+        Ok(tonic::Response::new(OAuthLoginResponse {
+            user: Some(profile_to_grpc_user(profile)),
+            tokens: Some(AuthTokens {
+                access_token: access_token.as_string(),
+                refresh_token,
+                expires_in_seconds: expires.timestamp(),
+            }),
+            is_new_user,
+        }))
     }
 
     async fn link_o_auth_provider(
@@ -492,11 +598,15 @@ impl UsersService for UsersServer {
         let provider = forest_grpc_interface::OAuthProvider::try_from(req.provider)
             .map_err(|_| tonic::Status::invalid_argument("invalid provider"))?;
 
-        // TODO: exchange authorization_code for provider user info
         let provider_str = provider.as_str_name().to_lowercase();
+        let provider_email = if req.provider_email.is_empty() {
+            None
+        } else {
+            Some(req.provider_email.as_str())
+        };
 
         self.service()
-            .link_oauth_provider(user_id, &provider_str, "todo_provider_user_id", None, None)
+            .link_oauth_provider(user_id, &provider_str, &req.provider_user_id, provider_email, None)
             .await
             .map_err(error::to_status)?;
 

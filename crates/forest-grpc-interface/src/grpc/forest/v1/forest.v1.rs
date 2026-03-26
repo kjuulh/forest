@@ -3849,14 +3849,26 @@ pub struct RemoveEmailResponse {
 }
 // ─── OAuth / Social login ────────────────────────────────────────────
 
+/// OAuthLoginRequest accepts pre-verified identity info from a trusted caller
+/// (e.g. Forage). The caller is responsible for the actual OIDC exchange with
+/// the provider — Forest just stores the identity and issues tokens.
+/// Requires service-account bearer auth.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct OAuthLoginRequest {
     #[prost(enumeration="OAuthProvider", tag="1")]
     pub provider: i32,
+    /// unique user ID from the provider (e.g. Google "sub")
     #[prost(string, tag="2")]
-    pub authorization_code: ::prost::alloc::string::String,
+    pub provider_user_id: ::prost::alloc::string::String,
+    /// verified email from the provider
     #[prost(string, tag="3")]
-    pub redirect_uri: ::prost::alloc::string::String,
+    pub provider_email: ::prost::alloc::string::String,
+    /// display name for profile seeding (optional)
+    #[prost(string, tag="4")]
+    pub provider_display_name: ::prost::alloc::string::String,
+    /// arbitrary provider data as JSON (optional)
+    #[prost(string, tag="5")]
+    pub provider_data_json: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OAuthLoginResponse {
@@ -3874,9 +3886,9 @@ pub struct LinkOAuthProviderRequest {
     #[prost(enumeration="OAuthProvider", tag="2")]
     pub provider: i32,
     #[prost(string, tag="3")]
-    pub authorization_code: ::prost::alloc::string::String,
+    pub provider_user_id: ::prost::alloc::string::String,
     #[prost(string, tag="4")]
-    pub redirect_uri: ::prost::alloc::string::String,
+    pub provider_email: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct LinkOAuthProviderResponse {
