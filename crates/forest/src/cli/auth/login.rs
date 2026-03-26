@@ -57,12 +57,13 @@ impl LoginCommand {
             .await
             .context("failed to login")?;
 
-        if let Some(user) = &resp.user {
-            println!("Logged in as {} ({})", user.username, user.user_id);
+        if resp.mfa_required {
+            anyhow::bail!("MFA is required for this account. Use the web interface to sign in.");
         }
 
-        let user = resp.user.unwrap();
-        let tokens = resp.tokens.context("no tokens found, login is not valid")?;
+        let user = resp.user.context("no user in login response")?;
+        let tokens = resp.tokens.context("no tokens in login response")?;
+        println!("Logged in as {} ({})", user.username, user.user_id);
 
         let now = chrono::Utc::now().timestamp();
         let refresh_after = compute_refresh_after(now, tokens.expires_in_seconds);
