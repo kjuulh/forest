@@ -58,6 +58,7 @@ sha2 = "0.10.9"
 base64 = "0.22.1"
 nostatus = "0.1.0"
 aes-gcm = "0.10.3"
+totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 serde_yaml = "0.9"
 hex = "0.4"
 async-nats.workspace = true

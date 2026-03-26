@@ -46,6 +46,7 @@ service UsersService {
   rpc SetupMfa(SetupMfaRequest) returns (SetupMfaResponse);
   rpc VerifyMfa(VerifyMfaRequest) returns (VerifyMfaResponse);
   rpc DisableMfa(DisableMfaRequest) returns (DisableMfaResponse);
+  rpc VerifyLoginMfa(VerifyLoginMfaRequest) returns (VerifyLoginMfaResponse);
 }
 
 // ─── Core types ──────────────────────────────────────────────────────
@@ -106,6 +107,8 @@ message LoginRequest {
 message LoginResponse {
   User user = 1;
   AuthTokens tokens = 2;
+  bool mfa_required = 3;
+  string mfa_session_token = 4;
 }
 
 message RefreshTokenRequest {
@@ -347,3 +350,13 @@ message DisableMfaRequest {
 }
 
 message DisableMfaResponse {}
+
+message VerifyLoginMfaRequest {
+  string mfa_session_token = 1;
+  string code = 2;
+}
+
+message VerifyLoginMfaResponse {
+  User user = 1;
+  AuthTokens tokens = 2;
+}

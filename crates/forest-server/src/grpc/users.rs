@@ -1,6 +1,7 @@
 use chrono::{Days, Utc};
 use forest_grpc_interface::{users_service_server::UsersService, *};
 use sha2::Digest;
+use totp_rs::{Algorithm, Secret, TOTP};
 use uuid::Uuid;
 
 use super::error;
@@ -103,6 +104,42 @@ impl UsersService for UsersServer {
             .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::internal("user not found"))?;
 
+        // Check MFA status — if the user has verified MFA, return a challenge
+        // instead of issuing tokens immediately.
+        let mfa = self
+            .service()
+            .get_mfa_for_user(authenticated.user_id)
+            .await
+            .map_err(error::to_status)?;
+        if let Some(mfa) = mfa {
+            if mfa.verified {
+                let state_data = serde_json::json!({
+                    "user_id": authenticated.user_id.to_string(),
+                    "type": "mfa_login"
+                });
+                let state_token = format!("mfa-{}", Uuid::now_v7());
+                let expires_mfa =
+                    Utc::now() + chrono::Duration::minutes(5);
+                self.service()
+                    .create_oauth_state(
+                        "mfa",
+                        &state_token,
+                        None,
+                        &state_data,
+                        Some(expires_mfa),
+                    )
+                    .await
+                    .map_err(error::to_status)?;
+
+                return Ok(tonic::Response::new(LoginResponse {
+                    user: None,
+                    tokens: None,
+                    mfa_required: true,
+                    mfa_session_token: state_token,
+                }));
+            }
+        }
+
         let (refresh_token, hash) = self
             .state
             .tokens()
@@ -137,6 +174,8 @@ impl UsersService for UsersServer {
                 refresh_token,
                 expires_in_seconds: expires.timestamp(),
             }),
+            mfa_required: false,
+            mfa_session_token: String::new(),
         }))
     }
 
@@ -748,37 +787,65 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<SetupMfaRequest>,
     ) -> std::result::Result<tonic::Response<SetupMfaResponse>, tonic::Status> {
+        let claims = request
+            .extensions()
+            .get::<crate::tokens::AppClaims>()
+            .cloned()
+            .ok_or_else(|| tonic::Status::unauthenticated("missing auth"))?;
         let req = request.into_inner();
-        let user_id = req
-            .user_id
-            .parse::<Uuid>()
-            .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
 
         let mfa_type = MfaType::try_from(req.mfa_type)
             .map_err(|_| tonic::Status::invalid_argument("invalid mfa_type"))?;
+        if mfa_type == MfaType::Unspecified {
+            return Err(tonic::Status::invalid_argument("mfa_type is required"));
+        }
 
-        let mfa_type_str = match mfa_type {
-            MfaType::Totp => "totp",
-            MfaType::Unspecified => {
-                return Err(tonic::Status::invalid_argument("mfa_type is required"));
-            }
-        };
+        let user_id: Uuid = claims
+            .user_id
+            .parse()
+            .map_err(|_| tonic::Status::internal("invalid user_id in claims"))?;
 
-        // TODO: generate actual TOTP secret
-        let secret = Uuid::now_v7().to_string();
-        let secret_bytes = secret.as_bytes();
+        // Get user email for the provisioning URI.
+        let profile = self
+            .service()
+            .get_user(user_id)
+            .await
+            .map_err(error::to_status)?
+            .ok_or_else(|| tonic::Status::not_found("user not found"))?;
+        let email = profile
+            .emails
+            .first()
+            .map(|e| e.email.as_str())
+            .unwrap_or("user");
+
+        // Generate a cryptographically random TOTP secret.
+        let secret = Secret::generate_secret();
+        let secret_bytes = secret
+            .to_bytes()
+            .map_err(|e| tonic::Status::internal(format!("secret encoding error: {e}")))?;
+        let totp = TOTP::new(
+            Algorithm::SHA1,
+            6,
+            1,
+            30,
+            secret_bytes.clone(),
+            Some("Forest".to_string()),
+            email.to_string(),
+        )
+        .map_err(|e| tonic::Status::internal(format!("TOTP setup error: {e}")))?;
+        let provisioning_uri = totp.get_url();
+        let secret_base32 = secret.to_encoded().to_string();
 
         let mfa_id = self
             .service()
-            .setup_mfa(user_id, mfa_type_str, secret_bytes)
+            .setup_mfa(user_id, "totp", &secret_bytes)
             .await
             .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(SetupMfaResponse {
             mfa_id: mfa_id.to_string(),
-            // TODO: generate proper TOTP provisioning URI
-            provisioning_uri: String::new(),
-            secret,
+            provisioning_uri,
+            secret: secret_base32,
         }))
     }
 
@@ -786,14 +853,40 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<VerifyMfaRequest>,
     ) -> std::result::Result<tonic::Response<VerifyMfaResponse>, tonic::Status> {
+        let claims = request
+            .extensions()
+            .get::<crate::tokens::AppClaims>()
+            .cloned()
+            .ok_or_else(|| tonic::Status::unauthenticated("missing auth"))?;
         let req = request.into_inner();
-        let mfa_id = req
+
+        let user_id: Uuid = claims
+            .user_id
+            .parse()
+            .map_err(|_| tonic::Status::internal("invalid user_id in claims"))?;
+        let mfa_id: Uuid = req
             .mfa_id
-            .parse::<Uuid>()
+            .parse()
             .map_err(|_| tonic::Status::invalid_argument("invalid mfa_id"))?;
 
-        // TODO: validate the TOTP code against the stored secret
-        let _code = req.code;
+        // Load MFA record and verify it belongs to the calling user.
+        let mfa = self
+            .service()
+            .get_mfa_for_user(user_id)
+            .await
+            .map_err(error::to_status)?
+            .ok_or_else(|| tonic::Status::not_found("MFA setup not found"))?;
+
+        if mfa.id != mfa_id {
+            return Err(tonic::Status::permission_denied("MFA ID mismatch"));
+        }
+
+        // Validate the TOTP code.
+        let totp = TOTP::new(Algorithm::SHA1, 6, 1, 30, mfa.secret.clone(), None, String::new())
+            .map_err(|e| tonic::Status::internal(format!("TOTP init error: {e}")))?;
+        if !totp.check_current(&req.code).unwrap_or(false) {
+            return Err(tonic::Status::unauthenticated("invalid TOTP code"));
+        }
 
         self.service()
             .verify_mfa(mfa_id)
@@ -807,14 +900,31 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<DisableMfaRequest>,
     ) -> std::result::Result<tonic::Response<DisableMfaResponse>, tonic::Status> {
+        let claims = request
+            .extensions()
+            .get::<crate::tokens::AppClaims>()
+            .cloned()
+            .ok_or_else(|| tonic::Status::unauthenticated("missing auth"))?;
         let req = request.into_inner();
-        let user_id = req
-            .user_id
-            .parse::<Uuid>()
-            .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
 
-        // TODO: validate the TOTP code before disabling
-        let _code = req.code;
+        let user_id: Uuid = claims
+            .user_id
+            .parse()
+            .map_err(|_| tonic::Status::internal("invalid user_id in claims"))?;
+
+        let mfa = self
+            .service()
+            .get_mfa_for_user(user_id)
+            .await
+            .map_err(error::to_status)?
+            .ok_or_else(|| tonic::Status::not_found("MFA not enabled"))?;
+
+        // Require the current TOTP code to confirm the disable request.
+        let totp = TOTP::new(Algorithm::SHA1, 6, 1, 30, mfa.secret.clone(), None, String::new())
+            .map_err(|e| tonic::Status::internal(format!("TOTP init error: {e}")))?;
+        if !totp.check_current(&req.code).unwrap_or(false) {
+            return Err(tonic::Status::unauthenticated("invalid TOTP code"));
+        }
 
         self.service()
             .disable_mfa(user_id)
@@ -822,6 +932,97 @@ impl UsersService for UsersServer {
             .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(DisableMfaResponse {}))
+    }
+
+    async fn verify_login_mfa(
+        &self,
+        request: tonic::Request<VerifyLoginMfaRequest>,
+    ) -> std::result::Result<tonic::Response<VerifyLoginMfaResponse>, tonic::Status> {
+        let req = request.into_inner();
+
+        // Consume the MFA session token — single-use, expires in 5 minutes.
+        let state_info = self
+            .service()
+            .consume_oauth_state(&req.mfa_session_token)
+            .await
+            .map_err(error::to_status)?
+            .ok_or_else(|| tonic::Status::unauthenticated("invalid or expired MFA session"))?;
+
+        if state_info.data.get("type").and_then(|v| v.as_str()) != Some("mfa_login") {
+            return Err(tonic::Status::unauthenticated("invalid MFA session type"));
+        }
+
+        let user_id: Uuid = state_info
+            .data
+            .get("user_id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse().ok())
+            .ok_or_else(|| tonic::Status::internal("invalid MFA session data"))?;
+
+        // Load MFA record and validate the TOTP code.
+        let mfa = self
+            .service()
+            .get_mfa_for_user(user_id)
+            .await
+            .map_err(error::to_status)?
+            .ok_or_else(|| tonic::Status::internal("MFA not found for user"))?;
+
+        let totp = TOTP::new(Algorithm::SHA1, 6, 1, 30, mfa.secret.clone(), None, String::new())
+            .map_err(|e| tonic::Status::internal(format!("TOTP init error: {e}")))?;
+        if !totp.check_current(&req.code).unwrap_or(false) {
+            return Err(tonic::Status::unauthenticated("invalid TOTP code"));
+        }
+
+        // Record successful use.
+        self.service()
+            .touch_mfa(mfa.id)
+            .await
+            .map_err(error::to_status)?;
+
+        // Load the full user profile for the response.
+        let profile = self
+            .service()
+            .get_user(user_id)
+            .await
+            .map_err(error::to_status)?
+            .ok_or_else(|| tonic::Status::internal("user not found"))?;
+
+        // Issue tokens (same pattern as login/register).
+        let (refresh_token, hash) = self
+            .state
+            .tokens()
+            .generate_refresh_token()
+            .map_err(error::to_status)?;
+
+        let expires = Utc::now()
+            .checked_add_days(Days::new(30))
+            .expect("to be able to add 30 days");
+
+        let session = self
+            .state
+            .user_service()
+            .create_session(user_id, &hash, Some(expires))
+            .await
+            .map_err(error::to_status)?;
+
+        let access_token = self
+            .state
+            .tokens()
+            .issue_access_token(
+                &user_id.to_string(),
+                &session.session_id.to_string(),
+                vec![],
+            )
+            .map_err(error::to_status)?;
+
+        Ok(tonic::Response::new(VerifyLoginMfaResponse {
+            user: Some(profile_to_grpc_user(profile)),
+            tokens: Some(AuthTokens {
+                access_token: access_token.as_string(),
+                refresh_token,
+                expires_in_seconds: expires.timestamp(),
+            }),
+        }))
     }
 }
 
@@ -849,7 +1050,7 @@ fn profile_to_grpc_user(profile: crate::services::users::UserProfile) -> User {
                 linked_at: Some(datetime_to_timestamp(c.linked_at)),
             })
             .collect(),
-        mfa_enabled: false, // TODO: check MFA status from service
+        mfa_enabled: profile.mfa_enabled,
         created_at: Some(datetime_to_timestamp(profile.created_at)),
         updated_at: Some(datetime_to_timestamp(profile.updated_at)),
     }

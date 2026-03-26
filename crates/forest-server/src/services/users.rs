@@ -3,7 +3,7 @@ use uuid::Uuid;
 use crate::{
     State,
     native_credentials::{NativeCredentials, NativeCredentialsState},
-    repositories::users::{UserRepository, UserRepositoryState},
+    repositories::users::{NativeMfaRow, UserRepository, UserRepositoryState},
 };
 
 pub struct UserService {
@@ -223,6 +223,8 @@ impl UserService {
 
         let emails = self.repo.get_user_emails(self.db(), user_id).await?;
         let identities = self.repo.get_identities_by_user(self.db(), user_id).await?;
+        let mfa = self.repo.get_native_mfa(self.db(), user_id).await?;
+        let mfa_enabled = mfa.map(|m| m.verified).unwrap_or(false);
 
         Ok(Some(UserProfile {
             user_id: user.id,
@@ -244,6 +246,7 @@ impl UserService {
                     linked_at: i.created_at,
                 })
                 .collect(),
+            mfa_enabled,
             created_at: user.created_at,
             updated_at: user.updated_at,
         }))
@@ -633,6 +636,19 @@ impl UserService {
         self.repo.delete_native_mfa(self.db(), user_id).await?;
         Ok(())
     }
+
+    /// Check if a user has verified MFA enabled.
+    pub async fn get_mfa_for_user(&self, user_id: Uuid) -> anyhow::Result<Option<NativeMfaRow>> {
+        self.repo.get_native_mfa(self.db(), user_id).await
+    }
+
+    /// Touch the last_used_at timestamp on an MFA record.
+    pub async fn touch_mfa(&self, mfa_id: Uuid) -> anyhow::Result<()> {
+        self.repo
+            .touch_native_mfa(self.db(), mfa_id)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))
+    }
 }
 
 // ─── Return types ────────────────────────────────────────────────────
@@ -665,6 +681,7 @@ pub struct UserProfile {
     pub username: String,
     pub emails: Vec<UserEmail>,
     pub oauth_connections: Vec<UserOAuthConnection>,
+    pub mfa_enabled: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }

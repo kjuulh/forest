@@ -3695,6 +3695,10 @@ pub struct LoginResponse {
     pub user: ::core::option::Option<User>,
     #[prost(message, optional, tag="2")]
     pub tokens: ::core::option::Option<AuthTokens>,
+    #[prost(bool, tag="3")]
+    pub mfa_required: bool,
+    #[prost(string, tag="4")]
+    pub mfa_session_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RefreshTokenRequest {
@@ -4038,6 +4042,20 @@ pub struct DisableMfaRequest {
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DisableMfaResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VerifyLoginMfaRequest {
+    #[prost(string, tag="1")]
+    pub mfa_session_token: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub code: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct VerifyLoginMfaResponse {
+    #[prost(message, optional, tag="1")]
+    pub user: ::core::option::Option<User>,
+    #[prost(message, optional, tag="2")]
+    pub tokens: ::core::option::Option<AuthTokens>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
