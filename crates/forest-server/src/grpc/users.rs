@@ -507,10 +507,37 @@ impl UsersService for UsersServer {
             .await
             .map_err(error::to_status)?;
 
-        let (user_id, is_new_user) = if let Some(uid) = existing_user_id {
-            (uid, false)
+        let provider_data = if req.provider_data_json.is_empty() {
+            None
         } else {
-            // Create a new user with a placeholder username (user will pick one later).
+            serde_json::from_str::<serde_json::Value>(&req.provider_data_json).ok()
+        };
+
+        let (user_id, is_new_user) = if let Some(uid) = existing_user_id {
+            // Known identity — just log them in.
+            (uid, false)
+        } else if let Some(existing_profile) = self
+            .service()
+            .get_user_by_email(&req.provider_email)
+            .await
+            .map_err(error::to_status)?
+        {
+            // Email already belongs to an existing user (e.g. registered with
+            // password or another OAuth provider). Link this new provider and
+            // log them in.
+            self.service()
+                .link_oauth_provider(
+                    existing_profile.user_id,
+                    &provider_str,
+                    &req.provider_user_id,
+                    Some(&req.provider_email),
+                    provider_data.as_ref(),
+                )
+                .await
+                .map_err(error::to_status)?;
+            (existing_profile.user_id, false)
+        } else {
+            // Completely new user — create account with placeholder username.
             let placeholder_username = format!("user-{}", Uuid::now_v7().simple());
             let registered = self
                 .service()
@@ -518,12 +545,6 @@ impl UsersService for UsersServer {
                 .await
                 .map_err(error::to_status)?;
 
-            // Link the OAuth identity.
-            let provider_data = if req.provider_data_json.is_empty() {
-                None
-            } else {
-                serde_json::from_str(&req.provider_data_json).ok()
-            };
             self.service()
                 .link_oauth_provider(
                     registered.user_id,
