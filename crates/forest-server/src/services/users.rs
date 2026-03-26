@@ -229,6 +229,7 @@ impl UserService {
         Ok(Some(UserProfile {
             user_id: user.id,
             username: user.username,
+            profile_picture_url: user.profile_picture_url,
             emails: emails
                 .into_iter()
                 .map(|e| UserEmail {
@@ -274,6 +275,28 @@ impl UserService {
     pub async fn update_username(&self, user_id: Uuid, username: &str) -> anyhow::Result<()> {
         self.repo
             .update_user_username(self.db(), user_id, username)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn update_profile_picture_url(
+        &self,
+        user_id: Uuid,
+        profile_picture_url: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.repo
+            .update_user_profile_picture_url(self.db(), user_id, profile_picture_url)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn set_profile_picture_url_if_unset(
+        &self,
+        user_id: Uuid,
+        profile_picture_url: &str,
+    ) -> anyhow::Result<()> {
+        self.repo
+            .set_profile_picture_url_if_unset(self.db(), user_id, profile_picture_url)
             .await?;
         Ok(())
     }
@@ -679,6 +702,7 @@ pub struct CreatedSession {
 pub struct UserProfile {
     pub user_id: Uuid,
     pub username: String,
+    pub profile_picture_url: Option<String>,
     pub emails: Vec<UserEmail>,
     pub oauth_connections: Vec<UserOAuthConnection>,
     pub mfa_enabled: bool,

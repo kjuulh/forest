@@ -315,6 +315,14 @@ impl UsersService for UsersServer {
                 .map_err(error::to_status)?;
         }
 
+        if let Some(ref url) = req.profile_picture_url {
+            let url = if url.is_empty() { None } else { Some(url.as_str()) };
+            self.service()
+                .update_profile_picture_url(user_id, url)
+                .await
+                .map_err(error::to_status)?;
+        }
+
         let profile = self
             .service()
             .get_user(user_id)
@@ -597,6 +605,19 @@ impl UsersService for UsersServer {
 
             (registered.user_id, true)
         };
+
+        // Set profile picture from provider data if user doesn't already have one.
+        // Uses a conditional update to avoid race conditions with concurrent logins.
+        if let Some(ref data) = provider_data {
+            if let Some(picture_url) = data.get("picture_url").and_then(|v| v.as_str()) {
+                if !picture_url.is_empty() && picture_url.starts_with("https://") {
+                    self.service()
+                        .set_profile_picture_url_if_unset(user_id, picture_url)
+                        .await
+                        .map_err(error::to_status)?;
+                }
+            }
+        }
 
         // Load user profile.
         let profile = self
@@ -1053,6 +1074,7 @@ fn profile_to_grpc_user(profile: crate::services::users::UserProfile) -> User {
         mfa_enabled: profile.mfa_enabled,
         created_at: Some(datetime_to_timestamp(profile.created_at)),
         updated_at: Some(datetime_to_timestamp(profile.updated_at)),
+        profile_picture_url: profile.profile_picture_url,
     }
 }
 

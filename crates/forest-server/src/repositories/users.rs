@@ -28,6 +28,7 @@ impl UserTx {
 pub struct UserRow {
     pub id: Uuid,
     pub username: String,
+    pub profile_picture_url: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -130,7 +131,7 @@ impl UserRepository {
             r#"
             INSERT INTO users (id, username)
             VALUES ($1, $2)
-            RETURNING id, username, created_at, updated_at
+            RETURNING id, username, profile_picture_url, created_at, updated_at
             "#,
             id,
             username,
@@ -149,7 +150,7 @@ impl UserRepository {
         let row = sqlx::query_as!(
             UserRow,
             r#"
-            SELECT id, username, created_at, updated_at
+            SELECT id, username, profile_picture_url, created_at, updated_at
             FROM users
             WHERE id = $1
             "#,
@@ -169,7 +170,7 @@ impl UserRepository {
         let row = sqlx::query_as!(
             UserRow,
             r#"
-            SELECT id, username, created_at, updated_at
+            SELECT id, username, profile_picture_url, created_at, updated_at
             FROM users
             WHERE username = $1
             "#,
@@ -193,7 +194,7 @@ impl UserRepository {
             UPDATE users
             SET username = $2, updated_at = now()
             WHERE id = $1
-            RETURNING id, username, created_at, updated_at
+            RETURNING id, username, profile_picture_url, created_at, updated_at
             "#,
             id,
             username,
@@ -202,6 +203,50 @@ impl UserRepository {
         .await?;
 
         Ok(row)
+    }
+
+    pub async fn update_user_profile_picture_url(
+        &self,
+        db: impl PgExecutor<'_>,
+        id: Uuid,
+        profile_picture_url: Option<&str>,
+    ) -> Result<UserRow, DbError> {
+        let row = sqlx::query_as!(
+            UserRow,
+            r#"
+            UPDATE users
+            SET profile_picture_url = $2, updated_at = now()
+            WHERE id = $1
+            RETURNING id, username, profile_picture_url, created_at, updated_at
+            "#,
+            id,
+            profile_picture_url,
+        )
+        .fetch_one(db)
+        .await?;
+
+        Ok(row)
+    }
+
+    pub async fn set_profile_picture_url_if_unset(
+        &self,
+        db: impl PgExecutor<'_>,
+        id: Uuid,
+        profile_picture_url: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query!(
+            r#"
+            UPDATE users
+            SET profile_picture_url = $2, updated_at = now()
+            WHERE id = $1 AND profile_picture_url IS NULL
+            "#,
+            id,
+            profile_picture_url,
+        )
+        .execute(db)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn delete_user(&self, db: impl PgExecutor<'_>, id: Uuid) -> Result<(), DbError> {
@@ -221,7 +266,7 @@ impl UserRepository {
         let rows = sqlx::query_as!(
             UserRow,
             r#"
-            SELECT id, username, created_at, updated_at
+            SELECT id, username, profile_picture_url, created_at, updated_at
             FROM users
             ORDER BY created_at ASC
             LIMIT $1 OFFSET $2
@@ -245,7 +290,7 @@ impl UserRepository {
         let rows = sqlx::query_as!(
             UserRow,
             r#"
-            SELECT u.id, u.username, u.created_at, u.updated_at
+            SELECT u.id, u.username, u.profile_picture_url, u.created_at, u.updated_at
             FROM users u
             WHERE u.id IN (
                 SELECT u2.id
@@ -319,7 +364,7 @@ impl UserRepository {
         let row = sqlx::query_as!(
             UserRow,
             r#"
-            SELECT u.id, u.username, u.created_at, u.updated_at
+            SELECT u.id, u.username, u.profile_picture_url, u.created_at, u.updated_at
             FROM users u
             JOIN user_emails ue ON ue.user_id = u.id
             WHERE ue.email = $1
