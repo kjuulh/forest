@@ -14,7 +14,10 @@ mod user_config;
 mod user_locations;
 mod user_state;
 
+mod contracts;
 mod features;
+mod lockfile;
+mod version_spec;
 mod models;
 mod project_artifacts;
 

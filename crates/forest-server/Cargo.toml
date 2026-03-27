@@ -62,6 +62,9 @@ totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 serde_yaml = "0.9"
 hex = "0.4"
 async-nats.workspace = true
+rust-s3 = { version = "0.35", default-features = false, features = ["tokio-rustls-tls", "fail-on-err"] }
+tar = "0.4"
+zip = "2"
 
 [dev-dependencies]
 tempfile = "3"

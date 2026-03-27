@@ -9,6 +9,7 @@ pub struct State {
     pub nats: async_nats::Client,
     pub drop_queue: DropQueue,
     pub event_store: EventStore,
+    pub object_store: crate::object_store::ObjectStore,
 
     pub config: Config,
 }
@@ -52,11 +53,15 @@ impl State {
             .await
             .context("failed to connect to NATS")?;
 
+        let object_store = crate::object_store::ObjectStore::from_env()
+            .context("failed to initialize S3 object store")?;
+
         Ok(Self {
             db: pool,
             nats,
             drop_queue: DropQueue::new(),
             event_store,
+            object_store,
             config,
         })
     }

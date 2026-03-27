@@ -7,6 +7,7 @@ rust = { version = "1.93", components = "rust-src,rust-analyzer" }
 goreleaser = "latest"
 zig = "latest"
 "cargo:cargo-zigbuild" = "latest"
+uv = "latest"
 
 [tasks.todos]
 run = "hyperlog --local-path ./todos"
@@ -83,7 +84,7 @@ mise run dev -- admin deploy-component ./components/* --all --quiet
 """
 
 [tasks."local:up"]
-run = "docker compose -f ./templates/docker-compose.yaml up -d --remove-orphans --wait"
+run = "docker compose -f ./templates/docker-compose.yaml up -d --remove-orphans"
 
 [tasks."local:down"]
 run = "docker compose -f ./templates/docker-compose.yaml down -v"
@@ -143,6 +144,16 @@ k3d registry delete forest-test-registry 2>/dev/null || true
 docker rm -f forest-gitea 2>/dev/null || true
 """
 description = "Clean up k3d flux test resources"
+
+[tasks."docs:serve"]
+dir = "./docs"
+description = "Serve documentation locally with hot-reload"
+run = "uv run --with mkdocs-material mkdocs serve -a 0.0.0.0:8000"
+
+[tasks."docs:build"]
+dir = "./docs"
+description = "Build documentation site"
+run = "uv run --with mkdocs-material mkdocs build"
 
 [tasks.test]
 run = "cargo nextest run"

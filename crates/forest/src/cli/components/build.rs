@@ -7,6 +7,15 @@ use sha2::{Digest, Sha256};
 
 use crate::state::State;
 
+/// Build the component binary for all configured platforms.
+///
+/// Reads forest.cue and spec.cue to determine the component name,
+/// version, and target architectures. Compiles the binary (Rust, Go,
+/// or Docker), stores it in the content-addressable cache, and caches
+/// the component descriptor for fast command discovery.
+///
+/// Output: ~/.cache/forest/components/bin/{hash}
+/// Metadata: .forest/component/meta.json
 #[derive(clap::Parser)]
 pub struct BuildCommand {}
 
@@ -14,13 +23,22 @@ impl BuildCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let mut cmd = tokio::process::Command::new("cue");
         cmd.args(["export", "./forest.cue", "./spec.cue", "--out", "json"]);
+        if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+            cmd.env("CUE_REGISTRY", registry);
+        }
 
         let output = cmd.output().await?;
         let stdout = String::from_utf8(output.stdout)?;
         let stderr = String::from_utf8(output.stderr)?;
 
         if !output.status.success() {
-            anyhow::bail!("failed to spec from cue: {stdout}, {stderr}");
+            if stderr.contains("no such file or directory") || stderr.contains("does not exist") {
+                anyhow::bail!(
+                    "no forest.cue or spec.cue found in current directory.\n\
+                     Are you in a component directory? Run `forest components init <name>` to create one."
+                );
+            }
+            anyhow::bail!("failed to evaluate CUE spec:\n{stderr}");
         }
 
         let doc: Document = serde_json::from_str(stdout.trim())?;
@@ -67,6 +85,86 @@ impl BuildCommand {
         }
 
         generate_checksums(&component.name, &targets)?;
+
+        // Store built binaries in content-addressable cache and write meta.json
+        let organisation = doc
+            .project
+            .as_ref()
+            .and_then(|p| p.organisation.as_deref())
+            .unwrap_or("forest");
+
+        let mut platforms = serde_json::Map::new();
+
+        for target in &targets {
+            let src = output_dir(&target.os, &target.arch)?
+                .join(output_filename(&component.name, target));
+            let binary_content = std::fs::read(&src)
+                .with_context(|| format!("read built binary {}", src.display()))?;
+
+            let (sha256, cache_path) =
+                crate::services::component_binary::store_binary_in_cache(&binary_content)?;
+
+            let platform_key = format!("{}_{}", target.os, target.arch);
+            platforms.insert(
+                platform_key,
+                serde_json::json!({
+                    "sha256": sha256,
+                    "size": binary_content.len(),
+                }),
+            );
+
+            tracing::info!(
+                "cached binary at {} (sha256={})",
+                cache_path.display(),
+                &sha256[..12]
+            );
+        }
+
+        // Run _meta/describe on the current platform binary to cache the descriptor
+        let (current_os, current_arch) = crate::services::component_binary::current_platform();
+        let current_platform_key = format!("{current_os}_{current_arch}");
+        let descriptor = if let Some(platform_info) = platforms.get(&current_platform_key) {
+            if let Some(sha256) = platform_info.get("sha256").and_then(|v| v.as_str()) {
+                if let Some(binary_path) =
+                    crate::services::component_binary::resolve_binary_from_hash(sha256)
+                {
+                    match crate::services::component_binary::describe_component(&binary_path).await
+                    {
+                        Ok(desc) => {
+                            tracing::info!("cached descriptor: {} methods", desc.methods.len());
+                            Some(serde_json::to_value(&desc)?)
+                        }
+                        Err(e) => {
+                            tracing::warn!("failed to describe component: {e}");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Write meta.json with binary hashes + cached descriptor
+        let meta_dir = std::env::current_dir()?.join(".forest").join("component");
+        std::fs::create_dir_all(&meta_dir)?;
+        let mut meta = serde_json::json!({
+            "organisation": organisation,
+            "name": component.name,
+            "version": component.version,
+            "platforms": platforms,
+        });
+        if let Some(desc) = descriptor {
+            meta["descriptor"] = desc;
+        }
+        std::fs::write(
+            meta_dir.join("meta.json"),
+            serde_json::to_string_pretty(&meta)?,
+        )?;
 
         tracing::info!("all targets built successfully");
         Ok(())
@@ -424,7 +522,14 @@ async fn build_docker(
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Document {
+    project: Option<ProjectMeta>,
     forest: Option<Forest>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProjectMeta {
+    pub name: Option<String>,
+    pub organisation: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

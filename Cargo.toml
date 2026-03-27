@@ -1,8 +1,9 @@
 [workspace]
 members = [
   "crates/*",
-  "examples/components-v2/crates/ecs-service",
-  "examples/rust-service-component/crates/rust-service",
+  "examples/components-v2/crates/kubernetes-service",
+  "components/forest-contrib/terraform-service/crates/terraform-service",
+  # "examples/rust-service-component/crates/rust-service",  # legacy v1 example — needs update
   "examples/rust-podinfo",
   "examples/service-example",
   "ci",

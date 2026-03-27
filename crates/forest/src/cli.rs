@@ -13,6 +13,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     cli::{
+        components::build::BuildCommand,
+        components::generate::GenerateCommand,
+        components::publish::PublishCommand,
         destination::DestinationCommand, environment::EnvironmentCommand,
         notifications::NotificationsCommand, organisation::OrganisationCommand,
         project::ProjectCommand, release::ReleaseCommand,
@@ -20,6 +23,7 @@ use crate::{
     state::{Config, State},
 };
 
+mod add;
 mod admin;
 mod auth;
 mod components;
@@ -35,6 +39,8 @@ mod run;
 mod shell;
 mod template;
 mod tmp;
+mod update;
+mod validate;
 
 pub(crate) mod output;
 pub(crate) mod prompts;
@@ -51,25 +57,63 @@ struct Command {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Scaffold a new project or component
     Init(InitCommand),
-    Components(ComponentsCommand),
-    Admin(AdminCommand),
-    /// Authenticate and manage credentials
-    Auth(AuthCommand),
+    /// Add a component dependency to the project
+    Add(add::AddCommand),
+
+    // ── Component lifecycle (like cargo build/publish) ──
+    /// Build the component binary for all configured platforms
+    Build(BuildCommand),
+    /// Generate Rust SDK code from CUE component spec (forest.component.cue)
+    Generate(GenerateCommand),
+    /// Publish component to the registry (binary + CUE spec + manifest)
+    Publish(PublishCommand),
+    /// Validate project config against component specs and check contract coverage
+    Validate(validate::ValidateCommand),
+    /// Update dependencies to the latest versions matching the spec
+    Update(update::UpdateCommand),
+
+    // ── Project commands ──
+    /// Run a project or component command (e.g., forest run status)
     Run(RunCommand),
-    Template(TemplateCommand),
-    Global(GlobalCommand),
-    Shell(ShellCommand),
-    Tmp(TmpCommand),
-    Project(ProjectCommand),
-    Destination(DestinationCommand),
-    /// Manage environments
-    Environment(EnvironmentCommand),
+    /// Prepare, annotate, and execute releases
     Release(Box<ReleaseCommand>),
-    /// Manage organisations
+
+    // ── Resource management ──
+    /// Manage projects
+    Project(ProjectCommand),
+    /// Manage deployment destinations
+    Destination(DestinationCommand),
+    /// Manage environments (dev, staging, prod)
+    Environment(EnvironmentCommand),
+    /// Manage organisations and members
     Organisation(OrganisationCommand),
     /// Manage and listen for notifications
     Notifications(NotificationsCommand),
+
+    // ── Component registry ──
+    /// Browse and manage components (list, init)
+    Components(ComponentsCommand),
+
+    // ── System (hidden from default help) ──
+    /// Admin operations (server status, diagnostics)
+    #[command(hide = true)]
+    Admin(AdminCommand),
+    /// Authenticate and manage credentials
+    Auth(AuthCommand),
+    /// Render templates
+    #[command(hide = true)]
+    Template(TemplateCommand),
+    /// Manage global user configuration
+    #[command(hide = true)]
+    Global(GlobalCommand),
+    /// Open an interactive shell
+    #[command(hide = true)]
+    Shell(ShellCommand),
+    /// Manage temporary directories
+    #[command(hide = true)]
+    Tmp(TmpCommand),
 }
 
 pub async fn execute() -> anyhow::Result<()> {
@@ -139,21 +183,27 @@ impl CommandHandler {
             .as_ref()
             .expect("commands are required should've been caught by clap")
         {
-            Commands::Init(init_command) => init_command.execute(state).await,
-            Commands::Components(components_command) => components_command.execute(state).await,
+            Commands::Init(cmd) => cmd.execute(state).await,
+            Commands::Add(cmd) => cmd.execute(state).await,
+            Commands::Build(cmd) => cmd.execute(state).await,
+            Commands::Generate(cmd) => cmd.execute(state).await,
+            Commands::Publish(cmd) => cmd.execute(state).await,
+            Commands::Validate(cmd) => cmd.execute(state).await,
+            Commands::Update(cmd) => cmd.execute(state).await,
+            Commands::Run(cmd) => cmd.execute(state).await,
+            Commands::Release(cmd) => cmd.execute(state).await,
+            Commands::Project(cmd) => cmd.execute(state).await,
+            Commands::Destination(cmd) => cmd.execute(state).await,
+            Commands::Environment(cmd) => cmd.execute(state).await,
+            Commands::Organisation(cmd) => cmd.execute(state).await,
+            Commands::Notifications(cmd) => cmd.execute(state).await,
+            Commands::Components(cmd) => cmd.execute(state).await,
             Commands::Admin(cmd) => cmd.execute(state).await,
             Commands::Auth(cmd) => cmd.execute(state).await,
-            Commands::Run(cmd) => cmd.execute(state).await,
             Commands::Template(cmd) => cmd.execute(state).await,
             Commands::Global(cmd) => cmd.execute(state).await,
             Commands::Shell(cmd) => cmd.execute(state).await,
             Commands::Tmp(cmd) => cmd.execute(state).await,
-            Commands::Project(cmd) => cmd.execute(state).await,
-            Commands::Destination(cmd) => cmd.execute(state).await,
-            Commands::Environment(cmd) => cmd.execute(state).await,
-            Commands::Release(cmd) => cmd.execute(state).await,
-            Commands::Organisation(cmd) => cmd.execute(state).await,
-            Commands::Notifications(cmd) => cmd.execute(state).await,
         }
     }
 }

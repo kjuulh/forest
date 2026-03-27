@@ -52,7 +52,7 @@ impl CacheComponent {
             &self.name,
             match &self.source {
                 CacheComponentSource::Versioned(version) => {
-                    models::ComponentSource::Versioned(version.clone())
+                    models::ComponentSource::Versioned(version.to_string())
                 }
                 CacheComponentSource::Local(path) => models::ComponentSource::Local(path.clone()),
                 CacheComponentSource::Unknown => todo!(),

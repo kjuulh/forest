@@ -12,6 +12,7 @@ use crate::{actor::Actor, state::State};
 #[derive(Clone)]
 pub struct ArtifactStagingRegistry {
     db: PgPool,
+    object_store: crate::object_store::ObjectStore,
 }
 
 impl ArtifactStagingRegistry {
@@ -55,6 +56,19 @@ impl ArtifactStagingRegistry {
         destination: &str,
         category: &str,
     ) -> anyhow::Result<()> {
+        // Store in S3
+        let s3_key = crate::object_store::keys::artifact_file(
+            &id.id().to_string(),
+            env,
+            destination,
+            file_name,
+        );
+        self.object_store
+            .put(&s3_key, file_content.as_bytes())
+            .await
+            .context("store artifact file in S3")?;
+
+        // Also store in DB for backward compatibility during migration
         let blob_entry = sqlx::query!(
             r#"
                 INSERT INTO blob_storage (
@@ -66,11 +80,18 @@ impl ArtifactStagingRegistry {
             file_content
         )
         .fetch_one(&self.db)
-        .await?;
+        .await;
 
-        let blob_id = blob_entry.id;
+        let blob_id = match blob_entry {
+            Ok(entry) => entry.id,
+            Err(e) => {
+                tracing::warn!("DB write failed after S3 upload, cleaning up: {e:#}");
+                let _ = self.object_store.delete(&s3_key).await;
+                return Err(e.into());
+            }
+        };
 
-        sqlx::query!(
+        let insert_result = sqlx::query!(
             r#"
                 INSERT INTO artifact_files (
                     artifact_staging_id,
@@ -96,8 +117,13 @@ impl ArtifactStagingRegistry {
             category
         )
         .execute(&self.db)
-        .await
-        .context("create artifact file")?;
+        .await;
+
+        if let Err(e) = insert_result {
+            tracing::warn!("DB write failed after S3 upload, cleaning up: {e:#}");
+            let _ = self.object_store.delete(&s3_key).await;
+            return Err(e).context("create artifact file");
+        }
 
         Ok(())
     }
@@ -113,29 +139,48 @@ impl ArtifactStagingRegistry {
             .context("get artifact id")?;
         let artifact_id = rec.artifact_id;
 
+        // Get file metadata from DB
         let recs = sqlx::query!(
-            "
-                SELECT
-                    file.file_name as file_name,
-                    blob.content as file_content
-                FROM artifact_files file
-                JOIN blob_storage blob ON
-                    file.file_content = blob.id
-                WHERE
-                        artifact_staging_id = $1
-                    AND env = $2
-                    AND category = 'deployment';
-            ",
+            "SELECT file_name, env, destination
+             FROM artifact_files
+             WHERE artifact_staging_id = $1 AND env = $2 AND category = 'deployment'",
             artifact_id,
             env
         )
         .fetch_all(&self.db)
         .await?;
 
-        Ok(recs
-            .into_iter()
-            .flat_map(|r| Some((PathBuf::from(r.file_name), r.file_content?)))
-            .collect())
+        let mut result = Vec::new();
+        for r in recs {
+            let s3_key = crate::object_store::keys::artifact_file(
+                &artifact_id.to_string(),
+                &r.env,
+                &r.destination,
+                &r.file_name,
+            );
+            match self.object_store.get(&s3_key).await {
+                Ok(content) => {
+                    result.push((PathBuf::from(r.file_name), String::from_utf8_lossy(&content).to_string()));
+                }
+                Err(_) => {
+                    // Fallback to DB for legacy data
+                    let legacy = sqlx::query!(
+                        "SELECT blob.content FROM artifact_files file
+                         JOIN blob_storage blob ON file.file_content = blob.id
+                         WHERE file.artifact_staging_id = $1 AND file.file_name = $2 AND file.env = $3 AND file.category = 'deployment'",
+                        artifact_id, r.file_name, env
+                    )
+                    .fetch_optional(&self.db)
+                    .await?;
+                    if let Some(row) = legacy {
+                        if let Some(content) = row.content {
+                            result.push((PathBuf::from(r.file_name), content));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(result)
     }
 
     pub async fn get_spec_files(
@@ -149,26 +194,45 @@ impl ArtifactStagingRegistry {
         let artifact_id = rec.artifact_id;
 
         let recs = sqlx::query!(
-            "
-                SELECT
-                    file.file_name as file_name,
-                    blob.content as file_content
-                FROM artifact_files file
-                JOIN blob_storage blob ON
-                    file.file_content = blob.id
-                WHERE
-                        artifact_staging_id = $1
-                    AND category = 'spec';
-            ",
+            "SELECT file_name, env, destination
+             FROM artifact_files
+             WHERE artifact_staging_id = $1 AND category = 'spec'",
             artifact_id
         )
         .fetch_all(&self.db)
         .await?;
 
-        Ok(recs
-            .into_iter()
-            .flat_map(|r| Some((PathBuf::from(r.file_name), r.file_content?)))
-            .collect())
+        let mut result = Vec::new();
+        for r in recs {
+            let s3_key = crate::object_store::keys::artifact_file(
+                &artifact_id.to_string(),
+                &r.env,
+                &r.destination,
+                &r.file_name,
+            );
+            match self.object_store.get(&s3_key).await {
+                Ok(content) => {
+                    result.push((PathBuf::from(r.file_name), String::from_utf8_lossy(&content).to_string()));
+                }
+                Err(_) => {
+                    // Fallback to DB for legacy data
+                    let legacy = sqlx::query!(
+                        "SELECT blob.content FROM artifact_files file
+                         JOIN blob_storage blob ON file.file_content = blob.id
+                         WHERE file.artifact_staging_id = $1 AND file.file_name = $2 AND file.category = 'spec'",
+                        artifact_id, r.file_name
+                    )
+                    .fetch_optional(&self.db)
+                    .await?;
+                    if let Some(row) = legacy {
+                        if let Some(content) = row.content {
+                            result.push((PathBuf::from(r.file_name), content));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(result)
     }
 
     pub async fn get_artifact_files(
@@ -182,37 +246,57 @@ impl ArtifactStagingRegistry {
             .context("get artifact id")?;
         let staging_id = rec.artifact_id;
 
+        // Get metadata from DB, content from S3
         let recs = sqlx::query!(
             r#"
-                SELECT
-                    file.file_name,
-                    file.category,
-                    file.env,
-                    file.destination,
-                    blob.content
-                FROM artifact_files file
-                JOIN blob_storage blob ON file.file_content = blob.id
-                WHERE file.artifact_staging_id = $1
-                  AND ($2::text IS NULL OR file.category = $2)
-                ORDER BY file.category, file.file_name
+                SELECT file_name, category, env, destination
+                FROM artifact_files
+                WHERE artifact_staging_id = $1
+                  AND ($2::text IS NULL OR category = $2)
+                ORDER BY category, file_name
             "#,
             staging_id,
             category,
         )
         .fetch_all(&self.db)
         .await
-        .context("get artifact files")?;
+        .context("get artifact file metadata")?;
 
-        Ok(recs
-            .into_iter()
-            .map(|r| ArtifactFileEntry {
+        let mut entries = Vec::new();
+        for r in recs {
+            let s3_key = crate::object_store::keys::artifact_file(
+                &staging_id.to_string(),
+                &r.env,
+                &r.destination,
+                &r.file_name,
+            );
+            let content = match self.object_store.get(&s3_key).await {
+                Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
+                Err(_) => {
+                    // Fallback to DB for legacy data
+                    let legacy = sqlx::query!(
+                        "SELECT blob.content FROM artifact_files file
+                         JOIN blob_storage blob ON file.file_content = blob.id
+                         WHERE file.artifact_staging_id = $1 AND file.file_name = $2",
+                        staging_id, r.file_name
+                    )
+                    .fetch_optional(&self.db)
+                    .await?
+                    .and_then(|row| row.content)
+                    .unwrap_or_default();
+                    legacy
+                }
+            };
+
+            entries.push(ArtifactFileEntry {
                 file_name: r.file_name,
                 category: r.category,
                 env: r.env,
                 destination: r.destination,
-                content: r.content.unwrap_or_default(),
-            })
-            .collect())
+                content,
+            });
+        }
+        Ok(entries)
     }
 
     pub async fn commit_staging(&self, id: &StagingArtifactID) -> anyhow::Result<ArtifactID> {
@@ -324,6 +408,7 @@ impl ArtifactStagingRegistryState for State {
     fn artifact_staging_registry(&self) -> ArtifactStagingRegistry {
         ArtifactStagingRegistry {
             db: self.db.clone(),
+            object_store: self.object_store.clone(),
         }
     }
 }

@@ -1,14 +1,17 @@
 use list::ListCommand;
 
 use crate::{
-    cli::components::{build::BuildCommand, generate::GenerateCommand},
+    cli::components::init::InitCommand,
     state::State,
 };
 
-mod build;
-mod generate;
+pub(crate) mod build;
+pub(crate) mod generate;
+pub(crate) mod init;
 mod list;
+pub(crate) mod publish;
 
+/// Browse and manage components in the registry.
 #[derive(clap::Parser)]
 #[command(subcommand_required = true)]
 pub struct ComponentsCommand {
@@ -18,17 +21,17 @@ pub struct ComponentsCommand {
 
 #[derive(clap::Subcommand)]
 enum Commands {
+    /// Scaffold a new component from a template
+    Init(InitCommand),
+    /// Search and list components in the registry
     List(ListCommand),
-    Generate(GenerateCommand),
-    Build(BuildCommand),
 }
 
 impl ComponentsCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         match &self.commands {
+            Commands::Init(cmd) => cmd.execute(state).await,
             Commands::List(list_command) => list_command.execute(state).await,
-            Commands::Generate(cmd) => cmd.execute(state).await,
-            Commands::Build(cmd) => cmd.execute(state).await,
         }
     }
 }

@@ -10,3 +10,6 @@ pub mod component_deployment;
 pub mod component_parser;
 
 pub mod temp_directories;
+
+pub mod component_binary;
+pub mod component_deno;

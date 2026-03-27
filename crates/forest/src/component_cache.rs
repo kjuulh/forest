@@ -48,6 +48,10 @@ impl ComponentCache {
             .await
             .context("read organisations entry")?
         {
+            // Skip the content-addressable binary cache directory
+            if organisation_entry.file_name() == "bin" {
+                continue;
+            }
             let mut name_entries =
                 tokio::fs::read_dir(organisation_entry.path())
                     .await

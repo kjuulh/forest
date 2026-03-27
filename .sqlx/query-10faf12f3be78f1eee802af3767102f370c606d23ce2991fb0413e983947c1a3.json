@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT file_name, env, destination\n             FROM artifact_files\n             WHERE artifact_staging_id = $1 AND category = 'spec'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "file_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "env",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "destination",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "10faf12f3be78f1eee802af3767102f370c606d23ce2991fb0413e983947c1a3"
+}

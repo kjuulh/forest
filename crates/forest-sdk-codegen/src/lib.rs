@@ -19,6 +19,7 @@ pub struct CodegenOptions {
 
 pub enum CodegenLanguage {
     Rust,
+    TypeScript,
 }
 
 impl Codegen {

@@ -153,6 +153,9 @@ fn requires_auth(path: &str) -> bool {
         "/forest.v1.StatusService/",
         // Runner service uses release-scoped tokens, not JWT
         "/forest.v1.RunnerService/",
+        // Registry discovery endpoints are public (read-only browsing)
+        "/forest.v1.RegistryService/SearchComponents",
+        "/forest.v1.RegistryService/GetComponentDetail",
     ];
     !unauthenticated.iter().any(|p| path.starts_with(p))
 }

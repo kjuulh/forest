@@ -8,21 +8,97 @@ pub mod models;
 use models::*;
 
 const COMPONENT_SPEC_FILE_NAME: &str = "forest.component.toml";
+const COMPONENT_CUE_FILE_NAME: &str = "forest.component.cue";
 
 #[derive(Clone)]
 pub struct ComponentParser {}
 
 impl ComponentParser {
     pub async fn parse(&self, path: &Path) -> anyhow::Result<RawComponent> {
-        let component_spec = get_component_spec_path(path)
-            .await?
-            .ok_or(anyhow::anyhow!("failed to find component in path"))?;
+        // Try v1 (TOML) first
+        if let Some(component_spec) = get_component_spec_path(path).await? {
+            return Ok(RawComponent {
+                component_spec,
+                path: path.into(),
+            });
+        }
 
-        Ok(RawComponent {
-            component_spec,
-            path: path.into(),
-        })
+        // Try v2 (CUE) — extract minimal metadata from forest.cue via cue export
+        if path.join(COMPONENT_CUE_FILE_NAME).exists() {
+            if let Some(component_spec) = get_component_spec_from_cue(path).await? {
+                return Ok(RawComponent {
+                    component_spec,
+                    path: path.into(),
+                });
+            }
+        }
+
+        anyhow::bail!("failed to find component in path")
     }
+}
+
+/// Parse a v2 component's metadata from forest.cue via `cue export`.
+async fn get_component_spec_from_cue(path: &Path) -> anyhow::Result<Option<RawComponentSpec>> {
+    let forest_cue = path.join("forest.cue");
+    let spec_cue = path.join("spec.cue");
+
+    if !forest_cue.exists() {
+        return Ok(None);
+    }
+
+    let mut cmd = tokio::process::Command::new("cue");
+    cmd.arg("export")
+        .arg(&forest_cue);
+    if spec_cue.exists() {
+        cmd.arg(&spec_cue);
+    }
+    cmd.arg("--out").arg("json");
+
+    let output = cmd.output().await?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        tracing::warn!("failed to parse v2 component CUE at {}: {}", path.display(), stderr);
+        return Ok(None);
+    }
+
+    let doc: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+
+    // Extract component metadata from forest.component section
+    let component = doc
+        .get("forest")
+        .and_then(|f| f.get("component"));
+
+    let (name, organisation, version) = match component {
+        Some(comp) => {
+            let name = comp.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let version = comp.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0");
+            // Organisation comes from project section
+            let org = doc
+                .get("project")
+                .and_then(|p| p.get("organisation"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("forest");
+            (name.to_string(), org.to_string(), version.to_string())
+        }
+        None => {
+            tracing::warn!("v2 component at {} has no forest.component section", path.display());
+            return Ok(None);
+        }
+    };
+
+    Ok(Some(RawComponentSpec {
+        component: RawSpecComponent {
+            name,
+            organisation,
+            version,
+        },
+        // v2 components don't use TOML fields — commands come from the binary
+        dependencies: Default::default(),
+        templates: Default::default(),
+        init: Default::default(),
+        requirements: Default::default(),
+        commands: Default::default(),
+    }))
 }
 
 async fn get_component_spec_path(path: &Path) -> Result<Option<RawComponentSpec>, anyhow::Error> {

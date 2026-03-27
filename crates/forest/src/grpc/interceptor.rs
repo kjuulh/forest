@@ -348,7 +348,7 @@ impl AuthMiddlewareLayerState for State {
     fn auth_interceptor(&self) -> AuthMiddlewareLayer {
         AuthMiddlewareLayer {
             state: self.user_state(),
-            host: self.config.forest_server.clone(),
+            host: self.config.forest_server.clone().unwrap_or_default(),
             refresh_channel: Arc::new(OnceCell::const_new()),
             refresh_lock: Arc::new(Mutex::new(())),
             last_validated: Arc::new(AtomicI64::new(0)),

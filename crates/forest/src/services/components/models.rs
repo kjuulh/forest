@@ -1,4 +1,3 @@
-use anyhow::Context;
 use uuid::Uuid;
 
 use crate::{
@@ -56,16 +55,10 @@ impl TryFrom<(String, project::models::Dependency)> for Dependency {
 
         let dep = match dependency {
             project::Dependency::String(version) => {
-                let version = semver::Version::parse(&version)
-                    .context("failed to parse dependency version")?;
-
                 DependencyType::Versioned(version)
             }
             project::Dependency::Versioned(details) => {
-                let version = semver::Version::parse(&details.version)
-                    .context("failed to parse dependency version")?;
-
-                DependencyType::Versioned(version)
+                DependencyType::Versioned(details.version)
             }
             project::Dependency::Local(details) => DependencyType::Local(details.path),
         };
@@ -87,13 +80,10 @@ impl TryFrom<(String, GlobalDependency)> for Dependency {
             None => ("forest", name.as_str()),
         };
 
-        let version = semver::Version::parse(&dependency.version)
-            .context("failed to parse dependency version")?;
-
         Ok(Self {
             name: name.into(),
             organisation: organisation.into(),
-            dependency_type: DependencyType::Versioned(version),
+            dependency_type: DependencyType::Versioned(dependency.version),
         })
     }
 }

@@ -24,8 +24,11 @@ pub struct ReleaseCommand {
 #[allow(clippy::large_enum_variant)]
 #[derive(clap::Subcommand)]
 pub enum Commands {
+    /// Generate deployment manifests by invoking component hooks
     Prepare(PrepareCommand),
+    /// Upload deployment artifacts and create a release annotation
     Annotate(AnnotateCommand),
+    /// Execute the release (deploy to destinations)
     Release(CommitCommand),
     /// Prepare, annotate, and release in one step (annotation-only, no auto-release from triggers).
     Create(CreateCommand),

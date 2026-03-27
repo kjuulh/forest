@@ -4,7 +4,6 @@ use std::{
     path::PathBuf,
 };
 
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 pub mod artifacts {
@@ -191,6 +190,43 @@ impl CommandName {
         }
     }
 
+    /// Returns a qualified CLI name for use in `forest run`.
+    /// Format: `name:command` for component commands, or just `command` for project commands.
+    pub fn to_qualified_cli_name(&self) -> String {
+        match self {
+            CommandName::Component {
+                name, command_name, ..
+            } => {
+                format!("{name}:{command_name}")
+            }
+            CommandName::Project { command_name } => command_name.clone(),
+        }
+    }
+
+    pub fn to_component_reference(&self) -> Option<ComponentReference> {
+        match self {
+            CommandName::Component {
+                organisation,
+                name,
+                source,
+                ..
+            } => Some(ComponentReference {
+                organisation: organisation
+                    .as_ref()
+                    .unwrap_or(&"forest".to_string())
+                    .clone(),
+                name: name.clone(),
+                source: match source {
+                    CommandSource::Local(path) => ComponentSource::Local(path.clone()),
+                    CommandSource::Versioned(version) => {
+                        ComponentSource::Versioned(version.clone())
+                    }
+                },
+            }),
+            CommandName::Project { .. } => None,
+        }
+    }
+
     pub fn to_component(&self) -> Option<String> {
         match self {
             CommandName::Component {
@@ -298,7 +334,7 @@ impl TryFrom<&str> for ComponentReference {
         let (name, source) = if let Some((name, rest)) = rest.split_once("@") {
             (
                 name,
-                ComponentSource::Versioned(rest.parse().context("parse version")?),
+                ComponentSource::Versioned(rest.to_string()),
             )
         } else if let Some((name, rest)) = rest.split_once("#") {
             (name, ComponentSource::Local(PathBuf::from(rest)))
@@ -317,19 +353,39 @@ impl TryFrom<&str> for ComponentReference {
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Serialize, Deserialize)]
 pub enum ComponentSource {
     Local(PathBuf),
-    Versioned(semver::Version),
+    Versioned(String),
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub enum CommandSource {
     Local(PathBuf),
-    Versioned(semver::Version),
+    Versioned(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     Script(String),
     Inline(Vec<String>),
+    /// A v2 component binary invocation.
+    ComponentBinary {
+        /// Absolute path to the component binary.
+        binary_path: PathBuf,
+        /// Method to invoke (e.g., "commands/prepare", "hooks/forest/deployment/release").
+        method: String,
+        /// Human-readable description from the CUE spec.
+        description: Option<String>,
+    },
+    /// A Deno/TypeScript component invocation.
+    ComponentDeno {
+        /// Directory containing the Deno component source.
+        component_dir: PathBuf,
+        /// Entrypoint file relative to component_dir (e.g., "src/main.ts").
+        entrypoint: String,
+        /// Method to invoke.
+        method: String,
+        /// Human-readable description.
+        description: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -424,7 +480,8 @@ pub enum DependencyType {
 
 type DependencyName = String;
 type DependencyOrganisation = String;
-type DependencyVersion = semver::Version;
+/// Version spec string — can be exact ("1.2.3"), partial ("1.2", "1"), or "latest".
+type DependencyVersion = String;
 type DependencyPath = PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Default)]

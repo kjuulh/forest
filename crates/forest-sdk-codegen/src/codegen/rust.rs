@@ -75,20 +75,45 @@ fn emit_enum(out: &mut String, name: &str, enum_def: &EnumDef) -> CodegenResult<
 }
 
 fn emit_struct(out: &mut String, name: &str, struct_def: &StructDef) -> CodegenResult<()> {
+    // Collect default functions needed for this struct
+    let mut default_fns: Vec<(String, String, String)> = Vec::new(); // (fn_name, rust_type, value_expr)
+
+    for field in &struct_def.fields {
+        if let Some(default_val) = &field.default_value {
+            if field.required {
+                if let Some(expr) = default_value_to_rust_expr(default_val, &field.ty) {
+                    let rust_name = to_snake_case(&field.name);
+                    let rust_type = type_ref_to_rust(&field.ty);
+                    let fn_name = format!("default_{name}_{rust_name}").to_lowercase();
+                    default_fns.push((fn_name, rust_type, expr));
+                }
+            }
+        }
+    }
+
     writeln!(
         out,
         "#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]"
     )?;
     writeln!(out, "pub struct {name} {{")?;
     for field in &struct_def.fields {
-        emit_field(out, field)?;
+        emit_field(out, field, name)?;
     }
     writeln!(out, "}}")?;
     writeln!(out)?;
+
+    // Emit default value functions
+    for (fn_name, rust_type, expr) in &default_fns {
+        writeln!(out, "fn {fn_name}() -> {rust_type} {{ {expr} }}")?;
+    }
+    if !default_fns.is_empty() {
+        writeln!(out)?;
+    }
+
     Ok(())
 }
 
-fn emit_field(out: &mut String, field: &Field) -> CodegenResult<()> {
+fn emit_field(out: &mut String, field: &Field, struct_name: &str) -> CodegenResult<()> {
     let rust_name = to_snake_case(&field.name);
     let rust_type = type_ref_to_rust(&field.ty);
     let rust_type = if field.required {
@@ -100,26 +125,95 @@ fn emit_field(out: &mut String, field: &Field) -> CodegenResult<()> {
     if rust_name != field.name {
         writeln!(out, "    #[serde(rename = \"{}\")]", field.name)?;
     }
+
     if !field.required {
+        // Optional field: always use serde(default)
         writeln!(out, "    #[serde(default)]")?;
+    } else if let Some(default_val) = &field.default_value {
+        // Required field with a CUE default
+        if default_value_to_rust_expr(default_val, &field.ty).is_some() {
+            let fn_name = format!("default_{struct_name}_{rust_name}").to_lowercase();
+            writeln!(out, "    #[serde(default = \"{fn_name}\")]")?;
+        } else if type_has_default(&field.ty) {
+            writeln!(out, "    #[serde(default)]")?;
+        }
     }
+
     writeln!(out, "    pub {rust_name}: {rust_type},")?;
     Ok(())
+}
+
+/// Convert an IR default value to a Rust expression string.
+fn default_value_to_rust_expr(val: &DefaultValue, ty: &TypeRef) -> Option<String> {
+    match (val, ty) {
+        (DefaultValue::String(s), TypeRef::String) => {
+            Some(format!("\"{}\".to_string()", escape_rust_string(s)))
+        }
+        (DefaultValue::Integer(n), TypeRef::Integer) => Some(format!("{n}")),
+        (DefaultValue::Float(f), TypeRef::Float) => Some(format!("{f}_f64")),
+        (DefaultValue::Boolean(b), TypeRef::Boolean) => Some(format!("{b}")),
+        _ => None,
+    }
+}
+
+/// Escape a string for use inside a Rust string literal.
+fn escape_rust_string(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
+/// Returns true if the type is guaranteed to implement `Default` in generated code.
+fn type_has_default(ty: &TypeRef) -> bool {
+    matches!(
+        ty,
+        TypeRef::String
+            | TypeRef::Integer
+            | TypeRef::Float
+            | TypeRef::Boolean
+            | TypeRef::Array(_)
+            | TypeRef::Map(_)
+    )
 }
 
 // ── Spec struct ──────────────────────────────────────────────────────
 
 fn emit_spec_struct(out: &mut String, spec: &Spec) -> CodegenResult<()> {
+    // Collect default functions needed for Spec
+    let mut default_fns: Vec<(String, String, String)> = Vec::new();
+    for field in &spec.fields {
+        if let Some(default_val) = &field.default_value {
+            if field.required {
+                if let Some(expr) = default_value_to_rust_expr(default_val, &field.ty) {
+                    let rust_name = to_snake_case(&field.name);
+                    let rust_type = type_ref_to_rust(&field.ty);
+                    let fn_name = format!("default_spec_{rust_name}").to_lowercase();
+                    default_fns.push((fn_name, rust_type, expr));
+                }
+            }
+        }
+    }
+
     writeln!(
         out,
         "#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]"
     )?;
     writeln!(out, "pub struct Spec {{")?;
     for field in &spec.fields {
-        emit_field(out, field)?;
+        emit_field(out, field, "Spec")?;
     }
     writeln!(out, "}}")?;
     writeln!(out)?;
+
+    for (fn_name, rust_type, expr) in &default_fns {
+        writeln!(out, "fn {fn_name}() -> {rust_type} {{ {expr} }}")?;
+    }
+    if !default_fns.is_empty() {
+        writeln!(out)?;
+    }
+
     Ok(())
 }
 
@@ -144,7 +238,7 @@ fn emit_command_trait(out: &mut String, commands: &[Command]) -> CodegenResult<(
     if commands.is_empty() {
         return Ok(());
     }
-    writeln!(out, "pub trait CommandHandler {{")?;
+    writeln!(out, "pub trait CommandHandler: Send + Sync {{")?;
     for cmd in commands {
         let pascal = to_pascal_case(&cmd.name);
         let snake = to_snake_case(&cmd.name);
@@ -156,7 +250,7 @@ fn emit_command_trait(out: &mut String, commands: &[Command]) -> CodegenResult<(
         }
         writeln!(
             out,
-            "    fn {snake}(&self, spec: &Spec, input: {input_name}) -> Result<{output_name}, forest_sdk::Error>;"
+            "    fn {snake}(&self, spec: &Spec, input: {input_name}) -> impl std::future::Future<Output = Result<{output_name}, forest_sdk::Error>> + Send;"
         )?;
     }
     writeln!(out, "}}")?;
@@ -191,7 +285,7 @@ fn emit_hook_traits(out: &mut String, groups: &[HookGroup]) -> CodegenResult<()>
         let topic_pascal = topic_to_pascal_case(&group.topic);
         let trait_name = format!("{topic_pascal}HookHandler");
 
-        writeln!(out, "pub trait {trait_name} {{")?;
+        writeln!(out, "pub trait {trait_name}: Send + Sync {{")?;
         for action in &group.actions {
             let action_pascal = to_pascal_case(&action.name);
             let snake = to_snake_case(&action.name);
@@ -208,7 +302,7 @@ fn emit_hook_traits(out: &mut String, groups: &[HookGroup]) -> CodegenResult<()>
             }
             writeln!(
                 out,
-                "    fn {snake}(&self, spec: &Spec, input: {input_name}) -> Result<{output_type}, forest_sdk::Error>;"
+                "    fn {snake}(&self, spec: &Spec, input: {input_name}) -> impl std::future::Future<Output = Result<{output_type}, forest_sdk::Error>> + Send;"
             )?;
         }
         writeln!(out, "}}")?;
@@ -306,10 +400,10 @@ fn emit_router(out: &mut String, module: &Module) -> CodegenResult<()> {
     writeln!(out, "    {bounds_str},")?;
     writeln!(out, "{{")?;
 
-    // call method
+    // call method (async)
     writeln!(
         out,
-        "    fn call(&self, method: &str, spec: &Spec, input: serde_json::Value) -> Result<serde_json::Value, forest_sdk::Error> {{"
+        "    async fn call(&self, method: &str, spec: &Spec, input: serde_json::Value, _context: &forest_sdk::CallContext) -> Result<serde_json::Value, forest_sdk::Error> {{"
     )?;
     writeln!(out, "        match method {{")?;
 
@@ -326,7 +420,7 @@ fn emit_router(out: &mut String, module: &Module) -> CodegenResult<()> {
         )?;
         writeln!(
             out,
-            "                let output = self.commands.{snake}(spec, input)?;"
+            "                let output = self.commands.{snake}(spec, input).await?;"
         )?;
         writeln!(
             out,
@@ -355,14 +449,14 @@ fn emit_router(out: &mut String, module: &Module) -> CodegenResult<()> {
             if action.output.is_some() {
                 writeln!(
                     out,
-                    "                let output = self.{field}.{snake}(spec, input)?;"
+                    "                let output = self.{field}.{snake}(spec, input).await?;"
                 )?;
                 writeln!(
                     out,
                     "                serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)"
                 )?;
             } else {
-                writeln!(out, "                self.{field}.{snake}(spec, input)?;")?;
+                writeln!(out, "                self.{field}.{snake}(spec, input).await?;")?;
                 writeln!(out, "                Ok(serde_json::Value::Null)")?;
             }
             writeln!(out, "            }}")?;
@@ -385,17 +479,19 @@ fn emit_router(out: &mut String, module: &Module) -> CodegenResult<()> {
     writeln!(out, "        vec![")?;
     for cmd in &module.commands {
         let method_path = format!("commands/{}", cmd.name);
+        let desc = escape_rust_string(&cmd.description);
         writeln!(
             out,
-            "            forest_sdk::MethodDescriptor {{ name: \"{method_path}\".into(), kind: forest_sdk::MethodKind::Command }},"
+            "            forest_sdk::MethodDescriptor {{ name: \"{method_path}\".into(), kind: forest_sdk::MethodKind::Command, description: Some(\"{desc}\".into()) }},"
         )?;
     }
     for group in &module.hook_groups {
         for action in &group.actions {
             let method_path = format!("hooks/{}/{}", group.topic, action.name);
+            let desc = escape_rust_string(&action.description);
             writeln!(
                 out,
-                "            forest_sdk::MethodDescriptor {{ name: \"{method_path}\".into(), kind: forest_sdk::MethodKind::Hook {{ topic: \"{}\".into() }} }},",
+                "            forest_sdk::MethodDescriptor {{ name: \"{method_path}\".into(), kind: forest_sdk::MethodKind::Hook {{ topic: \"{}\".into() }}, description: Some(\"{desc}\".into()) }},",
                 group.topic
             )?;
         }

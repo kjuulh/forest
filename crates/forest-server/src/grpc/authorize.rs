@@ -28,6 +28,11 @@ pub fn extract_actor(request: &tonic::Request<impl std::any::Any>) -> Result<Act
         .ok_or_else(|| tonic::Status::unauthenticated("missing actor"))
 }
 
+/// Extract the Actor if present (for endpoints that allow unauthenticated access).
+pub fn try_extract_actor(request: &tonic::Request<impl std::any::Any>) -> Option<Actor> {
+    request.extensions().get::<Actor>().cloned()
+}
+
 /// Verify the actor is authorized for the given organisation (by name).
 pub async fn require_org_access(
     db: &PgPool,

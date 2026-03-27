@@ -1,0 +1,92 @@
+name: forest-e2e
+
+services:
+  postgres:
+    image: 'postgres:18-alpine'
+    shm_size: 128mb
+    environment:
+      POSTGRES_DB: dev
+      POSTGRES_USER: devuser
+      POSTGRES_PASSWORD: devpassword
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devuser -d dev"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: 'nats:2-alpine'
+    command: ["--http_port", "8222"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: 'minio/minio:latest'
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: forestdev
+      MINIO_ROOT_PASSWORD: forestdevpassword
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: 'minio/mc:latest'
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 forestdev forestdevpassword;
+      mc mb --ignore-existing local/forest;
+      exit 0;
+      "
+
+  forest-server:
+    build: .
+    entrypoint: ["forest-server", "serve"]
+    environment:
+      FOREST_HOST: "0.0.0.0:4040"
+      FOREST_HTTP_HOST: "0.0.0.0:4042"
+      FOREST_TERRAFORM_V1_HOST: "0.0.0.0:4041"
+      FOREST_TERRAFORM_V1_EXTERNAL_HOST: "http://forest-server:4041"
+      DATABASE_URL: "postgresql://devuser:devpassword@postgres:5432/dev"
+      NATS_URL: "nats://nats:4222"
+      S3_ENDPOINT: "http://minio:9000"
+      S3_BUCKET: "forest"
+      S3_ACCESS_KEY: "forestdev"
+      S3_SECRET_KEY: "forestdevpassword"
+      S3_REGION: "us-east-1"
+      FOREST_SERVICE_ACCOUNT_API_KEY: "e2e-test-key"
+      FOREST_CUE_DOMAIN: "forest.sh"
+      EXTERNAL_HOST: "http://forest-server:4040"
+      PASSWORD_SECRET_KEY: "e2e-password-secret-key-32chars!"
+      ACCESS_TOKEN_SECRET_KEY: "ZTJlLWFjY2Vzcy1zZWNyZXQta2V5LTMyLWJ5dGVzLi4="
+      REFRESH_TOKEN_SECRET_KEY: "ZTJlLXJlZnJlc2gtc2VjcmV0LWtleS0zMmJ5dGVzLi4="
+      RUST_LOG: "info"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4042/v2/"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  e2e:
+    build: .
+    environment:
+      FOREST_SERVER: "http://forest-server:4040"
+      CUE_REGISTRY: "forest-server:4042+insecure"
+    depends_on:
+      forest-server:
+        condition: service_healthy

@@ -1,63 +1,70 @@
-project: {
+package service_example
+
+import (
+	"forest.sh/forest/sdk@v0"
+	tf "forest.sh/forest-contrib/terraform-service@v0:terraform_service"
+)
+
+project: sdk.#ForestProject & {
 	name:         "service-example"
 	organisation: "rawpotion"
 }
 
-_basePath: "../../components"
 _destinationTypes: {
-	kubernetes: "forest/kubernetes@1"
-	terraform:  "forest/terraform@1"
-	forage:     "forage/containers@1"
+	terraform: "forest/terraform@1"
+	forage:    "forage/containers@1"
 }
 
-dependencies: {
-	"forest/deployment": path:                      "\(_basePath)/forest/deployment"
-	"forest-contrib/postgres": path:                "\(_basePath)/forest-contrib/postgres"
-	"forest-contrib/rust-persistent-service": path: "\(_basePath)/forest-contrib/rust_persistent_service"
+#Terraform: {
+	destination: string
+	type:        "forest/terraform@1"
+}
+#Forage: {
+	destination: string
+	type:        "forage/containers/@1"
 }
 
-forest: deployment: enabled: true
+dependencies: sdk.#ForestDependencies & {
+	"forest-contrib/terraform-service": path: "../../components/forest-contrib/terraform-service"
+}
 
-"forest-contrib": "rust-persistent-service": {
+"forest-contrib": "terraform-service": sdk.#ForestComponentUsage & {
 	env: {
 		dev: {
 			destinations: [
-				{destination: "infrastructure-dev.*", type: _destinationTypes.terraform},
-				{destination: "forage/*", type: _destinationTypes.forage},
+				#Terraform & {destination: "infrastructure-dev.*"},
+				#Forage & {destination: "forage/.*"},
 			]
 			config: {
 				replicas: 2
-				environment: [
+				env_vars: [
 					{key: "RUST_LOG", value: "debug"},
 				]
 			}
 		}
 
 		staging: {
-			destinations: [
-				{destination: "infrastructure-staging.*", type: _destinationTypes.terraform},
-			]
+			destinations: [#Terraform & {destination: "infrastructure-staging.*"}]
 			config: {
 				replicas: 3
-				environment: [
+				env_vars: [
 					{key: "RUST_LOG", value: "info"},
 				]
 			}
 		}
 
 		prod: {
-			destinations: [
-				{destination: "infrastructure-prod.*", type: _destinationTypes.terraform},
-			]
+			destinations: [#Terraform & {destination: "infrastructure-prod.*"}]
 			config: {
 				replicas: 5
-				environment: [
+				env_vars: [
 					{key: "RUST_LOG", value: "warn"},
 				]
 			}
-		}}
+		}
+	}
 
-	config: {
+	config: tf.#Spec & {
 		name: "service-example"
 		ports: [
 			{name: "external", port: 3000, external: true},
@@ -69,10 +76,12 @@ forest: deployment: enabled: true
 			path: "/"
 			port: 3001
 		}
-		environment: [
+		env_vars: [
 			{key: "RUST_LOG", value: "my_service=debug,info"},
 		]
 	}
 }
 
-commands: dev: ["cargo run"]
+commands: sdk.#ForestProjectCommands & {
+	dev: ["cargo run"]
+}

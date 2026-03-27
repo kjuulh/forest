@@ -179,6 +179,188 @@ impl GrpcClient {
         Ok(())
     }
 
+    // --- v2 component registry methods ---
+
+    pub async fn begin_component_upload(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: &str,
+    ) -> anyhow::Result<String> {
+        let mut client = self.registry_client().await?;
+
+        let res = client
+            .begin_upload(BeginUploadRequest {
+                name: name.into(),
+                organisation: organisation.into(),
+                version: version.into(),
+            })
+            .await
+            .map_err(grpc_err)?;
+
+        Ok(res.into_inner().upload_context)
+    }
+
+    pub async fn upload_component_binary(
+        &self,
+        upload_context: &str,
+        os: &str,
+        arch: &str,
+        sha256: &str,
+        binary_content: &[u8],
+    ) -> anyhow::Result<()> {
+        let mut client = self.registry_client().await?;
+
+        // Stream: first message is metadata, subsequent messages are chunks
+        let chunk_size = 1024 * 1024; // 1MB chunks
+        let mut messages = vec![UploadBinaryRequest {
+            msg: Some(
+                forest_grpc_interface::upload_binary_request::Msg::Metadata(
+                    UploadBinaryMetadata {
+                        upload_context: upload_context.into(),
+                        os: os.into(),
+                        arch: arch.into(),
+                        sha256: sha256.into(),
+                    },
+                ),
+            ),
+        }];
+
+        for chunk in binary_content.chunks(chunk_size) {
+            messages.push(UploadBinaryRequest {
+                msg: Some(
+                    forest_grpc_interface::upload_binary_request::Msg::Chunk(chunk.to_vec()),
+                ),
+            });
+        }
+
+        client
+            .upload_binary(futures::stream::iter(messages))
+            .await
+            .map_err(grpc_err)?;
+
+        Ok(())
+    }
+
+    pub async fn publish_component_manifest(
+        &self,
+        upload_context: &str,
+        manifest_json: &str,
+    ) -> anyhow::Result<()> {
+        let mut client = self.registry_client().await?;
+
+        client
+            .publish_manifest(PublishManifestRequest {
+                upload_context: upload_context.into(),
+                manifest_json: manifest_json.into(),
+            })
+            .await
+            .map_err(grpc_err)?;
+
+        Ok(())
+    }
+
+    pub async fn get_component_manifest(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: &str,
+    ) -> anyhow::Result<String> {
+        let mut client = self.registry_client().await?;
+
+        let res = client
+            .get_component_manifest(GetComponentManifestRequest {
+                organisation: organisation.into(),
+                name: name.into(),
+                version: version.into(),
+            })
+            .await
+            .map_err(grpc_err)?;
+
+        Ok(res.into_inner().manifest_json)
+    }
+
+    pub async fn download_component_binary(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: &str,
+        os: &str,
+        arch: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        let mut client = self.registry_client().await?;
+
+        let mut stream = client
+            .download_binary(DownloadBinaryRequest {
+                organisation: organisation.into(),
+                name: name.into(),
+                version: version.into(),
+                os: os.into(),
+                arch: arch.into(),
+            })
+            .await
+            .map_err(grpc_err)?
+            .into_inner();
+
+        let mut binary = Vec::new();
+        while let Some(chunk) = stream.message().await.map_err(grpc_err)? {
+            binary.extend_from_slice(&chunk.chunk);
+        }
+
+        Ok(binary)
+    }
+
+    pub async fn upload_component_file(
+        &self,
+        upload_context: &str,
+        file_path: &str,
+        file_content: &[u8],
+    ) -> anyhow::Result<()> {
+        let mut client = self.registry_client().await?;
+
+        client
+            .upload_file(UploadFileRequest {
+                upload_context: upload_context.into(),
+                file_path: file_path.into(),
+                file_content: file_content.into(),
+            })
+            .await
+            .map_err(grpc_err)?;
+
+        Ok(())
+    }
+
+    pub async fn list_component_versions(
+        &self,
+        organisation: &str,
+        name: &str,
+    ) -> anyhow::Result<Vec<forest_grpc_interface::ComponentVersionInfo>> {
+        let mut client = self.registry_client().await?;
+
+        let res = client
+            .list_component_versions(ListComponentVersionsRequest {
+                organisation: organisation.into(),
+                name: name.into(),
+            })
+            .await
+            .map_err(grpc_err)?;
+
+        Ok(res.into_inner().versions)
+    }
+
+    pub async fn commit_component_upload(&self, upload_context: &str) -> anyhow::Result<()> {
+        let mut client = self.registry_client().await?;
+
+        client
+            .commit_upload(CommitUploadRequest {
+                upload_context: upload_context.into(),
+            })
+            .await
+            .map_err(grpc_err)?;
+
+        Ok(())
+    }
+
     pub async fn begin_artifact_upload(&self) -> anyhow::Result<UploadFileHandle> {
         let mut client = self.artifact_client().await?;
 
@@ -661,6 +843,7 @@ impl GrpcClient {
             .update_user(UpdateUserRequest {
                 user_id: user_id.into(),
                 username,
+                profile_picture_url: None,
             })
             .await
             .map_err(grpc_err)
@@ -2065,7 +2248,7 @@ impl GrpcClientState for State {
             tracing::trace!("creating grpc client");
 
             GrpcClient {
-                host: self.config.forest_server.clone(),
+                host: self.config.forest_server.clone().unwrap_or_default(),
                 auth_middleware_layer: self.auth_interceptor(),
 
                 channel: OnceCell::const_new(),

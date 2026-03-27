@@ -2918,6 +2918,8 @@ impl PolicyType {
         }
     }
 }
+// --- v1 messages (unchanged) ---
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetComponentsRequest {
 }
@@ -3024,6 +3026,196 @@ pub struct ComponentFile {
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Done {
+}
+// --- v2 messages: binary component distribution ---
+
+/// UploadBinary — client-streaming upload of a platform-specific binary.
+/// First message must include metadata (upload_context, os, arch, sha256).
+/// Subsequent messages contain binary chunks.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UploadBinaryRequest {
+    #[prost(oneof="upload_binary_request::Msg", tags="1, 2")]
+    pub msg: ::core::option::Option<upload_binary_request::Msg>,
+}
+/// Nested message and enum types in `UploadBinaryRequest`.
+pub mod upload_binary_request {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Msg {
+        #[prost(message, tag="1")]
+        Metadata(super::UploadBinaryMetadata),
+        #[prost(bytes, tag="2")]
+        Chunk(::prost::alloc::vec::Vec<u8>),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UploadBinaryMetadata {
+    #[prost(string, tag="1")]
+    pub upload_context: ::prost::alloc::string::String,
+    /// linux, macos, windows
+    #[prost(string, tag="2")]
+    pub os: ::prost::alloc::string::String,
+    /// amd64, arm64
+    #[prost(string, tag="3")]
+    pub arch: ::prost::alloc::string::String,
+    /// expected SHA-256 hex digest of the full binary
+    #[prost(string, tag="4")]
+    pub sha256: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UploadBinaryResponse {
+    #[prost(uint64, tag="1")]
+    pub size_bytes: u64,
+}
+/// DownloadBinary — server-streaming download of a platform-specific binary.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DownloadBinaryRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub version: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub os: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
+    pub arch: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DownloadBinaryResponse {
+    #[prost(bytes="vec", tag="1")]
+    pub chunk: ::prost::alloc::vec::Vec<u8>,
+}
+/// PublishManifest — publish the component manifest (capabilities, spec schema, etc.)
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PublishManifestRequest {
+    #[prost(string, tag="1")]
+    pub upload_context: ::prost::alloc::string::String,
+    /// JSON-encoded ComponentManifest
+    #[prost(string, tag="2")]
+    pub manifest_json: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PublishManifestResponse {
+}
+/// GetComponentManifest — retrieve the manifest for a specific version.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentManifestRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub version: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentManifestResponse {
+    #[prost(string, tag="1")]
+    pub manifest_json: ::prost::alloc::string::String,
+}
+/// ListComponentVersions — list all versions of a component with platform info.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListComponentVersionsRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListComponentVersionsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub versions: ::prost::alloc::vec::Vec<ComponentVersionInfo>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ComponentVersionInfo {
+    #[prost(string, tag="1")]
+    pub version: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub protocol_version: ::prost::alloc::string::String,
+    /// "binary" or "files"
+    #[prost(string, tag="3")]
+    pub kind: ::prost::alloc::string::String,
+    /// e.g., \["linux_amd64", "darwin_arm64"\]
+    #[prost(string, repeated, tag="4")]
+    pub platforms: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+// --- Registry UI / discovery ---
+
+/// SearchComponents — search/browse the registry (like crates.io search).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SearchComponentsRequest {
+    /// free-text search (name, description)
+    #[prost(string, tag="1")]
+    pub query: ::prost::alloc::string::String,
+    /// filter by org (empty = all)
+    #[prost(string, tag="2")]
+    pub organisation: ::prost::alloc::string::String,
+    /// pagination (0-indexed)
+    #[prost(int32, tag="3")]
+    pub page: i32,
+    /// items per page (default 20, max 100)
+    #[prost(int32, tag="4")]
+    pub page_size: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SearchComponentsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub components: ::prost::alloc::vec::Vec<ComponentSummary>,
+    #[prost(int32, tag="2")]
+    pub total_count: i32,
+}
+/// ComponentSummary — compact component info for listings.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ComponentSummary {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub latest_version: ::prost::alloc::string::String,
+    /// "binary" or "files"
+    #[prost(string, tag="4")]
+    pub kind: ::prost::alloc::string::String,
+    /// from manifest
+    #[prost(string, tag="5")]
+    pub description: ::prost::alloc::string::String,
+    /// ISO 8601
+    #[prost(string, tag="6")]
+    pub created_at: ::prost::alloc::string::String,
+    /// ISO 8601
+    #[prost(string, tag="7")]
+    pub updated_at: ::prost::alloc::string::String,
+    #[prost(int32, tag="8")]
+    pub version_count: i32,
+    /// \["forest/deployment", ...\]
+    #[prost(string, repeated, tag="9")]
+    pub contracts: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// "public" or "private"
+    #[prost(string, tag="10")]
+    pub visibility: ::prost::alloc::string::String,
+}
+/// GetComponentDetail — full component page (like crates.io crate page).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentDetailRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetComponentDetailResponse {
+    #[prost(message, optional, tag="1")]
+    pub summary: ::core::option::Option<ComponentSummary>,
+    #[prost(message, repeated, tag="2")]
+    pub versions: ::prost::alloc::vec::Vec<ComponentVersionInfo>,
+    /// README content (if available)
+    #[prost(string, tag="3")]
+    pub readme: ::prost::alloc::string::String,
+    /// latest version manifest
+    #[prost(string, tag="4")]
+    pub manifest_json: ::prost::alloc::string::String,
+    /// org members who can publish
+    #[prost(string, repeated, tag="5")]
+    pub owners: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 // ── Per-type config messages ─────────────────────────────────────────
 
@@ -3655,6 +3847,8 @@ pub struct User {
     pub created_at: ::core::option::Option<::prost_types::Timestamp>,
     #[prost(message, optional, tag="7")]
     pub updated_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(string, optional, tag="8")]
+    pub profile_picture_url: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UserEmail {
@@ -3792,6 +3986,8 @@ pub struct UpdateUserRequest {
     pub user_id: ::prost::alloc::string::String,
     #[prost(string, optional, tag="2")]
     pub username: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="3")]
+    pub profile_picture_url: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UpdateUserResponse {

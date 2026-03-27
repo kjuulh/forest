@@ -11,6 +11,7 @@ pub struct User {
     pub mfa_enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub profile_picture_url: Option<String>,
 }
 
 impl From<User> for forest_grpc_interface::User {
@@ -23,6 +24,7 @@ impl From<User> for forest_grpc_interface::User {
             mfa_enabled: value.mfa_enabled,
             created_at: Some(datetime_to_timestamp(value.created_at)),
             updated_at: Some(datetime_to_timestamp(value.updated_at)),
+            profile_picture_url: value.profile_picture_url,
         }
     }
 }

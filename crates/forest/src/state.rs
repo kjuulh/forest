@@ -2,8 +2,9 @@ use drop_queue::DropQueue;
 
 #[derive(clap::Parser, Clone)]
 pub struct Config {
+    /// Forest server URL (required for registry operations, optional for local commands)
     #[arg(long, env = "FOREST_SERVER")]
-    pub forest_server: String,
+    pub forest_server: Option<String>,
 }
 
 #[derive(Clone)]

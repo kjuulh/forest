@@ -7,7 +7,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use crate::{
     forest_context::{ForestContext, ForestContextState},
     models::Project,
-    services::project::ProjectParserState,
+    services::{component_binary, component_deno, project::ProjectParserState},
     state::State,
 };
 
@@ -51,38 +51,150 @@ impl Args for RunCommand {
 impl RunCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let ctx = state.context();
-
         let project = state.project_parser().get_project().await?;
 
-        let mut run_cmd = clap::Command::new("run").subcommand_required(true);
-        for command_name in project.commands.keys() {
-            let cmd = clap::Command::new(command_name.command_name().to_string());
-
-            // TODO: add args
-
-            run_cmd = run_cmd.subcommand(cmd);
+        // Handle --help and help before clap parsing (since we disabled help flag
+        // to allow pass-through of raw args)
+        if self.args.is_empty()
+            || self.args.iter().any(|a| a == "--help" || a == "-h")
+            || self.args.first().map(|a| a.as_str()) == Some("help")
+        {
+            let (_, mut run_cmd) = build_dynamic_command(&project);
+            let help = run_cmd.render_long_help();
+            println!("{help}");
+            return Ok(());
         }
 
-        let cmd = clap::Command::new("forest").subcommand(run_cmd);
+        let (cli_names, run_cmd) = build_dynamic_command(&project);
 
-        let mut args = Vec::new();
-        args.push("forest".to_string());
-        args.push("run".to_string());
+        let cmd = clap::Command::new("forest")
+            .subcommand(run_cmd)
+            .disable_help_flag(true);
 
-        for arg in &self.args {
-            args.push(arg.clone());
+        let mut args = vec!["forest".to_string(), "run".to_string()];
+        args.extend(self.args.iter().cloned());
+
+        match cmd.try_get_matches_from(args) {
+            Ok(matches) => {
+                let (_, matches) = matches
+                    .subcommand()
+                    .ok_or(anyhow::anyhow!("run command is required"))?;
+                CliRun.execute(&ctx, &project, matches, &cli_names).await
+            }
+            Err(e) => {
+                match e.kind() {
+                    clap::error::ErrorKind::DisplayHelp
+                    | clap::error::ErrorKind::DisplayVersion => {
+                        print!("{e}");
+                        Ok(())
+                    }
+                    clap::error::ErrorKind::MissingSubcommand => {
+                        // No command given — show help
+                        let (_, mut run_cmd) = build_dynamic_command(&project);
+                        let help = run_cmd.render_long_help();
+                        println!("{help}");
+                        anyhow::bail!("no command specified")
+                    }
+                    _ => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Build the dynamic clap command with discovered project/component commands.
+fn build_dynamic_command(
+    project: &Project,
+) -> (
+    std::collections::BTreeMap<String, crate::models::CommandName>,
+    clap::Command,
+) {
+    // Detect short name collisions
+    let mut short_name_count: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for command_name in project.commands.keys() {
+        *short_name_count
+            .entry(command_name.command_name().to_string())
+            .or_default() += 1;
+    }
+
+    // Build the name→key mapping
+    let mut cli_names: std::collections::BTreeMap<String, crate::models::CommandName> =
+        std::collections::BTreeMap::new();
+    for command_name in project.commands.keys() {
+        let short = command_name.command_name().to_string();
+        let count = short_name_count.get(&short).copied().unwrap_or(0);
+
+        if count > 1 {
+            let qualified = command_name.to_qualified_cli_name();
+            cli_names.insert(qualified, command_name.clone());
+        } else {
+            cli_names.insert(short, command_name.clone());
         }
 
-        tracing::trace!("item: {}", self.args.join(" "));
-        let matches = cmd.try_get_matches_from(args)?;
+        // Always register the fully qualified name as an alias
+        let fqn = command_name.to_qualified_cli_name();
+        if !cli_names.contains_key(&fqn) {
+            cli_names.insert(fqn, command_name.clone());
+        }
+    }
 
-        let (_, matches) = matches
-            .subcommand()
-            .ok_or(anyhow::anyhow!("run command is required"))?;
+    // Collect component names for the help footer
+    let mut component_names: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    for cmd_name in cli_names.values() {
+        if let crate::models::CommandName::Component { name, .. } = cmd_name {
+            component_names.insert(name.clone());
+        }
+    }
 
-        CliRun.execute(&ctx, &project, matches).await?;
+    let after_help = if !component_names.is_empty() {
+        let names = component_names.into_iter().collect::<Vec<_>>().join(", ");
+        format!(
+            "Commands can also be invoked with qualified names:\n  \
+             forest run <component>:<command>\n\n\
+             Available components: {names}"
+        )
+    } else {
+        String::new()
+    };
 
-        Ok(())
+    let mut run_cmd = clap::Command::new("run")
+        .about("Run a project or component command")
+        .subcommand_required(true)
+        .after_help(after_help);
+
+    for (cli_name, cmd_name) in &cli_names {
+        let mut sub = clap::Command::new(cli_name.clone());
+        if let Some(command) = project.commands.get(cmd_name) {
+            if let crate::models::Command::ComponentBinary {
+                description: Some(desc),
+                ..
+            } = command
+            {
+                sub = sub.about(desc.clone());
+            }
+        }
+        if cli_name.contains(':') {
+            sub = sub.hide(true);
+        }
+        run_cmd = run_cmd.subcommand(sub);
+    }
+
+    (cli_names, run_cmd)
+}
+
+/// Build a spec JSON object from the project's component config.
+fn build_spec_json(
+    project: &Project,
+    comp_ref: &crate::models::ComponentReference,
+) -> serde_json::Value {
+    match project.get_component_config(comp_ref) {
+        Some(config) => serde_json::to_value(config).unwrap_or_default(),
+        None => serde_json::Value::Object(serde_json::Map::new()),
     }
 }
 
@@ -93,33 +205,92 @@ impl CliRun {
         ctx: &ForestContext,
         project: &Project,
         matches: &ArgMatches,
+        cli_names: &std::collections::BTreeMap<String, crate::models::CommandName>,
     ) -> anyhow::Result<()> {
         let (subcommand, _args) = matches
             .subcommand()
             .ok_or(anyhow::anyhow!("subcommand required"))?;
 
-        tracing::info!(
-            "register commands {}, [{}]",
-            subcommand,
-            project
-                .commands
-                .keys()
-                .map(|c| c.command_name().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
+        let resolved_name = cli_names
+            .get(subcommand)
+            .ok_or(anyhow::anyhow!("found no matching command: {subcommand}"))?;
 
         let (command_name, command) = project
             .commands
             .iter()
-            .find(|(c, _)| c.command_name() == subcommand)
+            .find(|(c, _)| *c == resolved_name)
             .ok_or(anyhow::anyhow!("found no matching command"))?;
 
         tracing::info!("running command: {}", command_name);
 
         match command {
             crate::models::Command::Script(_) => {
-                todo!("script files are not supported yet")
+                anyhow::bail!(
+                    "script-based commands are not yet supported — \
+                     use inline commands or v2 component binaries instead"
+                )
+            }
+            crate::models::Command::ComponentBinary {
+                binary_path,
+                method,
+                ..
+            } => {
+                let spec_json = if let Some(comp_ref) = command_name.to_component_reference() {
+                    build_spec_json(project, &comp_ref)
+                } else {
+                    serde_json::Value::Object(serde_json::Map::new())
+                };
+
+                let input_json = serde_json::Value::Object(serde_json::Map::new());
+
+                let call_context = forest_sdk::CallContext {
+                    project: Some(project.name.clone()),
+                    organisation: project.organisation.clone(),
+                    ..Default::default()
+                };
+
+                let result = component_binary::invoke_component_with_context(
+                    binary_path,
+                    method,
+                    &spec_json,
+                    &input_json,
+                    Some(&call_context),
+                )
+                .await?;
+
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+            crate::models::Command::ComponentDeno {
+                component_dir,
+                entrypoint,
+                method,
+                ..
+            } => {
+                let spec_json = if let Some(comp_ref) = command_name.to_component_reference() {
+                    build_spec_json(project, &comp_ref)
+                } else {
+                    serde_json::Value::Object(serde_json::Map::new())
+                };
+
+                let input_json = serde_json::Value::Object(serde_json::Map::new());
+
+                let call_context = forest_sdk::CallContext {
+                    project: Some(project.name.clone()),
+                    organisation: project.organisation.clone(),
+                    ..Default::default()
+                };
+
+                let result = component_deno::invoke_deno_component(
+                    component_dir,
+                    entrypoint,
+                    method,
+                    &spec_json,
+                    &input_json,
+                    Some(&call_context),
+                )
+                .await?;
+
+                println!("{}", serde_json::to_string_pretty(&result)?);
             }
             crate::models::Command::Inline(items) => {
                 let mut cmd = tokio::process::Command::new("bash");
@@ -149,7 +320,6 @@ impl CliRun {
                         let command_name = command_name.clone();
                         async move {
                             let mut reader = BufReader::new(stdout).lines();
-
                             while let Ok(Some(line)) = reader.next_line().await {
                                 println!("{}: {line}", command_name.command_name())
                             }
@@ -162,7 +332,6 @@ impl CliRun {
                         let command_name = command_name.clone();
                         async move {
                             let mut reader = BufReader::new(stderr).lines();
-
                             while let Ok(Some(line)) = reader.next_line().await {
                                 println!("{}: {line}", command_name.command_name())
                             }

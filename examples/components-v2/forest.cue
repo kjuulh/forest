@@ -1,21 +1,23 @@
-package component_v2
+package kubernetes_service
 
-project: #ForestProject & {
-	name:         "ecs-service"
-	organisation: "rawpotion"
+import "forest.sh/forest/sdk@v0"
+
+project: sdk.#ForestProject & {
+	name:         "kubernetes-service"
+	organisation: "forest-contrib"
 }
 
-forest: component: #ForestComponent & {
+forest: component: sdk.#ForestComponent & {
 	name:    project.name
 	version: "0.1.0"
 
 	codegen: {
 		type:   "rust"
-		output: "./crates/ecs-service/src/"
+		output: "./crates/kubernetes-service/src/"
 	}
 
 	upload: {
-		source: "./crates/ecs-service"
+		source: "./crates/kubernetes-service"
 		type:   "rust"
 		architectures: {
 			linux: {
@@ -26,24 +28,6 @@ forest: component: #ForestComponent & {
 			// 	amd64: {}
 			// 	arm64: {}
 			// }
-			// windows: {
-			// 	amd64: {}
-			// 	arm64: {}
-			// }
 		}
 	}
-
-	// Docker alternative — outputs OCI tar files instead of native binaries.
-	// Uncomment below (and comment out the upload above) to use docker builds:
-	//
-	// upload: {
-	// 	source: "./crates/ecs-service"
-	// 	type:   "docker"
-	// 	architectures: {
-	// 		linux: {
-	// 			amd64: {}
-	// 			arm64: {}
-	// 		}
-	// 	}
-	// }
 }

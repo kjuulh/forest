@@ -28,11 +28,20 @@ pub struct Component {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HealthCheck {
+    #[serde(default = "default_healthcheck_interval")]
     pub interval: i64,
+    #[serde(default = "default_healthcheck_path")]
     pub path: String,
+    #[serde(default = "default_healthcheck_retries")]
     pub retries: i64,
+    #[serde(default = "default_healthcheck_timeout")]
     pub timeout: i64,
 }
+
+fn default_healthcheck_interval() -> i64 { 30 }
+fn default_healthcheck_path() -> String { "/health".to_string() }
+fn default_healthcheck_retries() -> i64 { 3 }
+fn default_healthcheck_timeout() -> i64 { 5 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Memory {
@@ -50,11 +59,14 @@ pub enum Memory {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Port {
+    #[serde(default = "default_port_external")]
     pub external: bool,
     pub name: String,
     pub port: i64,
     pub protocol: Protocol,
 }
+
+fn default_port_external() -> bool { false }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Protocol {
@@ -83,8 +95,11 @@ pub struct Spec {
     pub memory: Memory,
     pub name: String,
     pub ports: Vec<Port>,
+    #[serde(default = "default_spec_replicas")]
     pub replicas: i64,
 }
+
+fn default_spec_replicas() -> i64 { 1 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PrepareInput {
@@ -105,11 +120,11 @@ pub struct StatusOutput {
     pub running: i64,
 }
 
-pub trait CommandHandler {
+pub trait CommandHandler: Send + Sync {
     /// Generate ECS task definition and service manifests
-    fn prepare(&self, spec: &Spec, input: PrepareInput) -> Result<PrepareOutput, forest_sdk::Error>;
+    fn prepare(&self, spec: &Spec, input: PrepareInput) -> impl std::future::Future<Output = Result<PrepareOutput, forest_sdk::Error>> + Send;
     /// Check service health and running count
-    fn status(&self, spec: &Spec, input: StatusInput) -> Result<StatusOutput, forest_sdk::Error>;
+    fn status(&self, spec: &Spec, input: StatusInput) -> impl std::future::Future<Output = Result<StatusOutput, forest_sdk::Error>> + Send;
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -136,13 +151,13 @@ pub struct ForestDeploymentRollbackInput {
     pub release_id: String,
 }
 
-pub trait ForestDeploymentHookHandler {
+pub trait ForestDeploymentHookHandler: Send + Sync {
     /// Generate ECS task definition and service manifests
-    fn prepare(&self, spec: &Spec, input: ForestDeploymentPrepareInput) -> Result<ForestDeploymentPrepareOutput, forest_sdk::Error>;
+    fn prepare(&self, spec: &Spec, input: ForestDeploymentPrepareInput) -> impl std::future::Future<Output = Result<ForestDeploymentPrepareOutput, forest_sdk::Error>> + Send;
     /// Deploy to ECS
-    fn release(&self, spec: &Spec, input: ForestDeploymentReleaseInput) -> Result<ForestDeploymentReleaseOutput, forest_sdk::Error>;
+    fn release(&self, spec: &Spec, input: ForestDeploymentReleaseInput) -> impl std::future::Future<Output = Result<ForestDeploymentReleaseOutput, forest_sdk::Error>> + Send;
     /// Roll back to previous task definition
-    fn rollback(&self, spec: &Spec, input: ForestDeploymentRollbackInput) -> Result<(), forest_sdk::Error>;
+    fn rollback(&self, spec: &Spec, input: ForestDeploymentRollbackInput) -> impl std::future::Future<Output = Result<(), forest_sdk::Error>> + Send;
 }
 
 pub struct ComponentRouter<C, H>
@@ -172,31 +187,31 @@ where
     C: CommandHandler + Send + Sync,
     H: ForestDeploymentHookHandler + Send + Sync,
 {
-    fn call(&self, method: &str, spec: &Spec, input: serde_json::Value) -> Result<serde_json::Value, forest_sdk::Error> {
+    async fn call(&self, method: &str, spec: &Spec, input: serde_json::Value, _context: &forest_sdk::CallContext) -> Result<serde_json::Value, forest_sdk::Error> {
         match method {
             "commands/prepare" => {
                 let input: PrepareInput = serde_json::from_value(input)?;
-                let output = self.commands.prepare(spec, input)?;
+                let output = self.commands.prepare(spec, input).await?;
                 serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)
             }
             "commands/status" => {
                 let input: StatusInput = serde_json::from_value(input)?;
-                let output = self.commands.status(spec, input)?;
+                let output = self.commands.status(spec, input).await?;
                 serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)
             }
             "hooks/forest/deployment/prepare" => {
                 let input: ForestDeploymentPrepareInput = serde_json::from_value(input)?;
-                let output = self.hooks.prepare(spec, input)?;
+                let output = self.hooks.prepare(spec, input).await?;
                 serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)
             }
             "hooks/forest/deployment/release" => {
                 let input: ForestDeploymentReleaseInput = serde_json::from_value(input)?;
-                let output = self.hooks.release(spec, input)?;
+                let output = self.hooks.release(spec, input).await?;
                 serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)
             }
             "hooks/forest/deployment/rollback" => {
                 let input: ForestDeploymentRollbackInput = serde_json::from_value(input)?;
-                self.hooks.rollback(spec, input)?;
+                self.hooks.rollback(spec, input).await?;
                 Ok(serde_json::Value::Null)
             }
             other => Err(forest_sdk::Error::MethodNotFound(other.to_string())),
@@ -205,11 +220,11 @@ where
 
     fn methods(&self) -> Vec<forest_sdk::MethodDescriptor> {
         vec![
-            forest_sdk::MethodDescriptor { name: "commands/prepare".into(), kind: forest_sdk::MethodKind::Command },
-            forest_sdk::MethodDescriptor { name: "commands/status".into(), kind: forest_sdk::MethodKind::Command },
-            forest_sdk::MethodDescriptor { name: "hooks/forest/deployment/prepare".into(), kind: forest_sdk::MethodKind::Hook { topic: "forest/deployment".into() } },
-            forest_sdk::MethodDescriptor { name: "hooks/forest/deployment/release".into(), kind: forest_sdk::MethodKind::Hook { topic: "forest/deployment".into() } },
-            forest_sdk::MethodDescriptor { name: "hooks/forest/deployment/rollback".into(), kind: forest_sdk::MethodKind::Hook { topic: "forest/deployment".into() } },
+            forest_sdk::MethodDescriptor { name: "commands/prepare".into(), kind: forest_sdk::MethodKind::Command, description: Some("Generate ECS task definition and service manifests".into()) },
+            forest_sdk::MethodDescriptor { name: "commands/status".into(), kind: forest_sdk::MethodKind::Command, description: Some("Check service health and running count".into()) },
+            forest_sdk::MethodDescriptor { name: "hooks/forest/deployment/prepare".into(), kind: forest_sdk::MethodKind::Hook { topic: "forest/deployment".into() }, description: Some("Generate ECS task definition and service manifests".into()) },
+            forest_sdk::MethodDescriptor { name: "hooks/forest/deployment/release".into(), kind: forest_sdk::MethodKind::Hook { topic: "forest/deployment".into() }, description: Some("Deploy to ECS".into()) },
+            forest_sdk::MethodDescriptor { name: "hooks/forest/deployment/rollback".into(), kind: forest_sdk::MethodKind::Hook { topic: "forest/deployment".into() }, description: Some("Roll back to previous task definition".into()) },
         ]
     }
 }

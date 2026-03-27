@@ -19,6 +19,13 @@ pub struct ComponentVersion {
     pub version: String,
 }
 
+pub struct ComponentVersionInfo {
+    pub version: String,
+    pub protocol_version: String,
+    pub kind: String,
+    pub platforms: Vec<String>,
+}
+
 // ============================================================
 // Service — orchestrates aggregate + projections
 // ============================================================
@@ -33,11 +40,12 @@ struct UploadInfo {
 pub struct ComponentService {
     event_store: EventStore,
     db: PgPool,
+    object_store: crate::object_store::ObjectStore,
 }
 
 impl ComponentService {
-    pub fn new(event_store: EventStore, db: PgPool) -> Self {
-        Self { event_store, db }
+    pub fn new(event_store: EventStore, db: PgPool, object_store: crate::object_store::ObjectStore) -> Self {
+        Self { event_store, db, object_store }
     }
 
     // ----------------------------------------------------------
@@ -92,9 +100,7 @@ impl ComponentService {
 
     /// Upload a file for an in-flight upload.
     ///
-    /// Resolves org/name from the staging projection, then:
-    /// - Records FileUploaded event
-    /// - Inserts into `component_files` projection atomically
+    /// Stores file content in S3, records metadata in DB via event store.
     pub async fn upload_file(
         &self,
         upload_id: Uuid,
@@ -111,27 +117,55 @@ impl ComponentService {
 
         ComponentAggregate::upload_file(&mut root, upload_id, file_path)?;
 
-        let file_path_owned = file_path.to_string();
-        let file_content_owned = file_content.to_vec();
+        // Resolve version from staging
+        let version: String = sqlx::query_scalar(
+            "SELECT version FROM component_staging WHERE id = $1",
+        )
+        .bind(upload_id)
+        .fetch_one(&self.db)
+        .await
+        .context("resolve version from staging")?;
 
-        self.event_store
+        // Store file content in S3
+        let s3_key = crate::object_store::keys::component_file(
+            &info.organisation,
+            &info.name,
+            &version,
+            file_path,
+        );
+        self.object_store
+            .put(&s3_key, file_content)
+            .await
+            .context("store component file in S3")?;
+
+        let file_path_owned = file_path.to_string();
+
+        // Record metadata in DB (file_content is empty — content is in S3)
+        let db_result = self
+            .event_store
             .save_with(&mut root, move |_events, tx| {
                 Box::pin(async move {
                     sqlx::query(
                         "INSERT INTO component_files (component_id, file_path, file_content)
-                         VALUES ($1, $2, $3)",
+                         VALUES ($1, $2, ''::bytea)",
                     )
                     .bind(upload_id)
                     .bind(&file_path_owned)
-                    .bind(&file_content_owned)
                     .execute(&mut **tx)
                     .await
-                    .context("insert component file")?;
+                    .context("insert component file metadata")?;
                     Ok(())
                 })
             })
-            .await?;
+            .await;
 
+        // Cleanup S3 if DB write failed
+        if let Err(e) = &db_result {
+            tracing::warn!("DB write failed after S3 upload, cleaning up S3 object: {e:#}");
+            let _ = self.object_store.delete(&s3_key).await;
+        }
+
+        db_result?;
         Ok(())
     }
 
@@ -154,18 +188,36 @@ impl ComponentService {
         let org = info.organisation;
         let name = info.name;
 
+        // Keep copies for the OCI publish step (after the closure moves org/name)
+        let org_for_oci = org.clone();
+        let name_for_oci = name.clone();
+        let version_for_oci = version.clone();
+
         self.event_store
             .save_with(&mut root, move |_events, tx| {
                 Box::pin(async move {
+                    // Detect kind: "binary" if there are artifacts, "files" otherwise
+                    let has_artifacts: bool = sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM component_artifacts WHERE component_id = $1)",
+                    )
+                    .bind(upload_id)
+                    .fetch_one(&mut **tx)
+                    .await
+                    .unwrap_or(false);
+
+                    let kind = if has_artifacts { "binary" } else { "files" };
+
                     sqlx::query(
-                        "INSERT INTO components (id, name, organisation, version)
-                         VALUES ($1, $2, $3, $4)
-                         ON CONFLICT (name, organisation, version) DO NOTHING",
+                        "INSERT INTO components (id, name, organisation, version, kind)
+                         VALUES ($1, $2, $3, $4, $5)
+                         ON CONFLICT (name, organisation, version)
+                         DO UPDATE SET kind = $5, updated = now()",
                     )
                     .bind(upload_id)
                     .bind(&name)
                     .bind(&org)
                     .bind(&version)
+                    .bind(kind)
                     .execute(&mut **tx)
                     .await
                     .context("upsert component projection")?;
@@ -184,7 +236,67 @@ impl ComponentService {
             })
             .await?;
 
+        // Auto-publish CUE files as an OCI artifact for CUE module resolution.
+        // This runs after commit so the component is in a consistent state.
+        let cue_files = self.get_cue_files(upload_id).await?;
+        if !cue_files.is_empty() {
+            if let Err(e) = crate::oci_registry::publish_cue_module(
+                &self.object_store,
+                &org_for_oci,
+                &name_for_oci,
+                &version_for_oci,
+                cue_files,
+            )
+            .await
+            {
+                tracing::warn!("failed to publish CUE module as OCI artifact: {e:#}");
+                // Non-fatal — the component is committed, just the OCI artifact failed
+            }
+        }
+
         Ok(())
+    }
+
+    /// Get CUE files uploaded for a component (for OCI packaging).
+    async fn get_cue_files(&self, component_id: Uuid) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+        let rows = sqlx::query(
+            "SELECT file_path FROM component_files
+             WHERE component_id = $1 AND file_path LIKE '%.cue'
+             ORDER BY file_path",
+        )
+        .bind(component_id)
+        .fetch_all(&self.db)
+        .await?;
+
+        let mut files = Vec::new();
+        for row in rows {
+            use sqlx::Row;
+            let path: String = row.get("file_path");
+
+            // Read from S3
+            let comp = sqlx::query(
+                "SELECT name, organisation, version FROM components WHERE id = $1
+                 UNION ALL
+                 SELECT name, organisation, version FROM component_staging WHERE id = $1
+                 LIMIT 1",
+            )
+            .bind(component_id)
+            .fetch_optional(&self.db)
+            .await?;
+
+            if let Some(comp) = comp {
+                let org: String = comp.get("organisation");
+                let name: String = comp.get("name");
+                let ver: String = comp.get("version");
+                let s3_key = crate::object_store::keys::component_file(&org, &name, &ver, &path);
+
+                if let Ok(content) = self.object_store.get(&s3_key).await {
+                    files.push((path, content));
+                }
+            }
+        }
+
+        Ok(files)
     }
 
     // ----------------------------------------------------------
@@ -201,7 +313,10 @@ impl ComponentService {
             "SELECT id, name, organisation, version
              FROM components
              WHERE name = $1 AND organisation = $2
-             ORDER BY version DESC
+             ORDER BY
+               split_part(version, '.', 1)::int DESC,
+               split_part(version, '.', 2)::int DESC,
+               split_part(version, '.', 3)::int DESC
              LIMIT 1",
         )
         .bind(name)
@@ -246,46 +361,429 @@ impl ComponentService {
     }
 
     /// Stream files for a published component.
+    /// Fetches file paths from DB metadata, content from S3.
     pub async fn get_files(
         &self,
         component_id: Uuid,
         file_stream: FileStream,
     ) -> anyhow::Result<()> {
-        let mut page: i64 = 0;
-        loop {
-            let row = sqlx::query(
-                "SELECT file_path, file_content
-                 FROM component_files
-                 WHERE component_id = $1
-                 ORDER BY file_path ASC
-                 LIMIT 1 OFFSET $2",
-            )
-            .bind(component_id)
-            .bind(page)
-            .fetch_optional(&self.db)
-            .await;
+        // Get component identity for S3 key construction
+        let comp = sqlx::query(
+            "SELECT name, organisation, version FROM components WHERE id = $1",
+        )
+        .bind(component_id)
+        .fetch_optional(&self.db)
+        .await
+        .context("get component for file streaming")?;
 
-            match row {
-                Ok(Some(r)) => {
-                    let path: String = r.get("file_path");
-                    let content: Vec<u8> = r.get("file_content");
+        let Some(comp) = comp else {
+            file_stream.push_done().await?;
+            return Ok(());
+        };
+
+        let org: String = comp.get("organisation");
+        let name: String = comp.get("name");
+        let version: String = comp.get("version");
+
+        // Get file paths from metadata
+        let rows = sqlx::query(
+            "SELECT file_path FROM component_files
+             WHERE component_id = $1
+             ORDER BY file_path ASC",
+        )
+        .bind(component_id)
+        .fetch_all(&self.db)
+        .await
+        .context("list component files")?;
+
+        for row in rows {
+            let path: String = row.get("file_path");
+            let s3_key = crate::object_store::keys::component_file(&org, &name, &version, &path);
+
+            match self.object_store.get(&s3_key).await {
+                Ok(content) => {
                     if let Err(e) = file_stream.push_file(&path, &content).await {
                         file_stream.push_err(e).await?;
                         return Ok(());
                     }
                 }
-                Ok(None) => break,
                 Err(e) => {
-                    file_stream.push_err(e.into()).await?;
+                    tracing::warn!("failed to get file from S3: {path}: {e}");
+                    file_stream.push_err(e).await?;
                     return Ok(());
                 }
             }
-
-            page += 1;
         }
 
         file_stream.push_done().await?;
         Ok(())
+    }
+
+    // ----------------------------------------------------------
+    // v2: Binary component methods
+    // ----------------------------------------------------------
+
+    /// Store a binary artifact for an in-flight upload.
+    /// Binary content goes to S3; metadata recorded in `component_artifacts`.
+    pub async fn upload_binary(
+        &self,
+        upload_id: Uuid,
+        os: &str,
+        arch: &str,
+        sha256: &str,
+        binary_content: &[u8],
+    ) -> anyhow::Result<u64> {
+        let info = self.resolve_upload(upload_id).await?;
+        let size_bytes = binary_content.len() as i64;
+
+        // Resolve version from staging
+        let version: String = sqlx::query_scalar(
+            "SELECT version FROM component_staging WHERE id = $1",
+        )
+        .bind(upload_id)
+        .fetch_one(&self.db)
+        .await
+        .context("resolve version from staging")?;
+
+        // Store binary in S3
+        let s3_key = crate::object_store::keys::component_binary(
+            &info.organisation,
+            &info.name,
+            &version,
+            os,
+            arch,
+        );
+        self.object_store
+            .put(&s3_key, binary_content)
+            .await
+            .context("store binary in S3")?;
+
+        tracing::info!(
+            key = %s3_key,
+            size = size_bytes,
+            "stored component binary in S3"
+        );
+
+        // Record artifact metadata with storage_path pointing to S3
+        let db_result = sqlx::query(
+            "INSERT INTO component_artifacts (component_id, version, os, arch, sha256, size_bytes, storage_path)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (component_id, version, os, arch)
+             DO UPDATE SET sha256 = $5, size_bytes = $6, storage_path = $7, created_at = now()",
+        )
+        .bind(upload_id)
+        .bind(&version)
+        .bind(os)
+        .bind(arch)
+        .bind(sha256)
+        .bind(size_bytes)
+        .bind(&s3_key)
+        .execute(&self.db)
+        .await
+        .context("record artifact metadata");
+
+        // Cleanup S3 if DB write failed
+        if let Err(e) = &db_result {
+            tracing::warn!("DB write failed after S3 upload, cleaning up S3 object: {e:#}");
+            let _ = self.object_store.delete(&s3_key).await;
+        }
+
+        db_result?;
+        Ok(size_bytes as u64)
+    }
+
+    /// Publish a manifest for an in-flight upload.
+    pub async fn publish_manifest(
+        &self,
+        upload_id: Uuid,
+        manifest_json: &str,
+    ) -> anyhow::Result<()> {
+        let _info = self.resolve_upload(upload_id).await?;
+
+        // Validate JSON
+        let _: serde_json::Value =
+            serde_json::from_str(manifest_json).context("manifest is not valid JSON")?;
+
+        sqlx::query(
+            "INSERT INTO component_manifests (component_id, version, manifest_json)
+             SELECT $1, cs.version, $2::jsonb
+             FROM component_staging cs WHERE cs.id = $1
+             ON CONFLICT (component_id, version)
+             DO UPDATE SET manifest_json = $2::jsonb, created_at = now()",
+        )
+        .bind(upload_id)
+        .bind(manifest_json)
+        .execute(&self.db)
+        .await
+        .context("publish manifest")?;
+
+        Ok(())
+    }
+
+    /// Get the manifest for a specific component version.
+    pub async fn get_manifest(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: &str,
+    ) -> anyhow::Result<Option<String>> {
+        let row = sqlx::query(
+            "SELECT cm.manifest_json::text as manifest_json
+             FROM component_manifests cm
+             JOIN components c ON c.id = cm.component_id
+             WHERE c.organisation = $1 AND c.name = $2 AND cm.version = $3",
+        )
+        .bind(organisation)
+        .bind(name)
+        .bind(version)
+        .fetch_optional(&self.db)
+        .await
+        .context("get manifest")?;
+
+        Ok(row.map(|r| r.get("manifest_json")))
+    }
+
+    /// List all versions of a component with platform info.
+    pub async fn list_versions(
+        &self,
+        organisation: &str,
+        name: &str,
+    ) -> anyhow::Result<Vec<ComponentVersionInfo>> {
+        let rows = sqlx::query(
+            "SELECT c.version, c.kind,
+                    COALESCE(
+                        (SELECT json_agg(ca.os || '_' || ca.arch)
+                         FROM component_artifacts ca
+                         WHERE ca.component_id = c.id AND ca.version = c.version),
+                        '[]'::json
+                    )::text as platforms,
+                    COALESCE(
+                        (SELECT cm.manifest_json->>'protocol_version'
+                         FROM component_manifests cm
+                         WHERE cm.component_id = c.id AND cm.version = c.version),
+                        ''
+                    ) as protocol_version
+             FROM components c
+             WHERE c.organisation = $1 AND c.name = $2
+             ORDER BY
+               split_part(c.version, '.', 1)::int DESC,
+               split_part(c.version, '.', 2)::int DESC,
+               split_part(c.version, '.', 3)::int DESC",
+        )
+        .bind(organisation)
+        .bind(name)
+        .fetch_all(&self.db)
+        .await
+        .context("list versions")?;
+
+        let mut versions = Vec::new();
+        for row in rows {
+            let platforms_json: String = row.get("platforms");
+            let platforms: Vec<String> =
+                serde_json::from_str(&platforms_json).unwrap_or_default();
+
+            versions.push(ComponentVersionInfo {
+                version: row.get("version"),
+                protocol_version: row.get("protocol_version"),
+                kind: row.get("kind"),
+                platforms,
+            });
+        }
+
+        Ok(versions)
+    }
+
+    /// Download a binary artifact from S3 (returns raw bytes).
+    pub async fn download_binary(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: &str,
+        os: &str,
+        arch: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        // Look up storage_path from component_artifacts
+        let storage_path: Option<String> = sqlx::query_scalar(
+            "SELECT ca.storage_path
+             FROM component_artifacts ca
+             JOIN components c ON c.id = ca.component_id
+             WHERE c.organisation = $1 AND c.name = $2 AND ca.version = $3
+               AND ca.os = $4 AND ca.arch = $5",
+        )
+        .bind(organisation)
+        .bind(name)
+        .bind(version)
+        .bind(os)
+        .bind(arch)
+        .fetch_optional(&self.db)
+        .await
+        .context("look up binary artifact")?
+        .flatten();
+
+        let s3_key = storage_path.with_context(|| {
+            format!("binary not found: {organisation}/{name}@{version} ({os}/{arch})")
+        })?;
+
+        self.object_store
+            .get(&s3_key)
+            .await
+            .with_context(|| format!(
+                "download binary from S3: {organisation}/{name}@{version} ({os}/{arch})"
+            ))
+    }
+
+    // ----------------------------------------------------------
+    // Registry UI / search
+    // ----------------------------------------------------------
+
+    /// Search components with visibility filtering.
+    /// - `see_all`: service accounts bypass visibility (true = no filtering)
+    /// - `member_orgs`: org names the caller belongs to (empty for anonymous)
+    /// Results include: public project components + private components from member_orgs.
+    pub async fn search_components(
+        &self,
+        query: &str,
+        organisation_filter: &str,
+        limit: i64,
+        offset: i64,
+        see_all: bool,
+        member_orgs: &[String],
+    ) -> anyhow::Result<(Vec<forest_grpc_interface::ComponentSummary>, i32)> {
+        let is_search = !query.is_empty();
+        let is_org_filter = !organisation_filter.is_empty();
+        let search_pattern = format!("%{query}%");
+
+        // Visibility filter: when not see_all, show public projects + member org components.
+        // $7 = see_all (skip filter), $8 = member_orgs array
+        let rows = sqlx::query(
+            "SELECT c.organisation, c.name, c.version, c.kind, c.created, c.updated,
+                    COALESCE((SELECT cm.manifest_json->>'description' FROM component_manifests cm WHERE cm.component_id = c.id LIMIT 1), '') as description,
+                    (SELECT count(*) FROM components c2 WHERE c2.organisation = c.organisation AND c2.name = c.name) as version_count,
+                    COALESCE((SELECT p.visibility FROM projects p WHERE p.organisation = c.organisation AND p.project = c.name LIMIT 1), 'private') as visibility
+             FROM components c
+             WHERE ($1 = false OR c.name ILIKE $2 OR c.organisation ILIKE $2)
+               AND ($3 = false OR c.organisation = $4)
+               AND ($7 = true OR c.organisation = ANY($8) OR EXISTS (
+                   SELECT 1 FROM projects p
+                   WHERE p.organisation = c.organisation AND p.project = c.name
+                     AND p.visibility = 'public'
+               ))
+             ORDER BY c.updated DESC
+             LIMIT $5 OFFSET $6",
+        )
+        .bind(is_search)
+        .bind(&search_pattern)
+        .bind(is_org_filter)
+        .bind(organisation_filter)
+        .bind(limit)
+        .bind(offset)
+        .bind(see_all)
+        .bind(member_orgs)
+        .fetch_all(&self.db)
+        .await
+        .context("search components")?;
+
+        let total: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM components c
+             WHERE ($1 = false OR c.name ILIKE $2 OR c.organisation ILIKE $2)
+               AND ($3 = false OR c.organisation = $4)
+               AND ($5 = true OR c.organisation = ANY($6) OR EXISTS (
+                   SELECT 1 FROM projects p
+                   WHERE p.organisation = c.organisation AND p.project = c.name
+                     AND p.visibility = 'public'
+               ))",
+        )
+        .bind(is_search)
+        .bind(&search_pattern)
+        .bind(is_org_filter)
+        .bind(organisation_filter)
+        .bind(see_all)
+        .bind(member_orgs)
+        .fetch_one(&self.db)
+        .await
+        .unwrap_or(0);
+
+        let summaries = rows
+            .into_iter()
+            .map(|r| {
+                use sqlx::Row;
+                forest_grpc_interface::ComponentSummary {
+                    organisation: r.get("organisation"),
+                    name: r.get("name"),
+                    latest_version: r.get("version"),
+                    kind: r.get("kind"),
+                    description: r.get("description"),
+                    created_at: r.get::<chrono::DateTime<chrono::Utc>, _>("created").to_rfc3339(),
+                    updated_at: r.get::<chrono::DateTime<chrono::Utc>, _>("updated").to_rfc3339(),
+                    version_count: r.get::<i64, _>("version_count") as i32,
+                    contracts: vec![], // filled from manifest if needed
+                    visibility: r.get("visibility"),
+                }
+            })
+            .collect();
+
+        Ok((summaries, total as i32))
+    }
+
+    /// Get full component detail for the registry UI.
+    pub async fn get_component_detail(
+        &self,
+        organisation: &str,
+        name: &str,
+    ) -> anyhow::Result<Option<forest_grpc_interface::GetComponentDetailResponse>> {
+        use sqlx::Row;
+
+        let latest = self.get_component(name, organisation).await?;
+        let Some(latest) = latest else {
+            return Ok(None);
+        };
+
+        let versions = self.list_versions(organisation, name).await?;
+        let manifest = self.get_manifest(organisation, name, &latest.version).await?;
+
+        let visibility: String = sqlx::query_scalar::<_, String>(
+            "SELECT COALESCE((SELECT p.visibility FROM projects p WHERE p.organisation = $1 AND p.project = $2 LIMIT 1), 'private')",
+        )
+        .bind(organisation)
+        .bind(name)
+        .fetch_one(&self.db)
+        .await
+        .unwrap_or_else(|_| "private".into());
+
+        let summary = forest_grpc_interface::ComponentSummary {
+            organisation: organisation.into(),
+            name: name.into(),
+            latest_version: latest.version.clone(),
+            kind: "binary".into(),
+            description: manifest
+                .as_ref()
+                .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok())
+                .and_then(|v| v.get("description")?.as_str().map(String::from))
+                .unwrap_or_default(),
+            created_at: String::new(),
+            updated_at: String::new(),
+            version_count: versions.len() as i32,
+            contracts: vec![],
+            visibility,
+        };
+
+        let version_infos = versions
+            .into_iter()
+            .map(|v| forest_grpc_interface::ComponentVersionInfo {
+                version: v.version,
+                protocol_version: v.protocol_version,
+                kind: v.kind,
+                platforms: v.platforms,
+            })
+            .collect();
+
+        Ok(Some(forest_grpc_interface::GetComponentDetailResponse {
+            summary: Some(summary),
+            versions: version_infos,
+            readme: String::new(), // TODO: load from S3 if README.md was uploaded
+            manifest_json: manifest.unwrap_or_default(),
+            owners: vec![],
+        }))
     }
 
     // ----------------------------------------------------------
@@ -403,6 +901,6 @@ pub trait ComponentServiceState {
 
 impl ComponentServiceState for crate::state::State {
     fn component_service(&self) -> ComponentService {
-        ComponentService::new(self.event_store.clone(), self.db.clone())
+        ComponentService::new(self.event_store.clone(), self.db.clone(), self.object_store.clone())
     }
 }

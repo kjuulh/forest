@@ -181,10 +181,34 @@ impl ComponentsService {
                 }
             }
 
-            // Download deps
+            // Download deps — check component kind to decide v1 (files) vs v2 (binary)
             for dep in upstream {
-                self.download_component(&dep.id, &dep.name, &dep.organisation, &dep.version)
+                // Try to get manifest — if it exists and kind=binary, download binary
+                let manifest: Result<String, _> = self.grpc.get_component_manifest(
+                    &dep.organisation,
+                    &dep.name,
+                    &dep.version,
+                ).await;
+
+                let is_binary = manifest
+                    .as_ref()
+                    .ok()
+                    .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok())
+                    .and_then(|v| v.get("kind")?.as_str().map(|s| s == "binary"))
+                    .unwrap_or(false);
+
+                if is_binary {
+                    self.download_binary_component(
+                        &dep.name,
+                        &dep.organisation,
+                        &dep.version,
+                        manifest.as_deref().ok(),
+                    )
                     .await?;
+                } else {
+                    self.download_component(&dep.id, &dep.name, &dep.organisation, &dep.version)
+                        .await?;
+                }
             }
         }
 
@@ -212,6 +236,157 @@ impl ComponentsService {
         Ok(local_deps)
     }
 
+    /// Download a v2 binary component from the registry and store in the content-addressable cache.
+    async fn download_binary_component(
+        &self,
+        name: &str,
+        organisation: &str,
+        version: &str,
+        manifest_json: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let (os, arch) = crate::services::component_binary::current_platform();
+
+        tracing::info!(
+            "downloading binary component {organisation}/{name}@{version} ({os}/{arch})"
+        );
+
+        let binary = self
+            .grpc
+            .download_component_binary(organisation, name, version, os, arch)
+            .await
+            .context("download binary from registry")?;
+
+        // Store in content-addressable cache
+        let (sha256, cache_path) = crate::services::component_binary::store_binary_in_cache(&binary)
+            .context("store binary in cache")?;
+
+        let sha256_prefixed = format!("sha256:{sha256}");
+
+        // Verify against lock file if present
+        let project_dir = std::env::current_dir()?;
+        let lockfile = crate::lockfile::LockFile::load(&project_dir).await?;
+        lockfile.verify(organisation, name, version, os, arch, &sha256_prefixed)?;
+
+        // Update lock file
+        let mut lockfile = lockfile;
+        lockfile.insert(crate::lockfile::LockEntry {
+            organisation: organisation.to_string(),
+            name: name.to_string(),
+            version: version.to_string(),
+            source: crate::lockfile::LockSource::Registry {
+                os: os.to_string(),
+                arch: arch.to_string(),
+                sha256: sha256_prefixed,
+            },
+        });
+        lockfile.save(&project_dir).await?;
+
+        tracing::info!(
+            "cached binary at {} (sha256={}, {} bytes)",
+            cache_path.display(),
+            &sha256[..12],
+            binary.len()
+        );
+
+        // Write meta.json to the component cache directory so resolve_binary can find it
+        let cache_component_dir = dirs::cache_dir()
+            .context("cache dir")?
+            .join("forest")
+            .join("components")
+            .join(organisation)
+            .join(name)
+            .join(version);
+        tokio::fs::create_dir_all(&cache_component_dir).await?;
+
+        let platform_key = format!("{os}_{arch}");
+        let mut meta = serde_json::json!({
+            "organisation": organisation,
+            "name": name,
+            "version": version,
+            "platforms": {
+                platform_key: {
+                    "sha256": sha256,
+                    "size": binary.len(),
+                }
+            }
+        });
+
+        // Include descriptor from manifest if available
+        if let Some(manifest) = manifest_json {
+            if let Ok(m) = serde_json::from_str::<serde_json::Value>(manifest) {
+                if let Some(caps) = m.get("capabilities") {
+                    meta["descriptor"] = serde_json::json!({
+                        "protocol_version": m.get("protocol_version").and_then(|v| v.as_str()).unwrap_or("1.0"),
+                        "methods": caps.get("methods").cloned().unwrap_or(serde_json::Value::Array(vec![])),
+                    });
+                }
+            }
+        }
+
+        // Write meta.json in the .forest/component/ dir within the cache component path
+        let meta_dir = cache_component_dir.join(".forest").join("component");
+        tokio::fs::create_dir_all(&meta_dir).await?;
+        tokio::fs::write(
+            meta_dir.join("meta.json"),
+            serde_json::to_string_pretty(&meta)?,
+        )
+        .await?;
+
+        // Also write a minimal forest.component.cue marker so is_v2_component returns true
+        let marker = cache_component_dir.join("forest.component.cue");
+        if !marker.exists() {
+            tokio::fs::write(&marker, format!("// {organisation}/{name}@{version}\n")).await?;
+        }
+
+        // Download CUE spec files and vendor into project's cue.mod/pkg/
+        // This enables `import "forest.sh/{org}/{name}@v0"` in consumer CUE files
+        if let Ok(Some(comp)) = self.grpc.get_component_version(name, organisation, version).await {
+            if let Ok(mut file_stream) = self.grpc.get_component_files(&comp.id).await {
+                use futures::StreamExt;
+                let mut cue_files: Vec<(String, Vec<u8>)> = Vec::new();
+
+                while let Some(item) = file_stream.next().await {
+                    match item {
+                        Ok(f) => {
+                            if f.file_path.ends_with(".cue") {
+                                cue_files.push((f.file_path, f.file_content));
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("failed to stream component files: {e}");
+                            break;
+                        }
+                    }
+                }
+
+                if !cue_files.is_empty() {
+                    // Vendor into cue.mod/pkg/forest.sh/{org}/{name}@v0/
+                    let project_dir = std::env::current_dir()?;
+                    let major_version = version.split('.').next().unwrap_or("0");
+                    let vendor_dir = project_dir
+                        .join("cue.mod")
+                        .join("pkg")
+                        .join("forest.sh")
+                        .join(organisation)
+                        .join(format!("{name}@v{major_version}"));
+
+                    tokio::fs::create_dir_all(&vendor_dir).await?;
+
+                    for (file_path, content) in &cue_files {
+                        let dest = vendor_dir.join(file_path);
+                        if let Some(parent) = dest.parent() {
+                            tokio::fs::create_dir_all(parent).await?;
+                        }
+                        tokio::fs::write(&dest, content).await?;
+                        tracing::info!("vendored {}", dest.display());
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn get_component(
         &self,
@@ -233,7 +408,7 @@ impl ComponentsService {
                         dep
                     ))
             }
-            DependencyType::Local(_path) => todo!(),
+            DependencyType::Local(_path) => anyhow::bail!("local dependencies cannot be resolved as upstream components"),
         }
     }
 
@@ -262,12 +437,7 @@ impl ComponentsService {
         //     .context("failed to get local components")?;
 
         // FIXME(kjuulh): implement inits
-        // let local = local_deps
-        //     .get(deps.dependencies)
-        //     .context("failed to find all required local dependencies")?;
-
-        // Ok(local.get_init())
-        todo!()
+        anyhow::bail!("component init templates are not yet supported")
     }
 
     async fn download_component(
@@ -334,7 +504,7 @@ impl TryFrom<CacheComponent> for Dependency {
         Ok(Self {
             name: value.name,
             organisation: value.organisation,
-            dependency_type: DependencyType::Versioned(value.version),
+            dependency_type: DependencyType::Versioned(value.version.to_string()),
         })
     }
 }

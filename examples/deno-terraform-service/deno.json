@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "@forest/sdk": "../../sdk/typescript/forest-sdk.ts"
+  }
+}
