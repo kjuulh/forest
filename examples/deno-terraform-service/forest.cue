@@ -7,6 +7,10 @@ project: sdk.#ForestProject & {
 	organisation: "forest-contrib"
 }
 
+dependencies: sdk.#ForestDependencies & {
+	"forest/deployment": path: "../../components/forest/deployment"
+}
+
 forest: component: sdk.#ForestComponent & {
 	name:    project.name
 	version: "0.1.0"
@@ -21,3 +25,5 @@ forest: component: sdk.#ForestComponent & {
 		type:   "deno"
 	}
 }
+
+commands: sdk.#ForestCommands & {}

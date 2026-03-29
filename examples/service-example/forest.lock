@@ -1,2 +1,3 @@
 # forest.lock — do not edit manually
 forest-contrib/terraform-service@0.1.0 path:../../components/forest-contrib/terraform-service
+forest/deployment@0.2.0 path:../../components/forest/deployment

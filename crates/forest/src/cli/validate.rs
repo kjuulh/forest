@@ -21,7 +21,7 @@ impl ValidateCommand {
 
         // Derive available contracts from dependencies
         let enabled_contracts =
-            contracts::EnabledContracts::from_project_dependencies(&project).await;
+            contracts::EnabledContracts::from_project_dependencies(&project);
         if enabled_contracts.has_any() {
             println!("Contracts (from dependencies):");
             for topic in enabled_contracts.topics() {
@@ -42,6 +42,12 @@ impl ValidateCommand {
             };
 
             if !component_binary::is_v2_component(&path) {
+                continue;
+            }
+
+            // Skip contract-only dependencies (they define types, not services)
+            let dep_key = format!("{}/{}", dep.organisation, dep.name);
+            if contracts::is_contract(&dep_key) {
                 continue;
             }
 

@@ -348,6 +348,26 @@ impl GrpcClient {
         Ok(res.into_inner().versions)
     }
 
+    pub async fn search_components(
+        &self,
+        query: &str,
+        organisation: &str,
+    ) -> anyhow::Result<Vec<ComponentSummary>> {
+        let mut client = self.registry_client().await?;
+
+        let res = client
+            .search_components(SearchComponentsRequest {
+                query: query.into(),
+                organisation: organisation.into(),
+                page: 0,
+                page_size: 100,
+            })
+            .await
+            .map_err(grpc_err)?;
+
+        Ok(res.into_inner().components)
+    }
+
     pub async fn commit_component_upload(&self, upload_context: &str) -> anyhow::Result<()> {
         let mut client = self.registry_client().await?;
 

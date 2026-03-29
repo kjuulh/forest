@@ -64,6 +64,8 @@ pub struct TypeDef {
 pub enum TypeDefKind {
     Struct(StructDef),
     Enum(EnumDef),
+    /// Named map type (e.g., `{ [string]: string }` in CUE).
+    Map(TypeRef),
 }
 
 /// An object with named fields.

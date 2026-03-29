@@ -8,11 +8,7 @@ pub struct DeploymentHooks {
     pub rollback: serde_json::Value,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EnvVar {
-    pub key: String,
-    pub value: String,
-}
+pub type EnvVars = std::collections::BTreeMap<String, String>;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HealthCheck {
@@ -34,7 +30,7 @@ fn default_port_external() -> bool { false }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Spec {
-    pub env_vars: Vec<EnvVar>,
+    pub env_vars: EnvVars,
     #[serde(default)]
     pub health_checks: Option<HealthCheck>,
     pub name: String,
@@ -87,33 +83,18 @@ pub struct ForestDeploymentPrepareInput {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForestDeploymentPrepareOutput {
-    pub manifests: Vec<String>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForestDeploymentReleaseInput {
-    pub release_id: String,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForestDeploymentReleaseOutput {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForestDeploymentRollbackInput {
-    pub release_id: String,
-    #[serde(default = "default_forestdeploymentrollbackinput_target_revision")]
-    pub target_revision: String,
 }
-
-fn default_forestdeploymentrollbackinput_target_revision() -> String { "".to_string() }
 
 pub trait ForestDeploymentHookHandler: Send + Sync {
     /// Generate Terraform files for deployment
-    fn prepare(&self, spec: &Spec, input: ForestDeploymentPrepareInput) -> impl std::future::Future<Output = Result<ForestDeploymentPrepareOutput, forest_sdk::Error>> + Send;
+    fn prepare(&self, spec: &Spec, input: ForestDeploymentPrepareInput) -> impl std::future::Future<Output = Result<(), forest_sdk::Error>> + Send;
     /// Apply Terraform configuration
-    fn release(&self, spec: &Spec, input: ForestDeploymentReleaseInput) -> impl std::future::Future<Output = Result<ForestDeploymentReleaseOutput, forest_sdk::Error>> + Send;
+    fn release(&self, spec: &Spec, input: ForestDeploymentReleaseInput) -> impl std::future::Future<Output = Result<(), forest_sdk::Error>> + Send;
     /// Roll back Terraform state
     fn rollback(&self, spec: &Spec, input: ForestDeploymentRollbackInput) -> impl std::future::Future<Output = Result<(), forest_sdk::Error>> + Send;
 }
@@ -164,13 +145,13 @@ where
             }
             "hooks/forest/deployment/prepare" => {
                 let input: ForestDeploymentPrepareInput = serde_json::from_value(input)?;
-                let output = self.hooks.prepare(spec, input).await?;
-                serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)
+                self.hooks.prepare(spec, input).await?;
+                Ok(serde_json::Value::Null)
             }
             "hooks/forest/deployment/release" => {
                 let input: ForestDeploymentReleaseInput = serde_json::from_value(input)?;
-                let output = self.hooks.release(spec, input).await?;
-                serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)
+                self.hooks.release(spec, input).await?;
+                Ok(serde_json::Value::Null)
             }
             "hooks/forest/deployment/rollback" => {
                 let input: ForestDeploymentRollbackInput = serde_json::from_value(input)?;

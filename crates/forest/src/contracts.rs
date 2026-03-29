@@ -1,133 +1,62 @@
 //! Forest contract system.
 //!
-//! A **contract** is a forest-owned hook topic (e.g., `forest/deployment`) that
-//! defines a set of lifecycle hooks. Contracts are derived from the project's
-//! dependencies — if any dependency implements `forest/deployment` hooks, the
-//! deployment contract is available.
+//! A **contract** is a published component (e.g., `forest/deployment`) that
+//! defines hook signatures. Like Rust traits — the contract component is the
+//! trait definition, and both the implementing component AND the consumer
+//! project must depend on it for the hooks to be invoked.
 //!
-//! Contracts are:
-//! - Forest-only (`forest/*` topics)
-//! - Derived from dependencies — no explicit enablement needed
-//! - If `forest release` is invoked and no dependencies implement deployment,
-//!   an error is returned
+//! Resolution:
+//! 1. Check the project's `dependencies:` for known contract components
+//! 2. Check each component dependency's `dependencies:` for contracts too
+//! 3. Both the project AND the component must have the contract in deps
+//!    for hooks to fire
 
 use crate::models::Project;
-use crate::services::component_binary;
 
-/// Known forest contract topics.
+/// Known forest contract components.
+/// These are the `org/name` keys as they appear in `dependencies:`.
 pub const CONTRACT_DEPLOYMENT: &str = "forest/deployment";
 pub const CONTRACT_OBSERVABILITY: &str = "forest/observability";
 pub const CONTRACT_SECURITY: &str = "forest/security";
 
-/// All known contract topics.
-pub const ALL_CONTRACTS: &[&str] = &[
+/// All known contract component names.
+const ALL_CONTRACTS: &[&str] = &[
     CONTRACT_DEPLOYMENT,
     CONTRACT_OBSERVABILITY,
     CONTRACT_SECURITY,
 ];
 
-/// Contracts available in a project, derived from its dependencies.
+pub fn is_contract(dep_key: &str) -> bool {
+    ALL_CONTRACTS.contains(&dep_key)
+}
+
+/// Contracts available in a project, derived from its `dependencies:` field.
 #[derive(Debug, Clone)]
 pub struct EnabledContracts {
     topics: Vec<String>,
 }
 
 impl EnabledContracts {
-    /// Derive available contracts from a project's resolved dependencies.
+    /// Derive available contracts from the project's dependencies.
     ///
-    /// Scans each dependency's component descriptor for `forest/*` hook topics.
-    /// A contract is enabled if at least one dependency implements it.
-    pub async fn from_project_dependencies(project: &Project) -> Self {
-        let mut topics_set = std::collections::BTreeSet::new();
+    /// A contract is enabled if the contract component appears in the
+    /// project's `dependencies:` (directly). The project must explicitly
+    /// opt in — transitive deps through components are not enough.
+    pub fn from_project_dependencies(project: &Project) -> Self {
+        let mut topics = Vec::new();
 
-        for component_ref in project.dependencies.get_components() {
-            let path = match &component_ref.source {
-                crate::models::ComponentSource::Local(p) => p.clone(),
-                crate::models::ComponentSource::Versioned(_) => {
-                    // For versioned deps, check the cache
-                    let cache_dir = match dirs::cache_dir() {
-                        Some(d) => d
-                            .join("forest")
-                            .join("components")
-                            .join(&component_ref.organisation)
-                            .join(&component_ref.name),
-                        None => continue,
-                    };
-                    // Find latest version dir
-                    match std::fs::read_dir(&cache_dir) {
-                        Ok(entries) => {
-                            let mut latest = None;
-                            for entry in entries.flatten() {
-                                if entry.path().is_dir() {
-                                    latest = Some(entry.path());
-                                }
-                            }
-                            match latest {
-                                Some(p) => p,
-                                None => continue,
-                            }
-                        }
-                        Err(_) => continue,
-                    }
-                }
-            };
-
-            if !component_binary::is_v2_component(&path) {
-                continue;
-            }
-
-            // Try to load cached descriptor (fast path — works for both binary and deno)
-            if let Some(descriptor) = component_binary::load_cached_descriptor(&path) {
-                for topic in component_contracts(&descriptor) {
-                    topics_set.insert(topic);
-                }
-                continue;
-            }
-
-            // Also check deno cached descriptor
-            if let Some(descriptor) =
-                crate::services::component_deno::load_cached_descriptor(&path)
-            {
-                for topic in component_contracts(&descriptor) {
-                    topics_set.insert(topic);
-                }
-                continue;
-            }
-
-            // Try to describe from binary
-            if let Some(binary_path) =
-                component_binary::resolve_binary(&path, &component_ref.name)
-            {
-                if let Ok(descriptor) = component_binary::describe_component(&binary_path).await {
-                    for topic in component_contracts(&descriptor) {
-                        topics_set.insert(topic);
-                    }
-                }
-            }
-
-            // Try to describe from deno
-            if crate::services::component_deno::is_deno_component(&path) {
-                if let Some(entrypoint) =
-                    crate::services::component_deno::resolve_entrypoint(&path)
-                {
-                    if let Ok(descriptor) =
-                        crate::services::component_deno::describe_deno_component(&path, &entrypoint)
-                            .await
-                    {
-                        for topic in component_contracts(&descriptor) {
-                            topics_set.insert(topic);
-                        }
-                    }
-                }
+        for dep in &project.dependencies.dependencies {
+            let dep_key = format!("{}/{}", dep.organisation, dep.name);
+            if is_contract(&dep_key) {
+                topics.push(dep_key);
             }
         }
 
-        Self {
-            topics: topics_set.into_iter().collect(),
-        }
+        topics.sort();
+        Self { topics }
     }
 
-    /// Check if a specific contract topic is enabled.
+    /// Check if a specific contract is enabled.
     pub fn is_enabled(&self, topic: &str) -> bool {
         self.topics.iter().any(|t| t == topic)
     }
@@ -148,9 +77,11 @@ impl EnabledContracts {
             Ok(())
         } else {
             anyhow::bail!(
-                "no dependencies implement the '{topic}' contract.\n\
-                 Add a component that implements {topic} hooks to your dependencies in forest.cue.\n\
-                 Example:\n  dependencies: {{\n    \"forest-contrib/terraform-service\": path: \"...\"\n  }}"
+                "the '{topic}' contract is not in your dependencies.\n\
+                 Add it to your forest.cue:\n  \
+                 dependencies: {{\n    \
+                   \"{topic}\": path: \"path/to/{topic}\"\n  \
+                 }}"
             )
         }
     }
@@ -158,7 +89,7 @@ impl EnabledContracts {
 
 /// Extract which contract topics a component implements, based on its descriptor.
 ///
-/// Only returns `forest/*` topics (contracts), not custom hook topics.
+/// Only returns `forest/*` topics, not custom hook topics.
 pub fn component_contracts(descriptor: &forest_sdk::ComponentDescriptor) -> Vec<String> {
     let mut topics: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
@@ -190,26 +121,71 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_from_project_with_contract_dep() {
+        let project = Project {
+            name: "test".into(),
+            organisation: Some("myorg".into()),
+            dependencies: crate::models::Dependencies {
+                dependencies: vec![
+                    crate::models::Dependency {
+                        name: "deployment".into(),
+                        organisation: "forest".into(),
+                        dependency_type: crate::models::DependencyType::Local(
+                            "../../components/forest/deployment".into(),
+                        ),
+                    },
+                    crate::models::Dependency {
+                        name: "terraform-service".into(),
+                        organisation: "forest-contrib".into(),
+                        dependency_type: crate::models::DependencyType::Local(
+                            "../../components/forest-contrib/terraform-service".into(),
+                        ),
+                    },
+                ],
+            },
+            commands: Default::default(),
+            path: Default::default(),
+            other: crate::models::ProjectValue::Map(Default::default()),
+        };
+
+        let contracts = EnabledContracts::from_project_dependencies(&project);
+        assert!(contracts.is_enabled(CONTRACT_DEPLOYMENT));
+        assert!(!contracts.is_enabled(CONTRACT_OBSERVABILITY));
+    }
+
+    #[test]
+    fn test_from_project_without_contract() {
+        let project = Project {
+            name: "test".into(),
+            organisation: Some("myorg".into()),
+            dependencies: crate::models::Dependencies {
+                dependencies: vec![crate::models::Dependency {
+                    name: "terraform-service".into(),
+                    organisation: "forest-contrib".into(),
+                    dependency_type: crate::models::DependencyType::Local(
+                        "../../components/forest-contrib/terraform-service".into(),
+                    ),
+                }],
+            },
+            commands: Default::default(),
+            path: Default::default(),
+            other: crate::models::ProjectValue::Map(Default::default()),
+        };
+
+        let contracts = EnabledContracts::from_project_dependencies(&project);
+        assert!(!contracts.is_enabled(CONTRACT_DEPLOYMENT));
+        assert!(!contracts.has_any());
+    }
+
+    #[test]
     fn test_component_contracts() {
         let descriptor = forest_sdk::ComponentDescriptor {
             protocol_version: "1.1".into(),
             methods: vec![
                 forest_sdk::MethodInfo {
-                    name: "commands/prepare".into(),
-                    kind: "command".into(),
-                    topic: None,
-                    description: None,
-                },
-                forest_sdk::MethodInfo {
                     name: "hooks/forest/deployment/prepare".into(),
                     kind: "hook".into(),
                     topic: Some("forest/deployment".into()),
-                    description: None,
-                },
-                forest_sdk::MethodInfo {
-                    name: "hooks/forest/observability/configure_monitoring".into(),
-                    kind: "hook".into(),
-                    topic: Some("forest/observability".into()),
                     description: None,
                 },
                 forest_sdk::MethodInfo {
@@ -222,7 +198,6 @@ mod tests {
         };
 
         let contracts = component_contracts(&descriptor);
-        assert_eq!(contracts, vec!["forest/deployment", "forest/observability"]);
-        // custom/something is NOT a contract
+        assert_eq!(contracts, vec!["forest/deployment"]);
     }
 }

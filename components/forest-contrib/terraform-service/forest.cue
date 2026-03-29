@@ -7,9 +7,13 @@ project: sdk.#ForestProject & {
 	organisation: "forest-contrib"
 }
 
+dependencies: sdk.#ForestDependencies & {
+	"forest/deployment": path: "../../forest/deployment"
+}
+
 forest: component: sdk.#ForestComponent & {
 	name:    project.name
-	version: "0.1.0"
+	version: "0.2.0"
 
 	codegen: {
 		type:   "rust"

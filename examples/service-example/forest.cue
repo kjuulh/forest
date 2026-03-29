@@ -25,6 +25,7 @@ _destinationTypes: {
 }
 
 dependencies: sdk.#ForestDependencies & {
+	"forest/deployment": path:                "../../components/forest/deployment"
 	"forest-contrib/terraform-service": path: "../../components/forest-contrib/terraform-service"
 }
 
@@ -37,9 +38,7 @@ dependencies: sdk.#ForestDependencies & {
 			]
 			config: {
 				replicas: 2
-				env_vars: [
-					{key: "RUST_LOG", value: "debug"},
-				]
+				env_vars: RUST_LOG: "debug"
 			}
 		}
 
@@ -47,9 +46,7 @@ dependencies: sdk.#ForestDependencies & {
 			destinations: [#Terraform & {destination: "infrastructure-staging.*"}]
 			config: {
 				replicas: 3
-				env_vars: [
-					{key: "RUST_LOG", value: "info"},
-				]
+				env_vars: RUST_LOG: "info"
 			}
 		}
 
@@ -57,9 +54,7 @@ dependencies: sdk.#ForestDependencies & {
 			destinations: [#Terraform & {destination: "infrastructure-prod.*"}]
 			config: {
 				replicas: 5
-				env_vars: [
-					{key: "RUST_LOG", value: "warn"},
-				]
+				env_vars: RUST_LOG: "warn"
 			}
 		}
 	}
@@ -76,9 +71,9 @@ dependencies: sdk.#ForestDependencies & {
 			path: "/"
 			port: 3001
 		}
-		env_vars: [
-			{key: "RUST_LOG", value: "my_service=debug,info"},
-		]
+		env_vars: {
+			RUST_LOG: "my_service=debug,info"
+		}
 	}
 }
 

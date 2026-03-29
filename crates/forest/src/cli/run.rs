@@ -168,9 +168,19 @@ fn build_dynamic_command(
         .after_help(after_help);
 
     for (cli_name, cmd_name) in &cli_names {
-        let mut sub = clap::Command::new(cli_name.clone());
+        let mut sub = clap::Command::new(cli_name.clone())
+            .arg(
+                clap::Arg::new("input_args")
+                    .action(clap::ArgAction::Append)
+                    .allow_hyphen_values(true)
+                    .trailing_var_arg(true),
+            );
         if let Some(command) = project.commands.get(cmd_name) {
             if let crate::models::Command::ComponentBinary {
+                description: Some(desc),
+                ..
+            }
+            | crate::models::Command::ComponentDeno {
                 description: Some(desc),
                 ..
             } = command
@@ -198,6 +208,33 @@ fn build_spec_json(
     }
 }
 
+/// Parse `--key value` pairs from trailing args into a JSON object.
+fn parse_input_args(args: &ArgMatches) -> serde_json::Value {
+    let raw: Vec<String> = args
+        .get_raw("input_args")
+        .unwrap_or_default()
+        .map(|s| s.to_string_lossy().to_string())
+        .collect();
+
+    let mut map = serde_json::Map::new();
+    let mut i = 0;
+    while i < raw.len() {
+        if let Some(key) = raw[i].strip_prefix("--") {
+            if i + 1 < raw.len() && !raw[i + 1].starts_with("--") {
+                map.insert(key.replace('-', "_").to_string(), serde_json::Value::String(raw[i + 1].clone()));
+                i += 2;
+            } else {
+                map.insert(key.replace('-', "_").to_string(), serde_json::Value::Bool(true));
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    serde_json::Value::Object(map)
+}
+
 struct CliRun;
 impl CliRun {
     pub async fn execute(
@@ -207,7 +244,7 @@ impl CliRun {
         matches: &ArgMatches,
         cli_names: &std::collections::BTreeMap<String, crate::models::CommandName>,
     ) -> anyhow::Result<()> {
-        let (subcommand, _args) = matches
+        let (subcommand, sub_matches) = matches
             .subcommand()
             .ok_or(anyhow::anyhow!("subcommand required"))?;
 
@@ -220,6 +257,8 @@ impl CliRun {
             .iter()
             .find(|(c, _)| *c == resolved_name)
             .ok_or(anyhow::anyhow!("found no matching command"))?;
+
+        let input_json = parse_input_args(sub_matches);
 
         tracing::info!("running command: {}", command_name);
 
@@ -241,11 +280,10 @@ impl CliRun {
                     serde_json::Value::Object(serde_json::Map::new())
                 };
 
-                let input_json = serde_json::Value::Object(serde_json::Map::new());
-
                 let call_context = forest_sdk::CallContext {
                     project: Some(project.name.clone()),
                     organisation: project.organisation.clone(),
+                    work_dir: Some(project.path.to_string_lossy().to_string()),
                     ..Default::default()
                 };
 
@@ -258,7 +296,9 @@ impl CliRun {
                 )
                 .await?;
 
-                println!("{}", serde_json::to_string_pretty(&result)?);
+                if !result.is_null() {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
             }
             crate::models::Command::ComponentDeno {
                 component_dir,
@@ -272,11 +312,10 @@ impl CliRun {
                     serde_json::Value::Object(serde_json::Map::new())
                 };
 
-                let input_json = serde_json::Value::Object(serde_json::Map::new());
-
                 let call_context = forest_sdk::CallContext {
                     project: Some(project.name.clone()),
                     organisation: project.organisation.clone(),
+                    work_dir: Some(project.path.to_string_lossy().to_string()),
                     ..Default::default()
                 };
 
@@ -290,7 +329,9 @@ impl CliRun {
                 )
                 .await?;
 
-                println!("{}", serde_json::to_string_pretty(&result)?);
+                if !result.is_null() {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
             }
             crate::models::Command::Inline(items) => {
                 let mut cmd = tokio::process::Command::new("bash");

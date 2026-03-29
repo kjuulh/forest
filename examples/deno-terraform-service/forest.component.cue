@@ -1,6 +1,9 @@
 package deno_terraform_service
 
-import "forest.sh/forest/sdk@v0"
+import (
+	"forest.sh/forest/sdk@v0"
+	"forest.sh/forest/deployment@v0"
+)
 
 #Spec: sdk.#ForestSpec & {
 	name:     string & =~"^[a-z][a-z0-9-]*$"
@@ -35,29 +38,12 @@ import "forest.sh/forest/sdk@v0"
 	}
 }
 
+// Implements the forest/deployment contract.
 #Hooks: sdk.#ForestHooks & {
-	"forest/deployment": sdk.#ForestHook & {
-		prepare: {
-			description: "Generate Terraform files for deployment"
-			input: {}
-			output: {
-				manifests: [...string]
-			}
-		}
-		release: {
-			description: "Apply Terraform configuration"
-			input: {
-				release_id: string
-			}
-			output: {}
-		}
-		rollback: {
-			description: "Roll back Terraform state"
-			input: {
-				release_id:      string
-				target_revision: string | *""
-			}
-		}
+	"forest/deployment": deployment.#DeploymentHooks & {
+		prepare: description: "Generate Terraform files for deployment"
+		release: description: "Apply Terraform configuration"
+		rollback: description: "Roll back Terraform state"
 	}
 }
 

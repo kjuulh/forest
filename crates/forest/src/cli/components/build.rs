@@ -21,8 +21,18 @@ pub struct BuildCommand {}
 
 impl BuildCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        // Try forest.component.cue first (new SDK pattern), fall back to spec.cue (legacy)
+        let cue_files = if std::path::Path::new("forest.component.cue").exists() {
+            vec!["./forest.cue", "./forest.component.cue"]
+        } else {
+            vec!["./forest.cue", "./spec.cue"]
+        };
         let mut cmd = tokio::process::Command::new("cue");
-        cmd.args(["export", "./forest.cue", "./spec.cue", "--out", "json"]);
+        cmd.arg("export");
+        for f in &cue_files {
+            cmd.arg(f);
+        }
+        cmd.args(["--out", "json"]);
         if let Ok(registry) = std::env::var("CUE_REGISTRY") {
             cmd.env("CUE_REGISTRY", registry);
         }
@@ -50,6 +60,49 @@ impl BuildCommand {
         let Some(upload) = &component.upload else {
             anyhow::bail!("forest.component.upload section is required for building");
         };
+
+        let organisation = doc
+            .project
+            .as_ref()
+            .and_then(|p| p.organisation.as_deref())
+            .unwrap_or("forest");
+
+        // Deno/TypeScript components: no binary build, just generate meta.json
+        if matches!(upload.source_type, SourceType::Deno | SourceType::Typescript) {
+            let entrypoint = upload.source.join("main.ts");
+            tracing::info!(
+                "deno component '{}' — generating meta.json",
+                component.name,
+            );
+
+            // Run _meta/describe to get the descriptor
+            let descriptor = crate::services::component_deno::describe_deno_component(
+                &std::env::current_dir()?,
+                &entrypoint.to_string_lossy(),
+            )
+            .await
+            .ok();
+
+            let meta_dir = std::env::current_dir()?.join(".forest").join("component");
+            std::fs::create_dir_all(&meta_dir)?;
+            let mut meta = serde_json::json!({
+                "organisation": organisation,
+                "name": component.name,
+                "version": component.version,
+                "kind": "deno",
+                "entrypoint": entrypoint.to_string_lossy(),
+            });
+            if let Some(desc) = descriptor {
+                meta["descriptor"] = serde_json::to_value(&desc)?;
+            }
+            std::fs::write(
+                meta_dir.join("meta.json"),
+                serde_json::to_string_pretty(&meta)?,
+            )?;
+
+            tracing::info!("meta.json generated for deno component");
+            return Ok(());
+        }
 
         let architectures = upload
             .architectures
@@ -81,18 +134,13 @@ impl BuildCommand {
                 SourceType::Docker => {
                     build_docker(state, component, &upload.source, target).await?;
                 }
+                SourceType::Deno | SourceType::Typescript => unreachable!(),
             }
         }
 
         generate_checksums(&component.name, &targets)?;
 
         // Store built binaries in content-addressable cache and write meta.json
-        let organisation = doc
-            .project
-            .as_ref()
-            .and_then(|p| p.organisation.as_deref())
-            .unwrap_or("forest");
-
         let mut platforms = serde_json::Map::new();
 
         for target in &targets {
@@ -250,6 +298,9 @@ fn resolve_targets(
                 }
                 SourceType::Docker => {
                     target.docker_platform = Some(docker_platform(os, arch)?);
+                }
+                SourceType::Deno | SourceType::Typescript => {
+                    // No binary targets for Deno/TypeScript
                 }
             }
 
@@ -569,4 +620,8 @@ pub enum SourceType {
     Golang,
     #[serde(rename = "docker")]
     Docker,
+    #[serde(rename = "deno")]
+    Deno,
+    #[serde(rename = "typescript")]
+    Typescript,
 }

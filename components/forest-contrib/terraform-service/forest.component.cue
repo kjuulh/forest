@@ -1,6 +1,9 @@
 package terraform_service
 
-import "forest.sh/forest/sdk@v0"
+import (
+	"forest.sh/forest/sdk@v0"
+	"forest.sh/forest/deployment@v0"
+)
 
 // --- Input spec ---
 // Note: `environment` is NOT in the spec — it comes from the deployment
@@ -11,7 +14,7 @@ import "forest.sh/forest/sdk@v0"
 	replicas: int & >=1 & <=100 | *1
 	ports: [...#Port]
 	health_checks?: #HealthCheck
-	env_vars: [...#EnvVar]
+	env_vars: #EnvVars
 }
 
 // --- Commands ---
@@ -41,29 +44,12 @@ import "forest.sh/forest/sdk@v0"
 }
 
 // --- Hooks ---
+// Implements the forest/deployment contract.
 #Hooks: sdk.#ForestHooks & {
-	"forest/deployment": sdk.#ForestHook & {
-		prepare: {
-			description: "Generate Terraform files for deployment"
-			input: {}
-			output: {
-				manifests: [...string]
-			}
-		}
-		release: {
-			description: "Apply Terraform configuration"
-			input: {
-				release_id: string
-			}
-			output: {}
-		}
-		rollback: {
-			description: "Roll back Terraform state"
-			input: {
-				release_id:      string
-				target_revision: string | *""
-			}
-		}
+	"forest/deployment": deployment.#DeploymentHooks & {
+		prepare: description: "Generate Terraform files for deployment"
+		release: description: "Apply Terraform configuration"
+		rollback: description: "Roll back Terraform state"
 	}
 }
 
@@ -82,7 +68,6 @@ import "forest.sh/forest/sdk@v0"
 	}
 }
 
-#EnvVar: {
-	key:   string
-	value: string
+#EnvVars: {
+	[string]: string
 }

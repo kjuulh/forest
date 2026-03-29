@@ -173,20 +173,14 @@ async fn collect_cue_files(
     let mut files = Vec::new();
     let mut entries = tokio::fs::read_dir(dir).await?;
 
-    // Only include component-relevant CUE files (forest.cue, forest.component.cue, spec.cue, *.schema.cue)
-    // Skip consumer examples, tests, etc.
-    let component_cue_files = ["forest.cue", "forest.component.cue", "spec.cue"];
-
+    // Include all .cue files in the component directory.
+    // These form the component's public API (types, contracts, specs).
     while let Some(entry) = entries.next_entry().await? {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) == Some("cue") {
             let file_name = entry.file_name().to_string_lossy().to_string();
-            if component_cue_files.contains(&file_name.as_str())
-                || file_name.ends_with(".schema.cue")
-            {
-                let content = tokio::fs::read_to_string(&path).await?;
-                files.push((file_name, content));
-            }
+            let content = tokio::fs::read_to_string(&path).await?;
+            files.push((file_name, content));
         }
     }
 

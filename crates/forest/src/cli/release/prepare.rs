@@ -30,7 +30,7 @@ impl PrepareCommand {
         let project = state.project_parser().get_project().await?;
 
         // Derive available contracts from project dependencies
-        let enabled_contracts = EnabledContracts::from_project_dependencies(&project).await;
+        let enabled_contracts = EnabledContracts::from_project_dependencies(&project);
         enabled_contracts.require(contracts::CONTRACT_DEPLOYMENT)?;
 
         tracing::info!("enabled contracts: {}", enabled_contracts);
@@ -177,91 +177,74 @@ impl PrepareCommand {
             }
 
             // ── Pass 2: Invoke deployment hook (optional) ──
-            // If the component has a v2 binary or Deno runtime with deployment hooks, call it.
-            // The hook can add extra files or perform validation.
-            let hook_result = if let Some(binary_path) = component_binary::resolve_binary(component_path, &component.name) {
+            // If the component has a binary or Deno runtime with deployment hooks,
+            // call prepare to get additional manifest files.
+            let hook_result = {
                 let spec_json = deployment_item
                     .config
                     .as_ref()
                     .map(|c| serde_json::to_value(c).unwrap_or_default())
                     .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-
+                let empty_input = serde_json::Value::Object(serde_json::Map::new());
                 let call_context = forest_sdk::CallContext {
                     project: Some(project.name.clone()),
                     organisation: project.organisation.clone(),
                     environment: Some(deployment_item.env.clone()),
+                    work_dir: Some(project.path.to_string_lossy().to_string()),
                     ..Default::default()
                 };
 
-                tracing::info!(
-                    "invoking deployment prepare hook on {}/{}",
-                    component.organisation, component.name
-                );
-
-                Some(component_binary::invoke_component_with_context(
-                    &binary_path,
-                    "hooks/forest/deployment/prepare",
-                    &spec_json,
-                    &serde_json::Value::Object(serde_json::Map::new()),
-                    Some(&call_context),
-                )
-                .await
-                .with_context(|| format!(
-                    "deployment prepare hook failed for {}/{}",
-                    component.organisation, component.name
-                ))?)
-            } else if crate::services::component_deno::is_deno_component(component_path) {
-                if let Some(entrypoint) = crate::services::component_deno::resolve_entrypoint(component_path) {
-                    let spec_json = deployment_item
-                        .config
-                        .as_ref()
-                        .map(|c| serde_json::to_value(c).unwrap_or_default())
-                        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-
-                    let call_context = forest_sdk::CallContext {
-                        project: Some(project.name.clone()),
-                        organisation: project.organisation.clone(),
-                        environment: Some(deployment_item.env.clone()),
-                        ..Default::default()
-                    };
-
-                    tracing::info!(
-                        "invoking deno deployment prepare hook on {}/{}",
-                        component.organisation, component.name
-                    );
-
-                    Some(crate::services::component_deno::invoke_deno_component(
-                        component_path,
-                        &entrypoint,
+                if let Some(binary_path) = component_binary::resolve_binary(component_path, &component.name) {
+                    tracing::info!("invoking deployment prepare hook on {}/{}", component.organisation, component.name);
+                    Some(component_binary::invoke_component_with_context(
+                        &binary_path,
                         "hooks/forest/deployment/prepare",
                         &spec_json,
-                        &serde_json::Value::Object(serde_json::Map::new()),
+                        &empty_input,
                         Some(&call_context),
-                    )
-                    .await
-                    .with_context(|| format!(
-                        "deno deployment prepare hook failed for {}/{}",
+                    ).await.with_context(|| format!(
+                        "deployment prepare hook failed for {}/{}",
                         component.organisation, component.name
                     ))?)
+                } else if crate::services::component_deno::is_deno_component(component_path) {
+                    if let Some(entrypoint) = crate::services::component_deno::resolve_entrypoint(component_path) {
+                        tracing::info!("invoking deno deployment prepare hook on {}/{}", component.organisation, component.name);
+                        Some(crate::services::component_deno::invoke_deno_component(
+                            component_path,
+                            &entrypoint,
+                            "hooks/forest/deployment/prepare",
+                            &spec_json,
+                            &empty_input,
+                            Some(&call_context),
+                        ).await.with_context(|| format!(
+                            "deno deployment prepare hook failed for {}/{}",
+                            component.organisation, component.name
+                        ))?)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
-            } else {
-                None
             };
 
-            // If the hook returns manifests, write them as additional files
+            // Write manifests returned by the hook.
+            // Each manifest is { name: "filename.yaml", content: "..." }.
             if let Some(result) = hook_result {
                 if let Some(manifests) = result.get("manifests").and_then(|v| v.as_array()) {
-                    for (i, manifest) in manifests.iter().enumerate() {
-                        if let Some(content) = manifest.as_str() {
-                            let file_name = format!("hook-{:02}.yaml", i + 1);
-                            let file_path = output_path.join(&file_name);
-                            tokio::fs::write(&file_path, content)
-                                .await
-                                .context("write hook output file")?;
-                            tracing::info!("wrote hook output: {}", file_path.display());
-                        }
+                    for manifest in manifests {
+                        let obj = manifest.as_object()
+                            .context("manifest must be an object with name and content")?;
+                        let name = obj.get("name").and_then(|n| n.as_str())
+                            .context("manifest.name is required")?;
+                        let content = obj.get("content").and_then(|c| c.as_str())
+                            .context("manifest.content is required")?;
+
+                        let file_path = output_path.join(name);
+                        tokio::fs::write(&file_path, content)
+                            .await
+                            .with_context(|| format!("write manifest {name}"))?;
+                        tracing::info!("wrote manifest: {}", file_path.display());
                     }
                 }
             }

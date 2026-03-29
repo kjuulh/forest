@@ -93,19 +93,29 @@ pub async fn invoke_deno_component(
 
     let payload_bytes = serde_json::to_vec(&payload)?;
 
+    let component_dir = component_dir.canonicalize()
+        .with_context(|| format!("canonicalize component dir: {}", component_dir.display()))?;
     let entrypoint_path = component_dir.join(entrypoint);
+
+    // Run in the project directory (work_dir) if provided, otherwise the component dir.
+    let run_dir = context
+        .and_then(|ctx| ctx.work_dir.as_deref())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| component_dir.clone());
 
     let mut child = tokio::process::Command::new("deno")
         .args([
             "run",
             "--allow-read",
+            "--allow-write",
             "--allow-env",
             "--allow-net",
+            "--allow-run",
             "--quiet",
             &entrypoint_path.to_string_lossy(),
             method,
         ])
-        .current_dir(component_dir)
+        .current_dir(run_dir)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -144,6 +154,8 @@ pub async fn describe_deno_component(
     component_dir: &Path,
     entrypoint: &str,
 ) -> anyhow::Result<forest_sdk::ComponentDescriptor> {
+    let component_dir = component_dir.canonicalize()
+        .with_context(|| format!("canonicalize component dir: {}", component_dir.display()))?;
     let entrypoint_path = component_dir.join(entrypoint);
 
     let output = tokio::time::timeout(

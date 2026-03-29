@@ -45,6 +45,11 @@ fn emit_type_defs(out: &mut String, type_defs: &[TypeDef]) -> CodegenResult<()> 
         match &td.kind {
             TypeDefKind::Enum(enum_def) => emit_enum(out, &td.name, enum_def)?,
             TypeDefKind::Struct(struct_def) => emit_interface(out, &td.name, struct_def)?,
+            TypeDefKind::Map(inner) => {
+                let inner_type = type_ref_to_ts(inner);
+                writeln!(out, "export type {} = Record<string, {}>;", td.name, inner_type)?;
+                writeln!(out)?;
+            }
         }
     }
     Ok(())
@@ -144,7 +149,7 @@ fn emit_command_handler(out: &mut String, commands: &[Command]) -> CodegenResult
         }
         writeln!(
             out,
-            "  {camel}(spec: Spec, input: {input_name}): Promise<{output_name}>;"
+            "  {camel}(spec: Spec, input: {input_name}, context: CallContext): Promise<{output_name}>;"
         )?;
     }
     writeln!(out, "}}")?;
@@ -194,7 +199,7 @@ fn emit_hook_handlers(out: &mut String, groups: &[HookGroup]) -> CodegenResult<(
             }
             writeln!(
                 out,
-                "  {camel}(spec: Spec, input: {input_name}): Promise<{output_type}>;"
+                "  {camel}(spec: Spec, input: {input_name}, context: CallContext): Promise<{output_type}>;"
             )?;
         }
         writeln!(out, "}}")?;
@@ -230,7 +235,7 @@ fn emit_router(out: &mut String, module: &Module) -> CodegenResult<()> {
     // call method
     writeln!(
         out,
-        "    async call(method: string, spec: Spec, input: unknown, _context: CallContext): Promise<unknown> {{"
+        "    async call(method: string, spec: Spec, input: unknown, context: CallContext): Promise<unknown> {{"
     )?;
     writeln!(out, "      switch (method) {{")?;
 
@@ -242,7 +247,7 @@ fn emit_router(out: &mut String, module: &Module) -> CodegenResult<()> {
         writeln!(out, "        case \"{method_path}\":")?;
         writeln!(
             out,
-            "          return commands.{camel}(spec, input as {input_name});"
+            "          return commands.{camel}(spec, input as {input_name}, context);"
         )?;
     }
 
@@ -258,12 +263,12 @@ fn emit_router(out: &mut String, module: &Module) -> CodegenResult<()> {
             if action.output.is_some() {
                 writeln!(
                     out,
-                    "          return {param_name}.{camel}(spec, input as {input_name});"
+                    "          return {param_name}.{camel}(spec, input as {input_name}, context);"
                 )?;
             } else {
                 writeln!(
                     out,
-                    "          {{ await {param_name}.{camel}(spec, input as {input_name}); return null; }}"
+                    "          {{ await {param_name}.{camel}(spec, input as {input_name}, context); return null; }}"
                 )?;
             }
         }

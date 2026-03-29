@@ -34,6 +34,11 @@ fn emit_type_defs(out: &mut String, type_defs: &[TypeDef]) -> CodegenResult<()> 
         match &td.kind {
             TypeDefKind::Enum(enum_def) => emit_enum(out, &td.name, enum_def)?,
             TypeDefKind::Struct(struct_def) => emit_struct(out, &td.name, struct_def)?,
+            TypeDefKind::Map(inner) => {
+                let inner_type = type_ref_to_rust(inner);
+                writeln!(out, "pub type {} = std::collections::BTreeMap<String, {}>;", td.name, inner_type)?;
+                writeln!(out)?;
+            }
         }
     }
     Ok(())

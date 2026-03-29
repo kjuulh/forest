@@ -14,7 +14,7 @@ package deployment
 		description: string | *"Prepare deployment artifacts"
 		input: {}
 		output: {
-			manifests: [...string]
+			manifests: [...#Manifest]
 		}
 	}
 	release: {
@@ -31,4 +31,10 @@ package deployment
 			target_revision: string | *""
 		}
 	}
+}
+
+// #Manifest is a named output file produced by a deployment hook.
+#Manifest: {
+	name:    string & =~"^[a-z0-9][a-z0-9._-]*$"
+	content: string
 }

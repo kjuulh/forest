@@ -475,26 +475,80 @@ impl<'a> LoweringContext<'a> {
     }
 
     fn lower_hook_actions(&self, topic_schema: &Schema) -> CodegenResult<Vec<ir::HookAction>> {
-        let props = topic_schema
-            .properties
-            .as_ref()
-            .ok_or_else(|| Error::LoweringError("Hook topic has no properties".into()))?;
+        // Collect action schemas from allOf refs first (base contract),
+        // then overlay inline properties (user overrides like description).
+        let mut merged_actions: BTreeMap<String, &Schema> = BTreeMap::new();
+
+        // 1. Collect from allOf refs (e.g. DeploymentHooks contract)
+        if let Some(all_of) = &topic_schema.all_of {
+            for item in all_of {
+                if let SchemaOrRef::Ref(r) = item {
+                    if let Ok(ref_schema) = self.resolve_ref(&r.ref_path) {
+                        if let Some(ref_props) = &ref_schema.properties {
+                            for (name, sor) in ref_props {
+                                let schema = match sor {
+                                    SchemaOrRef::Schema(s) => s,
+                                    SchemaOrRef::Ref(r2) => self.resolve_ref(&r2.ref_path)?,
+                                };
+                                merged_actions.insert(name.clone(), schema);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Inline properties override/extend base actions
+        let inline_props = topic_schema.properties.as_ref();
 
         let mut actions = Vec::new();
-        for (action_name, action_sor) in props {
-            let action_schema = match action_sor {
-                SchemaOrRef::Schema(s) => s,
-                SchemaOrRef::Ref(r) => self.resolve_ref(&r.ref_path)?,
+        // Process all known action names (from base + inline)
+        let action_names: Vec<String> = {
+            let mut names: Vec<String> = merged_actions.keys().cloned().collect();
+            if let Some(props) = inline_props {
+                for name in props.keys() {
+                    if !names.contains(name) {
+                        names.push(name.clone());
+                    }
+                }
+            }
+            names
+        };
+
+        for action_name in &action_names {
+            let base_schema = merged_actions.get(action_name);
+            let inline_schema = inline_props.and_then(|p| p.get(action_name));
+
+            // Use inline for description (user override), base for input/output
+            let desc_schema: Option<&Schema> = match inline_schema {
+                Some(SchemaOrRef::Schema(s)) => Some(s.as_ref()),
+                Some(SchemaOrRef::Ref(r)) => Some(self.resolve_ref(&r.ref_path)?),
+                None => base_schema.copied(),
+            };
+            let io_schema: &Schema = match base_schema {
+                Some(s) => s,
+                None => match inline_schema {
+                    Some(SchemaOrRef::Schema(s)) => s.as_ref(),
+                    Some(SchemaOrRef::Ref(r)) => self.resolve_ref(&r.ref_path)?,
+                    None => {
+                        return Err(Error::LoweringError(format!(
+                            "hook action {action_name} has no schema"
+                        )));
+                    }
+                },
             };
 
-            let description = self.extract_description(action_schema)?;
-            let input = self.extract_io_struct(action_schema, "input")?;
-            let output = if action_schema
+            let description = match desc_schema {
+                Some(s) => self.extract_description(s)?,
+                None => String::new(),
+            };
+            let input = self.extract_io_struct(io_schema, "input")?;
+            let output = if io_schema
                 .properties
                 .as_ref()
                 .is_some_and(|p| p.contains_key("output"))
             {
-                Some(self.extract_io_struct(action_schema, "output")?)
+                Some(self.extract_io_struct(io_schema, "output")?)
             } else {
                 None
             };
@@ -519,6 +573,17 @@ impl<'a> LoweringContext<'a> {
                 name: name.to_string(),
                 kind: ir::TypeDefKind::Enum(enum_def),
             });
+        }
+
+        // Map type (object with additionalProperties, no named properties)
+        if schema.properties.is_none() {
+            if let Some(additional) = &schema.additional_properties {
+                let inner = self.lower_type_ref(additional)?;
+                return Ok(ir::TypeDef {
+                    name: name.to_string(),
+                    kind: ir::TypeDefKind::Map(inner),
+                });
+            }
         }
 
         // Struct type

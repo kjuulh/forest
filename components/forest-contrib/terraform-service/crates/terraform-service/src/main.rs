@@ -4,7 +4,7 @@ mod forestgen;
 use forestgen::*;
 
 struct Commands;
-struct DeploymentHooks;
+struct Deployment;
 
 impl CommandHandler for Commands {
     async fn prepare(
@@ -12,7 +12,6 @@ impl CommandHandler for Commands {
         _spec: &Spec,
         _input: PrepareInput,
     ) -> Result<PrepareOutput, forest_sdk::Error> {
-        // Templates handle file generation — nothing to do here
         Ok(PrepareOutput { manifests: vec![] })
     }
 
@@ -40,25 +39,22 @@ impl CommandHandler for Commands {
     }
 }
 
-impl ForestDeploymentHookHandler for DeploymentHooks {
+impl ForestDeploymentHookHandler for Deployment {
     async fn prepare(
         &self,
         _spec: &Spec,
         _input: ForestDeploymentPrepareInput,
-    ) -> Result<ForestDeploymentPrepareOutput, forest_sdk::Error> {
-        Ok(ForestDeploymentPrepareOutput { manifests: vec![] })
+    ) -> Result<(), forest_sdk::Error> {
+        Ok(())
     }
 
     async fn release(
         &self,
         spec: &Spec,
-        input: ForestDeploymentReleaseInput,
-    ) -> Result<ForestDeploymentReleaseOutput, forest_sdk::Error> {
-        eprintln!(
-            "terraform apply for '{}' (release_id={})",
-            spec.name, input.release_id
-        );
-        Ok(ForestDeploymentReleaseOutput {})
+        _input: ForestDeploymentReleaseInput,
+    ) -> Result<(), forest_sdk::Error> {
+        eprintln!("terraform apply for '{}'", spec.name);
+        Ok(())
     }
 
     async fn rollback(
@@ -72,6 +68,6 @@ impl ForestDeploymentHookHandler for DeploymentHooks {
 }
 
 fn main() {
-    let router = ComponentRouter::new(Commands, DeploymentHooks);
+    let router = ComponentRouter::new(Commands, Deployment);
     forest_sdk::run_once(&router);
 }
