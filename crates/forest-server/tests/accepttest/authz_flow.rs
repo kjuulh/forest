@@ -94,6 +94,8 @@ async fn setup_org_with_destination(
                     organisation: "forest".into(),
                     name: "flux".into(),
                     version: 1,
+                    description: String::new(),
+                    fields: vec![],
                 }),
             },
         ))
@@ -144,6 +146,8 @@ async fn unauthenticated_cannot_create_destination() {
                 organisation: "forest".into(),
                 name: "flux".into(),
                 version: 1,
+                description: String::new(),
+                fields: vec![],
             }),
         }))
         .await;
@@ -255,6 +259,8 @@ async fn user_cannot_create_destination_in_other_org() {
                     organisation: "forest".into(),
                     name: "flux".into(),
                     version: 1,
+                    description: String::new(),
+                    fields: vec![],
                 }),
             },
         ))

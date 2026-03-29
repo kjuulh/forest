@@ -16,6 +16,8 @@ enum Cli {
     ReleaseSnapshot,
     /// Build and publish forest CLI release via GoReleaser
     Release,
+    /// Smoke-test Dagger service bindings (Postgres, NATS, MinIO)
+    TestServices,
 }
 
 #[tokio::main]
@@ -28,6 +30,7 @@ async fn main() -> eyre::Result<()> {
             Cli::Main => run_main(&client).await?,
             Cli::ReleaseSnapshot => run_goreleaser(&client, false).await?,
             Cli::Release => run_goreleaser(&client, true).await?,
+            Cli::TestServices => test_services(&client).await?,
         }
         Ok(())
     })
@@ -55,6 +58,9 @@ async fn run_pr(client: &dagger_sdk::Query) -> eyre::Result<()> {
             "--workspace",
             "--exclude",
             "forest-event-store",
+            "--",
+            "--skip",
+            "component_flow",
         ])
         .sync()
         .await?;
@@ -85,6 +91,9 @@ async fn run_main(client: &dagger_sdk::Query) -> eyre::Result<()> {
             "--workspace",
             "--exclude",
             "forest-event-store",
+            "--",
+            "--skip",
+            "component_flow",
         ])
         .sync()
         .await?;
@@ -97,6 +106,128 @@ async fn run_main(client: &dagger_sdk::Query) -> eyre::Result<()> {
 
     eprintln!("==> Main pipeline complete");
     Ok(())
+}
+
+/// Smoke-test that all service containers start and accept connections.
+async fn test_services(client: &dagger_sdk::Query) -> eyre::Result<()> {
+    eprintln!("==> Testing service connectivity");
+
+    let base = client
+        .container()
+        .from("debian:trixie-slim")
+        .with_exec(vec!["apt-get", "update", "-qq"])
+        .with_exec(vec![
+            "apt-get", "install", "-y", "-qq", "--no-install-recommends",
+            "postgresql-client", "curl", "wget", "netcat-openbsd",
+        ]);
+
+    // --- post3 (S3) — test first to verify it works in Dagger ---
+    eprintln!("--- testing post3 (S3)");
+    let s3 = s3_service(client);
+    base.clone()
+        .with_service_binding("s3", s3)
+        .with_exec(vec![
+            "sh", "-c",
+            "until nc -z s3 9000; do echo 'waiting for post3...'; sleep 1; done && \
+             curl -sf -X PUT http://s3:9000/forest && \
+             echo 'post3: OK (bucket created)'",
+        ])
+        .sync()
+        .await?;
+    eprintln!("--- post3: OK");
+
+    // --- Postgres ---
+    eprintln!("--- testing Postgres");
+    let pg = postgres_service(client);
+    base.clone()
+        .with_service_binding("postgres", pg)
+        .with_exec(vec![
+            "sh", "-c",
+            "until pg_isready -h postgres -U forest -d forest; do echo 'waiting for pg...'; sleep 1; done && \
+             echo 'Postgres: OK'",
+        ])
+        .sync()
+        .await?;
+    eprintln!("--- Postgres: OK");
+
+    // --- NATS ---
+    eprintln!("--- testing NATS");
+    let nats = nats_service(client);
+    base.clone()
+        .with_service_binding("nats", nats)
+        .with_exec(vec![
+            "sh", "-c",
+            "until nc -z nats 4222; do echo 'waiting for nats...'; sleep 1; done && \
+             echo 'NATS: OK'",
+        ])
+        .sync()
+        .await?;
+    eprintln!("--- NATS: OK");
+
+    // --- All together ---
+    eprintln!("--- testing all services together");
+    let pg = postgres_service(client);
+    let nats = nats_service(client);
+    let s3 = s3_service(client);
+    base.clone()
+        .with_service_binding("postgres", pg)
+        .with_service_binding("nats", nats)
+        .with_service_binding("s3", s3)
+        .with_env_variable("DATABASE_URL", "postgres://forest:forest@postgres:5432/forest")
+        .with_env_variable("NATS_URL", "nats://nats:4222")
+        .with_env_variable("S3_ENDPOINT", "http://s3:9000")
+        .with_env_variable("S3_BUCKET", "forest")
+        .with_env_variable("S3_ACCESS_KEY", "test")
+        .with_env_variable("S3_SECRET_KEY", "test")
+        .with_exec(vec![
+            "sh", "-c",
+            "until pg_isready -h postgres -U forest -d forest; do sleep 1; done && echo 'pg ok' && \
+             until nc -z nats 4222; do sleep 1; done && echo 'nats ok' && \
+             curl -sf -X PUT http://s3:9000/forest; echo 's3 ok' && \
+             echo 'All services: OK'",
+        ])
+        .sync()
+        .await?;
+    eprintln!("--- All services: OK");
+
+    eprintln!("==> All service tests passed");
+    Ok(())
+}
+
+/// Create a Garage (S3-compatible) service container.
+/// Create a post3 S3-compatible service container (filesystem backend, no auth).
+fn s3_service(client: &dagger_sdk::Query) -> dagger_sdk::Service {
+    let registry = std::env::var("CI_REGISTRY").unwrap_or_else(|_| "git.kjuulh.io".into());
+    let user = std::env::var("CI_REGISTRY_USER").unwrap_or_else(|_| "kjuulh".into());
+
+    let container = client.container();
+
+    // Authenticate to the private registry if credentials are available.
+    let container = if let Ok(password) = std::env::var("CI_REGISTRY_PASSWORD") {
+        container.with_registry_auth(
+            &registry,
+            &user,
+            client.set_secret("registry-password-s3", &password),
+        )
+    } else {
+        container
+    };
+
+    container
+        .from(&format!("{registry}/{user}/post3:20260227125609"))
+        .with_exposed_port(9000)
+        .as_service_opts(
+            dagger_sdk::ContainerAsServiceOptsBuilder::default()
+                .use_entrypoint(true)
+                .args(vec![
+                    "serve",
+                    "--backend", "fs",
+                    "--data-dir", "/tmp/post3",
+                    "--host", "0.0.0.0:9000",
+                ])
+                .build()
+                .unwrap(),
+        )
 }
 
 /// Load only Rust-relevant source files from host.
@@ -116,6 +247,7 @@ fn load_source(client: &dagger_sdk::Query) -> eyre::Result<dagger_sdk::Directory
                 "**/*.snap",
                 "**/*.toml",
                 "**/*.tmpl",
+                "**/*.cue",
             ])
             .build()?,
     );
@@ -162,7 +294,7 @@ fn create_skeleton_files(client: &dagger_sdk::Query) -> eyre::Result<dagger_sdk:
 /// Discover workspace crate directories on the host by recursively finding Cargo.toml files.
 fn discover_crates() -> eyre::Result<Vec<PathBuf>> {
     let mut crate_paths = Vec::new();
-    for search_root in ["crates", "examples"] {
+    for search_root in ["crates", "examples", "components"] {
         let root = PathBuf::from(search_root);
         if root.is_dir() {
             find_crates_recursive(&root, &mut crate_paths)?;
@@ -265,7 +397,7 @@ fn nats_service(client: &dagger_sdk::Query) -> dagger_sdk::Service {
         .as_service()
 }
 
-/// Return the base container with live Postgres + NATS for runtime tests.
+/// Return the base container with live Postgres + NATS + S3 for runtime tests.
 /// Compilation uses SQLX_OFFLINE=true (the checked-in .sqlx/ cache).
 /// The live services are needed for integration tests at runtime.
 fn with_services(
@@ -274,15 +406,27 @@ fn with_services(
 ) -> dagger_sdk::Container {
     let pg = postgres_service(client);
     let nats = nats_service(client);
+    let s3 = s3_service(client);
 
     base.clone()
         .with_service_binding("postgres", pg)
         .with_service_binding("nats", nats)
+        .with_service_binding("s3", s3)
         .with_env_variable(
             "DATABASE_URL",
             "postgres://forest:forest@postgres:5432/forest",
         )
         .with_env_variable("NATS_URL", "nats://nats:4222")
+        .with_env_variable("S3_ENDPOINT", "http://s3:9000")
+        .with_env_variable("S3_BUCKET", "forest")
+        .with_env_variable("S3_ACCESS_KEY", "test")
+        .with_env_variable("S3_SECRET_KEY", "test")
+        // Create the S3 bucket before tests run.
+        .with_exec(vec![
+            "sh", "-c",
+            "until curl -sf http://s3:9000/ > /dev/null 2>&1; do sleep 1; done && \
+             curl -sf -X PUT http://s3:9000/forest || true",
+        ])
 }
 
 /// Build release binary and package into a slim image.

@@ -117,6 +117,8 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
                         organisation: "forest".into(),
                         name: "flux".into(),
                         version: 1,
+                        description: String::new(),
+                        fields: vec![],
                     }),
                 },
             ))

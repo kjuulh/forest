@@ -2,12 +2,18 @@ use std::path::{Path, PathBuf};
 
 /// Resolves the binary path for a v2 component.
 ///
-/// Reads `.forest/component/meta.json` from the component directory to find the
-/// SHA-256 hash of the built binary, then looks it up in the content-addressable
-/// cache at `~/.cache/forest/components/bin/{sha256}`.
+/// For local deps: finds the built binary on disk, checks if it changed
+/// since last cached, and updates the cache automatically. Rebuilding
+/// the component just works — no manual cache invalidation.
 ///
-/// Returns `None` if the binary hasn't been built or isn't in the cache.
-pub fn resolve_binary(component_dir: &Path, _component_name: &str) -> Option<PathBuf> {
+/// For registry deps: uses the content-addressable cache via meta.json.
+pub fn resolve_binary(component_dir: &Path, component_name: &str) -> Option<PathBuf> {
+    // 1. Try to find a locally-built binary and sync to cache if changed
+    if let Some(local_binary) = find_local_binary(component_dir, component_name) {
+        return sync_local_binary_to_cache(component_dir, &local_binary);
+    }
+
+    // 2. Fall back to meta.json → content-addressable cache (registry deps)
     let meta_path = component_dir
         .join(".forest")
         .join("component")
@@ -30,6 +36,92 @@ pub fn resolve_binary(component_dir: &Path, _component_name: &str) -> Option<Pat
         .as_str()?;
 
     resolve_binary_from_hash(sha256)
+}
+
+/// Find a locally-built binary for a component (Cargo workspace or standalone).
+fn find_local_binary(component_dir: &Path, binary_name: &str) -> Option<PathBuf> {
+    // Walk up to find workspace root with target/debug/{name}
+    let mut dir = component_dir.to_path_buf();
+    loop {
+        let cargo_toml = dir.join("Cargo.toml");
+        if cargo_toml.exists() {
+            if let Ok(content) = std::fs::read_to_string(&cargo_toml) {
+                if content.contains("[workspace]") {
+                    let candidate = dir.join("target").join("debug").join(binary_name);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                    let candidate = dir.join("target").join("release").join(binary_name);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                    return None;
+                }
+            }
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+/// Hash a local binary, compare to meta.json, update cache if changed.
+fn sync_local_binary_to_cache(component_dir: &Path, local_binary: &Path) -> Option<PathBuf> {
+    use sha2::{Digest, Sha256};
+
+    let content = std::fs::read(local_binary).ok()?;
+    let current_hash = hex::encode(Sha256::digest(&content));
+
+    let meta_path = component_dir
+        .join(".forest")
+        .join("component")
+        .join("meta.json");
+
+    let (os, arch) = current_platform();
+    let platform_key = format!("{os}_{arch}");
+
+    // Check if hash matches what's in meta.json
+    let stored_hash = std::fs::read_to_string(&meta_path)
+        .ok()
+        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+        .and_then(|m| {
+            m.get("platforms")?
+                .get(&platform_key)?
+                .get("sha256")?
+                .as_str()
+                .map(String::from)
+        });
+
+    if stored_hash.as_deref() == Some(&current_hash) {
+        // Binary unchanged — use cached
+        return resolve_binary_from_hash(&current_hash);
+    }
+
+    // Binary changed — update cache and meta.json
+    tracing::debug!("local binary changed ({}), syncing to cache", &current_hash[..12]);
+
+    let (hash, cache_path) = store_binary_in_cache(&content).ok()?;
+
+    // Update meta.json
+    let mut meta: serde_json::Value = std::fs::read_to_string(&meta_path)
+        .ok()
+        .and_then(|c| serde_json::from_str(&c).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    if meta.get("platforms").is_none() {
+        meta["platforms"] = serde_json::json!({});
+    }
+    meta["platforms"][&platform_key] = serde_json::json!({
+        "sha256": hash,
+        "size": content.len(),
+    });
+
+    if let Some(parent) = meta_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).ok()?);
+
+    Some(cache_path)
 }
 
 /// Resolves a binary from the content-addressable cache by its SHA-256 hash.
@@ -326,10 +418,10 @@ mod tests {
     fn test_is_v2_component() {
         assert!(is_v2_component(&component_dir()));
 
-        // v1 component should not be detected as v2
-        let v1_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../components/forest/deployment");
-        assert!(!is_v2_component(&v1_dir));
+        // A directory without forest.component.cue should not be detected as v2
+        let empty_dir = std::env::temp_dir().join("forest-test-not-v2");
+        std::fs::create_dir_all(&empty_dir).unwrap();
+        assert!(!is_v2_component(&empty_dir));
     }
 
     #[test]
