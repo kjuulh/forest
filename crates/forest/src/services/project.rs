@@ -37,6 +37,16 @@ impl ProjectParser {
         let components = self.get_project_components(&project).await?;
 
         for component in components {
+            // Only expose CLI commands for components with a usage block in the project config.
+            // Peer dependencies (used only via inter-component calls) don't surface their commands.
+            if !project.has_component_usage(&component.organisation, &component.name) {
+                tracing::trace!(
+                    "skipping CLI command registration for {}/{} (no usage block)",
+                    component.organisation, component.name,
+                );
+                continue;
+            }
+
             // Check if this is a v2 component (has forest.component.cue)
             if let CacheComponentSource::Local(path) = &component.source {
                 if component_binary::is_v2_component(path) {

@@ -36,6 +36,13 @@ impl Codegen {
         Ok(output)
     }
 
+    /// Generate a typed client for a dependency component.
+    pub fn generate_client(&self, input: &str, component_id: &str) -> CodegenResult<String> {
+        let doc = openapi::parse(input)?;
+        let module = lower::lower(&doc)?;
+        codegen::emit_client(&module, &self.options.language, component_id)
+    }
+
     pub async fn generate_for_file(&self, path: impl AsRef<Path>) -> CodegenResult<String> {
         let file_content =
             tokio::fs::read_to_string(&path)

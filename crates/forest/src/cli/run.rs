@@ -1,4 +1,5 @@
 use std::process::Stdio;
+use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{Arg, ArgAction, ArgMatches, Args, FromArgMatches};
@@ -208,6 +209,57 @@ fn build_spec_json(
     }
 }
 
+/// Build a call resolver that can invoke dependency components by their ID.
+/// Maps component IDs (e.g. "kjuulh/sealed-secrets") to their local paths
+/// and invokes them via the Deno or binary runtime.
+fn build_call_resolver(
+    project: &Project,
+    context: &forest_sdk::CallContext,
+) -> component_deno::ComponentCallResolver {
+    // Build a map of component_id → (component_dir, entrypoint)
+    let mut component_map: std::collections::HashMap<String, (std::path::PathBuf, String)> =
+        std::collections::HashMap::new();
+
+    for dep in project.dependencies.get_components() {
+        let component_id = format!("{}/{}", dep.organisation, dep.name);
+        if let crate::models::ComponentSource::Local(path) = &dep.source {
+            if component_deno::is_deno_component(path) {
+                if let Some(entrypoint) = component_deno::resolve_entrypoint(path) {
+                    component_map.insert(component_id, (path.clone(), entrypoint));
+                }
+            }
+        }
+    }
+
+    let component_map = Arc::new(component_map);
+    let context = context.clone();
+
+    Box::new(move |component_id, method, spec, input, call_context| {
+        let component_map = Arc::clone(&component_map);
+        let base_context = context.clone();
+
+        Box::pin(async move {
+            let (component_dir, entrypoint) = component_map
+                .get(&component_id)
+                .ok_or_else(|| anyhow::anyhow!("unknown component: {component_id}"))?;
+
+            // Use forwarded context if available, otherwise base context
+            let ctx = call_context.unwrap_or(base_context);
+
+            component_deno::invoke_deno_component(
+                component_dir,
+                entrypoint,
+                &method,
+                &spec,
+                &input,
+                Some(&ctx),
+                None,
+            )
+            .await
+        })
+    })
+}
+
 /// Parse `--key value` pairs from trailing args into a JSON object.
 fn parse_input_args(args: &ArgMatches) -> serde_json::Value {
     let raw: Vec<String> = args
@@ -319,6 +371,8 @@ impl CliRun {
                     ..Default::default()
                 };
 
+                let resolver = build_call_resolver(project, &call_context);
+
                 let result = component_deno::invoke_deno_component(
                     component_dir,
                     entrypoint,
@@ -326,6 +380,7 @@ impl CliRun {
                     &spec_json,
                     &input_json,
                     Some(&call_context),
+                    Some(&resolver),
                 )
                 .await?;
 

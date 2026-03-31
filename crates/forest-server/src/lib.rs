@@ -27,3 +27,4 @@ mod temp_dir;
 pub mod object_store;
 pub mod oci_registry;
 pub mod tokens;
+pub mod webhooks;

@@ -39,6 +39,14 @@ struct FluxMetadata {
     /// Optional webhook URL to trigger Flux reconciliation after push.
     /// Typically points at a Flux Receiver endpoint.
     reconcile_url: Option<String>,
+    /// Shared HMAC secret for Flux notification webhooks back to forest.
+    /// When set, Flux Provider/Alert/Secret CRs are generated in the clusters dir.
+    webhook_secret: Option<String>,
+    /// Externally-reachable forest webhook URL for Flux notifications.
+    /// Required when `webhook_secret` is set.
+    forest_webhook_url: Option<String>,
+    /// Name of the Flux GitRepository CR to watch in Alert eventSources.
+    flux_git_repository_name: String,
 }
 
 impl FluxMetadata {
@@ -67,7 +75,7 @@ impl FluxMetadata {
             );
         }
 
-        Ok(Self {
+        let meta = Self {
             cluster_name,
             namespace,
             git_url,
@@ -88,7 +96,25 @@ impl FluxMetadata {
                 .unwrap_or_else(|| "forest@release.local".to_string()),
             local_path,
             reconcile_url: metadata.get("reconcile_url").cloned(),
-        })
+            webhook_secret: metadata.get("webhook_secret").cloned().filter(|s| !s.is_empty()),
+            forest_webhook_url: metadata
+                .get("forest_webhook_url")
+                .cloned()
+                .filter(|s| !s.is_empty()),
+            flux_git_repository_name: metadata
+                .get("flux_git_repository_name")
+                .cloned()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "flux-system".to_string()),
+        };
+
+        if meta.webhook_secret.is_some() && meta.forest_webhook_url.is_none() {
+            anyhow::bail!(
+                "flux destination requires 'forest_webhook_url' when 'webhook_secret' is set"
+            );
+        }
+
+        Ok(meta)
     }
 
     fn is_local(&self) -> bool {
@@ -361,6 +387,130 @@ spec:
         )
     }
 
+    /// Generate a Kubernetes Secret CR for the Flux notification webhook token.
+    pub fn generate_notification_secret_cr(name: &str, namespace: &str, token: &str) -> String {
+        format!(
+            r#"apiVersion: v1
+kind: Secret
+metadata:
+  name: {name}
+  namespace: {namespace}
+stringData:
+  token: {token}
+"#,
+        )
+    }
+
+    /// Generate a Flux Provider CR for generic-hmac webhook notifications.
+    pub fn generate_provider_cr(
+        name: &str,
+        namespace: &str,
+        address: &str,
+        secret_name: &str,
+    ) -> String {
+        format!(
+            r#"apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Provider
+metadata:
+  name: {name}
+  namespace: {namespace}
+spec:
+  type: generic-hmac
+  address: {address}
+  secretRef:
+    name: {secret_name}
+"#,
+        )
+    }
+
+    /// Generate a Flux Alert CR that watches a Kustomization and GitRepository.
+    ///
+    /// `event_severity` should be `"info"` (success notifications) or
+    /// `"error"` (failure notifications). Flux treats these as exact filters,
+    /// so two separate Alerts are needed to capture both outcomes.
+    pub fn generate_alert_cr(
+        name: &str,
+        namespace: &str,
+        provider_name: &str,
+        git_repo_name: &str,
+        project: &str,
+        event_severity: &str,
+    ) -> String {
+        format!(
+            r#"apiVersion: notification.toolkit.fluxcd.io/v1beta3
+kind: Alert
+metadata:
+  name: {name}
+  namespace: {namespace}
+spec:
+  providerRef:
+    name: {provider_name}
+  eventSeverity: {event_severity}
+  eventSources:
+    - kind: Kustomization
+      name: {project}
+      namespace: {namespace}
+    - kind: GitRepository
+      name: {git_repo_name}
+      namespace: {namespace}
+"#,
+        )
+    }
+
+    /// Write Flux notification CRs (Secret, Provider, Alert) to the clusters
+    /// directory when `webhook_secret` and `forest_webhook_url` are configured.
+    async fn write_notification_crs(
+        clusters_dir: &Path,
+        meta: &FluxMetadata,
+        project: &str,
+        backend: &dyn DestinationBackend,
+    ) -> anyhow::Result<()> {
+        let (Some(secret), Some(url)) = (&meta.webhook_secret, &meta.forest_webhook_url) else {
+            return Ok(());
+        };
+
+        backend.log_stdout("[flux@1] writing Flux notification CRs (Provider, Alert, Secret)");
+
+        let secret_name = "forest-notify-secret";
+        let provider_name = "forest-notify";
+
+        let secret_cr = Self::generate_notification_secret_cr(secret_name, "flux-system", secret);
+        tokio::fs::write(
+            clusters_dir.join("forest-notify-secret.yaml"),
+            secret_cr.as_bytes(),
+        )
+        .await?;
+
+        let provider_cr =
+            Self::generate_provider_cr(provider_name, "flux-system", url, secret_name);
+        tokio::fs::write(
+            clusters_dir.join("forest-notify-provider.yaml"),
+            provider_cr.as_bytes(),
+        )
+        .await?;
+
+        // Flux treats eventSeverity as an exact filter, so we need separate
+        // Alerts for info (success) and error (failure) notifications.
+        for (suffix, severity) in [("info", "info"), ("error", "error")] {
+            let alert_name = format!("forest-notify-{project}-{suffix}");
+            let alert_cr = Self::generate_alert_cr(
+                &alert_name,
+                "flux-system",
+                provider_name,
+                &meta.flux_git_repository_name,
+                project,
+                severity,
+            );
+            tokio::fs::write(
+                clusters_dir.join(format!("forest-notify-alert-{project}-{suffix}.yaml")),
+                alert_cr.as_bytes(),
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
     /// Write a plain kustomize `kustomization.yaml` in a releases directory,
     /// listing only the manifest files as resources (excludes `.forest/` metadata).
     pub async fn write_releases_kustomize_yaml(
@@ -521,6 +671,8 @@ async fn run_local(
                 kustomization_cr.as_bytes(),
             )
             .await?;
+            FluxV1Handler::write_notification_crs(&clusters_dir_abs, meta, project, backend)
+                .await?;
             FluxV1Handler::write_kustomize_yaml(&clusters_dir_abs).await?;
 
             backend.log_stdout("[flux@1] local apply: done");
@@ -596,6 +748,7 @@ async fn run_git(
         kustomization_cr.as_bytes(),
     )
     .await?;
+    FluxV1Handler::write_notification_crs(&clusters_dir_abs, meta, project, backend).await?;
     FluxV1Handler::write_kustomize_yaml(&clusters_dir_abs).await?;
 
     // Step 4: Stage changes
@@ -1110,6 +1263,9 @@ mod tests {
             git_author_email: "test@test".into(),
             local_path: Some(local_root.path().to_path_buf()),
             reconcile_url: None,
+            webhook_secret: None,
+            forest_webhook_url: None,
+            flux_git_repository_name: "flux-system".into(),
         };
 
         let manifest_files = vec![
@@ -1622,5 +1778,113 @@ mod tests {
 
         // Check README still exists (not clobbered)
         assert!(verify_repo.join("README.md").exists());
+    }
+
+    // ====== NOTIFICATION CR GENERATION ======
+
+    #[test]
+    fn test_generate_notification_secret_cr() {
+        let cr = FluxV1Handler::generate_notification_secret_cr(
+            "forest-notify-secret",
+            "flux-system",
+            "my-hmac-token",
+        );
+        assert!(cr.contains("kind: Secret"));
+        assert!(cr.contains("name: forest-notify-secret"));
+        assert!(cr.contains("namespace: flux-system"));
+        assert!(cr.contains("token: my-hmac-token"));
+        assert!(cr.contains("stringData:"));
+    }
+
+    #[test]
+    fn test_generate_provider_cr() {
+        let cr = FluxV1Handler::generate_provider_cr(
+            "forest-notify",
+            "flux-system",
+            "https://forest.example.com/webhooks/flux/notifications/my-dest",
+            "forest-notify-secret",
+        );
+        assert!(cr.contains("kind: Provider"));
+        assert!(cr.contains("apiVersion: notification.toolkit.fluxcd.io/v1beta3"));
+        assert!(cr.contains("type: generic-hmac"));
+        assert!(cr.contains(
+            "address: https://forest.example.com/webhooks/flux/notifications/my-dest"
+        ));
+        assert!(cr.contains("name: forest-notify-secret"));
+    }
+
+    #[test]
+    fn test_generate_alert_cr_info() {
+        let cr = FluxV1Handler::generate_alert_cr(
+            "forest-notify-my-app-info",
+            "flux-system",
+            "forest-notify",
+            "flux-system",
+            "my-app",
+            "info",
+        );
+        assert!(cr.contains("kind: Alert"));
+        assert!(cr.contains("apiVersion: notification.toolkit.fluxcd.io/v1beta3"));
+        assert!(cr.contains("name: forest-notify-my-app-info"));
+        assert!(cr.contains("eventSeverity: info"));
+        assert!(cr.contains("kind: Kustomization"));
+        assert!(cr.contains("name: my-app"));
+        assert!(cr.contains("namespace: flux-system"));
+        assert!(cr.contains("kind: GitRepository"));
+    }
+
+    #[test]
+    fn test_generate_alert_cr_error() {
+        let cr = FluxV1Handler::generate_alert_cr(
+            "forest-notify-my-app-error",
+            "flux-system",
+            "forest-notify",
+            "flux-system",
+            "my-app",
+            "error",
+        );
+        assert!(cr.contains("eventSeverity: error"));
+        assert!(cr.contains("name: forest-notify-my-app-error"));
+    }
+
+    #[test]
+    fn test_metadata_webhook_fields() {
+        let mut m = valid_git_metadata();
+        m.insert("webhook_secret".into(), "my-secret".into());
+        m.insert(
+            "forest_webhook_url".into(),
+            "https://forest.example.com/webhooks/flux/notifications/dest".into(),
+        );
+        m.insert("flux_git_repository_name".into(), "my-repo".into());
+
+        let meta = FluxMetadata::from_metadata(&m).unwrap();
+        assert_eq!(meta.webhook_secret.as_deref(), Some("my-secret"));
+        assert_eq!(
+            meta.forest_webhook_url.as_deref(),
+            Some("https://forest.example.com/webhooks/flux/notifications/dest")
+        );
+        assert_eq!(meta.flux_git_repository_name, "my-repo");
+    }
+
+    #[test]
+    fn test_metadata_webhook_fields_defaults() {
+        let m = valid_git_metadata();
+        let meta = FluxMetadata::from_metadata(&m).unwrap();
+        assert!(meta.webhook_secret.is_none());
+        assert!(meta.forest_webhook_url.is_none());
+        assert_eq!(meta.flux_git_repository_name, "flux-system");
+    }
+
+    #[test]
+    fn test_metadata_webhook_secret_requires_url() {
+        let mut m = valid_git_metadata();
+        m.insert("webhook_secret".into(), "my-secret".into());
+        // Missing forest_webhook_url — should fail
+        let err = FluxMetadata::from_metadata(&m).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("forest_webhook_url"),
+            "expected error about forest_webhook_url, got: {err}"
+        );
     }
 }

@@ -1,18 +1,33 @@
 //! Deno/TypeScript component invocation.
 //!
-//! Mirrors `component_binary.rs` but spawns `deno run` instead of a native binary.
-//! The JSON stdin/stdout protocol is identical — Deno components speak the same
-//! protocol as Rust binary components.
+//! Implements Forest component protocol v2 with streaming JSON lines.
+//! Components can call other components during execution via call/call_result
+//! message pairs, mediated by the runtime.
 
 use std::path::Path;
 
 use anyhow::Context;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use std::time::Duration;
 
 const COMPONENT_TIMEOUT: Duration = Duration::from_secs(120);
 const DESCRIBE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Callback for resolving inter-component calls.
+/// Given a component identifier, method, spec, and input, invokes the target
+/// component and returns its result.
+pub type ComponentCallResolver = Box<
+    dyn Fn(
+            String,                           // component identifier
+            String,                           // method
+            serde_json::Value,                // spec
+            serde_json::Value,                // input
+            Option<forest_sdk::CallContext>,   // context from the caller
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// Check if Deno is available on the system.
 pub async fn check_deno_available() -> anyhow::Result<()> {
@@ -33,11 +48,7 @@ pub async fn check_deno_available() -> anyhow::Result<()> {
 }
 
 /// Detect if a component directory contains a Deno component.
-///
-/// Checks for `meta.json` with `kind: "deno"`, or the presence of
-/// a TypeScript entrypoint (`src/main.ts`).
 pub fn is_deno_component(path: &Path) -> bool {
-    // Check meta.json first (cached/downloaded components)
     let meta_path = path.join(".forest").join("component").join("meta.json");
     if let Ok(content) = std::fs::read_to_string(&meta_path) {
         if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -46,14 +57,11 @@ pub fn is_deno_component(path: &Path) -> bool {
             }
         }
     }
-
-    // Check for TypeScript entrypoint
     path.join("src").join("main.ts").exists() && path.join("src").join("forest-sdk.ts").exists()
 }
 
 /// Get the entrypoint for a Deno component.
 pub fn resolve_entrypoint(path: &Path) -> Option<String> {
-    // Check meta.json for explicit entrypoint
     let meta_path = path.join(".forest").join("component").join("meta.json");
     if let Ok(content) = std::fs::read_to_string(&meta_path) {
         if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -62,19 +70,16 @@ pub fn resolve_entrypoint(path: &Path) -> Option<String> {
             }
         }
     }
-
-    // Default convention
     if path.join("src").join("main.ts").exists() {
         return Some("src/main.ts".to_string());
     }
-
     None
 }
 
-/// Invoke a Deno component method.
+/// Invoke a Deno component method using protocol v2.
 ///
-/// Spawns `deno run` with the entrypoint and method name as argument.
-/// Sends JSON payload via stdin, reads JSON response from stdout.
+/// Spawns the component, sends an invoke message, then enters a loop
+/// handling call/return messages until the component returns its final result.
 pub async fn invoke_deno_component(
     component_dir: &Path,
     entrypoint: &str,
@@ -82,22 +87,21 @@ pub async fn invoke_deno_component(
     spec_json: &serde_json::Value,
     input_json: &serde_json::Value,
     context: Option<&forest_sdk::CallContext>,
+    call_resolver: Option<&ComponentCallResolver>,
 ) -> anyhow::Result<serde_json::Value> {
-    let mut payload = serde_json::json!({
+    let invoke_msg = serde_json::json!({
+        "type": "invoke",
+        "method": method,
         "spec": spec_json,
         "input": input_json,
+        "context": context.map(|c| serde_json::to_value(c).unwrap_or_default())
+            .unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
     });
-    if let Some(ctx) = context {
-        payload["context"] = serde_json::to_value(ctx)?;
-    }
-
-    let payload_bytes = serde_json::to_vec(&payload)?;
 
     let component_dir = component_dir.canonicalize()
         .with_context(|| format!("canonicalize component dir: {}", component_dir.display()))?;
     let entrypoint_path = component_dir.join(entrypoint);
 
-    // Run in the project directory (work_dir) if provided, otherwise the component dir.
     let run_dir = context
         .and_then(|ctx| ctx.work_dir.as_deref())
         .map(std::path::PathBuf::from)
@@ -123,30 +127,115 @@ pub async fn invoke_deno_component(
         .spawn()
         .context("failed to spawn deno")?;
 
-    // Write payload to stdin
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(&payload_bytes).await?;
-        stdin.flush().await?;
-        // Drop stdin to signal EOF
-    }
+    let mut stdin = child.stdin.take().context("failed to get stdin")?;
+    let stdout = child.stdout.take().context("failed to get stdout")?;
+    let stderr = child.stderr.take().context("failed to get stderr")?;
 
-    let output = tokio::time::timeout(COMPONENT_TIMEOUT, child.wait_with_output())
-        .await
-        .context("deno component timed out")??;
+    // Send invoke message
+    let invoke_line = serde_json::to_string(&invoke_msg)? + "\n";
+    stdin.write_all(invoke_line.as_bytes()).await?;
+    stdin.flush().await?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let msg = stderr
-            .trim()
-            .strip_prefix("error: ")
-            .unwrap_or(stderr.trim());
-        anyhow::bail!("{msg}");
-    }
+    // Stream stderr to tracing in background
+    let stderr_handle = tokio::spawn(async move {
+        let reader = BufReader::new(stderr);
+        let mut lines = reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            tracing::info!(target: "component", "{}", line);
+        }
+    });
 
-    let result: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .context("deno component returned invalid JSON")?;
+    // Read stdout lines, handling call/return protocol
+    let mut stdout_reader = BufReader::new(stdout);
+    let result = tokio::time::timeout(COMPONENT_TIMEOUT, async {
+        loop {
+            let mut line = String::new();
+            let bytes_read = stdout_reader.read_line(&mut line).await
+                .context("read stdout line")?;
+            if bytes_read == 0 {
+                anyhow::bail!("component closed stdout without returning a result");
+            }
+
+            let msg: serde_json::Value = serde_json::from_str(line.trim())
+                .with_context(|| format!("invalid JSON line from component: {}", line.trim()))?;
+
+            match msg.get("type").and_then(|t| t.as_str()) {
+                Some("return") => {
+                    let result = msg.get("result")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    return Ok(result);
+                }
+                Some("call") => {
+                    let component = msg.get("component").and_then(|c| c.as_str())
+                        .context("call message missing 'component'")?
+                        .to_string();
+                    let call_method = msg.get("method").and_then(|m| m.as_str())
+                        .context("call message missing 'method'")?
+                        .to_string();
+                    let call_id = msg.get("id").and_then(|i| i.as_str())
+                        .unwrap_or("0")
+                        .to_string();
+                    let call_spec = msg.get("spec").cloned()
+                        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                    let call_input = msg.get("input").cloned()
+                        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+                    let call_context: Option<forest_sdk::CallContext> = msg.get("context")
+                        .and_then(|c| serde_json::from_value(c.clone()).ok());
+
+                    let call_result = if let Some(resolver) = call_resolver {
+                        match resolver(component.clone(), call_method.clone(), call_spec, call_input, call_context).await {
+                            Ok(result) => result,
+                            Err(e) => {
+                                tracing::error!("call to {component}/{call_method} failed: {e}");
+                                serde_json::Value::Null
+                            }
+                        }
+                    } else {
+                        tracing::warn!("component requested call to {component}/{call_method} but no resolver available");
+                        serde_json::Value::Null
+                    };
+
+                    let response = serde_json::json!({
+                        "type": "call_result",
+                        "id": call_id,
+                        "result": call_result,
+                    });
+                    let response_line = serde_json::to_string(&response)? + "\n";
+                    stdin.write_all(response_line.as_bytes()).await?;
+                    stdin.flush().await?;
+                }
+                other => {
+                    anyhow::bail!("unexpected message type from component: {:?}", other);
+                }
+            }
+        }
+    })
+    .await
+    .context("deno component timed out")??;
+
+    // Wait for process to finish
+    drop(stdin);
+    let _ = child.wait().await;
+    stderr_handle.abort();
 
     Ok(result)
+}
+
+/// Invoke without callback support (for simple cases).
+pub async fn invoke_deno_component_simple(
+    component_dir: &Path,
+    entrypoint: &str,
+    method: &str,
+    spec_json: &serde_json::Value,
+    input_json: &serde_json::Value,
+    context: Option<&forest_sdk::CallContext>,
+) -> anyhow::Result<serde_json::Value> {
+    invoke_deno_component(
+        component_dir, entrypoint, method,
+        spec_json, input_json, context, None,
+    ).await
 }
 
 /// Describe a Deno component by invoking `_meta/describe`.
@@ -186,7 +275,7 @@ pub async fn describe_deno_component(
     Ok(descriptor)
 }
 
-/// Load a cached descriptor from meta.json (same as binary components).
+/// Load a cached descriptor from meta.json.
 pub fn load_cached_descriptor(path: &Path) -> Option<forest_sdk::ComponentDescriptor> {
     let meta_path = path.join(".forest").join("component").join("meta.json");
     let content = std::fs::read_to_string(&meta_path).ok()?;

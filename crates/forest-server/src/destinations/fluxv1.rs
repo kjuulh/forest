@@ -149,6 +149,30 @@ impl DestinationEdge for FluxV1Destination {
                 field_type: "url".into(),
                 default_value: String::new(),
             },
+            forest_models::MetadataFieldSchema {
+                name: "webhook_secret".into(),
+                label: "Webhook Secret".into(),
+                description: "Shared HMAC secret for Flux notification webhooks back to forest. When set, Provider/Alert/Secret CRs are auto-generated.".into(),
+                required: false,
+                field_type: "text".into(),
+                default_value: String::new(),
+            },
+            forest_models::MetadataFieldSchema {
+                name: "forest_webhook_url".into(),
+                label: "Forest Webhook URL".into(),
+                description: "Externally-reachable forest webhook URL for Flux notifications. Required when webhook_secret is set.".into(),
+                required: false,
+                field_type: "url".into(),
+                default_value: String::new(),
+            },
+            forest_models::MetadataFieldSchema {
+                name: "flux_git_repository_name".into(),
+                label: "Flux GitRepository Name".into(),
+                description: "Name of the Flux GitRepository CR to watch in Alert eventSources.".into(),
+                required: false,
+                field_type: "text".into(),
+                default_value: "flux-system".into(),
+            },
         ]
     }
 

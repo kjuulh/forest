@@ -101,6 +101,7 @@ impl ValidateCommand {
                         &spec_json,
                         &serde_json::json!({}),
                         None,
+                        None,
                     )
                     .await
                 } else {

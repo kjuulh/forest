@@ -126,6 +126,21 @@ impl Default for ProjectValue {
 }
 
 impl Project {
+    /// Check if a component has a usage block in the project config.
+    /// Components with usage blocks (e.g. `kjuulh: service: { env: {...} }`)
+    /// are "direct" dependencies whose commands are exposed in the CLI.
+    /// Components without usage blocks are "peer" dependencies — only
+    /// callable via inter-component calls.
+    pub fn has_component_usage(&self, organisation: &str, name: &str) -> bool {
+        let ProjectValue::Map(map) = &self.other else {
+            return false;
+        };
+        let Some(ProjectValue::Map(names)) = map.get(organisation) else {
+            return false;
+        };
+        names.contains_key(name)
+    }
+
     pub fn get_component_config(
         &self,
         component_ref: &ComponentReference,

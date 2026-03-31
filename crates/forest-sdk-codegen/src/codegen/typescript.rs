@@ -367,3 +367,86 @@ fn escape_ts_string(s: &str) -> String {
         .replace('\r', "\\r")
         .replace('\t', "\\t")
 }
+
+// ── Dependency client generation ────────────────────────────────────
+
+/// Generate a typed client for calling a dependency component's commands and hooks.
+pub fn emit_client(module: &Module, component_id: &str) -> CodegenResult<String> {
+    let mut out = String::with_capacity(2048);
+
+    writeln!(out, "// Generated dependency client for {component_id}. Do not edit.")?;
+    writeln!(out)?;
+    writeln!(out, "import {{ callComponent }} from \"@forest/sdk\";")?;
+    writeln!(out)?;
+
+    // Emit type definitions (shared types like Manifest, Postgres, etc.)
+    emit_type_defs(&mut out, &module.type_defs)?;
+
+    // Emit Spec interface
+    emit_spec_interface(&mut out, &module.spec)?;
+
+    // Emit command input/output types and client functions
+    for cmd in &module.commands {
+        let pascal = to_pascal_case(&cmd.name);
+        let input_name = format!("{pascal}Input");
+        let output_name = format!("{pascal}Output");
+
+        emit_interface(&mut out, &input_name, &cmd.input)?;
+        emit_interface(&mut out, &output_name, &cmd.output)?;
+
+        let fn_name = format!("commands{pascal}");
+        let method_path = format!("commands/{}", cmd.name);
+
+        if !cmd.description.is_empty() {
+            writeln!(out, "/** {} */", cmd.description)?;
+        }
+        writeln!(
+            out,
+            "export function {fn_name}(spec: Spec, input: {input_name}): Promise<{output_name}> {{"
+        )?;
+        writeln!(
+            out,
+            "  return callComponent(\"{component_id}\", \"{method_path}\", spec, input);"
+        )?;
+        writeln!(out, "}}")?;
+        writeln!(out)?;
+    }
+
+    // Emit hook input/output types and client functions
+    for group in &module.hook_groups {
+        let topic_pascal = topic_to_pascal_case(&group.topic);
+        for action in &group.actions {
+            let action_pascal = to_pascal_case(&action.name);
+            let input_name = format!("{topic_pascal}{action_pascal}Input");
+
+            emit_interface(&mut out, &input_name, &action.input)?;
+
+            let output_type = if let Some(output) = &action.output {
+                let output_name = format!("{topic_pascal}{action_pascal}Output");
+                emit_interface(&mut out, &output_name, output)?;
+                output_name
+            } else {
+                "void".to_string()
+            };
+
+            let fn_name = format!("hooks{topic_pascal}{action_pascal}");
+            let method_path = format!("hooks/{}/{}", group.topic, action.name);
+
+            if !action.description.is_empty() {
+                writeln!(out, "/** {} */", action.description)?;
+            }
+            writeln!(
+                out,
+                "export function {fn_name}(spec: Spec, input: {input_name}): Promise<{output_type}> {{"
+            )?;
+            writeln!(
+                out,
+                "  return callComponent(\"{component_id}\", \"{method_path}\", spec, input);"
+            )?;
+            writeln!(out, "}}")?;
+            writeln!(out)?;
+        }
+    }
+
+    Ok(out)
+}

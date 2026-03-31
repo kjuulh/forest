@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use anyhow::Context;
 use tokio::io::AsyncWriteExt;
 
 use crate::state::State;
@@ -9,8 +10,8 @@ use crate::state::State;
 /// Reads forest.component.cue (and spec.cue if present), converts to OpenAPI
 /// via `cue def`, then generates typed code into the output directory.
 ///
-/// The language is auto-detected from forest.cue codegen.type field,
-/// or can be overridden with --language.
+/// Also generates typed dependency clients for any local component dependencies
+/// that have a forest.component.cue file.
 ///
 /// Example: forest generate --output ./src/
 #[derive(clap::Parser)]
@@ -26,7 +27,6 @@ pub struct GenerateCommand {
 
 impl GenerateCommand {
     pub async fn execute(&self, _state: &State) -> anyhow::Result<()> {
-        // Detect language from forest.cue or CLI flag
         let language = match &self.language {
             Some(lang) => lang.clone(),
             None => detect_codegen_language().await.unwrap_or_else(|| "rust".to_string()),
@@ -35,31 +35,8 @@ impl GenerateCommand {
         let codegen_language = match language.as_str() {
             "rust" => forest_sdk_codegen::CodegenLanguage::Rust,
             "typescript" | "deno" | "ts" => forest_sdk_codegen::CodegenLanguage::TypeScript,
-            other => anyhow::bail!("unsupported codegen language: {other} (supported: rust, typescript)"),
+            other => anyhow::bail!("unsupported codegen language: {other}"),
         };
-
-        // Build cue def args — include all .cue files that exist
-        let mut cue_files = vec!["./forest.component.cue".to_string()];
-        if tokio::fs::metadata("./spec.cue").await.is_ok() {
-            cue_files.push("./spec.cue".to_string());
-        }
-
-        let mut cmd = tokio::process::Command::new("cue");
-        if let Ok(registry) = std::env::var("CUE_REGISTRY") {
-            cmd.env("CUE_REGISTRY", registry);
-        }
-        cmd.arg("def");
-        for f in &cue_files {
-            cmd.arg(f);
-        }
-        cmd.args(["--out", "openapi"]);
-
-        let output = cmd.output().await?;
-        let stdout = String::from_utf8(output.stdout)?;
-        let stderr = String::from_utf8(output.stderr)?;
-        if !output.status.success() {
-            anyhow::bail!("failed to generate spec from cue: {stdout}, {stderr}");
-        }
 
         let codegen = forest_sdk_codegen::Codegen {
             options: forest_sdk_codegen::CodegenOptions {
@@ -68,7 +45,9 @@ impl GenerateCommand {
             },
         };
 
-        let generated_code = codegen.generate(stdout.trim())?;
+        // Generate own component types
+        let openapi_json = run_cue_def_openapi(&["./forest.component.cue"]).await?;
+        let generated_code = codegen.generate(openapi_json.trim())?;
 
         tokio::fs::create_dir_all(&self.output).await?;
 
@@ -80,10 +59,129 @@ impl GenerateCommand {
         let mut file = tokio::fs::File::create(self.output.join(filename)).await?;
         file.write_all(generated_code.as_bytes()).await?;
         file.flush().await?;
-
         tracing::info!("generated {} at {}", filename, self.output.display());
+
+        // Generate dependency clients
+        if matches!(language.as_str(), "typescript" | "deno" | "ts") {
+            self.generate_dependency_clients(&codegen).await?;
+        }
+
         Ok(())
     }
+
+    /// Discover local component dependencies and generate typed clients for them.
+    async fn generate_dependency_clients(
+        &self,
+        codegen: &forest_sdk_codegen::Codegen,
+    ) -> anyhow::Result<()> {
+        let deps = discover_component_dependencies().await?;
+        if deps.is_empty() {
+            return Ok(());
+        }
+
+        let deps_dir = self.output.join("deps");
+        tokio::fs::create_dir_all(&deps_dir).await?;
+
+        for (component_id, component_path) in deps {
+            let component_cue = component_path.join("forest.component.cue");
+            if !component_cue.exists() {
+                continue;
+            }
+
+            tracing::info!("generating dependency client for {}", component_id);
+
+            let openapi_json = run_cue_def_openapi_in_dir(
+                &[&component_cue.to_string_lossy()],
+                &component_path,
+            )
+            .await
+            .with_context(|| format!("cue def for dependency {component_id}"))?;
+
+            let client_code = codegen
+                .generate_client(openapi_json.trim(), &component_id)
+                .with_context(|| format!("generate client for {component_id}"))?;
+
+            let safe_name = component_id.replace('/', "_");
+            let client_file = deps_dir.join(format!("{safe_name}.ts"));
+
+            let mut file = tokio::fs::File::create(&client_file).await?;
+            file.write_all(client_code.as_bytes()).await?;
+            file.flush().await?;
+
+            tracing::info!("generated dependency client: {}", client_file.display());
+        }
+
+        Ok(())
+    }
+}
+
+/// Run `cue def --out openapi` on the given files in the current directory.
+async fn run_cue_def_openapi(cue_files: &[&str]) -> anyhow::Result<String> {
+    run_cue_def_openapi_in_dir(cue_files, &std::env::current_dir()?).await
+}
+
+/// Run `cue def --out openapi` on the given files in a specific directory.
+async fn run_cue_def_openapi_in_dir(
+    cue_files: &[&str],
+    dir: &std::path::Path,
+) -> anyhow::Result<String> {
+    let mut cmd = tokio::process::Command::new("cue");
+    if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+        cmd.env("CUE_REGISTRY", registry);
+    }
+    cmd.arg("def");
+    for f in cue_files {
+        cmd.arg(f);
+    }
+    cmd.args(["--out", "openapi"]);
+    cmd.current_dir(dir);
+
+    let output = cmd.output().await?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let stderr = String::from_utf8(output.stderr)?;
+    if !output.status.success() {
+        anyhow::bail!("cue def failed: {stdout}, {stderr}");
+    }
+    Ok(stdout)
+}
+
+/// Parse forest.cue to find local component dependencies.
+/// Returns (component_id, local_path) pairs for dependencies that are local paths
+/// and have a forest.component.cue file (i.e., they are components, not just CUE modules).
+async fn discover_component_dependencies() -> anyhow::Result<Vec<(String, PathBuf)>> {
+    // Read forest.cue to get dependencies
+    let mut cmd = tokio::process::Command::new("cue");
+    if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+        cmd.env("CUE_REGISTRY", registry);
+    }
+    cmd.args(["export", "--out", "json", "forest.cue"]);
+
+    let output = cmd.output().await?;
+    if !output.status.success() {
+        return Ok(vec![]);
+    }
+
+    let doc: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .context("parse forest.cue JSON")?;
+
+    let Some(deps) = doc.get("dependencies").and_then(|d| d.as_object()) else {
+        return Ok(vec![]);
+    };
+
+    let mut result = Vec::new();
+    let cwd = std::env::current_dir()?;
+
+    for (name, spec) in deps {
+        // Only local path dependencies
+        if let Some(path) = spec.get("path").and_then(|p| p.as_str()) {
+            let dep_path = cwd.join(path);
+            if dep_path.join("forest.component.cue").exists() {
+                result.push((name.clone(), dep_path));
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 /// Try to detect the codegen language from forest.cue's codegen.type field.

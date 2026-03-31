@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::sync::Arc;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,7 @@ use crate::{
     forest_context::ForestContextState,
     models::{ComponentReference, ProjectValue},
     services::{
-        component_binary, project::ProjectParserState,
+        component_binary, component_deno, project::ProjectParserState,
         templates::TemplatesServiceState,
     },
     state::State,
@@ -91,6 +92,60 @@ impl PrepareCommand {
         tokio::fs::create_dir_all(&deployment_output)
             .await
             .context("create deployment preparation output")?;
+
+        // Build a resolver for inter-component calls
+        let call_resolver = {
+            let mut component_map: std::collections::HashMap<String, (std::path::PathBuf, String)> =
+                std::collections::HashMap::new();
+            for dep in project.dependencies.get_components() {
+                let component_id = format!("{}/{}", dep.organisation, dep.name);
+                if let crate::models::ComponentSource::Local(path) = &dep.source {
+                    if component_deno::is_deno_component(path) {
+                        if let Some(entrypoint) = component_deno::resolve_entrypoint(path) {
+                            component_map.insert(component_id, (path.clone(), entrypoint));
+                        }
+                    }
+                }
+            }
+            let component_map = Arc::new(component_map);
+            let project_path = project.path.clone();
+            let project_name = project.name.clone();
+            let project_org = project.organisation.clone();
+
+            let resolver: component_deno::ComponentCallResolver = Box::new(move |component_id, method, spec, input, call_context| {
+                let component_map = Arc::clone(&component_map);
+                let project_path = project_path.clone();
+                let project_name = project_name.clone();
+                let project_org = project_org.clone();
+
+                Box::pin(async move {
+                    let (component_dir, entrypoint) = component_map
+                        .get(&component_id)
+                        .ok_or_else(|| anyhow::anyhow!("unknown component: {component_id}"))?;
+
+                    // Use forwarded context if available, adding project defaults
+                    let ctx = match call_context {
+                        Some(mut ctx) => {
+                            ctx.project = ctx.project.or(Some(project_name));
+                            ctx.organisation = ctx.organisation.or(project_org);
+                            ctx.work_dir = ctx.work_dir.or(Some(project_path.to_string_lossy().to_string()));
+                            ctx
+                        }
+                        None => forest_sdk::CallContext {
+                            project: Some(project_name),
+                            organisation: project_org,
+                            work_dir: Some(project_path.to_string_lossy().to_string()),
+                            ..Default::default()
+                        },
+                    };
+
+                    component_deno::invoke_deno_component(
+                        component_dir, entrypoint, &method, &spec, &input, Some(&ctx), None,
+                    ).await
+                })
+            });
+            resolver
+        };
 
         // For each deployment item, send deployment prepare to component in question
         for deployment_item in deployment_items {
@@ -216,6 +271,7 @@ impl PrepareCommand {
                             &spec_json,
                             &empty_input,
                             Some(&call_context),
+                            Some(&call_resolver),
                         ).await.with_context(|| format!(
                             "deno deployment prepare hook failed for {}/{}",
                             component.organisation, component.name

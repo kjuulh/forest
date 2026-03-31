@@ -40,6 +40,7 @@ impl ServeCommand {
             .add(ServeHttp {
                 host: self.http_host,
                 object_store: state.object_store.clone(),
+                db: state.db.clone(),
             })
             .add(Checks {
                 state: state.clone(),
