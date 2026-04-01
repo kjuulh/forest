@@ -46,6 +46,7 @@ impl TemplateCommand {
                 &self.files.iter().map(|f| f.as_path()).collect::<Vec<_>>(),
                 temp_dir.as_path(),
                 &config,
+                &[],
             )
             .await?;
 

@@ -16,6 +16,7 @@ impl TemplatesServices {
         file: &Path,
         output_path: &Path,
         config: &Option<&ProjectValue>,
+        extra_globals: &[(&str, &str)],
     ) -> anyhow::Result<()> {
         tracing::debug!("processing file: {}", file.to_string_lossy());
 
@@ -53,7 +54,7 @@ impl TemplatesServices {
                 .await
                 .context("read template file")?;
             let rendered_content =
-                render_template(&raw_content, config).context("render template")?;
+                render_template(&raw_content, config, extra_globals).context("render template")?;
 
             let mut file = tokio::fs::File::create(&new_file_path)
                 .await
@@ -83,9 +84,10 @@ impl TemplatesServices {
         files: &[&Path],
         output_path: &Path,
         config: &Option<&ProjectValue>,
+        extra_globals: &[(&str, &str)],
     ) -> anyhow::Result<()> {
         for file in files {
-            self.template_file(input_path, file, output_path, config)
+            self.template_file(input_path, file, output_path, config, extra_globals)
                 .await?;
         }
 
@@ -97,6 +99,7 @@ impl TemplatesServices {
         input_path: &Path,
         output_path: &Path,
         config: &Option<&ProjectValue>,
+        extra_globals: &[(&str, &str)],
     ) -> anyhow::Result<()> {
         let mut files = Vec::new();
 
@@ -114,7 +117,7 @@ impl TemplatesServices {
         }
 
         for file in files {
-            self.template_file(input_path, &file, output_path, config)
+            self.template_file(input_path, &file, output_path, config, extra_globals)
                 .await?;
         }
 
@@ -141,6 +144,7 @@ impl TemplatesServiceState for State {
 fn render_template(
     template_content: &str,
     config: &Option<&ProjectValue>,
+    extra_globals: &[(&str, &str)],
 ) -> anyhow::Result<String> {
     let mut env = minijinja::Environment::new();
     // Debug diagnostics, jinja is not fun to debug without
@@ -148,6 +152,10 @@ fn render_template(
 
     if let Some(config) = config {
         env.add_global("config", minijinja::Value::from_serialize(config));
+    }
+
+    for (key, value) in extra_globals {
+        env.add_global(*key, minijinja::Value::from(*value));
     }
 
     env.add_filter("to_lower", |input: String| -> String {

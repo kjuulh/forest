@@ -215,6 +215,7 @@ impl PrepareCommand {
                         &template_dir,
                         &output_path,
                         &deployment_item.config.as_ref(),
+                        &[("env", &deployment_item.env)],
                     )
                     .await
                     .context("render deployment templates")?;
