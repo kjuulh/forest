@@ -360,7 +360,7 @@ impl FluxV1Handler {
 
     /// Generate a Flux Kustomization CR YAML.
     pub fn generate_kustomization_cr(
-        namespace: &str,
+        _namespace: &str,
         project: &str,
         releases_path: &Path,
     ) -> String {
@@ -377,12 +377,10 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
-  targetNamespace: {namespace}
   wait: true
   timeout: 3m
 "#,
             project = project,
-            namespace = namespace,
             releases_path = releases_path.display(),
         )
     }
@@ -1237,7 +1235,7 @@ mod tests {
         assert!(cr.contains("kind: Kustomization"));
         assert!(cr.contains("name: rawpotion-rust-podinfo"));
         assert!(cr.contains("namespace: flux-system"));
-        assert!(cr.contains("targetNamespace: rust-podinfo"));
+        assert!(!cr.contains("targetNamespace"));
         assert!(cr.contains(
             "path: ./releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo"
         ));
@@ -1338,7 +1336,7 @@ mod tests {
         assert!(cr_path.exists());
         let cr_content = tokio::fs::read_to_string(&cr_path).await.unwrap();
         assert!(cr_content.contains("kustomize.toolkit.fluxcd.io"));
-        assert!(cr_content.contains("targetNamespace: rust-podinfo"));
+        assert!(!cr_content.contains("targetNamespace"));
         assert!(cr_content.contains(&format!(
             "path: ./{}",
             releases_rel.display()
@@ -1748,7 +1746,7 @@ mod tests {
         assert!(cr_file.exists(), "Flux CR file not found");
         let cr_content = tokio::fs::read_to_string(&cr_file).await.unwrap();
         assert!(cr_content.contains("kustomize.toolkit.fluxcd.io"));
-        assert!(cr_content.contains("targetNamespace: rust-podinfo"));
+        assert!(!cr_content.contains("targetNamespace"));
         assert!(cr_content.contains(
             "path: ./releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo"
         ));

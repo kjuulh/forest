@@ -28,6 +28,7 @@ mod admin;
 mod auth;
 mod components;
 mod destination;
+mod docs;
 mod environment;
 mod global;
 mod init;
@@ -95,6 +96,9 @@ enum Commands {
     // ── Component registry ──
     /// Browse and manage components (list, init)
     Components(ComponentsCommand),
+
+    /// Show comprehensive documentation and manpages
+    Docs(docs::DocsCommand),
 
     // ── System (hidden from default help) ──
     /// Admin operations (server status, diagnostics)
@@ -198,6 +202,7 @@ impl CommandHandler {
             Commands::Organisation(cmd) => cmd.execute(state).await,
             Commands::Notifications(cmd) => cmd.execute(state).await,
             Commands::Components(cmd) => cmd.execute(state).await,
+            Commands::Docs(cmd) => cmd.execute(state).await,
             Commands::Admin(cmd) => cmd.execute(state).await,
             Commands::Auth(cmd) => cmd.execute(state).await,
             Commands::Template(cmd) => cmd.execute(state).await,
