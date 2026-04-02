@@ -26,6 +26,7 @@ pub struct InProcessBackend {
     artifact_id: uuid::Uuid,
     project_id: uuid::Uuid,
     environment: String,
+    release_identity: Option<forest_runner::backend::ReleaseIdentity>,
     /// Keep temp directory guards alive for the lifetime of this backend.
     temp_guards: Mutex<Vec<GuardedTempDirectory>>,
 }
@@ -48,8 +49,14 @@ impl InProcessBackend {
             artifact_id,
             project_id,
             environment,
+            release_identity: None,
             temp_guards: Mutex::new(Vec::new()),
         }
+    }
+
+    pub fn with_release_identity(mut self, identity: forest_runner::backend::ReleaseIdentity) -> Self {
+        self.release_identity = Some(identity);
+        self
     }
 }
 
@@ -148,5 +155,9 @@ impl DestinationBackend for InProcessBackend {
         // Keep the guard alive so the temp dir isn't cleaned up
         self.temp_guards.lock().unwrap().push(guarded);
         Ok(path)
+    }
+
+    async fn get_release_identity(&self) -> Option<forest_runner::backend::ReleaseIdentity> {
+        self.release_identity.clone()
     }
 }

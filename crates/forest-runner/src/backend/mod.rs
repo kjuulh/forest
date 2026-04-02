@@ -40,6 +40,19 @@ pub struct DestinationConfig {
     pub type_version: u64,
 }
 
+/// Identity metadata for a release, used to annotate kubernetes resources
+/// so external agents can correlate cluster state back to forest releases.
+#[derive(Debug, Clone, Default)]
+pub struct ReleaseIdentity {
+    pub release_intent_id: Option<String>,
+    pub release_id: Option<String>,
+    pub artifact_id: Option<String>,
+    pub organisation: String,
+    pub project: String,
+    pub destination: String,
+    pub environment: String,
+}
+
 /// Abstraction over the backing data + logging infrastructure.
 ///
 /// Implementations are either:
@@ -58,6 +71,12 @@ pub trait DestinationBackend: Send + Sync {
 
     /// Project organisation and name, used for directory naming.
     async fn get_project_info(&self) -> anyhow::Result<ProjectInfo>;
+
+    /// Release identity for annotating kubernetes resources.
+    /// Returns None if identity info is not available (e.g. local prepare without server).
+    async fn get_release_identity(&self) -> Option<ReleaseIdentity> {
+        None
+    }
 
     /// Log a line to stdout.
     fn log_stdout(&self, line: &str);

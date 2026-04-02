@@ -230,6 +230,9 @@ impl FluxV1Handler {
         let flux_meta = FluxMetadata::from_metadata(&config.metadata)
             .context("invalid flux destination metadata")?;
 
+        // Get release identity for kubernetes annotations (if available)
+        let identity = backend.get_release_identity().await;
+
         // 1. Get artifact files from backend
         let files = backend
             .get_deployment_files()
@@ -334,6 +337,7 @@ impl FluxV1Handler {
                     &config.name,
                     &project_name,
                     &mode,
+                    identity.as_ref(),
                 )
                 .await?;
             } else {
@@ -345,7 +349,7 @@ impl FluxV1Handler {
                     &config.environment,
                     &config.name,
                     &project_name,
-                    &mode,
+                    identity.as_ref(), &mode,
                 )
                 .await?;
             }
@@ -363,13 +367,47 @@ impl FluxV1Handler {
         _namespace: &str,
         project: &str,
         releases_path: &Path,
+        identity: Option<&crate::backend::ReleaseIdentity>,
     ) -> String {
+        let mut annotations = Vec::new();
+        if let Some(id) = identity {
+            if let Some(ref v) = id.release_intent_id {
+                annotations.push(format!("    forest.sh/release-intent-id: \"{v}\""));
+            }
+            if let Some(ref v) = id.release_id {
+                annotations.push(format!("    forest.sh/release-id: \"{v}\""));
+            }
+            if let Some(ref v) = id.artifact_id {
+                annotations.push(format!("    forest.sh/artifact-id: \"{v}\""));
+            }
+            annotations.push(format!("    forest.sh/destination: \"{}\"", id.destination));
+            annotations.push(format!("    forest.sh/environment: \"{}\"", id.environment));
+        }
+
+        let labels_block = if identity.is_some() {
+            let id = identity.unwrap();
+            format!(
+                "  labels:\n    forest.sh/managed: \"true\"\n    forest.sh/organisation: \"{}\"\n    forest.sh/project: \"{}\"",
+                id.organisation, id.project,
+            )
+        } else {
+            String::new()
+        };
+
+        let annotations_block = if annotations.is_empty() {
+            String::new()
+        } else {
+            format!("  annotations:\n{}", annotations.join("\n"))
+        };
+
         format!(
             r#"apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
   name: {project}
   namespace: flux-system
+{labels_block}
+{annotations_block}
 spec:
   interval: 5m
   path: ./{releases_path}
@@ -381,6 +419,8 @@ spec:
 "#,
             project = project,
             releases_path = releases_path.display(),
+            labels_block = labels_block,
+            annotations_block = annotations_block,
         )
     }
 
@@ -623,6 +663,7 @@ async fn run_local(
     destination_name: &str,
     project: &str,
     mode: &Mode,
+    identity: Option<&crate::backend::ReleaseIdentity>,
 ) -> anyhow::Result<()> {
     let local_root = meta.local_path.as_ref().context("local_path required")?;
 
@@ -661,7 +702,7 @@ async fn run_local(
             // Write Flux CR as <project>.yaml and regenerate kustomization.yaml
             tokio::fs::create_dir_all(&clusters_dir_abs).await?;
             let kustomization_cr =
-                FluxV1Handler::generate_kustomization_cr(&meta.namespace, project, &releases_rel);
+                FluxV1Handler::generate_kustomization_cr(&meta.namespace, project, &releases_rel, identity);
             let cr_filename = format!("{project}.yaml");
             tokio::fs::write(
                 clusters_dir_abs.join(&cr_filename),
@@ -689,6 +730,7 @@ async fn run_git(
     env: &str,
     destination_name: &str,
     project: &str,
+    identity: Option<&crate::backend::ReleaseIdentity>,
     mode: &Mode,
 ) -> anyhow::Result<()> {
     let clone_dir = backend.create_temp_dir().await?;
@@ -738,7 +780,7 @@ async fn run_git(
     // Step 3: Write Flux CR as <project>.yaml and regenerate kustomization.yaml
     tokio::fs::create_dir_all(&clusters_dir_abs).await?;
     let kustomization_cr =
-        FluxV1Handler::generate_kustomization_cr(&meta.namespace, project, &releases_rel);
+        FluxV1Handler::generate_kustomization_cr(&meta.namespace, project, &releases_rel, identity);
     let cr_filename = format!("{project}.yaml");
     tokio::fs::write(
         clusters_dir_abs.join(&cr_filename),
@@ -1228,7 +1270,7 @@ mod tests {
             "rawpotion-rust-podinfo",
             &PathBuf::from(
                 "releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo",
-            ),
+            ), None,
         );
         assert!(cr.contains("apiVersion: kustomize.toolkit.fluxcd.io/v1"));
         assert!(cr.contains("kind: Kustomization"));
@@ -1301,7 +1343,7 @@ mod tests {
         tokio::fs::create_dir_all(&clusters_dir_abs).await.unwrap();
         let releases_rel = meta.releases_path(env, destination_name, project);
         let kustomization_cr =
-            FluxV1Handler::generate_kustomization_cr(&meta.namespace, project, &releases_rel);
+            FluxV1Handler::generate_kustomization_cr(&meta.namespace, project, &releases_rel, None);
         let cr_filename = format!("{project}.yaml");
         tokio::fs::write(
             clusters_dir_abs.join(&cr_filename),
@@ -1661,6 +1703,7 @@ mod tests {
             &PathBuf::from(
                 "releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo",
             ),
+            None,
         );
         tokio::fs::write(
             clusters_dir.join("rawpotion-rust-podinfo.yaml"),

@@ -30,6 +30,16 @@ impl FluxV1Destination {
         release: &ReleaseItem,
         destination: &Destination,
     ) -> InProcessBackend {
+        let identity = forest_runner::backend::ReleaseIdentity {
+            release_intent_id: Some(release.release_intent_id.to_string()),
+            release_id: Some(release.id.to_string()),
+            artifact_id: Some(release.artifact.to_string()),
+            organisation: destination.organisation.clone(),
+            project: release.project.clone(),
+            destination: destination.name.clone(),
+            environment: destination.environment.clone(),
+        };
+
         InProcessBackend::new(
             self.artifact_files.clone(),
             self.db.clone(),
@@ -39,6 +49,7 @@ impl FluxV1Destination {
             release.project_id,
             destination.environment.clone(),
         )
+        .with_release_identity(identity)
     }
 }
 
