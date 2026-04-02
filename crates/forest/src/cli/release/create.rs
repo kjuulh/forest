@@ -7,7 +7,7 @@ use crate::{
 };
 
 use super::{
-    annotate::{self, AnnotateParams},
+    annotate::{self, git_output, AnnotateParams},
     commit::CommitCommand,
     prepare::PrepareCommand,
 };
@@ -108,6 +108,11 @@ pub struct CreateCommand {
     #[arg(long, short = 'd')]
     destination: Option<Vec<String>>,
 
+    /// Override config values. Format: org/component.key=value
+    /// Example: --set kjuulh/service.tag=abc123
+    #[arg(long = "set", value_name = "KEY=VALUE")]
+    overrides: Vec<String>,
+
     /// Skip waiting for the release to complete.
     #[arg(long)]
     no_wait: bool,
@@ -187,15 +192,24 @@ impl CreateCommand {
 
         // ── 1. Prepare ───────────────────────────────────────────────
         tracing::info!("step 1/3: prepare");
-        let prepare = PrepareCommand {};
+        let prepare = PrepareCommand {
+            overrides: self.overrides.clone(),
+        };
         prepare.execute(state).await.context("prepare")?;
 
         // ── 2. Annotate (annotation_only — no auto-release) ─────────
         tracing::info!("step 2/3: annotate");
+
+        // Include --set overrides in annotation metadata for traceability
+        let mut metadata = self.metadata.clone();
+        for (i, kv) in self.overrides.iter().enumerate() {
+            metadata.push(format!("override.{i}={kv}"));
+        }
+
         let slug = annotate::annotate(
             state,
             &AnnotateParams {
-                metadata: self.metadata.clone(),
+                metadata,
                 source_username,
                 source_email,
                 context_title: title,
@@ -346,22 +360,6 @@ impl GitInfo {
             author_email,
         }
     }
-}
-
-/// Run a git command and return its trimmed stdout, or None on failure.
-async fn git_output(args: &[&str]) -> Option<String> {
-    let output = tokio::process::Command::new("git")
-        .args(args)
-        .output()
-        .await
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
 }
 
 /// Returns true if the git working tree has uncommitted changes

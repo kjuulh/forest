@@ -188,6 +188,13 @@ fn render_template(
         },
     );
 
+    // Custom test: `is configured` returns true for any non-undefined, non-none value,
+    // including empty objects `{}`. This avoids the Jinja2 pitfall where `{% if config.foo %}`
+    // is false for `{}` because empty dicts are falsy.
+    env.add_test("configured", |value: minijinja::Value| -> bool {
+        !value.is_undefined() && !value.is_none()
+    });
+
     let res = env.render_str(template_content, minijinja::context! {});
 
     match res {

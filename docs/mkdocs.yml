@@ -71,6 +71,7 @@ nav:
   - Guides:
       - guides/index.md
       - Authoring Components: guides/authoring-components.md
+      - Flux v2 Destination: guides/flux-destination.md
       - CUE Configuration: guides/cue-configuration.md
       - CI/CD Integration: guides/ci-cd.md
   - Reference:

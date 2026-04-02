@@ -136,6 +136,43 @@ The annotation captures rich metadata about the CI context:
 | `--commit-branch` | Source branch | `main` |
 | `--commit-message` | Full commit message | `Add feature X` |
 
+## Image Tagging with `--set`
+
+The `--set` flag on `forest release create` lets CI override config values without modifying `forest.cue`. This is the recommended way to pin image tags from CI:
+
+```bash
+# In your CI pipeline (e.g. Dagger, GitHub Actions, Drone):
+IMAGE_TAG=$(git rev-parse --short HEAD)
+
+# Build and push the image
+docker build -t git.example.io/org/my-service:$IMAGE_TAG .
+docker push git.example.io/org/my-service:$IMAGE_TAG
+
+# Release with the exact tag that was just built
+forest release create --env dev \
+  --set my-org/service.tag=$IMAGE_TAG
+```
+
+Your `forest.cue` keeps `tag: "latest"` as a sensible default for local development, while CI always pins to the exact build:
+
+```cue
+config: {
+    name:  "my-service"
+    image: "git.example.io/org/my-service"
+    tag:   "latest"  // overridden by CI via --set
+}
+```
+
+Multiple overrides can be combined:
+
+```bash
+forest release create --env prod \
+  --set my-org/service.tag=$IMAGE_TAG \
+  --set my-org/service.env_vars.BUILD_SHA=$COMMIT_SHA
+```
+
+All `--set` overrides are recorded in the release annotation metadata for audit purposes.
+
 ## Event Streaming
 
 Subscribe to release events for notifications or dashboards:

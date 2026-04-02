@@ -17,7 +17,13 @@ use crate::{
 };
 
 #[derive(clap::Parser)]
-pub struct PrepareCommand {}
+pub struct PrepareCommand {
+    /// Override config values. Format: org/component.key=value
+    /// Example: --set kjuulh/service.tag=abc123
+    /// Nested keys use dots: --set kjuulh/service.env_vars.LOG_LEVEL=debug
+    #[arg(long = "set", value_name = "KEY=VALUE")]
+    pub overrides: Vec<String>,
+}
 
 impl PrepareCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
@@ -28,7 +34,13 @@ impl PrepareCommand {
         // Parse project
         //
 
-        let project = state.project_parser().get_project().await?;
+        let mut project = state.project_parser().get_project().await?;
+
+        // Apply --set overrides to project config
+        for kv in &self.overrides {
+            apply_config_override(&mut project.other, kv)
+                .with_context(|| format!("invalid --set value: {kv}"))?;
+        }
 
         // Derive available contracts from project dependencies
         let enabled_contracts = EnabledContracts::from_project_dependencies(&project);
@@ -465,4 +477,73 @@ fn merge_config(base: ProjectValue, patch: ProjectValue) -> ProjectValue {
             value
         }
     }
+}
+
+/// Apply a config override in the format "org/component.key.path=value".
+///
+/// The path before '=' is split:
+///   - "org/component" → navigates to `other[org][component][config]`
+///   - remaining dot-separated segments → nested map keys
+///
+/// Examples:
+///   "kjuulh/service.tag=abc123"           → config.tag = "abc123"
+///   "kjuulh/service.env_vars.LOG=debug"   → config.env_vars.LOG = "debug"
+fn apply_config_override(root: &mut ProjectValue, kv: &str) -> anyhow::Result<()> {
+    let (path, value) = kv
+        .split_once('=')
+        .ok_or_else(|| anyhow::anyhow!("expected KEY=VALUE format"))?;
+
+    // Split "org/component.key.subkey" into component ref + config path
+    let (component_part, config_path) = path
+        .split_once('.')
+        .ok_or_else(|| anyhow::anyhow!("expected org/component.key format, got: {path}"))?;
+
+    let (org, name) = component_part
+        .split_once('/')
+        .ok_or_else(|| anyhow::anyhow!("expected org/component, got: {component_part}"))?;
+
+    // Navigate to other[org][name][config]
+    let ProjectValue::Map(root_map) = root else {
+        anyhow::bail!("project config root is not a map");
+    };
+
+    let org_map = root_map
+        .entry(org.to_string())
+        .or_insert_with(|| ProjectValue::Map(Default::default()));
+    let ProjectValue::Map(org_map) = org_map else {
+        anyhow::bail!("organisation '{org}' config is not a map");
+    };
+
+    let comp_map = org_map
+        .entry(name.to_string())
+        .or_insert_with(|| ProjectValue::Map(Default::default()));
+    let ProjectValue::Map(comp_map) = comp_map else {
+        anyhow::bail!("component '{org}/{name}' config is not a map");
+    };
+
+    let config_map = comp_map
+        .entry("config".to_string())
+        .or_insert_with(|| ProjectValue::Map(Default::default()));
+    let ProjectValue::Map(config_map) = config_map else {
+        anyhow::bail!("component '{org}/{name}' config block is not a map");
+    };
+
+    // Navigate nested keys (e.g. "env_vars.LOG_LEVEL")
+    let keys: Vec<&str> = config_path.split('.').collect();
+    let mut current = config_map;
+
+    for key in &keys[..keys.len() - 1] {
+        let entry = current
+            .entry(key.to_string())
+            .or_insert_with(|| ProjectValue::Map(Default::default()));
+        let ProjectValue::Map(next) = entry else {
+            anyhow::bail!("config key '{key}' is not a map");
+        };
+        current = next;
+    }
+
+    let final_key = keys.last().unwrap().to_string();
+    current.insert(final_key, ProjectValue::String(value.to_string()));
+
+    Ok(())
 }

@@ -142,12 +142,30 @@ Manage the release lifecycle.
 Generate deployment manifests by invoking component hooks.
 
 ```bash
-forest release prepare
+forest release prepare [--set KEY=VALUE ...]
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--set` | Override config values. Format: `org/component.key=value`. Repeatable. |
+
+**Examples:**
+
+```bash
+# Pin an image tag from CI
+forest release prepare --set kjuulh/service.tag=abc123
+
+# Override multiple values
+forest release prepare \
+  --set kjuulh/service.tag=abc123 \
+  --set kjuulh/service.env_vars.LOG_LEVEL=debug
+```
+
+The `--set` flag overrides values in the component's `config` block without modifying `forest.cue`. This is designed for CI pipelines where the image tag is determined at build time.
 
 ### `forest release annotate`
 
-Upload artifacts and create a release annotation.
+Upload artifacts and create a release annotation. Commit SHA and branch are auto-detected from git if not specified.
 
 ```bash
 forest release annotate [OPTIONS]
@@ -161,8 +179,8 @@ forest release annotate [OPTIONS]
 | `--context-description` | Release description |
 | `--context-web` | Web link to the change |
 | `--context-pr` | Pull request link |
-| `--commit-sha` | Commit SHA |
-| `--commit-branch` | Source branch |
+| `--commit-sha` | Commit SHA (auto-detected from git HEAD) |
+| `--commit-branch` | Source branch (auto-detected from git) |
 | `--commit-message` | Commit message |
 | `--source-type` | Source type (e.g., `ci`, `manual`) |
 | `--source-username` | Who triggered the release |
@@ -206,6 +224,18 @@ forest release create --environment <ENV> [OPTIONS]
 | `--organisation`, `-o` | Organisation (auto-detected from `forest.cue`) |
 | `--project`, `-p` | Project (auto-detected from `forest.cue`) |
 | `--commit-sha` | Commit SHA (auto-detected from HEAD) |
+| `--set` | Override config values (same as `prepare --set`). Overrides are recorded in annotation metadata. |
+
+**CI Example:**
+
+```bash
+# Build image, get tag, release with pinned tag
+IMAGE_TAG=$(git rev-parse --short HEAD)
+docker build -t my-registry/my-app:$IMAGE_TAG .
+docker push my-registry/my-app:$IMAGE_TAG
+
+forest release create --env dev --set kjuulh/service.tag=$IMAGE_TAG
+```
 
 ---
 

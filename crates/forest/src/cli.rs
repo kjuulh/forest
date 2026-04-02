@@ -47,7 +47,14 @@ pub(crate) mod output;
 pub(crate) mod prompts;
 
 #[derive(Parser)]
-#[command(author, version, about, long_about, subcommand_required = true)]
+#[command(
+    author,
+    version,
+    about,
+    long_about,
+    subcommand_required = true,
+    after_help = "Run 'forest docs' for comprehensive documentation, component authoring guides, and configuration reference."
+)]
 struct Command {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -66,7 +73,7 @@ enum Commands {
     // ── Component lifecycle (like cargo build/publish) ──
     /// Build the component binary for all configured platforms
     Build(BuildCommand),
-    /// Generate Rust SDK code from CUE component spec (forest.component.cue)
+    /// Generate type-safe code from CUE component spec (forest.component.cue)
     Generate(GenerateCommand),
     /// Publish component to the registry (binary + CUE spec + manifest)
     Publish(PublishCommand),

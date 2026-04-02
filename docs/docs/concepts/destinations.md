@@ -42,9 +42,9 @@ Common types:
 
 | Type | Description |
 |------|-------------|
+| `forest/flux@1` | GitOps deployment via Flux v2 |
 | `forest/kubernetes@1` | Kubernetes deployment via manifests |
 | `forest/terraform@1` | Terraform apply/plan |
-| `forage/containers@1` | Container orchestration |
 
 ## Mapping in Configuration
 

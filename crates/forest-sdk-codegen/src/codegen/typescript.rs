@@ -94,15 +94,12 @@ fn emit_interface(out: &mut String, name: &str, struct_def: &StructDef) -> Codeg
 }
 
 fn emit_field(out: &mut String, field: &Field) -> CodegenResult<()> {
-    let ts_name = to_camel_case(&field.name);
     let ts_type = type_ref_to_ts(&field.ty);
     let optional = if field.required { "" } else { "?" };
 
-    if ts_name != field.name {
-        writeln!(out, "  /** JSON field: \"{}\" */", field.name)?;
-    }
-
-    writeln!(out, "  {ts_name}{optional}: {ts_type};")?;
+    // Use the original snake_case name from the CUE schema. The Forest runtime
+    // passes JSON with snake_case keys, so the TypeScript interface must match.
+    writeln!(out, "  {}{optional}: {ts_type};", field.name)?;
     Ok(())
 }
 
@@ -134,9 +131,8 @@ fn emit_command_types(out: &mut String, commands: &[Command]) -> CodegenResult<(
 }
 
 fn emit_command_handler(out: &mut String, commands: &[Command]) -> CodegenResult<()> {
-    if commands.is_empty() {
-        return Ok(());
-    }
+    // Always emit CommandHandler, even when there are no commands, so that
+    // components with only hooks still produce a valid, importable interface.
     writeln!(out, "export interface CommandHandler {{")?;
     for cmd in commands {
         let pascal = to_pascal_case(&cmd.name);
@@ -322,7 +318,18 @@ fn type_ref_to_ts(ty: &TypeRef) -> String {
         TypeRef::Boolean => "boolean".to_string(),
         TypeRef::Named(name) => name.clone(),
         TypeRef::Array(inner) => format!("{}[]", type_ref_to_ts(inner)),
-        TypeRef::Object(_) => "Record<string, unknown>".to_string(),
+        TypeRef::Object(struct_def) if struct_def.fields.is_empty() => {
+            "Record<string, unknown>".to_string()
+        }
+        TypeRef::Object(struct_def) => {
+            let mut parts = Vec::new();
+            for field in &struct_def.fields {
+                let ts_type = type_ref_to_ts(&field.ty);
+                let optional = if field.required { "" } else { "?" };
+                parts.push(format!("{}{optional}: {ts_type}", field.name));
+            }
+            format!("{{ {} }}", parts.join("; "))
+        }
         TypeRef::Map(inner) => format!("Record<string, {}>", type_ref_to_ts(inner)),
     }
 }

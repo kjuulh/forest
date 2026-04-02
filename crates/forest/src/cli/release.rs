@@ -37,7 +37,10 @@ pub enum Commands {
 impl ReleaseCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         match &self.commands {
-            Some(Commands::Prepare(cmd)) => cmd.execute(state).await?,
+            Some(Commands::Prepare(cmd)) => {
+                cmd.execute(state).await?;
+                eprintln!("\nhint: use 'forest release create --env <env>' to prepare, annotate, and release in one step");
+            }
             Some(Commands::Annotate(cmd)) => cmd.execute(state).await?,
             Some(Commands::Release(cmd)) => cmd.execute(state).await?,
             Some(Commands::Create(cmd)) => cmd.execute(state).await?,

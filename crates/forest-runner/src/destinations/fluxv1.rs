@@ -377,8 +377,7 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
-  wait: true
-  timeout: 3m
+  wait: false
 "#,
             project = project,
             releases_path = releases_path.display(),

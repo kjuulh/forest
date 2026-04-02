@@ -424,10 +424,13 @@ impl<'a> LoweringContext<'a> {
     // ── Commands ─────────────────────────────────────────────────────
 
     fn lower_commands(&self, schema: &Schema) -> CodegenResult<Vec<ir::Command>> {
-        let props = schema
-            .properties
-            .as_ref()
-            .ok_or_else(|| Error::LoweringError("Commands schema has no properties".into()))?;
+        // A component may define `#Commands: sdk.#ForestCommands & {}` with no
+        // command entries. In that case the schema has no `properties` key (or
+        // an empty one), which is valid — simply return an empty list.
+        let props = match schema.properties.as_ref() {
+            Some(p) => p,
+            None => return Ok(Vec::new()),
+        };
 
         let mut commands = Vec::new();
         for (cmd_name, cmd_sor) in props {

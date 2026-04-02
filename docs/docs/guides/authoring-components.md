@@ -264,3 +264,230 @@ Follow [semver](https://semver.org/) for component versions:
 - **Major** (1.0.0): Breaking spec changes
 
 Consumers use version specs (e.g., `"0.1"`) that auto-resolve to the latest matching version.
+
+## TypeScript / Deno Components
+
+Most Forest components are implemented in TypeScript and run via Deno. This section covers the TypeScript-specific workflow.
+
+### Scaffold
+
+A typical TypeScript component has the following directory structure:
+
+```
+my-component/
+  forest.cue              # name, organisation, dependencies
+  forest.component.cue    # Spec, Commands, Hooks
+  cue.mod/module.cue      # CUE module
+  deno.json               # Import map (@forest/sdk)
+  src/
+    main.ts               # Implementation
+    forestgen.ts           # Generated (do not edit)
+    deps/                  # Generated dependency clients
+```
+
+The CUE files (`forest.cue`, `forest.component.cue`, `cue.mod/module.cue`) follow the same conventions as Rust components. The key difference is the runtime: instead of a compiled binary, the component runs as a Deno process.
+
+### Generate TypeScript Code
+
+Run the code generator targeting TypeScript:
+
+```bash
+forest generate --output ./src/ --language typescript
+```
+
+This produces:
+
+- `src/forestgen.ts` — typed interfaces matching your `#Spec`, input/output types for each command and hook, the router dispatch logic, and handler type signatures.
+- `src/deps/<org>_<name>.ts` — a typed client for each declared dependency. These clients wrap the `callComponent()` protocol so you can invoke other components with full type safety.
+
+Re-run this command whenever you change `forest.component.cue`.
+
+### Implement the Component
+
+In `src/main.ts`, import the generated types and implement each handler:
+
+```typescript
+import {
+  type Spec,
+  type PrepareInput,
+  type PrepareOutput,
+  type StatusInput,
+  type StatusOutput,
+  runOnce,
+} from "./forestgen.ts";
+
+runOnce({
+  async status(spec: Spec, _input: StatusInput): Promise<StatusOutput> {
+    return {
+      healthy: true,
+      message: `${spec.name} is running`,
+    };
+  },
+
+  async "forest/deployment/prepare"(
+    spec: Spec,
+    _input: PrepareInput,
+  ): Promise<PrepareOutput> {
+    const manifests = generateManifests(spec);
+    return { manifests };
+  },
+
+  async "forest/deployment/release"(spec: Spec, input) {
+    await applyDeployment(spec, input.releaseId);
+    return {};
+  },
+});
+```
+
+The `runOnce()` function reads a single request from stdin, dispatches it to the matching handler, and writes the response to stdout. This is the standard execution model for Forest components.
+
+### Dependencies and callComponent
+
+Components can invoke other components through generated dependency clients. Each file in `src/deps/` exposes functions that call the target component's commands via the `callComponent()` protocol.
+
+For example, if your component depends on `my-org/forage-s3`, the generator creates `src/deps/my_org_forage_s3.ts` with typed functions for each of that component's commands. You call them like any async function:
+
+```typescript
+import { createBucket } from "./deps/my_org_forage_s3.ts";
+
+const result = await createBucket({ name: "my-bucket", region: "eu-west-1" });
+```
+
+For dependency resolution to work at runtime, the parent project must list every dependency — including transitive ones — in its own `forest.cue`. If component A depends on component B, and a project uses A, the project must also declare B.
+
+### Build and Test
+
+Build the component to generate `meta.json` (the component manifest):
+
+```bash
+forest build
+```
+
+For local testing, use a path-based dependency in your consuming project, just as with Rust components:
+
+```bash
+forest add my-org/my-component --path ../my-component
+```
+
+This lets you iterate without publishing.
+
+## Template Authoring
+
+### Jinja2 Templates
+
+Components that generate deployment manifests use Jinja2 templates. Place template files in a directory structure that matches the destination type:
+
+```
+templates/deployment/forest/flux@1/
+  05-crds.yaml.jinja2
+  10-namespace.yaml.jinja2
+  15-rbac.yaml.jinja2
+  30-deployment.yaml.jinja2
+```
+
+The numeric prefixes control rendering order. Files are processed in lexicographic order, so `05-crds.yaml` is rendered before `30-deployment.yaml`.
+
+### Available Variables
+
+Inside templates, the following variables are available:
+
+| Variable | Description |
+|----------|-------------|
+| `config.*` | The resolved spec values from the consuming project. Fields match the `#Spec` definition. |
+| `env` | The environment name (e.g., `dev`, `staging`, `prod`). |
+
+### Available Filters
+
+Forest extends Jinja2 with these custom filters:
+
+| Filter | Description | Example |
+|--------|-------------|---------|
+| `to_lower` | Lowercase | `{{ name \| to_lower }}` |
+| `to_upper` | Uppercase | `{{ name \| to_upper }}` |
+| `to_snake` | snake_case | `{{ name \| to_snake }}` |
+| `to_camel` | camelCase | `{{ name \| to_camel }}` |
+| `to_pascal` | PascalCase | `{{ name \| to_pascal }}` |
+| `to_screaming_snake` | SCREAMING_SNAKE_CASE | `{{ name \| to_screaming_snake }}` |
+| `to_kebab` | kebab-case | `{{ name \| to_kebab }}` |
+| `as_bool` | Convert to boolean string | `{{ flag \| as_bool }}` |
+| `dictsort` | Sort a dictionary by key | `{{ dict \| dictsort }}` |
+
+### The `is configured` Test
+
+Forest provides a custom Jinja2 test called `is configured`. Use this instead of standard truthiness checks when testing whether an optional config block is present.
+
+The problem: in Jinja2, `{% if config.foo %}` evaluates to false for empty objects (`{}`). This is incorrect for Forest's use case — an empty block like `forage_postgresql: {}` means "use this component with defaults", not "this component is absent".
+
+```jinja2
+{# WRONG — fails for empty objects like forage_postgresql: {} #}
+{% if config.forage_postgresql is defined and config.forage_postgresql %}
+
+{# CORRECT — true for any non-undefined, non-none value including {} #}
+{% if config.forage_postgresql is configured %}
+```
+
+Always prefer `is configured` for optional component blocks in your templates.
+
+## Sealed Secrets
+
+Forest supports sealing Kubernetes secrets using the `forest run seal` command. Sealed secrets are encrypted with a cluster-specific certificate and can be safely committed to version control.
+
+### Seal Workflow
+
+1. **Obtain the certificate.** The `cert` parameter is a **file path** to the PEM certificate on disk, not the certificate content itself. Download it from the cluster or use a shared location.
+
+2. **Follow the correct order.** Create your components and templates first, then seal secrets, then release. The typical workflow is:
+
+   ```bash
+   # Seal a secret value
+   forest run seal --env dev --key DATABASE_URL --value "postgres://..." --cert ./certs/sealed-secrets.pem
+   ```
+
+3. **Multi-line values.** For multi-line secret values (such as TLS certificates or private keys), you may need to seal them directly with `kubeseal --raw` rather than through the Forest wrapper, then paste the sealed value into your configuration.
+
+## Common Pitfalls
+
+1. **snake_case vs camelCase in forestgen.ts** — The generated TypeScript code uses camelCase for field names, but the runtime JSON payloads use snake_case. If you need to access a field that does not match the generated interface (or if you encounter missing data), cast the spec and use the snake_case key directly:
+
+   ```typescript
+   const value = (spec as Record<string, unknown>)["field_name"];
+   ```
+
+   This mismatch is a known issue in the code generator.
+
+2. **Empty `#Commands` breaks `forest generate`** — If your component defines no commands (only hooks), the code generator may fail. In this case, write `forestgen.ts` manually or define a no-op command as a workaround.
+
+3. **`{% if config.foo %}` is false for `{}`** — As described in the Template Authoring section, always use `{% if config.foo is configured %}` to test for the presence of optional config blocks. Standard Jinja2 truthiness treats empty dicts as falsy.
+
+4. **Projects must list transitive dependencies** — If component A calls component B via `callComponent`, every project that uses A must also declare B as a dependency. Forest does not auto-resolve transitive dependencies at the project level.
+
+5. **`forest build` does not regenerate codegen** — The `forest build` command compiles the component and produces `meta.json`, but it does not re-run code generation. When you change `forest.component.cue`, you must run `forest generate` separately before building.
+
+## First Deployment Workflow
+
+When deploying a new service for the first time, follow this order:
+
+1. **Create the deployment project.** Set up `forest.cue` with the project metadata, list all components (including transitive dependencies), and create the template directory structure.
+
+2. **Generate and build each component.** For every component in the project:
+
+   ```bash
+   forest generate --output ./src/ --language typescript
+   forest build
+   ```
+
+3. **Seal any required secrets.** Encrypt sensitive values before the first release:
+
+   ```bash
+   forest run seal --env dev --key SECRET_KEY --value "..." --cert ./certs/sealed-secrets.pem
+   ```
+
+4. **Release.** Create a release for the target environment:
+
+   ```bash
+   forest release create --env dev
+   ```
+
+   This single command runs the full prepare, annotate, and release flow.
+
+5. **Wait for reconciliation.** If using Flux, either trigger a manual reconciliation or wait for the next poll interval. The manifests generated by the release will be picked up and applied to the cluster.

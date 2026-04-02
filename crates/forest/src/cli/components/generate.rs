@@ -5,13 +5,17 @@ use tokio::io::AsyncWriteExt;
 
 use crate::state::State;
 
-/// Generate SDK code from the CUE component spec.
+/// Generate typed TypeScript (or Rust) SDK code and dependency clients from the CUE component spec.
 ///
 /// Reads forest.component.cue (and spec.cue if present), converts to OpenAPI
 /// via `cue def`, then generates typed code into the output directory.
+/// For TypeScript projects, also generates typed dependency clients for any
+/// local component dependencies that have a forest.component.cue file.
 ///
-/// Also generates typed dependency clients for any local component dependencies
-/// that have a forest.component.cue file.
+/// Output files:
+///   <output>/forestgen.ts   — component types and handler scaffolding (TypeScript)
+///   <output>/forestgen.rs   — component types and handler scaffolding (Rust)
+///   <output>/deps/<name>.ts — typed client for each local component dependency
 ///
 /// Example: forest generate --output ./src/
 #[derive(clap::Parser)]

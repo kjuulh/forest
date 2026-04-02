@@ -4,6 +4,22 @@ use anyhow::Context;
 
 use crate::{grpc::GrpcClientState, models::source::Source, state::State};
 
+/// Run a git command and return its trimmed stdout, or `None` on failure.
+pub(super) async fn git_output(args: &[&str]) -> Option<String> {
+    let output = tokio::process::Command::new("git")
+        .args(args)
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
 #[derive(clap::Parser)]
 pub struct AnnotateCommand {
     #[arg(long)]
@@ -303,12 +319,23 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
         project: params.project_name.clone(),
     };
 
+    let commit_sha = match params.commit_sha.clone() {
+        Some(sha) => sha,
+        None => {
+            git_output(&["rev-parse", "HEAD"])
+                .await
+                .context("--commit-sha is required (not in a git repository, or git not found)")?
+        }
+    };
+
+    let commit_branch = match params.commit_branch.clone() {
+        Some(branch) => Some(branch),
+        None => git_output(&["branch", "--show-current"]).await,
+    };
+
     let reference = crate::models::reference::Reference {
-        commit_sha: params
-            .commit_sha
-            .clone()
-            .context("commit sha not found : (TODO get from context)")?,
-        commit_branch: params.commit_branch.clone(),
+        commit_sha,
+        commit_branch,
         commit_message: params.commit_message.clone(),
         version: params.version.clone(),
         repo_url: params.repo_url.clone(),
