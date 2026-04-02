@@ -400,14 +400,24 @@ impl FluxV1Handler {
             format!("  annotations:\n{}", annotations.join("\n"))
         };
 
+        let metadata_extra = [&labels_block, &annotations_block]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let metadata_section = if metadata_extra.is_empty() {
+            String::new()
+        } else {
+            format!("\n{metadata_extra}")
+        };
+
         format!(
             r#"apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
   name: {project}
-  namespace: flux-system
-{labels_block}
-{annotations_block}
+  namespace: flux-system{metadata_section}
 spec:
   interval: 5m
   path: ./{releases_path}
@@ -419,8 +429,7 @@ spec:
 "#,
             project = project,
             releases_path = releases_path.display(),
-            labels_block = labels_block,
-            annotations_block = annotations_block,
+            metadata_section = metadata_section,
         )
     }
 

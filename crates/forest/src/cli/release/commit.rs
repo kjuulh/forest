@@ -248,7 +248,7 @@ impl CommitCommand {
 
         eprintln!("\nWatching health...");
 
-        let mut last_status = String::new();
+        let mut seen_statuses: std::collections::HashSet<String> = std::collections::HashSet::new();
         let poll_interval = std::time::Duration::from_secs(5);
 
         loop {
@@ -274,10 +274,9 @@ impl CommitCommand {
                             _ => "PENDING",
                         };
 
-                        // Only print when status changes
+                        // Only print when status changes per destination
                         let key = format!("{}:{}", dest.destination, status_str);
-                        if key != last_status {
-                            last_status = key;
+                        if seen_statuses.insert(key) {
                             eprintln!(
                                 "  [{env}] {dest}  HEALTH: {status_str}",
                                 env = dest.environment,
