@@ -502,6 +502,13 @@ impl GrpcClient {
         Ok(client.clone())
     }
 
+    pub async fn health_client(
+        &self,
+    ) -> anyhow::Result<forest_grpc_interface::release_health_service_client::ReleaseHealthServiceClient<AuthMiddleware<Channel>>> {
+        let channel = self.auth_channel(self.channel().await?);
+        Ok(forest_grpc_interface::release_health_service_client::ReleaseHealthServiceClient::new(channel))
+    }
+
     async fn registry_client(
         &self,
     ) -> anyhow::Result<RegistryServiceClient<AuthMiddleware<Channel>>> {
