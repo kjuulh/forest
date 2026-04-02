@@ -1648,6 +1648,162 @@ pub struct GetStatusRequest {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetStatusResponse {
 }
+// ── Report (agent → server) ────────────────────────────────────────
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReportHealthRequest {
+    /// Identity — read from Kustomization annotations
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub release_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub project: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
+    pub environment: ::prost::alloc::string::String,
+    /// The observed health state
+    #[prost(message, optional, tag="10")]
+    pub observation: ::core::option::Option<HealthObservation>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReportHealthResponse {
+}
+// ── Observation model ──────────────────────────────────────────────
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct HealthObservation {
+    /// Top-level Kustomization status
+    #[prost(message, optional, tag="1")]
+    pub kustomization: ::core::option::Option<KustomizationHealth>,
+    /// Individual managed resources (Deployments, StatefulSets, etc.)
+    #[prost(message, repeated, tag="2")]
+    pub resources: ::prost::alloc::vec::Vec<ResourceHealth>,
+    /// When this observation was taken (RFC 3339)
+    #[prost(string, tag="3")]
+    pub observed_at: ::prost::alloc::string::String,
+    /// Overall computed status for this observation
+    #[prost(enumeration="HealthStatus", tag="4")]
+    pub status: i32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct KustomizationHealth {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
+    pub ready: bool,
+    #[prost(string, tag="3")]
+    pub message: ::prost::alloc::string::String,
+    /// Last revision applied by Flux
+    #[prost(string, tag="4")]
+    pub last_applied_revision: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResourceHealth {
+    #[prost(string, tag="1")]
+    pub api_version: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub kind: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub namespace: ::prost::alloc::string::String,
+    #[prost(enumeration="HealthStatus", tag="5")]
+    pub status: i32,
+    #[prost(string, tag="6")]
+    pub message: ::prost::alloc::string::String,
+    /// For Deployments/StatefulSets: replica counts
+    #[prost(int32, optional, tag="10")]
+    pub desired_replicas: ::core::option::Option<i32>,
+    #[prost(int32, optional, tag="11")]
+    pub ready_replicas: ::core::option::Option<i32>,
+    #[prost(int32, optional, tag="12")]
+    pub available_replicas: ::core::option::Option<i32>,
+}
+// ── Query (CLI/UI → server) ────────────────────────────────────────
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetReleaseHealthRequest {
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetReleaseHealthResponse {
+    #[prost(message, repeated, tag="1")]
+    pub destinations: ::prost::alloc::vec::Vec<DestinationHealth>,
+    #[prost(enumeration="HealthStatus", tag="2")]
+    pub aggregate_status: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DestinationHealth {
+    #[prost(string, tag="1")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub environment: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub latest_observation: ::core::option::Option<HealthObservation>,
+    #[prost(enumeration="HealthStatus", tag="4")]
+    pub status: i32,
+}
+// ── Streaming (CLI --watch) ────────────────────────────────────────
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchReleaseHealthRequest {
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReleaseHealthEvent {
+    #[prost(string, tag="1")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub environment: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub observation: ::core::option::Option<HealthObservation>,
+    #[prost(enumeration="HealthStatus", tag="4")]
+    pub status: i32,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum HealthStatus {
+    Unspecified = 0,
+    Healthy = 1,
+    Progressing = 2,
+    Degraded = 3,
+    Unhealthy = 4,
+    Missing = 5,
+}
+impl HealthStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "HEALTH_STATUS_UNSPECIFIED",
+            Self::Healthy => "HEALTH_STATUS_HEALTHY",
+            Self::Progressing => "HEALTH_STATUS_PROGRESSING",
+            Self::Degraded => "HEALTH_STATUS_DEGRADED",
+            Self::Unhealthy => "HEALTH_STATUS_UNHEALTHY",
+            Self::Missing => "HEALTH_STATUS_MISSING",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "HEALTH_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "HEALTH_STATUS_HEALTHY" => Some(Self::Healthy),
+            "HEALTH_STATUS_PROGRESSING" => Some(Self::Progressing),
+            "HEALTH_STATUS_DEGRADED" => Some(Self::Degraded),
+            "HEALTH_STATUS_UNHEALTHY" => Some(Self::Unhealthy),
+            "HEALTH_STATUS_MISSING" => Some(Self::Missing),
+            _ => None,
+        }
+    }
+}
 /// Rich context about the release that triggered the notification.
 /// Integrations decide which fields to use.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

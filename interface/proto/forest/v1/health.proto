@@ -2,9 +2,124 @@ syntax = "proto3";
 
 package forest.v1;
 
+// System liveness check (existing).
 service StatusService {
   rpc Status(GetStatusRequest) returns (GetStatusResponse) {}
 }
 
 message GetStatusRequest {}
 message GetStatusResponse {}
+
+// ── Release health monitoring ──────────────────────────────────────
+//
+// The ReleaseHealthService is called by the forest-kubernetes-agent
+// running in each target cluster. The agent watches Flux Kustomization
+// CRs annotated with forest.sh/* labels, observes their health, and
+// pushes observations to the forest server.
+
+service ReleaseHealthService {
+  // Report a health observation for a release on a specific destination.
+  // Called periodically by the agent (every 15-30s or on change).
+  rpc ReportHealth(ReportHealthRequest) returns (ReportHealthResponse);
+
+  // Get the current health state for a release intent (all destinations).
+  rpc GetReleaseHealth(GetReleaseHealthRequest) returns (GetReleaseHealthResponse);
+
+  // Stream health updates for a release intent. Used by `forest release create --watch`.
+  rpc WatchReleaseHealth(WatchReleaseHealthRequest) returns (stream ReleaseHealthEvent);
+}
+
+// ── Report (agent → server) ────────────────────────────────────────
+
+message ReportHealthRequest {
+  // Identity — read from Kustomization annotations
+  string release_intent_id = 1;
+  string release_id = 2;
+  string organisation = 3;
+  string project = 4;
+  string destination = 5;
+  string environment = 6;
+
+  // The observed health state
+  HealthObservation observation = 10;
+}
+
+message ReportHealthResponse {}
+
+// ── Observation model ──────────────────────────────────────────────
+
+message HealthObservation {
+  // Top-level Kustomization status
+  KustomizationHealth kustomization = 1;
+
+  // Individual managed resources (Deployments, StatefulSets, etc.)
+  repeated ResourceHealth resources = 2;
+
+  // When this observation was taken (RFC 3339)
+  string observed_at = 3;
+
+  // Overall computed status for this observation
+  HealthStatus status = 4;
+}
+
+message KustomizationHealth {
+  string name = 1;
+  bool ready = 2;
+  string message = 3;
+  // Last revision applied by Flux
+  string last_applied_revision = 4;
+}
+
+message ResourceHealth {
+  string api_version = 1;
+  string kind = 2;
+  string name = 3;
+  string namespace = 4;
+  HealthStatus status = 5;
+  string message = 6;
+
+  // For Deployments/StatefulSets: replica counts
+  optional int32 desired_replicas = 10;
+  optional int32 ready_replicas = 11;
+  optional int32 available_replicas = 12;
+}
+
+enum HealthStatus {
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  HEALTH_STATUS_HEALTHY = 1;
+  HEALTH_STATUS_PROGRESSING = 2;
+  HEALTH_STATUS_DEGRADED = 3;
+  HEALTH_STATUS_UNHEALTHY = 4;
+  HEALTH_STATUS_MISSING = 5;
+}
+
+// ── Query (CLI/UI → server) ────────────────────────────────────────
+
+message GetReleaseHealthRequest {
+  string release_intent_id = 1;
+}
+
+message GetReleaseHealthResponse {
+  repeated DestinationHealth destinations = 1;
+  HealthStatus aggregate_status = 2;
+}
+
+message DestinationHealth {
+  string destination = 1;
+  string environment = 2;
+  HealthObservation latest_observation = 3;
+  HealthStatus status = 4;
+}
+
+// ── Streaming (CLI --watch) ────────────────────────────────────────
+
+message WatchReleaseHealthRequest {
+  string release_intent_id = 1;
+}
+
+message ReleaseHealthEvent {
+  string destination = 1;
+  string environment = 2;
+  HealthObservation observation = 3;
+  HealthStatus status = 4;
+}
