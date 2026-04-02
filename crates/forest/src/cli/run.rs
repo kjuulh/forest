@@ -265,7 +265,13 @@ fn build_call_resolver(
 /// A token is treated as a flag name only if it matches `--<letter>...` (exactly
 /// two hyphens followed by an ASCII letter). This avoids misinterpreting values
 /// that start with dashes (e.g. `-----BEGIN NATS USER JWT-----`).
-fn parse_input_args(args: &ArgMatches) -> serde_json::Value {
+///
+/// Special value `@-` reads from stdin. Example:
+///   cat creds.txt | forest run seal --value @- --key MY_KEY
+///
+/// Special value `@<path>` reads from a file. Example:
+///   forest run seal --value @/path/to/creds.txt --key MY_KEY
+async fn parse_input_args(args: &ArgMatches) -> anyhow::Result<serde_json::Value> {
     let raw: Vec<String> = args
         .get_raw("input_args")
         .unwrap_or_default()
@@ -278,9 +284,10 @@ fn parse_input_args(args: &ArgMatches) -> serde_json::Value {
         if let Some(key) = parse_flag_name(&raw[i]) {
             if i + 1 < raw.len() && parse_flag_name(&raw[i + 1]).is_none() {
                 // Next token is a value (not another flag)
+                let value = resolve_value(&raw[i + 1]).await?;
                 map.insert(
                     key.replace('-', "_"),
-                    serde_json::Value::String(raw[i + 1].clone()),
+                    serde_json::Value::String(value),
                 );
                 i += 2;
             } else {
@@ -293,7 +300,23 @@ fn parse_input_args(args: &ArgMatches) -> serde_json::Value {
         }
     }
 
-    serde_json::Value::Object(map)
+    Ok(serde_json::Value::Object(map))
+}
+
+/// Resolve a value that may be a literal, `@-` (stdin), or `@<path>` (file).
+async fn resolve_value(raw: &str) -> anyhow::Result<String> {
+    if raw == "@-" {
+        use tokio::io::AsyncReadExt;
+        let mut buf = String::new();
+        tokio::io::stdin().read_to_string(&mut buf).await?;
+        Ok(buf)
+    } else if let Some(path) = raw.strip_prefix('@') {
+        tokio::fs::read_to_string(path)
+            .await
+            .with_context(|| format!("failed to read value from file: {path}"))
+    } else {
+        Ok(raw.to_string())
+    }
 }
 
 /// Check if a token is a CLI flag (`--name`). Returns the flag name if so.
@@ -333,7 +356,7 @@ impl CliRun {
             .find(|(c, _)| *c == resolved_name)
             .ok_or(anyhow::anyhow!("found no matching command"))?;
 
-        let input_json = parse_input_args(sub_matches);
+        let input_json = parse_input_args(sub_matches).await?;
 
         tracing::info!("running command: {}", command_name);
 

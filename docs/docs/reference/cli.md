@@ -129,7 +129,29 @@ forest run status               # Short name
 forest run my-component:status  # Fully qualified
 ```
 
-All trailing arguments are passed through to the component.
+All trailing arguments are passed as `--key value` pairs to the component.
+
+**Special value syntax:**
+
+| Syntax | Description |
+|--------|-------------|
+| `--key value` | Pass a literal string value |
+| `--key @-` | Read value from stdin |
+| `--key @/path/to/file` | Read value from a file |
+| `--flag` | Boolean flag (no value — sets to `true`) |
+
+**Examples:**
+
+```bash
+# Pass a literal value
+forest run seal --env dev --key MY_SECRET --value "my-value" --cert cert.pem
+
+# Read value from stdin (useful for multi-line content like credentials)
+cat /path/to/creds.txt | forest run seal --env dev --key NATS_CREDS --value @- --cert cert.pem
+
+# Read value from a file
+forest run seal --env dev --key NATS_CREDS --value @/path/to/creds.txt --cert cert.pem
+```
 
 ---
 

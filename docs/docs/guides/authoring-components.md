@@ -443,7 +443,15 @@ Forest supports sealing Kubernetes secrets using the `forest run seal` command. 
    forest run seal --env dev --key DATABASE_URL --value "postgres://..." --cert ./certs/sealed-secrets.pem
    ```
 
-3. **Multi-line values.** For multi-line secret values (such as TLS certificates or private keys), you may need to seal them directly with `kubeseal --raw` rather than through the Forest wrapper, then paste the sealed value into your configuration.
+3. **Multi-line values.** For multi-line secret values (such as credentials files or PEM certificates), use `@-` (stdin) or `@<path>` (file) syntax:
+
+   ```bash
+   # Read from stdin
+   cat creds.txt | forest run seal --env dev --key NATS_CREDS --value @- --cert cert.pem
+
+   # Read from file
+   forest run seal --env dev --key NATS_CREDS --value @/path/to/creds.txt --cert cert.pem
+   ```
 
 ## Common Pitfalls
 
