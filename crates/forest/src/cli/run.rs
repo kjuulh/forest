@@ -261,6 +261,10 @@ fn build_call_resolver(
 }
 
 /// Parse `--key value` pairs from trailing args into a JSON object.
+///
+/// A token is treated as a flag name only if it matches `--<letter>...` (exactly
+/// two hyphens followed by an ASCII letter). This avoids misinterpreting values
+/// that start with dashes (e.g. `-----BEGIN NATS USER JWT-----`).
 fn parse_input_args(args: &ArgMatches) -> serde_json::Value {
     let raw: Vec<String> = args
         .get_raw("input_args")
@@ -271,12 +275,17 @@ fn parse_input_args(args: &ArgMatches) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     let mut i = 0;
     while i < raw.len() {
-        if let Some(key) = raw[i].strip_prefix("--") {
-            if i + 1 < raw.len() && !raw[i + 1].starts_with("--") {
-                map.insert(key.replace('-', "_").to_string(), serde_json::Value::String(raw[i + 1].clone()));
+        if let Some(key) = parse_flag_name(&raw[i]) {
+            if i + 1 < raw.len() && parse_flag_name(&raw[i + 1]).is_none() {
+                // Next token is a value (not another flag)
+                map.insert(
+                    key.replace('-', "_"),
+                    serde_json::Value::String(raw[i + 1].clone()),
+                );
                 i += 2;
             } else {
-                map.insert(key.replace('-', "_").to_string(), serde_json::Value::Bool(true));
+                // No value follows — treat as boolean flag
+                map.insert(key.replace('-', "_"), serde_json::Value::Bool(true));
                 i += 1;
             }
         } else {
@@ -285,6 +294,20 @@ fn parse_input_args(args: &ArgMatches) -> serde_json::Value {
     }
 
     serde_json::Value::Object(map)
+}
+
+/// Check if a token is a CLI flag (`--name`). Returns the flag name if so.
+/// Only matches exactly two hyphens followed by an ASCII letter, so values
+/// like `-----BEGIN...` are not mistaken for flags.
+fn parse_flag_name(token: &str) -> Option<String> {
+    let rest = token.strip_prefix("--")?;
+    if rest.starts_with('-') || rest.is_empty() {
+        return None; // "---..." or bare "--"
+    }
+    if !rest.as_bytes()[0].is_ascii_alphabetic() {
+        return None; // "--123" etc.
+    }
+    Some(rest.to_string())
 }
 
 struct CliRun;

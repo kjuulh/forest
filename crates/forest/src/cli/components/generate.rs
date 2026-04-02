@@ -22,11 +22,11 @@ use crate::state::State;
 pub struct GenerateCommand {
     /// Output directory for the generated code
     #[arg(long)]
-    output: PathBuf,
+    pub output: PathBuf,
 
     /// Language to generate (auto-detected from forest.cue if not specified)
     #[arg(long)]
-    language: Option<String>,
+    pub language: Option<String>,
 }
 
 impl GenerateCommand {

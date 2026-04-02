@@ -67,8 +67,30 @@ impl BuildCommand {
             .and_then(|p| p.organisation.as_deref())
             .unwrap_or("forest");
 
-        // Deno/TypeScript components: no binary build, just generate meta.json
+        // Deno/TypeScript components: auto-run codegen if stale, then generate meta.json
         if matches!(upload.source_type, SourceType::Deno | SourceType::Typescript) {
+            // Auto-run codegen if forest.component.cue is newer than forestgen output
+            if let Some(codegen) = &component.codegen {
+                let spec_path = std::env::current_dir()?.join("forest.component.cue");
+                let gen_path = std::path::PathBuf::from(&codegen.output).join("forestgen.ts");
+                let needs_codegen = match (spec_path.metadata(), gen_path.metadata()) {
+                    (Ok(spec_meta), Ok(gen_meta)) => {
+                        spec_meta.modified().ok() > gen_meta.modified().ok()
+                    }
+                    (Ok(_), Err(_)) => true, // forestgen.ts doesn't exist
+                    _ => false,
+                };
+                if needs_codegen {
+                    tracing::info!(
+                        "forest.component.cue is newer than forestgen.ts — regenerating codegen"
+                    );
+                    let generate = super::generate::GenerateCommand {
+                        output: std::path::PathBuf::from(&codegen.output),
+                        language: None,
+                    };
+                    generate.execute(state).await?;
+                }
+            }
             let entrypoint = upload.source.join("main.ts");
             tracing::info!(
                 "deno component '{}' — generating meta.json",

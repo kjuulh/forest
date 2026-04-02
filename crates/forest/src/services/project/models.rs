@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ForestProject {
     pub project: Project,
+    #[serde(default)]
     pub dependencies: BTreeMap<String, Dependency>,
+    #[serde(default)]
     pub commands: BTreeMap<String, Command>,
 
     #[serde(skip)]
