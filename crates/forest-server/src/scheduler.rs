@@ -40,6 +40,7 @@ struct SchedulerInner {
     release_token_registry: ReleaseTokenRegistry,
     release_event_store: ReleaseEventStore,
     policy_registry: PolicyRegistry,
+    nats: async_nats::Client,
     disable_in_process: bool,
 }
 
@@ -61,6 +62,7 @@ impl Scheduler {
                 release_token_registry: state.release_token_registry(),
                 release_event_store: state.release_event_store(),
                 policy_registry: state.policy_registry(),
+                nats: state.nats.clone(),
                 disable_in_process,
             }),
             nats: state.nats.clone(),
@@ -353,6 +355,22 @@ impl SchedulerInner {
                 // Normal deploy mode
                 dest_svc.prepare(&logger, &release_item, &dest).await?;
                 dest_svc.release(&logger, &release_item, &dest).await?;
+
+                // Seed a PENDING health observation so the CLI can start watching immediately
+                if let Err(e) = crate::services::release_health::seed_pending(
+                    &self.release_event_store.db,
+                    &self.nats,
+                    release_item.release_intent_id,
+                    release_item.id,
+                    &dest.name,
+                    &dest.environment,
+                    &dest.organisation,
+                    &release_item.project,
+                )
+                .await
+                {
+                    tracing::warn!(%release_id, error = %e, "failed to seed health observation");
+                }
             }
             Ok::<(), anyhow::Error>(())
         }

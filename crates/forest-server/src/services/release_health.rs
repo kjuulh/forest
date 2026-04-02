@@ -96,6 +96,43 @@ pub async fn get_observations_for_intent(
         .collect())
 }
 
+/// Seed a PENDING health observation when a release is created.
+/// This ensures the WatchReleaseHealth stream immediately has data.
+pub async fn seed_pending(
+    db: &PgPool,
+    nats: &async_nats::Client,
+    release_intent_id: Uuid,
+    release_id: Uuid,
+    destination_name: &str,
+    environment: &str,
+    organisation: &str,
+    project: &str,
+) -> anyhow::Result<()> {
+    let now = chrono::Utc::now();
+    let observation_json = serde_json::json!({
+        "resources": [],
+        "observed_at": now.to_rfc3339(),
+        "status": "PENDING",
+        "message": "waiting for health agent to report",
+    });
+
+    upsert_observation(
+        db,
+        nats,
+        release_intent_id,
+        release_id,
+        destination_name,
+        environment,
+        organisation,
+        project,
+        &observation_json,
+        "PENDING",
+        "waiting for health agent to report",
+        &now,
+    )
+    .await
+}
+
 pub struct HealthObservationRow {
     pub destination_name: String,
     pub environment: String,

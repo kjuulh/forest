@@ -238,60 +238,61 @@ impl CommitCommand {
         grpc: &crate::grpc::GrpcClient,
         release_intent_id: uuid::Uuid,
     ) {
-        use futures::StreamExt;
-
         let mut client = match grpc.health_client().await {
             Ok(c) => c,
             Err(_) => return, // Health service not available, skip silently
         };
 
-        let response = match client
-            .watch_release_health(forest_grpc_interface::WatchReleaseHealthRequest {
-                release_intent_id: release_intent_id.to_string(),
-            })
-            .await
-        {
-            Ok(r) => r,
-            Err(_) => return,
-        };
-
-        let mut stream = response.into_inner();
-        let timeout = tokio::time::sleep(std::time::Duration::from_secs(60));
+        let timeout = tokio::time::sleep(std::time::Duration::from_secs(120));
         tokio::pin!(timeout);
 
         eprintln!("\nWatching health...");
 
+        let mut last_status = String::new();
+        let poll_interval = std::time::Duration::from_secs(5);
+
         loop {
             tokio::select! {
-                event = stream.next() => {
-                    match event {
-                        Some(Ok(health)) => {
-                            let status = forest_grpc_interface::HealthStatus::try_from(health.status)
-                                .map(|s| format!("{s:?}"))
-                                .unwrap_or_else(|_| "Unknown".to_string());
+                _ = tokio::time::sleep(poll_interval) => {
+                    let resp = match client
+                        .get_release_health(forest_grpc_interface::GetReleaseHealthRequest {
+                            release_intent_id: release_intent_id.to_string(),
+                        })
+                        .await
+                    {
+                        Ok(r) => r.into_inner(),
+                        Err(_) => continue,
+                    };
 
+                    for dest in &resp.destinations {
+                        let status_str = match dest.status {
+                            x if x == forest_grpc_interface::HealthStatus::Healthy as i32 => "HEALTHY",
+                            x if x == forest_grpc_interface::HealthStatus::Progressing as i32 => "PROGRESSING",
+                            x if x == forest_grpc_interface::HealthStatus::Degraded as i32 => "DEGRADED",
+                            x if x == forest_grpc_interface::HealthStatus::Unhealthy as i32 => "UNHEALTHY",
+                            x if x == forest_grpc_interface::HealthStatus::Missing as i32 => "MISSING",
+                            _ => "PENDING",
+                        };
+
+                        // Only print when status changes
+                        let key = format!("{}:{}", dest.destination, status_str);
+                        if key != last_status {
+                            last_status = key;
                             eprintln!(
-                                "  [{env}] {dest}  HEALTH: {status}",
-                                env = health.environment,
-                                dest = health.destination,
-                                status = status,
+                                "  [{env}] {dest}  HEALTH: {status_str}",
+                                env = dest.environment,
+                                dest = dest.destination,
                             );
+                        }
+                    }
 
-                            // Stop watching once healthy
-                            if health.status == forest_grpc_interface::HealthStatus::Healthy as i32 {
-                                eprintln!("\nRelease healthy.");
-                                return;
-                            }
-                        }
-                        Some(Err(e)) => {
-                            tracing::debug!(error = %e, "health stream error");
-                            return;
-                        }
-                        None => return, // Stream ended
+                    if resp.aggregate_status == forest_grpc_interface::HealthStatus::Healthy as i32 {
+                        eprintln!("\nRelease healthy.");
+                        return;
                     }
                 }
                 _ = &mut timeout => {
-                    eprintln!("\nHealth watch timed out (60s). Check status with: forest release health <intent-id>");
+                    eprintln!("\nHealth watch timed out (120s).");
                     return;
                 }
             }
