@@ -23,3 +23,4 @@ pub mod release_finalizer;
 pub mod release_pipeline;
 pub mod release_token_registry;
 pub mod users;
+pub mod release_health;

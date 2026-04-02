@@ -1652,7 +1652,8 @@ pub struct GetStatusResponse {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReportHealthRequest {
-    /// Identity — read from Kustomization annotations
+    /// Release identity — how the agent correlates observed resources
+    /// back to a forest release (e.g. from labels/annotations/tags).
     #[prost(string, tag="1")]
     pub release_intent_id: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
@@ -1672,56 +1673,50 @@ pub struct ReportHealthRequest {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReportHealthResponse {
 }
-// ── Observation model ──────────────────────────────────────────────
+// ── Observation model (infrastructure-agnostic) ────────────────────
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HealthObservation {
-    /// Top-level Kustomization status
-    #[prost(message, optional, tag="1")]
-    pub kustomization: ::core::option::Option<KustomizationHealth>,
-    /// Individual managed resources (Deployments, StatefulSets, etc.)
-    #[prost(message, repeated, tag="2")]
+    /// Individual observed resources
+    #[prost(message, repeated, tag="1")]
     pub resources: ::prost::alloc::vec::Vec<ResourceHealth>,
     /// When this observation was taken (RFC 3339)
-    #[prost(string, tag="3")]
+    #[prost(string, tag="2")]
     pub observed_at: ::prost::alloc::string::String,
     /// Overall computed status for this observation
+    #[prost(enumeration="HealthStatus", tag="3")]
+    pub status: i32,
+    /// Human-readable summary message
+    #[prost(string, tag="4")]
+    pub message: ::prost::alloc::string::String,
+}
+/// A single observed resource's health.
+/// The meaning of fields depends on the agent — a kubernetes agent
+/// fills api_version/kind/namespace, while a VM agent might use
+/// different conventions. The server treats these as opaque observations.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ResourceHealth {
+    /// Resource identification
+    ///
+    /// e.g. "Deployment", "Pod", "Service", "VM"
+    #[prost(string, tag="1")]
+    pub kind: ::prost::alloc::string::String,
+    /// resource name
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    /// optional grouping (k8s namespace, region, etc.)
+    #[prost(string, tag="3")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Health state
     #[prost(enumeration="HealthStatus", tag="4")]
     pub status: i32,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct KustomizationHealth {
-    #[prost(string, tag="1")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(bool, tag="2")]
-    pub ready: bool,
-    #[prost(string, tag="3")]
+    #[prost(string, tag="5")]
     pub message: ::prost::alloc::string::String,
-    /// Last revision applied by Flux
-    #[prost(string, tag="4")]
-    pub last_applied_revision: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ResourceHealth {
-    #[prost(string, tag="1")]
-    pub api_version: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub kind: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
-    pub namespace: ::prost::alloc::string::String,
-    #[prost(enumeration="HealthStatus", tag="5")]
-    pub status: i32,
-    #[prost(string, tag="6")]
-    pub message: ::prost::alloc::string::String,
-    /// For Deployments/StatefulSets: replica counts
-    #[prost(int32, optional, tag="10")]
-    pub desired_replicas: ::core::option::Option<i32>,
-    #[prost(int32, optional, tag="11")]
-    pub ready_replicas: ::core::option::Option<i32>,
-    #[prost(int32, optional, tag="12")]
-    pub available_replicas: ::core::option::Option<i32>,
+    /// Optional key-value properties for resource-specific data.
+    /// Examples: {"desired_replicas": "3", "ready_replicas": "2"},
+    ///            {"last_applied_revision": "main@sha1:abc123"}
+    #[prost(map="string, string", tag="10")]
+    pub properties: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 // ── Query (CLI/UI → server) ────────────────────────────────────────
 
@@ -1748,7 +1743,7 @@ pub struct DestinationHealth {
     #[prost(enumeration="HealthStatus", tag="4")]
     pub status: i32,
 }
-// ── Streaming (CLI --watch) ────────────────────────────────────────
+// ── Streaming ──────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WatchReleaseHealthRequest {

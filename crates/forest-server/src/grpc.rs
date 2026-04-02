@@ -15,6 +15,7 @@ use forest_grpc_interface::{
     release_pipeline_service_server::ReleasePipelineServiceServer,
     release_service_server::ReleaseServiceServer,
     runner_service_server::RunnerServiceServer,
+    release_health_service_server::ReleaseHealthServiceServer,
     status_service_server::StatusServiceServer,
     users_service_server::UsersServiceServer,
 };
@@ -49,6 +50,7 @@ mod organisations;
 mod registry;
 mod release;
 pub mod runner;
+mod release_health;
 mod status;
 mod users;
 
@@ -131,6 +133,11 @@ impl GrpcServer {
                 state: self.state.clone(),
                 runner_manager: self.runner_manager.clone(),
             }))
+            .add_service(ReleaseHealthServiceServer::new(
+                release_health::ReleaseHealthServer {
+                    state: self.state.clone(),
+                },
+            ))
             .serve_with_shutdown(
                 self.host,
                 async move { cancellation_token.cancelled().await },

@@ -12,27 +12,28 @@ message GetStatusResponse {}
 
 // ── Release health monitoring ──────────────────────────────────────
 //
-// The ReleaseHealthService is called by the forest-kubernetes-agent
-// running in each target cluster. The agent watches Flux Kustomization
-// CRs annotated with forest.sh/* labels, observes their health, and
-// pushes observations to the forest server.
+// The ReleaseHealthService accepts health observations from external
+// agents. The contract is infrastructure-agnostic — agents observe
+// their specific platform (kubernetes, ECS, VMs, etc.) and report
+// generic resource health observations.
 
 service ReleaseHealthService {
   // Report a health observation for a release on a specific destination.
-  // Called periodically by the agent (every 15-30s or on change).
+  // Called periodically by an agent (every 15-30s or on change).
   rpc ReportHealth(ReportHealthRequest) returns (ReportHealthResponse);
 
   // Get the current health state for a release intent (all destinations).
   rpc GetReleaseHealth(GetReleaseHealthRequest) returns (GetReleaseHealthResponse);
 
-  // Stream health updates for a release intent. Used by `forest release create --watch`.
+  // Stream health updates for a release intent.
   rpc WatchReleaseHealth(WatchReleaseHealthRequest) returns (stream ReleaseHealthEvent);
 }
 
 // ── Report (agent → server) ────────────────────────────────────────
 
 message ReportHealthRequest {
-  // Identity — read from Kustomization annotations
+  // Release identity — how the agent correlates observed resources
+  // back to a forest release (e.g. from labels/annotations/tags).
   string release_intent_id = 1;
   string release_id = 2;
   string organisation = 3;
@@ -46,42 +47,40 @@ message ReportHealthRequest {
 
 message ReportHealthResponse {}
 
-// ── Observation model ──────────────────────────────────────────────
+// ── Observation model (infrastructure-agnostic) ────────────────────
 
 message HealthObservation {
-  // Top-level Kustomization status
-  KustomizationHealth kustomization = 1;
-
-  // Individual managed resources (Deployments, StatefulSets, etc.)
-  repeated ResourceHealth resources = 2;
+  // Individual observed resources
+  repeated ResourceHealth resources = 1;
 
   // When this observation was taken (RFC 3339)
-  string observed_at = 3;
+  string observed_at = 2;
 
   // Overall computed status for this observation
-  HealthStatus status = 4;
+  HealthStatus status = 3;
+
+  // Human-readable summary message
+  string message = 4;
 }
 
-message KustomizationHealth {
-  string name = 1;
-  bool ready = 2;
-  string message = 3;
-  // Last revision applied by Flux
-  string last_applied_revision = 4;
-}
-
+// A single observed resource's health.
+// The meaning of fields depends on the agent — a kubernetes agent
+// fills api_version/kind/namespace, while a VM agent might use
+// different conventions. The server treats these as opaque observations.
 message ResourceHealth {
-  string api_version = 1;
-  string kind = 2;
-  string name = 3;
-  string namespace = 4;
-  HealthStatus status = 5;
-  string message = 6;
+  // Resource identification
+  string kind = 1;       // e.g. "Deployment", "Pod", "Service", "VM"
+  string name = 2;       // resource name
+  string namespace = 3;  // optional grouping (k8s namespace, region, etc.)
 
-  // For Deployments/StatefulSets: replica counts
-  optional int32 desired_replicas = 10;
-  optional int32 ready_replicas = 11;
-  optional int32 available_replicas = 12;
+  // Health state
+  HealthStatus status = 4;
+  string message = 5;
+
+  // Optional key-value properties for resource-specific data.
+  // Examples: {"desired_replicas": "3", "ready_replicas": "2"},
+  //           {"last_applied_revision": "main@sha1:abc123"}
+  map<string, string> properties = 10;
 }
 
 enum HealthStatus {
@@ -111,7 +110,7 @@ message DestinationHealth {
   HealthStatus status = 4;
 }
 
-// ── Streaming (CLI --watch) ────────────────────────────────────────
+// ── Streaming ──────────────────────────────────────────────────────
 
 message WatchReleaseHealthRequest {
   string release_intent_id = 1;
