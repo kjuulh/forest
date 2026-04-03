@@ -261,16 +261,13 @@ impl CreateCommand {
 
 /// Reads organisation and project name from the forest.cue/toml project file.
 async fn detect_project(state: &State) -> anyhow::Result<(Option<String>, Option<String>)> {
-    match state.project_parser().get_project().await {
-        Ok(project) => Ok((
-            project.organisation.clone(),
-            Some(project.name.clone()),
-        )),
-        Err(e) => {
-            tracing::debug!("could not parse project file for auto-detection: {e:#}");
-            Ok((None, None))
-        }
-    }
+    let project = state
+        .project_parser()
+        .get_project()
+        .await
+        .context("could not parse project file — is there a valid forest.cue in this directory?")?;
+
+    Ok((project.organisation.clone(), Some(project.name.clone())))
 }
 
 /// Reads author identity from the local forest auth state.

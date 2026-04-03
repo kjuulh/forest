@@ -15,7 +15,7 @@ use crate::state::State;
 /// the component descriptor for fast command discovery.
 ///
 /// Output: ~/.cache/forest/components/bin/{hash}
-/// Metadata: .forest/component/meta.json
+/// Metadata: ~/.cache/forest/components/<org>/<name>/<version>/.forest/component/meta.json
 #[derive(clap::Parser)]
 pub struct BuildCommand {}
 
@@ -85,7 +85,7 @@ impl BuildCommand {
                         "forest.component.cue is newer than forestgen.ts — regenerating codegen"
                     );
                     let generate = super::generate::GenerateCommand {
-                        output: std::path::PathBuf::from(&codegen.output),
+                        output: Some(std::path::PathBuf::from(&codegen.output)),
                         language: None,
                     };
                     generate.execute(state).await?;
@@ -105,7 +105,12 @@ impl BuildCommand {
             .await
             .ok();
 
-            let meta_dir = std::env::current_dir()?.join(".forest").join("component");
+            let meta_dir = crate::services::component_binary::component_meta_dir(
+                organisation,
+                &component.name,
+                &component.version,
+            )
+            .context("failed to resolve component cache directory")?;
             std::fs::create_dir_all(&meta_dir)?;
             let mut meta = serde_json::json!({
                 "organisation": organisation,
@@ -122,7 +127,10 @@ impl BuildCommand {
                 serde_json::to_string_pretty(&meta)?,
             )?;
 
-            tracing::info!("meta.json generated for deno component");
+            tracing::info!(
+                "meta.json generated for deno component at {}",
+                meta_dir.display()
+            );
             return Ok(());
         }
 
@@ -220,7 +228,12 @@ impl BuildCommand {
         };
 
         // Write meta.json with binary hashes + cached descriptor
-        let meta_dir = std::env::current_dir()?.join(".forest").join("component");
+        let meta_dir = crate::services::component_binary::component_meta_dir(
+            organisation,
+            &component.name,
+            &component.version,
+        )
+        .context("failed to resolve component cache directory")?;
         std::fs::create_dir_all(&meta_dir)?;
         let mut meta = serde_json::json!({
             "organisation": organisation,

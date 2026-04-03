@@ -49,12 +49,20 @@ pub async fn check_deno_available() -> anyhow::Result<()> {
 
 /// Detect if a component directory contains a Deno component.
 pub fn is_deno_component(path: &Path) -> bool {
-    let meta_path = path.join(".forest").join("component").join("meta.json");
-    if let Ok(content) = std::fs::read_to_string(&meta_path) {
-        if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
-            if meta.get("kind").and_then(|k| k.as_str()) == Some("deno") {
-                return true;
-            }
+    is_deno_component_with_meta(path, None, None, None)
+}
+
+/// Detect if a component directory contains a Deno component,
+/// checking the shared cache if org/name/version are provided.
+pub fn is_deno_component_with_meta(
+    path: &Path,
+    organisation: Option<&str>,
+    name: Option<&str>,
+    version: Option<&str>,
+) -> bool {
+    if let Some(meta) = read_meta_json(path, organisation, name, version) {
+        if meta.get("kind").and_then(|k| k.as_str()) == Some("deno") {
+            return true;
         }
     }
     path.join("src").join("main.ts").exists() && path.join("src").join("forest-sdk.ts").exists()
@@ -62,18 +70,44 @@ pub fn is_deno_component(path: &Path) -> bool {
 
 /// Get the entrypoint for a Deno component.
 pub fn resolve_entrypoint(path: &Path) -> Option<String> {
-    let meta_path = path.join(".forest").join("component").join("meta.json");
-    if let Ok(content) = std::fs::read_to_string(&meta_path) {
-        if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
-            if let Some(ep) = meta.get("entrypoint").and_then(|e| e.as_str()) {
-                return Some(ep.to_string());
-            }
+    resolve_entrypoint_with_meta(path, None, None, None)
+}
+
+/// Get the entrypoint for a Deno component,
+/// checking the shared cache if org/name/version are provided.
+pub fn resolve_entrypoint_with_meta(
+    path: &Path,
+    organisation: Option<&str>,
+    name: Option<&str>,
+    version: Option<&str>,
+) -> Option<String> {
+    if let Some(meta) = read_meta_json(path, organisation, name, version) {
+        if let Some(ep) = meta.get("entrypoint").and_then(|e| e.as_str()) {
+            return Some(ep.to_string());
         }
     }
     if path.join("src").join("main.ts").exists() {
         return Some("src/main.ts".to_string());
     }
     None
+}
+
+/// Read meta.json from the shared cache or local `.forest/` directory.
+fn read_meta_json(
+    path: &Path,
+    organisation: Option<&str>,
+    name: Option<&str>,
+    version: Option<&str>,
+) -> Option<serde_json::Value> {
+    let meta_path = if let (Some(org), Some(n), Some(v)) = (organisation, name, version) {
+        super::component_binary::resolve_meta_json(path, org, n, v)?
+    } else {
+        let local = path.join(".forest").join("component").join("meta.json");
+        if !local.exists() { return None; }
+        local
+    };
+    let content = std::fs::read_to_string(&meta_path).ok()?;
+    serde_json::from_str(&content).ok()
 }
 
 /// Invoke a Deno component method using protocol v2.
@@ -89,6 +123,14 @@ pub async fn invoke_deno_component(
     context: Option<&forest_sdk::CallContext>,
     call_resolver: Option<&ComponentCallResolver>,
 ) -> anyhow::Result<serde_json::Value> {
+    tracing::trace!(
+        component_dir = %component_dir.display(),
+        entrypoint = %entrypoint,
+        method = %method,
+        "rpc call → deno component"
+    );
+    tracing::trace!(spec = %spec_json, input = %input_json, "rpc request payload");
+
     let invoke_msg = serde_json::json!({
         "type": "invoke",
         "method": method,
@@ -164,6 +206,7 @@ pub async fn invoke_deno_component(
                     let result = msg.get("result")
                         .cloned()
                         .unwrap_or(serde_json::Value::Null);
+                    tracing::trace!(method = %method, result = %result, "rpc response ← deno component");
                     return Ok(result);
                 }
                 Some("call") => {
@@ -173,6 +216,11 @@ pub async fn invoke_deno_component(
                     let call_method = msg.get("method").and_then(|m| m.as_str())
                         .context("call message missing 'method'")?
                         .to_string();
+                    tracing::trace!(
+                        component = %component,
+                        call_method = %call_method,
+                        "rpc inter-component call"
+                    );
                     let call_id = msg.get("id").and_then(|i| i.as_str())
                         .unwrap_or("0")
                         .to_string();
@@ -277,9 +325,17 @@ pub async fn describe_deno_component(
 
 /// Load a cached descriptor from meta.json.
 pub fn load_cached_descriptor(path: &Path) -> Option<forest_sdk::ComponentDescriptor> {
-    let meta_path = path.join(".forest").join("component").join("meta.json");
-    let content = std::fs::read_to_string(&meta_path).ok()?;
-    let meta: serde_json::Value = serde_json::from_str(&content).ok()?;
+    load_cached_descriptor_with_meta(path, None, None, None)
+}
+
+/// Load a cached descriptor from meta.json, checking the shared cache if org/name/version are provided.
+pub fn load_cached_descriptor_with_meta(
+    path: &Path,
+    organisation: Option<&str>,
+    name: Option<&str>,
+    version: Option<&str>,
+) -> Option<forest_sdk::ComponentDescriptor> {
+    let meta = read_meta_json(path, organisation, name, version)?;
     let descriptor = meta.get("descriptor")?;
     serde_json::from_value(descriptor.clone()).ok()
 }

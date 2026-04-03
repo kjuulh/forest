@@ -56,11 +56,31 @@ impl RunCommand {
 
         // Handle --help and help before clap parsing (since we disabled help flag
         // to allow pass-through of raw args)
-        if self.args.is_empty()
-            || self.args.iter().any(|a| a == "--help" || a == "-h")
+        if self.args.is_empty() {
+            let (_, mut run_cmd) = build_dynamic_command(&project);
+            let help = run_cmd.render_long_help();
+            println!("{help}");
+            return Ok(());
+        }
+
+        if self.args.iter().any(|a| a == "--help" || a == "-h")
             || self.args.first().map(|a| a.as_str()) == Some("help")
         {
-            let (_, mut run_cmd) = build_dynamic_command(&project);
+            let (cli_names, run_cmd) = build_dynamic_command(&project);
+            // Find the first non-help arg to see if user is asking for help on a specific subcommand
+            let subcmd_name = self
+                .args
+                .iter()
+                .find(|a| *a != "--help" && *a != "-h" && *a != "help");
+            if let Some(name) = subcmd_name {
+                if cli_names.contains_key(name.as_str()) {
+                    let mut sub = build_enriched_subcommand(name, &cli_names, &project).await;
+                    let help = sub.render_long_help();
+                    println!("{help}");
+                    return Ok(());
+                }
+            }
+            let mut run_cmd = run_cmd;
             let help = run_cmd.render_long_help();
             println!("{help}");
             return Ok(());
@@ -196,6 +216,139 @@ fn build_dynamic_command(
     }
 
     (cli_names, run_cmd)
+}
+
+/// Build an enriched clap subcommand for help display.
+///
+/// Fetches the component's OpenAPI spec from `forest.component.cue` to discover
+/// input fields, then adds them as proper `--arg` definitions so that `--help`
+/// shows meaningful argument documentation.
+async fn build_enriched_subcommand(
+    cli_name: &str,
+    cli_names: &std::collections::BTreeMap<String, crate::models::CommandName>,
+    project: &Project,
+) -> clap::Command {
+    let cmd_name = &cli_names[cli_name];
+    let mut sub = clap::Command::new(cli_name.to_string());
+
+    // Add description
+    if let Some(command) = project.commands.get(cmd_name) {
+        if let crate::models::Command::ComponentBinary {
+            description: Some(desc),
+            ..
+        }
+        | crate::models::Command::ComponentDeno {
+            description: Some(desc),
+            ..
+        } = command
+        {
+            sub = sub.about(desc.clone());
+        }
+    }
+
+    // Try to fetch input args from the component's OpenAPI spec
+    let command_short = cmd_name.command_name();
+    if let Some(fields) = fetch_command_input_schema(cmd_name, command_short).await {
+        for field in &fields {
+            let mut arg = clap::Arg::new(field.name.clone())
+                .long(field.name.clone())
+                .required(field.required)
+                .value_name(
+                    field.field_type.as_deref().unwrap_or("string").to_uppercase(),
+                );
+            if let Some(desc) = &field.description {
+                arg = arg.help(desc.to_string());
+            }
+            sub = sub.arg(arg);
+        }
+    } else {
+        // Fallback: keep the generic trailing args
+        sub = sub.arg(
+            clap::Arg::new("input_args")
+                .action(clap::ArgAction::Append)
+                .allow_hyphen_values(true)
+                .trailing_var_arg(true),
+        );
+    }
+
+    sub
+}
+
+struct InputField {
+    name: String,
+    required: bool,
+    description: Option<String>,
+    field_type: Option<String>,
+}
+
+/// Fetch the input fields for a command from the component's OpenAPI spec.
+///
+/// Runs `cue def --out openapi` on the component's `forest.component.cue`,
+/// then extracts the input properties for the given command name.
+async fn fetch_command_input_schema(
+    cmd_name: &crate::models::CommandName,
+    command_short: &str,
+) -> Option<Vec<InputField>> {
+    let component_dir = match cmd_name {
+        crate::models::CommandName::Component {
+            source: crate::models::CommandSource::Local(path),
+            ..
+        } => path.clone(),
+        _ => return None,
+    };
+
+    let component_cue = component_dir.join("forest.component.cue");
+    if !component_cue.exists() {
+        return None;
+    }
+
+    let mut cmd = tokio::process::Command::new("cue");
+    if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+        cmd.env("CUE_REGISTRY", registry);
+    }
+    cmd.args(["def", "./forest.component.cue", "--out", "openapi"]);
+    cmd.current_dir(&component_dir);
+
+    let output = cmd.output().await.ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let doc: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+
+    // Navigate: components.schemas.Commands.properties.<command_short>.properties.input
+    let command_schema = doc
+        .get("components")?
+        .get("schemas")?
+        .get("Commands")?
+        .get("properties")?
+        .get(command_short)?;
+
+    let input_schema = command_schema
+        .get("properties")?
+        .get("input")?;
+
+    let properties = input_schema.get("properties")?.as_object()?;
+    let required_fields: std::collections::HashSet<&str> = input_schema
+        .get("required")
+        .and_then(|r| r.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+
+    let mut fields = Vec::new();
+    for (name, schema) in properties {
+        fields.push(InputField {
+            name: name.clone(),
+            required: required_fields.contains(name.as_str()),
+            description: schema.get("description").and_then(|d| d.as_str()).map(String::from),
+            field_type: schema.get("type").and_then(|t| t.as_str()).map(String::from),
+        });
+    }
+
+    // Sort so required fields come first, then alphabetical
+    fields.sort_by(|a, b| b.required.cmp(&a.required).then(a.name.cmp(&b.name)));
+
+    Some(fields)
 }
 
 /// Build a spec JSON object from the project's component config.

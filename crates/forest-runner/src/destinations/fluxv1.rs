@@ -61,8 +61,14 @@ impl FluxMetadata {
             .context("metadata 'namespace' is required for flux destinations")?
             .clone();
 
-        let git_url = metadata.get("git_url").cloned();
-        let local_path = metadata.get("local_path").map(PathBuf::from);
+        let git_url = metadata
+            .get("git_url")
+            .filter(|v| !v.is_empty())
+            .cloned();
+        let local_path = metadata
+            .get("local_path")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from);
 
         if git_url.is_none() && local_path.is_none() {
             anyhow::bail!(

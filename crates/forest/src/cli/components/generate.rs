@@ -20,9 +20,9 @@ use crate::state::State;
 /// Example: forest generate --output ./src/
 #[derive(clap::Parser)]
 pub struct GenerateCommand {
-    /// Output directory for the generated code
+    /// Output directory for the generated code (defaults to codegen.output from forest.cue)
     #[arg(long)]
-    pub output: PathBuf,
+    pub output: Option<PathBuf>,
 
     /// Language to generate (auto-detected from forest.cue if not specified)
     #[arg(long)]
@@ -36,6 +36,15 @@ impl GenerateCommand {
             None => detect_codegen_language().await.unwrap_or_else(|| "rust".to_string()),
         };
 
+        let output = match &self.output {
+            Some(o) => o.clone(),
+            None => detect_codegen_output()
+                .await
+                .ok_or_else(|| anyhow::anyhow!(
+                    "no --output specified and no codegen.output found in forest.cue"
+                ))?,
+        };
+
         let codegen_language = match language.as_str() {
             "rust" => forest_sdk_codegen::CodegenLanguage::Rust,
             "typescript" | "deno" | "ts" => forest_sdk_codegen::CodegenLanguage::TypeScript,
@@ -44,7 +53,7 @@ impl GenerateCommand {
 
         let codegen = forest_sdk_codegen::Codegen {
             options: forest_sdk_codegen::CodegenOptions {
-                destination: self.output.display().to_string(),
+                destination: output.display().to_string(),
                 language: codegen_language,
             },
         };
@@ -53,21 +62,21 @@ impl GenerateCommand {
         let openapi_json = run_cue_def_openapi(&["./forest.component.cue"]).await?;
         let generated_code = codegen.generate(openapi_json.trim())?;
 
-        tokio::fs::create_dir_all(&self.output).await?;
+        tokio::fs::create_dir_all(&output).await?;
 
         let filename = match language.as_str() {
             "typescript" | "deno" | "ts" => "forestgen.ts",
             _ => "forestgen.rs",
         };
 
-        let mut file = tokio::fs::File::create(self.output.join(filename)).await?;
+        let mut file = tokio::fs::File::create(output.join(filename)).await?;
         file.write_all(generated_code.as_bytes()).await?;
         file.flush().await?;
-        tracing::info!("generated {} at {}", filename, self.output.display());
+        tracing::info!("generated {} at {}", filename, output.display());
 
         // Generate dependency clients
         if matches!(language.as_str(), "typescript" | "deno" | "ts") {
-            self.generate_dependency_clients(&codegen).await?;
+            self.generate_dependency_clients(&output, &codegen).await?;
         }
 
         Ok(())
@@ -76,6 +85,7 @@ impl GenerateCommand {
     /// Discover local component dependencies and generate typed clients for them.
     async fn generate_dependency_clients(
         &self,
+        output: &std::path::Path,
         codegen: &forest_sdk_codegen::Codegen,
     ) -> anyhow::Result<()> {
         let deps = discover_component_dependencies().await?;
@@ -83,7 +93,7 @@ impl GenerateCommand {
             return Ok(());
         }
 
-        let deps_dir = self.output.join("deps");
+        let deps_dir = output.join("deps");
         tokio::fs::create_dir_all(&deps_dir).await?;
 
         for (component_id, component_path) in deps {
@@ -186,6 +196,27 @@ async fn discover_component_dependencies() -> anyhow::Result<Vec<(String, PathBu
     }
 
     Ok(result)
+}
+
+/// Try to detect the codegen output directory from forest.cue's codegen.output field.
+async fn detect_codegen_output() -> Option<PathBuf> {
+    let output = tokio::process::Command::new("cue")
+        .args(["export", "--out", "json", "forest.cue"])
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let doc: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    doc.get("forest")
+        .and_then(|f| f.get("component"))
+        .and_then(|c| c.get("codegen"))
+        .and_then(|c| c.get("output"))
+        .and_then(|t| t.as_str())
+        .map(PathBuf::from)
 }
 
 /// Try to detect the codegen language from forest.cue's codegen.type field.

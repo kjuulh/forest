@@ -51,12 +51,23 @@ impl ProjectParser {
             if let CacheComponentSource::Local(path) = &component.source {
                 if component_binary::is_v2_component(path) {
                     // v2 component — check for binary (optional for template-only components)
-                    let binary_path = component_binary::resolve_binary(path, &component.name);
+                    let binary_path = component_binary::resolve_binary_with_meta(
+                        path,
+                        &component.name,
+                        Some(&component.organisation),
+                        Some(&component.name),
+                        Some(&component.version.to_string()),
+                    );
 
                     if let Some(ref binary_path) = binary_path {
                         // v2 component: try cached descriptor first, then _meta/describe
                         let descriptor_result =
-                            if let Some(cached) = component_binary::load_cached_descriptor(path) {
+                            if let Some(cached) = component_binary::load_cached_descriptor_with_meta(
+                                path,
+                                Some(&component.organisation),
+                                Some(&component.name),
+                                Some(&component.version.to_string()),
+                            ) {
                                 tracing::debug!(
                                     "using cached descriptor for {}/{}",
                                     component.organisation,
@@ -116,11 +127,26 @@ impl ProjectParser {
                                 );
                             }
                         }
-                    } else if component_deno::is_deno_component(path) {
+                    } else if component_deno::is_deno_component_with_meta(
+                        path,
+                        Some(&component.organisation),
+                        Some(&component.name),
+                        Some(&component.version.to_string()),
+                    ) {
                         // Deno/TypeScript component
-                        if let Some(entrypoint) = component_deno::resolve_entrypoint(path) {
+                        if let Some(entrypoint) = component_deno::resolve_entrypoint_with_meta(
+                            path,
+                            Some(&component.organisation),
+                            Some(&component.name),
+                            Some(&component.version.to_string()),
+                        ) {
                             let descriptor_result =
-                                if let Some(cached) = component_deno::load_cached_descriptor(path) {
+                                if let Some(cached) = component_deno::load_cached_descriptor_with_meta(
+                                    path,
+                                    Some(&component.organisation),
+                                    Some(&component.name),
+                                    Some(&component.version.to_string()),
+                                ) {
                                     tracing::debug!(
                                         "using cached descriptor for deno component {}/{}",
                                         component.organisation,

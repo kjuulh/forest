@@ -1,5 +1,46 @@
 use std::path::{Path, PathBuf};
 
+/// Compute the shared cache directory for a component's metadata.
+/// Layout: `~/.cache/forest/component-meta/<org>/<name>/<version>/`
+///
+/// This is separate from the component cache (`~/.cache/forest/components/`)
+/// which is scanned for registry-downloaded components. Local component
+/// metadata must not live there or the scanner will try to parse incomplete dirs.
+pub fn component_meta_dir(organisation: &str, name: &str, version: &str) -> Option<PathBuf> {
+    let cache_dir = dirs::cache_dir()?;
+    Some(
+        cache_dir
+            .join("forest")
+            .join("component-meta")
+            .join(organisation)
+            .join(name)
+            .join(version),
+    )
+}
+
+/// Resolve meta.json for a component, checking the shared cache first,
+/// then falling back to the local `.forest/component/` directory.
+pub fn resolve_meta_json(component_dir: &Path, organisation: &str, name: &str, version: &str) -> Option<PathBuf> {
+    // Check shared cache first
+    if let Some(cache_meta_dir) = component_meta_dir(organisation, name, version) {
+        let cache_meta = cache_meta_dir.join("meta.json");
+        if cache_meta.exists() {
+            return Some(cache_meta);
+        }
+    }
+
+    // Fall back to local .forest/component/meta.json
+    let local_meta = component_dir
+        .join(".forest")
+        .join("component")
+        .join("meta.json");
+    if local_meta.exists() {
+        return Some(local_meta);
+    }
+
+    None
+}
+
 /// Resolves the binary path for a v2 component.
 ///
 /// For local deps: finds the built binary on disk, checks if it changed
@@ -8,21 +49,35 @@ use std::path::{Path, PathBuf};
 ///
 /// For registry deps: uses the content-addressable cache via meta.json.
 pub fn resolve_binary(component_dir: &Path, component_name: &str) -> Option<PathBuf> {
+    resolve_binary_with_meta(component_dir, component_name, None, None, None)
+}
+
+/// Resolve binary with optional org/name/version for shared cache meta lookup.
+pub fn resolve_binary_with_meta(
+    component_dir: &Path,
+    component_name: &str,
+    organisation: Option<&str>,
+    name: Option<&str>,
+    version: Option<&str>,
+) -> Option<PathBuf> {
     // 1. Try to find a locally-built binary and sync to cache if changed
     if let Some(local_binary) = find_local_binary(component_dir, component_name) {
-        return sync_local_binary_to_cache(component_dir, &local_binary);
+        let meta_path = resolve_meta_for_sync(component_dir, organisation, name, version);
+        return sync_local_binary_to_cache_at(component_dir, &local_binary, meta_path.as_deref());
     }
 
     // 2. Fall back to meta.json → content-addressable cache (registry deps)
-    let meta_path = component_dir
-        .join(".forest")
-        .join("component")
-        .join("meta.json");
+    let meta_path = if let (Some(org), Some(n), Some(v)) = (organisation, name, version) {
+        resolve_meta_json(component_dir, org, n, v)
+    } else {
+        let local_meta = component_dir
+            .join(".forest")
+            .join("component")
+            .join("meta.json");
+        if local_meta.exists() { Some(local_meta) } else { None }
+    };
 
-    if !meta_path.exists() {
-        return None;
-    }
-
+    let meta_path = meta_path?;
     let meta_content = std::fs::read_to_string(&meta_path).ok()?;
     let meta: serde_json::Value = serde_json::from_str(&meta_content).ok()?;
 
@@ -36,6 +91,24 @@ pub fn resolve_binary(component_dir: &Path, component_name: &str) -> Option<Path
         .as_str()?;
 
     resolve_binary_from_hash(sha256)
+}
+
+/// Resolve the meta.json path for sync operations.
+fn resolve_meta_for_sync(
+    component_dir: &Path,
+    organisation: Option<&str>,
+    name: Option<&str>,
+    version: Option<&str>,
+) -> Option<PathBuf> {
+    if let (Some(org), Some(n), Some(v)) = (organisation, name, version) {
+        resolve_meta_json(component_dir, org, n, v)
+    } else {
+        let local_meta = component_dir
+            .join(".forest")
+            .join("component")
+            .join("meta.json");
+        if local_meta.exists() { Some(local_meta) } else { None }
+    }
 }
 
 /// Find a locally-built binary for a component (Cargo workspace or standalone).
@@ -67,15 +140,27 @@ fn find_local_binary(component_dir: &Path, binary_name: &str) -> Option<PathBuf>
 
 /// Hash a local binary, compare to meta.json, update cache if changed.
 fn sync_local_binary_to_cache(component_dir: &Path, local_binary: &Path) -> Option<PathBuf> {
+    sync_local_binary_to_cache_at(component_dir, local_binary, None)
+}
+
+/// Hash a local binary, compare to meta.json, update cache if changed.
+/// If `meta_path_override` is provided, use that instead of the local `.forest/` path.
+fn sync_local_binary_to_cache_at(
+    component_dir: &Path,
+    local_binary: &Path,
+    meta_path_override: Option<&Path>,
+) -> Option<PathBuf> {
     use sha2::{Digest, Sha256};
 
     let content = std::fs::read(local_binary).ok()?;
     let current_hash = hex::encode(Sha256::digest(&content));
 
-    let meta_path = component_dir
-        .join(".forest")
-        .join("component")
-        .join("meta.json");
+    let meta_path = meta_path_override.map(PathBuf::from).unwrap_or_else(|| {
+        component_dir
+            .join(".forest")
+            .join("component")
+            .join("meta.json")
+    });
 
     let (os, arch) = current_platform();
     let platform_key = format!("{os}_{arch}");
@@ -212,10 +297,26 @@ pub fn is_v2_component(component_dir: &Path) -> bool {
 pub fn load_cached_descriptor(
     component_dir: &Path,
 ) -> Option<forest_sdk::ComponentDescriptor> {
-    let meta_path = component_dir
-        .join(".forest")
-        .join("component")
-        .join("meta.json");
+    load_cached_descriptor_with_meta(component_dir, None, None, None)
+}
+
+/// Load the cached descriptor, checking the shared cache if org/name/version are provided.
+pub fn load_cached_descriptor_with_meta(
+    component_dir: &Path,
+    organisation: Option<&str>,
+    name: Option<&str>,
+    version: Option<&str>,
+) -> Option<forest_sdk::ComponentDescriptor> {
+    let meta_path = if let (Some(org), Some(n), Some(v)) = (organisation, name, version) {
+        resolve_meta_json(component_dir, org, n, v)?
+    } else {
+        let local = component_dir
+            .join(".forest")
+            .join("component")
+            .join("meta.json");
+        if !local.exists() { return None; }
+        local
+    };
 
     let content = std::fs::read_to_string(&meta_path).ok()?;
     let meta: serde_json::Value = serde_json::from_str(&content).ok()?;
@@ -311,6 +412,13 @@ pub async fn invoke_component_with_context(
 ) -> anyhow::Result<serde_json::Value> {
     use tokio::io::AsyncWriteExt;
 
+    tracing::trace!(
+        binary = %binary_path.display(),
+        method = %method,
+        "rpc call → binary component"
+    );
+    tracing::trace!(spec = %spec_json, input = %input_json, "rpc request payload");
+
     let mut payload = serde_json::json!({
         "spec": spec_json,
         "input": input_json,
@@ -362,6 +470,7 @@ pub async fn invoke_component_with_context(
     }
 
     let result: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    tracing::trace!(method = %method, result = %result, "rpc response ← binary component");
     Ok(result)
 }
 

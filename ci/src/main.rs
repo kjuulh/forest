@@ -1,9 +1,38 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-
 const BIN_NAME: &str = "forest-server";
 const MOLD_VERSION: &str = "2.40.4";
+const SCCACHE_VERSION: &str = "0.9.1";
+const SCCACHE_MEMCACHED_ENDPOINT: &str = "tcp://10.0.10.13:11211";
+const MEMCACHED_METRICS_URL: &str = "http://10.0.10.13:9150/metrics";
+
+struct PlatformSpec {
+    platform: &'static str,
+    rust_target: &'static str,
+    /// Extra apt packages needed for cross-compilation (e.g. cross-linker).
+    extra_apt_pkgs: &'static [&'static str],
+    /// Extra env vars for cross-compilation (key, value pairs).
+    extra_env: &'static [(&'static str, &'static str)],
+    /// Whether this is a cross-compile target (skip mold, add rustup target).
+    is_cross: bool,
+}
+
+const PLATFORM_AMD64: PlatformSpec = PlatformSpec {
+    platform: "linux/amd64",
+    rust_target: "x86_64-unknown-linux-gnu",
+    extra_apt_pkgs: &[],
+    extra_env: &[],
+    is_cross: false,
+};
+
+const PLATFORM_ARM64: PlatformSpec = PlatformSpec {
+    platform: "linux/arm64",
+    rust_target: "aarch64-unknown-linux-gnu",
+    extra_apt_pkgs: &["gcc-aarch64-linux-gnu"],
+    extra_env: &[("CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER", "aarch64-linux-gnu-gcc")],
+    is_cross: true,
+};
 
 #[derive(Parser)]
 #[command(name = "ci")]
@@ -41,14 +70,13 @@ async fn main() -> eyre::Result<()> {
 
 async fn run_pr(client: &dagger_sdk::Query) -> eyre::Result<()> {
     eprintln!("==> PR pipeline: check + test + build");
+    print_memcached_metrics(client, "before build").await?;
 
     let base = build_base(client).await?;
 
     eprintln!("--- cargo check --workspace");
-    base.clone()
-        .with_exec(vec!["cargo", "check", "--workspace"])
-        .sync()
-        .await?;
+    let check_output = cargo_with_stats(&base, "cargo check --workspace").stdout().await?;
+    eprintln!("{check_output}");
 
     eprintln!("--- running tests");
     with_services(client, &base)
@@ -65,23 +93,23 @@ async fn run_pr(client: &dagger_sdk::Query) -> eyre::Result<()> {
         .sync()
         .await?;
 
-    eprintln!("--- building release image");
-    let _image = build_release_image(client, &base).await?;
+    eprintln!("--- building release images (multi-platform)");
+    let (_image_amd64, _image_arm64) = build_release_images(client).await?;
 
+    print_memcached_metrics(client, "after build").await?;
     eprintln!("==> PR pipeline complete");
     Ok(())
 }
 
 async fn run_main(client: &dagger_sdk::Query) -> eyre::Result<()> {
     eprintln!("==> Main pipeline: check + test + build + publish");
+    print_memcached_metrics(client, "before build").await?;
 
     let base = build_base(client).await?;
 
     eprintln!("--- cargo check --workspace");
-    base.clone()
-        .with_exec(vec!["cargo", "check", "--workspace"])
-        .sync()
-        .await?;
+    let check_output = cargo_with_stats(&base, "cargo check --workspace").stdout().await?;
+    eprintln!("{check_output}");
 
     eprintln!("--- running tests");
     with_services(client, &base)
@@ -98,12 +126,13 @@ async fn run_main(client: &dagger_sdk::Query) -> eyre::Result<()> {
         .sync()
         .await?;
 
-    eprintln!("--- building release image");
-    let image = build_release_image(client, &base).await?;
+    eprintln!("--- building release images (multi-platform)");
+    let (image_amd64, image_arm64) = build_release_images(client).await?;
 
-    eprintln!("--- publishing image");
-    publish_image(client, &image).await?;
+    eprintln!("--- publishing multi-platform image");
+    publish_image(client, &image_amd64, &image_arm64).await?;
 
+    print_memcached_metrics(client, "after build").await?;
     eprintln!("==> Main pipeline complete");
     Ok(())
 }
@@ -320,16 +349,24 @@ fn find_crates_recursive(dir: &PathBuf, out: &mut Vec<PathBuf>) -> eyre::Result<
     Ok(())
 }
 
-/// Build the base Rust container with all deps cached.
+/// Build the base Rust container with all deps cached (native x86_64, used for check/test).
 async fn build_base(client: &dagger_sdk::Query) -> eyre::Result<dagger_sdk::Container> {
+    build_base_for_platform(client, &PLATFORM_AMD64).await
+}
+
+/// Build the base Rust container for a specific target platform.
+async fn build_base_for_platform(
+    client: &dagger_sdk::Query,
+    spec: &PlatformSpec,
+) -> eyre::Result<dagger_sdk::Container> {
     let src = load_source(client)?;
     let dep_src = load_dep_source(client)?;
     let skeleton = create_skeleton_files(client)?;
 
     let dep_src_with_skeleton = dep_src.with_directory(".", skeleton);
 
-    // Base rust image with build tools.
-    let rust_base = client
+    // Base rust image with build tools — always x86_64 (cross-compile for arm64).
+    let mut rust_base = client
         .container()
         .from("rust:1.93-trixie")
         .with_exec(vec!["apt", "update"])
@@ -337,34 +374,77 @@ async fn build_base(client: &dagger_sdk::Query) -> eyre::Result<dagger_sdk::Cont
         // Git config needed for tests that commit.
         .with_exec(vec!["git", "config", "--global", "user.email", "ci@forest.dev"])
         .with_exec(vec!["git", "config", "--global", "user.name", "Forest CI"])
-        .with_exec(vec!["git", "config", "--global", "init.defaultBranch", "main"])
-        // Install mold linker.
+        .with_exec(vec!["git", "config", "--global", "init.defaultBranch", "main"]);
+
+    if spec.is_cross {
+        // Cross-compilation: install cross-linker + add rustup target.
+        // Mold doesn't support cross-linking, so we use the platform's gcc linker directly.
+        if !spec.extra_apt_pkgs.is_empty() {
+            let mut apt_cmd = vec!["apt", "install", "-y"];
+            apt_cmd.extend(spec.extra_apt_pkgs.iter().copied());
+            rust_base = rust_base.with_exec(apt_cmd);
+        }
+        rust_base = rust_base
+            .with_exec(vec!["rustup", "target", "add", spec.rust_target]);
+        for &(key, val) in spec.extra_env {
+            rust_base = rust_base.with_env_variable(key, val);
+        }
+    } else {
+        // Native build: install mold linker for faster linking.
+        rust_base = rust_base
+            .with_exec(vec![
+                "wget",
+                "-q",
+                &format!(
+                    "https://github.com/rui314/mold/releases/download/v{MOLD_VERSION}/mold-{MOLD_VERSION}-x86_64-linux.tar.gz"
+                ),
+            ])
+            .with_exec(vec![
+                "tar",
+                "-xf",
+                &format!("mold-{MOLD_VERSION}-x86_64-linux.tar.gz"),
+            ])
+            .with_exec(vec![
+                "mv",
+                &format!("mold-{MOLD_VERSION}-x86_64-linux/bin/mold"),
+                "/usr/bin/mold",
+            ]);
+    }
+
+    // Install sccache.
+    rust_base = rust_base
         .with_exec(vec![
             "wget",
             "-q",
             &format!(
-                "https://github.com/rui314/mold/releases/download/v{MOLD_VERSION}/mold-{MOLD_VERSION}-x86_64-linux.tar.gz"
+                "https://github.com/mozilla/sccache/releases/download/v{SCCACHE_VERSION}/sccache-v{SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz"
             ),
         ])
         .with_exec(vec![
             "tar",
             "-xf",
-            &format!("mold-{MOLD_VERSION}-x86_64-linux.tar.gz"),
+            &format!("sccache-v{SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz"),
         ])
         .with_exec(vec![
             "mv",
-            &format!("mold-{MOLD_VERSION}-x86_64-linux/bin/mold"),
-            "/usr/bin/mold",
-        ]);
+            &format!("sccache-v{SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache"),
+            "/usr/bin/sccache",
+        ])
+        .with_env_variable("RUSTC_WRAPPER", "sccache")
+        .with_env_variable("SCCACHE_MEMCACHED_ENDPOINT", SCCACHE_MEMCACHED_ENDPOINT);
+
+    let target_args: Vec<&str> = vec!["--target", spec.rust_target];
 
     // Step 1: build deps with skeleton source (cacheable layer).
-    // SQLX_OFFLINE=true uses the checked-in .sqlx/ query cache instead of a live database.
+    let mut prebuild_cmd = vec!["cargo", "build", "--release", "--bin", BIN_NAME];
+    prebuild_cmd.extend_from_slice(&target_args);
+
     let prebuild = rust_base
         .clone()
         .with_workdir("/mnt/src")
         .with_env_variable("SQLX_OFFLINE", "true")
         .with_directory("/mnt/src", dep_src_with_skeleton)
-        .with_exec(vec!["cargo", "build", "--release", "--bin", BIN_NAME]);
+        .with_exec(prebuild_cmd);
 
     // Step 2: copy cargo registry from prebuild (avoids re-downloading deps).
     let build_container = rust_base
@@ -429,21 +509,29 @@ fn with_services(
         ])
 }
 
-/// Build release binary and package into a slim image.
-async fn build_release_image(
+/// Build release binary and package into a slim image for a specific platform.
+async fn build_release_image_for_platform(
     client: &dagger_sdk::Query,
     base: &dagger_sdk::Container,
+    spec: &PlatformSpec,
 ) -> eyre::Result<dagger_sdk::Container> {
-    let built = base
-        .clone()
-        .with_exec(vec!["cargo", "build", "--release", "--bin", BIN_NAME]);
+    let mut build_cmd = vec!["cargo", "build", "--release", "--bin", BIN_NAME];
+    build_cmd.extend_from_slice(&["--target", spec.rust_target]);
 
-    let binary = built.file(format!("/mnt/src/target/release/{BIN_NAME}"));
+    let built = base.clone().with_exec(build_cmd);
 
-    // Distroless cc-debian13 matches the build image's glibc (trixie/2.38+)
-    // and includes libgcc + ca-certificates with no shell or package manager.
+    let binary = built.file(format!(
+        "/mnt/src/target/{}/release/{BIN_NAME}",
+        spec.rust_target,
+    ));
+
+    // Use a platform-specific base image matching the target arch.
     let final_image = client
-        .container()
+        .container_opts(
+            dagger_sdk::QueryContainerOptsBuilder::default()
+                .platform(dagger_sdk::Platform(spec.platform.to_string()))
+                .build()?,
+        )
         .from("debian:13-slim")
         .with_exec(vec!["apt", "update"])
         .with_exec(vec![
@@ -455,21 +543,32 @@ async fn build_release_image(
             "ca-certificates",
         ])
         .with_file(format!("/usr/local/bin/{BIN_NAME}"), binary)
-        .with_exec(vec![BIN_NAME, "--help"]);
+        .with_entrypoint(vec![BIN_NAME]);
 
-    final_image.sync().await?;
-
-    // Set the final entrypoint for the published image.
-    let final_image = final_image.with_entrypoint(vec![BIN_NAME]);
-
-    eprintln!("--- release image built successfully");
+    eprintln!("--- release image built for {}", spec.platform);
     Ok(final_image)
 }
 
-/// Publish image to container registry with latest, commit, and timestamp tags.
+/// Build release images for both amd64 and arm64.
+async fn build_release_images(
+    client: &dagger_sdk::Query,
+) -> eyre::Result<(dagger_sdk::Container, dagger_sdk::Container)> {
+    eprintln!("--- building amd64 release image");
+    let base_amd64 = build_base_for_platform(client, &PLATFORM_AMD64).await?;
+    let image_amd64 = build_release_image_for_platform(client, &base_amd64, &PLATFORM_AMD64).await?;
+
+    eprintln!("--- building arm64 release image (cross-compile)");
+    let base_arm64 = build_base_for_platform(client, &PLATFORM_ARM64).await?;
+    let image_arm64 = build_release_image_for_platform(client, &base_arm64, &PLATFORM_ARM64).await?;
+
+    Ok((image_amd64, image_arm64))
+}
+
+/// Publish multi-platform image to container registry with latest, commit, and timestamp tags.
 async fn publish_image(
     client: &dagger_sdk::Query,
-    image: &dagger_sdk::Container,
+    image_amd64: &dagger_sdk::Container,
+    image_arm64: &dagger_sdk::Container,
 ) -> eyre::Result<()> {
     let registry = std::env::var("CI_REGISTRY").unwrap_or_else(|_| "git.kjuulh.io".into());
     let user = std::env::var("CI_REGISTRY_USER").unwrap_or_else(|_| "kjuulh".into());
@@ -484,21 +583,29 @@ async fn publish_image(
 
     let tags = vec!["latest".to_string(), commit, timestamp];
 
-    let authed = image.clone().with_registry_auth(
-        &registry,
-        &user,
-        client.set_secret("registry-password", &password),
-    );
+    let secret = client.set_secret("registry-password", &password);
+
+    let authed_amd64 = image_amd64
+        .clone()
+        .with_registry_auth(&registry, &user, secret.clone());
+    let authed_arm64 = image_arm64
+        .clone()
+        .with_registry_auth(&registry, &user, secret);
+
+    // Get the arm64 container ID to pass as platform variant.
+    let arm64_id = authed_arm64.id().await?;
 
     for tag in &tags {
         let image_ref = format!("{image_name}:{tag}");
-        authed
+        authed_amd64
             .publish_opts(
                 &image_ref,
-                dagger_sdk::ContainerPublishOptsBuilder::default().build()?,
+                dagger_sdk::ContainerPublishOptsBuilder::default()
+                    .platform_variants(vec![arm64_id.clone()])
+                    .build()?,
             )
             .await?;
-        eprintln!("--- published {image_ref}");
+        eprintln!("--- published {image_ref} (linux/amd64 + linux/arm64)");
     }
 
     Ok(())
@@ -575,6 +682,42 @@ async fn run_goreleaser(client: &dagger_sdk::Query, publish: bool) -> eyre::Resu
 
     eprintln!("==> GoReleaser {task} complete");
     Ok(())
+}
+
+/// Query the memcached exporter and print cache-relevant metrics.
+async fn print_memcached_metrics(client: &dagger_sdk::Query, label: &str) -> eyre::Result<()> {
+    eprintln!("--- memcached metrics ({label})");
+    let output = client
+        .container()
+        .from("alpine:3")
+        .with_exec(vec!["wget", "-qO-", MEMCACHED_METRICS_URL])
+        .stdout()
+        .await?;
+    for line in output.lines() {
+        if line.starts_with('#') {
+            continue;
+        }
+        if line.contains("cmd_get")
+            || line.contains("cmd_set")
+            || line.contains("get_hits")
+            || line.contains("get_misses")
+            || line.contains("curr_items")
+            || line.contains("bytes")
+        {
+            eprintln!("  {line}");
+        }
+    }
+    Ok(())
+}
+
+/// Wrap a cargo command so sccache stats are printed in the same exec
+/// (the sccache server only lives for the duration of the process tree).
+fn cargo_with_stats(base: &dagger_sdk::Container, cargo_args: &str) -> dagger_sdk::Container {
+    base.clone().with_exec(vec![
+        "sh",
+        "-c",
+        &format!("{cargo_args} && sccache --show-stats"),
+    ])
 }
 
 /// Get the short git commit hash from the host.
