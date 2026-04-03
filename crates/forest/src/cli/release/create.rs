@@ -117,6 +117,10 @@ pub struct CreateCommand {
     #[arg(long)]
     no_wait: bool,
 
+    /// Skip health monitoring after release.
+    #[arg(long)]
+    no_health: bool,
+
     /// Force release: cancel queued releases and jump to front of queue.
     #[arg(long)]
     force: bool,
@@ -244,6 +248,7 @@ impl CreateCommand {
             environment: Some(self.environment.clone()),
             destination: self.destination.clone(),
             no_wait: self.no_wait,
+            no_health: self.no_health,
             force: self.force,
             pipeline: self.pipeline,
             ..Default::default()

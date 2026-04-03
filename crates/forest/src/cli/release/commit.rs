@@ -35,6 +35,10 @@ pub struct CommitCommand {
     #[arg(long)]
     pub(crate) no_wait: bool,
 
+    /// Skip health monitoring after release
+    #[arg(long)]
+    pub(crate) no_health: bool,
+
     /// Force release: cancel queued releases and jump to front of queue
     #[arg(long)]
     pub(crate) force: bool,
@@ -216,7 +220,10 @@ impl CommitCommand {
                 anyhow::bail!("one or more releases failed");
             }
 
-            // Stream health updates for a short period after release
+            // Stream health updates after release
+            if self.no_health {
+                return Ok(());
+            }
             self.watch_health(
                 &grpc,
                 release_result.release_intent_id,
@@ -243,7 +250,8 @@ impl CommitCommand {
             Err(_) => return, // Health service not available, skip silently
         };
 
-        let timeout = tokio::time::sleep(std::time::Duration::from_secs(120));
+        // 5 minutes: enough for flux reconcile (~30s) + agent poll (15s) + buffer
+        let timeout = tokio::time::sleep(std::time::Duration::from_secs(300));
         tokio::pin!(timeout);
 
         eprintln!("\nWatching health...");
