@@ -250,14 +250,14 @@ impl CommitCommand {
             Err(_) => return, // Health service not available, skip silently
         };
 
-        // 5 minutes: enough for flux reconcile (~30s) + agent poll (15s) + buffer
-        let timeout = tokio::time::sleep(std::time::Duration::from_secs(300));
+        let timeout = tokio::time::sleep(std::time::Duration::from_secs(60));
         tokio::pin!(timeout);
 
         eprintln!("\nWatching health...");
 
         let mut seen_statuses: std::collections::HashSet<String> = std::collections::HashSet::new();
         let poll_interval = std::time::Duration::from_secs(5);
+        let mut waiting_printed = false;
 
         loop {
             tokio::select! {
@@ -272,6 +272,20 @@ impl CommitCommand {
                         Err(_) => continue,
                     };
 
+                    // Skip if no data yet or only PENDING/UNSPECIFIED
+                    let has_real_data = resp.destinations.iter().any(|d| {
+                        d.status != forest_grpc_interface::HealthStatus::Unspecified as i32
+                            && d.status != 0
+                    });
+
+                    if !has_real_data {
+                        if !waiting_printed {
+                            eprintln!("  waiting for health agent...");
+                            waiting_printed = true;
+                        }
+                        continue;
+                    }
+
                     for dest in &resp.destinations {
                         let status_str = match dest.status {
                             x if x == forest_grpc_interface::HealthStatus::Healthy as i32 => "HEALTHY",
@@ -279,10 +293,9 @@ impl CommitCommand {
                             x if x == forest_grpc_interface::HealthStatus::Degraded as i32 => "DEGRADED",
                             x if x == forest_grpc_interface::HealthStatus::Unhealthy as i32 => "UNHEALTHY",
                             x if x == forest_grpc_interface::HealthStatus::Missing as i32 => "MISSING",
-                            _ => "PENDING",
+                            _ => continue, // Skip PENDING/UNSPECIFIED
                         };
 
-                        // Only print when status changes per destination
                         let key = format!("{}:{}", dest.destination, status_str);
                         if seen_statuses.insert(key) {
                             eprintln!(
@@ -299,7 +312,7 @@ impl CommitCommand {
                     }
                 }
                 _ = &mut timeout => {
-                    eprintln!("\nHealth watch timed out (120s).");
+                    eprintln!("\nHealth watch timed out.");
                     return;
                 }
             }
