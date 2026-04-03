@@ -419,7 +419,7 @@ metadata:
   name: {project}
   namespace: flux-system{metadata_section}
 spec:
-  interval: 5m
+  interval: 30s
   path: ./{releases_path}
   prune: true
   sourceRef:
