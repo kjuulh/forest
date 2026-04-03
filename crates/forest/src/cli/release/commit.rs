@@ -250,7 +250,7 @@ impl CommitCommand {
             Err(_) => return, // Health service not available, skip silently
         };
 
-        let timeout = tokio::time::sleep(std::time::Duration::from_secs(60));
+        let timeout = tokio::time::sleep(std::time::Duration::from_secs(90));
         tokio::pin!(timeout);
 
         eprintln!("\nWatching health...");
