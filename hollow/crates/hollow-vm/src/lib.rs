@@ -6,6 +6,7 @@
 //! callback passed to [`run_job`].
 
 pub mod firecracker;
+pub mod jailer;
 pub mod net;
 pub mod session;
 
@@ -16,6 +17,7 @@ use anyhow::Context;
 use hollow_vsock::protocol::{JobDefinition, LogLineMsg};
 
 pub use crate::firecracker::VmInstance;
+pub use crate::jailer::JailerConfig;
 pub use crate::net::{NetworkAllocator, NetworkConfig, NetworkHandle};
 pub use crate::session::{GUEST_TO_HOST_PORT, GuestSession, JobEvent, JobOutcome, drive_job};
 
@@ -48,6 +50,10 @@ pub struct VmConfig {
     /// If set, the VM gets a tap-backed virtio-net device and NATed egress.
     /// None → no network (vsock only).
     pub network: Option<NetworkConfig>,
+    /// If set, Firecracker is launched via `jailer` (chroot + UID drop +
+    /// per-VM cgroup) instead of being spawned directly. Production should
+    /// always set this; the direct path is for diagnostics.
+    pub jailer: Option<JailerConfig>,
 }
 
 impl VmConfig {
@@ -162,9 +168,19 @@ where
     };
 
     on_event(VmEvent::Stage(VmStage::VmSpawn));
-    let mut vm = VmInstance::spawn(&config.firecracker_bin, config.workdir.clone())
+    let mut vm = match &config.jailer {
+        Some(jailer_cfg) => VmInstance::spawn_jailed(
+            jailer_cfg,
+            config.workdir.clone(),
+            &config.kernel,
+            &config.rootfs,
+        )
         .await
-        .context("spawn firecracker")?;
+        .context("spawn jailed firecracker")?,
+        None => VmInstance::spawn(&config.firecracker_bin, config.workdir.clone())
+            .await
+            .context("spawn firecracker")?,
+    };
 
     vm.put_machine_config(config.vcpus, config.mem_mib).await?;
     vm.put_boot_source(

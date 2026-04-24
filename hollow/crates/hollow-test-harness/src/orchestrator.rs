@@ -134,6 +134,10 @@ export HOLLOW_MEMORY_MIB=2048
 export HOLLOW_FIRECRACKER_BIN={fc}
 export HOLLOW_KERNEL={kernel}
 export HOLLOW_IMAGES_DIR={images}
+export HOLLOW_JAILER_BIN={jailer_bin}
+export HOLLOW_JAILER_CHROOT_BASE={jailer_chroot}
+export HOLLOW_JAILER_UID={jailer_uid}
+export HOLLOW_JAILER_GID={jailer_gid}
 export RUST_LOG=hollow=debug,info
 exec {agent}"#,
         port = controller_port,
@@ -141,6 +145,10 @@ exec {agent}"#,
         fc = layout.firecracker_bin,
         kernel = layout.kernel,
         images = layout.images_dir,
+        jailer_bin = layout.jailer_bin,
+        jailer_chroot = layout.jailer_chroot_base,
+        jailer_uid = layout.jailer_uid,
+        jailer_gid = layout.jailer_gid,
         agent = layout.agent_bin,
     );
 

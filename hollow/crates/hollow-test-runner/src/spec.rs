@@ -29,6 +29,17 @@ pub struct RunnerSpec {
     /// Opt-in per-VM networking (tap + iptables NAT). None → vsock-only.
     #[serde(default)]
     pub network: Option<NetworkSpec>,
+    /// Optional jailer wrapper. None → spawn Firecracker directly (dev path).
+    #[serde(default)]
+    pub jailer: Option<JailerSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct JailerSpec {
+    pub jailer_bin: String,
+    pub chroot_base: String,
+    pub uid: u32,
+    pub gid: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

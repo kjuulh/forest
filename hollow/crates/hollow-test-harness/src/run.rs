@@ -104,6 +104,8 @@ struct WireRunnerSpec<'a> {
     timeout_seconds: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     network: Option<WireNetworkSpec>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jailer: Option<WireJailerSpec>,
 }
 
 #[derive(Serialize)]
@@ -111,6 +113,14 @@ struct WireNetworkSpec {
     subnet_index: u8,
     host_iface: String,
     dns: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct WireJailerSpec {
+    jailer_bin: String,
+    chroot_base: String,
+    uid: u32,
+    gid: u32,
 }
 
 #[derive(Serialize)]
@@ -141,6 +151,14 @@ pub fn execute(cfg: &Config, layout: &RemoteLayout, job: JobSpec) -> anyhow::Res
     } else {
         None
     };
+    // Jailer is always-on for the runner path. Production agents do the same;
+    // there's no scenario where we want unjailed Firecracker in tests.
+    let jailer = Some(WireJailerSpec {
+        jailer_bin: layout.jailer_bin.clone(),
+        chroot_base: layout.jailer_chroot_base.clone(),
+        uid: layout.jailer_uid,
+        gid: layout.jailer_gid,
+    });
     let wire = WireRunnerSpec {
         firecracker_bin: &layout.firecracker_bin,
         kernel: &layout.kernel,
@@ -166,6 +184,7 @@ pub fn execute(cfg: &Config, layout: &RemoteLayout, job: JobSpec) -> anyhow::Res
         mem_mib: job.mem_mib.unwrap_or(512),
         timeout_seconds: job.timeout_seconds.unwrap_or(120),
         network,
+        jailer,
     };
     let payload = serde_json::to_vec(&wire)?;
 

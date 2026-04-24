@@ -74,6 +74,13 @@ async fn run(cli: Cli) -> anyhow::Result<i32> {
         host_iface: n.host_iface.clone(),
         dns: n.dns.clone(),
     });
+    let jailer = spec.jailer.as_ref().map(|j| hollow_vm::JailerConfig {
+        jailer_bin: PathBuf::from(&j.jailer_bin),
+        firecracker_bin: PathBuf::from(&spec.firecracker_bin),
+        chroot_base: PathBuf::from(&j.chroot_base),
+        uid: j.uid,
+        gid: j.gid,
+    });
     let vm_config = VmConfig {
         firecracker_bin: PathBuf::from(&spec.firecracker_bin),
         kernel: PathBuf::from(&spec.kernel),
@@ -86,6 +93,7 @@ async fn run(cli: Cli) -> anyhow::Result<i32> {
         guest_connect_timeout: None,
         rootfs_read_only: false,
         network,
+        jailer,
     };
 
     let outer_timeout = Duration::from_secs(spec.timeout_seconds.into());

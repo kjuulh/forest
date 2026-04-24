@@ -10,7 +10,8 @@ use hollow_grpc_interface::{
     AgentMessage, JobLogBatch, JobStatus, JobUpdate, LogLine, RunJob, agent_message,
 };
 use hollow_vm::{
-    NetworkAllocator, NetworkConfig, VmConfig, VmEvent, VmStage, run_job as vm_run_job,
+    JailerConfig, NetworkAllocator, NetworkConfig, VmConfig, VmEvent, VmStage,
+    run_job as vm_run_job,
 };
 use hollow_vsock::protocol::{JobDefinition, JobFile};
 use tokio::sync::mpsc;
@@ -30,6 +31,9 @@ pub struct VmPaths {
     /// DNS servers the guest should use. Passed to hollow-guest via
     /// HOLLOW_DNS so it can populate /etc/resolv.conf before the job runs.
     pub dns: Vec<String>,
+    /// Jailer wrapping (chroot + UID drop). When present, every VM launch
+    /// goes through jailer; this is the production posture.
+    pub jailer: Option<JailerConfig>,
 }
 
 pub async fn run_job(
@@ -129,6 +133,7 @@ async fn run_job_inner(
         guest_connect_timeout: None,
         rootfs_read_only: false,
         network: network.as_ref().map(|(c, _)| c.clone()),
+        jailer: vm_paths.jailer.clone(),
     };
 
     let job_def = JobDefinition {

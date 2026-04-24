@@ -60,6 +60,28 @@ struct Cli {
     /// Comma-separated DNS servers for the guest's /etc/resolv.conf.
     #[arg(long, env = "HOLLOW_DNS", default_value = "1.1.1.1,8.8.8.8")]
     dns: String,
+
+    /// Path to the Firecracker jailer binary. When set, every VM is launched
+    /// via jailer (chroot + UID drop). Production should always set this.
+    #[arg(long, env = "HOLLOW_JAILER_BIN")]
+    jailer_bin: Option<String>,
+
+    /// Per-VM chroot base directory (jailer expands to
+    /// `<base>/<fc-basename>/<vm-id>/root/`).
+    #[arg(
+        long,
+        env = "HOLLOW_JAILER_CHROOT_BASE",
+        default_value = "/var/lib/hollow/jailer"
+    )]
+    jailer_chroot_base: String,
+
+    /// UID Firecracker drops to inside the jail.
+    #[arg(long, env = "HOLLOW_JAILER_UID", default_value = "10000")]
+    jailer_uid: u32,
+
+    /// GID Firecracker drops to inside the jail.
+    #[arg(long, env = "HOLLOW_JAILER_GID", default_value = "10000")]
+    jailer_gid: u32,
 }
 
 fn default_agent_id() -> String {
@@ -101,6 +123,14 @@ async fn main() -> anyhow::Result<()> {
         .filter(|s| !s.is_empty())
         .collect();
 
+    let jailer = cli.jailer_bin.as_ref().map(|jb| hollow_vm::JailerConfig {
+        jailer_bin: jb.into(),
+        firecracker_bin: cli.firecracker_bin.clone().into(),
+        chroot_base: cli.jailer_chroot_base.clone().into(),
+        uid: cli.jailer_uid,
+        gid: cli.jailer_gid,
+    });
+
     notmad::Mad::builder()
         .add(AgentService::new(
             cli.controller_addr,
@@ -114,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
             cli.images_dir,
             host_iface,
             dns,
+            jailer,
         ))
         .run()
         .await?;

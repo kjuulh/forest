@@ -18,6 +18,7 @@ const KERNEL_DOWNLOAD_BASE: &str = "https://s3.amazonaws.com/spec.ccfc.min";
 #[derive(Debug, Clone)]
 pub struct RemoteLayout {
     pub firecracker_bin: String,
+    pub jailer_bin: String,
     pub kernel: String,
     pub rootfs: String,
     pub runner_bin: String,
@@ -25,6 +26,12 @@ pub struct RemoteLayout {
     pub images_dir: String,
     pub workdir_root: String,
     pub agent_data_dir: String,
+    /// Per-VM chroot base (jailer expands this to
+    /// `<base>/<fc-basename>/<vm-id>/root/`).
+    pub jailer_chroot_base: String,
+    /// UID/GID Firecracker drops to under jailer.
+    pub jailer_uid: u32,
+    pub jailer_gid: u32,
     /// Default-route interface on the remote host (used as MASQUERADE out).
     pub host_iface: String,
 }
@@ -37,7 +44,12 @@ pub fn bootstrap(cfg: &Config, artifacts: &BuildArtifacts) -> anyhow::Result<Rem
     let images_dir = format!("{}/images", cfg.remote_dir.display());
     let workdir_root = format!("{}/work", cfg.remote_dir.display());
 
-    let firecracker_bin = format!("{bin_dir}/firecracker-{}", cfg.firecracker_version);
+    // No version suffix in the binary names — jailer uses the firecracker
+    // basename as a path component in the chroot, and the chroot path has to
+    // fit inside SUN_LEN (~108 bytes) when we add /run/firecracker.sock to it.
+    // Using a short fixed name keeps us safely under that limit.
+    let firecracker_bin = format!("{bin_dir}/firecracker");
+    let jailer_bin = format!("{bin_dir}/jailer");
     let runner_bin = format!("{bin_dir}/hollow-test-runner");
     let agent_bin = format!("{bin_dir}/hollow-agent");
     let kernel_filename = cfg
@@ -48,9 +60,10 @@ pub fn bootstrap(cfg: &Config, artifacts: &BuildArtifacts) -> anyhow::Result<Rem
     let kernel = format!("{bin_dir}/{kernel_filename}");
     let rootfs = format!("{images_dir}/base.ext4");
     let agent_data_dir = format!("{}/agent-data", cfg.remote_dir.display());
+    let jailer_chroot_base = format!("{}/jailer", cfg.remote_dir.display());
 
-    // 2. Install firecracker (download + extract if missing).
-    install_firecracker(cfg, &firecracker_bin)?;
+    // 2. Install firecracker + jailer (single tarball; download once).
+    install_firecracker(cfg, &firecracker_bin, &jailer_bin)?;
 
     // 3. Install kernel.
     install_kernel(cfg, &kernel)?;
@@ -87,13 +100,23 @@ mkdir -p {agent_data_dir}
 
     // 7. Detect the remote's outbound interface and enable ip_forward.
     let host_iface = detect_host_iface(cfg).context("detect remote host outbound iface")?;
-    let forward_script = r#"set -e
+    let forward_script = format!(
+        r#"set -e
 echo 1 > /proc/sys/net/ipv4/ip_forward
-"#;
-    ssh::run_remote(cfg, forward_script).context("enable ip_forward")?;
+mkdir -p {jailer_chroot_base}
+"#
+    );
+    ssh::run_remote(cfg, &forward_script).context("enable ip_forward + jailer dirs")?;
+
+    // Jailer numeric UID/GID. Linux setresuid/setresgid don't require these
+    // to exist in /etc/passwd, so we can use a fixed pair without managing
+    // system users on the remote.
+    let jailer_uid = 10000;
+    let jailer_gid = 10000;
 
     Ok(RemoteLayout {
         firecracker_bin,
+        jailer_bin,
         kernel,
         rootfs,
         runner_bin,
@@ -101,6 +124,9 @@ echo 1 > /proc/sys/net/ipv4/ip_forward
         images_dir,
         workdir_root,
         agent_data_dir,
+        jailer_chroot_base,
+        jailer_uid,
+        jailer_gid,
         host_iface,
     })
 }
@@ -140,30 +166,42 @@ echo OK
     Ok(())
 }
 
-fn install_firecracker(cfg: &Config, target: &str) -> anyhow::Result<()> {
+fn install_firecracker(
+    cfg: &Config,
+    firecracker_target: &str,
+    jailer_target: &str,
+) -> anyhow::Result<()> {
     let url = FIRECRACKER_DOWNLOAD_TEMPLATE.replace("{ver}", cfg.firecracker_version);
-    // Extract single binary from tarball; the release archive contains
-    // `release-vX.Y.Z-x86_64/firecracker-vX.Y.Z-x86_64`.
-    let inner = format!(
+    // The release archive bundles both binaries:
+    //   release-vX.Y.Z-x86_64/firecracker-vX.Y.Z-x86_64
+    //   release-vX.Y.Z-x86_64/jailer-vX.Y.Z-x86_64
+    let inner_fc = format!(
         "release-{ver}-x86_64/firecracker-{ver}-x86_64",
+        ver = cfg.firecracker_version
+    );
+    let inner_jailer = format!(
+        "release-{ver}-x86_64/jailer-{ver}-x86_64",
         ver = cfg.firecracker_version
     );
     let script = format!(
         r#"set -e
-if [ -x "{target}" ]; then exit 0; fi
+if [ -x "{fc_target}" ] && [ -x "{jl_target}" ]; then exit 0; fi
 tmp=$(mktemp -d)
 trap "rm -rf $tmp" EXIT
-echo "downloading firecracker {ver}..." >&2
+echo "downloading firecracker {ver} (incl. jailer)..." >&2
 curl -fsSL "{url}" -o "$tmp/fc.tgz"
-tar -xzf "$tmp/fc.tgz" -C "$tmp" "{inner}"
-install -m 0755 "$tmp/{inner}" "{target}"
+tar -xzf "$tmp/fc.tgz" -C "$tmp" "{inner_fc}" "{inner_jailer}"
+install -m 0755 "$tmp/{inner_fc}" "{fc_target}"
+install -m 0755 "$tmp/{inner_jailer}" "{jl_target}"
 "#,
         ver = cfg.firecracker_version,
         url = url,
-        inner = inner,
-        target = target,
+        inner_fc = inner_fc,
+        inner_jailer = inner_jailer,
+        fc_target = firecracker_target,
+        jl_target = jailer_target,
     );
-    ssh::run_remote(cfg, &script).context("install firecracker")?;
+    ssh::run_remote(cfg, &script).context("install firecracker + jailer")?;
     Ok(())
 }
 

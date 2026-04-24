@@ -25,11 +25,19 @@ pub struct GuestSession {
 impl GuestSession {
     /// Bind a Unix listener at `<vsock_uds_base>_<port>`. Must be called BEFORE
     /// the guest tries to connect — i.e. before Firecracker's `InstanceStart`.
+    ///
+    /// Sets mode 0666 on the socket so Firecracker can connect even when it
+    /// runs under a different UID (jailer drops to an unprivileged user;
+    /// without this, the socket is mode 0644 from our umask and Firecracker
+    /// gets EACCES on connect).
     pub fn bind(vsock_uds_base: &Path, port: u32) -> anyhow::Result<Self> {
+        use std::os::unix::fs::PermissionsExt;
         let uds_path = port_suffixed_path(vsock_uds_base, port);
         let _ = std::fs::remove_file(&uds_path);
         let listener = UnixListener::bind(&uds_path)
             .with_context(|| format!("bind {}", uds_path.display()))?;
+        std::fs::set_permissions(&uds_path, std::fs::Permissions::from_mode(0o666))
+            .with_context(|| format!("chmod 666 {}", uds_path.display()))?;
         Ok(Self { listener, uds_path })
     }
 
