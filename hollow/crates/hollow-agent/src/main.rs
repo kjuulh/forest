@@ -51,6 +51,15 @@ struct Cli {
     /// Directory containing rootfs `.ext4` images, named `{image}.ext4`
     #[arg(long, env = "HOLLOW_IMAGES_DIR")]
     images_dir: String,
+
+    /// Host outbound interface used for per-VM NAT MASQUERADE.
+    /// Auto-detected from the default route if not set.
+    #[arg(long, env = "HOLLOW_HOST_IFACE")]
+    host_iface: Option<String>,
+
+    /// Comma-separated DNS servers for the guest's /etc/resolv.conf.
+    #[arg(long, env = "HOLLOW_DNS", default_value = "1.1.1.1,8.8.8.8")]
+    dns: String,
 }
 
 fn default_agent_id() -> String {
@@ -77,6 +86,21 @@ async fn main() -> anyhow::Result<()> {
         "starting hollow-agent"
     );
 
+    let host_iface = match cli.host_iface {
+        Some(iface) => iface,
+        None => hollow_vm::net::detect_host_iface()
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "could not auto-detect outbound iface; falling back to eth0");
+                "eth0".to_string()
+            }),
+    };
+    let dns: Vec<String> = cli
+        .dns
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
     notmad::Mad::builder()
         .add(AgentService::new(
             cli.controller_addr,
@@ -88,6 +112,8 @@ async fn main() -> anyhow::Result<()> {
             cli.firecracker_bin,
             cli.kernel,
             cli.images_dir,
+            host_iface,
+            dns,
         ))
         .run()
         .await?;

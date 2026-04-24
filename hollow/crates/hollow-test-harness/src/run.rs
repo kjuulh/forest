@@ -25,6 +25,11 @@ pub struct JobSpec {
     pub mem_mib: Option<u32>,
     /// Hard wallclock cap on the runner (seconds). Defaults to 120.
     pub timeout_seconds: Option<u32>,
+    /// Enable per-VM NAT networking. The harness picks a unique subnet index
+    /// and asks the runner (which detects the host outbound iface) to wire
+    /// the tap + iptables. Required for any job that touches the network
+    /// (cloud APIs, terraform registry, package downloads, etc.).
+    pub network: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +102,15 @@ struct WireRunnerSpec<'a> {
     vcpus: u8,
     mem_mib: u32,
     timeout_seconds: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    network: Option<WireNetworkSpec>,
+}
+
+#[derive(Serialize)]
+struct WireNetworkSpec {
+    subnet_index: u8,
+    host_iface: String,
+    dns: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -115,6 +129,18 @@ struct WireJobFile {
 }
 
 pub fn execute(cfg: &Config, layout: &RemoteLayout, job: JobSpec) -> anyhow::Result<RunResult> {
+    let network = if job.network {
+        // Each direct-runner test uses subnet 0 — single VM at a time over
+        // this invocation. Agent-dispatched tests rely on the agent's own
+        // allocator to pick a unique index.
+        Some(WireNetworkSpec {
+            subnet_index: 0,
+            host_iface: layout.host_iface.clone(),
+            dns: vec!["1.1.1.1".into(), "8.8.8.8".into()],
+        })
+    } else {
+        None
+    };
     let wire = WireRunnerSpec {
         firecracker_bin: &layout.firecracker_bin,
         kernel: &layout.kernel,
@@ -139,6 +165,7 @@ pub fn execute(cfg: &Config, layout: &RemoteLayout, job: JobSpec) -> anyhow::Res
         vcpus: job.vcpus.unwrap_or(1),
         mem_mib: job.mem_mib.unwrap_or(512),
         timeout_seconds: job.timeout_seconds.unwrap_or(120),
+        network,
     };
     let payload = serde_json::to_vec(&wire)?;
 

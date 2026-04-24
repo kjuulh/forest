@@ -55,6 +55,15 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!(job_id = %job.job_id, cmd = ?job.command, "received job");
 
+    // If the host wired up networking, seed /etc/resolv.conf with the DNS
+    // servers it picked. Silent failure is fine — jobs that don't use DNS
+    // (e.g. vsock-only payloads) won't care.
+    if let Some(dns) = job.environment.get("HOLLOW_DNS")
+        && let Err(e) = write_resolv_conf(dns).await
+    {
+        tracing::warn!(error = %e, "failed to write /etc/resolv.conf");
+    }
+
     // Prepare working directory and write files
     tokio::fs::create_dir_all(WORK_DIR).await?;
     for file in &job.files {
@@ -227,6 +236,21 @@ async fn stream_lines_discard(
             timestamp: now_millis(),
         }));
     }
+}
+
+async fn write_resolv_conf(dns_csv: &str) -> anyhow::Result<()> {
+    let mut body = String::new();
+    for server in dns_csv.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        body.push_str("nameserver ");
+        body.push_str(server);
+        body.push('\n');
+    }
+    if body.is_empty() {
+        return Ok(());
+    }
+    tokio::fs::create_dir_all("/etc").await.ok();
+    tokio::fs::write("/etc/resolv.conf", body).await?;
+    Ok(())
 }
 
 fn now_millis() -> u64 {

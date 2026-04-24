@@ -91,6 +91,9 @@ pub struct AgentService {
     /// kernel, and rootfs images. Owned by `Arc` so we don't pay copy cost
     /// per job.
     vm_paths: Arc<crate::vm::VmPaths>,
+    /// Shared across all concurrent VMs on this agent to hand out unique
+    /// /30 subnets. See `hollow_vm::net`.
+    net_allocator: hollow_vm::NetworkAllocator,
 }
 
 impl AgentService {
@@ -105,7 +108,16 @@ impl AgentService {
         firecracker_bin: String,
         kernel: String,
         images_dir: String,
+        host_iface: String,
+        dns: Vec<String>,
     ) -> Self {
+        // Remove any leftover taps from a previous agent process before we
+        // start handing out subnet indexes — otherwise a stale `hlw-5` will
+        // make NetworkHandle::establish fail on the next allocation to 5.
+        if let Err(e) = hollow_vm::net::clean_stale_taps() {
+            tracing::warn!(error = %e, "clean_stale_taps failed (continuing)");
+        }
+
         Self {
             controller_addr,
             agent_id,
@@ -117,7 +129,10 @@ impl AgentService {
                 firecracker_bin: firecracker_bin.into(),
                 kernel: kernel.into(),
                 images_dir: images_dir.into(),
+                host_iface,
+                dns,
             }),
+            net_allocator: hollow_vm::NetworkAllocator::new(),
         }
     }
 
@@ -204,11 +219,12 @@ impl AgentService {
                         let tx = outbound_tx.clone();
                         let data_dir = self.data_dir.clone();
                         let vm_paths = self.vm_paths.clone();
+                        let net_allocator = self.net_allocator.clone();
                         let mgr = vm_manager.clone();
                         let job_id = job.job_id.clone();
                         let cancel = mgr.register_job(job_id.clone());
                         tokio::spawn(async move {
-                            vm::run_job(job, tx, &data_dir, &vm_paths, cancel).await;
+                            vm::run_job(job, tx, &data_dir, &vm_paths, &net_allocator, cancel).await;
                             mgr.job_finished(&job_id);
                         });
                     }

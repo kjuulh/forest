@@ -62,6 +62,13 @@ struct VsockConfig<'a> {
 }
 
 #[derive(Serialize)]
+struct NetworkInterface<'a> {
+    iface_id: &'a str,
+    host_dev_name: &'a str,
+    guest_mac: &'a str,
+}
+
+#[derive(Serialize)]
 struct Action<'a> {
     action_type: &'a str,
 }
@@ -157,6 +164,26 @@ impl VmInstance {
                 path_on_host: rootfs_path,
                 is_root_device: true,
                 is_read_only: read_only,
+            },
+        )
+        .await
+    }
+
+    /// Attach a tap-backed virtio-net device. The tap must already exist on
+    /// the host (see `hollow_vm::net`).
+    pub async fn put_network_interface(
+        &self,
+        iface_id: &str,
+        host_dev_name: &str,
+        guest_mac: &str,
+    ) -> anyhow::Result<()> {
+        let path = format!("/network-interfaces/{iface_id}");
+        self.put(
+            &path,
+            &NetworkInterface {
+                iface_id,
+                host_dev_name,
+                guest_mac,
             },
         )
         .await

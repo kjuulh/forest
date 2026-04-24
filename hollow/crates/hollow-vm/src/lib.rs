@@ -6,6 +6,7 @@
 //! callback passed to [`run_job`].
 
 pub mod firecracker;
+pub mod net;
 pub mod session;
 
 use std::path::PathBuf;
@@ -15,6 +16,7 @@ use anyhow::Context;
 use hollow_vsock::protocol::{JobDefinition, LogLineMsg};
 
 pub use crate::firecracker::VmInstance;
+pub use crate::net::{NetworkAllocator, NetworkConfig, NetworkHandle};
 pub use crate::session::{GUEST_TO_HOST_PORT, GuestSession, JobEvent, JobOutcome, drive_job};
 
 /// Guest CID — only used by Firecracker internally; the value just needs to be ≥ 3.
@@ -43,11 +45,22 @@ pub struct VmConfig {
     pub guest_connect_timeout: Option<Duration>,
     /// If true, mount rootfs read-only (write-through CoW would go here later).
     pub rootfs_read_only: bool,
+    /// If set, the VM gets a tap-backed virtio-net device and NATed egress.
+    /// None → no network (vsock only).
+    pub network: Option<NetworkConfig>,
 }
 
 impl VmConfig {
     pub fn boot_args(&self) -> String {
-        self.boot_args.clone().unwrap_or_else(default_boot_args)
+        if let Some(extra) = self.boot_args.as_deref() {
+            return extra.to_string();
+        }
+        let mut base = default_boot_args();
+        if let Some(net) = &self.network {
+            base.push(' ');
+            base.push_str(&net.kernel_ip_arg());
+        }
+        base
     }
 }
 
@@ -115,12 +128,39 @@ impl VmStage {
 /// shut down. Always cleans up the VM, even on error paths.
 pub async fn run_job<F>(
     config: VmConfig,
-    job: JobDefinition,
+    mut job: JobDefinition,
     mut on_event: F,
 ) -> anyhow::Result<JobOutcome>
 where
     F: FnMut(VmEvent),
 {
+    // Bring up tap + iptables BEFORE spawning Firecracker so the VM's
+    // PUT /network-interfaces finds a usable host_dev. The handle stays alive
+    // for the whole VM lifetime and auto-teardown happens in Drop.
+    let _network = if let Some(net_cfg) = &config.network {
+        on_event(VmEvent::Diag {
+            level: "info",
+            message: format!(
+                "network: tap={} subnet={} host={} guest={}",
+                net_cfg.tap_name(),
+                net_cfg.subnet_cidr(),
+                net_cfg.host_ip(),
+                net_cfg.guest_ip(),
+            ),
+        });
+        let handle = NetworkHandle::establish(net_cfg.clone())
+            .context("establish per-VM network")?;
+        // Pass DNS to the guest via env so hollow-guest can write resolv.conf.
+        if !net_cfg.dns.is_empty() {
+            job.environment
+                .entry("HOLLOW_DNS".to_string())
+                .or_insert_with(|| net_cfg.dns.join(","));
+        }
+        Some(handle)
+    } else {
+        None
+    };
+
     on_event(VmEvent::Stage(VmStage::VmSpawn));
     let mut vm = VmInstance::spawn(&config.firecracker_bin, config.workdir.clone())
         .await
@@ -137,6 +177,12 @@ where
         config.rootfs_read_only,
     )
     .await?;
+
+    if let Some(net_cfg) = &config.network {
+        vm.put_network_interface("eth0", &net_cfg.tap_name(), &net_cfg.guest_mac())
+            .await
+            .context("put_network_interface")?;
+    }
 
     let guest_cid = config.guest_cid.unwrap_or(DEFAULT_GUEST_CID);
     vm.put_vsock(guest_cid).await?;

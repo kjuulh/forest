@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use hollow_grpc_interface::{
     AgentMessage, JobLogBatch, JobStatus, JobUpdate, LogLine, RunJob, agent_message,
 };
-use hollow_vm::{VmConfig, VmEvent, VmStage, run_job as vm_run_job};
+use hollow_vm::{
+    NetworkAllocator, NetworkConfig, VmConfig, VmEvent, VmStage, run_job as vm_run_job,
+};
 use hollow_vsock::protocol::{JobDefinition, JobFile};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -22,6 +24,12 @@ pub struct VmPaths {
     pub firecracker_bin: PathBuf,
     pub kernel: PathBuf,
     pub images_dir: PathBuf,
+    /// Host outbound interface for NAT MASQUERADE (e.g. "ens18"). Detected
+    /// from the default route at agent startup.
+    pub host_iface: String,
+    /// DNS servers the guest should use. Passed to hollow-guest via
+    /// HOLLOW_DNS so it can populate /etc/resolv.conf before the job runs.
+    pub dns: Vec<String>,
 }
 
 pub async fn run_job(
@@ -29,13 +37,14 @@ pub async fn run_job(
     outbound_tx: mpsc::UnboundedSender<AgentMessage>,
     data_dir: &str,
     vm_paths: &VmPaths,
+    net_allocator: &NetworkAllocator,
     cancel: CancellationToken,
 ) {
     let job_id = job.job_id.clone();
     send_status(&outbound_tx, &job_id, JobStatus::Booting, None);
 
     let result = tokio::select! {
-        r = run_job_inner(&job, &outbound_tx, data_dir, vm_paths) => r,
+        r = run_job_inner(&job, &outbound_tx, data_dir, vm_paths, net_allocator) => r,
         _ = cancel.cancelled() => {
             tracing::info!(job_id = %job_id, "job cancelled");
             Err(anyhow::anyhow!("job cancelled"))
@@ -80,11 +89,29 @@ async fn run_job_inner(
     outbound_tx: &mpsc::UnboundedSender<AgentMessage>,
     data_dir: &str,
     vm_paths: &VmPaths,
+    net_allocator: &NetworkAllocator,
 ) -> anyhow::Result<(i32, Option<String>)> {
     let rootfs = resolve_image(&vm_paths.images_dir, &job.image)?;
 
     let workdir = PathBuf::from(data_dir).join(format!("vm-{}", job.job_id));
     tokio::fs::create_dir_all(&workdir).await?;
+
+    let network = if job.egress_enabled {
+        let subnet = net_allocator
+            .allocate()
+            .map_err(|e| anyhow::anyhow!("allocate subnet: {e}"))?;
+        // The AllocatedSubnet is kept alive for the whole VM run via the
+        // VmConfig → NetworkHandle chain inside hollow_vm::run_job. We
+        // release the slot on the way out below.
+        let cfg = NetworkConfig {
+            subnet_index: subnet.index,
+            host_iface: vm_paths.host_iface.clone(),
+            dns: vm_paths.dns.clone(),
+        };
+        Some((cfg, subnet))
+    } else {
+        None
+    };
 
     let vm_config = VmConfig {
         firecracker_bin: vm_paths.firecracker_bin.clone(),
@@ -101,6 +128,7 @@ async fn run_job_inner(
         guest_cid: None,
         guest_connect_timeout: None,
         rootfs_read_only: false,
+        network: network.as_ref().map(|(c, _)| c.clone()),
     };
 
     let job_def = JobDefinition {
@@ -169,7 +197,12 @@ async fn run_job_inner(
         }
     };
 
-    let outcome = vm_run_job(vm_config, job_def, on_event).await?;
+    let outcome = vm_run_job(vm_config, job_def, on_event).await;
+    // Drop the subnet allocation now that the VM is gone. Keep `network` alive
+    // until here so Drop runs in order: NetworkHandle (inside run_job) →
+    // AllocatedSubnet (here) → allocator gets its slot back.
+    drop(network);
+    let outcome = outcome?;
     Ok((outcome.exit_code, outcome.plan_output))
 }
 

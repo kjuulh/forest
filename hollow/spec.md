@@ -1355,6 +1355,86 @@ Target: **<10s from code change to boot + registration**.
 
 **Firecracker-only:** Hollow has no subprocess or host-execution fallback. All jobs run inside a Firecracker microVM — that is the isolation contract, and the only execution mode the agent supports. Tests run against a real KVM-capable Linux host (see `hollow-test-harness`).
 
+## Command Dispatch Abstraction
+
+> This section sketches the evolution of the "what to run in the VM" model.
+> Today it's hardcoded; soon we'll need to accept user-defined commands.
+
+### Today
+
+`hollow-controller` maps a destination name to a fixed shell command inside
+`build_command_for_destination` (see `hollow/crates/hollow-controller/src/dispatcher.rs`):
+
+| Destination | Command |
+|-------------|---------|
+| `terraform` | `terraform init && terraform {plan,apply}` |
+| `opentofu`  | `tofu init && tofu {plan,apply}` |
+| `echo`      | `sh -c $metadata.command` (test-only) |
+
+This matches the legacy `forest-runner` where each destination is a trait
+implementation that owns its own process spawn and file plumbing
+(`TerraformV1`, `ForageV1`, `FluxV1`). It's fine for first-party destinations
+that Forest knows the shape of.
+
+### The gap: custom CI
+
+Users want to run arbitrary pre/post-deploy steps that Forest doesn't know
+about in advance — lint, tests, smoke probes, database migrations, custom
+deploy scripts. The legacy runner has no slot for these; neither does the
+controller today.
+
+### Target model
+
+Introduce a `ci-script` / `exec` destination type whose contract is:
+
+1. **Release artifacts** carry a `forest.yaml` (or similar) describing steps:
+
+   ```yaml
+   steps:
+     - name: lint
+       run: "./ci/lint.sh"
+     - name: test
+       run: "cargo test"
+       env:
+         RUST_LOG: info
+     - name: deploy
+       run: "./ci/deploy.sh"
+   ```
+
+2. **Controller** reads `forest.yaml` from the deployment files, translates
+   it to a sequence of `RunJob`s — one per step OR a single job that runs
+   all steps and streams results step-by-step. The first version runs all
+   steps in one VM to avoid VM-boot overhead per step.
+
+3. **Image selection** is configurable per step: `image: "ci-node-20"`,
+   `image: "ci-rust-stable"`, etc. Forest ships a small catalogue;
+   organisations can register their own.
+
+4. **Output contract**: each step's stdout/stderr streams back with a
+   `step=<name>` tag in the log channel, so the UI can present per-step
+   collapsible logs and mark pass/fail independently.
+
+### Migration
+
+No existing destinations need to move. The `ci-script` destination lives
+alongside `terraform`/`opentofu`/`flux`; it's a separate code path in the
+dispatcher with its own arm in `build_command_for_destination` that reads
+the pipeline definition from metadata or release files.
+
+Later, the first-party destinations can become sugar over the `ci-script`
+substrate (e.g. `opentofu` is a pre-baked pipeline of `init` → `plan` →
+`apply` steps). That's a refactor, not a prerequisite.
+
+### Where this lives
+
+- `forest-server` — stores the pipeline definition as part of the release
+  artifact; no change to `release_files` needed.
+- `hollow-controller` — one arm in `build_command_for_destination` that
+  parses `forest.yaml` from deployment files and dispatches accordingly.
+- `hollow-guest` — no change initially (one command executed per VM). When
+  multi-step-per-VM arrives, the guest learns a new vsock message type
+  for `ExecuteStep(name, cmd, env)` that the host agent sends in sequence.
+
 ## Open Questions
 
 None currently. All architectural decisions are resolved for Phase 1.

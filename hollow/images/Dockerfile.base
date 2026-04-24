@@ -7,7 +7,8 @@ FROM alpine:3.21
 #   - util-linux-misc: provides `setsid`, useful when running as PID 1
 RUN apk add --no-cache \
     ca-certificates \
-    bash
+    bash \
+    curl
 
 # hollow-guest is copied in by the build harness (cargo build -p hollow-guest
 # --target x86_64-unknown-linux-musl --release, then cp into images/).

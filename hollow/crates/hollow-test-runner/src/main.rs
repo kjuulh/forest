@@ -69,6 +69,11 @@ async fn run(cli: Cli) -> anyhow::Result<i32> {
     Event::diag("info", format!("workdir: {}", workdir.display())).emit();
 
     let job_def = build_job_definition(&spec)?;
+    let network = spec.network.as_ref().map(|n| hollow_vm::NetworkConfig {
+        subnet_index: n.subnet_index,
+        host_iface: n.host_iface.clone(),
+        dns: n.dns.clone(),
+    });
     let vm_config = VmConfig {
         firecracker_bin: PathBuf::from(&spec.firecracker_bin),
         kernel: PathBuf::from(&spec.kernel),
@@ -80,6 +85,7 @@ async fn run(cli: Cli) -> anyhow::Result<i32> {
         guest_cid: None,
         guest_connect_timeout: None,
         rootfs_read_only: false,
+        network,
     };
 
     let outer_timeout = Duration::from_secs(spec.timeout_seconds.into());

@@ -25,6 +25,8 @@ pub struct RemoteLayout {
     pub images_dir: String,
     pub workdir_root: String,
     pub agent_data_dir: String,
+    /// Default-route interface on the remote host (used as MASQUERADE out).
+    pub host_iface: String,
 }
 
 pub fn bootstrap(cfg: &Config, artifacts: &BuildArtifacts) -> anyhow::Result<RemoteLayout> {
@@ -83,6 +85,13 @@ mkdir -p {agent_data_dir}
     );
     ssh::run_remote(cfg, &script).context("install image aliases")?;
 
+    // 7. Detect the remote's outbound interface and enable ip_forward.
+    let host_iface = detect_host_iface(cfg).context("detect remote host outbound iface")?;
+    let forward_script = r#"set -e
+echo 1 > /proc/sys/net/ipv4/ip_forward
+"#;
+    ssh::run_remote(cfg, forward_script).context("enable ip_forward")?;
+
     Ok(RemoteLayout {
         firecracker_bin,
         kernel,
@@ -92,7 +101,20 @@ mkdir -p {agent_data_dir}
         images_dir,
         workdir_root,
         agent_data_dir,
+        host_iface,
     })
+}
+
+fn detect_host_iface(cfg: &Config) -> anyhow::Result<String> {
+    let out = ssh::run_remote(
+        cfg,
+        "ip -4 route show default | awk '/^default/ {for (i=1;i<=NF;i++) if ($i==\"dev\") print $(i+1)}'",
+    )?;
+    let iface = out.trim().lines().next().unwrap_or("").trim();
+    if iface.is_empty() {
+        bail!("could not detect default-route interface on remote");
+    }
+    Ok(iface.to_string())
 }
 
 fn preflight(cfg: &Config) -> anyhow::Result<()> {

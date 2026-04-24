@@ -26,6 +26,26 @@ pub struct RunnerSpec {
     /// Hard wallclock cap on the whole runner (boot + execution + cleanup).
     #[serde(default = "default_timeout")]
     pub timeout_seconds: u32,
+    /// Opt-in per-VM networking (tap + iptables NAT). None → vsock-only.
+    #[serde(default)]
+    pub network: Option<NetworkSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NetworkSpec {
+    /// Unique subnet index [0, 255]. Caller is responsible for ensuring it
+    /// doesn't collide with other concurrent VMs on the host.
+    pub subnet_index: u8,
+    /// Host's default-route interface; `hollow_vm::net::detect_host_iface`
+    /// is a reasonable way to fill this in.
+    pub host_iface: String,
+    /// Nameservers written to /etc/resolv.conf inside the guest.
+    #[serde(default = "default_dns")]
+    pub dns: Vec<String>,
+}
+
+fn default_dns() -> Vec<String> {
+    vec!["1.1.1.1".into(), "8.8.8.8".into()]
 }
 
 fn default_vcpus() -> u8 {
