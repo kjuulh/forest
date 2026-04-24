@@ -15,5 +15,11 @@ RUN apk add --no-cache \
 COPY hollow-guest /usr/local/bin/hollow-guest
 RUN chmod +x /usr/local/bin/hollow-guest
 
-# Working directory for job files.
-RUN mkdir -p /work
+# Pre-create the directories hollow-guest mounts tmpfs onto at boot. They
+# don't need to be writable on the rootfs — they're just mountpoints — but
+# they have to exist.
+RUN mkdir -p /work /run /var/tmp /tmp
+
+# /etc/resolv.conf is a regular file (Docker bind-mounts it during build, so
+# we can't symlink it here without "Resource busy"). hollow-guest bind-mounts
+# /run/resolv.conf over it at boot so DNS writes on the read-only rootfs work.

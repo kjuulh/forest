@@ -131,7 +131,11 @@ async fn run_job_inner(
         boot_args: None,
         guest_cid: None,
         guest_connect_timeout: None,
-        rootfs_read_only: false,
+        // Rootfs is the immutable base image; hollow-guest mounts tmpfs over
+        // every path the job actually writes to (/work, /tmp, /run,
+        // /var/tmp). Writable rootfs would let one job persist data into the
+        // shared image and leak to the next tenant.
+        rootfs_read_only: true,
         network: network.as_ref().map(|(c, _)| c.clone()),
         jailer: vm_paths.jailer.clone(),
     };

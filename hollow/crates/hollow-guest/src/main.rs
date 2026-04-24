@@ -40,6 +40,13 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("hollow-guest starting");
 
+    // Bring up the writable scratch areas the rest of the runtime expects
+    // BEFORE we connect to the host. Rootfs is read-only; this gives the
+    // job a place to write without tainting the underlying ext4.
+    if let Err(e) = setup_writable_areas() {
+        tracing::warn!(error = %e, "failed to mount tmpfs scratch areas (continuing)");
+    }
+
     let stream = connect().await.context("failed to connect to host agent")?;
     let (reader, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
@@ -248,8 +255,89 @@ async fn write_resolv_conf(dns_csv: &str) -> anyhow::Result<()> {
     if body.is_empty() {
         return Ok(());
     }
-    tokio::fs::create_dir_all("/etc").await.ok();
-    tokio::fs::write("/etc/resolv.conf", body).await?;
+    // /etc lives on the read-only rootfs, so we can't overwrite the file
+    // directly. /run is a tmpfs (mounted in setup_writable_areas); write
+    // there and bind-mount it on top of /etc/resolv.conf so any tool that
+    // reads the canonical path gets the writable copy.
+    tokio::fs::write("/run/resolv.conf", body).await?;
+    if let Err(e) = bind_mount("/run/resolv.conf", "/etc/resolv.conf") {
+        // EBUSY just means we already bind-mounted on a previous job — that
+        // can't happen with a fresh VM but we treat it as benign just in case.
+        tracing::warn!(error = %e, "bind-mount /run/resolv.conf → /etc/resolv.conf failed");
+    }
+    Ok(())
+}
+
+fn bind_mount(source: &str, target: &str) -> anyhow::Result<()> {
+    use std::ffi::CString;
+    let src = CString::new(source)?;
+    let tgt = CString::new(target)?;
+    let rc = unsafe {
+        libc::mount(
+            src.as_ptr(),
+            tgt.as_ptr(),
+            std::ptr::null(),
+            libc::MS_BIND,
+            std::ptr::null(),
+        )
+    };
+    if rc != 0 {
+        let err = std::io::Error::last_os_error();
+        anyhow::bail!("bind-mount {source} → {target}: {err}");
+    }
+    Ok(())
+}
+
+/// Mount tmpfs at every directory the runtime needs to write to. The rootfs
+/// is read-only, so without these mounts /work, /tmp, /run etc. would all
+/// EROFS the moment a job tries to use them.
+///
+/// Idempotent: silently no-ops if the path is already a mount point (the
+/// kernel might have set up `/dev` or `/proc` for us depending on the kernel
+/// config). Errors on individual mounts are logged but don't abort the guest
+/// — the worst case is the job fails with a clear "permission denied" later,
+/// which beats hanging.
+fn setup_writable_areas() -> anyhow::Result<()> {
+    // size=… is generous but bounded by the VM's `mem_size_mib`, so a
+    // runaway tmpfs can't exceed the VM's RAM cap.
+    for (path, size_mib) in [
+        ("/work", 512),
+        ("/tmp", 512),
+        ("/run", 64),
+        ("/var/tmp", 256),
+    ] {
+        // Best-effort: ensure mount target exists. On a read-only rootfs we
+        // rely on the image already having these dirs.
+        let _ = std::fs::create_dir_all(path);
+        if let Err(e) = mount_tmpfs(path, size_mib) {
+            tracing::warn!(target = path, error = %e, "tmpfs mount failed");
+        }
+    }
+    Ok(())
+}
+
+fn mount_tmpfs(target: &str, size_mib: u32) -> anyhow::Result<()> {
+    use std::ffi::CString;
+    let target_c = CString::new(target)?;
+    let fstype_c = CString::new("tmpfs")?;
+    let opts = format!("size={size_mib}M,mode=1777");
+    let opts_c = CString::new(opts)?;
+    // mount(source, target, fstype, mountflags, data) — for tmpfs the source
+    // string is conventionally "tmpfs" but the kernel ignores it.
+    let source_c = CString::new("tmpfs")?;
+    let rc = unsafe {
+        libc::mount(
+            source_c.as_ptr(),
+            target_c.as_ptr(),
+            fstype_c.as_ptr(),
+            0,
+            opts_c.as_ptr().cast(),
+        )
+    };
+    if rc != 0 {
+        let err = std::io::Error::last_os_error();
+        anyhow::bail!("mount tmpfs at {target}: {err}");
+    }
     Ok(())
 }
 

@@ -91,7 +91,9 @@ async fn run(cli: Cli) -> anyhow::Result<i32> {
         boot_args: None,
         guest_cid: None,
         guest_connect_timeout: None,
-        rootfs_read_only: false,
+        // Match the production agent posture — rootfs is immutable, scratch
+        // areas are tmpfs mounted by hollow-guest.
+        rootfs_read_only: true,
         network,
         jailer,
     };
