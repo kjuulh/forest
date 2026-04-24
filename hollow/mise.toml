@@ -55,6 +55,11 @@ description = "Full controller+agent orchestrator test against the KVM host"
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }
 run = "cargo test -p hollow-acceptance --test orchestrator -- --nocapture"
 
+[tasks."test:opentofu"]
+description = "Run real OpenTofu inside Firecracker (tofu init + plan, offline)"
+env = { HOLLOW_TEST_HOST = "forage-local-agent" }
+run = "cargo test -p hollow-acceptance --test opentofu -- --nocapture"
+
 [tasks."test:doctor"]
 description = "Verify SSH connectivity and KVM availability on HOLLOW_TEST_HOST"
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }

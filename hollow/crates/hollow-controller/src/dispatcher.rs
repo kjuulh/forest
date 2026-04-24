@@ -396,6 +396,21 @@ fn build_command_for_destination(
                 format!("terraform init -no-color && terraform {action}"),
             ]
         }
+        // OpenTofu is the open-source Terraform fork. Same CLI surface, so
+        // the command shape is identical; the image is separate because it
+        // ships the `tofu` binary + baked providers instead of `terraform`.
+        "opentofu" => {
+            let action = if mode == "plan" {
+                "plan -no-color"
+            } else {
+                "apply -no-color -auto-approve"
+            };
+            vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                format!("tofu init -no-color -input=false && tofu {action} -input=false"),
+            ]
+        }
         // Test-only: run an arbitrary shell command supplied via destination
         // metadata. Used by hollow-acceptance orchestrator tests to drive the
         // full controller→agent→VM path with a trivial payload.

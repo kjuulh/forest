@@ -1,5 +1,6 @@
-//! Local build steps: cross-compile guest (musl) + runner (host gnu), and
-//! pack the rootfs into an ext4 image using docker + `mkfs.ext4 -d`.
+//! Local build steps: cross-compile guest (musl) + runner/agent (host gnu),
+//! then build each rootfs image (base, opentofu-v1, …) as a docker image and
+//! pack to ext4 via `mkfs.ext4 -d`.
 //!
 //! Caching is mtime-based: we skip a step if the output is newer than every
 //! input we know about. Good enough for `cargo test` — `cargo clean` invalidates.
@@ -14,49 +15,73 @@ use crate::config::Config;
 const GUEST_TARGET: &str = "x86_64-unknown-linux-musl";
 const RUNNER_TARGET: &str = "x86_64-unknown-linux-gnu";
 
+/// Declarative description of a rootfs image we know how to build. The base
+/// must come first — everything else derives from it.
+struct ImageBuild {
+    /// Logical name. Maps to `<name>.ext4` on the remote.
+    name: &'static str,
+    /// Dockerfile filename inside `hollow/images/`.
+    dockerfile: &'static str,
+    /// Docker image tag to use (and reference from downstream Dockerfiles).
+    tag: &'static str,
+    /// Filesystem label baked into the ext4.
+    fs_label: &'static str,
+    /// Size of the ext4 image. Override for anything bigger than base.
+    size: &'static str,
+}
+
+const IMAGES: &[ImageBuild] = &[
+    ImageBuild {
+        name: "base",
+        dockerfile: "Dockerfile.base",
+        tag: "hollow-base:test",
+        fs_label: "hollow-base",
+        size: "256M",
+    },
+    ImageBuild {
+        name: "opentofu-v1",
+        dockerfile: "Dockerfile.opentofu-v1",
+        tag: "hollow-opentofu-v1:test",
+        fs_label: "hollow-otf",
+        size: "1024M",
+    },
+];
+
 pub struct BuildArtifacts {
     pub runner_bin: PathBuf,
     pub agent_bin: PathBuf,
-    pub rootfs_ext4: PathBuf,
+    /// All rootfs images, keyed by logical name. The first entry is always
+    /// `base.ext4` and the rest derive from it.
+    pub images: Vec<ImageArtifact>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImageArtifact {
+    pub name: String,
+    pub ext4_path: PathBuf,
 }
 
 pub fn build(cfg: &Config) -> anyhow::Result<BuildArtifacts> {
     std::fs::create_dir_all(&cfg.local_target_dir).context("create local_target_dir")?;
 
-    // Guest binary is consumed by the rootfs build; not shipped separately.
     let guest_bin = build_cargo(cfg, "hollow-guest", GUEST_TARGET, true)?;
     let runner_bin = build_cargo(cfg, "hollow-test-runner", RUNNER_TARGET, false)?;
-    // hollow-agent ships to the remote KVM host (same target as the runner).
     let agent_bin = build_cargo(cfg, "hollow-agent", RUNNER_TARGET, false)?;
-    // hollow-controller runs locally on the dev machine during orchestrator
-    // tests — built here so the path `target/release/hollow-controller` is
-    // populated before orchestrator::start tries to spawn it, but we don't
-    // need to keep the path around since it's derivable from cfg.repo_root.
+    // Controller runs on the dev machine in orchestrator tests; build it so
+    // target/release/hollow-controller is populated.
     build_cargo_host(cfg, "hollow-controller")?;
-    let rootfs_ext4 = build_base_ext4(cfg, &guest_bin)?;
+
+    let mut images = Vec::with_capacity(IMAGES.len());
+    for spec in IMAGES {
+        let art = build_image(cfg, spec, &guest_bin)?;
+        images.push(art);
+    }
 
     Ok(BuildArtifacts {
         runner_bin,
         agent_bin,
-        rootfs_ext4,
+        images,
     })
-}
-
-fn build_cargo_host(cfg: &Config, pkg: &str) -> anyhow::Result<PathBuf> {
-    tracing::info!(pkg, "cargo build (release, host target)");
-    let status = Command::new("cargo")
-        .current_dir(&cfg.repo_root)
-        .args(["build", "-p", pkg, "--release"])
-        .status()
-        .with_context(|| format!("spawn cargo build for {pkg}"))?;
-    if !status.success() {
-        bail!("cargo build {pkg} (host) failed");
-    }
-    let bin_path = cfg.repo_root.join("target/release").join(pkg);
-    if !bin_path.exists() {
-        bail!("expected binary not found: {}", bin_path.display());
-    }
-    Ok(bin_path)
 }
 
 fn build_cargo(
@@ -91,6 +116,23 @@ fn build_cargo(
     Ok(bin_path)
 }
 
+fn build_cargo_host(cfg: &Config, pkg: &str) -> anyhow::Result<PathBuf> {
+    tracing::info!(pkg, "cargo build (release, host target)");
+    let status = Command::new("cargo")
+        .current_dir(&cfg.repo_root)
+        .args(["build", "-p", pkg, "--release"])
+        .status()
+        .with_context(|| format!("spawn cargo build for {pkg}"))?;
+    if !status.success() {
+        bail!("cargo build {pkg} (host) failed");
+    }
+    let bin_path = cfg.repo_root.join("target/release").join(pkg);
+    if !bin_path.exists() {
+        bail!("expected binary not found: {}", bin_path.display());
+    }
+    Ok(bin_path)
+}
+
 fn ensure_rustup_target(target: &str) -> anyhow::Result<()> {
     let installed = Command::new("rustup")
         .args(["target", "list", "--installed"])
@@ -115,19 +157,29 @@ fn ensure_rustup_target(target: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn build_base_ext4(cfg: &Config, guest_bin: &Path) -> anyhow::Result<PathBuf> {
+fn build_image(cfg: &Config, spec: &ImageBuild, guest_bin: &Path) -> anyhow::Result<ImageArtifact> {
     let images_dir = cfg.repo_root.join("images");
-    let dockerfile = images_dir.join("Dockerfile.base");
+    let dockerfile = images_dir.join(spec.dockerfile);
     if !dockerfile.exists() {
         bail!("missing {}", dockerfile.display());
     }
 
-    let out = cfg.local_target_dir.join("base.ext4");
-    if out.exists() && newer_than(&out, guest_bin)? && newer_than(&out, &dockerfile)? {
-        tracing::info!(path = %out.display(), "base.ext4 up-to-date, reusing");
-        return Ok(out);
+    let out = cfg.local_target_dir.join(format!("{}.ext4", spec.name));
+
+    // Cache invalidation: only the base image depends on the guest binary
+    // directly. Higher-layer images depend on whatever `FROM` they reference,
+    // and docker's own layer cache handles that. Still re-pack whenever the
+    // dockerfile changes.
+    if out.exists() && newer_than(&out, &dockerfile)? && newer_than(&out, guest_bin)? {
+        tracing::info!(image = spec.name, path = %out.display(), "up-to-date, reusing");
+        return Ok(ImageArtifact {
+            name: spec.name.to_string(),
+            ext4_path: out,
+        });
     }
 
+    // Stage the guest binary into images/ for the Dockerfile.base COPY line.
+    // Safe to stage for non-base images too — docker just ignores it.
     let staged_guest = images_dir.join("hollow-guest");
     std::fs::copy(guest_bin, &staged_guest).with_context(|| {
         format!(
@@ -136,15 +188,13 @@ fn build_base_ext4(cfg: &Config, guest_bin: &Path) -> anyhow::Result<PathBuf> {
             staged_guest.display()
         )
     })?;
-    // Dockerfile.base does `COPY hollow-guest …`, so it must be readable by docker.
 
-    let image_tag = "hollow-base:test";
-    tracing::info!(tag = image_tag, "docker build base image");
+    tracing::info!(image = spec.name, tag = spec.tag, "docker build");
     let status = Command::new("docker")
         .args([
             "build",
             "-t",
-            image_tag,
+            spec.tag,
             "-f",
             dockerfile.to_string_lossy().as_ref(),
             images_dir.to_string_lossy().as_ref(),
@@ -153,16 +203,18 @@ fn build_base_ext4(cfg: &Config, guest_bin: &Path) -> anyhow::Result<PathBuf> {
         .context("docker build")?;
     let _ = std::fs::remove_file(&staged_guest);
     if !status.success() {
-        bail!("docker build base image failed");
+        bail!("docker build {} failed", spec.name);
     }
 
     // Export the image rootfs into a staging directory.
-    let staging = cfg.local_target_dir.join("rootfs-staging");
+    let staging = cfg
+        .local_target_dir
+        .join(format!("rootfs-staging-{}", spec.name));
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir_all(&staging).context("create staging")?;
 
     let cid_out = Command::new("docker")
-        .args(["create", image_tag])
+        .args(["create", spec.tag])
         .output()
         .context("docker create")?;
     if !cid_out.status.success() {
@@ -186,12 +238,11 @@ fn build_base_ext4(cfg: &Config, guest_bin: &Path) -> anyhow::Result<PathBuf> {
         bail!("docker export failed");
     }
 
-    // mkfs.ext4 -d <dir> populates the FS image without needing root/mount.
     if out.exists() {
         std::fs::remove_file(&out)?;
     }
     let status = Command::new("truncate")
-        .args(["-s", "256M", out.to_string_lossy().as_ref()])
+        .args(["-s", spec.size, out.to_string_lossy().as_ref()])
         .status()
         .context("truncate ext4 image")?;
     if !status.success() {
@@ -203,7 +254,7 @@ fn build_base_ext4(cfg: &Config, guest_bin: &Path) -> anyhow::Result<PathBuf> {
             "-d",
             staging.to_string_lossy().as_ref(),
             "-L",
-            "hollow-base",
+            spec.fs_label,
             out.to_string_lossy().as_ref(),
         ])
         .status()
@@ -212,8 +263,11 @@ fn build_base_ext4(cfg: &Config, guest_bin: &Path) -> anyhow::Result<PathBuf> {
         bail!("mkfs.ext4 failed");
     }
 
-    tracing::info!(path = %out.display(), "base.ext4 built");
-    Ok(out)
+    tracing::info!(image = spec.name, path = %out.display(), "ext4 built");
+    Ok(ImageArtifact {
+        name: spec.name.to_string(),
+        ext4_path: out,
+    })
 }
 
 fn newer_than(a: &Path, b: &Path) -> anyhow::Result<bool> {

@@ -53,22 +53,31 @@ pub fn bootstrap(cfg: &Config, artifacts: &BuildArtifacts) -> anyhow::Result<Rem
     // 3. Install kernel.
     install_kernel(cfg, &kernel)?;
 
-    // 4. Ship the runner, agent, and rootfs image.
+    // 4. Ship the runner and agent binaries.
     ship_artifact(cfg, &artifacts.runner_bin, &runner_bin, /* exec */ true)?;
     ship_artifact(cfg, &artifacts.agent_bin, &agent_bin, /* exec */ true)?;
-    ship_artifact(cfg, &artifacts.rootfs_ext4, &rootfs, /* exec */ false)?;
 
-    // 5. Provide image aliases so the controller's `{dest}-v{ver}.ext4`
-    //    naming convention finds base.ext4. Add more aliases here as new
-    //    destination types come online.
+    // 5. Ship every rootfs image built locally.
+    for img in &artifacts.images {
+        let remote_path = format!("{images_dir}/{}.ext4", img.name);
+        ship_artifact(cfg, &img.ext4_path, &remote_path, /* exec */ false)?;
+    }
+
+    // 6. Provide image aliases so the controller's `{dest}-v{ver}.ext4`
+    //    naming convention finds the right ext4. One alias per destination
+    //    type that maps to an existing image. Add arms here for new
+    //    destination types.
     let script = format!(
         r#"set -e
 cd {images_dir}
-for alias in echo-v1 base-v1; do
-  if [ ! -e "$alias.ext4" ]; then
-    ln -sf base.ext4 "$alias.ext4"
+link_if_missing() {{
+  target="$1"; link="$2"
+  if [ -f "$target" ] && [ ! -e "$link" ]; then
+    ln -sf "$target" "$link"
   fi
-done
+}}
+link_if_missing base.ext4 echo-v1.ext4
+link_if_missing base.ext4 base-v1.ext4
 mkdir -p {agent_data_dir}
 "#
     );

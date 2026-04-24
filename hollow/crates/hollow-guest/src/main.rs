@@ -122,6 +122,15 @@ async fn execute_job(
     let mut cmd = tokio::process::Command::new(&job.command[0]);
     cmd.args(&job.command[1..])
         .current_dir(WORK_DIR)
+        // Seed a sensible baseline before the job-supplied env takes over.
+        // hollow-guest runs as PID 1 with an essentially empty environment —
+        // Linux doesn't set PATH/HOME/TERM for init, systemd normally would,
+        // but we have no systemd. Without this any `sh -c 'tofu …'` dies
+        // with "not found" because PATH is empty.
+        .env("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+        .env("HOME", "/root")
+        .env("TERM", "xterm-256color")
+        // Apply the job's env last so callers can override any of the above.
         .envs(&job.environment)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
