@@ -1,0 +1,16 @@
+FROM hollow-base:latest
+
+ARG FLUX_VERSION=2.4.0
+ARG KUSTOMIZE_VERSION=5.4.3
+
+RUN curl -fsSL \
+    "https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_linux_amd64.tar.gz" \
+    | tar -xz -C /usr/local/bin/ \
+    && flux version --client
+
+RUN curl -fsSL \
+    "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
+    | tar -xz -C /usr/local/bin/ \
+    && kustomize version
+
+RUN apk add --no-cache git openssh-client

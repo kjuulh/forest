@@ -1,0 +1,40 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+
+[workspace.dependencies]
+hollow-grpc-interface = { path = "crates/hollow-grpc-interface" }
+hollow-vsock = { path = "crates/hollow-vsock" }
+
+# Shared with forest (path dependencies up to parent)
+forest-grpc-interface = { path = "../crates/forest-grpc-interface" }
+forest-runner = { path = "../crates/forest-runner" }
+
+anyhow = { version = "1" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0.145"
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
+clap = { version = "4", features = ["derive", "env", "string"] }
+async-trait = "0.1.88"
+futures = "0.3.31"
+uuid = { version = "1.7.0", features = ["v4", "v7"] }
+tokio-stream = "0.1"
+tokio-util = "0.7.15"
+notmad = "0.11.0"
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
+
+bytes = "1.10.1"
+prost = "0.14.1"
+prost-types = "0.14.1"
+tonic = { version = "=0.14.2", features = [
+  "gzip",
+  "tls-aws-lc",
+  "tls-webpki-roots",
+] }
+tonic-prost = "=0.14.2"

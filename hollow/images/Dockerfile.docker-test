@@ -1,0 +1,5 @@
+# Validation-only image: verifies Docker works inside Firecracker VMs.
+# NOT a production destination — used for CI capability smoke testing.
+FROM hollow-base:latest
+
+RUN apk add --no-cache docker-cli docker-engine iptables

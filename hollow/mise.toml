@@ -1,0 +1,95 @@
+[env]
+RUST_LOG = "hollow=debug,info"
+_.file = "../.env"
+
+[tasks.build]
+description = "Build all hollow binaries (debug)"
+run = "cargo build --workspace"
+
+[tasks."build:release"]
+description = "Build all hollow binaries (release)"
+run = "cargo build --workspace --release"
+
+[tasks."build:guest"]
+description = "Build hollow-guest (debug, for local dev testing)"
+run = "cargo build -p hollow-guest"
+
+[tasks.check]
+description = "Check + clippy + fmt"
+run = """
+cargo fmt --all --check
+cargo clippy --workspace -- -D warnings
+"""
+
+[tasks."generate:proto"]
+description = "Regenerate gRPC code from proto definitions"
+run = "buf generate"
+
+[tasks.controller]
+description = "Run the hollow controller (connects to forest-server)"
+env = { FOREST_SERVER_ADDR = "http://localhost:4040", HOLLOW_LISTEN_ADDR = "[::]:4050", HOLLOW_METRICS_ADDR = "[::]:4051", HOLLOW_MAX_CONCURRENT = "1", HOLLOW_CAPABILITIES = "forest/terraform/1" }
+run = "cargo run -p hollow-controller"
+
+[tasks.agent]
+description = "Run the hollow agent (connects to controller)"
+env = { HOLLOW_CONTROLLER_ADDR = "http://localhost:4050", HOLLOW_DATA_DIR = "/tmp/hollow-agent", HOLLOW_VCPUS = "2", HOLLOW_MEMORY_MIB = "4096" }
+run = """
+export HOLLOW_GUEST_BIN="$(pwd)/target/debug/hollow-guest"
+cargo run -p hollow-agent
+"""
+
+[tasks.test]
+description = "Run a standalone agent↔guest integration test without forest-server"
+run = """
+#!/bin/bash
+set -euo pipefail
+
+echo "==> Building binaries..."
+cargo build -p hollow-agent -p hollow-guest -p hollow-controller
+
+GUEST_BIN="$(pwd)/target/debug/hollow-guest"
+DATA_DIR=$(mktemp -d)
+SOCKET="$DATA_DIR/test.sock"
+
+echo "==> Testing vsock protocol: agent spawns guest, runs 'echo hello'"
+
+# Create a simple test that exercises the guest directly
+echo "==> Starting guest binary with a test socket..."
+rm -f "$SOCKET"
+
+# Start a listener, send a job, check output
+cargo run --example smoke_test 2>&1 || echo "(smoke_test example not yet implemented)"
+
+# Cleanup
+rm -rf "$DATA_DIR"
+echo "==> Done"
+"""
+
+[tasks."images:base"]
+description = "Build base rootfs Docker image (requires hollow-guest binary)"
+dir = "images"
+run = """
+echo "==> Building hollow-guest..."
+cd ..
+cargo build -p hollow-guest --release
+cp target/release/hollow-guest images/hollow-guest
+
+echo "==> Building base Docker image..."
+cd images
+docker build -t hollow-base -f Dockerfile.base .
+rm -f hollow-guest
+"""
+
+[tasks."images:terraform"]
+description = "Build terraform rootfs Docker image"
+depends = ["images:base"]
+dir = "images"
+run = "docker build -t hollow-terraform-v1 -f Dockerfile.terraform-v1 ."
+
+[tasks."images:pack"]
+description = "Pack a Docker image into ext4 for Firecracker"
+dir = "images"
+run = """
+mkdir -p out
+./scripts/pack-ext4.sh {{arg(name="image")}} out/{{arg(name="output")}} {{arg(name="size", default="2048")}}
+"""

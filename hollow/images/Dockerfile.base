@@ -1,0 +1,14 @@
+FROM alpine:3.21
+
+RUN apk add --no-cache \
+    busybox-initscripts \
+    ca-certificates \
+    curl \
+    bash
+
+# hollow-guest is copied in during image build
+COPY hollow-guest /usr/local/bin/hollow-guest
+RUN chmod +x /usr/local/bin/hollow-guest
+
+# Create working directory for jobs
+RUN mkdir -p /work

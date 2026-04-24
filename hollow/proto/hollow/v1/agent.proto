@@ -1,0 +1,138 @@
+syntax = "proto3";
+package hollow.v1;
+
+// HollowAgentService is exposed by the hollow-controller.
+// Agents on pool machines connect and register via a bidirectional stream,
+// receive job dispatch commands, and report status/logs back.
+service HollowAgentService {
+  // Bidirectional stream for agent lifecycle and job dispatch.
+  // Agent sends: register, heartbeat, job updates, log batches.
+  // Controller sends: register ack, run job, cancel job.
+  rpc RegisterAgent(stream AgentMessage) returns (stream ControllerMessage);
+}
+
+// ============================================================================
+// Agent → Controller
+// ============================================================================
+
+message AgentMessage {
+  oneof message {
+    AgentRegister register = 1;
+    AgentHeartbeat heartbeat = 2;
+    JobUpdate job_update = 3;
+    JobLogBatch log_batch = 4;
+  }
+}
+
+// First message an agent sends on the stream.
+message AgentRegister {
+  string agent_id = 1;
+  string hostname = 2;
+  string pool = 3;
+  uint32 total_vcpus = 4;
+  uint32 total_memory_mib = 5;
+  uint32 total_disk_mib = 6;
+  string kernel_version = 7;
+  string firecracker_version = 8;
+  // Available rootfs images with semver (e.g. "terraform-v1-1.3.0")
+  repeated string available_images = 9;
+  // Architecture: "x86_64" or "aarch64" (future)
+  string arch = 10;
+}
+
+// Periodic keepalive with capacity info (recommended every 10s).
+message AgentHeartbeat {
+  uint32 active_vms = 1;
+  uint32 available_vcpus = 2;
+  uint32 available_memory_mib = 3;
+  uint32 available_disk_mib = 4;
+  double load_1m = 5;
+  double load_5m = 6;
+}
+
+// Status update for a running job.
+message JobUpdate {
+  string job_id = 1;
+  JobStatus status = 2;
+  string error_message = 3;
+  optional string plan_output = 4;
+  int32 exit_code = 5;
+}
+
+// Batch of log lines from a running job.
+message JobLogBatch {
+  string job_id = 1;
+  repeated LogLine lines = 2;
+}
+
+message LogLine {
+  string channel = 1; // "stdout" or "stderr"
+  string line = 2;
+  uint64 timestamp = 3;
+}
+
+// ============================================================================
+// Controller → Agent
+// ============================================================================
+
+message ControllerMessage {
+  oneof message {
+    AgentRegisterAck register_ack = 1;
+    RunJob run_job = 2;
+    CancelJob cancel_job = 3;
+  }
+}
+
+// Controller response to AgentRegister.
+message AgentRegisterAck {
+  string agent_id = 1;
+  bool accepted = 2;
+  string reason = 3;
+}
+
+// Dispatch a job to the agent for execution in a Firecracker microVM.
+message RunJob {
+  string job_id = 1;
+  // Rootfs image to use (e.g. "terraform-v1"). Agent resolves to
+  // highest compatible semver on disk.
+  string image = 2;
+  repeated string command = 3;
+  map<string, string> environment = 4;
+  repeated JobFile files = 5;
+  // Resource allocation
+  uint32 vcpus = 6;
+  uint32 memory_mib = 7;
+  uint32 disk_mib = 8;
+  uint32 timeout_seconds = 9;
+  // Network policy
+  bool egress_enabled = 10;
+  // Execution mode: "deploy" or "plan"
+  string mode = 11;
+}
+
+message JobFile {
+  string path = 1;
+  bytes content = 2;
+  uint32 mode = 3; // octal, e.g. 0644
+}
+
+message CancelJob {
+  string job_id = 1;
+}
+
+// ============================================================================
+// Shared enums
+// ============================================================================
+
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_PENDING = 1;
+  JOB_STATUS_SCHEDULING = 2;
+  JOB_STATUS_BOOTING = 3;
+  JOB_STATUS_RUNNING = 4;
+  JOB_STATUS_COMPLETING = 5;
+  JOB_STATUS_COMPLETED = 6;
+  JOB_STATUS_FAILED = 7;
+  JOB_STATUS_TIMED_OUT = 8;
+  JOB_STATUS_CANCELLED = 9;
+}

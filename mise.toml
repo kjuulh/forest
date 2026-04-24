@@ -46,6 +46,12 @@ alias = ["d", "dev"]
 env = { RUST_LOG = "forest_server=trace,info" }
 run = "cargo run -p forest-server -- serve"
 
+[tasks."develop:hollow"]
+alias = ["dh"]
+description = "Run forest-server with in-process execution disabled (for testing with Hollow)"
+env = { RUST_LOG = "forest_server=trace,info", FOREST_DISABLE_IN_PROCESS = "true" }
+run = "cargo run -p forest-server -- serve --disable-in-process"
+
 [tasks."build"]
 run = "cargo build --release"
 
