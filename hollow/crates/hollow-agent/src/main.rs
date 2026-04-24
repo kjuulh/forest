@@ -39,6 +39,18 @@ struct Cli {
     /// Directory for rootfs images and VM scratch space
     #[arg(long, env = "HOLLOW_DATA_DIR", default_value = "/var/lib/hollow")]
     data_dir: String,
+
+    /// Path to the Firecracker binary
+    #[arg(long, env = "HOLLOW_FIRECRACKER_BIN")]
+    firecracker_bin: String,
+
+    /// Path to the Linux kernel image (uncompressed vmlinux)
+    #[arg(long, env = "HOLLOW_KERNEL")]
+    kernel: String,
+
+    /// Directory containing rootfs `.ext4` images, named `{image}.ext4`
+    #[arg(long, env = "HOLLOW_IMAGES_DIR")]
+    images_dir: String,
 }
 
 fn default_agent_id() -> String {
@@ -73,6 +85,9 @@ async fn main() -> anyhow::Result<()> {
             cli.total_vcpus,
             cli.total_memory_mib,
             cli.data_dir,
+            cli.firecracker_bin,
+            cli.kernel,
+            cli.images_dir,
         ))
         .run()
         .await?;

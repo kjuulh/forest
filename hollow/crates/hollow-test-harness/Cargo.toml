@@ -1,0 +1,29 @@
+[package]
+name = "hollow-test-harness"
+edition = "2024"
+version.workspace = true
+
+# Dev-machine-side test driver: cross-compiles the runner + guest, builds the
+# rootfs ext4 image locally, ships everything to a KVM-capable Linux host over
+# SSH, runs hollow-test-runner there, parses its JSONL event stream, and hands
+# back an assertable `RunResult`. Used by the hollow-acceptance test crate.
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+base64 = "0.22"
+sha2 = "0.10"
+hex = "0.4"
+
+# Puppet forest-server needs the real RunnerService types + a tonic server.
+forest-grpc-interface.workspace = true
+tonic.workspace = true
+tokio-stream.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+uuid.workspace = true

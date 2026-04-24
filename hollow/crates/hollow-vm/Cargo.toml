@@ -1,0 +1,28 @@
+[package]
+name = "hollow-vm"
+edition = "2024"
+version.workspace = true
+
+# Shared Firecracker microVM launcher used by hollow-test-runner (acceptance
+# tests) and hollow-agent (production runtime). Contains the API client over
+# the Firecracker UDS, the host-side vsock listener, and the job protocol
+# pump. Consumers attach an event callback to surface lifecycle stages and
+# guest log lines into their own transports (JSONL stdout, gRPC, etc.).
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+hollow-vsock.workspace = true
+
+anyhow.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+hyper = { version = "1.7", features = ["http1", "client"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
+hyperlocal = "0.9"
+http-body-util = "0.1"
+bytes.workspace = true

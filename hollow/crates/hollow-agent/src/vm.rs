@@ -1,34 +1,41 @@
-//! VM lifecycle management — creates and manages Firecracker microVMs for jobs.
+//! VM lifecycle for the production hollow-agent.
 //!
-//! For Phase 1 development, this module uses a Unix socket + subprocess to simulate
-//! the VM. Production will use Firecracker API + vsock.
+//! Launches one Firecracker microVM per `RunJob` via the shared `hollow-vm`
+//! crate, bridging its [`VmEvent`](hollow_vm::VmEvent) stream into the gRPC
+//! `AgentMessage`s the controller expects.
 
-use std::process::Stdio;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 
 use hollow_grpc_interface::{
     AgentMessage, JobLogBatch, JobStatus, JobUpdate, LogLine, RunJob, agent_message,
 };
-use hollow_vsock::protocol::{JobDefinition, JobFile, Message};
-use hollow_vsock::transport;
+use hollow_vm::{VmConfig, VmEvent, VmStage, run_job as vm_run_job};
+use hollow_vsock::protocol::{JobDefinition, JobFile};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-/// Run a job. In production this launches a Firecracker VM; in dev mode it spawns
-/// the hollow-guest binary directly, communicating over a Unix socket.
+/// Host-side paths the agent needs to launch any VM — plumbed in from the
+/// CLI so the production deployment and the test harness configure them
+/// independently.
+#[derive(Debug, Clone)]
+pub struct VmPaths {
+    pub firecracker_bin: PathBuf,
+    pub kernel: PathBuf,
+    pub images_dir: PathBuf,
+}
+
 pub async fn run_job(
     job: RunJob,
     outbound_tx: mpsc::UnboundedSender<AgentMessage>,
     data_dir: &str,
+    vm_paths: &VmPaths,
     cancel: CancellationToken,
 ) {
     let job_id = job.job_id.clone();
-
-    // Report booting
     send_status(&outbound_tx, &job_id, JobStatus::Booting, None);
 
     let result = tokio::select! {
-        r = run_job_inner(job, &outbound_tx, data_dir) => r,
+        r = run_job_inner(&job, &outbound_tx, data_dir, vm_paths) => r,
         _ = cancel.cancelled() => {
             tracing::info!(job_id = %job_id, "job cancelled");
             Err(anyhow::anyhow!("job cancelled"))
@@ -69,63 +76,33 @@ pub async fn run_job(
 }
 
 async fn run_job_inner(
-    job: RunJob,
+    job: &RunJob,
     outbound_tx: &mpsc::UnboundedSender<AgentMessage>,
     data_dir: &str,
+    vm_paths: &VmPaths,
 ) -> anyhow::Result<(i32, Option<String>)> {
-    let job_id = &job.job_id;
-    let socket_path = format!("{data_dir}/vm-{job_id}.sock");
+    let rootfs = resolve_image(&vm_paths.images_dir, &job.image)?;
 
-    // Ensure data_dir exists
-    tokio::fs::create_dir_all(data_dir).await?;
+    let workdir = PathBuf::from(data_dir).join(format!("vm-{}", job.job_id));
+    tokio::fs::create_dir_all(&workdir).await?;
 
-    // Clean up stale socket
-    let _ = tokio::fs::remove_file(&socket_path).await;
-
-    // Listen for the guest to connect
-    let listener = tokio::net::UnixListener::bind(&socket_path)?;
-
-    // In dev mode, auto-launch hollow-guest as a subprocess.
-    // In production, this will be replaced by Firecracker VM launch.
-    let guest_bin =
-        std::env::var("HOLLOW_GUEST_BIN").unwrap_or_else(|_| "hollow-guest".to_string());
-    tracing::info!(job_id, socket = %socket_path, guest_bin = %guest_bin, "launching guest");
-
-    let mut guest_proc = tokio::process::Command::new(&guest_bin)
-        .env("HOLLOW_VSOCK_PATH", &socket_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("failed to spawn guest binary '{guest_bin}': {e}"))?;
-
-    send_status(outbound_tx, job_id, JobStatus::Running, None);
-
-    // Accept guest connection (with timeout)
-    let stream = tokio::time::timeout(Duration::from_secs(30), listener.accept()).await;
-    let (stream, _) = match stream {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => {
-            guest_proc.kill().await.ok();
-            anyhow::bail!("accept failed: {e}");
-        }
-        Err(_) => {
-            guest_proc.kill().await.ok();
-            anyhow::bail!("guest did not connect within 30s");
-        }
+    let vm_config = VmConfig {
+        firecracker_bin: vm_paths.firecracker_bin.clone(),
+        kernel: vm_paths.kernel.clone(),
+        rootfs,
+        workdir,
+        vcpus: job.vcpus.max(1) as u8,
+        mem_mib: if job.memory_mib > 0 {
+            job.memory_mib
+        } else {
+            512
+        },
+        boot_args: None,
+        guest_cid: None,
+        guest_connect_timeout: None,
+        rootfs_read_only: false,
     };
 
-    let (reader, mut writer) = tokio::io::split(stream);
-    let mut reader = tokio::io::BufReader::new(reader);
-
-    // Wait for Ready signal
-    match transport::recv_message(&mut reader).await? {
-        Some(Message::Ready) => tracing::info!(job_id, "guest ready"),
-        other => anyhow::bail!("expected Ready, got {other:?}"),
-    }
-
-    // Send job definition
     let job_def = JobDefinition {
         job_id: job.job_id.clone(),
         command: job.command.clone(),
@@ -139,70 +116,94 @@ async fn run_job_inner(
                 mode: f.mode,
             })
             .collect(),
-        mode: job.mode.clone(),
+        mode: if job.mode.is_empty() {
+            "deploy".to_string()
+        } else {
+            job.mode.clone()
+        },
         timeout_seconds: job.timeout_seconds,
     };
 
-    transport::send_message(&mut writer, &Message::JobDefinition(job_def)).await?;
-    tracing::info!(job_id, "sent job definition");
+    let job_id = job.job_id.clone();
+    let tx = outbound_tx.clone();
+    let running_emitted = std::sync::atomic::AtomicBool::new(false);
 
-    // Read messages from guest until completion
-    let timeout = Duration::from_secs(job.timeout_seconds.max(60) as u64);
-    let deadline = tokio::time::Instant::now() + timeout;
-
-    let result = run_guest_loop(&job.job_id, outbound_tx, &mut reader, deadline).await;
-
-    // Cleanup: kill guest process and remove socket on all paths.
-    // guest_proc has kill_on_drop(true), but explicit kill is more reliable.
-    guest_proc.kill().await.ok();
-    guest_proc.wait().await.ok();
-    let _ = tokio::fs::remove_file(&socket_path).await;
-
-    result
-}
-
-async fn run_guest_loop(
-    job_id: &str,
-    outbound_tx: &mpsc::UnboundedSender<AgentMessage>,
-    reader: &mut tokio::io::BufReader<tokio::io::ReadHalf<tokio::net::UnixStream>>,
-    deadline: tokio::time::Instant,
-) -> anyhow::Result<(i32, Option<String>)> {
-    loop {
-        let msg = tokio::time::timeout_at(deadline, transport::recv_message(reader)).await;
-
-        match msg {
-            Ok(Ok(Some(Message::LogLine(log)))) => {
-                let _ = outbound_tx.send(AgentMessage {
-                    message: Some(agent_message::Message::LogBatch(JobLogBatch {
-                        job_id: job_id.to_string(),
-                        lines: vec![LogLine {
-                            channel: log.channel,
-                            line: log.line,
-                            timestamp: log.timestamp,
-                        }],
-                    })),
-                });
-            }
-            Ok(Ok(Some(Message::Heartbeat))) => {}
-            Ok(Ok(Some(Message::Completion(c)))) => {
-                tracing::info!(job_id, exit_code = c.exit_code, "guest reported completion");
-                return Ok((c.exit_code, c.plan_output));
-            }
-            Ok(Ok(Some(other))) => {
-                tracing::warn!(job_id, msg_type = ?other.message_type(), "unexpected message from guest");
-            }
-            Ok(Ok(None)) => anyhow::bail!("guest disconnected"),
-            Ok(Err(e)) => anyhow::bail!("vsock read error: {e}"),
-            Err(_) => {
-                anyhow::bail!(
-                    "job timed out after {}s",
-                    deadline
-                        .duration_since(tokio::time::Instant::now())
-                        .as_secs()
-                );
+    let on_event = |evt: VmEvent| match evt {
+        VmEvent::Stage(stage) => {
+            tracing::debug!(job_id = %job_id, stage = stage.name(), "vm stage");
+            // The controller's state machine wants a Running transition as
+            // soon as the guest starts receiving the job — not when the VM
+            // process first spawns. Emit it exactly once.
+            if stage == VmStage::JobDispatched
+                && !running_emitted.swap(true, std::sync::atomic::Ordering::Relaxed)
+            {
+                send_status(&tx, &job_id, JobStatus::Running, None);
             }
         }
+        VmEvent::Diag { level, message } => {
+            tracing::info!(job_id = %job_id, level, %message, "vm diag");
+        }
+        VmEvent::Log(l) => {
+            let _ = tx.send(AgentMessage {
+                message: Some(agent_message::Message::LogBatch(JobLogBatch {
+                    job_id: job_id.clone(),
+                    lines: vec![LogLine {
+                        channel: l.channel,
+                        line: l.line,
+                        timestamp: l.timestamp,
+                    }],
+                })),
+            });
+        }
+        VmEvent::GuestConsole { line } => {
+            let _ = tx.send(AgentMessage {
+                message: Some(agent_message::Message::LogBatch(JobLogBatch {
+                    job_id: job_id.clone(),
+                    lines: vec![LogLine {
+                        channel: "console".to_string(),
+                        line,
+                        timestamp: now_millis(),
+                    }],
+                })),
+            });
+        }
+    };
+
+    let outcome = vm_run_job(vm_config, job_def, on_event).await?;
+    Ok((outcome.exit_code, outcome.plan_output))
+}
+
+/// Map a `RunJob.image` label (e.g. `"base"`, `"terraform-v1"`) to the rootfs
+/// `.ext4` on disk. We keep the file naming simple for Stage A; image semver
+/// resolution is a follow-on milestone.
+fn resolve_image(images_dir: &Path, image: &str) -> anyhow::Result<PathBuf> {
+    let mut candidates = vec![images_dir.join(format!("{image}.ext4"))];
+    // Also allow a bare `base` to resolve to `base.ext4`.
+    if !image.contains('.') {
+        candidates.push(images_dir.join(format!("{image}.ext4")));
     }
+    for c in &candidates {
+        if c.exists() {
+            return Ok(c.clone());
+        }
+    }
+    anyhow::bail!(
+        "no rootfs image found for `{image}` in {} (tried: {})",
+        images_dir.display(),
+        candidates
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn now_millis() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 fn send_status(

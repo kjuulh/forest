@@ -14,9 +14,20 @@ use hollow_vsock::transport;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::ChildStdout;
 use tokio::sync::mpsc;
+use tokio_vsock::{VsockAddr, VsockStream};
 
 /// Working directory inside the VM for job files.
 const WORK_DIR: &str = "/work";
+
+/// vsock CID of the host. Firecracker exposes the host as CID=2.
+const HOST_CID: u32 = 2;
+
+/// Default vsock port the agent listens on for guest connections.
+const DEFAULT_PORT: u32 = 1024;
+
+/// How long the guest will keep retrying to connect to the host on boot.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+const CONNECT_RETRY: std::time::Duration = std::time::Duration::from_millis(200);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -216,14 +227,34 @@ fn now_millis() -> u64 {
         .as_millis() as u64
 }
 
-/// Connect to host agent. Uses Unix socket for development, vsock in production.
-async fn connect() -> anyhow::Result<tokio::net::UnixStream> {
-    // TODO: Use AF_VSOCK on Linux in production (CID=2, port=1024).
-    let path =
-        std::env::var("HOLLOW_VSOCK_PATH").unwrap_or_else(|_| "/tmp/hollow-vsock.sock".to_string());
+/// Connect to the host agent over AF_VSOCK.
+///
+/// The host (Firecracker side) is always CID=2. The port is fixed by convention
+/// (`DEFAULT_PORT`); override with `HOLLOW_VSOCK_PORT` for diagnostics.
+///
+/// Boot ordering is racy: the guest kernel often starts before the host has
+/// finished configuring the vsock device, so we retry until `CONNECT_TIMEOUT`.
+async fn connect() -> anyhow::Result<VsockStream> {
+    let port: u32 = std::env::var("HOLLOW_VSOCK_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_PORT);
+    let addr = VsockAddr::new(HOST_CID, port);
 
-    tracing::info!(path = %path, "connecting via Unix socket");
-    tokio::net::UnixStream::connect(&path)
-        .await
-        .with_context(|| format!("failed to connect to {path}"))
+    tracing::info!(cid = HOST_CID, port, "connecting via AF_VSOCK");
+    let deadline = tokio::time::Instant::now() + CONNECT_TIMEOUT;
+    let mut last_err: Option<std::io::Error> = None;
+    while tokio::time::Instant::now() < deadline {
+        match VsockStream::connect(addr).await {
+            Ok(s) => return Ok(s),
+            Err(e) => {
+                last_err = Some(e);
+                tokio::time::sleep(CONNECT_RETRY).await;
+            }
+        }
+    }
+    Err(last_err
+        .map(|e| anyhow::anyhow!("vsock connect timed out: {e}"))
+        .unwrap_or_else(|| anyhow::anyhow!("vsock connect timed out")))
+        .with_context(|| format!("CID={HOST_CID}, port={port}"))
 }

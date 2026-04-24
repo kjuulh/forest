@@ -1353,7 +1353,7 @@ Target: **<10s from code change to boot + registration**.
 
 **Guest binary iteration shortcut:** During development, instead of rebuilding the ext4 image every time `hollow-guest` changes, the agent can inject the guest binary via a secondary virtio-block device or pass it over vsock at boot. This keeps the ext4 image stable and only swaps the guest binary.
 
-**Mock agent mode (no KVM fallback):** For development on machines without KVM (e.g., macOS), the agent can run jobs in a subprocess instead of a Firecracker VM. Same interface, no isolation — purely for testing the controller↔agent↔guest protocol without hardware virtualization. NOT for production.
+**Firecracker-only:** Hollow has no subprocess or host-execution fallback. All jobs run inside a Firecracker microVM — that is the isolation contract, and the only execution mode the agent supports. Tests run against a real KVM-capable Linux host (see `hollow-test-harness`).
 
 ## Open Questions
 

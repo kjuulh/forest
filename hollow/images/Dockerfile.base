@@ -1,14 +1,18 @@
 FROM alpine:3.21
 
+# Alpine already ships busybox (which provides /bin/sh, echo, etc.). For the
+# base image we only add things every job needs:
+#   - ca-certificates: for any tool inside the guest that talks TLS
+#   - bash: a few destination scripts assume bash semantics
+#   - util-linux-misc: provides `setsid`, useful when running as PID 1
 RUN apk add --no-cache \
-    busybox-initscripts \
     ca-certificates \
-    curl \
     bash
 
-# hollow-guest is copied in during image build
+# hollow-guest is copied in by the build harness (cargo build -p hollow-guest
+# --target x86_64-unknown-linux-musl --release, then cp into images/).
 COPY hollow-guest /usr/local/bin/hollow-guest
 RUN chmod +x /usr/local/bin/hollow-guest
 
-# Create working directory for jobs
+# Working directory for job files.
 RUN mkdir -p /work

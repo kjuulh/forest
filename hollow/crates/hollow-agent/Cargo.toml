@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 hollow-grpc-interface.workspace = true
+hollow-vm = { path = "../hollow-vm" }
 hollow-vsock.workspace = true
 
 anyhow.workspace = true

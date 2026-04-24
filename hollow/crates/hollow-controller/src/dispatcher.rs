@@ -211,7 +211,7 @@ impl Dispatcher {
             .as_ref()
             .context("missing destination type")?;
         let image = format!("{}-v{}", dest_type.name, dest_type.version);
-        let command = build_command_for_destination(&dest_type.name, mode);
+        let command = build_command_for_destination(&dest_type.name, mode, &destination.metadata);
 
         let mut environment: HashMap<String, String> = destination.metadata.clone();
         environment.insert("FOREST_ORGANISATION".to_string(), org);
@@ -375,7 +375,14 @@ async fn complete_release(
 }
 
 /// Build the command to run inside the VM based on destination type and mode.
-fn build_command_for_destination(dest_name: &str, mode: &str) -> Vec<String> {
+///
+/// Adding a new destination? Add an arm. Destinations are matched by the
+/// `DestinationCapability.name` the controller is registered with.
+fn build_command_for_destination(
+    dest_name: &str,
+    mode: &str,
+    metadata: &HashMap<String, String>,
+) -> Vec<String> {
     match dest_name {
         "terraform" => {
             let action = if mode == "plan" {
@@ -388,6 +395,16 @@ fn build_command_for_destination(dest_name: &str, mode: &str) -> Vec<String> {
                 "-c".to_string(),
                 format!("terraform init -no-color && terraform {action}"),
             ]
+        }
+        // Test-only: run an arbitrary shell command supplied via destination
+        // metadata. Used by hollow-acceptance orchestrator tests to drive the
+        // full controller→agent→VM path with a trivial payload.
+        "echo" => {
+            let script = metadata
+                .get("command")
+                .cloned()
+                .unwrap_or_else(|| "echo hello".to_string());
+            vec!["sh".to_string(), "-c".to_string(), script]
         }
         other => {
             vec![

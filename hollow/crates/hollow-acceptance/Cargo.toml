@@ -1,0 +1,23 @@
+[package]
+name = "hollow-acceptance"
+edition = "2024"
+version.workspace = true
+publish = false
+
+# Acceptance tests for hollow.
+#
+# Each test boots a real Firecracker microVM on the test host (HOLLOW_TEST_HOST)
+# and asserts on the resulting log/completion event stream. If HOLLOW_TEST_HOST
+# is unset the tests skip with a clear message — `cargo test --workspace` keeps
+# working in environments without a configured KVM host.
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+hollow-test-harness = { path = "../hollow-test-harness" }
+anyhow.workspace = true
+
+[dev-dependencies]
+forest-grpc-interface.workspace = true
+tokio = { workspace = true, features = ["full"] }

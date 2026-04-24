@@ -39,30 +39,52 @@ cargo run -p hollow-agent
 """
 
 [tasks.test]
-description = "Run a standalone agent↔guest integration test without forest-server"
+description = "Run all hollow acceptance tests (smoke + orchestrator) against a KVM host"
+# Defaults tuned for local development; override by exporting any of these
+# before invoking mise (e.g. `HOLLOW_TEST_HOST=other mise run test`).
+env = { HOLLOW_TEST_HOST = "forage-local-agent" }
+run = "cargo test -p hollow-acceptance -- --nocapture"
+
+[tasks."test:smoke"]
+description = "Direct Firecracker smoke test only (hollow-test-runner, no controller/agent)"
+env = { HOLLOW_TEST_HOST = "forage-local-agent" }
+run = "cargo test -p hollow-acceptance --test smoke -- --nocapture"
+
+[tasks."test:orchestrator"]
+description = "Full controller+agent orchestrator test against the KVM host"
+env = { HOLLOW_TEST_HOST = "forage-local-agent" }
+run = "cargo test -p hollow-acceptance --test orchestrator -- --nocapture"
+
+[tasks."test:doctor"]
+description = "Verify SSH connectivity and KVM availability on HOLLOW_TEST_HOST"
+env = { HOLLOW_TEST_HOST = "forage-local-agent" }
 run = """
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-echo "==> Building binaries..."
-cargo build -p hollow-agent -p hollow-guest -p hollow-controller
+ssh ${HOLLOW_TEST_KEY:+-i $HOLLOW_TEST_KEY} "$HOLLOW_TEST_HOST" '
+  echo "host: $(hostname)"
+  echo "kernel: $(uname -r)"
+  echo "debian: $(cat /etc/debian_version 2>/dev/null || echo n/a)"
+  if [ -e /dev/kvm ]; then
+    echo "/dev/kvm: present"
+    ls -la /dev/kvm
+  else
+    echo "/dev/kvm: MISSING — Firecracker cannot run. Enable nested virt on the hypervisor."
+    grep -m1 -oE "vmx|svm" /proc/cpuinfo || echo "no virt extensions exposed to the CPU"
+    exit 2
+  fi
+'
+"""
 
-GUEST_BIN="$(pwd)/target/debug/hollow-guest"
-DATA_DIR=$(mktemp -d)
-SOCKET="$DATA_DIR/test.sock"
-
-echo "==> Testing vsock protocol: agent spawns guest, runs 'echo hello'"
-
-# Create a simple test that exercises the guest directly
-echo "==> Starting guest binary with a test socket..."
-rm -f "$SOCKET"
-
-# Start a listener, send a job, check output
-cargo run --example smoke_test 2>&1 || echo "(smoke_test example not yet implemented)"
-
-# Cleanup
-rm -rf "$DATA_DIR"
-echo "==> Done"
+[tasks."test:clean"]
+description = "Wipe the remote hollow-test cache (forces a fresh bootstrap on next test run)"
+env = { HOLLOW_TEST_HOST = "forage-local-agent" }
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+ssh ${HOLLOW_TEST_KEY:+-i $HOLLOW_TEST_KEY} "$HOLLOW_TEST_HOST" 'rm -rf /var/lib/hollow-test'
+echo "wiped /var/lib/hollow-test on $HOLLOW_TEST_HOST"
 """
 
 [tasks."images:base"]

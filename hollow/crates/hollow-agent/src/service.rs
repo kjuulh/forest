@@ -87,9 +87,14 @@ pub struct AgentService {
     total_vcpus: u32,
     total_memory_mib: u32,
     data_dir: String,
+    /// Cloned into every spawned job so the launcher can find Firecracker, the
+    /// kernel, and rootfs images. Owned by `Arc` so we don't pay copy cost
+    /// per job.
+    vm_paths: Arc<crate::vm::VmPaths>,
 }
 
 impl AgentService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         controller_addr: String,
         agent_id: String,
@@ -97,6 +102,9 @@ impl AgentService {
         total_vcpus: u32,
         total_memory_mib: u32,
         data_dir: String,
+        firecracker_bin: String,
+        kernel: String,
+        images_dir: String,
     ) -> Self {
         Self {
             controller_addr,
@@ -105,6 +113,11 @@ impl AgentService {
             total_vcpus,
             total_memory_mib,
             data_dir,
+            vm_paths: Arc::new(crate::vm::VmPaths {
+                firecracker_bin: firecracker_bin.into(),
+                kernel: kernel.into(),
+                images_dir: images_dir.into(),
+            }),
         }
     }
 
@@ -190,11 +203,12 @@ impl AgentService {
                         tracing::info!(job_id = %job.job_id, image = %job.image, "received job");
                         let tx = outbound_tx.clone();
                         let data_dir = self.data_dir.clone();
+                        let vm_paths = self.vm_paths.clone();
                         let mgr = vm_manager.clone();
                         let job_id = job.job_id.clone();
                         let cancel = mgr.register_job(job_id.clone());
                         tokio::spawn(async move {
-                            vm::run_job(job, tx, &data_dir, cancel).await;
+                            vm::run_job(job, tx, &data_dir, &vm_paths, cancel).await;
                             mgr.job_finished(&job_id);
                         });
                     }
