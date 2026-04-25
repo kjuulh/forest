@@ -186,6 +186,12 @@ pub fn build(cfg: &Config) -> anyhow::Result<BuildArtifacts> {
                 name: "git-commit-push",
                 version: "0.1.0",
             },
+            ComponentSpec {
+                package: "gitea-create-repo",
+                organisation: "forest-contrib",
+                name: "gitea-create-repo",
+                version: "0.1.0",
+            },
         ],
     )?;
 

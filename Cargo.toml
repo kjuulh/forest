@@ -6,6 +6,7 @@ members = [
   "components/forest-contrib/render-template/crates/render-template",
   "components/forest-contrib/checkout/crates/checkout",
   "components/forest-contrib/git-commit-push/crates/git-commit-push",
+  "components/forest-contrib/gitea-create-repo/crates/gitea-create-repo",
   # "examples/rust-service-component/crates/rust-service",  # legacy v1 example — needs update
   "examples/rust-podinfo",
   "examples/service-example",
