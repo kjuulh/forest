@@ -1,4 +1,6 @@
-FROM alpine:3.21
+# Pinned by digest so the rootfs base can't shift under us between builds.
+# To rotate: `docker pull alpine:3.21 && docker inspect alpine:3.21 --format '{{index .RepoDigests 0}}'`
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 
 # Alpine already ships busybox (which provides /bin/sh, echo, etc.). For the
 # base image we only add things every job needs:

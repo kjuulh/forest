@@ -3,15 +3,23 @@ FROM hollow-base:test
 # OpenTofu binary + two baked providers so `tofu init` works offline. Once the
 # per-VM NAT is in place we can drop the baked providers and let tofu download
 # from the registry like it normally would.
+#
+# Every download is verified against an upstream-published SHA256 before it
+# enters the image. To rotate: bump the version, fetch the new SHA from the
+# upstream `*_SHA256SUMS` file (linux_amd64 row), update the constant below.
 ARG OPENTOFU_VERSION=1.11.6
+ARG OPENTOFU_SHA256=68026be376f8910a318645acc65f21da8b39ab86946cb0dd6cd16ef1705f34b3
 ARG NULL_PROVIDER_VERSION=3.2.4
+ARG NULL_PROVIDER_SHA256=9d32ac3619cfc93eb3c4f423492a8e0f79db05fec58e449dee9b2d5873d5f69f
 ARG LOCAL_PROVIDER_VERSION=2.8.0
+ARG LOCAL_PROVIDER_SHA256=c80bbd1c3f56b3c836d80cf93ac0e8809305c2642f0c98b54bf5d05d3b12718c
 
 RUN apk add --no-cache curl unzip
 
 # --- OpenTofu -------------------------------------------------------------
 RUN curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_amd64.zip" \
       -o /tmp/tofu.zip \
+ && echo "${OPENTOFU_SHA256}  /tmp/tofu.zip" | sha256sum -c - \
  && unzip -o /tmp/tofu.zip tofu -d /usr/local/bin/ \
  && chmod 0755 /usr/local/bin/tofu \
  && rm /tmp/tofu.zip \
@@ -24,13 +32,14 @@ ENV MIRROR=/usr/share/opentofu/providers
 
 RUN set -eux; \
     for spec in \
-        "null ${NULL_PROVIDER_VERSION}" \
-        "local ${LOCAL_PROVIDER_VERSION}" ; do \
-      set -- $spec; NAME="$1"; VERSION="$2"; \
+        "null ${NULL_PROVIDER_VERSION} ${NULL_PROVIDER_SHA256}" \
+        "local ${LOCAL_PROVIDER_VERSION} ${LOCAL_PROVIDER_SHA256}" ; do \
+      set -- $spec; NAME="$1"; VERSION="$2"; SHA="$3"; \
       DEST="${MIRROR}/registry.opentofu.org/hashicorp/${NAME}/${VERSION}/linux_amd64"; \
       mkdir -p "$DEST"; \
       curl -fsSL "https://releases.hashicorp.com/terraform-provider-${NAME}/${VERSION}/terraform-provider-${NAME}_${VERSION}_linux_amd64.zip" \
         -o /tmp/provider.zip; \
+      echo "${SHA}  /tmp/provider.zip" | sha256sum -c -; \
       unzip -o /tmp/provider.zip -d "$DEST"; \
       rm /tmp/provider.zip; \
     done

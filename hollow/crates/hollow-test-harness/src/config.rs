@@ -17,6 +17,10 @@ pub struct Config {
     pub remote_dir: PathBuf,
     /// Pinned Firecracker release used by the bootstrap.
     pub firecracker_version: &'static str,
+    /// SHA256 of the Firecracker release tarball (x86_64). Verified after
+    /// download before we install jailer/firecracker. Update alongside
+    /// `firecracker_version`.
+    pub firecracker_tarball_sha256: &'static str,
     /// Pinned kernel artifact path inside the official Firecracker CI bucket.
     pub kernel_s3_key: &'static str,
     /// Local repository root (resolved from `CARGO_MANIFEST_DIR` of this crate).
@@ -49,6 +53,10 @@ impl Config {
             ssh_key,
             remote_dir,
             firecracker_version: "v1.15.1",
+            // Published at github.com/firecracker-microvm/firecracker/releases/download/
+            // v1.15.1/firecracker-v1.15.1-x86_64.tgz.sha256.txt
+            firecracker_tarball_sha256:
+                "d4a32ab2322d887ca1bc4a4e7afa9cc35393e6362dfc2b3becb389d362e4275a",
             kernel_s3_key: "firecracker-ci/20260408-ce2a467895c1-0/x86_64/vmlinux-6.1.166",
             repo_root,
             local_target_dir,

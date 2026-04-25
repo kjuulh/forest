@@ -190,12 +190,14 @@ tmp=$(mktemp -d)
 trap "rm -rf $tmp" EXIT
 echo "downloading firecracker {ver} (incl. jailer)..." >&2
 curl -fsSL "{url}" -o "$tmp/fc.tgz"
+echo "{sha}  $tmp/fc.tgz" | sha256sum -c -
 tar -xzf "$tmp/fc.tgz" -C "$tmp" "{inner_fc}" "{inner_jailer}"
 install -m 0755 "$tmp/{inner_fc}" "{fc_target}"
 install -m 0755 "$tmp/{inner_jailer}" "{jl_target}"
 "#,
         ver = cfg.firecracker_version,
         url = url,
+        sha = cfg.firecracker_tarball_sha256,
         inner_fc = inner_fc,
         inner_jailer = inner_jailer,
         fc_target = firecracker_target,
