@@ -89,6 +89,11 @@ description = "End-to-end stress: scaffold + git + podman build + run + cleanup 
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }
 run = "cargo test -p hollow-acceptance --test pipeline_stress -- --nocapture"
 
+[tasks."test:ci"]
+description = "GitHub-Actions-shaped CI pipeline using multiple raw OCI images"
+env = { HOLLOW_TEST_HOST = "forage-local-agent" }
+run = "cargo test -p hollow-acceptance --test pipeline_ci -- --nocapture"
+
 [tasks."test:secrets"]
 description = "Verify the secret-shipping channel — bytes reach guest, never log"
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }

@@ -56,11 +56,6 @@ while [ "$i" -lt "$n" ]; do
 
   echo "[step=$name] starting"
 
-  if [ -n "$uses" ] && [ -n "$run" ]; then
-    echo "[step=$name] step has BOTH 'uses' and 'run' — workflow is ambiguous" >&2
-    exit 2
-  fi
-
   if [ -z "$uses" ] && [ -z "$run" ]; then
     echo "[step=$name] step has neither 'uses' nor 'run' — skipping" >&2
     i=$((i + 1))
@@ -71,10 +66,18 @@ while [ "$i" -lt "$n" ]; do
     # Container-action mode (GitHub Actions semantics):
     #   - inputs from `with:` arrive as INPUT_<UPPERCASE_KEY> env vars
     #     (dashes → underscores, matching GitHub's mapping)
-    #   - `env:` entries are exported as-is
+    #   - `env:` entries pass through as-is
     #   - /work is mounted in as the workspace so actions can read
     #     shipped files and share state across steps
     #   - --network=host: the VM is already the isolation boundary
+    #
+    # Three sub-modes:
+    #   uses only          → image's default ENTRYPOINT+CMD
+    #   uses + run         → entrypoint-override to /bin/sh, run script
+    #                        inside the container (the most flexible
+    #                        shape, lets workflow authors compose any
+    #                        image with any inline shell)
+    #   uses + run + entrypoint → not yet supported; fall back to uses+run
     #
     # Pull is split from run so podman's progress bars (which use \r)
     # don't garble the action's stdout in the captured log channel.
@@ -89,11 +92,20 @@ while [ "$i" -lt "$n" ]; do
     printf '%s' "$JSON" | jq -r ".steps[$i].env // {} | to_entries[] | .key + \"=\" + (.value | tostring)" >>"$env_file"
 
     rc=0
-    podman run --rm --network=host \
-      --env-file="$env_file" \
-      -v /work:/work \
-      -w /work \
-      "$uses" || rc=$?
+    if [ -n "$run" ]; then
+      podman run --rm --network=host \
+        --env-file="$env_file" \
+        -v /work:/work \
+        -w /work \
+        --entrypoint=/bin/sh \
+        "$uses" -c "$run" || rc=$?
+    else
+      podman run --rm --network=host \
+        --env-file="$env_file" \
+        -v /work:/work \
+        -w /work \
+        "$uses" || rc=$?
+    fi
     rm -f "$env_file"
     if [ "$rc" -ne 0 ]; then
       echo "[step=$name] container action exited $rc" >&2
