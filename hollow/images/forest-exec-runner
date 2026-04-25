@@ -177,10 +177,20 @@ Sync from registry not yet wired — re-build the exec-v1 image to refresh." >&2
         rm -f "$env_file"
 
         out_json=/tmp/forest-exec-step-outputs/"$name".json
+        err_log=$(mktemp)
         rc=0
-        "$comp_bin" "commands/$comp_name_only" "$payload" >"$out_json" 2>&1 || rc=$?
-        cat "$out_json"
+        # stdout (JSON output) and stderr (logs / diagnostics) MUST stay
+        # separate — merging garbles the structured output the runner
+        # parses for step outputs.
+        "$comp_bin" "commands/$comp_name_only" "$payload" >"$out_json" 2>"$err_log" || rc=$?
+        # Forward stderr through the runner's stderr so failures and
+        # diagnostic prints stay visible.
+        cat "$err_log" >&2
+        rm -f "$err_log"
         if [ "$rc" -ne 0 ]; then
+          # On failure, dump whatever the component put on stdout too —
+          # often a JSON-shaped error record from the SDK.
+          cat "$out_json"
           echo "[step=$name] component '$uses' exited $rc" >&2
           exit "$rc"
         fi
@@ -254,19 +264,16 @@ Sync from registry not yet wired — re-build the exec-v1 image to refresh." >&2
         rm -f "$env_file"
 
         # Capture stdout — native components return JSON whose top-level
-        # keys are the step's outputs. Anything that's not valid JSON or
-        # not an object is silently treated as no-outputs (the component
-        # may have just printed progress text).
+        # keys are the step's outputs. stdout/stderr stay SEPARATE so the
+        # component's diagnostics never corrupt its structured output.
         out_json=/tmp/forest-exec-step-outputs/"$name".json
+        err_log=$(mktemp)
         rc=0
-        "$comp_bin" "commands/$comp_name" "$payload" >"$out_json" 2>&1 || rc=$?
-
-        # Echo the component's stdout into the step log so authors see
-        # what it produced. We replay regardless of exit code so failures
-        # surface the component's error message.
-        cat "$out_json"
-
+        "$comp_bin" "commands/$comp_name" "$payload" >"$out_json" 2>"$err_log" || rc=$?
+        cat "$err_log" >&2
+        rm -f "$err_log"
         if [ "$rc" -ne 0 ]; then
+          cat "$out_json"
           echo "[step=$name] component '$uses' exited $rc" >&2
           exit "$rc"
         fi

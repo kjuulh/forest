@@ -32,14 +32,25 @@ impl CommandHandler for Commands {
         }
         clone.arg(&input.repo).arg(&input.dest);
 
-        let status = clone
-            .status()
+        // Capture stderr instead of letting it pass through — the component
+        // owns its stdout for the JSON output contract, and the runner
+        // separates streams so a noisy clone can't corrupt the result.
+        let out = clone
+            .output()
             .map_err(|e| forest_sdk::Error::Handler(format!("spawn git clone: {e}").into()))?;
-        if !status.success() {
+        if !out.status.success() {
             return Err(forest_sdk::Error::Handler(
-                format!("git clone exited with {status}").into(),
+                format!(
+                    "git clone exited with {} — {}",
+                    out.status,
+                    String::from_utf8_lossy(&out.stderr).trim()
+                )
+                .into(),
             ));
         }
+        // Forward git's progress noise to the component's stderr so it
+        // surfaces in workflow logs without polluting stdout.
+        eprintln!("{}", String::from_utf8_lossy(&out.stderr).trim_end());
 
         let commit_sha = git_output(&input.dest, &["rev-parse", "HEAD"])?;
         let branch = git_output(&input.dest, &["rev-parse", "--abbrev-ref", "HEAD"])?;

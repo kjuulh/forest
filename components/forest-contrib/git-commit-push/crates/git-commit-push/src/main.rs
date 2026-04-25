@@ -59,14 +59,19 @@ impl CommandHandler for Commands {
 }
 
 fn git(cwd: &str, args: &[&str]) -> Result<(), forest_sdk::Error> {
-    let status = Command::new("git")
+    let out = Command::new("git")
         .current_dir(cwd)
         .args(args)
-        .status()
+        .output()
         .map_err(|e| forest_sdk::Error::Handler(format!("spawn git {args:?}: {e}").into()))?;
-    if !status.success() {
+    if !out.status.success() {
         return Err(forest_sdk::Error::Handler(
-            format!("git {args:?} failed: {status}").into(),
+            format!(
+                "git {args:?} failed (exit {:?}): {}",
+                out.status.code(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            )
+            .into(),
         ));
     }
     Ok(())

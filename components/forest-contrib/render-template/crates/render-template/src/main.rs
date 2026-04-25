@@ -95,6 +95,16 @@ fn walk(
             .file_name()
             .into_string()
             .map_err(|n| anyhow::anyhow!("non-UTF-8 filename: {n:?}"))?;
+
+        // Skip VCS metadata. Templates frequently come from a `git clone`
+        // (the checkout component leaves `.git/` behind) and the rendered
+        // output should be a fresh working tree, not the template's
+        // history. If a workflow legitimately needs to render files
+        // *into* a `.git` directory we'll add an `include_vcs` opt-in.
+        if file_type.is_dir() && (raw_name == ".git" || raw_name == ".hg" || raw_name == ".svn") {
+            continue;
+        }
+
         let rendered_name = render_str(&raw_name, vars)?;
         let target = dest_root.join(&rendered_name);
 
