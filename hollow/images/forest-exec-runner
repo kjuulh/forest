@@ -56,41 +56,74 @@ while [ "$i" -lt "$n" ]; do
 
   echo "[step=$name] starting"
 
-  if [ -n "$uses" ]; then
-    # Container-action mode lands in a follow-on once we've verified
-    # podman/Docker actually runs in this Firecracker guest kernel.
-    echo "[step=$name] 'uses: $uses' is not supported by exec-v1 (run-only); aborting" >&2
+  if [ -n "$uses" ] && [ -n "$run" ]; then
+    echo "[step=$name] step has BOTH 'uses' and 'run' — workflow is ambiguous" >&2
     exit 2
   fi
 
-  if [ -z "$run" ]; then
+  if [ -z "$uses" ] && [ -z "$run" ]; then
     echo "[step=$name] step has neither 'uses' nor 'run' — skipping" >&2
     i=$((i + 1))
     continue
   fi
 
-  # Step env: any string fields under .env are exported into the step's
-  # process. We read with IFS='=' so values can contain '=' freely; values
-  # with literal newlines aren't supported (rare for env shape, painful
-  # to escape; revisit if a workflow author hits the limit).
-  env_file=$(mktemp)
-  printf '%s' "$JSON" | jq -r ".steps[$i].env // {} | to_entries[] | .key + \"=\" + (.value | tostring)" >"$env_file"
-  while IFS='=' read -r ek ev; do
-    [ -z "$ek" ] && continue
-    export "$ek=$ev"
-  done <"$env_file"
-  rm -f "$env_file"
+  if [ -n "$uses" ]; then
+    # Container-action mode (GitHub Actions semantics):
+    #   - inputs from `with:` arrive as INPUT_<UPPERCASE_KEY> env vars
+    #     (dashes → underscores, matching GitHub's mapping)
+    #   - `env:` entries are exported as-is
+    #   - /work is mounted in as the workspace so actions can read
+    #     shipped files and share state across steps
+    #   - --network=host: the VM is already the isolation boundary
+    #
+    # Pull is split from run so podman's progress bars (which use \r)
+    # don't garble the action's stdout in the captured log channel.
+    if ! podman pull --quiet "$uses" >/tmp/forest-exec-pull.log 2>&1; then
+      echo "[step=$name] pull failed for $uses:" >&2
+      cat /tmp/forest-exec-pull.log >&2
+      exit 5
+    fi
 
-  # Use `sh -c` so the workflow author can write multi-command steps with
-  # `&&` / pipes. Inheritance of the env we just set is automatic.
-  #
-  # `rc=0; cmd || rc=$?` rather than `if ! cmd; then rc=$?` — the latter
-  # captures the exit code of the negation (always 0), not the command.
-  rc=0
-  sh -c "$run" || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    echo "[step=$name] failed (exit $rc)" >&2
-    exit "$rc"
+    env_file=$(mktemp)
+    printf '%s' "$JSON" | jq -r ".steps[$i].with // {} | to_entries[] | \"INPUT_\" + (.key | ascii_upcase | gsub(\"-\"; \"_\")) + \"=\" + (.value | tostring)" >>"$env_file"
+    printf '%s' "$JSON" | jq -r ".steps[$i].env // {} | to_entries[] | .key + \"=\" + (.value | tostring)" >>"$env_file"
+
+    rc=0
+    podman run --rm --network=host \
+      --env-file="$env_file" \
+      -v /work:/work \
+      -w /work \
+      "$uses" || rc=$?
+    rm -f "$env_file"
+    if [ "$rc" -ne 0 ]; then
+      echo "[step=$name] container action exited $rc" >&2
+      exit "$rc"
+    fi
+  else
+    # `run:` mode — shell command in the host VM (alpine substrate +
+    # whatever the image bakes in: cue, jq, git, gh, podman).
+    #
+    # Step env: any string fields under .env are exported into the
+    # step's process. We read with IFS='=' so values can contain '='
+    # freely; literal newlines aren't supported (rare for env shape,
+    # painful to escape; revisit if a workflow author hits the limit).
+    env_file=$(mktemp)
+    printf '%s' "$JSON" | jq -r ".steps[$i].env // {} | to_entries[] | .key + \"=\" + (.value | tostring)" >"$env_file"
+    while IFS='=' read -r ek ev; do
+      [ -z "$ek" ] && continue
+      export "$ek=$ev"
+    done <"$env_file"
+    rm -f "$env_file"
+
+    # `rc=0; cmd || rc=$?` rather than `if ! cmd; then rc=$?` — the
+    # latter captures the exit code of the negation (always 0), not
+    # the command.
+    rc=0
+    sh -c "$run" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      echo "[step=$name] failed (exit $rc)" >&2
+      exit "$rc"
+    fi
   fi
 
   echo "[step=$name] succeeded"

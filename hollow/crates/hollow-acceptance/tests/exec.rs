@@ -242,6 +242,118 @@ steps: [
     Ok(())
 }
 
+/// Mixes `run:` with a `uses:` container-action step. Proves the runner
+/// can pull + run an OCI image, that /work persists across the run/uses
+/// boundary, and that step ordering is preserved.
+///
+/// We deliberately use `alpine:3.21` (which exits 0 on its default
+/// entrypoint) rather than a forest-bot action image — building a
+/// first-party action image is its own commit. The substrate-level
+/// guarantees we want here (image pull works, container exits cleanly,
+/// workspace is shared) don't need the action to do real work.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn exec_runs_uses_container_action() -> anyhow::Result<()> {
+    let harness = skip_unless_harness!();
+
+    let mut orchestrator = harness.start_orchestrator("forest/exec/1").await?;
+
+    let release_token = format!("tkn-exec-uses-{}", short_token());
+
+    let workflow = r#"
+package workflow
+
+steps: [
+    {
+        name: "seed-workspace"
+        run:  "echo SEEDED > /work/seed.txt"
+    },
+    {
+        name: "container-action"
+        uses: "docker.io/library/alpine:3.21"
+        with: {
+            greeting: "HELLO_FROM_USES"
+        }
+    },
+    {
+        name: "assert-workspace"
+        run:  "test -f /work/seed.txt && grep -q SEEDED /work/seed.txt && echo SEEDED_FILE_OK"
+    },
+]
+"#;
+
+    orchestrator.fake_server.install_fixture(
+        &release_token,
+        ReleaseFixture {
+            organisation: "test-org".into(),
+            project: "exec-uses".into(),
+            release_files: vec![(
+                "prod/exec-uses-dest/forest/exec@1/workflow.cue".to_string(),
+                workflow.to_string(),
+            )],
+            ..Default::default()
+        },
+    );
+
+    let assignment = WorkAssignment {
+        release_token: release_token.clone(),
+        release_id: "rel-exec-uses-1".into(),
+        release_intent_id: "int-exec-uses-1".into(),
+        artifact_id: "art-exec-uses-1".into(),
+        destination_id: "dest-exec-uses-1".into(),
+        destination: Some(DestinationInfo {
+            name: "exec-uses-dest".into(),
+            environment: "prod".into(),
+            metadata: HashMap::new(),
+            r#type: Some(DestinationCapability {
+                organisation: "forest".into(),
+                name: "exec".into(),
+                version: 1,
+            }),
+            organisation: "forest".into(),
+        }),
+        mode: ReleaseMode::Deploy.into(),
+        artifact_store: None,
+    };
+
+    orchestrator.fake_server.dispatch(assignment)?;
+
+    let (completion, logs) = orchestrator
+        .fake_server
+        .wait_for_completion(&release_token, Duration::from_secs(180))
+        .await?;
+
+    if completion.outcome != ReleaseOutcome::Success {
+        let relevant: Vec<_> = logs
+            .iter()
+            .filter(|l| l.channel != "console")
+            .take(80)
+            .collect();
+        panic!(
+            "expected SUCCESS, got {:?}: {}\nlogs (non-console, first 80):\n{:#?}",
+            completion.outcome, completion.error_message, relevant
+        );
+    }
+
+    let stdout: Vec<&str> = logs
+        .iter()
+        .filter(|l| l.channel == "stdout")
+        .map(|l| l.line.as_str())
+        .collect();
+
+    assert!(
+        stdout.iter().any(|l| l.contains("SEEDED_FILE_OK")),
+        "step ordering broken: assert-workspace ran before /work/seed.txt was written. \
+         stdout:\n{stdout:#?}"
+    );
+    assert!(
+        stdout.iter().any(|l| l.contains("EXEC_WORKFLOW_OK")),
+        "missing EXEC_WORKFLOW_OK sentinel — runner didn't reach the end. \
+         stdout:\n{stdout:#?}"
+    );
+
+    Ok(())
+}
+
 fn short_token() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()

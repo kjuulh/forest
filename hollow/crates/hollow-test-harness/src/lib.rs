@@ -17,7 +17,7 @@ pub mod orchestrator;
 mod run;
 mod ssh;
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::Context;
 
@@ -48,13 +48,26 @@ impl Harness {
 
     /// Build local artifacts and bootstrap the remote host. Safe to call
     /// repeatedly — subsequent calls are near-instant.
+    ///
+    /// `PREPARE_LOCK` is a process-wide mutex so multiple test threads
+    /// (each with their own Harness instance) don't race on docker build
+    /// / scp / remote-fs writes inside `build::build` and
+    /// `bootstrap::bootstrap`. Without it, the second concurrent caller
+    /// surfaces confusing "No such file or directory" errors from cache
+    /// stat'ing files the first caller is mid-rename of.
     pub fn prepare(&self) -> anyhow::Result<&RemoteLayout> {
+        if let Some(layout) = self.prepared.get() {
+            return Ok(layout);
+        }
+        static PREPARE_LOCK: Mutex<()> = Mutex::new(());
+        let _guard = PREPARE_LOCK.lock().expect("prepare lock poisoned");
+        // Re-check under the lock — another thread may have prepared while
+        // we were waiting.
         if let Some(layout) = self.prepared.get() {
             return Ok(layout);
         }
         let artifacts = build::build(&self.config).context("local build")?;
         let layout = bootstrap::bootstrap(&self.config, &artifacts).context("remote bootstrap")?;
-        // Race-tolerant: another caller may have already populated.
         let _ = self.prepared.set(layout);
         Ok(self.prepared.get().expect("just set"))
     }
