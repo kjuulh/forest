@@ -186,6 +186,17 @@ async fn run_job_inner(
             tracing::info!(job_id = %job_id, level, %message, "vm diag");
         }
         VmEvent::Log(l) => {
+            // Trace the line locally so dev:agent's stdout shows what the
+            // job is actually printing (otherwise it goes straight up to the
+            // controller via gRPC and we have to query forest-server to see
+            // it). debug level so prod operators can opt out.
+            tracing::debug!(
+                target: "hollow_agent::job_log",
+                job_id = %job_id,
+                channel = %l.channel,
+                "{}",
+                l.line,
+            );
             let _ = tx.send(AgentMessage {
                 message: Some(agent_message::Message::LogBatch(JobLogBatch {
                     job_id: job_id.clone(),

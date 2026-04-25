@@ -147,6 +147,8 @@ fn handle_agent_message(pool: &AgentPool, tracker: &JobTracker, agent_id: &str, 
                 agent_id,
                 job_id = %update.job_id,
                 status = ?status,
+                exit_code = update.exit_code,
+                error = %update.error_message,
                 "job update"
             );
 

@@ -37,7 +37,7 @@ run = "cargo run -p hollow-controller"
 
 [tasks."dev:agent"]
 description = "Build, ship, and run hollow-agent on the configured KVM host (HOLLOW_TEST_HOST)"
-env = { HOLLOW_TEST_HOST = "forage-local-agent", HOLLOW_CONTROLLER_PORT = "4050" }
+env = { HOLLOW_TEST_HOST = "forage-local-agent", HOLLOW_CONTROLLER_PORT = "4050", HOLLOW_DEV_CONSOLE = "true" }
 run = "cargo run --release -p hollow-dev-agent"
 
 [tasks."dev:up"]

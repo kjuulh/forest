@@ -222,11 +222,37 @@ impl Dispatcher {
             destination.environment.clone(),
         );
 
-        let files: Vec<hollow_grpc_interface::JobFile> = deployment_files
-            .iter()
-            .chain(spec_files.iter())
+        // Forest artifacts pack files for every destination of every type
+        // under one tarball, with paths shaped like
+        //   `<env>/<dest-name-or-regex>/<org>/<type>@<version>/<file>`
+        // We're running ONE destination here, so trim the artifact to just
+        // its files and strip the prefix so e.g. `main.tf` lands at /work.
+        // Spec files (forest.cue etc.) live outside that hierarchy and ride
+        // along untouched.
+        let dest_files = filter_files_for_destination(
+            &deployment_files,
+            &destination.environment,
+            &destination.name,
+            &dest_type.organisation,
+            &dest_type.name,
+            dest_type.version,
+        );
+        if dest_files.is_empty() {
+            tracing::warn!(
+                env = %destination.environment,
+                dest = %destination.name,
+                ty = format_args!("{}/{}@{}", dest_type.organisation, dest_type.name, dest_type.version),
+                total_files = deployment_files.len(),
+                "no deployment files matched destination — job will likely fail with empty config"
+            );
+        }
+        let files: Vec<hollow_grpc_interface::JobFile> = dest_files
+            .into_iter()
+            .chain(spec_files.iter().map(|(path, content)| {
+                (path.to_string_lossy().to_string(), content.clone())
+            }))
             .map(|(path, content)| hollow_grpc_interface::JobFile {
-                path: path.to_string_lossy().to_string(),
+                path,
                 content: content.as_bytes().to_vec(),
                 mode: 0o644,
             })
@@ -372,6 +398,59 @@ async fn complete_release(
     {
         tracing::error!(error = %e, "CompleteRelease RPC failed");
     }
+}
+
+/// Pick the subset of an artifact's deployment files that belongs to a
+/// specific destination, and strip the `<env>/<dest>/<org>/<type>@<ver>/`
+/// prefix so files land at the working directory root inside the VM.
+///
+/// The artifact path layout is shared with the legacy in-process runner
+/// (see `crates/forest-server/src/destinations/terraformv1.rs`): each
+/// artifact carries files for every (env, destination-name-or-regex,
+/// destination-type) tuple the project deploys to. We're running one
+/// destination here, so the others are dead weight (and worse, can break
+/// tools like `tofu` that scan the working directory recursively).
+///
+/// The destination-name segment is treated as a regex against `dest_name`,
+/// matching the legacy runner's behaviour. Patterns like
+/// `infrastructure-dev.*` thus match both `infrastructure-dev/1` and
+/// `infrastructure-dev/2`.
+fn filter_files_for_destination(
+    deployment_files: &[(std::path::PathBuf, String)],
+    env: &str,
+    dest_name: &str,
+    type_org: &str,
+    type_name: &str,
+    type_version: u64,
+) -> Vec<(String, String)> {
+    let type_segment = format!("{type_name}@{type_version}");
+    let mut out = Vec::with_capacity(deployment_files.len());
+    for (path, content) in deployment_files {
+        let s = path.to_string_lossy();
+        let parts: Vec<&str> = s.split('/').collect();
+        // Need at least <env>/<dest>/<org>/<type@version>/<file>
+        if parts.len() < 5 {
+            continue;
+        }
+        if parts[0] != env {
+            continue;
+        }
+        let dest_pattern = parts[1];
+        let dest_match = match regex::Regex::new(&format!("^{dest_pattern}$")) {
+            Ok(re) => re.is_match(dest_name),
+            // Pattern wasn't a valid regex — fall back to literal equality.
+            Err(_) => dest_pattern == dest_name,
+        };
+        if !dest_match {
+            continue;
+        }
+        if parts[2] != type_org || parts[3] != type_segment {
+            continue;
+        }
+        let rel = parts[4..].join("/");
+        out.push((rel, content.clone()));
+    }
+    out
 }
 
 /// Build the command to run inside the VM based on destination type and mode.

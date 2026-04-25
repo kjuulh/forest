@@ -693,6 +693,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "notmad",
+ "regex",
  "serde",
  "serde_json",
  "tokio",

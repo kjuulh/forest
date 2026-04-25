@@ -50,20 +50,20 @@ RUN set -eux; \
     done
 
 # --- CLI config -----------------------------------------------------------
-# Point tofu at the filesystem mirror and forbid direct registry access so
-# runs fail fast if something tries to reach out to the network. Shipping this
-# at both /etc/opentofu/opentofurc and /root/.terraformrc — tofu honours
-# TF_CLI_CONFIG_FILE when set, but some paths look at HOME too.
+# Mirror serves whatever's been baked in; any provider not in the tree
+# falls through to the registry over the per-VM NAT. No include/exclude
+# allowlists — the destination contract is "any provider works", and the
+# mirror is just a cache speedup for the ones we happened to ship.
+#
+# Shipping at both /etc/opentofu/opentofurc and /root/.terraformrc since
+# tofu honours TF_CLI_CONFIG_FILE when set but some paths look at HOME too.
 RUN mkdir -p /etc/opentofu && \
     printf '%s\n' \
       'provider_installation {' \
       '  filesystem_mirror {' \
-      '    path    = "/usr/share/opentofu/providers"' \
-      '    include = ["registry.opentofu.org/*/*"]' \
+      '    path = "/usr/share/opentofu/providers"' \
       '  }' \
-      '  direct {' \
-      '    exclude = ["registry.opentofu.org/*/*"]' \
-      '  }' \
+      '  direct {}' \
       '}' \
       > /etc/opentofu/opentofurc && \
     cp /etc/opentofu/opentofurc /root/.terraformrc

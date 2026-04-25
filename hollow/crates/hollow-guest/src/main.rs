@@ -111,7 +111,24 @@ async fn main() -> anyhow::Result<()> {
 
     let (exit_code, plan_output) = match &result {
         Ok(output) => (0, output.clone()),
-        Err(_) => (-1, None),
+        Err(e) => {
+            // Surface the failure detail back to the host so the resulting
+            // CompleteRelease has more than just "exit code -1". One line
+            // per cause (anyhow's chain); marked stderr so it routes to the
+            // right channel in the controller's PushLogs.
+            for line in format!("hollow-guest: {e:#}").lines() {
+                let _ = transport::send_message(
+                    &mut writer,
+                    &Message::LogLine(LogLineMsg {
+                        channel: "stderr".to_string(),
+                        line: line.to_string(),
+                        timestamp: now_millis(),
+                    }),
+                )
+                .await;
+            }
+            (-1, None)
+        }
     };
 
     transport::send_message(

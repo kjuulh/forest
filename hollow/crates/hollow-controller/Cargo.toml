@@ -27,3 +27,4 @@ serde_json.workspace = true
 notmad.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
+regex = "1"
