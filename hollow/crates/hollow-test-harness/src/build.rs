@@ -81,6 +81,7 @@ const IMAGES: &[ImageBuild] = &[
             "podman-containers.conf",
             "forest-component-init",
             "forest-component-script",
+            "forest-component-render-template",
             // Each script-component contributes its directory; if any
             // file inside a component changes we want a rebuild.
             "components/git-init/component",
@@ -141,6 +142,18 @@ pub fn build(cfg: &Config) -> anyhow::Result<BuildArtifacts> {
         .join("forest-component-script");
     stage_if_changed(&script_engine_bin, &staged_script_engine)?;
 
+    // Forest-workspace components — proper components living under
+    // `components/forest-contrib/<name>/crates/<name>/`, registered in
+    // the forest root Cargo.toml. We compile from there (not the hollow
+    // workspace) so the components are first-class Forest projects with
+    // their own CUE specs, codegen output dirs, and registry metadata.
+    let render_template_bin = build_cargo_forest(cfg, "render-template", GUEST_TARGET)?;
+    let staged_render_template = cfg
+        .repo_root
+        .join("images")
+        .join("forest-component-render-template");
+    stage_if_changed(&render_template_bin, &staged_render_template)?;
+
     let mut images = Vec::with_capacity(IMAGES.len());
     for spec in IMAGES {
         let art = build_image(cfg, spec, &guest_bin)?;
@@ -176,6 +189,38 @@ fn build_cargo(
 
     let bin_path = cfg
         .repo_root
+        .join("target")
+        .join(target)
+        .join("release")
+        .join(pkg);
+    if !bin_path.exists() {
+        bail!("expected binary not found: {}", bin_path.display());
+    }
+    Ok(bin_path)
+}
+
+/// Build a crate from the *parent* (forest) workspace, not the hollow
+/// one. Forest components live at `forest/components/<org>/<name>/crates/`,
+/// registered in `forest/Cargo.toml` workspace.members. Their target dir
+/// is `forest/target/<target>/release/<pkg>`.
+fn build_cargo_forest(cfg: &Config, pkg: &str, target: &str) -> anyhow::Result<PathBuf> {
+    let forest_root = cfg
+        .repo_root
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("hollow root has no parent (expected forest workspace)"))?;
+    ensure_rustup_target(target)?;
+
+    tracing::info!(pkg, target, "cargo build (release, forest workspace)");
+    let status = Command::new("cargo")
+        .current_dir(forest_root)
+        .args(["build", "-p", pkg, "--release", "--target", target])
+        .status()
+        .with_context(|| format!("spawn cargo build for {pkg} (forest workspace)"))?;
+    if !status.success() {
+        bail!("cargo build {pkg} ({target}) in forest workspace failed");
+    }
+
+    let bin_path = forest_root
         .join("target")
         .join(target)
         .join("release")
