@@ -24,7 +24,7 @@ use anyhow::Context;
 pub use crate::bootstrap::RemoteLayout;
 pub use crate::config::Config;
 pub use crate::orchestrator::Orchestrator;
-pub use crate::run::{Diagnostic, JobFile, JobSpec, LogLine, RunResult};
+pub use crate::run::{Diagnostic, JobFile, JobSecret, JobSpec, LogLine, RunResult};
 
 pub struct Harness {
     config: Config,

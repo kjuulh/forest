@@ -39,6 +39,18 @@ pub struct JobSpec {
     /// these CIDRs only. The strict deny-everything-else rule is enforced
     /// at the iptables FORWARD chain.
     pub allowed_egress_cidrs: Vec<String>,
+    /// Secret files shipped to the guest out-of-band from `environment`
+    /// and `files`. Tracing only ever shows {name, target_path, mode};
+    /// the bytes are opaque from the harness all the way to the guest.
+    pub secrets: Vec<JobSecret>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JobSecret {
+    pub name: String,
+    pub target_path: String,
+    pub content: Vec<u8>,
+    pub mode: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -141,11 +153,21 @@ struct WireJobSpec {
     environment: HashMap<String, String>,
     files: Vec<WireJobFile>,
     mode: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    secrets: Vec<WireJobSecret>,
 }
 
 #[derive(Serialize)]
 struct WireJobFile {
     path: String,
+    content_b64: String,
+    mode: u32,
+}
+
+#[derive(Serialize)]
+struct WireJobSecret {
+    name: String,
+    target_path: String,
     content_b64: String,
     mode: u32,
 }
@@ -195,6 +217,19 @@ pub fn execute(cfg: &Config, layout: &RemoteLayout, job: JobSpec) -> anyhow::Res
                 })
                 .collect(),
             mode: job.mode.unwrap_or_else(|| "deploy".to_string()),
+            secrets: job
+                .secrets
+                .into_iter()
+                .map(|s| {
+                    use base64::Engine;
+                    WireJobSecret {
+                        name: s.name,
+                        target_path: s.target_path,
+                        content_b64: base64::engine::general_purpose::STANDARD.encode(&s.content),
+                        mode: s.mode,
+                    }
+                })
+                .collect(),
         },
         vcpus: job.vcpus.unwrap_or(1),
         mem_mib: job.mem_mib.unwrap_or(512),

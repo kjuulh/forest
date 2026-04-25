@@ -22,6 +22,7 @@ async fn roundtrip_job_definition() {
         }],
         mode: "deploy".to_string(),
         timeout_seconds: 60,
+        secrets: Vec::new(),
     };
 
     transport::send_message(&mut host_write, &Message::JobDefinition(job.clone()))

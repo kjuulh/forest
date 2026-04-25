@@ -13,7 +13,7 @@ use hollow_vm::{
     JailerConfig, NetworkAllocator, NetworkConfig, VmConfig, VmEvent, VmStage,
     run_job as vm_run_job,
 };
-use hollow_vsock::protocol::{JobDefinition, JobFile};
+use hollow_vsock::protocol::{JobDefinition, JobFile, Secret};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -170,6 +170,16 @@ async fn run_job_inner(
             job.mode.clone()
         },
         timeout_seconds: job.timeout_seconds,
+        secrets: job
+            .secrets
+            .iter()
+            .map(|s| Secret {
+                name: s.name.clone(),
+                target_path: s.target_path.clone(),
+                mode: s.mode,
+                content: s.content.clone(),
+            })
+            .collect(),
     };
 
     let job_id = job.job_id.clone();

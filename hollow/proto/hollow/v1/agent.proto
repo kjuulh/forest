@@ -115,6 +115,30 @@ message RunJob {
   // internet only" behaviour.
   // Format: standard CIDR strings (e.g. "1.1.1.1/32", "10.0.0.0/8").
   repeated string allowed_egress_cidrs = 12;
+  // Files containing secret material (SSH keys, cloud creds, tokens) that
+  // the VM needs but must NEVER appear in the environment, log streams,
+  // or anywhere else observable. Distinct from `files` because the agent
+  // and guest treat these specially: paths can be outside /work, mode
+  // is honoured (typically 0600), tracing only shows {name, target_path,
+  // mode} — never `content`.
+  repeated Secret secrets = 13;
+}
+
+// A secret file delivered to the VM out-of-band from the regular `files`
+// channel. The shape is a target path + mode + bytes; the agent and guest
+// agree to redact `content` from every log surface.
+message Secret {
+  // Diagnostic identifier (e.g. "git_ssh_key", "aws_credentials"). Logged
+  // freely. Do not put secret material here.
+  string name = 1;
+  // Absolute path inside the VM where the bytes are written. Common
+  // targets: /root/.ssh/id_<name>, /etc/<destination>/credentials.
+  string target_path = 2;
+  // Unix permission bits (octal). 0o600 for SSH keys, 0o400 for read-
+  // only creds. The guest applies this with chmod after writing.
+  uint32 mode = 3;
+  // Raw bytes. NEVER log this.
+  bytes content = 4;
 }
 
 message JobFile {

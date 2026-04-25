@@ -296,6 +296,11 @@ impl Dispatcher {
             egress_enabled: true,
             mode: mode.to_string(),
             allowed_egress_cidrs,
+            // Per-destination arms populate this — terraform's TF_HTTP_*
+            // creds and fluxv1's git SSH key are obvious candidates. For
+            // now we leave it empty here; specific arms (e.g. fluxv1) wrap
+            // RunJob in a builder that pushes secrets pre-dispatch.
+            secrets: Vec::new(),
         };
 
         let agent_id = self

@@ -16,7 +16,7 @@ use anyhow::Context;
 use base64::Engine;
 use clap::Parser;
 use hollow_vm::{VmConfig, VmEvent, run_job};
-use hollow_vsock::protocol::{JobDefinition, JobFile};
+use hollow_vsock::protocol::{JobDefinition, JobFile, Secret};
 
 use crate::spec::{Event, RunnerSpec};
 
@@ -141,6 +141,23 @@ fn build_job_definition(spec: &RunnerSpec) -> anyhow::Result<JobDefinition> {
 
     let environment: HashMap<String, String> = spec.job.environment.clone();
 
+    let secrets = spec
+        .job
+        .secrets
+        .iter()
+        .map(|s| {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(&s.content_b64)
+                .map_err(|e| anyhow::anyhow!("invalid base64 in secret {}: {e}", s.name))?;
+            Ok::<_, anyhow::Error>(Secret {
+                name: s.name.clone(),
+                target_path: s.target_path.clone(),
+                mode: s.mode,
+                content: bytes,
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
     Ok(JobDefinition {
         job_id: format!("test-{}", uuid::Uuid::new_v4()),
         command: spec.job.command.clone(),
@@ -148,6 +165,7 @@ fn build_job_definition(spec: &RunnerSpec) -> anyhow::Result<JobDefinition> {
         files,
         mode: spec.job.mode.clone(),
         timeout_seconds: 0, // outer wallclock enforced by run() above
+        secrets,
     })
 }
 

@@ -45,6 +45,37 @@ pub struct JobDefinition {
     pub files: Vec<JobFile>,
     pub mode: String,
     pub timeout_seconds: u32,
+    /// Secret material delivered out-of-band from `files`. The guest
+    /// writes each secret to its `target_path` (absolute inside the VM)
+    /// with the requested mode BEFORE spawning the job process. Tracing
+    /// in the agent and guest must only ever surface `name`/`target_path`/
+    /// `mode` — the `content` field is opaque and never logged.
+    #[serde(default)]
+    pub secrets: Vec<Secret>,
+}
+
+/// Secret file delivered to the guest before the job runs. See
+/// `RunJob.secrets` in `hollow.v1` for the full contract.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Secret {
+    pub name: String,
+    pub target_path: String,
+    pub mode: u32,
+    #[serde(with = "base64_bytes")]
+    pub content: Vec<u8>,
+}
+
+// Custom Debug that elides `content` so accidental `tracing::debug!(?secret)`
+// calls don't ship the bytes through the log channel.
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Secret")
+            .field("name", &self.name)
+            .field("target_path", &self.target_path)
+            .field("mode", &format_args!("0o{:o}", self.mode))
+            .field("content", &format_args!("<{} bytes>", self.content.len()))
+            .finish()
+    }
 }
 
 /// A file to write into the guest working directory.
@@ -92,6 +123,31 @@ impl Message {
             Self::Completion(_) => MessageType::Completion,
             Self::Cancel => MessageType::Cancel,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_debug_redacts_content() {
+        let s = Secret {
+            name: "git_ssh_key".to_string(),
+            target_path: "/root/.ssh/id_forest".to_string(),
+            mode: 0o600,
+            content: b"-----BEGIN OPENSSH PRIVATE KEY-----\nactualsecret\n".to_vec(),
+        };
+        let dbg = format!("{s:?}");
+        // Diagnostic fields are visible.
+        assert!(dbg.contains("git_ssh_key"));
+        assert!(dbg.contains("/root/.ssh/id_forest"));
+        assert!(dbg.contains("0o600"));
+        // The byte length stand-in is visible…
+        assert!(dbg.contains("bytes"));
+        // …but no part of the actual material leaks through Debug.
+        assert!(!dbg.contains("BEGIN OPENSSH"));
+        assert!(!dbg.contains("actualsecret"));
     }
 }
 

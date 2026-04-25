@@ -90,6 +90,24 @@ pub struct JobSpec {
     pub files: Vec<JobFile>,
     #[serde(default = "default_mode")]
     pub mode: String,
+    /// Secrets shipped to the guest before the job runs. See `Secret`
+    /// (RunJob proto) for the contract — content is opaque.
+    #[serde(default)]
+    pub secrets: Vec<JobSecret>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct JobSecret {
+    pub name: String,
+    pub target_path: String,
+    /// Base64-encoded bytes.
+    pub content_b64: String,
+    #[serde(default = "default_secret_mode")]
+    pub mode: u32,
+}
+
+fn default_secret_mode() -> u32 {
+    0o600
 }
 
 fn default_mode() -> String {

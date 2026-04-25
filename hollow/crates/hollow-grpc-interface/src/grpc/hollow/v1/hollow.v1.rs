@@ -166,6 +166,35 @@ pub struct RunJob {
     /// Format: standard CIDR strings (e.g. "1.1.1.1/32", "10.0.0.0/8").
     #[prost(string, repeated, tag="12")]
     pub allowed_egress_cidrs: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Files containing secret material (SSH keys, cloud creds, tokens) that
+    /// the VM needs but must NEVER appear in the environment, log streams,
+    /// or anywhere else observable. Distinct from `files` because the agent
+    /// and guest treat these specially: paths can be outside /work, mode
+    /// is honoured (typically 0600), tracing only shows {name, target_path,
+    /// mode} — never `content`.
+    #[prost(message, repeated, tag="13")]
+    pub secrets: ::prost::alloc::vec::Vec<Secret>,
+}
+/// A secret file delivered to the VM out-of-band from the regular `files`
+/// channel. The shape is a target path + mode + bytes; the agent and guest
+/// agree to redact `content` from every log surface.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Secret {
+    /// Diagnostic identifier (e.g. "git_ssh_key", "aws_credentials"). Logged
+    /// freely. Do not put secret material here.
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    /// Absolute path inside the VM where the bytes are written. Common
+    /// targets: /root/.ssh/id_<name>, /etc/<destination>/credentials.
+    #[prost(string, tag="2")]
+    pub target_path: ::prost::alloc::string::String,
+    /// Unix permission bits (octal). 0o600 for SSH keys, 0o400 for read-
+    /// only creds. The guest applies this with chmod after writing.
+    #[prost(uint32, tag="3")]
+    pub mode: u32,
+    /// Raw bytes. NEVER log this.
+    #[prost(bytes="vec", tag="4")]
+    pub content: ::prost::alloc::vec::Vec<u8>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct JobFile {

@@ -84,6 +84,31 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Drop secret files into the guest BEFORE spawning the job process.
+    // Paths are absolute inside the VM (typically /root/.ssh/id_xxx,
+    // /etc/<dest>/credentials etc.). Tracing only mentions name + target +
+    // mode — the `content` field is opaque.
+    for secret in &job.secrets {
+        let path = Path::new(&secret.target_path);
+        if let Some(parent) = path.parent() {
+            // Use 0700 for parent dirs of secrets so even a parallel job in
+            // the same VM (shouldn't happen, but defence in depth) can't
+            // sniff via parent-dir reads.
+            tokio::fs::create_dir_all(parent).await?;
+            let _ = tokio::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).await;
+        }
+        tokio::fs::write(path, &secret.content).await?;
+        let mode = if secret.mode == 0 { 0o600 } else { secret.mode };
+        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).await?;
+        tracing::info!(
+            name = %secret.name,
+            target = %secret.target_path,
+            mode = format!("0o{:o}", mode),
+            bytes = secret.content.len(),
+            "wrote secret",
+        );
+    }
+
     // Execute the job, streaming logs through a channel
     let (log_tx, log_rx) = mpsc::unbounded_channel::<Message>();
 

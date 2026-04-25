@@ -79,6 +79,11 @@ description = "Phase-2 MVP: fluxv1 image toolchain check (git + flux + kustomize
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }
 run = "cargo test -p hollow-acceptance --test fluxv1 -- --nocapture"
 
+[tasks."test:secrets"]
+description = "Verify the secret-shipping channel — bytes reach guest, never log"
+env = { HOLLOW_TEST_HOST = "forage-local-agent" }
+run = "cargo test -p hollow-acceptance --test secrets -- --nocapture"
+
 [tasks."test:network"]
 description = "Per-VM NAT networking — fetches a public HTTPS endpoint from inside the guest"
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }
