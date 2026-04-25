@@ -38,9 +38,13 @@ async fn pipeline_ci_multi_image_workflow() -> anyhow::Result<()> {
     let workflow = r#"
 package workflow
 
-_image_alpine: "docker.io/library/alpine:3.21"
-_image_python: "docker.io/library/python:3.12-alpine"
-_image_git:    "docker.io/alpine/git:latest"
+// AWS ECR Public mirrors Docker Official Images without rate limits;
+// preferred over docker.io for tests that pull on every run. `alpine/git`
+// lives outside the `library/` namespace and isn't on ECR Public, so the
+// git step uses the same alpine image and installs git inline.
+_image_alpine: "public.ecr.aws/docker/library/alpine:3.21"
+_image_python: "public.ecr.aws/docker/library/python:3.12-alpine"
+_image_git:    _image_alpine
 
 steps: [
     // 1. Scaffold (host-side) — mimics actions/checkout dropping a repo
@@ -137,8 +141,10 @@ steps: [
             """
     },
 
-    // 7. Git snapshot via alpine/git — uses+run with --entrypoint=/bin/sh
-    //    overrides alpine/git's `git` ENTRYPOINT so we can run a script.
+    // 7. Git snapshot. Reuses _image_alpine (= ECR mirror) and installs
+    //    git on demand — alpine/git itself isn't mirrored on ECR Public,
+    //    and the install is well under a second over the kept-alive
+    //    apk index from earlier steps.
     {
         name: "git-snapshot"
         uses: _image_git
@@ -149,6 +155,7 @@ steps: [
             GIT_COMMITTER_EMAIL: "ci@forest.local"
         }
         run: """
+            apk add --no-cache git >/dev/null
             cd /work
             git init -q -b main .
             git add -A

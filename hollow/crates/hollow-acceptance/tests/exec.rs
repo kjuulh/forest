@@ -269,7 +269,7 @@ steps: [
     },
     {
         name: "container-action"
-        uses: "docker.io/library/alpine:3.21"
+        uses: "public.ecr.aws/docker/library/alpine:3.21"
         with: {
             greeting: "HELLO_FROM_USES"
         }

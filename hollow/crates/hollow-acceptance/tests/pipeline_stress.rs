@@ -63,7 +63,7 @@ steps: [
             EOF
             chmod +x /work/src/hello.sh
             cat >/work/Dockerfile <<EOF
-            FROM docker.io/library/alpine:3.21
+            FROM public.ecr.aws/docker/library/alpine:3.21
             COPY src/hello.sh /usr/local/bin/hello
             RUN chmod +x /usr/local/bin/hello
             CMD ["hello"]

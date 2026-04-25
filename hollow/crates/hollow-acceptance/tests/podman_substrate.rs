@@ -64,14 +64,14 @@ echo PODMAN_INFO_OK
 # stack with the container. The VM is already the isolation boundary,
 # so per-container network namespacing buys nothing here and avoids
 # the iptables-nft-vs-legacy compatibility dance.
-if ! podman pull --quiet docker.io/library/alpine:3.21 >/tmp/pull.log 2>&1; then
+if ! podman pull --quiet public.ecr.aws/docker/library/alpine:3.21 >/tmp/pull.log 2>&1; then
   echo "PODMAN_PULL_FAILED:"
   cat /tmp/pull.log
   exit 5
 fi
 echo PODMAN_PULL_OK
 
-if ! out=$(podman run --rm --network=host docker.io/library/alpine:3.21 echo HELLO_FROM_CONTAINER 2>&1); then
+if ! out=$(podman run --rm --network=host public.ecr.aws/docker/library/alpine:3.21 echo HELLO_FROM_CONTAINER 2>&1); then
   echo "PODMAN_RUN_FAILED: $out"
   exit 4
 fi

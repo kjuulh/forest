@@ -52,7 +52,7 @@ steps: [
     //    STEP_GATHER_GREETING / STEP_GATHER_BUILD_ID.
     {
         name: "gather"
-        uses: "docker.io/library/alpine:3.21"
+        uses: "public.ecr.aws/docker/library/alpine:3.21"
         run: """
             : "${FOREST_OUTPUT:?missing FOREST_OUTPUT — runner contract broken}"
             {
