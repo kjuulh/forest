@@ -55,10 +55,10 @@ description = "Full controller+agent orchestrator test against the KVM host"
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }
 run = "cargo test -p hollow-acceptance --test orchestrator -- --nocapture"
 
-[tasks."test:opentofu"]
-description = "Run real OpenTofu inside Firecracker (tofu init + plan, offline)"
+[tasks."test:terraform"]
+description = "Run real terraform/1 (OpenTofu under the hood) inside Firecracker"
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }
-run = "cargo test -p hollow-acceptance --test opentofu -- --nocapture"
+run = "cargo test -p hollow-acceptance --test terraform -- --nocapture"
 
 [tasks."test:network"]
 description = "Per-VM NAT networking — fetches a public HTTPS endpoint from inside the guest"

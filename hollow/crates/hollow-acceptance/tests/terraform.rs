@@ -1,10 +1,11 @@
-//! Real OpenTofu running inside a Firecracker microVM.
+//! Real `forest/terraform/1` destination running inside a Firecracker microVM.
 //!
-//! Drives a `tofu init && tofu plan` through the full orchestrator path
-//! (fake forest-server → controller → agent → VM → guest → `tofu`).
-//! Providers are baked into the `opentofu-v1` rootfs image and served through
-//! a filesystem_mirror, so this test does NOT require per-VM networking —
-//! that's a separate milestone.
+//! The binary inside the image is OpenTofu (CLI-compatible, BSL-free); the
+//! controller's literal `terraform init/plan/apply` commands resolve to it
+//! via a `terraform → tofu` symlink in the rootfs. Drives the full
+//! orchestrator path: fake forest-server → controller → agent → VM → guest.
+//! Providers are baked into the rootfs and served through a filesystem
+//! mirror, so this test does not exercise per-VM networking.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -31,23 +32,23 @@ resource "null_resource" "hello" {
 
 resource "local_file" "hello" {
   filename = "/tmp/hollow-demo.txt"
-  content  = "from opentofu in hollow"
+  content  = "from terraform-v1 in hollow"
 }
 "#;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn opentofu_plan_through_orchestrator() -> anyhow::Result<()> {
+async fn terraform_plan_through_orchestrator() -> anyhow::Result<()> {
     let harness = skip_unless_harness!();
 
-    let mut orchestrator = harness.start_orchestrator("forest/opentofu/1").await?;
+    let mut orchestrator = harness.start_orchestrator("forest/terraform/1").await?;
 
-    let release_token = format!("tkn-otf-{}", short_token());
+    let release_token = format!("tkn-tf-{}", short_token());
 
     orchestrator.fake_server.install_fixture(
         &release_token,
         ReleaseFixture {
             organisation: "test-org".into(),
-            project: "opentofu-smoke".into(),
+            project: "terraform-smoke".into(),
             release_files: vec![("main.tf".into(), MAIN_TF.into())],
             ..Default::default()
         },
@@ -55,17 +56,17 @@ async fn opentofu_plan_through_orchestrator() -> anyhow::Result<()> {
 
     let assignment = WorkAssignment {
         release_token: release_token.clone(),
-        release_id: "rel-otf-1".into(),
-        release_intent_id: "int-otf-1".into(),
-        artifact_id: "art-otf-1".into(),
-        destination_id: "dest-otf-1".into(),
+        release_id: "rel-tf-1".into(),
+        release_intent_id: "int-tf-1".into(),
+        artifact_id: "art-tf-1".into(),
+        destination_id: "dest-tf-1".into(),
         destination: Some(DestinationInfo {
-            name: "opentofu-smoke-dest".into(),
+            name: "terraform-smoke-dest".into(),
             environment: "test".into(),
             metadata: HashMap::new(),
             r#type: Some(DestinationCapability {
                 organisation: "forest".into(),
-                name: "opentofu".into(),
+                name: "terraform".into(),
                 version: 1,
             }),
             organisation: "forest".into(),

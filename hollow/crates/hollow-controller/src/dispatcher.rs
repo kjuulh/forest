@@ -384,6 +384,10 @@ fn build_command_for_destination(
     metadata: &HashMap<String, String>,
 ) -> Vec<String> {
     match dest_name {
+        // The terraform-v1 image actually ships OpenTofu under a `terraform`
+        // symlink, so this command surface is BSL-free even though the
+        // destination type is named after Terraform (matching forest-server's
+        // existing destination registry).
         "terraform" => {
             let action = if mode == "plan" {
                 "plan -no-color"
@@ -393,22 +397,7 @@ fn build_command_for_destination(
             vec![
                 "sh".to_string(),
                 "-c".to_string(),
-                format!("terraform init -no-color && terraform {action}"),
-            ]
-        }
-        // OpenTofu is the open-source Terraform fork. Same CLI surface, so
-        // the command shape is identical; the image is separate because it
-        // ships the `tofu` binary + baked providers instead of `terraform`.
-        "opentofu" => {
-            let action = if mode == "plan" {
-                "plan -no-color"
-            } else {
-                "apply -no-color -auto-approve"
-            };
-            vec![
-                "sh".to_string(),
-                "-c".to_string(),
-                format!("tofu init -no-color -input=false && tofu {action} -input=false"),
+                format!("terraform init -no-color -input=false && terraform {action} -input=false"),
             ]
         }
         // Test-only: run an arbitrary shell command supplied via destination

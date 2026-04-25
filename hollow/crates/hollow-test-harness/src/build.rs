@@ -1,5 +1,5 @@
 //! Local build steps: cross-compile guest (musl) + runner/agent (host gnu),
-//! then build each rootfs image (base, opentofu-v1, …) as a docker image and
+//! then build each rootfs image (base, terraform-v1, …) as a docker image and
 //! pack to ext4 via `mkfs.ext4 -d`.
 //!
 //! Caching is mtime-based: we skip a step if the output is newer than every
@@ -39,10 +39,12 @@ const IMAGES: &[ImageBuild] = &[
         size: "256M",
     },
     ImageBuild {
-        name: "opentofu-v1",
-        dockerfile: "Dockerfile.opentofu-v1",
-        tag: "hollow-opentofu-v1:test",
-        fs_label: "hollow-otf",
+        // Forest's destination registry calls this "terraform" (the binary
+        // inside is actually OpenTofu — see Dockerfile for the rationale).
+        name: "terraform-v1",
+        dockerfile: "Dockerfile.terraform-v1",
+        tag: "hollow-terraform-v1:test",
+        fs_label: "hollow-tf",
         size: "1024M",
     },
 ];

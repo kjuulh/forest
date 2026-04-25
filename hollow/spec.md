@@ -1367,8 +1367,7 @@ Target: **<10s from code change to boot + registration**.
 
 | Destination | Command |
 |-------------|---------|
-| `terraform` | `terraform init && terraform {plan,apply}` |
-| `opentofu`  | `tofu init && tofu {plan,apply}` |
+| `terraform` | `terraform init && terraform {plan,apply}` (binary is OpenTofu under a `terraform → tofu` symlink in the rootfs) |
 | `echo`      | `sh -c $metadata.command` (test-only) |
 
 This matches the legacy `forest-runner` where each destination is a trait
@@ -1417,12 +1416,12 @@ Introduce a `ci-script` / `exec` destination type whose contract is:
 ### Migration
 
 No existing destinations need to move. The `ci-script` destination lives
-alongside `terraform`/`opentofu`/`flux`; it's a separate code path in the
-dispatcher with its own arm in `build_command_for_destination` that reads
-the pipeline definition from metadata or release files.
+alongside `terraform`/`flux`; it's a separate code path in the dispatcher
+with its own arm in `build_command_for_destination` that reads the
+pipeline definition from metadata or release files.
 
 Later, the first-party destinations can become sugar over the `ci-script`
-substrate (e.g. `opentofu` is a pre-baked pipeline of `init` → `plan` →
+substrate (e.g. `terraform` is a pre-baked pipeline of `init` → `plan` →
 `apply` steps). That's a refactor, not a prerequisite.
 
 ### Where this lives
