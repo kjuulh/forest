@@ -1,4 +1,4 @@
-//! Verifies `forest:render-template@v1` — a *proper* Forest component
+//! Verifies `forest-contrib/render-template@0.1.0` — a proper Forest component
 //! (lives under `components/forest-contrib/render-template/`, declared
 //! via CUE, compiled into the exec-v1 image) runs end-to-end through the
 //! exec runner. Companion to the other component tests; this is the
@@ -24,7 +24,7 @@ async fn render_template_component_walks_directory_tree() -> anyhow::Result<()> 
     // Step 1 (host run:) — write a small template directory into /work,
     //   including a path component with a `{{var}}` placeholder so we
     //   can prove path-rendering works.
-    // Step 2 (forest:render-template@v1) — interpolate src → dest.
+    // Step 2 (forest-contrib/render-template@0.1.0) — interpolate src → dest.
     // Step 3 (host run:) — verify file contents and rendered paths.
     let workflow = r#"
 package workflow

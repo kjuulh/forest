@@ -412,26 +412,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
-name = "forest-component-init"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "forest-sdk",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "forest-component-script"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "forest-sdk",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "forest-grpc-interface"
 version = "0.1.0"
 dependencies = [
@@ -464,16 +444,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
-]
-
-[[package]]
-name = "forest-sdk"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]

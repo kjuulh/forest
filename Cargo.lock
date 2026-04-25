@@ -1632,6 +1632,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "git-init"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "forest-sdk",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "gitea-create-repo"
 version = "0.1.0"
 dependencies = [
@@ -2160,6 +2170,16 @@ dependencies = [
  "hashbrown 0.16.1",
  "serde",
  "serde_core",
+]
+
+[[package]]
+name = "init"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "forest-sdk",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

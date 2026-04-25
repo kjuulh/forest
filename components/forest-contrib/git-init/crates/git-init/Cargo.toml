@@ -1,0 +1,11 @@
+[package]
+name = "git-init"
+edition = "2024"
+version.workspace = true
+publish = false
+
+[dependencies]
+forest-sdk.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true

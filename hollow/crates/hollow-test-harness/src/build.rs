@@ -79,18 +79,11 @@ const IMAGES: &[ImageBuild] = &[
             "forest-exec-runner",
             "podman-storage.conf",
             "podman-containers.conf",
-            "forest-component-init",
-            "forest-component-script",
-            // Cache stamp covers all proper Forest components shipping
-            // through the populated cache (render-template, checkout,
-            // git-commit-push, etc.). When any component is rebuilt the
-            // stamp gets touched and the ext4 invalidates.
+            // Cache stamp covers every Forest component shipping through
+            // the populated cache (render-template, checkout, git-commit-push,
+            // gitea-create-repo, init, git-init, …). When any component
+            // is rebuilt the stamp gets touched and the ext4 invalidates.
             "forest-cache/.cache-stamp",
-            // Each script-component contributes its directory; if any
-            // file inside a component changes we want a rebuild.
-            "components/git-init/component",
-            "components/git-init/manifest.json",
-            "components/git-init/scripts/git-init.sh",
         ],
     },
 ];
@@ -118,33 +111,6 @@ pub fn build(cfg: &Config) -> anyhow::Result<BuildArtifacts> {
     // Controller runs on the dev machine in orchestrator tests; build it so
     // target/release/hollow-controller is populated.
     build_cargo_host(cfg, "hollow-controller")?;
-
-    // Native Forest components — compiled for musl so they're fully static
-    // and portable into the alpine-based exec-v1 image. Each component
-    // becomes a binary under /usr/local/lib/forest-components/<name>/<v>/
-    // inside the image; the exec runner resolves `uses: forest:NAME@VER`
-    // to that path. Staged into hollow/images/ so the Dockerfile can COPY
-    // them in deterministically. We keep the staged file across builds so
-    // its mtime matches the source — copying every run would invalidate
-    // the ext4 cache check on every harness invocation.
-    let init_bin = build_cargo(cfg, "forest-component-init", GUEST_TARGET, true)?;
-    let staged_init = cfg
-        .repo_root
-        .join("images")
-        .join("forest-component-init");
-    stage_if_changed(&init_bin, &staged_init)?;
-
-    // Generic script-component engine: same compile pattern, lives at
-    // /usr/local/lib/forest-components/_engine/ inside the image. Lets
-    // us ship new components as "drop a directory of shell scripts"
-    // rather than a Rust crate per action.
-    let script_engine_bin =
-        build_cargo(cfg, "forest-component-script", GUEST_TARGET, true)?;
-    let staged_script_engine = cfg
-        .repo_root
-        .join("images")
-        .join("forest-component-script");
-    stage_if_changed(&script_engine_bin, &staged_script_engine)?;
 
     // Forest-workspace components — proper components living under
     // `components/forest-contrib/<name>/crates/<name>/`, registered in
@@ -190,6 +156,18 @@ pub fn build(cfg: &Config) -> anyhow::Result<BuildArtifacts> {
                 package: "gitea-create-repo",
                 organisation: "forest-contrib",
                 name: "gitea-create-repo",
+                version: "0.1.0",
+            },
+            ComponentSpec {
+                package: "init",
+                organisation: "forest-contrib",
+                name: "init",
+                version: "0.1.0",
+            },
+            ComponentSpec {
+                package: "git-init",
+                organisation: "forest-contrib",
+                name: "git-init",
                 version: "0.1.0",
             },
         ],
@@ -597,24 +575,3 @@ fn newer_than(a: &Path, b: &Path) -> anyhow::Result<bool> {
     Ok(am >= bm)
 }
 
-/// Copy `src` to `dst` only when content differs, preserving `dst`'s mtime
-/// when unchanged so downstream cache checks (`newer_than`) don't pointlessly
-/// invalidate. Idempotent and cheap on the no-change path.
-fn stage_if_changed(src: &Path, dst: &Path) -> anyhow::Result<()> {
-    let src_meta = std::fs::metadata(src)
-        .with_context(|| format!("stat {}", src.display()))?;
-    if let Ok(dst_meta) = std::fs::metadata(dst)
-        && dst_meta.len() == src_meta.len()
-    {
-        let src_bytes = std::fs::read(src)
-            .with_context(|| format!("read {}", src.display()))?;
-        let dst_bytes = std::fs::read(dst)
-            .with_context(|| format!("read {}", dst.display()))?;
-        if src_bytes == dst_bytes {
-            return Ok(());
-        }
-    }
-    std::fs::copy(src, dst)
-        .with_context(|| format!("copy {} → {}", src.display(), dst.display()))?;
-    Ok(())
-}

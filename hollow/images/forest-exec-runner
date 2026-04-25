@@ -93,30 +93,23 @@ while [ "$i" -lt "$n" ]; do
   if [ -n "$uses" ]; then
     # Resolution rules:
     #   <org>/<name>@<version>           — Forest component (cache lookup).
-    #                                       Recognised by exactly one '/'
-    #                                       and one '@', matching the
-    #                                       project-deps format.
-    #   forest:<name>@<v>                — Legacy Forest component (fixed
-    #                                       path under /usr/local/lib/...).
-    #                                       Kept until init/git-init are
-    #                                       migrated to cache layout.
+    #                                       Recognised by exactly one '/',
+    #                                       one '@', and a non-`sha256:`
+    #                                       version. Matches the format
+    #                                       Forest projects already use
+    #                                       to declare dependencies.
     #   anything else with a '/' or ':'  — OCI image, run via podman.
     is_forest_cache_ref=false
-    case "$uses" in
-      forest:*) ;;
-      *)
-        slashes=$(printf '%s' "$uses" | tr -cd '/' | wc -c)
-        ats=$(printf '%s' "$uses" | tr -cd '@' | wc -c)
-        if [ "$slashes" -eq 1 ] && [ "$ats" -eq 1 ]; then
-          # Reject `*/*@sha256:...` (OCI digest ref) — those land in the
-          # `*` (podman) branch.
-          case "$uses" in
-            *@sha256:*) ;;
-            *) is_forest_cache_ref=true ;;
-          esac
-        fi
-        ;;
-    esac
+    slashes=$(printf '%s' "$uses" | tr -cd '/' | wc -c)
+    ats=$(printf '%s' "$uses" | tr -cd '@' | wc -c)
+    if [ "$slashes" -eq 1 ] && [ "$ats" -eq 1 ]; then
+      # Reject `*/*@sha256:...` (OCI digest ref) — those land in the
+      # podman branch.
+      case "$uses" in
+        *@sha256:*) ;;
+        *) is_forest_cache_ref=true ;;
+      esac
+    fi
 
     case "$is_forest_cache_ref" in
       true)
@@ -207,88 +200,6 @@ Sync from registry not yet wired — re-build the exec-v1 image to refresh." >&2
     esac
 
     case "$uses" in
-      forest:*)
-        # Native Forest component (skips podman entirely):
-        #   uses: forest:NAME@VER
-        # Resolves to /usr/local/lib/forest-components/<name>/<ver>/component
-        # and invokes via the components-v2 SDK protocol:
-        #   ./component commands/<name> '<payload>'
-        # where payload = {spec, input, context}. `with:` populates `input`,
-        # FOREST_* env vars + /work feed `context`, `env:` entries pass
-        # through to the component process.
-        spec_str=${uses#forest:}
-        comp_name=${spec_str%@*}
-        comp_version=${spec_str##*@}
-        if [ "$comp_name" = "$comp_version" ]; then
-          echo "[step=$name] forest:NAME@VER required, got '$uses'" >&2
-          exit 2
-        fi
-        comp_bin="/usr/local/lib/forest-components/$comp_name/$comp_version/component"
-        if [ ! -x "$comp_bin" ]; then
-          echo "[step=$name] no such component '$uses' (expected $comp_bin)" >&2
-          exit 2
-        fi
-
-        # Build the JSON payload. Spec is empty in v0; input is the
-        # whole `with:` object verbatim; context picks up the workspace
-        # and FOREST_* identity from the runner's env.
-        payload=$(printf '%s' "$JSON" | jq -c \
-          --arg work_dir "/work" \
-          --arg organisation "${FOREST_ORGANISATION:-}" \
-          --arg project "${FOREST_PROJECT:-}" \
-          --arg environment "${FOREST_ENVIRONMENT:-}" \
-          --arg release_id "${FOREST_RELEASE_ID:-}" \
-          ".steps[$i] | {
-              spec: {},
-              input: (.with // {}),
-              context: {
-                  work_dir: \$work_dir,
-                  organisation: \$organisation,
-                  project: \$project,
-                  environment: \$environment,
-                  release_id: \$release_id,
-                  dry_run: false
-              }
-          }")
-
-        # Step env: any `env:` keys are exported into the component's
-        # process. SDK components rarely need this (they read inputs
-        # from JSON), but it matches the docker-mode contract so a
-        # workflow author switching prefix doesn't see surprising drift.
-        env_file=$(mktemp)
-        printf '%s' "$JSON" | jq -r ".steps[$i].env // {} | to_entries[] | .key + \"=\" + (.value | tostring)" >"$env_file"
-        while IFS='=' read -r ek ev; do
-          [ -z "$ek" ] && continue
-          export "$ek=$ev"
-        done <"$env_file"
-        rm -f "$env_file"
-
-        # Capture stdout — native components return JSON whose top-level
-        # keys are the step's outputs. stdout/stderr stay SEPARATE so the
-        # component's diagnostics never corrupt its structured output.
-        out_json=/tmp/forest-exec-step-outputs/"$name".json
-        err_log=$(mktemp)
-        rc=0
-        "$comp_bin" "commands/$comp_name" "$payload" >"$out_json" 2>"$err_log" || rc=$?
-        cat "$err_log" >&2
-        rm -f "$err_log"
-        if [ "$rc" -ne 0 ]; then
-          cat "$out_json"
-          echo "[step=$name] component '$uses' exited $rc" >&2
-          exit "$rc"
-        fi
-
-        # Flatten top-level scalar keys into key=value lines, then export.
-        # Object/array values are kept in the .json file for later tools
-        # but not promoted to env vars.
-        kv_file=$(mktemp)
-        jq -r 'select(type == "object") | to_entries[]
-               | select(.value | type | IN("string","number","boolean"))
-               | .key + "=" + (.value | tostring)' "$out_json" 2>/dev/null \
-          >"$kv_file" || true
-        capture_step_outputs "$name" "$kv_file"
-        rm -f "$kv_file"
-        ;;
       *)
         # Container-action mode (GitHub Actions semantics):
         #   - inputs from `with:` arrive as INPUT_<UPPERCASE_KEY> env vars

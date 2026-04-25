@@ -1,6 +1,6 @@
 //! Step outputs are uniform across both `uses:` backends:
 //!
-//!   - Native (`forest:NAME@VER`): top-level scalar keys of the
+//!   - Native (`<org>/<name>@<version>`): top-level scalar keys of the
 //!     component's JSON return value become `STEP_<NAME>_<KEY>` env
 //!     vars in subsequent steps.
 //!   - Container (`<image>`): the action writes `key=value` lines to
@@ -39,7 +39,7 @@ steps: [
     //    array, so it stays in the .json sidecar but isn't promoted.)
     {
         name: "init"
-        uses: "forest:init@v1"
+        uses: "forest-contrib/init@0.1.0"
         with: {
             project_name: "outputs-svc"
             organisation: "step-out-org"

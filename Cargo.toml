@@ -7,6 +7,8 @@ members = [
   "components/forest-contrib/checkout/crates/checkout",
   "components/forest-contrib/git-commit-push/crates/git-commit-push",
   "components/forest-contrib/gitea-create-repo/crates/gitea-create-repo",
+  "components/forest-contrib/init/crates/init",
+  "components/forest-contrib/git-init/crates/git-init",
   # "examples/rust-service-component/crates/rust-service",  # legacy v1 example — needs update
   "examples/rust-podinfo",
   "examples/service-example",

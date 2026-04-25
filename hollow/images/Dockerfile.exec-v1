@@ -71,9 +71,6 @@ RUN chmod 0755 /usr/local/bin/forest-exec-runner
 #       Generic engine: takes manifest.json + scripts/<method>.sh, speaks
 #       the v2 protocol on their behalf. Lets new components ship as a
 #       directory of shell scripts.
-COPY forest-component-init /usr/local/lib/forest-components/init/v1/component
-RUN chmod 0755 /usr/local/lib/forest-components/init/v1/component
-
 # Forest components (proper layout under components/forest-contrib/<name>/
 # in the forest workspace) ship through the standard Forest cache, NOT
 # baked at fixed paths. The build harness pre-populates the content-
@@ -83,12 +80,3 @@ RUN chmod 0755 /usr/local/lib/forest-components/init/v1/component
 # `forest` itself uses, so the substrate looks like a Forest dev
 # machine with components already pulled.
 COPY forest-cache /root/.cache/forest/components
-
-COPY forest-component-script /usr/local/lib/forest-components/_engine/forest-component-script
-RUN chmod 0755 /usr/local/lib/forest-components/_engine/forest-component-script
-
-# Script-shaped components. Each is a directory with `component` (entry
-# wrapper), `manifest.json`, and `scripts/<method>.sh`.
-COPY components/git-init /usr/local/lib/forest-components/git-init/v1/
-RUN chmod 0755 /usr/local/lib/forest-components/git-init/v1/component \
-    /usr/local/lib/forest-components/git-init/v1/scripts/git-init.sh
