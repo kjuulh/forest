@@ -74,8 +74,12 @@ const IMAGES: &[ImageBuild] = &[
         dockerfile: "Dockerfile.exec-v1",
         tag: "hollow-exec-v1:test",
         fs_label: "hollow-exec",
-        size: "1024M",
-        extra_inputs: &["forest-exec-runner"],
+        size: "2048M",
+        extra_inputs: &[
+            "forest-exec-runner",
+            "podman-storage.conf",
+            "podman-containers.conf",
+        ],
     },
 ];
 

@@ -365,11 +365,17 @@ fn setup_writable_areas() -> anyhow::Result<()> {
 
     // tmpfs scratch. size=… is generous but bounded by the VM's
     // `mem_size_mib`, so a runaway tmpfs can't exceed the VM's RAM cap.
+    //
+    // /dev/shm is mounted as POSIX shared memory; podman's libpod uses it
+    // for cross-process locks. Without it, `podman version` itself fails
+    // with "failed to create 2048 locks in /libpod_lock". 64 MiB is more
+    // than any tooling we ship needs.
     for (path, size_mib) in [
         ("/work", 512),
         ("/tmp", 512),
         ("/run", 64),
         ("/var/tmp", 256),
+        ("/dev/shm", 64),
     ] {
         let _ = std::fs::create_dir_all(path);
         if let Err(e) = mount_tmpfs(path, size_mib) {

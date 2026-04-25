@@ -19,7 +19,20 @@ ARG CUE_SHA256=5d644c1305a2b86504c8dcd2ec829cf5b4999efc2cf51ee375624e0455f774ae
 # `github-cli` lives in the Alpine community repo, which 3.21 enables by
 # default; if a future base bump moves to an edition without community,
 # add the repo explicitly here.
-RUN apk add --no-cache git github-cli jq
+#
+# podman + dependencies for `uses:` container-action steps:
+#  - podman: rootful container runtime (the VM is already the isolation
+#    boundary, so we don't bother with rootless setup)
+#  - crun: lightweight OCI runtime; podman v5 picks it as default on Alpine
+#  - iptables: required by podman's default bridge networking (we already
+#    have ip_tables compiled into the kernel — verified via kernel_substrate)
+#  - aardvark-dns + netavark: podman v4+ networking stack
+#  - cni-plugins is intentionally *not* installed; netavark replaces it
+#  - shadow / fuse-overlayfs deliberately omitted — kernel has native
+#    overlayfs and we don't need user-namespace ID mapping in v0
+RUN apk add --no-cache \
+    git github-cli jq \
+    podman crun iptables aardvark-dns netavark
 
 # --- CUE CLI --------------------------------------------------------------
 RUN curl -fsSL "https://github.com/cue-lang/cue/releases/download/v${CUE_VERSION}/cue_v${CUE_VERSION}_linux_amd64.tar.gz" \
@@ -30,9 +43,17 @@ RUN curl -fsSL "https://github.com/cue-lang/cue/releases/download/v${CUE_VERSION
  && rm /tmp/cue.tgz \
  && /usr/local/bin/cue version
 
+# podman storage + engine config: redirect to tmpfs paths the guest mounts
+# on boot, since the rootfs is read-only. See podman-storage.conf and
+# podman-containers.conf for the rationale of each redirect.
+COPY podman-storage.conf /etc/containers/storage.conf
+COPY podman-containers.conf /etc/containers/containers.conf
+RUN mkdir -p /run/containers /var/tmp/containers \
+ && chmod 0755 /run/containers /var/tmp/containers
+
 # Bake the workflow runner. The dispatcher's `exec` arm execs this directly;
 # it reads /work/workflow.cue (CUE), evaluates to JSON, and walks the
-# `steps:` list executing each one. `uses:` (container actions) is a
-# follow-on; v0 supports `run:` only.
+# `steps:` list executing each one. v0 supports `run:` only; v1 adds
+# `uses:` container actions backed by the podman binary baked above.
 COPY forest-exec-runner /usr/local/bin/forest-exec-runner
 RUN chmod 0755 /usr/local/bin/forest-exec-runner
