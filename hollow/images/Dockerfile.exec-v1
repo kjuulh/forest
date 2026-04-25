@@ -60,10 +60,24 @@ COPY forest-exec-runner /usr/local/bin/forest-exec-runner
 RUN chmod 0755 /usr/local/bin/forest-exec-runner
 
 # Forest components — first-party SDK-driven binaries the runner can call
-# directly without spinning up a container. Layout:
+# directly without spinning up a container. Two flavours coexist behind
+# the same `uses: forest:NAME@VER` shape:
+#
 #   /usr/local/lib/forest-components/<name>/<version>/component
-# Each binary speaks the components-v2 protocol (`<method> '<json>'` with
-# `_meta/describe` for capability discovery). Staged-in binaries are
-# already compiled for x86_64-musl by the build harness.
+#       Either a compiled binary (e.g. init/v1) OR a wrapper that exec's
+#       the script-engine for shell-shaped components (e.g. git-init/v1).
+#   /usr/local/lib/forest-components/_engine/forest-component-script
+#       Generic engine: takes manifest.json + scripts/<method>.sh, speaks
+#       the v2 protocol on their behalf. Lets new components ship as a
+#       directory of shell scripts.
 COPY forest-component-init /usr/local/lib/forest-components/init/v1/component
 RUN chmod 0755 /usr/local/lib/forest-components/init/v1/component
+
+COPY forest-component-script /usr/local/lib/forest-components/_engine/forest-component-script
+RUN chmod 0755 /usr/local/lib/forest-components/_engine/forest-component-script
+
+# Script-shaped components. Each is a directory with `component` (entry
+# wrapper), `manifest.json`, and `scripts/<method>.sh`.
+COPY components/git-init /usr/local/lib/forest-components/git-init/v1/
+RUN chmod 0755 /usr/local/lib/forest-components/git-init/v1/component \
+    /usr/local/lib/forest-components/git-init/v1/scripts/git-init.sh

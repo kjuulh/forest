@@ -1,0 +1,7 @@
+#!/bin/sh
+# Entrypoint wrapper for the git-init script-component. The exec runner
+# resolves `uses: forest:git-init@v1` to this file; we set
+# FOREST_COMPONENT_DIR so the engine can find manifest.json + scripts/,
+# then exec the engine with the original args.
+export FOREST_COMPONENT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+exec /usr/local/lib/forest-components/_engine/forest-component-script "$@"

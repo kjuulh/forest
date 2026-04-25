@@ -422,6 +422,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "forest-component-script"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "forest-sdk",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "forest-grpc-interface"
 version = "0.1.0"
 dependencies = [

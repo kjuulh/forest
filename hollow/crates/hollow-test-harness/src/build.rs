@@ -80,6 +80,12 @@ const IMAGES: &[ImageBuild] = &[
             "podman-storage.conf",
             "podman-containers.conf",
             "forest-component-init",
+            "forest-component-script",
+            // Each script-component contributes its directory; if any
+            // file inside a component changes we want a rebuild.
+            "components/git-init/component",
+            "components/git-init/manifest.json",
+            "components/git-init/scripts/git-init.sh",
         ],
     },
 ];
@@ -122,6 +128,18 @@ pub fn build(cfg: &Config) -> anyhow::Result<BuildArtifacts> {
         .join("images")
         .join("forest-component-init");
     stage_if_changed(&init_bin, &staged_init)?;
+
+    // Generic script-component engine: same compile pattern, lives at
+    // /usr/local/lib/forest-components/_engine/ inside the image. Lets
+    // us ship new components as "drop a directory of shell scripts"
+    // rather than a Rust crate per action.
+    let script_engine_bin =
+        build_cargo(cfg, "forest-component-script", GUEST_TARGET, true)?;
+    let staged_script_engine = cfg
+        .repo_root
+        .join("images")
+        .join("forest-component-script");
+    stage_if_changed(&script_engine_bin, &staged_script_engine)?;
 
     let mut images = Vec::with_capacity(IMAGES.len());
     for spec in IMAGES {
