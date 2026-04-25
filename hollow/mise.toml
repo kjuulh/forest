@@ -43,9 +43,10 @@ run = "cargo run --release -p hollow-dev-agent"
 [tasks."dev:up"]
 description = "Run forest-server + controller + remote agent in parallel (Ctrl-C tears all three down)"
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }
-# Default mise-task running is parallel — `:::` would force sequential.
-# Output is automatically prefixed by task name when multiple tasks run.
-run = "mise run dev:server dev:controller dev:agent"
+# `:::` separates tasks (mise's `mise run task1 ::: task2 ::: task3` form).
+# Without it, mise treats following arguments as positional args for the
+# first task. Tasks run in parallel; mise prefixes log lines with task name.
+run = "mise run dev:server ::: dev:controller ::: dev:agent"
 
 
 [tasks.test]

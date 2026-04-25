@@ -52,6 +52,11 @@ description = "Run forest-server with in-process execution disabled (for testing
 env = { RUST_LOG = "forest_server=trace,info", FOREST_DISABLE_IN_PROCESS = "true" }
 run = "cargo run -p forest-server -- serve --disable-in-process"
 
+[tasks."dev:hollow"]
+description = "Bring up forest-server + hollow-controller + remote hollow-agent (Ctrl-C tears all three down)"
+dir = "hollow"
+run = "mise run dev:up"
+
 [tasks."build"]
 run = "cargo build --release"
 
