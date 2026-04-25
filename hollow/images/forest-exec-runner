@@ -63,54 +63,120 @@ while [ "$i" -lt "$n" ]; do
   fi
 
   if [ -n "$uses" ]; then
-    # Container-action mode (GitHub Actions semantics):
-    #   - inputs from `with:` arrive as INPUT_<UPPERCASE_KEY> env vars
-    #     (dashes → underscores, matching GitHub's mapping)
-    #   - `env:` entries pass through as-is
-    #   - /work is mounted in as the workspace so actions can read
-    #     shipped files and share state across steps
-    #   - --network=host: the VM is already the isolation boundary
-    #
-    # Three sub-modes:
-    #   uses only          → image's default ENTRYPOINT+CMD
-    #   uses + run         → entrypoint-override to /bin/sh, run script
-    #                        inside the container (the most flexible
-    #                        shape, lets workflow authors compose any
-    #                        image with any inline shell)
-    #   uses + run + entrypoint → not yet supported; fall back to uses+run
-    #
-    # Pull is split from run so podman's progress bars (which use \r)
-    # don't garble the action's stdout in the captured log channel.
-    if ! podman pull --quiet "$uses" >/tmp/forest-exec-pull.log 2>&1; then
-      echo "[step=$name] pull failed for $uses:" >&2
-      cat /tmp/forest-exec-pull.log >&2
-      exit 5
-    fi
+    case "$uses" in
+      forest:*)
+        # Native Forest component (skips podman entirely):
+        #   uses: forest:NAME@VER
+        # Resolves to /usr/local/lib/forest-components/<name>/<ver>/component
+        # and invokes via the components-v2 SDK protocol:
+        #   ./component commands/<name> '<payload>'
+        # where payload = {spec, input, context}. `with:` populates `input`,
+        # FOREST_* env vars + /work feed `context`, `env:` entries pass
+        # through to the component process.
+        spec_str=${uses#forest:}
+        comp_name=${spec_str%@*}
+        comp_version=${spec_str##*@}
+        if [ "$comp_name" = "$comp_version" ]; then
+          echo "[step=$name] forest:NAME@VER required, got '$uses'" >&2
+          exit 2
+        fi
+        comp_bin="/usr/local/lib/forest-components/$comp_name/$comp_version/component"
+        if [ ! -x "$comp_bin" ]; then
+          echo "[step=$name] no such component '$uses' (expected $comp_bin)" >&2
+          exit 2
+        fi
 
-    env_file=$(mktemp)
-    printf '%s' "$JSON" | jq -r ".steps[$i].with // {} | to_entries[] | \"INPUT_\" + (.key | ascii_upcase | gsub(\"-\"; \"_\")) + \"=\" + (.value | tostring)" >>"$env_file"
-    printf '%s' "$JSON" | jq -r ".steps[$i].env // {} | to_entries[] | .key + \"=\" + (.value | tostring)" >>"$env_file"
+        # Build the JSON payload. Spec is empty in v0; input is the
+        # whole `with:` object verbatim; context picks up the workspace
+        # and FOREST_* identity from the runner's env.
+        payload=$(printf '%s' "$JSON" | jq -c \
+          --arg work_dir "/work" \
+          --arg organisation "${FOREST_ORGANISATION:-}" \
+          --arg project "${FOREST_PROJECT:-}" \
+          --arg environment "${FOREST_ENVIRONMENT:-}" \
+          --arg release_id "${FOREST_RELEASE_ID:-}" \
+          ".steps[$i] | {
+              spec: {},
+              input: (.with // {}),
+              context: {
+                  work_dir: \$work_dir,
+                  organisation: \$organisation,
+                  project: \$project,
+                  environment: \$environment,
+                  release_id: \$release_id,
+                  dry_run: false
+              }
+          }")
 
-    rc=0
-    if [ -n "$run" ]; then
-      podman run --rm --network=host \
-        --env-file="$env_file" \
-        -v /work:/work \
-        -w /work \
-        --entrypoint=/bin/sh \
-        "$uses" -c "$run" || rc=$?
-    else
-      podman run --rm --network=host \
-        --env-file="$env_file" \
-        -v /work:/work \
-        -w /work \
-        "$uses" || rc=$?
-    fi
-    rm -f "$env_file"
-    if [ "$rc" -ne 0 ]; then
-      echo "[step=$name] container action exited $rc" >&2
-      exit "$rc"
-    fi
+        # Step env: any `env:` keys are exported into the component's
+        # process. SDK components rarely need this (they read inputs
+        # from JSON), but it matches the docker-mode contract so a
+        # workflow author switching prefix doesn't see surprising drift.
+        env_file=$(mktemp)
+        printf '%s' "$JSON" | jq -r ".steps[$i].env // {} | to_entries[] | .key + \"=\" + (.value | tostring)" >"$env_file"
+        while IFS='=' read -r ek ev; do
+          [ -z "$ek" ] && continue
+          export "$ek=$ev"
+        done <"$env_file"
+        rm -f "$env_file"
+
+        rc=0
+        "$comp_bin" "commands/$comp_name" "$payload" || rc=$?
+        if [ "$rc" -ne 0 ]; then
+          echo "[step=$name] component '$uses' exited $rc" >&2
+          exit "$rc"
+        fi
+        ;;
+      *)
+        # Container-action mode (GitHub Actions semantics):
+        #   - inputs from `with:` arrive as INPUT_<UPPERCASE_KEY> env vars
+        #     (dashes → underscores, matching GitHub's mapping)
+        #   - `env:` entries pass through as-is
+        #   - /work is mounted in as the workspace so actions can read
+        #     shipped files and share state across steps
+        #   - --network=host: the VM is already the isolation boundary
+        #
+        # Three sub-modes:
+        #   uses only          → image's default ENTRYPOINT+CMD
+        #   uses + run         → entrypoint-override to /bin/sh, run script
+        #                        inside the container (the most flexible
+        #                        shape, lets workflow authors compose any
+        #                        image with any inline shell)
+        #
+        # Pull is split from run so podman's progress bars (which use \r)
+        # don't garble the action's stdout in the captured log channel.
+        if ! podman pull --quiet "$uses" >/tmp/forest-exec-pull.log 2>&1; then
+          echo "[step=$name] pull failed for $uses:" >&2
+          cat /tmp/forest-exec-pull.log >&2
+          exit 5
+        fi
+
+        env_file=$(mktemp)
+        printf '%s' "$JSON" | jq -r ".steps[$i].with // {} | to_entries[] | \"INPUT_\" + (.key | ascii_upcase | gsub(\"-\"; \"_\")) + \"=\" + (.value | tostring)" >>"$env_file"
+        printf '%s' "$JSON" | jq -r ".steps[$i].env // {} | to_entries[] | .key + \"=\" + (.value | tostring)" >>"$env_file"
+
+        rc=0
+        if [ -n "$run" ]; then
+          podman run --rm --network=host \
+            --env-file="$env_file" \
+            -v /work:/work \
+            -w /work \
+            --entrypoint=/bin/sh \
+            "$uses" -c "$run" || rc=$?
+        else
+          podman run --rm --network=host \
+            --env-file="$env_file" \
+            -v /work:/work \
+            -w /work \
+            "$uses" || rc=$?
+        fi
+        rm -f "$env_file"
+        if [ "$rc" -ne 0 ]; then
+          echo "[step=$name] container action exited $rc" >&2
+          exit "$rc"
+        fi
+        ;;
+    esac
   else
     # `run:` mode — shell command in the host VM (alpine substrate +
     # whatever the image bakes in: cue, jq, git, gh, podman).

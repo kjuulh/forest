@@ -1,0 +1,20 @@
+[package]
+name = "forest-component-init"
+edition = "2024"
+version.workspace = true
+publish = false
+
+# First first-party Forest component for the exec runner — renders a small
+# project skeleton into work_dir based on `with:` inputs. Speaks the
+# components-v2 SDK protocol so the same binary is callable from the
+# Forest CLI, the exec runner, or anything else that knows the protocol.
+
+[[bin]]
+name = "forest-component-init"
+path = "src/main.rs"
+
+[dependencies]
+forest-sdk.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true

@@ -53,7 +53,17 @@ RUN mkdir -p /run/containers /var/tmp/containers \
 
 # Bake the workflow runner. The dispatcher's `exec` arm execs this directly;
 # it reads /work/workflow.cue (CUE), evaluates to JSON, and walks the
-# `steps:` list executing each one. v0 supports `run:` only; v1 adds
-# `uses:` container actions backed by the podman binary baked above.
+# `steps:` list executing each one. Supports `run:`, `uses: <image>`, and
+# `uses: forest:NAME@VER` (the latter resolves to a binary baked under
+# /usr/local/lib/forest-components and skips podman entirely).
 COPY forest-exec-runner /usr/local/bin/forest-exec-runner
 RUN chmod 0755 /usr/local/bin/forest-exec-runner
+
+# Forest components — first-party SDK-driven binaries the runner can call
+# directly without spinning up a container. Layout:
+#   /usr/local/lib/forest-components/<name>/<version>/component
+# Each binary speaks the components-v2 protocol (`<method> '<json>'` with
+# `_meta/describe` for capability discovery). Staged-in binaries are
+# already compiled for x86_64-musl by the build harness.
+COPY forest-component-init /usr/local/lib/forest-components/init/v1/component
+RUN chmod 0755 /usr/local/lib/forest-components/init/v1/component

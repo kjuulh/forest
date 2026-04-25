@@ -12,6 +12,7 @@ hollow-vsock = { path = "crates/hollow-vsock" }
 # Shared with forest (path dependencies up to parent)
 forest-grpc-interface = { path = "../crates/forest-grpc-interface" }
 forest-runner = { path = "../crates/forest-runner" }
+forest-sdk = { path = "../crates/forest-sdk" }
 
 anyhow = { version = "1" }
 tokio = { version = "1", features = ["full"] }
