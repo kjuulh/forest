@@ -54,6 +54,8 @@ async fn echo_through_orchestrator() -> anyhow::Result<()> {
             organisation: "forest".into(),
         }),
         mode: ReleaseMode::Deploy.into(),
+        // Echo destination doesn't need server-managed state.
+        artifact_store: None,
     };
 
     orchestrator.fake_server.dispatch(assignment)?;

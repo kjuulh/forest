@@ -222,6 +222,21 @@ impl Dispatcher {
             destination.environment.clone(),
         );
 
+        // If this destination has a server-issued artifact store (e.g.
+        // terraform.tfstate over HTTP), translate the generic URL+auth
+        // shape into whatever env vars the destination's tooling expects.
+        // Without this, terraform runs from empty state every release and
+        // resources end up "created" each run.
+        if let Some(store) = assignment.artifact_store.as_ref() {
+            tracing::info!(
+                store_id = %store.id,
+                store_url = %store.url,
+                dest_type = %dest_type.name,
+                "applying release artifact_store env vars"
+            );
+            apply_artifact_store_env(&mut environment, &dest_type.name, store);
+        }
+
         // Forest artifacts pack files for every destination of every type
         // under one tarball, with paths shaped like
         //   `<env>/<dest-name-or-regex>/<org>/<type>@<version>/<file>`
@@ -398,6 +413,35 @@ async fn complete_release(
     {
         tracing::error!(error = %e, "CompleteRelease RPC failed");
     }
+}
+
+/// Translate the generic `ReleaseArtifactStore` (URL + basic auth) into
+/// the env vars a particular destination's tooling expects. Adding a new
+/// destination that uses `artifact_store`? Add an arm here.
+fn apply_artifact_store_env(
+    env: &mut HashMap<String, String>,
+    dest_name: &str,
+    store: &forest_grpc_interface::ReleaseArtifactStore,
+) {
+    if dest_name == "terraform" {
+        // Terraform's HTTP backend uses {base, base/lock, base/unlock} with
+        // a fixed lock/unlock method. The base URL comes from the server.
+        env.insert("TF_HTTP_ADDRESS".to_string(), store.url.clone());
+        env.insert(
+            "TF_HTTP_LOCK_ADDRESS".to_string(),
+            format!("{}/lock", store.url),
+        );
+        env.insert(
+            "TF_HTTP_UNLOCK_ADDRESS".to_string(),
+            format!("{}/unlock", store.url),
+        );
+        env.insert("TF_HTTP_USERNAME".to_string(), store.username.clone());
+        env.insert("TF_HTTP_PASSWORD".to_string(), store.password.clone());
+        env.insert("TF_HTTP_LOCK_METHOD".to_string(), "POST".to_string());
+        env.insert("TF_HTTP_UNLOCK_METHOD".to_string(), "POST".to_string());
+    }
+    // Other destinations that grow into using artifact_store get their own
+    // arm here. Default: no env injection.
 }
 
 /// Pick the subset of an artifact's deployment files that belongs to a

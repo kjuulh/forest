@@ -49,7 +49,14 @@ async fn terraform_plan_through_orchestrator() -> anyhow::Result<()> {
         ReleaseFixture {
             organisation: "test-org".into(),
             project: "terraform-smoke".into(),
-            release_files: vec![("main.tf".into(), MAIN_TF.into())],
+            // Match production layout: artefacts are packed under
+            // <env>/<dest-name-or-pattern>/<org>/<type>@<version>/<file>.
+            // The controller's dispatcher filters to this destination's
+            // subset and strips the prefix before sending to the guest.
+            release_files: vec![(
+                "test/terraform-smoke-dest/forest/terraform@1/main.tf".into(),
+                MAIN_TF.into(),
+            )],
             ..Default::default()
         },
     );
@@ -73,6 +80,10 @@ async fn terraform_plan_through_orchestrator() -> anyhow::Result<()> {
         }),
         // Plan mode: guest captures stdout and returns it in CompleteRelease.plan_output.
         mode: ReleaseMode::Plan.into(),
+        // The puppet doesn't run a real state backend; the test config only
+        // creates `null_resource` + `local_file` so plan-without-state is
+        // well-defined.
+        artifact_store: None,
     };
 
     orchestrator.fake_server.dispatch(assignment)?;

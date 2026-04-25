@@ -1,7 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
-use forest_grpc_interface::{DestinationInfo, ReleaseMode, WorkAssignment};
+use forest_grpc_interface::{
+    DestinationInfo, ReleaseArtifactStore, ReleaseMode, WorkAssignment,
+};
 use forest_models::ReleaseStatus;
 use futures::StreamExt;
 use notmad::{Component, ComponentInfo, MadError};
@@ -11,7 +13,11 @@ use uuid::Uuid;
 use crate::{
     State,
     destination_services::{DestinationServices, DestinationServicesState},
-    destinations::{DestinationIndex, logger::DestinationLogger},
+    destinations::{
+        DestinationIndex,
+        logger::DestinationLogger,
+        terraformv1::{TerraformStateStore, TerraformStateStoreState},
+    },
     runner_manager::RunnerManager,
     services::{
         destination_registry::{DestinationRegistry, DestinationRegistryState},
@@ -40,6 +46,10 @@ struct SchedulerInner {
     release_token_registry: ReleaseTokenRegistry,
     release_event_store: ReleaseEventStore,
     policy_registry: PolicyRegistry,
+    /// Owned by terraformv1's in-process backend; the scheduler reads it to
+    /// hand state-backend credentials to remote runners (e.g. hollow) via
+    /// WorkAssignment.terraform_state. Cheap clone (Arcs inside).
+    tf_state: TerraformStateStore,
     nats: async_nats::Client,
     disable_in_process: bool,
 }
@@ -62,6 +72,7 @@ impl Scheduler {
                 release_token_registry: state.release_token_registry(),
                 release_event_store: state.release_event_store(),
                 policy_registry: state.policy_registry(),
+                tf_state: state.terraform_state_store(),
                 nats: state.nats.clone(),
                 disable_in_process,
             }),
@@ -204,6 +215,31 @@ impl SchedulerInner {
                 ReleaseMode::Deploy
             };
 
+            // Populate the artifact-store handle for destination types that
+            // need server-managed state. Today only `forest/terraform/<v>`;
+            // we add arms here as new destination types come online. The
+            // shape (URL + basic auth) is generic on purpose — the runner
+            // translates to destination-specific env vars.
+            let artifact_store = if dest.destination_type.organisation == "forest"
+                && dest.destination_type.name == "terraform"
+            {
+                let project_id = release_state.project_id.to_string();
+                let state_id = TerraformStateStore::state_id_for(&dest.environment, &project_id);
+                let (id, password) = self.tf_state.urls(state_id).await;
+                let url = format!(
+                    "{}/{id}",
+                    self.tf_state.external_url.trim_end_matches('/')
+                );
+                Some(ReleaseArtifactStore {
+                    id,
+                    url,
+                    username: "forest-terraform-v1".to_string(),
+                    password,
+                })
+            } else {
+                None
+            };
+
             let assignment = WorkAssignment {
                 release_token: token,
                 release_id: release_id.to_string(),
@@ -218,6 +254,7 @@ impl SchedulerInner {
                     organisation: dest.organisation.clone(),
                 }),
                 mode: mode.into(),
+                artifact_store,
             };
 
             match work_sender.send(assignment).await {

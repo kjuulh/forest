@@ -40,7 +40,7 @@ pub struct TerraformStateStore {
     users: Arc<Mutex<BTreeMap<String, String>>>,
     locks: Arc<Mutex<BTreeMap<String, Mutex<Option<String>>>>>,
 
-    external_url: String,
+    pub external_url: String,
 }
 
 impl TerraformStateStore {
@@ -68,11 +68,20 @@ impl TerraformStateStore {
         Ok(())
     }
 
-    fn state_id(&self, destination: &Destination, project_id: &str) -> String {
+    pub fn state_id(&self, destination: &Destination, project_id: &str) -> String {
         format!("{}.{}", destination.environment, project_id)
     }
 
-    async fn urls(&self, state_id: String) -> (String, String) {
+    /// Like [`state_id`](Self::state_id) but for callers that don't have a
+    /// `Destination` handy (e.g. the scheduler when computing credentials
+    /// for a remote runner). The shape MUST match `state_id` exactly so
+    /// in-process and remote runs converge on the same state record.
+    pub fn state_id_for(environment: &str, project_id: &str) -> String {
+        format!("{environment}.{project_id}")
+    }
+
+    /// Look up (or generate) the secret for a state id and return both back.
+    pub async fn urls(&self, state_id: String) -> (String, String) {
         let mut user = self.users.lock().await;
 
         let secret = user.entry(state_id.clone()).or_insert_with(|| {

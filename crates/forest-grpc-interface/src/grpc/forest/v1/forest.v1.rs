@@ -3672,6 +3672,32 @@ pub struct WorkAssignment {
     /// Execution mode. Defaults to DEPLOY if unset.
     #[prost(enumeration="ReleaseMode", tag="7")]
     pub mode: i32,
+    /// Per-release HTTP-backed artifact store for destinations that need
+    /// server-managed state (terraform.tfstate, k8s applied snapshots,
+    /// future destinations…). Destination types that don't need it ignore
+    /// these fields. Server-issued per release_token; do NOT log.
+    #[prost(message, optional, tag="8")]
+    pub artifact_store: ::core::option::Option<ReleaseArtifactStore>,
+}
+/// Generic per-release artifact store exposed by forest-server. The runner
+/// (or destination handler) translates the URL + basic-auth pair into
+/// whatever the destination type needs — e.g. `terraform/v1` runs
+/// `TF_HTTP_ADDRESS=<url>` plus `TF_HTTP_LOCK_ADDRESS=<url>/lock` etc.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReleaseArtifactStore {
+    /// Stable identifier of this store; useful for logs/metrics. For
+    /// terraform: `<environment>.<project_id>`. Treat as opaque otherwise.
+    #[prost(string, tag="1")]
+    pub id: ::prost::alloc::string::String,
+    /// Base URL the runner reads/writes against.
+    #[prost(string, tag="2")]
+    pub url: ::prost::alloc::string::String,
+    /// HTTP basic auth — the runner uses these for whatever destination-
+    /// specific protocol the URL implements.
+    #[prost(string, tag="3")]
+    pub username: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub password: ::prost::alloc::string::String,
 }
 /// Destination configuration sent with the work assignment.
 #[derive(Clone, PartialEq, ::prost::Message)]
