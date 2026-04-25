@@ -330,30 +330,84 @@ fn bind_mount(source: &str, target: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Mount tmpfs at every directory the runtime needs to write to. The rootfs
-/// is read-only, so without these mounts /work, /tmp, /run etc. would all
-/// EROFS the moment a job tries to use them.
+/// Mount the writable + pseudo filesystems every job needs. The rootfs is
+/// read-only and the Firecracker kernel only auto-mounts `devtmpfs`, so
+/// /proc, /sys, the cgroup v2 hierarchy, and the tmpfs scratch areas are
+/// all on us.
 ///
-/// Idempotent: silently no-ops if the path is already a mount point (the
-/// kernel might have set up `/dev` or `/proc` for us depending on the kernel
-/// config). Errors on individual mounts are logged but don't abort the guest
-/// — the worst case is the job fails with a clear "permission denied" later,
-/// which beats hanging.
+/// Without /proc + /sys most container-aware tooling (and even basic things
+/// like `ps`, `unshare`, anything that reads `/proc/self/*`) breaks in
+/// confusing ways. Mounting them up-front keeps the guest looking like a
+/// normal Linux userspace.
+///
+/// Errors on individual mounts are logged but don't abort the guest — the
+/// worst case is the job fails later with a clear ENOENT/EROFS, which beats
+/// hanging.
 fn setup_writable_areas() -> anyhow::Result<()> {
-    // size=… is generous but bounded by the VM's `mem_size_mib`, so a
-    // runaway tmpfs can't exceed the VM's RAM cap.
+    // /proc: procfs. Required for /proc/self, namespace links, sysctl.
+    let _ = std::fs::create_dir_all("/proc");
+    if let Err(e) = mount_pseudo("proc", "/proc", "proc", "") {
+        tracing::warn!(error = %e, "mount /proc failed");
+    }
+    // /sys: sysfs. Required for /sys/fs/cgroup and most kernel introspection.
+    let _ = std::fs::create_dir_all("/sys");
+    if let Err(e) = mount_pseudo("sysfs", "/sys", "sysfs", "") {
+        tracing::warn!(error = %e, "mount /sys failed");
+    }
+    // /sys/fs/cgroup: cgroup v2 unified hierarchy. Modern OCI runtimes
+    // (podman, runc with systemd cgroup driver, …) require this; the legacy
+    // v1 hierarchy is deprecated. nsdelegate enables unprivileged subtree
+    // delegation, which container runtimes lean on for nested cgroups.
+    let _ = std::fs::create_dir_all("/sys/fs/cgroup");
+    if let Err(e) = mount_pseudo("cgroup2", "/sys/fs/cgroup", "cgroup2", "nsdelegate") {
+        tracing::warn!(error = %e, "mount /sys/fs/cgroup failed");
+    }
+
+    // tmpfs scratch. size=… is generous but bounded by the VM's
+    // `mem_size_mib`, so a runaway tmpfs can't exceed the VM's RAM cap.
     for (path, size_mib) in [
         ("/work", 512),
         ("/tmp", 512),
         ("/run", 64),
         ("/var/tmp", 256),
     ] {
-        // Best-effort: ensure mount target exists. On a read-only rootfs we
-        // rely on the image already having these dirs.
         let _ = std::fs::create_dir_all(path);
         if let Err(e) = mount_tmpfs(path, size_mib) {
             tracing::warn!(target = path, error = %e, "tmpfs mount failed");
         }
+    }
+    Ok(())
+}
+
+/// Mount a pseudo-filesystem (procfs / sysfs / cgroup2). `data` is passed as
+/// the mount-options string; pass empty for default.
+fn mount_pseudo(source: &str, target: &str, fstype: &str, data: &str) -> anyhow::Result<()> {
+    use std::ffi::CString;
+    let source_c = CString::new(source)?;
+    let target_c = CString::new(target)?;
+    let fstype_c = CString::new(fstype)?;
+    let data_c = CString::new(data)?;
+    let data_ptr = if data.is_empty() {
+        std::ptr::null()
+    } else {
+        data_c.as_ptr().cast()
+    };
+    let rc = unsafe {
+        libc::mount(
+            source_c.as_ptr(),
+            target_c.as_ptr(),
+            fstype_c.as_ptr(),
+            0,
+            data_ptr,
+        )
+    };
+    if rc != 0 {
+        let err = std::io::Error::last_os_error();
+        // EBUSY means it's already mounted — fine, treat as success.
+        if err.raw_os_error() == Some(libc::EBUSY) {
+            return Ok(());
+        }
+        anyhow::bail!("mount {fstype} at {target}: {err}");
     }
     Ok(())
 }
