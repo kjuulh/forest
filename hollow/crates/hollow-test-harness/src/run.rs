@@ -30,6 +30,10 @@ pub struct JobSpec {
     /// the tap + iptables. Required for any job that touches the network
     /// (cloud APIs, terraform registry, package downloads, etc.).
     pub network: bool,
+    /// Replay the guest serial console as `console`-channel log lines.
+    /// Default off (production posture); tests asserting on boot output
+    /// flip to true.
+    pub capture_console: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +106,7 @@ struct WireRunnerSpec<'a> {
     vcpus: u8,
     mem_mib: u32,
     timeout_seconds: u32,
+    capture_console: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     network: Option<WireNetworkSpec>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -183,6 +188,7 @@ pub fn execute(cfg: &Config, layout: &RemoteLayout, job: JobSpec) -> anyhow::Res
         vcpus: job.vcpus.unwrap_or(1),
         mem_mib: job.mem_mib.unwrap_or(512),
         timeout_seconds: job.timeout_seconds.unwrap_or(120),
+        capture_console: job.capture_console,
         network,
         jailer,
     };

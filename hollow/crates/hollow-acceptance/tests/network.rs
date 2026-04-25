@@ -60,6 +60,9 @@ fn network_egress_locked_down() -> anyhow::Result<()> {
         command: vec!["/bin/sh".into(), "-c".into(), PROBE_SCRIPT.into()],
         network: true,
         timeout_seconds: Some(60),
+        // Asserting on `IP-Config:` from the kernel below requires console
+        // replay; production has this off by default.
+        capture_console: true,
         ..Default::default()
     })?;
 

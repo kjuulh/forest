@@ -96,6 +96,7 @@ async fn run(cli: Cli) -> anyhow::Result<i32> {
         rootfs_read_only: true,
         network,
         jailer,
+        capture_console: spec.capture_console,
     };
 
     let outer_timeout = Duration::from_secs(spec.timeout_seconds.into());

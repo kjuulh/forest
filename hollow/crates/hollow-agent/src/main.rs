@@ -82,6 +82,13 @@ struct Cli {
     /// GID Firecracker drops to inside the jail.
     #[arg(long, env = "HOLLOW_JAILER_GID", default_value = "10000")]
     jailer_gid: u32,
+
+    /// Replay the guest serial console as log events (channel="console").
+    /// Off in production: the console captures everything PID 1 prints,
+    /// which is a passive secret-leak channel if a job process panics.
+    /// A short tail is always emitted on failure regardless of this flag.
+    #[arg(long, env = "HOLLOW_CAPTURE_CONSOLE", default_value = "false")]
+    capture_console: bool,
 }
 
 fn default_agent_id() -> String {
@@ -145,6 +152,7 @@ async fn main() -> anyhow::Result<()> {
             host_iface,
             dns,
             jailer,
+            cli.capture_console,
         ))
         .run()
         .await?;

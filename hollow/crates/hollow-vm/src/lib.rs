@@ -54,6 +54,13 @@ pub struct VmConfig {
     /// per-VM cgroup) instead of being spawned directly. Production should
     /// always set this; the direct path is for diagnostics.
     pub jailer: Option<JailerConfig>,
+    /// When true, the kernel/serial-console output is read after VM
+    /// shutdown and re-emitted as `VmEvent::GuestConsole` lines. Useful for
+    /// diagnosing boot failures, but the console captures everything the
+    /// guest's PID 1 prints — so a panicking job that dumps env vars to
+    /// stderr would end up in the log channel. Default false to keep that
+    /// channel closed; flip to true only when actively debugging.
+    pub capture_console: bool,
 }
 
 impl VmConfig {
@@ -249,17 +256,34 @@ where
     on_event(VmEvent::Stage(VmStage::VmShutdown));
     let _ = vm.shutdown().await;
 
-    // After shutdown, Firecracker's stdout buffer is flushed. Surface every
-    // line so consumers can diagnose failures that happened outside the job
-    // protocol (kernel panics, missing /init, vsock handshake errors).
+    // Console replay is opt-in. The serial console captures kernel dmesg
+    // AND anything PID 1 (hollow-guest) writes to stderr — including any
+    // tracing line that ever stringifies a job env var. We don't trust
+    // ourselves not to add that someday, and we definitely don't trust
+    // arbitrary tofu providers, so the default is "stay quiet".
+    //
+    // On the failure path (no completion event reached us), we always emit
+    // a short tail regardless of `capture_console` so operators have a
+    // fighting chance at diagnosing boot/handshake errors. The tail is
+    // capped to keep the leak surface bounded.
+    let outcome_failed = outcome.is_err();
     if let Ok(console) = vm.read_console_log().await {
-        emit_console_lines(&console, &mut on_event);
+        if config.capture_console {
+            emit_console_lines(&console, &mut on_event);
+        } else if outcome_failed {
+            emit_console_tail(&console, FAILURE_CONSOLE_TAIL_LINES, &mut on_event);
+        }
     }
 
     drop(session);
 
     outcome
 }
+
+/// On a failure with `capture_console = false`, surface this many of the
+/// last console lines so operators can still see kernel panics / vsock
+/// handshake errors.
+const FAILURE_CONSOLE_TAIL_LINES: usize = 50;
 
 /// Max guest console bytes we'll replay through the event channel. A typical
 /// boot is ~20 KiB; this cap prevents pathological runaway kernel prints from
@@ -278,6 +302,21 @@ fn emit_console_lines<F: FnMut(VmEvent)>(console: &str, on_event: &mut F) {
         }
         on_event(VmEvent::GuestConsole {
             line: line.to_string(),
+        });
+    }
+}
+
+fn emit_console_tail<F: FnMut(VmEvent)>(console: &str, max_lines: usize, on_event: &mut F) {
+    let slice = if console.len() > MAX_CONSOLE_BYTES {
+        &console[console.len() - MAX_CONSOLE_BYTES..]
+    } else {
+        console
+    };
+    let lines: Vec<&str> = slice.lines().filter(|l| !l.is_empty()).collect();
+    let start = lines.len().saturating_sub(max_lines);
+    for line in &lines[start..] {
+        on_event(VmEvent::GuestConsole {
+            line: (*line).to_string(),
         });
     }
 }

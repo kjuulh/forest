@@ -138,6 +138,9 @@ export HOLLOW_JAILER_BIN={jailer_bin}
 export HOLLOW_JAILER_CHROOT_BASE={jailer_chroot}
 export HOLLOW_JAILER_UID={jailer_uid}
 export HOLLOW_JAILER_GID={jailer_gid}
+# Tests assert on kernel boot lines + 'Linux version' from the orchestrator
+# path, which requires console replay. Production agents leave this off.
+export HOLLOW_CAPTURE_CONSOLE=true
 export RUST_LOG=hollow=debug,info
 exec {agent}"#,
         port = controller_port,

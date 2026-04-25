@@ -15,6 +15,8 @@ fn echo_hello_in_microvm() -> anyhow::Result<()> {
             "-c".into(),
             "echo hello-from-vm".into(),
         ],
+        // Need console output to assert on the kernel banner below.
+        capture_console: true,
         ..Default::default()
     })?;
 

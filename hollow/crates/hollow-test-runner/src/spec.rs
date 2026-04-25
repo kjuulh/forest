@@ -32,6 +32,12 @@ pub struct RunnerSpec {
     /// Optional jailer wrapper. None → spawn Firecracker directly (dev path).
     #[serde(default)]
     pub jailer: Option<JailerSpec>,
+    /// Replay the guest serial console as `Log{channel="console"}` events
+    /// after the VM exits. Off by default — the console captures kernel
+    /// dmesg + anything PID 1 prints, which is a passive secret-leak channel
+    /// for production. Tests that assert on boot output set this to true.
+    #[serde(default)]
+    pub capture_console: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

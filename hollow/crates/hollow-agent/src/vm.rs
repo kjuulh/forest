@@ -34,6 +34,10 @@ pub struct VmPaths {
     /// Jailer wrapping (chroot + UID drop). When present, every VM launch
     /// goes through jailer; this is the production posture.
     pub jailer: Option<JailerConfig>,
+    /// Operator opt-in to replaying the guest serial console. Default off;
+    /// the failure-path tail in hollow-vm still surfaces a short snippet
+    /// when something breaks before the guest can report a clean exit.
+    pub capture_console: bool,
 }
 
 pub async fn run_job(
@@ -138,6 +142,7 @@ async fn run_job_inner(
         rootfs_read_only: true,
         network: network.as_ref().map(|(c, _)| c.clone()),
         jailer: vm_paths.jailer.clone(),
+        capture_console: vm_paths.capture_console,
     };
 
     let job_def = JobDefinition {

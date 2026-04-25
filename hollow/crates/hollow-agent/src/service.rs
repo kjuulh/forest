@@ -111,6 +111,7 @@ impl AgentService {
         host_iface: String,
         dns: Vec<String>,
         jailer: Option<hollow_vm::JailerConfig>,
+        capture_console: bool,
     ) -> Self {
         // Remove any leftover taps from a previous agent process before we
         // start handing out subnet indexes — otherwise a stale `hlw-5` will
@@ -133,6 +134,7 @@ impl AgentService {
                 host_iface,
                 dns,
                 jailer,
+                capture_console,
             }),
             net_allocator: hollow_vm::NetworkAllocator::new(),
         }
