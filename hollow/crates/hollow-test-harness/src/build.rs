@@ -84,6 +84,7 @@ const IMAGES: &[ImageBuild] = &[
             // gitea-create-repo, init, git-init, …). When any component
             // is rebuilt the stamp gets touched and the ext4 invalidates.
             "forest-cache/.cache-stamp",
+            "forest",
         ],
     },
 ];
@@ -172,6 +173,30 @@ pub fn build(cfg: &Config) -> anyhow::Result<BuildArtifacts> {
             },
         ],
     )?;
+
+    // Forest CLI itself — baked into the image so the guest looks like
+    // a normal Forest dev box. The runner currently resolves components
+    // through the pre-populated cache directly, but having `forest` on
+    // PATH unblocks the next step: `forest components sync` against a
+    // live registry on cache miss.
+    let forest_bin = build_cargo_forest(cfg, "forest", GUEST_TARGET)?;
+    let staged_forest = cfg.repo_root.join("images").join("forest");
+    let needs_copy = match (
+        std::fs::metadata(&staged_forest).and_then(|m| m.modified()),
+        std::fs::metadata(&forest_bin).and_then(|m| m.modified()),
+    ) {
+        (Ok(staged), Ok(src)) => staged < src,
+        _ => true,
+    };
+    if needs_copy {
+        std::fs::copy(&forest_bin, &staged_forest).with_context(|| {
+            format!(
+                "stage forest CLI {} → {}",
+                forest_bin.display(),
+                staged_forest.display()
+            )
+        })?;
+    }
 
     let mut images = Vec::with_capacity(IMAGES.len());
     for spec in IMAGES {

@@ -5,6 +5,5 @@ forest-cache/
 
 # Per-component artifacts staged into images/ for the Dockerfile to
 # COPY in. Binary, regenerated on every build.
-forest-component-init
-forest-component-script
 hollow-guest
+forest

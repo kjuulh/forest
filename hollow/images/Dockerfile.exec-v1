@@ -71,6 +71,12 @@ RUN chmod 0755 /usr/local/bin/forest-exec-runner
 #       Generic engine: takes manifest.json + scripts/<method>.sh, speaks
 #       the v2 protocol on their behalf. Lets new components ship as a
 #       directory of shell scripts.
+# Forest CLI itself — gives the guest a Forest dev-box-shaped tool
+# surface. Today the runner reads the cache directly; the next step
+# is to wire `forest components sync` for cache-miss → registry pull.
+COPY forest /usr/local/bin/forest
+RUN chmod 0755 /usr/local/bin/forest
+
 # Forest components (proper layout under components/forest-contrib/<name>/
 # in the forest workspace) ship through the standard Forest cache, NOT
 # baked at fixed paths. The build harness pre-populates the content-
