@@ -72,10 +72,18 @@ pub fn bootstrap(cfg: &Config, artifacts: &BuildArtifacts) -> anyhow::Result<Rem
     ship_artifact(cfg, &artifacts.runner_bin, &runner_bin, /* exec */ true)?;
     ship_artifact(cfg, &artifacts.agent_bin, &agent_bin, /* exec */ true)?;
 
-    // 5. Ship every rootfs image built locally.
+    // 5. Ship every rootfs image built locally, plus its sha256 sidecar.
+    //    hollow-vm verifies the sidecar matches before each VM launch, so a
+    //    missing or stale sidecar makes the launch fail loudly.
     for img in &artifacts.images {
         let remote_path = format!("{images_dir}/{}.ext4", img.name);
         ship_artifact(cfg, &img.ext4_path, &remote_path, /* exec */ false)?;
+
+        let sidecar_local = img
+            .ext4_path
+            .with_file_name(format!("{}.ext4.sha256", img.name));
+        let remote_sidecar = format!("{remote_path}.sha256");
+        ship_artifact(cfg, &sidecar_local, &remote_sidecar, /* exec */ false)?;
     }
 
     // 6. Provide image aliases so the controller's `{dest}-v{ver}.ext4`
@@ -89,6 +97,12 @@ link_if_missing() {{
   target="$1"; link="$2"
   if [ -f "$target" ] && [ ! -e "$link" ]; then
     ln -sf "$target" "$link"
+  fi
+  # Sidecars: hollow-vm reads `<image>.ext4.sha256` next to the rootfs, so
+  # the alias has to carry one too. Re-symlink unconditionally so the alias
+  # always points at the up-to-date checksum even after image rebuilds.
+  if [ -f "$target.sha256" ]; then
+    ln -sfn "$target.sha256" "$link.sha256"
   fi
 }}
 link_if_missing base.ext4 echo-v1.ext4

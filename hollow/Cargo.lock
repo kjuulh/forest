@@ -773,6 +773,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "hex",
  "hollow-vsock",
  "http-body-util",
  "hyper",
@@ -781,6 +782,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tracing",
  "uuid",

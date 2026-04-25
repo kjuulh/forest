@@ -6,6 +6,7 @@
 //! callback passed to [`run_job`].
 
 pub mod firecracker;
+pub mod image;
 pub mod jailer;
 pub mod net;
 pub mod session;
@@ -173,6 +174,11 @@ where
     } else {
         None
     };
+
+    // Verify the rootfs hasn't been swapped between build and launch BEFORE
+    // anything stages it into a chroot. A mismatch is a hard fail — refusing
+    // to boot a tampered image is the whole point of this check.
+    image::verify_digest(&config.rootfs).context("verify rootfs digest")?;
 
     on_event(VmEvent::Stage(VmStage::VmSpawn));
     let mut vm = match &config.jailer {

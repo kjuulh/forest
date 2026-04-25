@@ -26,6 +26,8 @@ hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", 
 hyperlocal = "0.9"
 http-body-util = "0.1"
 bytes.workspace = true
+sha2 = "0.10"
+hex = "0.4"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

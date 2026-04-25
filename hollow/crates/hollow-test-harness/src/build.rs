@@ -171,6 +171,15 @@ fn build_image(cfg: &Config, spec: &ImageBuild, guest_bin: &Path) -> anyhow::Res
     // and docker's own layer cache handles that. Still re-pack whenever the
     // dockerfile changes.
     if out.exists() && newer_than(&out, &dockerfile)? && newer_than(&out, guest_bin)? {
+        // Ensure the sidecar exists even on a cache hit — older harness runs
+        // didn't write it, and bootstrap.rs needs it to ship.
+        let sidecar = out.with_file_name(format!("{}.ext4.sha256", spec.name));
+        if !sidecar.exists() {
+            let digest = sha256_file(&out)
+                .with_context(|| format!("hash {}", out.display()))?;
+            std::fs::write(&sidecar, format!("{digest}\n"))
+                .with_context(|| format!("write {}", sidecar.display()))?;
+        }
         tracing::info!(image = spec.name, path = %out.display(), "up-to-date, reusing");
         return Ok(ImageArtifact {
             name: spec.name.to_string(),
@@ -263,11 +272,27 @@ fn build_image(cfg: &Config, spec: &ImageBuild, guest_bin: &Path) -> anyhow::Res
         bail!("mkfs.ext4 failed");
     }
 
-    tracing::info!(image = spec.name, path = %out.display(), "ext4 built");
+    // Sidecar checksum so hollow-vm can verify the bytes haven't been
+    // swapped between here and the launch host.
+    let sidecar = out.with_file_name(format!("{}.ext4.sha256", spec.name));
+    let digest = sha256_file(&out)
+        .with_context(|| format!("hash {}", out.display()))?;
+    std::fs::write(&sidecar, format!("{digest}\n"))
+        .with_context(|| format!("write {}", sidecar.display()))?;
+
+    tracing::info!(image = spec.name, path = %out.display(), sha256 = %digest, "ext4 built");
     Ok(ImageArtifact {
         name: spec.name.to_string(),
         ext4_path: out,
     })
+}
+
+fn sha256_file(path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    let mut f = std::fs::File::open(path)?;
+    std::io::copy(&mut f, &mut hasher)?;
+    Ok(hex::encode(hasher.finalize()))
 }
 
 fn newer_than(a: &Path, b: &Path) -> anyhow::Result<bool> {
