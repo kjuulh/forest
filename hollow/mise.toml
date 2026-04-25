@@ -84,6 +84,11 @@ description = "Run the CUE-driven exec/v1 workflow runner inside Firecracker"
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }
 run = "cargo test -p hollow-acceptance --test exec -- --nocapture"
 
+[tasks."test:stress"]
+description = "End-to-end stress: scaffold + git + podman build + run + cleanup pipeline"
+env = { HOLLOW_TEST_HOST = "forage-local-agent" }
+run = "cargo test -p hollow-acceptance --test pipeline_stress -- --nocapture"
+
 [tasks."test:secrets"]
 description = "Verify the secret-shipping channel — bytes reach guest, never log"
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }
