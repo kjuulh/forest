@@ -1,16 +1,40 @@
-FROM hollow-base:latest
+FROM hollow-base:test
 
-ARG FLUX_VERSION=2.4.0
-ARG KUSTOMIZE_VERSION=5.4.3
-
-RUN curl -fsSL \
-    "https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_linux_amd64.tar.gz" \
-    | tar -xz -C /usr/local/bin/ \
-    && flux version --client
-
-RUN curl -fsSL \
-    "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
-    | tar -xz -C /usr/local/bin/ \
-    && kustomize version
+# Image for the `forest/fluxv1/1` destination type. Contains the tools the
+# legacy fluxv1 destination uses today: git + openssh-client for the SSH/HTTPS
+# git workflow, plus the flux + kustomize CLIs for cluster-side manifest
+# generation. The real Hollow-side dispatcher arm that orchestrates these
+# (clone → write manifests → commit → push → optional reconcile webhook) is
+# a separate commit; this image is the substrate.
+#
+# Versions and SHAs sourced from the upstream release checksum files
+# (`flux_<v>_checksums.txt`, kustomize's `checksums.txt`). To rotate: bump
+# the ARGs, refresh the SHA constants from the corresponding upstream file.
+ARG FLUX_VERSION=2.8.6
+ARG FLUX_SHA256=c53cc990ae266f7840f64c81515d701d8821d558a9062aa4211d71b38cf044be
+ARG KUSTOMIZE_VERSION=5.8.1
+ARG KUSTOMIZE_SHA256=029a7f0f4e1932c52a0476cf02a0fd855c0bb85694b82c338fc648dcb53a819d
 
 RUN apk add --no-cache git openssh-client
+
+# --- Flux CLI -------------------------------------------------------------
+RUN curl -fsSL "https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_linux_amd64.tar.gz" \
+      -o /tmp/flux.tgz \
+ && echo "${FLUX_SHA256}  /tmp/flux.tgz" | sha256sum -c - \
+ && tar -xz -C /usr/local/bin/ -f /tmp/flux.tgz flux \
+ && chmod 0755 /usr/local/bin/flux \
+ && rm /tmp/flux.tgz \
+ && /usr/local/bin/flux --version
+
+# --- Kustomize CLI --------------------------------------------------------
+RUN curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
+      -o /tmp/kustomize.tgz \
+ && echo "${KUSTOMIZE_SHA256}  /tmp/kustomize.tgz" | sha256sum -c - \
+ && tar -xz -C /usr/local/bin/ -f /tmp/kustomize.tgz kustomize \
+ && chmod 0755 /usr/local/bin/kustomize \
+ && rm /tmp/kustomize.tgz \
+ && /usr/local/bin/kustomize version
+
+# Pre-create ~/.ssh so the runtime can drop a key without surprises about
+# parent directory ownership when running as root inside the VM.
+RUN mkdir -p /root/.ssh && chmod 0700 /root/.ssh

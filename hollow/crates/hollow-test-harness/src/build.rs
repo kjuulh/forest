@@ -47,6 +47,17 @@ const IMAGES: &[ImageBuild] = &[
         fs_label: "hollow-tf",
         size: "1024M",
     },
+    ImageBuild {
+        // Forest's destination type is `forest/fluxv1/1` — controller maps
+        // this to image `fluxv1-v1.ext4`. Ships git + openssh-client + flux
+        // CLI + kustomize CLI; the real flux git-clone/push workflow comes
+        // in a follow-up dispatcher arm.
+        name: "fluxv1-v1",
+        dockerfile: "Dockerfile.fluxv1",
+        tag: "hollow-fluxv1-v1:test",
+        fs_label: "hollow-flux",
+        size: "1024M",
+    },
 ];
 
 pub struct BuildArtifacts {

@@ -74,6 +74,11 @@ description = "Run real terraform/1 (OpenTofu under the hood) inside Firecracker
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }
 run = "cargo test -p hollow-acceptance --test terraform -- --nocapture"
 
+[tasks."test:fluxv1"]
+description = "Phase-2 MVP: fluxv1 image toolchain check (git + flux + kustomize)"
+env = { HOLLOW_TEST_HOST = "forage-local-agent" }
+run = "cargo test -p hollow-acceptance --test fluxv1 -- --nocapture"
+
 [tasks."test:network"]
 description = "Per-VM NAT networking — fetches a public HTTPS endpoint from inside the guest"
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }

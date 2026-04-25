@@ -1203,8 +1203,14 @@ The controller mirrors the executor flow from `crates/forest-runner/src/executor
 
 ### Phase 2: All Destinations
 
-1. Add flux destination support to guest rootfs images
-2. Add forage/component destination support
+1. ✅ MVP — `Dockerfile.fluxv1` ships git + openssh-client + flux CLI +
+   kustomize CLI; controller has `fluxv1` arm; integration test proves the
+   image boots and the toolchain is reachable. The actual git-clone /
+   write-manifests / commit / push workflow (and SSH key shipping) is the
+   next iteration on top of this substrate.
+2. Add forage/component destination support — `forage` is gRPC-based, no
+   shell command surface, so this likely stays on the legacy in-process
+   runner.
 3. Increase controller's `max_concurrent`, decrease old runner's `max_concurrent`
 4. Gradually shift all traffic to Hollow
 

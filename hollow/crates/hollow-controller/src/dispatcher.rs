@@ -558,6 +558,23 @@ fn build_command_for_destination(
                 .unwrap_or_else(|| "echo hello".to_string());
             vec!["sh".to_string(), "-c".to_string(), script]
         }
+        // Phase-2 MVP: image is built and ready (git + openssh + flux +
+        // kustomize), but the real git-clone/push workflow isn't ported yet
+        // — that needs path-layout logic + SSH-key shipping that's bigger
+        // than this commit. For now we run a metadata-supplied shell
+        // command (default: a sanity check that the toolchain is present)
+        // so the integration is testable.
+        "fluxv1" => {
+            let script = metadata
+                .get("command")
+                .cloned()
+                .unwrap_or_else(|| {
+                    "git --version && flux --version && kustomize version && \
+                     echo FLUXV1_TOOLCHAIN_OK"
+                        .to_string()
+                });
+            vec!["sh".to_string(), "-c".to_string(), script]
+        }
         other => {
             vec![
                 "sh".to_string(),
