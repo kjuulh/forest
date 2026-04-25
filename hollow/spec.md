@@ -1435,6 +1435,32 @@ substrate (e.g. `opentofu` is a pre-baked pipeline of `init` → `plan` →
   multi-step-per-VM arrives, the guest learns a new vsock message type
   for `ExecuteStep(name, cmd, env)` that the host agent sends in sequence.
 
+## Deferred Hardening
+
+The post-Phase-1 security audit (see `git log --grep "audit"`) closed five
+issues: read-only rootfs + tmpfs scratch, cgroup v2 caps, iptables egress
+lockdown (INPUT chain + IMDS + RFC1918 blocks), console-capture
+default-off, and SHA256 pinning of every external artifact. Two items are
+deliberately deferred:
+
+- **Agent privilege split.** Today the agent runs as root because it owns
+  `ip tuntap` / `iptables` / chroot setup. A "small privileged helper +
+  unprivileged daemon" split is a textbook hardening pattern, but it
+  defends only against the case where Firecracker's KVM boundary has
+  *already* been broken. KVM+Firecracker has had ~1–2 critical CVEs/year
+  historically, all patched within days; relying on that boundary plus
+  fast patching is a defensible trade-off versus the maintenance cost of
+  a split-process agent + IPC contract. Revisit if a real customer
+  threat model demands it.
+
+- **Agent-side rootfs digest verification.** Build-time pinning means
+  the bytes on the operator's disk match what we built; we don't yet
+  verify those bytes haven't been swapped on-disk between build and
+  launch. A signed `image_name → sha256` manifest checked at mount time
+  closes the gap. Smaller lift than the privilege split; do this when we
+  get a real image-distribution story (S3/MinIO/registry) instead of the
+  current rsync-from-dev pattern.
+
 ## Open Questions
 
 None currently. All architectural decisions are resolved for Phase 1.
