@@ -80,13 +80,29 @@ impl Harness {
     }
 
     /// Boot the full controller + agent stack against a puppet forest-server
-    /// for orchestrator-level acceptance tests.
+    /// for orchestrator-level acceptance tests. Defaults to the strict
+    /// egress posture (no RFC1918 / dev-machine reachability from the
+    /// guest); tests that need to talk to a host-side mock should use
+    /// `start_orchestrator_with_egress`.
     pub async fn start_orchestrator(
         &self,
         capability_name: &str,
     ) -> anyhow::Result<Orchestrator> {
         let layout = self.prepare()?.clone();
         Orchestrator::start(&self.config, layout, capability_name).await
+    }
+
+    /// Variant that flips per-VM iptables FORWARD to allow the guest to
+    /// reach RFC1918 addresses on the dev machine (e.g. an in-process
+    /// FakeRegistry on the host).
+    pub async fn start_orchestrator_with_egress(
+        &self,
+        capability_name: &str,
+        allow_local_egress: bool,
+    ) -> anyhow::Result<Orchestrator> {
+        let layout = self.prepare()?.clone();
+        Orchestrator::start_with_egress(&self.config, layout, capability_name, allow_local_egress)
+            .await
     }
 
     /// Build/ship artefacts and launch only the remote agent, wired back to

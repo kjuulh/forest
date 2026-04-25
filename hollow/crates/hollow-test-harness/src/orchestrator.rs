@@ -63,6 +63,19 @@ impl Orchestrator {
         layout: RemoteLayout,
         capability_name: &str,
     ) -> anyhow::Result<Self> {
+        Self::start_with_egress(cfg, layout, capability_name, false).await
+    }
+
+    /// Variant for tests that need the guest to reach RFC1918 / dev-machine
+    /// addresses (e.g. an in-process FakeRegistry running on the host).
+    /// Default tests stick with the strict egress posture; this opens the
+    /// per-VM iptables FORWARD chain to the dev-machine subnet.
+    pub async fn start_with_egress(
+        cfg: &Config,
+        layout: RemoteLayout,
+        capability_name: &str,
+        allow_local_egress: bool,
+    ) -> anyhow::Result<Self> {
         let serial_guard = orchestrator_lock().lock_owned().await;
 
         let fake_server = FakeServer::start().await?;
@@ -90,14 +103,12 @@ impl Orchestrator {
         // Tests assert on kernel boot lines and 'Linux version' from the
         // orchestrator path, so console replay needs to be on. Production
         // agents (and the dev:agent mise task) leave it off by default.
-        // Tests stick with the strict egress posture (allow_local_egress=
-        // false) since that's what the network test asserts against.
         let agent_ssh = spawn_remote_agent(
             cfg,
             &layout,
             controller_port,
             /* capture_console */ true,
-            /* allow_local_egress */ false,
+            allow_local_egress,
         )?;
         tracing::info!("hollow-agent spawned on remote");
 
