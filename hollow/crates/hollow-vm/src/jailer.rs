@@ -30,6 +30,37 @@ pub struct JailerConfig {
     pub gid: u32,
 }
 
+/// Per-VM resource caps applied via cgroup v2. Without these, Firecracker is
+/// configured with `vcpus`/`mem_mib` at the API level but the host process
+/// itself is unconstrained — a VM that allocates aggressively or fork-bombs
+/// inside its guest can starve the host.
+#[derive(Debug, Clone)]
+pub struct JailerLimits {
+    /// Hard memory cap on the Firecracker process tree (cgroup memory.max).
+    /// Sized to match the VM's `mem_size_mib` so the guest can't exceed
+    /// what we told it it had.
+    pub memory_max_bytes: u64,
+    /// vCPUs available to the VM. Translated to cgroup cpu.max as
+    /// `<vcpus * period> <period>` with `period = 100_000us`.
+    pub vcpus: u8,
+    /// Maximum tasks in the cgroup. Firecracker itself uses a handful of
+    /// threads; the rest are jailer/init/job descendants. 512 is generous
+    /// for normal workloads and tight enough to stop a fork-bomb.
+    pub pids_max: u32,
+}
+
+impl JailerLimits {
+    /// Derive limits from the VM's compute size, with sensible defaults for
+    /// pids_max. Callers can override the resulting struct directly.
+    pub fn from_vm_size(vcpus: u8, mem_mib: u32) -> Self {
+        Self {
+            memory_max_bytes: u64::from(mem_mib) * 1024 * 1024,
+            vcpus: vcpus.max(1),
+            pids_max: 512,
+        }
+    }
+}
+
 /// Resolved per-VM chroot layout. Produced by [`stage_chroot`] just before
 /// jailer is invoked. Field values are always absolute host paths; [`in_chroot`]
 /// converts any of them to chroot-relative form for Firecracker API calls.
@@ -207,7 +238,11 @@ fn chown_recursive(root: &Path, uid: u32, gid: u32) -> anyhow::Result<()> {
 /// Build the argv for spawning jailer. The exec-file and chroot base come
 /// from the [`JailerConfig`]; the remaining pieces come from the staged
 /// [`ChrootLayout`]. Everything after `--` is passed through to Firecracker.
-pub fn build_argv(cfg: &JailerConfig, layout: &ChrootLayout) -> Vec<String> {
+pub fn build_argv(
+    cfg: &JailerConfig,
+    layout: &ChrootLayout,
+    limits: &JailerLimits,
+) -> Vec<String> {
     let mut argv: Vec<String> = Vec::new();
     argv.extend([
         "--id".to_string(),
@@ -220,7 +255,30 @@ pub fn build_argv(cfg: &JailerConfig, layout: &ChrootLayout) -> Vec<String> {
         cfg.gid.to_string(),
         "--chroot-base-dir".to_string(),
         cfg.chroot_base.to_string_lossy().into_owned(),
+        // cgroup v2 unified hierarchy. Trixie defaults to v2; older distros
+        // would need a kernel cmdline change.
+        "--cgroup-version".to_string(),
+        "2".to_string(),
     ]);
+
+    // Per-VM resource caps. Each --cgroup flag is "<file>=<value>".
+    // cpu.max takes "<quota> <period>" with a literal space — argv handles
+    // it fine (no shell tokenisation).
+    let cpu_period_us: u32 = 100_000;
+    let cpu_quota_us: u32 = u32::from(limits.vcpus) * cpu_period_us;
+    let cgroup_kv: Vec<String> = vec![
+        format!("memory.max={}", limits.memory_max_bytes),
+        // Forbid the VM's pages from being swapped — protects neighbouring
+        // tenants' latency and avoids tenant data hitting persistent storage.
+        "memory.swap.max=0".to_string(),
+        format!("cpu.max={cpu_quota_us} {cpu_period_us}"),
+        format!("pids.max={}", limits.pids_max),
+    ];
+    for kv in cgroup_kv {
+        argv.push("--cgroup".to_string());
+        argv.push(kv);
+    }
+
     // Separator then Firecracker-specific args.
     argv.push("--".to_string());
     argv.push("--api-sock".to_string());
@@ -245,4 +303,85 @@ pub fn check_binary(cfg: &JailerConfig) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture_layout() -> ChrootLayout {
+        ChrootLayout {
+            vm_id: "vm-deadbeef".into(),
+            chroot_root: PathBuf::from("/var/lib/hollow/jailer/firecracker/vm-deadbeef/root"),
+            kernel_host: PathBuf::from(
+                "/var/lib/hollow/jailer/firecracker/vm-deadbeef/root/kernel",
+            ),
+            rootfs_host: PathBuf::from(
+                "/var/lib/hollow/jailer/firecracker/vm-deadbeef/root/rootfs.ext4",
+            ),
+            api_sock_host: PathBuf::from(
+                "/var/lib/hollow/jailer/firecracker/vm-deadbeef/root/run/firecracker.sock",
+            ),
+            vsock_uds_host: PathBuf::from(
+                "/var/lib/hollow/jailer/firecracker/vm-deadbeef/root/run/vsock.sock",
+            ),
+            console_log_host: PathBuf::from(
+                "/var/lib/hollow/jailer/firecracker/vm-deadbeef/firecracker.log",
+            ),
+            firecracker_basename: "firecracker".into(),
+        }
+    }
+
+    fn fixture_config() -> JailerConfig {
+        JailerConfig {
+            jailer_bin: PathBuf::from("/usr/bin/jailer"),
+            firecracker_bin: PathBuf::from("/usr/bin/firecracker"),
+            chroot_base: PathBuf::from("/var/lib/hollow/jailer"),
+            uid: 10000,
+            gid: 10000,
+        }
+    }
+
+    #[test]
+    fn limits_from_vm_size_scales_correctly() {
+        let l = JailerLimits::from_vm_size(2, 1024);
+        assert_eq!(l.memory_max_bytes, 2u64.pow(30)); // 1024 MiB == 2^30
+        assert_eq!(l.vcpus, 2);
+        assert_eq!(l.pids_max, 512);
+
+        // Floor to 1 vCPU even if caller passes 0 — cpu.max=0 would deadlock.
+        let l = JailerLimits::from_vm_size(0, 256);
+        assert_eq!(l.vcpus, 1);
+    }
+
+    #[test]
+    fn build_argv_includes_cgroup_limits() {
+        let argv = build_argv(
+            &fixture_config(),
+            &fixture_layout(),
+            &JailerLimits::from_vm_size(2, 1024),
+        );
+        // cgroup-version
+        assert!(argv.windows(2).any(|w| w[0] == "--cgroup-version" && w[1] == "2"));
+        // memory.max in bytes
+        assert!(argv.contains(&"memory.max=1073741824".to_string()));
+        // cpu.max as "<quota> <period>" with a literal space
+        assert!(argv.contains(&"cpu.max=200000 100000".to_string()));
+        // pids.max
+        assert!(argv.contains(&"pids.max=512".to_string()));
+        // swap forbidden — VM data must not hit persistent storage
+        assert!(argv.contains(&"memory.swap.max=0".to_string()));
+        // every cgroup option is paired with --cgroup
+        let cgroup_flag_count = argv.iter().filter(|a| *a == "--cgroup").count();
+        let cgroup_kv_count = argv
+            .iter()
+            .filter(|a| {
+                a.contains("memory.max=")
+                    || a.contains("memory.swap.max=")
+                    || a.contains("cpu.max=")
+                    || a.contains("pids.max=")
+            })
+            .count();
+        assert_eq!(cgroup_flag_count, cgroup_kv_count);
+    }
 }

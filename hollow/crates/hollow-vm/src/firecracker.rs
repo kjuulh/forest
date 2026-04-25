@@ -20,7 +20,7 @@ use hyperlocal::{UnixClientExt, UnixConnector, Uri as UnixUri};
 use serde::Serialize;
 use tokio::process::{Child, Command};
 
-use crate::jailer::{self, ChrootLayout, JailerConfig};
+use crate::jailer::{self, ChrootLayout, JailerConfig, JailerLimits};
 
 /// Encapsulates a single Firecracker VM instance — its API socket, vsock UDS,
 /// and launched process. Drop ensures the process is killed and sockets removed.
@@ -144,6 +144,7 @@ impl VmInstance {
     /// to be chroot-relative.
     pub async fn spawn_jailed(
         cfg: &JailerConfig,
+        limits: &JailerLimits,
         workdir: PathBuf,
         kernel: &Path,
         rootfs: &Path,
@@ -165,7 +166,7 @@ impl VmInstance {
         let stdout_log = workdir.join("firecracker.log");
         let stderr_log = workdir.join("firecracker.stderr.log");
 
-        let argv = jailer::build_argv(cfg, &layout);
+        let argv = jailer::build_argv(cfg, &layout, limits);
         tracing::info!(
             jailer = %cfg.jailer_bin.display(),
             argv = ?argv,

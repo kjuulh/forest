@@ -17,7 +17,7 @@ use anyhow::Context;
 use hollow_vsock::protocol::{JobDefinition, LogLineMsg};
 
 pub use crate::firecracker::VmInstance;
-pub use crate::jailer::JailerConfig;
+pub use crate::jailer::{JailerConfig, JailerLimits};
 pub use crate::net::{NetworkAllocator, NetworkConfig, NetworkHandle};
 pub use crate::session::{GUEST_TO_HOST_PORT, GuestSession, JobEvent, JobOutcome, drive_job};
 
@@ -169,14 +169,22 @@ where
 
     on_event(VmEvent::Stage(VmStage::VmSpawn));
     let mut vm = match &config.jailer {
-        Some(jailer_cfg) => VmInstance::spawn_jailed(
-            jailer_cfg,
-            config.workdir.clone(),
-            &config.kernel,
-            &config.rootfs,
-        )
-        .await
-        .context("spawn jailed firecracker")?,
+        Some(jailer_cfg) => {
+            // Cap the Firecracker process tree to the same compute the VM
+            // was promised. Without this the cgroup is uncapped, so a guest
+            // that fork-bombs or balloons memory usage past `mem_size_mib`
+            // can starve the host.
+            let limits = JailerLimits::from_vm_size(config.vcpus, config.mem_mib);
+            VmInstance::spawn_jailed(
+                jailer_cfg,
+                &limits,
+                config.workdir.clone(),
+                &config.kernel,
+                &config.rootfs,
+            )
+            .await
+            .context("spawn jailed firecracker")?
+        }
         None => VmInstance::spawn(&config.firecracker_bin, config.workdir.clone())
             .await
             .context("spawn firecracker")?,
