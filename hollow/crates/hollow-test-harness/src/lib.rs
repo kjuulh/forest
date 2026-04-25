@@ -12,6 +12,7 @@
 mod bootstrap;
 mod build;
 mod config;
+pub mod fake_registry;
 pub mod fake_server;
 pub mod orchestrator;
 mod run;
