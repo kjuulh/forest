@@ -4,6 +4,8 @@ members = [
   "examples/components-v2/crates/kubernetes-service",
   "components/forest-contrib/terraform-service/crates/terraform-service",
   "components/forest-contrib/render-template/crates/render-template",
+  "components/forest-contrib/checkout/crates/checkout",
+  "components/forest-contrib/git-commit-push/crates/git-commit-push",
   # "examples/rust-service-component/crates/rust-service",  # legacy v1 example — needs update
   "examples/rust-podinfo",
   "examples/service-example",

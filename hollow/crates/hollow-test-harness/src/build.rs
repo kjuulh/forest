@@ -81,7 +81,11 @@ const IMAGES: &[ImageBuild] = &[
             "podman-containers.conf",
             "forest-component-init",
             "forest-component-script",
-            "forest-component-render-template",
+            // Cache stamp covers all proper Forest components shipping
+            // through the populated cache (render-template, checkout,
+            // git-commit-push, etc.). When any component is rebuilt the
+            // stamp gets touched and the ext4 invalidates.
+            "forest-cache/.cache-stamp",
             // Each script-component contributes its directory; if any
             // file inside a component changes we want a rebuild.
             "components/git-init/component",
@@ -147,12 +151,43 @@ pub fn build(cfg: &Config) -> anyhow::Result<BuildArtifacts> {
     // the forest root Cargo.toml. We compile from there (not the hollow
     // workspace) so the components are first-class Forest projects with
     // their own CUE specs, codegen output dirs, and registry metadata.
-    let render_template_bin = build_cargo_forest(cfg, "render-template", GUEST_TARGET)?;
-    let staged_render_template = cfg
-        .repo_root
-        .join("images")
-        .join("forest-component-render-template");
-    stage_if_changed(&render_template_bin, &staged_render_template)?;
+    // Pre-populated Forest component cache. We compile each component
+    // for x86_64-musl and place it in the content-addressable layout
+    // `forest` itself uses, so the runner-side resolution matches what
+    // happens on any other Forest dev machine after `forest components
+    // sync` has run.
+    //
+    // Layout produced under hollow/images/forest-cache/:
+    //   bin/<sha[:2]>/<sha>                      — content-addressed binary
+    //   <org>/<name>/<ver>/.forest/component/meta.json
+    //                                            — points back via sha
+    //
+    // Dockerfile COPYs the whole tree into /root/.cache/forest/components.
+    let cache_root = cfg.repo_root.join("images").join("forest-cache");
+    populate_component_cache(
+        cfg,
+        &cache_root,
+        &[
+            ComponentSpec {
+                package: "render-template",
+                organisation: "forest-contrib",
+                name: "render-template",
+                version: "0.1.0",
+            },
+            ComponentSpec {
+                package: "checkout",
+                organisation: "forest-contrib",
+                name: "checkout",
+                version: "0.1.0",
+            },
+            ComponentSpec {
+                package: "git-commit-push",
+                organisation: "forest-contrib",
+                name: "git-commit-push",
+                version: "0.1.0",
+            },
+        ],
+    )?;
 
     let mut images = Vec::with_capacity(IMAGES.len());
     for spec in IMAGES {
@@ -197,6 +232,132 @@ fn build_cargo(
         bail!("expected binary not found: {}", bin_path.display());
     }
     Ok(bin_path)
+}
+
+/// One row of `populate_component_cache`'s input. `package` is the cargo
+/// crate name (used with `-p`), the rest go into the cache directory
+/// layout + meta.json. Identifiers come from each component's
+/// `forest.cue` and stay in sync with the registry shape.
+struct ComponentSpec {
+    package: &'static str,
+    organisation: &'static str,
+    name: &'static str,
+    version: &'static str,
+}
+
+/// Compile each component, drop binaries into the content-addressable
+/// cache, and write the per-component meta.json the runner reads to
+/// resolve `uses: <org>/<name>@<version>`. Mtime preservation on
+/// the binary side keeps the ext4 cache check stable when nothing
+/// changed source-side.
+fn populate_component_cache(
+    cfg: &Config,
+    cache_root: &Path,
+    specs: &[ComponentSpec],
+) -> anyhow::Result<()> {
+    std::fs::create_dir_all(cache_root.join("bin"))
+        .with_context(|| format!("create {}", cache_root.display()))?;
+
+    for spec in specs {
+        let bin_path = build_cargo_forest(cfg, spec.package, GUEST_TARGET)?;
+        let bytes = std::fs::read(&bin_path)
+            .with_context(|| format!("read {}", bin_path.display()))?;
+        let sha256 = {
+            use sha2::Digest;
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(&bytes);
+            hex::encode(hasher.finalize())
+        };
+        let prefix = &sha256[..2];
+        let bin_dir = cache_root.join("bin").join(prefix);
+        std::fs::create_dir_all(&bin_dir)
+            .with_context(|| format!("create {}", bin_dir.display()))?;
+        let bin_target = bin_dir.join(&sha256);
+        // Only overwrite when the bytes differ — preserves mtime so the
+        // ext4 cache invalidation only fires when something actually
+        // changed.
+        let needs_write = match std::fs::read(&bin_target) {
+            Ok(existing) => existing != bytes,
+            Err(_) => true,
+        };
+        if needs_write {
+            std::fs::write(&bin_target, &bytes)
+                .with_context(|| format!("write {}", bin_target.display()))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(
+                    &bin_target,
+                    std::fs::Permissions::from_mode(0o755),
+                )?;
+            }
+        }
+
+        let meta_path = cache_root
+            .join(spec.organisation)
+            .join(spec.name)
+            .join(spec.version)
+            .join(".forest/component/meta.json");
+        if let Some(parent) = meta_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create {}", parent.display()))?;
+        }
+        let meta = serde_json::json!({
+            "name": spec.name,
+            "organisation": spec.organisation,
+            "version": spec.version,
+            "platforms": {
+                "linux_amd64": {
+                    "sha256": sha256,
+                    "size": bytes.len(),
+                }
+            }
+        });
+        let new_bytes = serde_json::to_vec_pretty(&meta)?;
+        // Same dance: only rewrite when content differs.
+        let needs_meta_write = match std::fs::read(&meta_path) {
+            Ok(existing) => existing != new_bytes,
+            Err(_) => true,
+        };
+        if needs_meta_write {
+            std::fs::write(&meta_path, &new_bytes)
+                .with_context(|| format!("write {}", meta_path.display()))?;
+        }
+    }
+
+    // Sentinel stamp the ext4 cache check can mtime-compare against.
+    // We always touch it, even on no-op runs, so the cache check remains
+    // simple — its mtime tracks "the last time we re-evaluated the
+    // cache" rather than "when any content changed." Stable across
+    // unchanged builds because we skip the stamp write when its mtime
+    // is already > all per-component meta.json mtimes.
+    let stamp = cache_root.join(".cache-stamp");
+    let needs_stamp = match (std::fs::metadata(&stamp), std::fs::metadata(cache_root)) {
+        (Ok(s), Ok(_)) => {
+            // stamp is older than any meta.json — find newest meta.json mtime
+            let mut newest = std::time::SystemTime::UNIX_EPOCH;
+            for spec in specs {
+                let mp = cache_root
+                    .join(spec.organisation)
+                    .join(spec.name)
+                    .join(spec.version)
+                    .join(".forest/component/meta.json");
+                if let Ok(m) = std::fs::metadata(&mp).and_then(|md| md.modified())
+                    && m > newest
+                {
+                    newest = m;
+                }
+            }
+            s.modified().map(|sm| sm < newest).unwrap_or(true)
+        }
+        _ => true,
+    };
+    if needs_stamp {
+        std::fs::write(&stamp, b"forest-cache populated\n")
+            .with_context(|| format!("write {}", stamp.display()))?;
+    }
+
+    Ok(())
 }
 
 /// Build a crate from the *parent* (forest) workspace, not the hollow

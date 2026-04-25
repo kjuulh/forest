@@ -73,11 +73,15 @@ RUN chmod 0755 /usr/local/bin/forest-exec-runner
 COPY forest-component-init /usr/local/lib/forest-components/init/v1/component
 RUN chmod 0755 /usr/local/lib/forest-components/init/v1/component
 
-# render-template: a real Forest component living under
-# components/forest-contrib/render-template/ in the forest workspace.
-# Compiled separately by the harness's build_cargo_forest helper.
-COPY forest-component-render-template /usr/local/lib/forest-components/render-template/v1/component
-RUN chmod 0755 /usr/local/lib/forest-components/render-template/v1/component
+# Forest components (proper layout under components/forest-contrib/<name>/
+# in the forest workspace) ship through the standard Forest cache, NOT
+# baked at fixed paths. The build harness pre-populates the content-
+# addressable cache + per-component meta.json, mimicking what
+# `forest components sync` would produce on a dev box. The runner
+# resolves `uses: <org>/<name>@<version>` through the same path
+# `forest` itself uses, so the substrate looks like a Forest dev
+# machine with components already pulled.
+COPY forest-cache /root/.cache/forest/components
 
 COPY forest-component-script /usr/local/lib/forest-components/_engine/forest-component-script
 RUN chmod 0755 /usr/local/lib/forest-components/_engine/forest-component-script

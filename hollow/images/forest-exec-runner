@@ -91,6 +91,111 @@ while [ "$i" -lt "$n" ]; do
   fi
 
   if [ -n "$uses" ]; then
+    # Resolution rules:
+    #   <org>/<name>@<version>           — Forest component (cache lookup).
+    #                                       Recognised by exactly one '/'
+    #                                       and one '@', matching the
+    #                                       project-deps format.
+    #   forest:<name>@<v>                — Legacy Forest component (fixed
+    #                                       path under /usr/local/lib/...).
+    #                                       Kept until init/git-init are
+    #                                       migrated to cache layout.
+    #   anything else with a '/' or ':'  — OCI image, run via podman.
+    is_forest_cache_ref=false
+    case "$uses" in
+      forest:*) ;;
+      *)
+        slashes=$(printf '%s' "$uses" | tr -cd '/' | wc -c)
+        ats=$(printf '%s' "$uses" | tr -cd '@' | wc -c)
+        if [ "$slashes" -eq 1 ] && [ "$ats" -eq 1 ]; then
+          # Reject `*/*@sha256:...` (OCI digest ref) — those land in the
+          # `*` (podman) branch.
+          case "$uses" in
+            *@sha256:*) ;;
+            *) is_forest_cache_ref=true ;;
+          esac
+        fi
+        ;;
+    esac
+
+    case "$is_forest_cache_ref" in
+      true)
+        # Cache layout (pre-populated, mimicking `forest components sync`):
+        #   /root/.cache/forest/components/<org>/<name>/<v>/.forest/component/meta.json
+        #     → {platforms.linux_amd64.sha256: <sha>}
+        #   /root/.cache/forest/components/bin/<sha[:2]>/<sha>
+        #     → the binary
+        comp_org_name=${uses%@*}
+        comp_version=${uses##*@}
+        comp_org=${comp_org_name%/*}
+        comp_name_only=${comp_org_name#*/}
+        meta_file="/root/.cache/forest/components/$comp_org/$comp_name_only/$comp_version/.forest/component/meta.json"
+        if [ ! -f "$meta_file" ]; then
+          echo "[step=$name] component '$uses' not in cache (expected $meta_file). \
+Sync from registry not yet wired — re-build the exec-v1 image to refresh." >&2
+          exit 2
+        fi
+        sha=$(jq -r '.platforms.linux_amd64.sha256' "$meta_file")
+        if [ -z "$sha" ] || [ "$sha" = "null" ]; then
+          echo "[step=$name] meta.json for '$uses' has no linux_amd64 sha256" >&2
+          exit 2
+        fi
+        prefix=$(printf '%s' "$sha" | cut -c1-2)
+        comp_bin="/root/.cache/forest/components/bin/$prefix/$sha"
+        if [ ! -x "$comp_bin" ]; then
+          echo "[step=$name] component binary missing at $comp_bin (sha mismatch?)" >&2
+          exit 2
+        fi
+
+        # Build the same {spec, input, context} payload native components expect.
+        payload=$(printf '%s' "$JSON" | jq -c \
+          --arg work_dir "/work" \
+          --arg organisation "${FOREST_ORGANISATION:-}" \
+          --arg project "${FOREST_PROJECT:-}" \
+          --arg environment "${FOREST_ENVIRONMENT:-}" \
+          --arg release_id "${FOREST_RELEASE_ID:-}" \
+          ".steps[$i] | {
+              spec: {},
+              input: (.with // {}),
+              context: {
+                  work_dir: \$work_dir,
+                  organisation: \$organisation,
+                  project: \$project,
+                  environment: \$environment,
+                  release_id: \$release_id,
+                  dry_run: false
+              }
+          }")
+
+        # Step env passthrough — same shape as the other backends.
+        env_file=$(mktemp)
+        printf '%s' "$JSON" | jq -r ".steps[$i].env // {} | to_entries[] | .key + \"=\" + (.value | tostring)" >"$env_file"
+        while IFS='=' read -r ek ev; do
+          [ -z "$ek" ] && continue
+          export "$ek=$ev"
+        done <"$env_file"
+        rm -f "$env_file"
+
+        out_json=/tmp/forest-exec-step-outputs/"$name".json
+        rc=0
+        "$comp_bin" "commands/$comp_name_only" "$payload" >"$out_json" 2>&1 || rc=$?
+        cat "$out_json"
+        if [ "$rc" -ne 0 ]; then
+          echo "[step=$name] component '$uses' exited $rc" >&2
+          exit "$rc"
+        fi
+        kv_file=$(mktemp)
+        jq -r 'select(type == "object") | to_entries[]
+               | select(.value | type | IN("string","number","boolean"))
+               | .key + "=" + (.value | tostring)' "$out_json" 2>/dev/null \
+          >"$kv_file" || true
+        capture_step_outputs "$name" "$kv_file"
+        rm -f "$kv_file"
+        i=$((i + 1))
+        continue
+        ;;
+    esac
+
     case "$uses" in
       forest:*)
         # Native Forest component (skips podman entirely):

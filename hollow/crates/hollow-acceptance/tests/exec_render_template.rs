@@ -59,7 +59,10 @@ steps: [
     },
     {
         name: "render"
-        uses: "forest:render-template@v1"
+        // Canonical Forest dependency form: <org>/<name>@<version>.
+        // Resolved through the local component cache, just like
+        // `forest run` does on a dev box.
+        uses: "forest-contrib/render-template@0.1.0"
         with: {
             src:  "/work/tpl"
             dest: "/work/out"
