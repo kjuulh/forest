@@ -48,6 +48,34 @@ fi
 
 echo "exec: $n step(s) to run"
 
+# Step outputs land here. Two surfaces:
+#   - $STEP_<NAME>_<KEY> env vars exported into every later step (uniform
+#     across run:, uses+run, and uses: forest:NAME — the workflow author
+#     uses one shape regardless of backend)
+#   - /tmp/forest-exec-step-outputs/<step>.json for tools that want the
+#     full structured form
+mkdir -p /tmp/forest-exec-step-outputs
+
+# capture_step_outputs <step_name> <kv_file>
+#   Reads `key=value` lines from kv_file and exports each as
+#   STEP_<UPPER_NAME>_<UPPER_KEY>=value into the runner's environment so
+#   subsequent steps see them. Empty/blank lines and comments (#-prefix)
+#   are skipped. Names and keys are upper-cased; dashes mapped to
+#   underscores to match the same convention as `INPUT_*` for `with:`.
+capture_step_outputs() {
+  _step=$1
+  _kv=$2
+  [ -s "$_kv" ] || return 0
+  _upper_step=$(echo "$_step" | tr 'a-z-' 'A-Z_')
+  while IFS='=' read -r _k _v; do
+    case "$_k" in
+      ''|\#*) continue ;;
+    esac
+    _upper_k=$(echo "$_k" | tr 'a-z-' 'A-Z_')
+    export "STEP_${_upper_step}_${_upper_k}=$_v"
+  done <"$_kv"
+}
+
 i=0
 while [ "$i" -lt "$n" ]; do
   name=$(printf '%s' "$JSON" | jq -r ".steps[$i].name // \"step-$i\"")
@@ -120,12 +148,34 @@ while [ "$i" -lt "$n" ]; do
         done <"$env_file"
         rm -f "$env_file"
 
+        # Capture stdout — native components return JSON whose top-level
+        # keys are the step's outputs. Anything that's not valid JSON or
+        # not an object is silently treated as no-outputs (the component
+        # may have just printed progress text).
+        out_json=/tmp/forest-exec-step-outputs/"$name".json
         rc=0
-        "$comp_bin" "commands/$comp_name" "$payload" || rc=$?
+        "$comp_bin" "commands/$comp_name" "$payload" >"$out_json" 2>&1 || rc=$?
+
+        # Echo the component's stdout into the step log so authors see
+        # what it produced. We replay regardless of exit code so failures
+        # surface the component's error message.
+        cat "$out_json"
+
         if [ "$rc" -ne 0 ]; then
           echo "[step=$name] component '$uses' exited $rc" >&2
           exit "$rc"
         fi
+
+        # Flatten top-level scalar keys into key=value lines, then export.
+        # Object/array values are kept in the .json file for later tools
+        # but not promoted to env vars.
+        kv_file=$(mktemp)
+        jq -r 'select(type == "object") | to_entries[]
+               | select(.value | type | IN("string","number","boolean"))
+               | .key + "=" + (.value | tostring)' "$out_json" 2>/dev/null \
+          >"$kv_file" || true
+        capture_step_outputs "$name" "$kv_file"
+        rm -f "$kv_file"
         ;;
       *)
         # Container-action mode (GitHub Actions semantics):
@@ -155,10 +205,19 @@ while [ "$i" -lt "$n" ]; do
         printf '%s' "$JSON" | jq -r ".steps[$i].with // {} | to_entries[] | \"INPUT_\" + (.key | ascii_upcase | gsub(\"-\"; \"_\")) + \"=\" + (.value | tostring)" >>"$env_file"
         printf '%s' "$JSON" | jq -r ".steps[$i].env // {} | to_entries[] | .key + \"=\" + (.value | tostring)" >>"$env_file"
 
+        # Container-action outputs: GitHub-Actions-style. We bind-mount a
+        # host tempfile to /forest/output inside the container and tell
+        # the action where to write via $FOREST_OUTPUT. After the action
+        # exits we parse `key=value` lines from the file and export
+        # STEP_<NAME>_<KEY> env vars — same shape as native components.
+        out_kv=$(mktemp)
+        echo "FOREST_OUTPUT=/forest/output" >>"$env_file"
+
         rc=0
         if [ -n "$run" ]; then
           podman run --rm --network=host \
             --env-file="$env_file" \
+            -v "$out_kv:/forest/output" \
             -v /work:/work \
             -w /work \
             --entrypoint=/bin/sh \
@@ -166,15 +225,26 @@ while [ "$i" -lt "$n" ]; do
         else
           podman run --rm --network=host \
             --env-file="$env_file" \
+            -v "$out_kv:/forest/output" \
             -v /work:/work \
             -w /work \
             "$uses" || rc=$?
         fi
         rm -f "$env_file"
+
         if [ "$rc" -ne 0 ]; then
+          rm -f "$out_kv"
           echo "[step=$name] container action exited $rc" >&2
           exit "$rc"
         fi
+
+        # Persist the kv file alongside other step outputs and promote
+        # to env vars for later steps.
+        if [ -s "$out_kv" ]; then
+          cp "$out_kv" /tmp/forest-exec-step-outputs/"$name".kv
+        fi
+        capture_step_outputs "$name" "$out_kv"
+        rm -f "$out_kv"
         ;;
     esac
   else
