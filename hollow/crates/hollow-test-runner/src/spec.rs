@@ -62,6 +62,9 @@ pub struct NetworkSpec {
     /// Allow the VM to reach RFC1918 + the host's tap IP. Default false.
     #[serde(default)]
     pub allow_local_egress: bool,
+    /// Optional egress allowlist (CIDR strings). Empty = no allowlist.
+    #[serde(default)]
+    pub allowed_egress_cidrs: Vec<String>,
 }
 
 fn default_dns() -> Vec<String> {

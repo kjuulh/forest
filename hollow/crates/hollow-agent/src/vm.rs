@@ -120,6 +120,7 @@ async fn run_job_inner(
             host_iface: vm_paths.host_iface.clone(),
             dns: vm_paths.dns.clone(),
             allow_local_egress: vm_paths.allow_local_egress,
+            allowed_egress_cidrs: job.allowed_egress_cidrs.clone(),
         };
         Some((cfg, subnet))
     } else {

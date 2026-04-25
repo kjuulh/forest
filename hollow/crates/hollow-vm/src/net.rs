@@ -37,6 +37,11 @@ pub struct NetworkConfig {
     /// regardless — the local egress allowlist is for the dev forest-server,
     /// not for cloud-credential exfil paths.
     pub allow_local_egress: bool,
+    /// Optional CIDR allowlist. When empty: everything not blocked above
+    /// is reachable (default). When non-empty: ONLY these CIDRs are
+    /// reachable — anything else is dropped. Use for tight per-destination
+    /// scoping (e.g. terraform that should only hit the AWS API endpoints).
+    pub allowed_egress_cidrs: Vec<String>,
 }
 
 impl NetworkConfig {
@@ -229,18 +234,51 @@ fn add_iptables_rules(cfg: &NetworkConfig) -> anyhow::Result<()> {
         )?;
     }
 
-    // Allow the VM's outbound traffic to the host's uplink (anything that
-    // wasn't matched by the DROPs above is, by construction, public).
-    run(
-        "iptables",
-        &[
-            "-A", "FORWARD",
-            "-i", &tap,
-            "-o", &cfg.host_iface,
-            "-j", "ACCEPT",
-        ],
-    )?;
-    // And return packets for established connections.
+    // Outbound policy:
+    //   • allowed_egress_cidrs empty → allow everything not blocked above
+    //     (current behaviour, "public internet only")
+    //   • non-empty → allow only those CIDRs, drop the rest. Required for
+    //     tight per-destination scoping (e.g. terraform that should only
+    //     hit the AWS API).
+    if cfg.allowed_egress_cidrs.is_empty() {
+        run(
+            "iptables",
+            &[
+                "-A", "FORWARD",
+                "-i", &tap,
+                "-o", &cfg.host_iface,
+                "-j", "ACCEPT",
+            ],
+        )?;
+    } else {
+        for cidr in &cfg.allowed_egress_cidrs {
+            run(
+                "iptables",
+                &[
+                    "-A", "FORWARD",
+                    "-i", &tap,
+                    "-d", cidr,
+                    "-o", &cfg.host_iface,
+                    "-j", "ACCEPT",
+                ],
+            )?;
+        }
+        // Catch-all: anything from this tap that didn't match the
+        // allowlist is dropped. Without this, the chain would fall
+        // through to the host's default FORWARD policy (typically ACCEPT)
+        // and the allowlist would be advisory, not enforced.
+        run(
+            "iptables",
+            &[
+                "-A", "FORWARD",
+                "-i", &tap,
+                "-j", "DROP",
+            ],
+        )?;
+    }
+    // And return packets for established connections — applies regardless
+    // of allowlist. Without this, even an allowlisted outbound TCP can't
+    // receive a SYN-ACK back.
     run(
         "iptables",
         &[
@@ -295,9 +333,22 @@ fn remove_iptables_rules(cfg: &NetworkConfig) -> anyhow::Result<()> {
         "iptables", "-D", "INPUT",
         "-i", &tap, "-j", "DROP",
     ]);
+    // Outbound rules — try to remove both shapes (with and without the
+    // allowlist) since the install path may have used either depending on
+    // whether allowed_egress_cidrs was populated.
     let _ = run_ignore_err(&[
         "iptables", "-D", "FORWARD",
         "-i", &tap, "-o", &cfg.host_iface, "-j", "ACCEPT",
+    ]);
+    for cidr in &cfg.allowed_egress_cidrs {
+        let _ = run_ignore_err(&[
+            "iptables", "-D", "FORWARD",
+            "-i", &tap, "-d", cidr, "-o", &cfg.host_iface, "-j", "ACCEPT",
+        ]);
+    }
+    let _ = run_ignore_err(&[
+        "iptables", "-D", "FORWARD",
+        "-i", &tap, "-j", "DROP",
     ]);
     let _ = run_ignore_err(&[
         "iptables", "-D", "FORWARD",

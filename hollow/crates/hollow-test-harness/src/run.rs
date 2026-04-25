@@ -34,6 +34,11 @@ pub struct JobSpec {
     /// Default off (production posture); tests asserting on boot output
     /// flip to true.
     pub capture_console: bool,
+    /// Optional egress allowlist (CIDR strings). Empty = "no allowlist",
+    /// VM uses the default network posture. Non-empty = lock egress to
+    /// these CIDRs only. The strict deny-everything-else rule is enforced
+    /// at the iptables FORWARD chain.
+    pub allowed_egress_cidrs: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +124,7 @@ struct WireNetworkSpec {
     host_iface: String,
     dns: Vec<String>,
     allow_local_egress: bool,
+    allowed_egress_cidrs: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -156,6 +162,7 @@ pub fn execute(cfg: &Config, layout: &RemoteLayout, job: JobSpec) -> anyhow::Res
             // Direct-runner tests assert against the strict posture, so
             // local egress stays blocked here.
             allow_local_egress: false,
+            allowed_egress_cidrs: job.allowed_egress_cidrs.clone(),
         })
     } else {
         None

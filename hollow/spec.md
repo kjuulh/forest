@@ -1219,7 +1219,10 @@ The controller mirrors the executor flow from `crates/forest-runner/src/executor
 1. Snapshot-based fast boot (<50ms cold start)
 2. Machine pool autoscaling via Hetzner API
 3. Per-org dedicated pools
-4. Network egress filtering (per-destination CIDR allowlists)
+4. ✅ Network egress filtering (per-destination CIDR allowlists) — sourced
+   from `destination.metadata.allowed_egress_cidrs` (comma-separated). When
+   set, the VM may only reach those CIDRs; everything else is dropped at
+   the FORWARD chain. IMDS / RFC1918 blocks remain unconditional.
 5. Terraform provider mirror cache
 6. Job result caching
 7. `HollowService` gRPC API for forest-server integration

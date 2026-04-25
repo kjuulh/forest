@@ -275,6 +275,14 @@ impl Dispatcher {
 
         let job_id = format!("job-{}", uuid::Uuid::new_v4());
 
+        // Per-destination egress allowlist: sourced from destination metadata
+        // under the `allowed_egress_cidrs` key (comma-separated CIDRs). When
+        // unset, the VM follows the default "public internet only" posture.
+        // When set, the VM is restricted to *only* those CIDRs — useful for
+        // terraform destinations that should only reach the cloud API or
+        // for closed-network deploys.
+        let allowed_egress_cidrs = parse_egress_allowlist(&destination.metadata);
+
         let run_job = RunJob {
             job_id: job_id.clone(),
             image,
@@ -287,6 +295,7 @@ impl Dispatcher {
             timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
             egress_enabled: true,
             mode: mode.to_string(),
+            allowed_egress_cidrs,
         };
 
         let agent_id = self
@@ -413,6 +422,22 @@ async fn complete_release(
     {
         tracing::error!(error = %e, "CompleteRelease RPC failed");
     }
+}
+
+/// Parse the `allowed_egress_cidrs` destination metadata key into a
+/// validated CIDR list. Empty / missing → empty Vec → "no allowlist", which
+/// the agent reads as "default egress posture".
+///
+/// Format: comma-separated CIDR strings, whitespace ignored, e.g.
+/// `"1.1.1.1/32, 8.8.8.8/32"` or `"54.239.0.0/16,52.119.128.0/17"`.
+fn parse_egress_allowlist(metadata: &HashMap<String, String>) -> Vec<String> {
+    let Some(raw) = metadata.get("allowed_egress_cidrs") else {
+        return Vec::new();
+    };
+    raw.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// Translate the generic `ReleaseArtifactStore` (URL + basic auth) into

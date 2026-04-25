@@ -6,95 +6,95 @@
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AgentMessage {
-    #[prost(oneof = "agent_message::Message", tags = "1, 2, 3, 4")]
+    #[prost(oneof="agent_message::Message", tags="1, 2, 3, 4")]
     pub message: ::core::option::Option<agent_message::Message>,
 }
 /// Nested message and enum types in `AgentMessage`.
 pub mod agent_message {
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Message {
-        #[prost(message, tag = "1")]
+        #[prost(message, tag="1")]
         Register(super::AgentRegister),
-        #[prost(message, tag = "2")]
+        #[prost(message, tag="2")]
         Heartbeat(super::AgentHeartbeat),
-        #[prost(message, tag = "3")]
+        #[prost(message, tag="3")]
         JobUpdate(super::JobUpdate),
-        #[prost(message, tag = "4")]
+        #[prost(message, tag="4")]
         LogBatch(super::JobLogBatch),
     }
 }
 /// First message an agent sends on the stream.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct AgentRegister {
-    #[prost(string, tag = "1")]
+    #[prost(string, tag="1")]
     pub agent_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
+    #[prost(string, tag="2")]
     pub hostname: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
+    #[prost(string, tag="3")]
     pub pool: ::prost::alloc::string::String,
-    #[prost(uint32, tag = "4")]
+    #[prost(uint32, tag="4")]
     pub total_vcpus: u32,
-    #[prost(uint32, tag = "5")]
+    #[prost(uint32, tag="5")]
     pub total_memory_mib: u32,
-    #[prost(uint32, tag = "6")]
+    #[prost(uint32, tag="6")]
     pub total_disk_mib: u32,
-    #[prost(string, tag = "7")]
+    #[prost(string, tag="7")]
     pub kernel_version: ::prost::alloc::string::String,
-    #[prost(string, tag = "8")]
+    #[prost(string, tag="8")]
     pub firecracker_version: ::prost::alloc::string::String,
     /// Available rootfs images with semver (e.g. "terraform-v1-1.3.0")
-    #[prost(string, repeated, tag = "9")]
+    #[prost(string, repeated, tag="9")]
     pub available_images: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Architecture: "x86_64" or "aarch64" (future)
-    #[prost(string, tag = "10")]
+    #[prost(string, tag="10")]
     pub arch: ::prost::alloc::string::String,
 }
 /// Periodic keepalive with capacity info (recommended every 10s).
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct AgentHeartbeat {
-    #[prost(uint32, tag = "1")]
+    #[prost(uint32, tag="1")]
     pub active_vms: u32,
-    #[prost(uint32, tag = "2")]
+    #[prost(uint32, tag="2")]
     pub available_vcpus: u32,
-    #[prost(uint32, tag = "3")]
+    #[prost(uint32, tag="3")]
     pub available_memory_mib: u32,
-    #[prost(uint32, tag = "4")]
+    #[prost(uint32, tag="4")]
     pub available_disk_mib: u32,
-    #[prost(double, tag = "5")]
+    #[prost(double, tag="5")]
     pub load_1m: f64,
-    #[prost(double, tag = "6")]
+    #[prost(double, tag="6")]
     pub load_5m: f64,
 }
 /// Status update for a running job.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct JobUpdate {
-    #[prost(string, tag = "1")]
+    #[prost(string, tag="1")]
     pub job_id: ::prost::alloc::string::String,
-    #[prost(enumeration = "JobStatus", tag = "2")]
+    #[prost(enumeration="JobStatus", tag="2")]
     pub status: i32,
-    #[prost(string, tag = "3")]
+    #[prost(string, tag="3")]
     pub error_message: ::prost::alloc::string::String,
-    #[prost(string, optional, tag = "4")]
+    #[prost(string, optional, tag="4")]
     pub plan_output: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(int32, tag = "5")]
+    #[prost(int32, tag="5")]
     pub exit_code: i32,
 }
 /// Batch of log lines from a running job.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct JobLogBatch {
-    #[prost(string, tag = "1")]
+    #[prost(string, tag="1")]
     pub job_id: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag = "2")]
+    #[prost(message, repeated, tag="2")]
     pub lines: ::prost::alloc::vec::Vec<LogLine>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct LogLine {
     /// "stdout" or "stderr"
-    #[prost(string, tag = "1")]
+    #[prost(string, tag="1")]
     pub channel: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
+    #[prost(string, tag="2")]
     pub line: ::prost::alloc::string::String,
-    #[prost(uint64, tag = "3")]
+    #[prost(uint64, tag="3")]
     pub timestamp: u64,
 }
 // ============================================================================
@@ -103,76 +103,83 @@ pub struct LogLine {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ControllerMessage {
-    #[prost(oneof = "controller_message::Message", tags = "1, 2, 3")]
+    #[prost(oneof="controller_message::Message", tags="1, 2, 3")]
     pub message: ::core::option::Option<controller_message::Message>,
 }
 /// Nested message and enum types in `ControllerMessage`.
 pub mod controller_message {
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Message {
-        #[prost(message, tag = "1")]
+        #[prost(message, tag="1")]
         RegisterAck(super::AgentRegisterAck),
-        #[prost(message, tag = "2")]
+        #[prost(message, tag="2")]
         RunJob(super::RunJob),
-        #[prost(message, tag = "3")]
+        #[prost(message, tag="3")]
         CancelJob(super::CancelJob),
     }
 }
 /// Controller response to AgentRegister.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct AgentRegisterAck {
-    #[prost(string, tag = "1")]
+    #[prost(string, tag="1")]
     pub agent_id: ::prost::alloc::string::String,
-    #[prost(bool, tag = "2")]
+    #[prost(bool, tag="2")]
     pub accepted: bool,
-    #[prost(string, tag = "3")]
+    #[prost(string, tag="3")]
     pub reason: ::prost::alloc::string::String,
 }
 /// Dispatch a job to the agent for execution in a Firecracker microVM.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RunJob {
-    #[prost(string, tag = "1")]
+    #[prost(string, tag="1")]
     pub job_id: ::prost::alloc::string::String,
     /// Rootfs image to use (e.g. "terraform-v1"). Agent resolves to
     /// highest compatible semver on disk.
-    #[prost(string, tag = "2")]
+    #[prost(string, tag="2")]
     pub image: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag = "3")]
+    #[prost(string, repeated, tag="3")]
     pub command: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(map = "string, string", tag = "4")]
-    pub environment:
-        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(message, repeated, tag = "5")]
+    #[prost(map="string, string", tag="4")]
+    pub environment: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, repeated, tag="5")]
     pub files: ::prost::alloc::vec::Vec<JobFile>,
     /// Resource allocation
-    #[prost(uint32, tag = "6")]
+    #[prost(uint32, tag="6")]
     pub vcpus: u32,
-    #[prost(uint32, tag = "7")]
+    #[prost(uint32, tag="7")]
     pub memory_mib: u32,
-    #[prost(uint32, tag = "8")]
+    #[prost(uint32, tag="8")]
     pub disk_mib: u32,
-    #[prost(uint32, tag = "9")]
+    #[prost(uint32, tag="9")]
     pub timeout_seconds: u32,
     /// Network policy
-    #[prost(bool, tag = "10")]
+    #[prost(bool, tag="10")]
     pub egress_enabled: bool,
     /// Execution mode: "deploy" or "plan"
-    #[prost(string, tag = "11")]
+    #[prost(string, tag="11")]
     pub mode: ::prost::alloc::string::String,
+    /// Optional egress allowlist. When `egress_enabled` is true and this list
+    /// is non-empty, the VM is restricted to *only* these destination CIDRs
+    /// (in addition to the unconditional IMDS/RFC1918 blocks).
+    /// Empty list with egress_enabled=true preserves the current "public
+    /// internet only" behaviour.
+    /// Format: standard CIDR strings (e.g. "1.1.1.1/32", "10.0.0.0/8").
+    #[prost(string, repeated, tag="12")]
+    pub allowed_egress_cidrs: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct JobFile {
-    #[prost(string, tag = "1")]
+    #[prost(string, tag="1")]
     pub path: ::prost::alloc::string::String,
-    #[prost(bytes = "vec", tag = "2")]
+    #[prost(bytes="vec", tag="2")]
     pub content: ::prost::alloc::vec::Vec<u8>,
     /// octal, e.g. 0644
-    #[prost(uint32, tag = "3")]
+    #[prost(uint32, tag="3")]
     pub mode: u32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CancelJob {
-    #[prost(string, tag = "1")]
+    #[prost(string, tag="1")]
     pub job_id: ::prost::alloc::string::String,
 }
 // ============================================================================

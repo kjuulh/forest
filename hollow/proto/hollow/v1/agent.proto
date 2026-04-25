@@ -108,6 +108,13 @@ message RunJob {
   bool egress_enabled = 10;
   // Execution mode: "deploy" or "plan"
   string mode = 11;
+  // Optional egress allowlist. When `egress_enabled` is true and this list
+  // is non-empty, the VM is restricted to *only* these destination CIDRs
+  // (in addition to the unconditional IMDS/RFC1918 blocks).
+  // Empty list with egress_enabled=true preserves the current "public
+  // internet only" behaviour.
+  // Format: standard CIDR strings (e.g. "1.1.1.1/32", "10.0.0.0/8").
+  repeated string allowed_egress_cidrs = 12;
 }
 
 message JobFile {
