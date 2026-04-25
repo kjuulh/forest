@@ -1205,14 +1205,22 @@ The controller mirrors the executor flow from `crates/forest-runner/src/executor
 
 1. ✅ MVP — `Dockerfile.fluxv1` ships git + openssh-client + flux CLI +
    kustomize CLI; controller has `fluxv1` arm; integration test proves the
-   image boots and the toolchain is reachable. The actual git-clone /
-   write-manifests / commit / push workflow (and SSH key shipping) is the
-   next iteration on top of this substrate.
-2. Add forage/component destination support — `forage` is gRPC-based, no
+   image boots and the toolchain is reachable.
+2. ✅ Real fluxv1 git workflow — `forest-flux-deploy` baked into the image
+   does clone → write manifests at
+   `releases/<env>/<dest>/<cluster>/<ns>/<project>/` → commit → push.
+   Configuration via destination metadata env vars; SSH key ships through
+   the secret channel as a Secret targeting `/root/.ssh/id_forest`. Acceptance
+   test exercises the full path against a `file://` bare repo and asserts
+   on the `FLUX_PUSHED` sentinel.
+3. ✅ Secret-shipping channel — `RunJob.secrets` carries name/target_path/
+   mode/content; agent and guest redact `content` everywhere; written to
+   the target path with the requested mode before the job's command runs.
+4. Add forage/component destination support — `forage` is gRPC-based, no
    shell command surface, so this likely stays on the legacy in-process
    runner.
-3. Increase controller's `max_concurrent`, decrease old runner's `max_concurrent`
-4. Gradually shift all traffic to Hollow
+5. Increase controller's `max_concurrent`, decrease old runner's `max_concurrent`
+6. Gradually shift all traffic to Hollow
 
 ### Phase 3: Deprecate Old Runners
 
