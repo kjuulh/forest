@@ -135,54 +135,88 @@ impl Drop for NetworkHandle {
     }
 }
 
+/// CIDRs that MUST NOT be reachable from a VM. The intent is "public internet
+/// only": no host LAN, no other tenants, no cloud instance metadata.
+///
+/// IMPORTANT: 10.0.0.0/8 covers our own per-VM /30 subnets, so this also
+/// implicitly blocks VM→VM traffic via the routing path. The dedicated
+/// tap-to-tap rule below is still installed for defence in depth (and to
+/// make the intent explicit when reading `iptables -L`).
+const BLOCKED_DESTS: &[&str] = &[
+    "169.254.0.0/16", // link-local — cloud IMDS lives at 169.254.169.254
+    "10.0.0.0/8",     // RFC1918
+    "172.16.0.0/12",  // RFC1918
+    "192.168.0.0/16", // RFC1918
+];
+
 fn add_iptables_rules(cfg: &NetworkConfig) -> anyhow::Result<()> {
-    // Block traffic between tap interfaces (lateral movement between VMs).
-    // Insert at the top of FORWARD so it wins over later ACCEPTs.
+    let tap = cfg.tap_name();
+    let any_tap = format!("{IFACE_PREFIX}+");
+
+    // Order matters: every -I X inserts at position X, shifting prior rules
+    // down. We install all DROP rules with `-I FORWARD 1` so they end up
+    // ahead of the ACCEPTs in the chain. iptables walks rules top-to-bottom,
+    // so DROPs evaluated first means a denied packet never reaches MASQUERADE.
+
+    // Block lateral movement between tenants.
     run(
         "iptables",
         &[
-            "-I",
-            "FORWARD",
-            "1",
-            "-i",
-            &cfg.tap_name(),
-            "-o",
-            &format!("{IFACE_PREFIX}+"),
-            "-j",
-            "DROP",
+            "-I", "FORWARD", "1",
+            "-i", &tap,
+            "-o", &any_tap,
+            "-j", "DROP",
         ],
     )?;
 
-    // Allow the VM's outbound traffic to the host's uplink.
+    // Block VM→host LAN, IMDS, anything else private. -d operates on the
+    // routed destination IP, so a VM that pokes 192.168.0.1 (the host's
+    // gateway, perhaps) is dropped before MASQUERADE rewrites the source.
+    for cidr in BLOCKED_DESTS {
+        run(
+            "iptables",
+            &[
+                "-I", "FORWARD", "1",
+                "-i", &tap,
+                "-d", cidr,
+                "-j", "DROP",
+            ],
+        )?;
+    }
+
+    // Block VM→host services. The VM's gateway is the host tap IP, so any
+    // packet destined for `10.200.N.1` lands in INPUT after routing. INPUT's
+    // default policy is usually ACCEPT, which would expose every host
+    // service bound to 0.0.0.0 (Postgres, dockerd, the agent itself…).
     run(
         "iptables",
         &[
-            "-A",
-            "FORWARD",
-            "-i",
-            &cfg.tap_name(),
-            "-o",
-            &cfg.host_iface,
-            "-j",
-            "ACCEPT",
+            "-I", "INPUT", "1",
+            "-i", &tap,
+            "-j", "DROP",
+        ],
+    )?;
+
+    // Allow the VM's outbound traffic to the host's uplink (anything that
+    // wasn't matched by the DROPs above is, by construction, public).
+    run(
+        "iptables",
+        &[
+            "-A", "FORWARD",
+            "-i", &tap,
+            "-o", &cfg.host_iface,
+            "-j", "ACCEPT",
         ],
     )?;
     // And return packets for established connections.
     run(
         "iptables",
         &[
-            "-A",
-            "FORWARD",
-            "-i",
-            &cfg.host_iface,
-            "-o",
-            &cfg.tap_name(),
-            "-m",
-            "state",
-            "--state",
-            "ESTABLISHED,RELATED",
-            "-j",
-            "ACCEPT",
+            "-A", "FORWARD",
+            "-i", &cfg.host_iface,
+            "-o", &tap,
+            "-m", "state", "--state", "ESTABLISHED,RELATED",
+            "-j", "ACCEPT",
         ],
     )?;
 
@@ -190,16 +224,11 @@ fn add_iptables_rules(cfg: &NetworkConfig) -> anyhow::Result<()> {
     run(
         "iptables",
         &[
-            "-t",
-            "nat",
-            "-A",
-            "POSTROUTING",
-            "-s",
-            &cfg.subnet_cidr(),
-            "-o",
-            &cfg.host_iface,
-            "-j",
-            "MASQUERADE",
+            "-t", "nat",
+            "-A", "POSTROUTING",
+            "-s", &cfg.subnet_cidr(),
+            "-o", &cfg.host_iface,
+            "-j", "MASQUERADE",
         ],
     )?;
     Ok(())
@@ -209,55 +238,38 @@ fn remove_iptables_rules(cfg: &NetworkConfig) -> anyhow::Result<()> {
     // Each rule gets `-D` (delete). Deletion by rule-spec must match exactly.
     // Errors are swallowed so a partial-teardown path still removes as much
     // as it can.
+    let tap = cfg.tap_name();
+    let any_tap = format!("{IFACE_PREFIX}+");
+
     let _ = run_ignore_err(&[
-        "iptables",
-        "-D",
-        "FORWARD",
-        "-i",
-        &cfg.tap_name(),
-        "-o",
-        &format!("{IFACE_PREFIX}+"),
-        "-j",
-        "DROP",
+        "iptables", "-D", "FORWARD",
+        "-i", &tap, "-o", &any_tap, "-j", "DROP",
+    ]);
+    for cidr in BLOCKED_DESTS {
+        let _ = run_ignore_err(&[
+            "iptables", "-D", "FORWARD",
+            "-i", &tap, "-d", cidr, "-j", "DROP",
+        ]);
+    }
+    let _ = run_ignore_err(&[
+        "iptables", "-D", "INPUT",
+        "-i", &tap, "-j", "DROP",
     ]);
     let _ = run_ignore_err(&[
-        "iptables",
-        "-D",
-        "FORWARD",
-        "-i",
-        &cfg.tap_name(),
-        "-o",
-        &cfg.host_iface,
-        "-j",
-        "ACCEPT",
+        "iptables", "-D", "FORWARD",
+        "-i", &tap, "-o", &cfg.host_iface, "-j", "ACCEPT",
     ]);
     let _ = run_ignore_err(&[
-        "iptables",
-        "-D",
-        "FORWARD",
-        "-i",
-        &cfg.host_iface,
-        "-o",
-        &cfg.tap_name(),
-        "-m",
-        "state",
-        "--state",
-        "ESTABLISHED,RELATED",
-        "-j",
-        "ACCEPT",
+        "iptables", "-D", "FORWARD",
+        "-i", &cfg.host_iface, "-o", &tap,
+        "-m", "state", "--state", "ESTABLISHED,RELATED",
+        "-j", "ACCEPT",
     ]);
     let _ = run_ignore_err(&[
-        "iptables",
-        "-t",
-        "nat",
-        "-D",
-        "POSTROUTING",
-        "-s",
-        &cfg.subnet_cidr(),
-        "-o",
-        &cfg.host_iface,
-        "-j",
-        "MASQUERADE",
+        "iptables", "-t", "nat", "-D", "POSTROUTING",
+        "-s", &cfg.subnet_cidr(),
+        "-o", &cfg.host_iface,
+        "-j", "MASQUERADE",
     ]);
     Ok(())
 }
