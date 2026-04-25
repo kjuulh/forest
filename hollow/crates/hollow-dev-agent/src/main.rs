@@ -43,15 +43,20 @@ async fn main() -> anyhow::Result<()> {
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
 
+    let allow_local_egress = std::env::var("HOLLOW_DEV_LOCAL_EGRESS")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+
     tracing::info!(
         host = %harness.config().host,
         controller_port,
         capture_console,
+        allow_local_egress,
         "preparing artefacts and starting remote agent"
     );
 
     let mut child = harness
-        .start_remote_agent(controller_port, capture_console)
+        .start_remote_agent(controller_port, capture_console, allow_local_egress)
         .context("start remote agent")?;
 
     let status = child.wait().await.context("wait for ssh agent session")?;

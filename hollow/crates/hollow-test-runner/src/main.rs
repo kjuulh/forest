@@ -73,6 +73,7 @@ async fn run(cli: Cli) -> anyhow::Result<i32> {
         subnet_index: n.subnet_index,
         host_iface: n.host_iface.clone(),
         dns: n.dns.clone(),
+        allow_local_egress: n.allow_local_egress,
     });
     let jailer = spec.jailer.as_ref().map(|j| hollow_vm::JailerConfig {
         jailer_bin: PathBuf::from(&j.jailer_bin),

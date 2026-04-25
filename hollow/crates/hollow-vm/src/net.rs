@@ -28,6 +28,15 @@ pub struct NetworkConfig {
     /// DNS servers the guest should use. hollow-guest writes /etc/resolv.conf
     /// from this list before spawning the job.
     pub dns: Vec<String>,
+    /// Dev-only escape hatch: when true, the VM is allowed to reach RFC1918
+    /// destinations and the host tap IP — i.e. the dev machine's forest-
+    /// server. Default false: production VMs only reach the public internet
+    /// (cloud APIs, registries) and never the host LAN.
+    ///
+    /// IMDS (169.254.169.254 / link-local) and tap-to-tap remain blocked
+    /// regardless — the local egress allowlist is for the dev forest-server,
+    /// not for cloud-credential exfil paths.
+    pub allow_local_egress: bool,
 }
 
 impl NetworkConfig {
@@ -135,15 +144,21 @@ impl Drop for NetworkHandle {
     }
 }
 
-/// CIDRs that MUST NOT be reachable from a VM. The intent is "public internet
-/// only": no host LAN, no other tenants, no cloud instance metadata.
-///
-/// IMPORTANT: 10.0.0.0/8 covers our own per-VM /30 subnets, so this also
-/// implicitly blocks VM→VM traffic via the routing path. The dedicated
-/// tap-to-tap rule below is still installed for defence in depth (and to
-/// make the intent explicit when reading `iptables -L`).
-const BLOCKED_DESTS: &[&str] = &[
+/// Destinations blocked unconditionally — even with `allow_local_egress`.
+/// IMDS at 169.254.169.254 covers the link-local block; cloud-credential
+/// exfil is the threat regardless of dev/prod.
+const ALWAYS_BLOCKED_DESTS: &[&str] = &[
     "169.254.0.0/16", // link-local — cloud IMDS lives at 169.254.169.254
+];
+
+/// Destinations blocked in the strict (production) posture but reachable
+/// when `allow_local_egress` is true (dev posture, so VMs can talk to
+/// the dev-machine forest-server).
+///
+/// 10.0.0.0/8 covers our own per-VM /30 subnets, so blocking it also
+/// implicitly blocks VM→VM traffic via the routing path; the dedicated
+/// tap-to-tap rule still goes in regardless for defence in depth.
+const LOCAL_BLOCKED_DESTS: &[&str] = &[
     "10.0.0.0/8",     // RFC1918
     "172.16.0.0/12",  // RFC1918
     "192.168.0.0/16", // RFC1918
@@ -169,10 +184,10 @@ fn add_iptables_rules(cfg: &NetworkConfig) -> anyhow::Result<()> {
         ],
     )?;
 
-    // Block VM→host LAN, IMDS, anything else private. -d operates on the
-    // routed destination IP, so a VM that pokes 192.168.0.1 (the host's
-    // gateway, perhaps) is dropped before MASQUERADE rewrites the source.
-    for cidr in BLOCKED_DESTS {
+    // Block IMDS / link-local always — cloud credential exfil is a
+    // threat regardless of posture. -d operates on the routed destination
+    // IP so we drop before MASQUERADE rewrites the source.
+    for cidr in ALWAYS_BLOCKED_DESTS {
         run(
             "iptables",
             &[
@@ -184,18 +199,35 @@ fn add_iptables_rules(cfg: &NetworkConfig) -> anyhow::Result<()> {
         )?;
     }
 
-    // Block VM→host services. The VM's gateway is the host tap IP, so any
-    // packet destined for `10.200.N.1` lands in INPUT after routing. INPUT's
-    // default policy is usually ACCEPT, which would expose every host
-    // service bound to 0.0.0.0 (Postgres, dockerd, the agent itself…).
-    run(
-        "iptables",
-        &[
-            "-I", "INPUT", "1",
-            "-i", &tap,
-            "-j", "DROP",
-        ],
-    )?;
+    // Strict (production) posture: also block RFC1918 + the host's tap IP.
+    // Dev opts out via `allow_local_egress` so the VM can reach the
+    // dev-machine forest-server's terraform state backend etc.
+    if !cfg.allow_local_egress {
+        for cidr in LOCAL_BLOCKED_DESTS {
+            run(
+                "iptables",
+                &[
+                    "-I", "FORWARD", "1",
+                    "-i", &tap,
+                    "-d", cidr,
+                    "-j", "DROP",
+                ],
+            )?;
+        }
+
+        // Block VM→host services. The VM's gateway is the host tap IP, so any
+        // packet destined for `10.200.N.1` lands in INPUT after routing.
+        // INPUT default policy is usually ACCEPT, which would expose every
+        // host service bound to 0.0.0.0 (Postgres, dockerd, the agent…).
+        run(
+            "iptables",
+            &[
+                "-I", "INPUT", "1",
+                "-i", &tap,
+                "-j", "DROP",
+            ],
+        )?;
+    }
 
     // Allow the VM's outbound traffic to the host's uplink (anything that
     // wasn't matched by the DROPs above is, by construction, public).
@@ -245,7 +277,15 @@ fn remove_iptables_rules(cfg: &NetworkConfig) -> anyhow::Result<()> {
         "iptables", "-D", "FORWARD",
         "-i", &tap, "-o", &any_tap, "-j", "DROP",
     ]);
-    for cidr in BLOCKED_DESTS {
+    for cidr in ALWAYS_BLOCKED_DESTS {
+        let _ = run_ignore_err(&[
+            "iptables", "-D", "FORWARD",
+            "-i", &tap, "-d", cidr, "-j", "DROP",
+        ]);
+    }
+    // Always attempt removal — cheap to be a no-op when allow_local_egress
+    // was true and the rules were never installed.
+    for cidr in LOCAL_BLOCKED_DESTS {
         let _ = run_ignore_err(&[
             "iptables", "-D", "FORWARD",
             "-i", &tap, "-d", cidr, "-j", "DROP",

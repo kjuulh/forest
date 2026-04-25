@@ -87,6 +87,7 @@ impl Harness {
         &self,
         controller_port: u16,
         capture_console: bool,
+        allow_local_egress: bool,
     ) -> anyhow::Result<tokio::process::Child> {
         let layout = self.prepare()?.clone();
         crate::orchestrator::spawn_remote_agent(
@@ -94,6 +95,7 @@ impl Harness {
             &layout,
             controller_port,
             capture_console,
+            allow_local_egress,
         )
     }
 }

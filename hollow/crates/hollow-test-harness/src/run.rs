@@ -118,6 +118,7 @@ struct WireNetworkSpec {
     subnet_index: u8,
     host_iface: String,
     dns: Vec<String>,
+    allow_local_egress: bool,
 }
 
 #[derive(Serialize)]
@@ -152,6 +153,9 @@ pub fn execute(cfg: &Config, layout: &RemoteLayout, job: JobSpec) -> anyhow::Res
             subnet_index: 0,
             host_iface: layout.host_iface.clone(),
             dns: vec!["1.1.1.1".into(), "8.8.8.8".into()],
+            // Direct-runner tests assert against the strict posture, so
+            // local egress stays blocked here.
+            allow_local_egress: false,
         })
     } else {
         None

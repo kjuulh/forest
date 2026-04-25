@@ -68,7 +68,15 @@ impl Orchestrator {
         // Tests assert on kernel boot lines and 'Linux version' from the
         // orchestrator path, so console replay needs to be on. Production
         // agents (and the dev:agent mise task) leave it off by default.
-        let agent_ssh = spawn_remote_agent(cfg, &layout, controller_port, /* capture_console */ true)?;
+        // Tests stick with the strict egress posture (allow_local_egress=
+        // false) since that's what the network test asserts against.
+        let agent_ssh = spawn_remote_agent(
+            cfg,
+            &layout,
+            controller_port,
+            /* capture_console */ true,
+            /* allow_local_egress */ false,
+        )?;
         tracing::info!("hollow-agent spawned on remote");
 
         // Wait until the agent has registered with the controller. The
@@ -133,6 +141,7 @@ pub fn spawn_remote_agent(
     layout: &RemoteLayout,
     controller_port: u16,
     capture_console: bool,
+    allow_local_egress: bool,
 ) -> anyhow::Result<Child> {
     // Remote command: export env vars, then exec the agent. Using `exec` so
     // the agent replaces the shell and receives SIGHUP directly when ssh dies.
@@ -149,6 +158,7 @@ export HOLLOW_JAILER_CHROOT_BASE={jailer_chroot}
 export HOLLOW_JAILER_UID={jailer_uid}
 export HOLLOW_JAILER_GID={jailer_gid}
 export HOLLOW_CAPTURE_CONSOLE={capture}
+export HOLLOW_LOCAL_EGRESS={local_egress}
 export RUST_LOG=hollow=debug,info
 exec {agent}"#,
         port = controller_port,
@@ -161,6 +171,7 @@ exec {agent}"#,
         jailer_uid = layout.jailer_uid,
         jailer_gid = layout.jailer_gid,
         capture = capture_console,
+        local_egress = allow_local_egress,
         agent = layout.agent_bin,
     );
 

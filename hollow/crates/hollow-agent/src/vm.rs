@@ -38,6 +38,10 @@ pub struct VmPaths {
     /// the failure-path tail in hollow-vm still surfaces a short snippet
     /// when something breaks before the guest can report a clean exit.
     pub capture_console: bool,
+    /// Dev-only: allow VMs to reach RFC1918 + the host's tap IP. Required
+    /// when forest-server runs on the dev machine and the VM needs to talk
+    /// to its terraform state backend etc. IMDS stays blocked regardless.
+    pub allow_local_egress: bool,
 }
 
 pub async fn run_job(
@@ -115,6 +119,7 @@ async fn run_job_inner(
             subnet_index: subnet.index,
             host_iface: vm_paths.host_iface.clone(),
             dns: vm_paths.dns.clone(),
+            allow_local_egress: vm_paths.allow_local_egress,
         };
         Some((cfg, subnet))
     } else {

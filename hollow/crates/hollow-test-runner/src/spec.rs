@@ -59,6 +59,9 @@ pub struct NetworkSpec {
     /// Nameservers written to /etc/resolv.conf inside the guest.
     #[serde(default = "default_dns")]
     pub dns: Vec<String>,
+    /// Allow the VM to reach RFC1918 + the host's tap IP. Default false.
+    #[serde(default)]
+    pub allow_local_egress: bool,
 }
 
 fn default_dns() -> Vec<String> {

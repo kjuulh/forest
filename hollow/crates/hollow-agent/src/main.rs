@@ -89,6 +89,14 @@ struct Cli {
     /// A short tail is always emitted on failure regardless of this flag.
     #[arg(long, env = "HOLLOW_CAPTURE_CONSOLE", default_value = "false")]
     capture_console: bool,
+
+    /// Dev-only: allow VMs to reach RFC1918 + the host's tap IP. Use this
+    /// when forest-server runs on the same machine as the agent and the
+    /// guest needs to talk to its state backend or other internal
+    /// services. Default false matches production posture (public-internet
+    /// egress only).
+    #[arg(long, env = "HOLLOW_LOCAL_EGRESS", default_value = "false")]
+    allow_local_egress: bool,
 }
 
 fn default_agent_id() -> String {
@@ -153,6 +161,7 @@ async fn main() -> anyhow::Result<()> {
             dns,
             jailer,
             cli.capture_console,
+            cli.allow_local_egress,
         ))
         .run()
         .await?;
