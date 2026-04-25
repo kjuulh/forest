@@ -13,6 +13,13 @@ pub mod names {
     pub const JOBS_FAILED: &str = "hollow_jobs_failed_total";
     pub const AGENTS_CONNECTED: &str = "hollow_agents_connected";
     pub const JOBS_ACTIVE: &str = "hollow_jobs_active";
+    /// Allocated vCPU-seconds per (org, project, destination, outcome).
+    /// Forage scrapes this for usage-based quota / billing — the values are
+    /// allocation-based (vcpus × duration), not actual cgroup samples.
+    pub const VCPU_SECONDS: &str = "hollow_vcpu_seconds_total";
+    /// Allocated memory-MiB-seconds per (org, project, destination, outcome).
+    pub const MEMORY_MIB_SECONDS: &str = "hollow_memory_mib_seconds_total";
+    pub const JOB_DURATION_SECONDS: &str = "hollow_job_duration_seconds";
 }
 
 /// Installs the Prometheus exporter and serves `/metrics` on the given address.
@@ -54,6 +61,18 @@ impl Component for MetricsServer {
             "Number of currently connected agents"
         );
         metrics::describe_gauge!(names::JOBS_ACTIVE, "Number of currently active jobs");
+        metrics::describe_counter!(
+            names::VCPU_SECONDS,
+            "Allocated vCPU-seconds (vcpus × duration) per job — labelled by org/project/destination/outcome"
+        );
+        metrics::describe_counter!(
+            names::MEMORY_MIB_SECONDS,
+            "Allocated memory-MiB-seconds per job — labelled by org/project/destination/outcome"
+        );
+        metrics::describe_histogram!(
+            names::JOB_DURATION_SECONDS,
+            "Wall-clock duration per job from dispatch to completion"
+        );
 
         // Keep alive until shutdown
         cancellation_token.cancelled().await;

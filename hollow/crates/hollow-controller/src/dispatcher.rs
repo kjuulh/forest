@@ -25,6 +25,27 @@ pub const DEFAULT_VCPUS_PER_JOB: u32 = 1;
 pub const DEFAULT_MEMORY_MIB_PER_JOB: u32 = 1024;
 pub const DEFAULT_TIMEOUT_SECONDS: u32 = 1800;
 
+/// Per-job billing/metering context. Captured at dispatch, consumed at
+/// completion to emit `hollow_vcpu_seconds_total` /
+/// `hollow_memory_mib_seconds_total` counters labelled by org/project/dest/
+/// outcome and a structured `target = "hollow::meter"` tracing event that
+/// forage (or anything log-shipping) can pick up.
+///
+/// Allocation-based by design — counts what the VM was given, not what it
+/// used. Actual cgroup sampling is a follow-on if forage needs tighter
+/// numbers.
+#[derive(Clone)]
+struct MeterContext {
+    job_id: String,
+    organisation: String,
+    project: String,
+    destination: String,
+    vcpus: u32,
+    memory_mib: u32,
+    started_at: std::time::Instant,
+    started_at_unix_ms: u64,
+}
+
 pub struct Dispatcher {
     client: ForestRunnerClient,
     server_addr: String,
@@ -275,6 +296,12 @@ impl Dispatcher {
 
         let job_id = format!("job-{}", uuid::Uuid::new_v4());
 
+        let started_at = std::time::Instant::now();
+        let started_at_unix_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
         // Per-destination egress allowlist: sourced from destination metadata
         // under the `allowed_egress_cidrs` key (comma-separated CIDRs). When
         // unset, the VM follows the default "public internet only" posture.
@@ -285,6 +312,14 @@ impl Dispatcher {
 
         let secrets = build_secrets_for_destination(&dest_type.name, &destination.metadata)
             .context("failed to assemble destination secrets")?;
+
+        // Snapshot the bits the meter context needs before `environment` is
+        // moved into the RunJob below.
+        let meter_organisation = environment
+            .get("FOREST_ORGANISATION")
+            .cloned()
+            .unwrap_or_default();
+        let meter_project = environment.get("FOREST_PROJECT").cloned().unwrap_or_default();
 
         let run_job = RunJob {
             job_id: job_id.clone(),
@@ -324,8 +359,26 @@ impl Dispatcher {
         let mut client = background_client.clone();
         let release_token_owned = release_token.to_string();
 
+        let meter_ctx = MeterContext {
+            job_id: job_id.clone(),
+            organisation: meter_organisation,
+            project: meter_project,
+            destination: dest_type.name.clone(),
+            vcpus: DEFAULT_VCPUS_PER_JOB,
+            memory_mib: DEFAULT_MEMORY_MIB_PER_JOB,
+            started_at,
+            started_at_unix_ms,
+        };
+
         tokio::spawn(async move {
-            forward_job_events(job_handle, log_sender, &release_token_owned, &mut client).await;
+            forward_job_events(
+                job_handle,
+                log_sender,
+                &release_token_owned,
+                &mut client,
+                meter_ctx,
+            )
+            .await;
         });
 
         Ok(())
@@ -338,6 +391,7 @@ async fn forward_job_events(
     log_sender: mpsc::UnboundedSender<PushLogRequest>,
     release_token: &str,
     client: &mut RunnerServiceClient<tonic::transport::Channel>,
+    meter_ctx: MeterContext,
 ) {
     while let Some(event) = handle.rx.recv().await {
         match event {
@@ -358,16 +412,18 @@ async fn forward_job_events(
                 plan_output,
             } => {
                 metrics::gauge!(crate::metrics::names::JOBS_ACTIVE).decrement(1.0);
-                let (outcome, error) = if exit_code == 0 {
+                let (outcome, error, outcome_label) = if exit_code == 0 {
                     metrics::counter!(crate::metrics::names::JOBS_COMPLETED).increment(1);
-                    (ReleaseOutcome::Success, None)
+                    (ReleaseOutcome::Success, None, "success")
                 } else {
                     metrics::counter!(crate::metrics::names::JOBS_FAILED).increment(1);
                     (
                         ReleaseOutcome::Failure,
                         Some(format!("process exited with code {exit_code}")),
+                        "failure",
                     )
                 };
+                emit_meter_event(&meter_ctx, outcome_label, exit_code);
                 complete_release(
                     client,
                     release_token,
@@ -381,6 +437,7 @@ async fn forward_job_events(
             JobEvent::Failed { error_message } => {
                 metrics::gauge!(crate::metrics::names::JOBS_ACTIVE).decrement(1.0);
                 metrics::counter!(crate::metrics::names::JOBS_FAILED).increment(1);
+                emit_meter_event(&meter_ctx, "failure", -1);
                 complete_release(
                     client,
                     release_token,
@@ -398,6 +455,7 @@ async fn forward_job_events(
     tracing::warn!(release_token, "job event channel closed without completion");
     metrics::gauge!(crate::metrics::names::JOBS_ACTIVE).decrement(1.0);
     metrics::counter!(crate::metrics::names::JOBS_FAILED).increment(1);
+    emit_meter_event(&meter_ctx, "agent_disconnected", -1);
     complete_release(
         client,
         release_token,
@@ -406,6 +464,57 @@ async fn forward_job_events(
         None,
     )
     .await;
+}
+
+/// Emit per-job metering: increment Prometheus counters labelled by
+/// (org, project, destination, outcome) and log a structured tracing event
+/// at `target = "hollow::meter"` for log-shipping pipelines / forage.
+///
+/// `outcome` is one of `success`, `failure`, `agent_disconnected`. We
+/// keep the cardinality tight so Prometheus stays happy under high
+/// release volume.
+fn emit_meter_event(ctx: &MeterContext, outcome: &str, exit_code: i32) {
+    let duration = ctx.started_at.elapsed();
+    let duration_seconds = duration.as_secs_f64();
+    let vcpu_seconds = duration_seconds * f64::from(ctx.vcpus);
+    let memory_mib_seconds = duration_seconds * f64::from(ctx.memory_mib);
+    let ended_at_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    let labels = [
+        ("organisation", ctx.organisation.clone()),
+        ("project", ctx.project.clone()),
+        ("destination", ctx.destination.clone()),
+        ("outcome", outcome.to_string()),
+    ];
+    metrics::counter!(crate::metrics::names::VCPU_SECONDS, &labels).increment(vcpu_seconds as u64);
+    metrics::counter!(crate::metrics::names::MEMORY_MIB_SECONDS, &labels)
+        .increment(memory_mib_seconds as u64);
+    metrics::histogram!(crate::metrics::names::JOB_DURATION_SECONDS, &labels)
+        .record(duration_seconds);
+
+    // Structured event with target=hollow::meter so log pipelines can filter
+    // it cheaply. Field set is the minimum forage needs to attribute usage:
+    // who, what, when, how-much.
+    tracing::info!(
+        target: "hollow::meter",
+        job_id = %ctx.job_id,
+        organisation = %ctx.organisation,
+        project = %ctx.project,
+        destination = %ctx.destination,
+        outcome = %outcome,
+        exit_code,
+        vcpus = ctx.vcpus,
+        memory_mib = ctx.memory_mib,
+        duration_seconds,
+        vcpu_seconds,
+        memory_mib_seconds,
+        started_at_unix_ms = ctx.started_at_unix_ms,
+        ended_at_unix_ms,
+        "job metering"
+    );
 }
 
 async fn complete_release(
