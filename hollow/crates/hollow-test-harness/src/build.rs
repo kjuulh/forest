@@ -65,6 +65,18 @@ const IMAGES: &[ImageBuild] = &[
         size: "1024M",
         extra_inputs: &["forest-flux-deploy"],
     },
+    ImageBuild {
+        // forest/exec/1 — general-purpose CUE-driven workflow runner.
+        // v0 ships cue + jq + git + gh + bash; v1 will add podman for
+        // `uses:` container actions once we've verified the kernel-side
+        // primitives work in Firecracker.
+        name: "exec-v1",
+        dockerfile: "Dockerfile.exec-v1",
+        tag: "hollow-exec-v1:test",
+        fs_label: "hollow-exec",
+        size: "1024M",
+        extra_inputs: &["forest-exec-runner"],
+    },
 ];
 
 pub struct BuildArtifacts {
@@ -190,17 +202,21 @@ fn build_image(cfg: &Config, spec: &ImageBuild, guest_bin: &Path) -> anyhow::Res
     // directly. Higher-layer images depend on whatever `FROM` they reference,
     // and docker's own layer cache handles that. Still re-pack whenever the
     // dockerfile or any explicitly-declared sidecar input changes.
-    let extra_inputs_ok = spec
-        .extra_inputs
-        .iter()
-        .try_fold(true, |acc, name| -> anyhow::Result<bool> {
-            Ok(acc && newer_than(&out, &images_dir.join(name))?)
-        })?;
-    if out.exists()
-        && newer_than(&out, &dockerfile)?
-        && newer_than(&out, guest_bin)?
-        && extra_inputs_ok
+    //
+    // We short-circuit on `out.exists()` first because newer_than tries to
+    // stat both arguments — if the ext4 hasn't been built yet, `out` is
+    // missing and we'd surface a confusing "No such file or directory".
+    let cache_ok = if out.exists() && newer_than(&out, &dockerfile)? && newer_than(&out, guest_bin)?
     {
+        spec.extra_inputs
+            .iter()
+            .try_fold(true, |acc, name| -> anyhow::Result<bool> {
+                Ok(acc && newer_than(&out, &images_dir.join(name))?)
+            })?
+    } else {
+        false
+    };
+    if cache_ok {
         // Ensure the sidecar exists even on a cache hit — older harness runs
         // didn't write it, and bootstrap.rs needs it to ship.
         let sidecar = out.with_file_name(format!("{}.ext4.sha256", spec.name));

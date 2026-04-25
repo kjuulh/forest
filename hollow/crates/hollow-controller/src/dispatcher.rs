@@ -717,6 +717,15 @@ fn build_command_for_destination(
             Some(cmd) => vec!["sh".to_string(), "-c".to_string(), cmd.clone()],
             None => vec!["/usr/local/bin/forest-flux-deploy".to_string()],
         },
+        // forest/exec/1: general-purpose CUE-driven workflow runner. The
+        // controller hands a `workflow.cue` to the guest as a deployment
+        // file (lands at /work/workflow.cue after prefix stripping); the
+        // runner inside the image evaluates it and walks the steps. As
+        // with fluxv1, `metadata.command` overrides for diagnostics.
+        "exec" => match metadata.get("command") {
+            Some(cmd) => vec!["sh".to_string(), "-c".to_string(), cmd.clone()],
+            None => vec!["/usr/local/bin/forest-exec-runner".to_string()],
+        },
         other => {
             vec![
                 "sh".to_string(),

@@ -1,0 +1,38 @@
+FROM hollow-base:test
+
+# Image for the `forest/exec/1` destination type — Forest's general-purpose
+# arbitrary-execution platform. Workflows are CUE files (`workflow.cue`)
+# that declare a list of named steps; each step is either a `run:` shell
+# command or a `uses:` reference to a container action (added in a later
+# image revision once podman-in-Firecracker is verified end-to-end).
+#
+# v0 ships only the substrate every workflow needs: CUE for evaluation,
+# jq for step-by-step JSON traversal, git + GitHub CLI for repo-init
+# workflows, plus the base image's bash/curl/ca-certs.
+#
+# Versions are pinned by SHA256 against the upstream-published releases.
+# To rotate: bump the ARG, paste the new SHA from the corresponding upstream
+# checksum source.
+ARG CUE_VERSION=0.16.1
+ARG CUE_SHA256=5d644c1305a2b86504c8dcd2ec829cf5b4999efc2cf51ee375624e0455f774ae
+
+# `github-cli` lives in the Alpine community repo, which 3.21 enables by
+# default; if a future base bump moves to an edition without community,
+# add the repo explicitly here.
+RUN apk add --no-cache git github-cli jq
+
+# --- CUE CLI --------------------------------------------------------------
+RUN curl -fsSL "https://github.com/cue-lang/cue/releases/download/v${CUE_VERSION}/cue_v${CUE_VERSION}_linux_amd64.tar.gz" \
+      -o /tmp/cue.tgz \
+ && echo "${CUE_SHA256}  /tmp/cue.tgz" | sha256sum -c - \
+ && tar -xz -C /usr/local/bin/ -f /tmp/cue.tgz cue \
+ && chmod 0755 /usr/local/bin/cue \
+ && rm /tmp/cue.tgz \
+ && /usr/local/bin/cue version
+
+# Bake the workflow runner. The dispatcher's `exec` arm execs this directly;
+# it reads /work/workflow.cue (CUE), evaluates to JSON, and walks the
+# `steps:` list executing each one. `uses:` (container actions) is a
+# follow-on; v0 supports `run:` only.
+COPY forest-exec-runner /usr/local/bin/forest-exec-runner
+RUN chmod 0755 /usr/local/bin/forest-exec-runner

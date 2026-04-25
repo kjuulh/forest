@@ -79,6 +79,11 @@ description = "Phase-2 MVP: fluxv1 image toolchain check (git + flux + kustomize
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }
 run = "cargo test -p hollow-acceptance --test fluxv1 -- --nocapture"
 
+[tasks."test:exec"]
+description = "Run the CUE-driven exec/v1 workflow runner inside Firecracker"
+env = { HOLLOW_TEST_HOST = "forage-local-agent" }
+run = "cargo test -p hollow-acceptance --test exec -- --nocapture"
+
 [tasks."test:secrets"]
 description = "Verify the secret-shipping channel — bytes reach guest, never log"
 env = { HOLLOW_TEST_HOST = "forage-local-agent" }

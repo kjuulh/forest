@@ -1,0 +1,100 @@
+#!/bin/sh
+# forest-exec-runner — drives the v0 exec destination.
+#
+# Reads a CUE workflow file (default /work/workflow.cue), evaluates it to
+# JSON, and walks the `steps:` list. Each step has:
+#   name: string                    # required, used for log tagging
+#   run:  string                    # shell command to run (mutually exclusive with `uses`)
+#   uses: string                    # container image reference (NOT supported in v0)
+#   env:  [string]: string          # optional env merged into the step's process
+#   with: [string]: _               # inputs for `uses` actions (ignored in v0)
+#
+# The whole CUE file ships from the controller as a regular deployment
+# file, so it's evaluated *inside* the VM (not on the controller). That
+# keeps the controller dumb and lets workflows use CUE imports/constraints
+# without dragging the cue-go runtime into the controller.
+#
+# Failures fail-fast: a non-zero step short-circuits the rest of the
+# workflow. The runner prints `EXEC_WORKFLOW_OK` on success so callers
+# can pin a sentinel without parsing the trailing log lines.
+
+set -eu
+
+WORKFLOW="${1:-/work/workflow.cue}"
+
+if [ ! -f "$WORKFLOW" ]; then
+  echo "exec: no workflow file at $WORKFLOW" >&2
+  exit 1
+fi
+
+# `cue export` evaluates and validates the file, emitting one JSON object
+# with the concrete value of every exported field. We capture stderr
+# separately so a CUE error surfaces with its original message instead of
+# being swallowed by the `set -e` exit.
+CUE_ERR=$(mktemp)
+if ! JSON=$(cue export "$WORKFLOW" --out json 2>"$CUE_ERR"); then
+  echo "exec: cue export failed:" >&2
+  cat "$CUE_ERR" >&2
+  rm -f "$CUE_ERR"
+  exit 1
+fi
+rm -f "$CUE_ERR"
+
+n=$(printf '%s' "$JSON" | jq '.steps | length')
+if [ "$n" -eq 0 ]; then
+  echo "exec: workflow has no steps" >&2
+  exit 1
+fi
+
+echo "exec: $n step(s) to run"
+
+i=0
+while [ "$i" -lt "$n" ]; do
+  name=$(printf '%s' "$JSON" | jq -r ".steps[$i].name // \"step-$i\"")
+  uses=$(printf '%s' "$JSON" | jq -r ".steps[$i].uses // empty")
+  run=$(printf '%s' "$JSON" | jq -r ".steps[$i].run // empty")
+
+  echo "[step=$name] starting"
+
+  if [ -n "$uses" ]; then
+    # Container-action mode lands in a follow-on once we've verified
+    # podman/Docker actually runs in this Firecracker guest kernel.
+    echo "[step=$name] 'uses: $uses' is not supported by exec-v1 (run-only); aborting" >&2
+    exit 2
+  fi
+
+  if [ -z "$run" ]; then
+    echo "[step=$name] step has neither 'uses' nor 'run' — skipping" >&2
+    i=$((i + 1))
+    continue
+  fi
+
+  # Step env: any string fields under .env are exported into the step's
+  # process. We read with IFS='=' so values can contain '=' freely; values
+  # with literal newlines aren't supported (rare for env shape, painful
+  # to escape; revisit if a workflow author hits the limit).
+  env_file=$(mktemp)
+  printf '%s' "$JSON" | jq -r ".steps[$i].env // {} | to_entries[] | .key + \"=\" + (.value | tostring)" >"$env_file"
+  while IFS='=' read -r ek ev; do
+    [ -z "$ek" ] && continue
+    export "$ek=$ev"
+  done <"$env_file"
+  rm -f "$env_file"
+
+  # Use `sh -c` so the workflow author can write multi-command steps with
+  # `&&` / pipes. Inheritance of the env we just set is automatic.
+  #
+  # `rc=0; cmd || rc=$?` rather than `if ! cmd; then rc=$?` — the latter
+  # captures the exit code of the negation (always 0), not the command.
+  rc=0
+  sh -c "$run" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "[step=$name] failed (exit $rc)" >&2
+    exit "$rc"
+  fi
+
+  echo "[step=$name] succeeded"
+  i=$((i + 1))
+done
+
+echo "EXEC_WORKFLOW_OK"
