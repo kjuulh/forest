@@ -1,0 +1,22 @@
+[package]
+name = "hollow-dev-agent"
+edition = "2024"
+version.workspace = true
+publish = false
+
+# Thin wrapper around hollow-test-harness for the dev workflow. The harness
+# already knows how to build the agent for the right target, ship it to a
+# remote KVM host, and start it under a reverse SSH tunnel — this binary just
+# blocks on the resulting Child so `mise run dev:agent` is a single
+# foreground task that ties its lifetime to the SSH session.
+[[bin]]
+name = "hollow-dev-agent"
+path = "src/main.rs"
+
+[dependencies]
+hollow-test-harness = { path = "../hollow-test-harness" }
+
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

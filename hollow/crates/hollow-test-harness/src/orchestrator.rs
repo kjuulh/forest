@@ -65,7 +65,10 @@ impl Orchestrator {
             .context("controller did not register with fake server")?;
         tracing::info!("controller registered with fake server");
 
-        let agent_ssh = spawn_remote_agent(cfg, &layout, controller_port)?;
+        // Tests assert on kernel boot lines and 'Linux version' from the
+        // orchestrator path, so console replay needs to be on. Production
+        // agents (and the dev:agent mise task) leave it off by default.
+        let agent_ssh = spawn_remote_agent(cfg, &layout, controller_port, /* capture_console */ true)?;
         tracing::info!("hollow-agent spawned on remote");
 
         // Wait until the agent has registered with the controller. The
@@ -119,10 +122,17 @@ fn spawn_controller(
         .with_context(|| format!("spawn {}", controller_bin.display()))
 }
 
-fn spawn_remote_agent(
+/// Boot a `hollow-agent` on the remote KVM host, wired back to a controller
+/// running on `127.0.0.1:<controller_port>` via reverse SSH tunnel. Returns
+/// the SSH `Child`; dropping (or killing) it tears the agent down.
+///
+/// Public so dev tooling (e.g. the `hollow-dev-agent` mise task) can reuse
+/// the deployment recipe without going through the orchestrator.
+pub fn spawn_remote_agent(
     cfg: &Config,
     layout: &RemoteLayout,
     controller_port: u16,
+    capture_console: bool,
 ) -> anyhow::Result<Child> {
     // Remote command: export env vars, then exec the agent. Using `exec` so
     // the agent replaces the shell and receives SIGHUP directly when ssh dies.
@@ -138,9 +148,7 @@ export HOLLOW_JAILER_BIN={jailer_bin}
 export HOLLOW_JAILER_CHROOT_BASE={jailer_chroot}
 export HOLLOW_JAILER_UID={jailer_uid}
 export HOLLOW_JAILER_GID={jailer_gid}
-# Tests assert on kernel boot lines + 'Linux version' from the orchestrator
-# path, which requires console replay. Production agents leave this off.
-export HOLLOW_CAPTURE_CONSOLE=true
+export HOLLOW_CAPTURE_CONSOLE={capture}
 export RUST_LOG=hollow=debug,info
 exec {agent}"#,
         port = controller_port,
@@ -152,6 +160,7 @@ exec {agent}"#,
         jailer_chroot = layout.jailer_chroot_base,
         jailer_uid = layout.jailer_uid,
         jailer_gid = layout.jailer_gid,
+        capture = capture_console,
         agent = layout.agent_bin,
     );
 

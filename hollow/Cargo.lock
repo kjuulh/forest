@@ -705,6 +705,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hollow-dev-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hollow-test-harness",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "hollow-grpc-interface"
 version = "0.1.0"
 dependencies = [

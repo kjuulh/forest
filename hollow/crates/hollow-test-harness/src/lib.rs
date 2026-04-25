@@ -74,4 +74,26 @@ impl Harness {
         let layout = self.prepare()?.clone();
         Orchestrator::start(&self.config, layout, capability_name).await
     }
+
+    /// Build/ship artefacts and launch only the remote agent, wired back to
+    /// a controller already running on `127.0.0.1:<controller_port>` via
+    /// reverse SSH tunnel. Returns the SSH `Child`; the caller blocks on it
+    /// (or kills it for teardown).
+    ///
+    /// Used by the `hollow-dev-agent` binary that backs the `mise run
+    /// dev:agent` task — keeps the deployment recipe in one place instead
+    /// of duplicating it in shell.
+    pub fn start_remote_agent(
+        &self,
+        controller_port: u16,
+        capture_console: bool,
+    ) -> anyhow::Result<tokio::process::Child> {
+        let layout = self.prepare()?.clone();
+        crate::orchestrator::spawn_remote_agent(
+            &self.config,
+            &layout,
+            controller_port,
+            capture_console,
+        )
+    }
 }

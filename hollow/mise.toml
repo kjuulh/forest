@@ -25,18 +25,28 @@ cargo clippy --workspace -- -D warnings
 description = "Regenerate gRPC code from proto definitions"
 run = "buf generate"
 
-[tasks.controller]
-description = "Run the hollow controller (connects to forest-server)"
+[tasks."dev:server"]
+description = "Run forest-server with in-process execution disabled (proxies to root develop:hollow)"
+dir = ".."
+run = "mise run develop:hollow"
+
+[tasks."dev:controller"]
+description = "Run hollow-controller pointed at the local forest-server"
 env = { FOREST_SERVER_ADDR = "http://localhost:4040", HOLLOW_LISTEN_ADDR = "[::]:4050", HOLLOW_METRICS_ADDR = "[::]:4051", HOLLOW_MAX_CONCURRENT = "1", HOLLOW_CAPABILITIES = "forest/terraform/1" }
 run = "cargo run -p hollow-controller"
 
-[tasks.agent]
-description = "Run the hollow agent (connects to controller)"
-env = { HOLLOW_CONTROLLER_ADDR = "http://localhost:4050", HOLLOW_DATA_DIR = "/tmp/hollow-agent", HOLLOW_VCPUS = "2", HOLLOW_MEMORY_MIB = "4096" }
-run = """
-export HOLLOW_GUEST_BIN="$(pwd)/target/debug/hollow-guest"
-cargo run -p hollow-agent
-"""
+[tasks."dev:agent"]
+description = "Build, ship, and run hollow-agent on the configured KVM host (HOLLOW_TEST_HOST)"
+env = { HOLLOW_TEST_HOST = "forage-local-agent", HOLLOW_CONTROLLER_PORT = "4050" }
+run = "cargo run --release -p hollow-dev-agent"
+
+[tasks."dev:up"]
+description = "Run forest-server + controller + remote agent in parallel (Ctrl-C tears all three down)"
+env = { HOLLOW_TEST_HOST = "forage-local-agent" }
+# Default mise-task running is parallel — `:::` would force sequential.
+# Output is automatically prefixed by task name when multiple tasks run.
+run = "mise run dev:server dev:controller dev:agent"
+
 
 [tasks.test]
 description = "Run all hollow acceptance tests (smoke + orchestrator) against a KVM host"
