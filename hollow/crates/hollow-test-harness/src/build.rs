@@ -28,6 +28,11 @@ struct ImageBuild {
     fs_label: &'static str,
     /// Size of the ext4 image. Override for anything bigger than base.
     size: &'static str,
+    /// Additional files inside `hollow/images/` whose mtime should
+    /// invalidate the cache. Use for anything `COPY`ed by the Dockerfile
+    /// — without this, editing e.g. `forest-flux-deploy` won't trigger
+    /// a rebuild because the Dockerfile mtime hasn't moved.
+    extra_inputs: &'static [&'static str],
 }
 
 const IMAGES: &[ImageBuild] = &[
@@ -37,6 +42,7 @@ const IMAGES: &[ImageBuild] = &[
         tag: "hollow-base:test",
         fs_label: "hollow-base",
         size: "256M",
+        extra_inputs: &[],
     },
     ImageBuild {
         // Forest's destination registry calls this "terraform" (the binary
@@ -46,17 +52,18 @@ const IMAGES: &[ImageBuild] = &[
         tag: "hollow-terraform-v1:test",
         fs_label: "hollow-tf",
         size: "1024M",
+        extra_inputs: &[],
     },
     ImageBuild {
         // Forest's destination type is `forest/fluxv1/1` — controller maps
         // this to image `fluxv1-v1.ext4`. Ships git + openssh-client + flux
-        // CLI + kustomize CLI; the real flux git-clone/push workflow comes
-        // in a follow-up dispatcher arm.
+        // CLI + kustomize CLI plus the `forest-flux-deploy` workflow script.
         name: "fluxv1-v1",
         dockerfile: "Dockerfile.fluxv1",
         tag: "hollow-fluxv1-v1:test",
         fs_label: "hollow-flux",
         size: "1024M",
+        extra_inputs: &["forest-flux-deploy"],
     },
 ];
 
@@ -182,8 +189,18 @@ fn build_image(cfg: &Config, spec: &ImageBuild, guest_bin: &Path) -> anyhow::Res
     // Cache invalidation: only the base image depends on the guest binary
     // directly. Higher-layer images depend on whatever `FROM` they reference,
     // and docker's own layer cache handles that. Still re-pack whenever the
-    // dockerfile changes.
-    if out.exists() && newer_than(&out, &dockerfile)? && newer_than(&out, guest_bin)? {
+    // dockerfile or any explicitly-declared sidecar input changes.
+    let extra_inputs_ok = spec
+        .extra_inputs
+        .iter()
+        .try_fold(true, |acc, name| -> anyhow::Result<bool> {
+            Ok(acc && newer_than(&out, &images_dir.join(name))?)
+        })?;
+    if out.exists()
+        && newer_than(&out, &dockerfile)?
+        && newer_than(&out, guest_bin)?
+        && extra_inputs_ok
+    {
         // Ensure the sidecar exists even on a cache hit — older harness runs
         // didn't write it, and bootstrap.rs needs it to ship.
         let sidecar = out.with_file_name(format!("{}.ext4.sha256", spec.name));

@@ -38,3 +38,10 @@ RUN curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/k
 # Pre-create ~/.ssh so the runtime can drop a key without surprises about
 # parent directory ownership when running as root inside the VM.
 RUN mkdir -p /root/.ssh && chmod 0700 /root/.ssh
+
+# Bake the deploy script. The controller's `fluxv1` dispatcher arm exec's
+# this directly; all configuration arrives via env vars (sourced from
+# destination metadata) and an optional SSH key shipped as a Secret to
+# /root/.ssh/id_forest.
+COPY forest-flux-deploy /usr/local/bin/forest-flux-deploy
+RUN chmod 0755 /usr/local/bin/forest-flux-deploy

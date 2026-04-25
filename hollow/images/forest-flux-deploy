@@ -1,0 +1,99 @@
+#!/bin/sh
+# forest-flux-deploy — drop-in replacement for the legacy fluxv1 destination
+# workflow inside a Hollow microVM.
+#
+# Configuration arrives via environment variables sourced from
+# DestinationInfo.metadata by the controller (so e.g. metadata `git_url`
+# becomes the env var `git_url`):
+#
+#   git_url             — required (ssh://… or https://… or file://…)
+#   git_branch          — default "main"
+#   git_author_name     — default "forest-bot"
+#   git_author_email    — default "forest@hollow.invalid"
+#   cluster_name        — required, used in path layout
+#   namespace           — required, used in path layout
+#
+#   FOREST_ORGANISATION, FOREST_PROJECT,
+#   FOREST_ENVIRONMENT, FOREST_DESTINATION
+#                       — set by the controller, used in path layout
+#                          and the commit message
+#
+# An optional SSH key arrives as a Secret at /root/.ssh/id_forest (mode
+# 0600); when present we set GIT_SSH_COMMAND accordingly. HTTPS auth via
+# embedded `user:token@host` is also supported transparently.
+
+set -eu
+
+# --- input validation -----------------------------------------------------
+: "${git_url:?metadata.git_url is required}"
+: "${cluster_name:?metadata.cluster_name is required}"
+: "${namespace:?metadata.namespace is required}"
+: "${FOREST_ENVIRONMENT:?controller did not set FOREST_ENVIRONMENT}"
+: "${FOREST_DESTINATION:?controller did not set FOREST_DESTINATION}"
+: "${FOREST_PROJECT:?controller did not set FOREST_PROJECT}"
+
+git_branch="${git_branch:-main}"
+git_author_name="${git_author_name:-forest-bot}"
+git_author_email="${git_author_email:-forest@hollow.invalid}"
+
+# --- SSH key wiring -------------------------------------------------------
+# The controller drops the key as a Secret if metadata.git_ssh_key_path is
+# set. StrictHostKeyChecking=accept-new + UserKnownHostsFile=/dev/null
+# matches the legacy runner's TOFU posture; tightening that is a separate
+# trust-on-first-use story.
+if [ -f /root/.ssh/id_forest ]; then
+  export GIT_SSH_COMMAND="ssh -i /root/.ssh/id_forest -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null"
+fi
+
+# --- file:// auto-init ----------------------------------------------------
+# Useful for tests against a local bare repo. Production URLs (ssh://,
+# https://) hit this branch only if someone misconfigures, in which case
+# the create_dir below fails noisily.
+case "$git_url" in
+  file://*)
+    repo_path="${git_url#file://}"
+    if [ ! -d "$repo_path" ]; then
+      echo "FLUX: initializing bare repo at $repo_path" >&2
+      mkdir -p "$repo_path"
+      git init --bare --initial-branch="$git_branch" "$repo_path" >&2
+    fi
+    ;;
+esac
+
+# --- clone or init --------------------------------------------------------
+work_repo=/tmp/forest-flux-repo
+rm -rf "$work_repo"
+
+# Empty bare repos can't be cloned (no refs); fall back to an init+remote
+# dance so the first push creates the branch.
+if git clone --depth 1 --branch "$git_branch" --single-branch "$git_url" "$work_repo" >&2 2>/tmp/clone.log; then
+  :
+else
+  echo "FLUX: branch $git_branch not present at remote; initialising local repo" >&2
+  cat /tmp/clone.log >&2 || true
+  git init --initial-branch="$git_branch" "$work_repo" >&2
+  git -C "$work_repo" remote add origin "$git_url"
+fi
+
+cd "$work_repo"
+git config user.name "$git_author_name"
+git config user.email "$git_author_email"
+
+# --- write manifests ------------------------------------------------------
+# /work has already had the artifact's <env>/<dest>/<org>/<type>@<v>/
+# prefix stripped by the controller's file filter, so files live at
+# /work/<file> directly.
+target_dir="releases/$FOREST_ENVIRONMENT/$FOREST_DESTINATION/$cluster_name/$namespace/$FOREST_PROJECT"
+mkdir -p "$target_dir"
+if [ -d /work ] && [ -n "$(ls -A /work 2>/dev/null)" ]; then
+  cp -r /work/. "$target_dir/"
+fi
+
+git add -A
+if git diff --cached --quiet; then
+  echo "FLUX_NO_CHANGES"
+  exit 0
+fi
+git commit -m "release: $FOREST_ENVIRONMENT/$FOREST_PROJECT to $FOREST_DESTINATION/$cluster_name"
+git push origin "$git_branch"
+echo "FLUX_PUSHED"

@@ -13,14 +13,31 @@
 
 use std::net::TcpListener;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
 use tokio::process::Child;
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::bootstrap::RemoteLayout;
 use crate::config::Config;
 use crate::fake_server::FakeServer;
+
+/// Process-wide mutex serialising orchestrator-backed tests inside a single
+/// test binary. Two orchestrators on the same KVM host both start their
+/// `NetworkAllocator` at index 0 and race for `hlw-0`; serialising them is
+/// cheaper than teaching the allocator to coordinate across agent processes.
+/// Different test binaries still run in parallel — they target the same host
+/// but cargo runs at most one binary concurrently per pkg by default and the
+/// stale-tap cleanup at agent boot handles the inter-binary case.
+static ORCHESTRATOR_LOCK: std::sync::OnceLock<Arc<Mutex<()>>> = std::sync::OnceLock::new();
+
+fn orchestrator_lock() -> Arc<Mutex<()>> {
+    ORCHESTRATOR_LOCK
+        .get_or_init(|| Arc::new(Mutex::new(())))
+        .clone()
+}
 
 pub struct Orchestrator {
     pub fake_server: FakeServer,
@@ -32,6 +49,9 @@ pub struct Orchestrator {
     /// Killing this ssh process closes the tunnel and SIGHUPs the remote shell,
     /// which in turn kills hollow-agent.
     agent_ssh: Child,
+    /// Held for the lifetime of the orchestrator so the next start_orchestrator
+    /// in this process waits until we tear down.
+    _serial_guard: OwnedMutexGuard<()>,
 }
 
 impl Orchestrator {
@@ -43,6 +63,8 @@ impl Orchestrator {
         layout: RemoteLayout,
         capability_name: &str,
     ) -> anyhow::Result<Self> {
+        let serial_guard = orchestrator_lock().lock_owned().await;
+
         let fake_server = FakeServer::start().await?;
         tracing::info!(addr = %fake_server.addr, "fake forest-server up");
 
@@ -91,6 +113,7 @@ impl Orchestrator {
             remote_layout: layout,
             controller,
             agent_ssh,
+            _serial_guard: serial_guard,
         })
     }
 }

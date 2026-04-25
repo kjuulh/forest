@@ -283,6 +283,9 @@ impl Dispatcher {
         // for closed-network deploys.
         let allowed_egress_cidrs = parse_egress_allowlist(&destination.metadata);
 
+        let secrets = build_secrets_for_destination(&dest_type.name, &destination.metadata)
+            .context("failed to assemble destination secrets")?;
+
         let run_job = RunJob {
             job_id: job_id.clone(),
             image,
@@ -296,11 +299,7 @@ impl Dispatcher {
             egress_enabled: true,
             mode: mode.to_string(),
             allowed_egress_cidrs,
-            // Per-destination arms populate this — terraform's TF_HTTP_*
-            // creds and fluxv1's git SSH key are obvious candidates. For
-            // now we leave it empty here; specific arms (e.g. fluxv1) wrap
-            // RunJob in a builder that pushes secrets pre-dispatch.
-            secrets: Vec::new(),
+            secrets,
         };
 
         let agent_id = self
@@ -474,6 +473,41 @@ fn apply_artifact_store_env(
     // arm here. Default: no env injection.
 }
 
+/// Assemble per-destination secrets from metadata. Today only `fluxv1`
+/// uses this — it pulls a path out of `metadata.git_ssh_key_path` and
+/// ships the file's bytes as a Secret. The path is read from the
+/// controller's own filesystem (the controller is the trust boundary
+/// for credential material; the agent and guest never see paths, just
+/// bytes via the secrets channel).
+///
+/// Adding a new destination that needs file-backed secrets? Add an arm.
+fn build_secrets_for_destination(
+    dest_name: &str,
+    metadata: &HashMap<String, String>,
+) -> anyhow::Result<Vec<hollow_grpc_interface::Secret>> {
+    let mut secrets = Vec::new();
+    if dest_name == "fluxv1"
+        && let Some(path) = metadata.get("git_ssh_key_path").map(|s| s.trim()).filter(|s| !s.is_empty())
+    {
+        let bytes = std::fs::read(path).with_context(|| {
+            format!("reading git SSH key for fluxv1 destination from {path}")
+        })?;
+        tracing::info!(
+            target_path = "/root/.ssh/id_forest",
+            source = %path,
+            bytes = bytes.len(),
+            "shipping git SSH key as fluxv1 Secret"
+        );
+        secrets.push(hollow_grpc_interface::Secret {
+            name: "git_ssh_key".to_string(),
+            target_path: "/root/.ssh/id_forest".to_string(),
+            mode: 0o600,
+            content: bytes,
+        });
+    }
+    Ok(secrets)
+}
+
 /// Pick the subset of an artifact's deployment files that belongs to a
 /// specific destination, and strip the `<env>/<dest>/<org>/<type>@<ver>/`
 /// prefix so files land at the working directory root inside the VM.
@@ -563,23 +597,17 @@ fn build_command_for_destination(
                 .unwrap_or_else(|| "echo hello".to_string());
             vec!["sh".to_string(), "-c".to_string(), script]
         }
-        // Phase-2 MVP: image is built and ready (git + openssh + flux +
-        // kustomize), but the real git-clone/push workflow isn't ported yet
-        // — that needs path-layout logic + SSH-key shipping that's bigger
-        // than this commit. For now we run a metadata-supplied shell
-        // command (default: a sanity check that the toolchain is present)
-        // so the integration is testable.
-        "fluxv1" => {
-            let script = metadata
-                .get("command")
-                .cloned()
-                .unwrap_or_else(|| {
-                    "git --version && flux --version && kustomize version && \
-                     echo FLUXV1_TOOLCHAIN_OK"
-                        .to_string()
-                });
-            vec!["sh".to_string(), "-c".to_string(), script]
-        }
+        // forest/fluxv1/1: clone target git repo, write manifests under
+        // releases/<env>/<dest>/<cluster>/<ns>/<project>/, commit, push.
+        // The full workflow lives in /usr/local/bin/forest-flux-deploy
+        // baked into the image; configuration arrives via env vars
+        // (sourced from destination.metadata) and an optional SSH key
+        // shipped as a Secret. For tests/diagnostics, supplying
+        // metadata.command overrides the default deploy invocation.
+        "fluxv1" => match metadata.get("command") {
+            Some(cmd) => vec!["sh".to_string(), "-c".to_string(), cmd.clone()],
+            None => vec!["/usr/local/bin/forest-flux-deploy".to_string()],
+        },
         other => {
             vec![
                 "sh".to_string(),
