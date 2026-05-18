@@ -31,8 +31,12 @@ mod forest_context;
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
+    // All tracing output (DEBUG/INFO/WARN/ERROR) goes to stderr so it never
+    // contaminates command stdout — `forest X --format json | jq` stays clean,
+    // and `slug=$(forest project publish)` doesn't capture log lines.
     tracing_subscriber::fmt()
         .pretty()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             EnvFilter::from_default_env().add_directive("notmad=warn".parse().unwrap()),
         )
