@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT release_id FROM release_states\n             WHERE project_id = $1 AND destination_id = $2 AND status = 'QUEUED'\n             ORDER BY queued_at ASC\n             LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "release_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c355cdadf4763a80250642c2c113147910f2704af96c25334a08eaa62e50b3d1"
+}

@@ -143,9 +143,20 @@ pub struct AuthMiddleware<S> {
 
 type BoxFuture<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 
-/// Paths that do not require authentication.
-fn requires_auth(path: &str) -> bool {
-    let unauthenticated = [
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AuthMode {
+    /// Token required; reject if missing or invalid.
+    Required,
+    /// Token optional; if present and valid, extract Actor; otherwise pass through anonymously.
+    /// Used for registry browsing where private components must be visible to their org members
+    /// while anonymous users can still see public components.
+    Optional,
+    /// Skip token handling entirely.
+    None,
+}
+
+fn auth_mode(path: &str) -> AuthMode {
+    let none = [
         "/forest.v1.UsersService/Register",
         "/forest.v1.UsersService/Login",
         "/forest.v1.UsersService/RefreshToken",
@@ -153,11 +164,26 @@ fn requires_auth(path: &str) -> bool {
         "/forest.v1.StatusService/",
         // Runner service uses release-scoped tokens, not JWT
         "/forest.v1.RunnerService/",
-        // Registry discovery endpoints are public (read-only browsing)
+        // Standard gRPC health protocol — used by the ALB / k8s probes.
+        // Probers can't carry user credentials; refusing them makes the
+        // server look dead. The health namespace exposes only liveness, so
+        // it's safe to leave open.
+        "/grpc.health.v1.Health/",
+    ];
+    let optional = [
+        // Registry discovery endpoints allow anonymous browsing of public components,
+        // but must still recognise authenticated callers so they see private components
+        // from their own orgs.
         "/forest.v1.RegistryService/SearchComponents",
         "/forest.v1.RegistryService/GetComponentDetail",
     ];
-    !unauthenticated.iter().any(|p| path.starts_with(p))
+    if none.iter().any(|p| path.starts_with(p)) {
+        AuthMode::None
+    } else if optional.iter().any(|p| path.starts_with(p)) {
+        AuthMode::Optional
+    } else {
+        AuthMode::Required
+    }
 }
 
 fn grpc_unauthenticated<B: Default>(message: &str) -> http::Response<B> {
@@ -198,8 +224,9 @@ where
 
         Box::pin(async move {
             let path = req.uri().path().to_owned();
+            let mode = auth_mode(&path);
 
-            if !requires_auth(&path) {
+            if mode == AuthMode::None {
                 return inner.call(req).await;
             }
 
@@ -211,6 +238,9 @@ where
             {
                 Some(t) => t.to_owned(),
                 None => {
+                    if mode == AuthMode::Optional {
+                        return inner.call(req).await;
+                    }
                     tracing::warn!(path = %path, "missing authorization token");
                     return Ok(grpc_unauthenticated("missing authorization token"));
                 }
@@ -260,6 +290,9 @@ where
                     inner.call(req).await
                 }
                 Ok(None) => {
+                    if mode == AuthMode::Optional {
+                        return inner.call(req).await;
+                    }
                     tracing::warn!(path = %path, "token verification failed: no matching user, app, or service account token");
                     Ok(grpc_unauthenticated("token verification failed"))
                 }

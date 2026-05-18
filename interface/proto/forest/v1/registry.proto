@@ -22,6 +22,12 @@ service RegistryService {
   // --- Registry UI / discovery ---
   rpc SearchComponents(SearchComponentsRequest) returns (SearchComponentsResponse) {}
   rpc GetComponentDetail(GetComponentDetailRequest) returns (GetComponentDetailResponse) {}
+
+  // --- Global-tools (TASKS/018-global-tools.md §1a.2c) ---
+  // Stream the tool-y components published under `organisation` (shape ∈
+  // {hybrid_component, tool_binary, tool_external}). Used by `forest global
+  // add <org>` (catalogue subscription).
+  rpc ListOrgTools(ListOrgToolsRequest) returns (stream OrgToolEntry) {}
 }
 
 // --- v1 messages (unchanged) ---
@@ -181,13 +187,20 @@ message ComponentSummary {
   string organisation = 1;
   string name = 2;
   string latest_version = 3;
-  string kind = 4;                // "binary" or "files"
+  string kind = 4;                // "binary", "external", or "files"
   string description = 5;         // from manifest
   string created_at = 6;          // ISO 8601
   string updated_at = 7;          // ISO 8601
   int32 version_count = 8;
   repeated string contracts = 9;  // ["forest/deployment", ...]
   string visibility = 10;         // "public" or "private"
+
+  // §1a.2e taxonomy
+  ComponentShape shape    = 11;
+  ToolFacet      tool     = 12;   // populated for HYBRID / TOOL_*
+  repeated string methods = 13;   // names only; populated for COMPONENT / HYBRID
+  // For TOOL_EXTERNAL only; full URL is only on detail view.
+  string upstream_host    = 14;
 }
 
 // GetComponentDetail — full component page (like crates.io crate page).
@@ -201,4 +214,39 @@ message GetComponentDetailResponse {
   string readme = 3;              // README content (if available)
   string manifest_json = 4;       // latest version manifest
   repeated string owners = 5;     // org members who can publish
+}
+
+// --- Global-tools (TASKS/018-global-tools.md §1a.2c, §1a.2e) ---
+
+// Shape taxonomy persisted on `components.shape`. The four observable
+// kinds of registry artefact:
+//   COMPONENT          — binary + methods, no tool facet (status quo)
+//   HYBRID             — binary + methods + tool facet
+//   TOOL_BINARY        — binary + tool facet, no methods
+//   TOOL_EXTERNAL      — external manifest (URL-hosted) + tool facet
+enum ComponentShape {
+  COMPONENT_SHAPE_UNSPECIFIED   = 0;
+  COMPONENT_SHAPE_COMPONENT     = 1;
+  COMPONENT_SHAPE_HYBRID        = 2;
+  COMPONENT_SHAPE_TOOL_BINARY   = 3;
+  COMPONENT_SHAPE_TOOL_EXTERNAL = 4;
+}
+
+message ToolFacet {
+  string name             = 1;
+  bool   argv_passthrough = 2;
+  string description      = 3;
+}
+
+message ListOrgToolsRequest {
+  string organisation = 1;
+}
+
+message OrgToolEntry {
+  string         organisation   = 1;
+  string         name           = 2;  // component name
+  string         latest_version = 3;  // server-resolved (excludes prereleases)
+  ToolFacet      tool           = 4;  // populated for HYBRID/TOOL_*
+  ComponentShape shape          = 5;
+  string         upstream_host  = 6;  // populated for TOOL_EXTERNAL only
 }

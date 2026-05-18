@@ -4,7 +4,7 @@ use crate::{cli::prompts, grpc::GrpcClientState, state::State};
 
 #[derive(clap::Parser)]
 pub struct GetCommand {
-    #[arg(long, short = 'o')]
+    #[arg(long, short = 'o', visible_alias = "org")]
     organisation: Option<String>,
 
     #[arg(long)]

@@ -9136,6 +9136,30 @@ pub mod registry_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        pub async fn list_org_tools(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListOrgToolsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::OrgToolEntry>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.RegistryService/ListOrgTools",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("forest.v1.RegistryService", "ListOrgTools"));
+            self.inner.server_streaming(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -9262,6 +9286,19 @@ pub mod registry_service_server {
             request: tonic::Request<super::GetComponentDetailRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetComponentDetailResponse>,
+            tonic::Status,
+        >;
+        /// Server streaming response type for the ListOrgTools method.
+        type ListOrgToolsStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::OrgToolEntry, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        async fn list_org_tools(
+            &self,
+            request: tonic::Request<super::ListOrgToolsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<Self::ListOrgToolsStream>,
             tonic::Status,
         >;
     }
@@ -9993,6 +10030,53 @@ pub mod registry_service_server {
                                 max_encoding_message_size,
                             );
                         let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.RegistryService/ListOrgTools" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListOrgToolsSvc<T: RegistryService>(pub Arc<T>);
+                    impl<
+                        T: RegistryService,
+                    > tonic::server::ServerStreamingService<super::ListOrgToolsRequest>
+                    for ListOrgToolsSvc<T> {
+                        type Response = super::OrgToolEntry;
+                        type ResponseStream = T::ListOrgToolsStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListOrgToolsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as RegistryService>::list_org_tools(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListOrgToolsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)
@@ -12318,6 +12402,32 @@ pub mod users_service_client {
                 .insert(GrpcMethod::new("forest.v1.UsersService", "VerifyEmail"));
             self.inner.unary(req, path, codec).await
         }
+        pub async fn confirm_email_verification(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ConfirmEmailVerificationRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ConfirmEmailVerificationResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.UsersService/ConfirmEmailVerification",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("forest.v1.UsersService", "ConfirmEmailVerification"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         pub async fn remove_email(
             &mut self,
             request: impl tonic::IntoRequest<super::RemoveEmailRequest>,
@@ -12708,6 +12818,13 @@ pub mod users_service_server {
             request: tonic::Request<super::VerifyEmailRequest>,
         ) -> std::result::Result<
             tonic::Response<super::VerifyEmailResponse>,
+            tonic::Status,
+        >;
+        async fn confirm_email_verification(
+            &self,
+            request: tonic::Request<super::ConfirmEmailVerificationRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ConfirmEmailVerificationResponse>,
             tonic::Status,
         >;
         async fn remove_email(
@@ -13395,6 +13512,57 @@ pub mod users_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = VerifyEmailSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.UsersService/ConfirmEmailVerification" => {
+                    #[allow(non_camel_case_types)]
+                    struct ConfirmEmailVerificationSvc<T: UsersService>(pub Arc<T>);
+                    impl<
+                        T: UsersService,
+                    > tonic::server::UnaryService<super::ConfirmEmailVerificationRequest>
+                    for ConfirmEmailVerificationSvc<T> {
+                        type Response = super::ConfirmEmailVerificationResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::ConfirmEmailVerificationRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as UsersService>::confirm_email_verification(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ConfirmEmailVerificationSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

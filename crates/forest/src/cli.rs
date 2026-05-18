@@ -2,6 +2,8 @@ use admin::AdminCommand;
 use auth::AuthCommand;
 use clap::{Parser, Subcommand};
 use components::ComponentsCommand;
+use context::ContextCommand;
+use eval::EvalCommand;
 use global::GlobalCommand;
 use init::InitCommand;
 use notmad::{Component, ComponentInfo, MadError};
@@ -10,6 +12,7 @@ use shell::ShellCommand;
 use template::TemplateCommand;
 use tmp::TmpCommand;
 use tokio_util::sync::CancellationToken;
+use tool::ToolCommand;
 
 use crate::{
     cli::{
@@ -27,9 +30,11 @@ mod add;
 mod admin;
 mod auth;
 mod components;
+mod context;
 mod destination;
 mod docs;
 mod environment;
+mod eval;
 mod global;
 mod init;
 mod notifications;
@@ -40,6 +45,7 @@ mod run;
 mod shell;
 mod template;
 mod tmp;
+mod tool;
 mod update;
 mod validate;
 
@@ -113,6 +119,12 @@ enum Commands {
     Admin(AdminCommand),
     /// Authenticate and manage credentials
     Auth(AuthCommand),
+    /// Manage named server+auth profiles (like kubectl context)
+    Context(ContextCommand),
+    /// Print shell integration script — `eval "$(forest eval zsh)"` in your rc file.
+    Eval(EvalCommand),
+    /// Helper commands for authoring tool manifests.
+    Tool(ToolCommand),
     /// Render templates
     #[command(hide = true)]
     Template(TemplateCommand),
@@ -212,6 +224,9 @@ impl CommandHandler {
             Commands::Docs(cmd) => cmd.execute(state).await,
             Commands::Admin(cmd) => cmd.execute(state).await,
             Commands::Auth(cmd) => cmd.execute(state).await,
+            Commands::Context(cmd) => cmd.execute(state).await,
+            Commands::Eval(cmd) => cmd.execute(state).await,
+            Commands::Tool(cmd) => cmd.execute(state).await,
             Commands::Template(cmd) => cmd.execute(state).await,
             Commands::Global(cmd) => cmd.execute(state).await,
             Commands::Shell(cmd) => cmd.execute(state).await,

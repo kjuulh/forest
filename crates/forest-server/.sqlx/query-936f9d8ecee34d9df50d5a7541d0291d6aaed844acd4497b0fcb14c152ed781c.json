@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH in_flight AS (\n                SELECT\n                    rs.*,\n                    ROW_NUMBER() OVER (PARTITION BY rs.destination_id ORDER BY rs.queued_at ASC)\n                        as queue_pos\n                FROM release_states rs\n                JOIN destinations d ON d.id = rs.destination_id\n                WHERE d.organisation = $1\n                  AND ($2::uuid IS NULL OR rs.project_id = $2)\n                  AND rs.status IN ('QUEUED', 'ASSIGNED', 'RUNNING')\n            ),\n            current_release AS (\n                SELECT DISTINCT ON (rs.destination_id)\n                    rs.*\n                FROM release_states rs\n                JOIN destinations d ON d.id = rs.destination_id\n                WHERE d.organisation = $1\n                  AND ($2::uuid IS NULL OR rs.project_id = $2)\n                  AND rs.status IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT')\n                ORDER BY rs.destination_id, rs.completed_at DESC NULLS LAST\n            )\n            SELECT\n                d.id as destination_id,\n                d.name as destination_name,\n                d.environment,\n                r.release_id as \"release_id!\",\n                r.release_intent_id as \"release_intent_id!\",\n                r.artifact_id as \"artifact_id!\",\n                r.status as \"status!\",\n                r.error_message,\n                r.queued_at as \"queued_at!\",\n                r.assigned_at,\n                r.started_at,\n                r.completed_at,\n                r.queue_pos as queue_position,\n                r.stage_id\n            FROM destinations d\n            JOIN (\n                SELECT release_id, release_intent_id, destination_id, artifact_id, status,\n                       error_message, queued_at, assigned_at, started_at, completed_at,\n                       NULL::bigint as queue_pos, stage_id\n                FROM current_release\n                UNION ALL\n                SELECT release_id, release_intent_id, destination_id, artifact_id, status,\n                       error_message, queued_at, assigned_at, started_at, completed_at,\n                       queue_pos, stage_id\n                FROM in_flight\n            ) r ON r.destination_id = d.id\n            WHERE d.organisation = $1\n            ORDER BY d.environment, d.name, r.queue_pos NULLS FIRST, r.queued_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "destination_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "destination_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "environment",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "release_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "release_intent_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "artifact_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "queued_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "assigned_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "queue_position",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "stage_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "936f9d8ecee34d9df50d5a7541d0291d6aaed844acd4497b0fcb14c152ed781c"
+}

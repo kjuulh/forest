@@ -18,7 +18,7 @@ impl ListTokensCommand {
             .context("failed to list tokens")?;
 
         if tokens.is_empty() {
-            println!("No personal access tokens");
+            eprintln!("No personal access tokens");
             return Ok(());
         }
 

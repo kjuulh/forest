@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE component_staging\n                SET\n                    status = 'committed'\n                WHERE\n                    id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1845d9f5252a453913bdf9333645945a060ec7b3970562f88bf96a3bdbbe38c2"
+}

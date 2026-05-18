@@ -21,7 +21,7 @@ impl DeleteCommand {
             .await
             .context("delete environment")?;
 
-        println!("Deleted environment {}", id);
+        eprintln!("Deleted environment {}", id);
 
         Ok(())
     }

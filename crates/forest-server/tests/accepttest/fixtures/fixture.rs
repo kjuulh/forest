@@ -56,89 +56,134 @@ static FIXTURE_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
 });
 
 static FIXTURE: OnceLock<Fixture> = OnceLock::new();
+static RESTRICTED_FIXTURE: OnceLock<Fixture> = OnceLock::new();
+
+fn base_test_config() -> forest_server::Config {
+    forest_server::Config {
+        external_host: "http://localhost:0".into(),
+        terraform_external_host: "http://localhost:0".into(),
+        password_secret_key: "test-password-secret-key-32chars".into(),
+        access_token_secret_key: b"test-access-token-secret-key-32b".to_vec(),
+        refresh_token_secret_key: b"test-refresh-token-secret-key32b".to_vec(),
+        service_account_token_hash: None,
+        registration_email_domain_regex: None,
+        require_email_verification: false,
+    }
+}
+
+fn bring_up(config: forest_server::Config) -> Fixture {
+    tokio::task::block_in_place(|| FIXTURE_RUNTIME.block_on(async move {
+        dotenvy::dotenv().ok();
+
+        // Initialize tracing for test output
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_test_writer()
+            .try_init();
+
+        let state = forest_server::State::new(config)
+            .await
+            .expect("failed to create state (is DATABASE_URL or TEST_DATABASE_URL set?)");
+
+        let db = state.db.clone();
+
+        // Bind to random port
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind to random port");
+        let addr = listener.local_addr().expect("get local addr");
+        drop(listener);
+
+        let runner_manager = forest_server::runner_manager::RunnerManager::new();
+
+        // Start gRPC server on the fixture runtime so it outlives individual tests
+        let cancel = tokio_util::sync::CancellationToken::new();
+        {
+            let state = state.clone();
+            let runner_manager = runner_manager.clone();
+            let cancel = cancel.clone();
+            FIXTURE_RUNTIME.spawn(async move {
+                let grpc = forest_server::grpc::GrpcServer {
+                    host: addr,
+                    state: state.clone(),
+                    runner_manager: runner_manager.clone(),
+                };
+                grpc.serve(cancel).await.ok();
+            });
+        }
+
+        // Start scheduler as a Component
+        {
+            let state = state.clone();
+            let runner_manager = runner_manager.clone();
+            let cancel = cancel.clone();
+            FIXTURE_RUNTIME.spawn(async move {
+                use notmad::Component;
+                let sched =
+                    forest_server::scheduler::Scheduler::new(&state, runner_manager, false);
+                sched.run(cancel).await.ok();
+            });
+        }
+
+        // Wait for server to be ready
+        probe_grpc(addr).await;
+
+        let channel = Channel::from_shared(format!("http://{}", addr))
+            .expect("valid uri")
+            .connect()
+            .await
+            .expect("connect to grpc server");
+
+        Fixture { channel, db }
+    }))
+}
 
 pub async fn fixture() -> anyhow::Result<Fixture> {
-    let fixture = FIXTURE.get_or_init(|| {
-        // Use block_in_place to allow blocking inside a multi-thread tokio runtime,
-        // then block_on the fixture runtime so server tasks are spawned there.
-        tokio::task::block_in_place(|| FIXTURE_RUNTIME.block_on(async {
-            dotenvy::dotenv().ok();
-
-            // Initialize tracing for test output
-            let _ = tracing_subscriber::fmt()
-                .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-                .with_test_writer()
-                .try_init();
-
-            let config = forest_server::Config {
-                external_host: "http://localhost:0".into(),
-                terraform_external_host: "http://localhost:0".into(),
-                password_secret_key: "test-password-secret-key-32chars".into(),
-                access_token_secret_key: b"test-access-token-secret-key-32b".to_vec(),
-                refresh_token_secret_key: b"test-refresh-token-secret-key32b".to_vec(),
-                service_account_token_hash: None,
-            };
-
-            let state = forest_server::State::new(config)
-                .await
-                .expect("failed to create state (is DATABASE_URL or TEST_DATABASE_URL set?)");
-
-            let db = state.db.clone();
-
-            // Bind to random port
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-                .await
-                .expect("bind to random port");
-            let addr = listener.local_addr().expect("get local addr");
-            drop(listener);
-
-            let runner_manager = forest_server::runner_manager::RunnerManager::new();
-
-            // Start gRPC server on the fixture runtime so it outlives individual tests
-            let cancel = tokio_util::sync::CancellationToken::new();
-            {
-                let state = state.clone();
-                let runner_manager = runner_manager.clone();
-                let cancel = cancel.clone();
-                FIXTURE_RUNTIME.spawn(async move {
-                    let grpc = forest_server::grpc::GrpcServer {
-                        host: addr,
-                        state: state.clone(),
-                        runner_manager: runner_manager.clone(),
-                    };
-                    grpc.serve(cancel).await.ok();
-                });
-            }
-
-            // Start scheduler as a Component
-            {
-                let state = state.clone();
-                let runner_manager = runner_manager.clone();
-                let cancel = cancel.clone();
-                FIXTURE_RUNTIME.spawn(async move {
-                    use notmad::Component;
-                    let sched =
-                        forest_server::scheduler::Scheduler::new(&state, runner_manager, false);
-                    sched.run(cancel).await.ok();
-                });
-            }
-
-            // Wait for server to be ready
-            probe_grpc(addr).await;
-
-            let channel = Channel::from_shared(format!("http://{}", addr))
-                .expect("valid uri")
-                .connect()
-                .await
-                .expect("connect to grpc server");
-
-            Fixture { channel, db }
-        }))
-    });
-
-
-
+    let fixture = FIXTURE.get_or_init(|| bring_up(base_test_config()));
     Ok(fixture.clone())
+}
+
+/// Plaintext service-account key configured on `restricted_fixture()`.
+/// Tests pass this in an `authorization: Bearer …` header to call
+/// service-account-only RPCs (e.g. `ConfirmEmailVerification`).
+pub const RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY: &str = "test-service-account-key";
+
+/// Fixture with the registration domain regex set to `@understory\.io$`
+/// (and the email-verification flag on so startup validation passes).
+/// Shares the underlying DB with the default fixture; tests rely on
+/// UUID-suffixed identifiers for isolation.
+pub async fn restricted_fixture() -> anyhow::Result<Fixture> {
+    let fixture = RESTRICTED_FIXTURE.get_or_init(|| {
+        use sha2::Digest;
+        let mut config = base_test_config();
+        config.registration_email_domain_regex =
+            Some(regex::Regex::new(r"@understory\.io$").unwrap());
+        config.require_email_verification = true;
+        config.service_account_token_hash = Some(
+            sha2::Sha256::digest(RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY.as_bytes()).to_vec(),
+        );
+        bring_up(config)
+    });
+    Ok(fixture.clone())
+}
+
+/// Test helper: flip `user_emails.verified` to true via direct DB
+/// access, simulating the side-effect of redeeming a verification token
+/// in forage. Acceptance tests use this when the gate
+/// `require_email_verification = true` blocks login otherwise.
+pub async fn mark_email_verified(
+    db: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+    email: &str,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        r#"UPDATE user_emails SET verified = true WHERE user_id = $1 AND email = $2"#,
+        user_id,
+        email,
+    )
+    .execute(db)
+    .await?;
+    Ok(())
 }
 
 async fn probe_grpc(addr: SocketAddr) {

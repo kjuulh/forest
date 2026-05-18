@@ -36,7 +36,7 @@ impl ReleasesCommand {
             .context("get release intent states")?;
 
         if resp.release_intents.is_empty() {
-            println!("No releases found for {organisation}/{project}");
+            eprintln!("No releases found for {organisation}/{project}");
             return Ok(());
         }
 

@@ -96,7 +96,7 @@ impl AddCommand {
                  deps: {{\n}}\n"
             );
             tokio::fs::write(&module_cue, &module_content).await?;
-            println!("Created cue.mod/module.cue");
+            eprintln!("Created cue.mod/module.cue");
         }
 
         // Add the CUE module dependency to cue.mod/module.cue
@@ -112,7 +112,7 @@ impl AddCommand {
             if !module_content.contains(&cue_dep_key) {
                 let new_module = insert_cue_dep(&module_content, &cue_dep_key, version)?;
                 tokio::fs::write(&module_cue, &new_module).await?;
-                println!("Added CUE module dependency to cue.mod/module.cue");
+                eprintln!("Added CUE module dependency to cue.mod/module.cue");
             }
         }
 
@@ -122,11 +122,11 @@ impl AddCommand {
             format!("{organisation}/{name} ({dep_value})")
         };
 
-        println!("Added {dep_display}");
-        println!();
+        eprintln!("Added {dep_display}");
+        eprintln!();
         if self.path.is_none() {
-            println!("You can now import the component's types in your CUE files:");
-            println!("  import k8s \"forest.sh/{organisation}/{name}@v0:{pkg}\"",
+            eprintln!("You can now import the component's types in your CUE files:");
+            eprintln!("  import k8s \"forest.sh/{organisation}/{name}@v0:{pkg}\"",
                 pkg = name.replace('-', "_"));
         }
 

@@ -260,13 +260,13 @@ fn main() {
         .await?;
 
         tracing::info!("created component at {}", output_dir.display());
-        println!("Component '{name}' created at {}", output_dir.display());
-        println!();
-        println!("Next steps:");
-        println!("  cd {}", output_dir.display());
-        println!("  forest generate --output crates/{name}/src/");
-        println!("  forest build");
-        println!("  forest publish");
+        eprintln!("Component '{name}' created at {}", output_dir.display());
+        eprintln!();
+        eprintln!("Next steps:");
+        eprintln!("  cd {}", output_dir.display());
+        eprintln!("  forest generate --output crates/{name}/src/");
+        eprintln!("  forest build");
+        eprintln!("  forest publish");
 
         Ok(())
     }

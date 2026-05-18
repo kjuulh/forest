@@ -38,7 +38,7 @@ impl DeleteCommand {
             .await
             .context("delete trigger")?;
 
-        println!("Deleted trigger '{}'", name);
+        eprintln!("Deleted trigger '{}'", name);
 
         Ok(())
     }

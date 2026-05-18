@@ -8,7 +8,7 @@ impl LogoutCommand {
         // TODO: read stored refresh token from local config and call logout
         // state.grpc_client().logout(&refresh_token).await?;
 
-        println!("Logged out");
+        eprintln!("Logged out");
 
         Ok(())
     }

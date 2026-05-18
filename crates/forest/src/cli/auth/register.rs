@@ -8,8 +8,8 @@ use crate::{
 
 #[derive(clap::Parser)]
 pub struct RegisterCommand {
-    /// Username for the new account
-    #[arg(long)]
+    /// Username for the new account. Aliased as `--user`.
+    #[arg(long, visible_alias = "user")]
     username: Option<String>,
 
     /// Email for the new account
@@ -56,7 +56,7 @@ impl RegisterCommand {
             .context("failed to register")?;
 
         if let Some(user) = &resp.user {
-            println!("Registered as {} ({})", user.username, user.user_id);
+            eprintln!("Registered as {} ({})", user.username, user.user_id);
         }
 
         let user = resp.user.unwrap();

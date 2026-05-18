@@ -93,7 +93,7 @@ impl UpdateCommand {
             .context("update auto-release policy")?;
 
         let status = if policy.enabled { "enabled" } else { "disabled" };
-        println!("Updated auto-release policy '{}' ({})", policy.name, status);
+        eprintln!("Updated auto-release policy '{}' ({})", policy.name, status);
 
         Ok(())
     }

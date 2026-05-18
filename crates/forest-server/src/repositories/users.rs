@@ -320,20 +320,52 @@ impl UserRepository {
         user_id: Uuid,
         email: &str,
     ) -> Result<UserEmailRow, DbError> {
+        self.add_user_email_with_verified(db, user_id, email, false)
+            .await
+    }
+
+    pub async fn add_user_email_with_verified(
+        &self,
+        db: impl PgExecutor<'_>,
+        user_id: Uuid,
+        email: &str,
+        verified: bool,
+    ) -> Result<UserEmailRow, DbError> {
         let row = sqlx::query_as!(
             UserEmailRow,
             r#"
-            INSERT INTO user_emails (user_id, email)
-            VALUES ($1, $2)
+            INSERT INTO user_emails (user_id, email, verified)
+            VALUES ($1, $2, $3)
             RETURNING user_id, email, verified, created_at, updated_at
             "#,
             user_id,
             email,
+            verified,
         )
         .fetch_one(db)
         .await?;
 
         Ok(row)
+    }
+
+    pub async fn user_has_verified_email(
+        &self,
+        db: impl PgExecutor<'_>,
+        user_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        let row = sqlx::query!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1 FROM user_emails
+                WHERE user_id = $1 AND verified = TRUE
+            ) AS "has_verified!"
+            "#,
+            user_id,
+        )
+        .fetch_one(db)
+        .await?;
+
+        Ok(row.has_verified)
     }
 
     pub async fn get_user_emails(

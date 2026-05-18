@@ -1,0 +1,13 @@
+[package]
+name = "forest-manifest"
+edition = "2024"
+description = "Shared manifest parser + shape derivation for forest registry (TASKS/018-global-tools.md §1a.2 / §1a.2e). No I/O, no async, no thread-state — usable from both the forest CLI and the forest server."
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+proptest = "1"

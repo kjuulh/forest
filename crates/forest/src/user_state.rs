@@ -130,10 +130,18 @@ pub trait UserStateLoaderState {
 
 impl UserStateLoaderState for State {
     fn user_state(&self) -> UserStateLoader {
-        let forest_dir = dirs::data_local_dir()
-            .expect("to be able to get data dir")
-            .join("forest");
-
-        UserStateLoader { path: forest_dir }
+        // Context-aware: resolve which named context the auth state lives in.
+        // The `--context` / FOREST_CONTEXT override wins over the registry's
+        // active marker.
+        let store = crate::contexts::ContextStore::from_env()
+            .expect("resolve XDG data dir");
+        let want = self.config.context.as_deref();
+        let entry = store
+            .resolve(want)
+            .or_else(|_| store.active())
+            .expect("resolve active context");
+        UserStateLoader {
+            path: store.user_state_dir(&entry.name),
+        }
     }
 }

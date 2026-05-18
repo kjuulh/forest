@@ -3,14 +3,10 @@ mod get;
 mod member;
 mod search;
 
-use crate::{cli::output::OutputFormat, state::State};
+use crate::state::State;
 
 #[derive(clap::Parser)]
 pub struct OrganisationCommand {
-    /// Output format
-    #[arg(long, value_enum, default_value_t, global = true)]
-    format: OutputFormat,
-
     #[command(subcommand)]
     commands: Commands,
 }
@@ -19,8 +15,9 @@ pub struct OrganisationCommand {
 enum Commands {
     /// Create a new organisation
     Create(create::CreateCommand),
-    /// Get an organisation by ID or name
-    Get(get::GetCommand),
+    /// Show full details of an organisation by ID or name
+    #[command(alias = "get")]
+    Show(get::GetCommand),
     /// Search organisations by name
     Search(search::SearchCommand),
     /// Manage organisation members
@@ -29,11 +26,14 @@ enum Commands {
 
 impl OrganisationCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        // The --format flag is hoisted to global Config; subcommands read it
+        // from state.config.format.
+        let format = state.config.format;
         match &self.commands {
-            Commands::Create(cmd) => cmd.execute(state, &self.format).await,
-            Commands::Get(cmd) => cmd.execute(state, &self.format).await,
-            Commands::Search(cmd) => cmd.execute(state, &self.format).await,
-            Commands::Member(cmd) => cmd.execute(state, &self.format).await,
+            Commands::Create(cmd) => cmd.execute(state, &format).await,
+            Commands::Show(cmd) => cmd.execute(state, &format).await,
+            Commands::Search(cmd) => cmd.execute(state, &format).await,
+            Commands::Member(cmd) => cmd.execute(state, &format).await,
         }
     }
 }

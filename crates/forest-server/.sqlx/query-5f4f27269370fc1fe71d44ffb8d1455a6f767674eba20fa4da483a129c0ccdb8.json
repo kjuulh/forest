@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT release_id, release_intent_id, status, runner_id\n             FROM release_states\n             WHERE status IN ('ASSIGNED', 'RUNNING')\n               AND last_heartbeat_at IS NOT NULL\n               AND last_heartbeat_at < now() - make_interval(secs => $1::double precision)\n             FOR UPDATE SKIP LOCKED",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "release_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_intent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "runner_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "5f4f27269370fc1fe71d44ffb8d1455a6f767674eba20fa4da483a129c0ccdb8"
+}

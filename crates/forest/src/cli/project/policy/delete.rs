@@ -38,7 +38,7 @@ impl DeleteCommand {
             .await
             .context("delete policy")?;
 
-        println!("Deleted policy '{}'", name);
+        eprintln!("Deleted policy '{}'", name);
 
         Ok(())
     }

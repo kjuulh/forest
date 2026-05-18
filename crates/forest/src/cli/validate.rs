@@ -23,11 +23,11 @@ impl ValidateCommand {
         let enabled_contracts =
             contracts::EnabledContracts::from_project_dependencies(&project);
         if enabled_contracts.has_any() {
-            println!("Contracts (from dependencies):");
+            eprintln!("Contracts (from dependencies):");
             for topic in enabled_contracts.topics() {
-                println!("  {} available", topic);
+                eprintln!("  {} available", topic);
             }
-            println!();
+            eprintln!();
         }
 
         let mut errors = Vec::new();
@@ -133,12 +133,12 @@ impl ValidateCommand {
                         .unwrap_or_default();
 
                     if valid {
-                        println!("  {} {}/{}  config valid", "✓", dep.organisation, dep.name);
+                        eprintln!("  {} {}/{}  config valid", "✓", dep.organisation, dep.name);
                     } else {
                         for err in &spec_errors {
                             errors.push(format!("{}/{}: {}", dep.organisation, dep.name, err));
                         }
-                        println!(
+                        eprintln!(
                             "  {} {}/{}  {} error(s)",
                             "✗",
                             dep.organisation,
@@ -151,7 +151,7 @@ impl ValidateCommand {
                 Err(e) => {
                     let msg = e.to_string();
                     errors.push(format!("{}/{}: {}", dep.organisation, dep.name, msg));
-                    println!("  {} {}/{}  invalid config", "✗", dep.organisation, dep.name);
+                    eprintln!("  {} {}/{}  invalid config", "✗", dep.organisation, dep.name);
                     validated += 1;
                 }
             }
@@ -159,18 +159,18 @@ impl ValidateCommand {
 
         // Contract coverage check
         if enabled_contracts.has_any() {
-            println!();
-            println!("Contract coverage:");
+            eprintln!();
+            eprintln!("Contract coverage:");
             for topic in enabled_contracts.topics() {
                 if let Some(implementors) = contract_implementations.get(topic) {
-                    println!(
+                    eprintln!(
                         "  {} {}  implemented by: {}",
                         "✓",
                         topic,
                         implementors.join(", ")
                     );
                 } else {
-                    println!(
+                    eprintln!(
                         "  {} {}  no component implements this contract",
                         "!",
                         topic,
@@ -179,14 +179,14 @@ impl ValidateCommand {
             }
         }
 
-        println!();
+        eprintln!();
         if errors.is_empty() {
-            println!("Validated {} component(s), all configs valid.", validated);
+            eprintln!("Validated {} component(s), all configs valid.", validated);
             Ok(())
         } else {
-            println!("Validated {} component(s), {} error(s):", validated, errors.len());
+            eprintln!("Validated {} component(s), {} error(s):", validated, errors.len());
             for err in &errors {
-                println!("  - {err}");
+                eprintln!("  - {err}");
             }
             anyhow::bail!("validation failed")
         }

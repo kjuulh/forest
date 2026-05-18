@@ -27,6 +27,10 @@ service UsersService {
   // Email management
   rpc AddEmail(AddEmailRequest) returns (AddEmailResponse);
   rpc VerifyEmail(VerifyEmailRequest) returns (VerifyEmailResponse);
+  // ConfirmEmailVerification is the service-account-only counterpart to
+  // VerifyEmail. Forage calls this after redeeming an email-verification
+  // token; it does not require the user to be logged in.
+  rpc ConfirmEmailVerification(ConfirmEmailVerificationRequest) returns (ConfirmEmailVerificationResponse);
   rpc RemoveEmail(RemoveEmailRequest) returns (RemoveEmailResponse);
 
   // Social / OAuth login
@@ -93,7 +97,11 @@ message RegisterRequest {
 
 message RegisterResponse {
   User user = 1;
+  // Empty when email_verification_required is true.
   AuthTokens tokens = 2;
+  // True when the server requires email verification before issuing tokens.
+  // The caller (forage) is responsible for triggering the verification email.
+  bool email_verification_required = 3;
 }
 
 message LoginRequest {
@@ -202,6 +210,9 @@ message AddEmailRequest {
 
 message AddEmailResponse {
   UserEmail email = 1;
+  // True when the server requires verification of this newly added email.
+  // The caller (forage) should trigger the verification flow for it.
+  bool email_verification_required = 2;
 }
 
 message VerifyEmailRequest {
@@ -210,6 +221,18 @@ message VerifyEmailRequest {
 }
 
 message VerifyEmailResponse {}
+
+// Service-account-only confirmation that an email has been verified via
+// the out-of-band token-redemption flow. The caller has already proven
+// the user owns this address (typically by clicking a link in their
+// inbox) and asks forest to flip the verified flag. Forest looks up the
+// owning user from the email — the caller is not expected to know the
+// user_id.
+message ConfirmEmailVerificationRequest {
+  string email = 1;
+}
+
+message ConfirmEmailVerificationResponse {}
 
 message RemoveEmailRequest {
   string user_id = 1;

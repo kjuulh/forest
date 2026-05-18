@@ -30,7 +30,7 @@ impl ListCommand {
             .context("list triggers")?;
 
         if triggers.is_empty() {
-            println!("No triggers found");
+            eprintln!("No triggers found");
             return Ok(());
         }
 

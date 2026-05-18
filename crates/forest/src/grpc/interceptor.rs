@@ -346,9 +346,27 @@ pub trait AuthMiddlewareLayerState {
 
 impl AuthMiddlewareLayerState for State {
     fn auth_interceptor(&self) -> AuthMiddlewareLayer {
+        // Resolve the server URL the same way the gRPC client does
+        // (TASKS/019-context.md §1.3): explicit FOREST_SERVER override
+        // wins, otherwise fall back to the active context.
+        let host = if let Some(s) = self
+            .config
+            .forest_server
+            .clone()
+            .filter(|s| !s.is_empty())
+        {
+            s
+        } else {
+            match crate::contexts::ContextStore::from_env()
+                .and_then(|s| s.resolve(self.config.context.as_deref()))
+            {
+                Ok(entry) => entry.server,
+                Err(_) => String::new(),
+            }
+        };
         AuthMiddlewareLayer {
             state: self.user_state(),
-            host: self.config.forest_server.clone().unwrap_or_default(),
+            host,
             refresh_channel: Arc::new(OnceCell::const_new()),
             refresh_lock: Arc::new(Mutex::new(())),
             last_validated: Arc::new(AtomicI64::new(0)),

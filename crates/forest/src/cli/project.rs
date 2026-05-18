@@ -26,8 +26,11 @@ pub struct ProjectCommand {
 enum Commands {
     /// Create a project in an organisation
     Create(CreateCommand),
+    /// Scaffold project files locally (forest.cue + cue.mod) for a fresh checkout
     Init(InitCommand),
+    /// Publish the current project's metadata to the registry (org + name + visibility)
     Publish(Box<PublishCommand>),
+    /// List projects (filterable by organisation)
     List(ListCommand),
     /// Show current release state per destination for a project
     Releases(ReleasesCommand),

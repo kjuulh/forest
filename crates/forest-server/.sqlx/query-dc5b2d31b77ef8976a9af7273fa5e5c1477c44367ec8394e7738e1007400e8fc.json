@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                rs.release_id, rs.release_intent_id, rs.project_id,\n                rs.destination_id, rs.artifact_id\n             FROM release_states rs\n             WHERE rs.status = 'QUEUED'\n               AND NOT EXISTS (\n                   SELECT 1 FROM release_states active\n                   WHERE active.project_id = rs.project_id\n                     AND active.destination_id = rs.destination_id\n                     AND active.status IN ('ASSIGNED', 'RUNNING')\n               )\n             ORDER BY rs.queued_at\n             LIMIT $1\n             FOR UPDATE SKIP LOCKED",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "release_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_intent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "destination_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "dc5b2d31b77ef8976a9af7273fa5e5c1477c44367ec8394e7738e1007400e8fc"
+}

@@ -97,7 +97,7 @@ impl UpdateCommand {
         } else {
             "disabled"
         };
-        println!("Updated trigger '{}' ({})", trigger.name, status);
+        eprintln!("Updated trigger '{}' ({})", trigger.name, status);
 
         Ok(())
     }

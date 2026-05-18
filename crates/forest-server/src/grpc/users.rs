@@ -5,7 +5,12 @@ use totp_rs::{Algorithm, Secret, TOTP};
 use uuid::Uuid;
 
 use super::error;
-use crate::{actor::Actor, services::users::UserServiceState, state::State, tokens::TokenServiceState};
+use crate::{
+    actor::Actor,
+    services::{registration_policy::RegistrationPolicyState, users::UserServiceState},
+    state::State,
+    tokens::TokenServiceState,
+};
 
 pub struct UsersServer {
     pub state: State,
@@ -14,6 +19,23 @@ pub struct UsersServer {
 impl UsersServer {
     fn service(&self) -> crate::services::users::UserService {
         self.state.user_service()
+    }
+
+    /// Apply the registration email-domain regex (if configured). Maps the
+    /// pure-core `DomainNotAllowed` error to a generic `permission_denied`
+    /// gRPC status that does *not* leak the configured pattern to clients.
+    /// On rejection, logs the domain (text after the last `@`) only —
+    /// never the full address — so operators can tune the regex without
+    /// pulling PII into logs.
+    fn enforce_registration_policy(&self, email: &str) -> Result<(), tonic::Status> {
+        if self.state.registration_policy().check_email(email).is_err() {
+            let domain = email.rsplit_once('@').map(|(_, d)| d).unwrap_or("<no-@>");
+            tracing::warn!(domain = %domain, "registration rejected by domain policy");
+            return Err(tonic::Status::permission_denied(
+                "registration is restricted to allowed email domains",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -27,6 +49,8 @@ impl UsersService for UsersServer {
     ) -> std::result::Result<tonic::Response<RegisterResponse>, tonic::Status> {
         let req = request.into_inner();
 
+        self.enforce_registration_policy(&req.email)?;
+
         let registered = self
             .service()
             .register(&req.username, &req.email, &req.password)
@@ -39,6 +63,18 @@ impl UsersService for UsersServer {
             .await
             .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::internal("user not found after registration"))?;
+
+        // When verification is required, the registered user has no
+        // verified email yet (native register inserts verified=false), so
+        // we return user info but no tokens. The caller (forage) is
+        // expected to drive the verification flow.
+        if self.state.config.require_email_verification {
+            return Ok(tonic::Response::new(RegisterResponse {
+                user: Some(profile_to_grpc_user(profile)),
+                tokens: None,
+                email_verification_required: true,
+            }));
+        }
 
         let (refresh_token, hash) = self
             .state
@@ -74,6 +110,7 @@ impl UsersService for UsersServer {
                 refresh_token,
                 expires_in_seconds: expires.timestamp(),
             }),
+            email_verification_required: false,
         }))
     }
 
@@ -103,6 +140,21 @@ impl UsersService for UsersServer {
             .await
             .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::internal("user not found"))?;
+
+        // Block login when the operator requires email verification and
+        // none of the user's emails are verified. Forage uses the
+        // canonical detail string "email_not_verified" to render a
+        // resend-verification page.
+        if self.state.config.require_email_verification {
+            let has_verified = self
+                .service()
+                .user_has_verified_email(profile.user_id)
+                .await
+                .map_err(error::to_status)?;
+            if !has_verified {
+                return Err(tonic::Status::failed_precondition("email_not_verified"));
+            }
+        }
 
         // Check MFA status — if the user has verified MFA, return a challenge
         // instead of issuing tokens immediately.
@@ -467,6 +519,8 @@ impl UsersService for UsersServer {
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
 
+        self.enforce_registration_policy(&req.email)?;
+
         self.service()
             .add_email(user_id, &req.email)
             .await
@@ -477,6 +531,7 @@ impl UsersService for UsersServer {
                 email: req.email,
                 verified: false,
             }),
+            email_verification_required: self.state.config.require_email_verification,
         }))
     }
 
@@ -484,11 +539,24 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<VerifyEmailRequest>,
     ) -> std::result::Result<tonic::Response<VerifyEmailResponse>, tonic::Status> {
+        // User-self only: a logged-in user can verify their own email.
+        // Cross-user verification by JWT is rejected. The service-account
+        // path lives on `confirm_email_verification`.
+        let claims = request
+            .extensions()
+            .get::<crate::tokens::AppClaims>()
+            .cloned()
+            .ok_or_else(|| tonic::Status::unauthenticated("missing auth"))?;
         let req = request.into_inner();
         let user_id = req
             .user_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+        if claims.user_id != user_id.to_string() {
+            return Err(tonic::Status::permission_denied(
+                "verify_email is restricted to the authenticated user",
+            ));
+        }
 
         self.service()
             .verify_email(user_id, &req.email)
@@ -496,6 +564,41 @@ impl UsersService for UsersServer {
             .map_err(error::to_status)?;
 
         Ok(tonic::Response::new(VerifyEmailResponse {}))
+    }
+
+    async fn confirm_email_verification(
+        &self,
+        request: tonic::Request<ConfirmEmailVerificationRequest>,
+    ) -> std::result::Result<tonic::Response<ConfirmEmailVerificationResponse>, tonic::Status> {
+        // Service-account-only. The caller (forage) has already validated
+        // a redemption token; we just flip the bit.
+        let actor = request.extensions().get::<Actor>().cloned();
+        match &actor {
+            Some(Actor::ServiceAccount { .. }) => {}
+            _ => {
+                return Err(tonic::Status::permission_denied(
+                    "ConfirmEmailVerification requires service account authentication",
+                ));
+            }
+        }
+
+        let req = request.into_inner();
+
+        // Look up the owning user from the email. The caller is not
+        // expected to know user_id.
+        let profile = self
+            .service()
+            .get_user_by_email(&req.email)
+            .await
+            .map_err(error::to_status)?
+            .ok_or_else(|| tonic::Status::not_found("no user owns this email"))?;
+
+        self.service()
+            .verify_email(profile.user_id, &req.email)
+            .await
+            .map_err(error::to_status)?;
+
+        Ok(tonic::Response::new(ConfirmEmailVerificationResponse {}))
     }
 
     async fn remove_email(
@@ -585,6 +688,11 @@ impl UsersService for UsersServer {
             (existing_profile.user_id, false)
         } else {
             // Completely new user — create account with placeholder username.
+            // Apply the registration domain regex here (signup branch only;
+            // login branches above are exempt so existing users aren't
+            // locked out when the operator tightens the regex).
+            self.enforce_registration_policy(&req.provider_email)?;
+
             let placeholder_username = format!("user-{}", Uuid::now_v7().simple());
             let registered = self
                 .service()

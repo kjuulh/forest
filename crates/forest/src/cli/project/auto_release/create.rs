@@ -87,7 +87,7 @@ impl CreateCommand {
             .await
             .context("create auto-release policy")?;
 
-        println!("Created auto-release policy '{}'", policy.name);
+        eprintln!("Created auto-release policy '{}'", policy.name);
 
         if let Some(bp) = &policy.branch_pattern {
             println!("  branch:         {bp}");

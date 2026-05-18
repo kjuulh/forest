@@ -58,7 +58,7 @@ impl ListCommand {
         if resp.members.is_empty() {
             match format {
                 OutputFormat::Json => print!("[]"),
-                _ => println!("No members found"),
+                _ => eprintln!("No members found"),
             }
             return Ok(());
         }

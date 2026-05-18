@@ -3,7 +3,7 @@ use base64::{Engine, prelude::BASE64_STANDARD};
 use clap::{Parser, Subcommand};
 use sha2::Digest;
 
-use crate::{Config, state::State};
+use crate::{Config, state::{State, validate_config}};
 
 mod serve;
 use serve::*;
@@ -59,6 +59,27 @@ pub async fn execute() -> anyhow::Result<()> {
         )
     }
 
+    let registration_email_domain_regex = std::env::var("FOREST_REGISTRATION_EMAIL_DOMAIN_REGEX")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .map(|pattern| {
+            let compiled = regex::Regex::new(&pattern).with_context(|| {
+                format!(
+                    "FOREST_REGISTRATION_EMAIL_DOMAIN_REGEX is not a valid regex: {pattern:?}"
+                )
+            })?;
+            tracing::info!(
+                pattern = %compiled.as_str(),
+                "registration email-domain restriction active"
+            );
+            Ok::<_, anyhow::Error>(compiled)
+        })
+        .transpose()?;
+
+    let require_email_verification = std::env::var("FOREST_REQUIRE_EMAIL_VERIFICATION")
+        .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "True"))
+        .unwrap_or(false);
+
     let config = Config {
         external_host: cli.external_host.clone(),
         terraform_external_host: cli.terraform_external_host.clone(),
@@ -78,7 +99,13 @@ pub async fn execute() -> anyhow::Result<()> {
                 tracing::info!("service account API key configured");
                 sha2::Sha256::digest(key.as_bytes()).to_vec()
             }),
+
+        registration_email_domain_regex,
+        require_email_verification,
     };
+
+    validate_config(&config)?;
+
     let state = State::new(config).await?;
 
     cli.command.execute(&state).await?;

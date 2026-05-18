@@ -10,9 +10,10 @@ mod organisation {
         pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
             let organisations = state.grpc_client().get_organisations().await?;
 
-            println!("organisations:\n");
+            eprintln!("organisations:");
+            eprintln!();
             for organisation in organisations {
-                println!("- {}", organisation.as_str())
+                println!("{}", organisation.as_str())
             }
 
             Ok(())
@@ -46,9 +47,10 @@ mod project {
                 .await
                 .context("get projects")?;
 
-            println!("projects:\n");
+            eprintln!("projects:");
+            eprintln!();
             for project in projects {
-                println!("- {}", project.as_str());
+                println!("{}", project.as_str());
             }
 
             Ok(())
@@ -72,9 +74,10 @@ mod destination {
                 .get_destinations(&self.organisation)
                 .await?;
 
-            println!("destinations:\n");
+            eprintln!("destinations:");
+            eprintln!();
             for destination in destinations {
-                println!("- {}", destination)
+                println!("{}", destination)
             }
 
             Ok(())

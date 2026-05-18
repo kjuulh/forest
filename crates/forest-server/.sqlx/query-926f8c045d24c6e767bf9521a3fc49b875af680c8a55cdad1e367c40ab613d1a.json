@@ -1,0 +1,67 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO policies (project_id, name, policy_type, config)\n            VALUES ($1, $2, $3, $4)\n            RETURNING id, project_id, name, enabled, policy_type, config, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "policy_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "config",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "926f8c045d24c6e767bf9521a3fc49b875af680c8a55cdad1e367c40ab613d1a"
+}

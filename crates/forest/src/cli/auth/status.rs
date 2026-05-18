@@ -9,8 +9,8 @@ pub struct StatusCommand {
     #[arg(long)]
     user_id: Option<String>,
 
-    /// Show status for a specific user by username
-    #[arg(long)]
+    /// Show status for a specific user by username (canonical: --user)
+    #[arg(long, visible_alias = "user")]
     username: Option<String>,
 }
 

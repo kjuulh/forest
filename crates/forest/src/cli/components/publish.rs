@@ -72,6 +72,22 @@ impl PublishCommand {
             "publishing component {organisation}/{name}@{version}"
         );
 
+        // Dispatch: `external:` block in forest.cue means external manifest mode
+        // (TASKS/018-global-tools.md §1a.2b). No build, no UploadBinary.
+        let external = component.and_then(|c| c.get("external"));
+        if let Some(external_block) = external {
+            return publish_external(
+                state,
+                &current_dir,
+                organisation,
+                name,
+                version,
+                &doc,
+                external_block,
+            )
+            .await;
+        }
+
         // 2. Check for binary (optional — CUE-only components don't need one)
         let binary_path = component_binary::resolve_binary(&current_dir, name);
 
@@ -97,7 +113,16 @@ impl PublishCommand {
 
         if let Some(ref desc) = descriptor {
             manifest["protocol_version"] = serde_json::json!(desc.protocol_version);
+            // Methods are also surfaced as a plain string array for the
+            // shape derivation in forest-manifest (HYBRID vs COMPONENT).
+            let method_names: Vec<String> = desc.methods.iter().map(|m| m.name.clone()).collect();
+            manifest["methods"] = serde_json::json!(method_names);
             manifest["capabilities"] = serde_json::json!({ "methods": desc.methods });
+            // Carry the tool facet through to the published manifest if the
+            // describe response advertised one.
+            if let Some(tool) = describe_response_tool_facet(desc) {
+                manifest["tool"] = tool;
+            }
 
             let (os, arch) = component_binary::current_platform();
             let binary_content = tokio::fs::read(binary_path.as_ref().unwrap()).await?;
@@ -164,6 +189,151 @@ impl PublishCommand {
 
         Ok(())
     }
+}
+
+/// Read the optional `tool` facet from a component's `_meta/describe`
+/// response if it advertised one. Returns the JSON form ready to embed
+/// in the manifest. The describe protocol places `tool` alongside
+/// `methods` (see TASKS/018-global-tools.md §1a.1).
+fn describe_response_tool_facet(
+    desc: &forest_sdk::ComponentDescriptor,
+) -> Option<serde_json::Value> {
+    desc.tool.as_ref().map(|t| {
+        let mut obj = serde_json::json!({
+            "name": t.name,
+            "argv_passthrough": t.argv_passthrough,
+        });
+        if let Some(d) = &t.description {
+            obj["description"] = serde_json::json!(d);
+        }
+        obj
+    })
+}
+
+/// External-manifest publishing path. Skips the binary build/upload entirely
+/// and submits only the manifest (kind=external). See §1a.2b.
+async fn publish_external(
+    state: &State,
+    current_dir: &std::path::Path,
+    organisation: &str,
+    name: &str,
+    version: &str,
+    doc: &serde_json::Value,
+    external_block: &serde_json::Value,
+) -> anyhow::Result<()> {
+    // Build the platforms map from the CUE `external.platforms` array.
+    let raw_platforms = external_block
+        .get("platforms")
+        .and_then(|v| v.as_array())
+        .context("forest.component.external.platforms must be an array")?;
+
+    let mut platforms = serde_json::Map::new();
+    for entry in raw_platforms {
+        let os = entry
+            .get("os")
+            .and_then(|v| v.as_str())
+            .context("platform entry missing `os`")?;
+        let arch = entry
+            .get("arch")
+            .and_then(|v| v.as_str())
+            .context("platform entry missing `arch`")?;
+        let sha256 = entry
+            .get("sha256")
+            .and_then(|v| v.as_str())
+            .context("platform entry missing `sha256`")?;
+        let url = entry
+            .get("url")
+            .and_then(|v| v.as_str())
+            .context("platform entry missing `url`")?;
+        let archive = entry
+            .get("archive")
+            .and_then(|v| v.as_str())
+            .unwrap_or("none");
+
+        let mut platform_obj = serde_json::json!({
+            "sha256": sha256,
+            "url": url,
+            "archive": archive,
+        });
+        if let Some(b) = entry.get("binary_in_archive").and_then(|v| v.as_str()) {
+            platform_obj["binary_in_archive"] = serde_json::json!(b);
+        }
+        if let Some(a) = entry.get("archive_sha256").and_then(|v| v.as_str()) {
+            platform_obj["archive_sha256"] = serde_json::json!(a);
+        }
+        platforms.insert(format!("{os}_{arch}"), platform_obj);
+    }
+
+    // Extract the `#Tool` facet via a dedicated `cue eval -e tool`.
+    // `#Tool` is a CUE definition (hidden from `cue export`); we eval it
+    // explicitly to extract its concrete JSON form.
+    let tool_facet = eval_tool_facet(current_dir).await?;
+
+    let manifest = serde_json::json!({
+        "name": name,
+        "organisation": organisation,
+        "version": version,
+        "kind": "external",
+        "tool": tool_facet,
+        "platforms": platforms,
+    });
+
+    tracing::info!(
+        "publishing external manifest: {organisation}/{name}@{version} ({} platforms)",
+        platforms.len()
+    );
+    let _ = doc; // reserved for future fields
+
+    let client = state.grpc_client();
+    let upload_context = client
+        .begin_component_upload(organisation, name, version)
+        .await?;
+
+    // Skip UploadBinary entirely — externals are URL-hosted.
+    // Upload the CUE files (lightweight, for the registry's discovery UI).
+    let cue_files: Vec<(String, String)> = collect_cue_files(current_dir).await?;
+    for (rel_path, content) in &cue_files {
+        client
+            .upload_component_file(&upload_context, rel_path, content.as_bytes())
+            .await
+            .with_context(|| format!("upload CUE file: {rel_path}"))?;
+    }
+
+    let manifest_json = serde_json::to_string(&manifest)?;
+    client
+        .publish_component_manifest(&upload_context, &manifest_json)
+        .await?;
+    client.commit_component_upload(&upload_context).await?;
+
+    tracing::info!(
+        "published external tool {organisation}/{name}@{version} (kind=external)"
+    );
+    Ok(())
+}
+
+/// Evaluate `#Tool` from the project's CUE package. Since `#Tool` is a
+/// definition (hidden from `cue export`), we use `cue eval --expression`
+/// to extract its concrete value.
+async fn eval_tool_facet(dir: &std::path::Path) -> anyhow::Result<serde_json::Value> {
+    let mut cmd = tokio::process::Command::new("cue");
+    cmd.current_dir(dir)
+        .args(["eval", "--out=json", "-e", "#Tool", "."]);
+    if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+        cmd.env("CUE_REGISTRY", registry);
+    }
+    let output = cmd
+        .output()
+        .await
+        .context("running `cue eval -e #Tool`")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "cue eval -e #Tool failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .context("parsing cue eval -e #Tool output")?;
+    Ok(v)
 }
 
 /// Collect all `.cue` files from a directory (non-recursive, excludes cue.mod/).

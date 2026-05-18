@@ -190,20 +190,20 @@ impl CommitCommand {
         );
 
         if !self.no_wait {
-            println!("Waiting for release to complete (streaming logs)...\n");
+            eprintln!("Waiting for release to complete (streaming logs)...\n");
 
             let result = grpc
                 .wait_release(release_result.release_intent_id)
                 .await
                 .context("wait_release")?;
 
-            println!(); // Empty line after logs
+            eprintln!(); // Empty line after logs
 
             // Report results for each destination
             let mut any_failed = false;
             for dest_result in &result.destinations {
                 if dest_result.status.is_success() {
-                    println!(
+                    eprintln!(
                         "Release completed successfully for destination: {}",
                         dest_result.destination
                     );

@@ -24,8 +24,9 @@ enum Commands {
     Add(add::AddCommand),
     /// Remove a member from an organisation
     Remove(remove::RemoveCommand),
-    /// Update a member's role
-    UpdateRole(update_role::UpdateRoleCommand),
+    /// Set a member's role (admin / member)
+    #[command(alias = "update-role")]
+    SetRole(update_role::UpdateRoleCommand),
     /// List members of an organisation
     List(list::ListCommand),
 }
@@ -35,7 +36,7 @@ impl MemberCommand {
         match &self.commands {
             Commands::Add(cmd) => cmd.execute(state, format).await,
             Commands::Remove(cmd) => cmd.execute(state, format).await,
-            Commands::UpdateRole(cmd) => cmd.execute(state, format).await,
+            Commands::SetRole(cmd) => cmd.execute(state, format).await,
             Commands::List(cmd) => cmd.execute(state, format).await,
         }
     }

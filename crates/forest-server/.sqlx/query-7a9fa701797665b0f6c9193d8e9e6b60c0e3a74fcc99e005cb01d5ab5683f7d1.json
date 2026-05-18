@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT slug, source, context, ref, created FROM annotations WHERE artifact_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "slug",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "source",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "context",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "ref",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "created",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7a9fa701797665b0f6c9193d8e9e6b60c0e3a74fcc99e005cb01d5ab5683f7d1"
+}

@@ -2,6 +2,7 @@
 members = [
   "crates/*",
   "examples/components-v2/crates/kubernetes-service",
+  "examples/global-tools/forest-hello/crates/forest-hello",
   "components/forest-contrib/terraform-service/crates/terraform-service",
   "components/forest-contrib/render-template/crates/render-template",
   "components/forest-contrib/checkout/crates/checkout",
@@ -22,6 +23,7 @@ version = "0.1.0"
 [workspace.dependencies]
 forest-models = { path = "crates/forest-models" }
 forest-grpc-interface = { path = "crates/forest-grpc-interface" }
+forest-manifest = { path = "crates/forest-manifest" }
 forest-runner = { path = "crates/forest-runner" }
 forest-sdk = { path = "crates/forest-sdk" }
 forest-sdk-codegen = { path = "crates/forest-sdk-codegen" }

@@ -59,7 +59,7 @@ impl CreateCommand {
             .await
             .context("create release pipeline")?;
 
-        println!("Created release pipeline '{}'", pipeline.name);
+        eprintln!("Created release pipeline '{}'", pipeline.name);
         let status = if pipeline.enabled { "enabled" } else { "disabled" };
         println!("  status:  {status}");
         println!("  id:      {}", pipeline.id);

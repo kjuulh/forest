@@ -43,11 +43,34 @@ use crate::{
 
 mod interceptor;
 
-/// Convert a `tonic::Status` into a clean `anyhow::Error` containing only the
-/// human-readable message (e.g. "member already exists in this organisation")
-/// rather than the raw debug format with status codes and metadata.
+/// Convert a `tonic::Status` into a clean `anyhow::Error`.
+///
+/// When the server returned a human-readable message (e.g.
+/// "member already exists in this organisation"), surface that verbatim.
+/// When the message is empty (some auth-layer rejections and stream-side
+/// errors come back with no body), fall back to the status code so the
+/// user gets a meaningful hint instead of the literal text "empty string".
 fn grpc_err(status: tonic::Status) -> anyhow::Error {
-    anyhow::anyhow!("{}", status.message())
+    let msg = status.message();
+    if !msg.is_empty() {
+        return anyhow::anyhow!("{msg}");
+    }
+    // No message body — synthesise something useful from the code.
+    let code = status.code();
+    let hint: &str = match code {
+        tonic::Code::Unauthenticated => {
+            "unauthenticated — run `forest auth login` and try again"
+        }
+        tonic::Code::PermissionDenied => {
+            "permission denied — your account may not be a member of this organisation"
+        }
+        tonic::Code::NotFound => "not found",
+        tonic::Code::Unavailable => {
+            "registry unavailable — is the forest server running?"
+        }
+        _ => "(no message body)",
+    };
+    anyhow::anyhow!("gRPC {code:?}: {hint}")
 }
 
 #[derive(Clone)]
@@ -280,6 +303,28 @@ impl GrpcClient {
         Ok(res.into_inner().manifest_json)
     }
 
+    /// Stream the tool catalogue for an organisation (§1a.2c).
+    /// Each entry has shape ∈ {HYBRID, TOOL_BINARY, TOOL_EXTERNAL}.
+    pub async fn list_org_tools(
+        &self,
+        organisation: &str,
+    ) -> anyhow::Result<Vec<OrgToolEntry>> {
+        let mut client = self.registry_client().await?;
+        let mut stream = client
+            .list_org_tools(ListOrgToolsRequest {
+                organisation: organisation.into(),
+            })
+            .await
+            .map_err(grpc_err)?
+            .into_inner();
+
+        let mut out = Vec::new();
+        while let Some(entry) = stream.message().await.map_err(grpc_err)? {
+            out.push(entry);
+        }
+        Ok(out)
+    }
+
     pub async fn download_component_binary(
         &self,
         organisation: &str,
@@ -367,6 +412,23 @@ impl GrpcClient {
 
         Ok(res.into_inner().components)
     }
+
+    pub async fn get_component_detail(
+        &self,
+        organisation: &str,
+        name: &str,
+    ) -> anyhow::Result<GetComponentDetailResponse> {
+        let mut client = self.registry_client().await?;
+        let res = client
+            .get_component_detail(GetComponentDetailRequest {
+                organisation: organisation.into(),
+                name: name.into(),
+            })
+            .await
+            .map_err(grpc_err)?;
+        Ok(res.into_inner())
+    }
+
 
     pub async fn commit_component_upload(&self, upload_context: &str) -> anyhow::Result<()> {
         let mut client = self.registry_client().await?;
@@ -2274,8 +2336,30 @@ impl GrpcClientState for State {
         GRPC.get_or_init(move || {
             tracing::trace!("creating grpc client");
 
+            // Server URL resolution (TASKS/019-context.md §1.3):
+            //   1. --forest-server / FOREST_SERVER (explicit override)
+            //   2. The resolved context's server URL.
+            let host = if let Some(s) = self
+                .config
+                .forest_server
+                .clone()
+                .filter(|s| !s.is_empty())
+            {
+                s
+            } else {
+                match crate::contexts::ContextStore::from_env()
+                    .and_then(|s| s.resolve(self.config.context.as_deref()))
+                {
+                    Ok(entry) => entry.server,
+                    Err(e) => {
+                        tracing::warn!("resolving context server url: {e:#}");
+                        String::new()
+                    }
+                }
+            };
+
             GrpcClient {
-                host: self.config.forest_server.clone().unwrap_or_default(),
+                host,
                 auth_middleware_layer: self.auth_interceptor(),
 
                 channel: OnceCell::const_new(),

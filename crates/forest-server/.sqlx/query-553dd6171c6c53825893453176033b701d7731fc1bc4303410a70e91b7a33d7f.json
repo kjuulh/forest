@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT status, release_intent_id, project_id, destination_id, stage_id\n             FROM release_states\n             WHERE release_id = $1\n             FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "release_intent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "destination_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "stage_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "553dd6171c6c53825893453176033b701d7731fc1bc4303410a70e91b7a33d7f"
+}

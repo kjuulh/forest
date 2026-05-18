@@ -9,8 +9,8 @@ use crate::{
 
 #[derive(clap::Parser)]
 pub struct LoginCommand {
-    /// Login with username (mutually exclusive with --email)
-    #[arg(long, conflicts_with = "email")]
+    /// Login with username (mutually exclusive with --email). Aliased as `--user`.
+    #[arg(long, conflicts_with = "email", visible_alias = "user")]
     username: Option<String>,
 
     /// Login with email (mutually exclusive with --username)
@@ -58,7 +58,7 @@ impl LoginCommand {
             .context("failed to login")?;
 
         let (user, tokens) = if resp.mfa_required {
-            println!("Two-factor authentication required.");
+            eprintln!("Two-factor authentication required.");
             let code = inquire::Text::new("TOTP code:")
                 .with_placeholder("123456")
                 .prompt()?;
@@ -79,7 +79,7 @@ impl LoginCommand {
                 resp.tokens.context("no tokens in login response")?,
             )
         };
-        println!("Logged in as {} ({})", user.username, user.user_id);
+        eprintln!("Logged in as {} ({})", user.username, user.user_id);
 
         let now = chrono::Utc::now().timestamp();
         let refresh_after = compute_refresh_after(now, tokens.expires_in_seconds);

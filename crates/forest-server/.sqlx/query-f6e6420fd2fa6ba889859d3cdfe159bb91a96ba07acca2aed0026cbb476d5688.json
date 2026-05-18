@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, user_id, name, token_hash, scopes, expires_at, last_used, created_at, updated_at\n            FROM personal_access_tokens\n            WHERE user_id = $1 AND token_hash = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "token_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 4,
+        "name": "scopes",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "last_used",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "f6e6420fd2fa6ba889859d3cdfe159bb91a96ba07acca2aed0026cbb476d5688"
+}

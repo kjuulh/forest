@@ -16,7 +16,7 @@ impl DeleteTokenCommand {
             .await
             .context("failed to delete token")?;
 
-        println!("Token {} deleted", self.token_id);
+        eprintln!("Token {} deleted", self.token_id);
 
         Ok(())
     }

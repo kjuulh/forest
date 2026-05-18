@@ -38,7 +38,7 @@ impl DeleteCommand {
             .await
             .context("delete auto-release policy")?;
 
-        println!("Deleted auto-release policy '{}'", name);
+        eprintln!("Deleted auto-release policy '{}'", name);
 
         Ok(())
     }

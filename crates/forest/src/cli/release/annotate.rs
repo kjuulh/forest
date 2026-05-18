@@ -118,8 +118,8 @@ impl AnnotateCommand {
         )
         .await?;
 
-        println!("published artifact: {slug}\n");
-        println!("$ forest release {slug} --destination <prod/k8s/eu-west-1/001>");
+        eprintln!("published artifact: {slug}\n");
+        eprintln!("$ forest release {slug} --destination <prod/k8s/eu-west-1/001>");
 
         Ok(())
     }

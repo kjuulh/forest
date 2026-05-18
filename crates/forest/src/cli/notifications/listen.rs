@@ -6,7 +6,7 @@ use crate::{grpc::GrpcClientState, state::State};
 #[derive(clap::Parser)]
 pub struct ListenCommand {
     /// Filter by organisation
-    #[arg(long)]
+    #[arg(long, short = 'o', visible_alias = "org")]
     organisation: Option<String>,
 
     /// Filter by project
@@ -25,7 +25,7 @@ impl ListenCommand {
             )
             .await?;
 
-        println!("Listening for notifications...\n");
+        eprintln!("Listening for notifications...\n");
 
         while let Some(event) = stream.next().await {
             let notif = event.map_err(|e| anyhow::anyhow!("{}", e.message()))?;

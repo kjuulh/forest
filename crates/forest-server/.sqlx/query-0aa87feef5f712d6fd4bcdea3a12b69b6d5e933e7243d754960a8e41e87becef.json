@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, organisation, name, resource_types, actions, projects,\n                      status, cursor, created_at, updated_at\n               FROM event_subscriptions\n               WHERE organisation = $1 AND name = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "organisation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "resource_types",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 4,
+        "name": "actions",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 5,
+        "name": "projects",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "cursor",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0aa87feef5f712d6fd4bcdea3a12b69b6d5e933e7243d754960a8e41e87becef"
+}

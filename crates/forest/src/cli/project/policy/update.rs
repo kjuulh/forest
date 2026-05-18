@@ -109,7 +109,7 @@ impl UpdateCommand {
         } else {
             "disabled"
         };
-        println!("Updated policy '{}' ({})", policy.name, status);
+        eprintln!("Updated policy '{}' ({})", policy.name, status);
 
         Ok(())
     }

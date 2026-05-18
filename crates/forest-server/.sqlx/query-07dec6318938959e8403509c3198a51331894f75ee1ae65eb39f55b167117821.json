@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO event_subscriptions\n                (organisation, name, resource_types, actions, projects,\n                 created_by_app_id, created_by_user_id)\n               VALUES ($1, $2, $3, $4, $5, $6, $7)\n               RETURNING id, organisation, name, resource_types, actions, projects,\n                         status, cursor, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "organisation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "resource_types",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 4,
+        "name": "actions",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 5,
+        "name": "projects",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "cursor",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "TextArray",
+        "TextArray",
+        "TextArray",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "07dec6318938959e8403509c3198a51331894f75ee1ae65eb39f55b167117821"
+}

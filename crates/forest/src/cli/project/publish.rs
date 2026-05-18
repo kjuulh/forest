@@ -263,8 +263,13 @@ impl PublishCommand {
             .await
             .context("annotate artifact")?;
 
-        println!("published artifact: {slug}\n");
-        println!("$ forest project release {slug} --destination <prod/k8s/eu-west-1/001>");
+        // Slug to stdout so `slug=$(forest project publish)` works; the
+        // next-step hint goes to stderr so it doesn't pollute the variable.
+        eprintln!("published artifact: {slug}");
+        eprintln!();
+        eprintln!("Next step:");
+        eprintln!("  $ forest project release {slug} --destination <prod/k8s/eu-west-1/001>");
+        println!("{slug}");
 
         Ok(())
     }

@@ -75,6 +75,32 @@ pub struct Config {
     /// Set via `FOREST_SERVICE_ACCOUNT_API_KEY` env var.
     /// Grants `Actor::ServiceAccount` with full cross-org access.
     pub service_account_token_hash: Option<Vec<u8>>,
+
+    /// Optional regex restricting which email addresses may register
+    /// (and be added post-signup). Set via
+    /// `FOREST_REGISTRATION_EMAIL_DOMAIN_REGEX`. When set,
+    /// `require_email_verification` must also be true.
+    pub registration_email_domain_regex: Option<regex::Regex>,
+
+    /// When true, native registration requires the email-verification
+    /// flow to complete before unverified accounts can act. Set via
+    /// `FOREST_REQUIRE_EMAIL_VERIFICATION`. Required when
+    /// `registration_email_domain_regex` is set.
+    pub require_email_verification: bool,
+}
+
+/// Pure validator for inter-field invariants on `Config`.
+/// Called at startup, before opening DB connections, so misconfigured
+/// instances never reach a serving state.
+pub fn validate_config(config: &Config) -> anyhow::Result<()> {
+    if config.registration_email_domain_regex.is_some() && !config.require_email_verification {
+        anyhow::bail!(
+            "FOREST_REGISTRATION_EMAIL_DOMAIN_REGEX is set but \
+             FOREST_REQUIRE_EMAIL_VERIFICATION is false; native registration \
+             would let attackers claim emails they don't own"
+        );
+    }
+    Ok(())
 }
 
 impl State {
@@ -113,5 +139,49 @@ impl State {
             object_store,
             config,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_config() -> Config {
+        Config {
+            external_host: "http://localhost:0".into(),
+            terraform_external_host: "http://localhost:0".into(),
+            password_secret_key: "test-password-secret-key-32chars".into(),
+            access_token_secret_key: b"test-access-token-secret-key-32b".to_vec(),
+            refresh_token_secret_key: b"test-refresh-token-secret-key32b".to_vec(),
+            service_account_token_hash: None,
+            registration_email_domain_regex: None,
+            require_email_verification: false,
+        }
+    }
+
+    #[test]
+    fn unrestricted_passes_regardless_of_verification_flag() {
+        let mut c = base_config();
+        c.require_email_verification = false;
+        assert!(validate_config(&c).is_ok());
+        c.require_email_verification = true;
+        assert!(validate_config(&c).is_ok());
+    }
+
+    #[test]
+    fn domain_regex_without_verification_fails() {
+        let mut c = base_config();
+        c.registration_email_domain_regex = Some(regex::Regex::new(r"@understory\.io$").unwrap());
+        c.require_email_verification = false;
+        let err = validate_config(&c).unwrap_err().to_string();
+        assert!(err.contains("FOREST_REQUIRE_EMAIL_VERIFICATION"));
+    }
+
+    #[test]
+    fn domain_regex_with_verification_passes() {
+        let mut c = base_config();
+        c.registration_email_domain_regex = Some(regex::Regex::new(r"@understory\.io$").unwrap());
+        c.require_email_verification = true;
+        assert!(validate_config(&c).is_ok());
     }
 }

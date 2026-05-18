@@ -87,7 +87,7 @@ impl CreateCommand {
             .await
             .context("create trigger")?;
 
-        println!("Created trigger '{}'", trigger.name);
+        eprintln!("Created trigger '{}'", trigger.name);
 
         if let Some(bp) = &trigger.branch_pattern {
             println!("  branch:         {bp}");

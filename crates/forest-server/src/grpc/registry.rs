@@ -14,6 +14,16 @@ use crate::{
     state::State,
 };
 
+fn shape_to_proto(s: &str) -> ComponentShape {
+    match s {
+        "component" => ComponentShape::Component,
+        "hybrid_component" => ComponentShape::Hybrid,
+        "tool_binary" => ComponentShape::ToolBinary,
+        "tool_external" => ComponentShape::ToolExternal,
+        _ => ComponentShape::Unspecified,
+    }
+}
+
 pub struct RegistryServer {
     pub state: State,
 }
@@ -365,6 +375,51 @@ impl RegistryService for RegistryServer {
                 })
                 .collect(),
         }))
+    }
+
+    // --- Global-tools (TASKS/018-global-tools.md §1a.2c) ---
+
+    type ListOrgToolsStream = Pin<
+        Box<dyn Stream<Item = std::result::Result<OrgToolEntry, tonic::Status>> + Send>,
+    >;
+
+    async fn list_org_tools(
+        &self,
+        request: tonic::Request<ListOrgToolsRequest>,
+    ) -> std::result::Result<tonic::Response<Self::ListOrgToolsStream>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
+        let req = request.into_inner();
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            OrgRole::Member,
+        )
+        .await?;
+
+        let rows = self
+            .state
+            .component_service()
+            .list_org_tools(&req.organisation)
+            .await
+            .inspect_err(|e| tracing::warn!("list_org_tools failed: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        let stream = futures::stream::iter(rows.into_iter().map(|row| {
+            Ok(OrgToolEntry {
+                organisation: row.organisation,
+                name: row.name,
+                latest_version: row.latest_version,
+                shape: shape_to_proto(&row.shape) as i32,
+                upstream_host: row.upstream_host.unwrap_or_default(),
+                tool: row.tool.map(|t| ToolFacet {
+                    name: t.name,
+                    argv_passthrough: t.argv_passthrough,
+                    description: t.description.unwrap_or_default(),
+                }),
+            })
+        }));
+        Ok(tonic::Response::new(Box::pin(stream)))
     }
 
     // --- Registry UI / discovery ---

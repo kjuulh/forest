@@ -69,7 +69,7 @@ impl UpdateCommand {
             .context("update release pipeline")?;
 
         let status = if pipeline.enabled { "enabled" } else { "disabled" };
-        println!("Updated release pipeline '{}' ({})", pipeline.name, status);
+        eprintln!("Updated release pipeline '{}' ({})", pipeline.name, status);
 
         Ok(())
     }

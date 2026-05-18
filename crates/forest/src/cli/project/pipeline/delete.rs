@@ -38,7 +38,7 @@ impl DeleteCommand {
             .await
             .context("delete release pipeline")?;
 
-        println!("Deleted release pipeline '{}'", name);
+        eprintln!("Deleted release pipeline '{}'", name);
 
         Ok(())
     }

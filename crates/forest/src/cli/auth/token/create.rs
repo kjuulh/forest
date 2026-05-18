@@ -34,19 +34,21 @@ impl CreateTokenCommand {
             .await
             .context("failed to create token")?;
 
+        // Metadata + warnings to stderr so `forest auth token create > token.txt`
+        // captures only the raw token (data).
         if let Some(token) = resp.token {
-            println!("Token ID:   {}", token.token_id);
-            println!("Name:       {}", token.name);
+            eprintln!("Token ID:   {}", token.token_id);
+            eprintln!("Name:       {}", token.name);
             if !token.scopes.is_empty() {
-                println!("Scopes:     {}", token.scopes.join(", "));
+                eprintln!("Scopes:     {}", token.scopes.join(", "));
             }
         }
 
         if !resp.raw_token.is_empty() {
-            println!();
-            println!("Token: {}", resp.raw_token);
-            println!();
-            println!("Make sure to copy this token now. You won't be able to see it again.");
+            eprintln!();
+            println!("{}", resp.raw_token);
+            eprintln!();
+            eprintln!("Make sure to copy this token now. You won't be able to see it again.");
         }
 
         Ok(())

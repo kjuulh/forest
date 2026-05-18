@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                ri.id as release_intent_id,\n                ri.artifact as artifact_id,\n                p.project as project,\n                ri.created as created_at,\n                ri.stages,\n                ri.stage_states\n            FROM release_intents ri\n            JOIN projects p ON ri.project_id = p.id\n            WHERE p.organisation = $1\n              AND ($2::uuid IS NULL OR ri.project_id = $2)\n              AND (\n                  $3::bool\n                  OR EXISTS (\n                      SELECT 1 FROM release_states rs\n                      WHERE rs.release_intent_id = ri.id\n                        AND rs.status IN ('QUEUED', 'ASSIGNED', 'RUNNING')\n                  )\n                  OR (\n                      ri.stage_states IS NOT NULL\n                      AND EXISTS (\n                          SELECT 1\n                          FROM jsonb_each(ri.stage_states) AS s(key, val)\n                          WHERE val->>'status' IN ('PENDING', 'ACTIVE')\n                      )\n                  )\n              )\n            ORDER BY ri.created DESC\n            LIMIT 50",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "release_intent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "project",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "stages",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "stage_states",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "3f10c3a59b25115b273166807bb4468fba5485afa8b615d58b741231c1f85cf0"
+}

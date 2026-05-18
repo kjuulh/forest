@@ -50,7 +50,7 @@ impl SearchCommand {
         if resp.organisations.is_empty() {
             match format {
                 OutputFormat::Json => print!("[]"),
-                _ => println!("No organisations found"),
+                _ => eprintln!("No organisations found"),
             }
             return Ok(());
         }
@@ -77,9 +77,9 @@ impl SearchCommand {
         print!("{}", output::render(format, &rows));
 
         if !matches!(format, OutputFormat::Json) {
-            println!("{} total", resp.total_count);
+            eprintln!("{} total", resp.total_count);
             if !resp.next_page_token.is_empty() {
-                println!("Next page: --page-token {}", resp.next_page_token);
+                eprintln!("Next page: --page-token {}", resp.next_page_token);
             }
         }
 

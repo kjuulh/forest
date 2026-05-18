@@ -3,14 +3,17 @@ use std::fmt::Write;
 use serde::Serialize;
 use tabled::{Table, Tabled, settings::Style};
 
-#[derive(clap::ValueEnum, Clone, Default, Debug)]
+#[derive(clap::ValueEnum, Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub enum OutputFormat {
-    /// Human-readable table with rounded borders
+    /// Human-readable table with rounded borders (default).
     #[default]
     Pretty,
-    /// Tab-separated, no headers — for piping to other commands
+    /// Tab-separated, no headers — for piping to other commands.
     Text,
-    /// JSON array
+    /// Just the first column of each row, one per line — perfect for `xargs`.
+    /// Example: `forest global list --format name | xargs -L1 forest global which`
+    Name,
+    /// JSON array of typed rows.
     Json,
 }
 
@@ -32,6 +35,17 @@ pub fn render<T: Tabled + Serialize>(format: &OutputFormat, rows: &[T]) -> Strin
                     .collect();
                 out.push_str(&fields.join("\t"));
                 out.push('\n');
+            }
+            out
+        }
+        OutputFormat::Name => {
+            let mut out = String::new();
+            for row in rows {
+                let mut fields = row.fields().into_iter();
+                if let Some(first) = fields.next() {
+                    out.push_str(&first);
+                    out.push('\n');
+                }
             }
             out
         }

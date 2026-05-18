@@ -33,7 +33,7 @@ impl ListPrefsCommand {
         let prefs = client.get_notification_preferences().await?;
 
         if prefs.is_empty() {
-            println!("No preferences set (all notifications enabled by default).");
+            eprintln!("No preferences set (all notifications enabled by default).");
             return Ok(());
         }
 
@@ -100,14 +100,14 @@ impl SetPrefCommand {
         match pref {
             Some(p) => {
                 let status = if p.enabled { "enabled" } else { "disabled" };
-                println!(
+                eprintln!(
                     "Set {} / {}: {}",
                     format_notification_type(p.notification_type()),
                     format_channel(p.channel()),
                     status,
                 );
             }
-            None => println!("Preference updated."),
+            None => eprintln!("Preference updated."),
         }
 
         Ok(())

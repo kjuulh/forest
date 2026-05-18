@@ -20,11 +20,15 @@ pub struct DestinationCommand {
 
 #[derive(clap::Subcommand)]
 enum Commands {
+    /// Create a deployment destination (e.g. flux/k8s, terraform, forage)
     Create(CreateCommand),
+    /// Update a destination's metadata or type
     Update(UpdateCommand),
+    /// Delete a destination
     Delete(DeleteCommand),
+    /// List destinations in an organisation
     List(ListCommand),
-    /// List available destination types
+    /// List available destination types (the blessed kinds: flux, terraform, forage, …)
     Types(TypesCommand),
 }
 

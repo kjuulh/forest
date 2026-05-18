@@ -47,7 +47,7 @@ impl UpdateCommand {
             .await
             .context("update environment")?;
 
-        println!("Updated environment '{}' ({})", env.name, env.id);
+        eprintln!("Updated environment '{}' ({})", env.name, env.id);
 
         Ok(())
     }

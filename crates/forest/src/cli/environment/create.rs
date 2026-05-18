@@ -4,7 +4,7 @@ use crate::{cli::prompts, grpc::GrpcClientState, state::State};
 
 #[derive(clap::Parser)]
 pub struct CreateCommand {
-    #[arg(long, short = 'o')]
+    #[arg(long, short = 'o', visible_alias = "org")]
     organisation: Option<String>,
 
     #[arg(long)]
@@ -43,7 +43,7 @@ impl CreateCommand {
             .await
             .context("create environment")?;
 
-        println!("Created environment '{}' ({})", env.name, env.id);
+        eprintln!("Created environment '{}' ({})", env.name, env.id);
 
         Ok(())
     }

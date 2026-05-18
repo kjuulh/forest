@@ -4,7 +4,7 @@ use crate::{grpc::GrpcClientState, state::State};
 #[derive(clap::Parser)]
 pub struct ListCommand {
     /// Filter by organisation
-    #[arg(long)]
+    #[arg(long, short = 'o', visible_alias = "org")]
     organisation: Option<String>,
 
     /// Filter by project
@@ -30,7 +30,7 @@ impl ListCommand {
             .await?;
 
         if resp.notifications.is_empty() {
-            println!("No notifications found.");
+            eprintln!("No notifications found.");
             return Ok(());
         }
 

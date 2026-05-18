@@ -24,8 +24,9 @@ enum Commands {
     List(ListCommand),
     /// Create a new environment
     Create(CreateCommand),
-    /// Get details of an environment
-    Get(GetCommand),
+    /// Show details of an environment
+    #[command(alias = "get")]
+    Show(GetCommand),
     /// Update an environment
     Update(UpdateCommand),
     /// Delete an environment
@@ -37,7 +38,7 @@ impl EnvironmentCommand {
         match &self.commands {
             Commands::List(cmd) => cmd.execute(state).await,
             Commands::Create(cmd) => cmd.execute(state).await,
-            Commands::Get(cmd) => cmd.execute(state).await,
+            Commands::Show(cmd) => cmd.execute(state).await,
             Commands::Update(cmd) => cmd.execute(state).await,
             Commands::Delete(cmd) => cmd.execute(state).await,
         }

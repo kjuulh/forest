@@ -4,7 +4,7 @@ use crate::{grpc::GrpcClientState, state::State};
 
 #[derive(clap::Parser)]
 pub struct ListCommand {
-    #[arg(long, short = 'o')]
+    #[arg(long, short = 'o', visible_alias = "org")]
     organisation: String,
 }
 

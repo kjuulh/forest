@@ -14,8 +14,10 @@ mod user_config;
 mod user_locations;
 mod user_state;
 
+mod contexts;
 mod contracts;
 mod features;
+mod global;
 mod lockfile;
 mod version_spec;
 mod models;

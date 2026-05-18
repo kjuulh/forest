@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT\n                    d.name as \"name!\",\n                    d.environment as \"environment!\",\n                    d.type_organisation as \"type_organisation!\",\n                    d.type_name as \"type_name!\",\n                    d.type_version as \"type_version!\",\n                    rs.status as \"status!\"\n                FROM release_states rs\n                JOIN destinations d ON rs.destination_id = d.id\n                WHERE rs.artifact_id = $1\n                  AND rs.mode = 'deploy'\n                ORDER BY d.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "environment!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "type_organisation!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "type_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "type_version!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "status!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "87979b46aba30ce8b19b1ade150e47ecb8c6101c78612130a411c549eee75cc6"
+}

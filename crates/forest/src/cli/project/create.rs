@@ -30,7 +30,7 @@ impl CreateCommand {
             .await
             .context("create project")?;
 
-        println!("Created project '{organisation}/{project}'");
+        eprintln!("Created project '{organisation}/{project}'");
 
         Ok(())
     }

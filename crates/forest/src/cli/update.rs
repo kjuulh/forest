@@ -97,7 +97,7 @@ impl UpdateCommand {
 
                     // Resolve the best match
                     let Some(resolved) = spec.resolve(&semver_versions) else {
-                        println!(
+                        eprintln!(
                             "  {} {}/{}  no version matches spec '{spec}'",
                             "!", dep.organisation, dep.name
                         );
@@ -118,7 +118,7 @@ impl UpdateCommand {
                         let hash =
                             existing_hash.strip_prefix("sha256:").unwrap_or(existing_hash);
                         if component_binary::resolve_binary_from_hash(hash).is_some() {
-                            println!(
+                            eprintln!(
                                 "  {} {}/{}@{}  up to date",
                                 "✓", dep.organisation, dep.name, resolved_str
                             );
@@ -127,7 +127,7 @@ impl UpdateCommand {
                     }
 
                     // Download the binary
-                    println!(
+                    eprintln!(
                         "  {} {}/{}@{}  downloading...",
                         "↓", dep.organisation, dep.name, resolved_str
                     );
@@ -162,7 +162,7 @@ impl UpdateCommand {
                         },
                     });
 
-                    println!(
+                    eprintln!(
                         "  {} {}/{}@{}  updated ({} bytes)",
                         "✓", dep.organisation, dep.name, resolved_str,
                         binary.len()
@@ -174,11 +174,11 @@ impl UpdateCommand {
 
         lockfile.save(&project_dir).await?;
 
-        println!();
+        eprintln!();
         if updated > 0 {
-            println!("Updated {updated} component(s). forest.lock written.");
+            eprintln!("Updated {updated} component(s). forest.lock written.");
         } else {
-            println!("All components up to date.");
+            eprintln!("All components up to date.");
         }
 
         Ok(())

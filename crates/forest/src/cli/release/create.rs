@@ -238,7 +238,7 @@ impl CreateCommand {
         .await
         .context("annotate")?;
 
-        println!("published artifact: {slug}");
+        eprintln!("published artifact: {slug}");
 
         // ── 3. Release ───────────────────────────────────────────────
         tracing::info!("step 3/3: release");

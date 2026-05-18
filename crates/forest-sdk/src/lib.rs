@@ -85,6 +85,10 @@ pub struct TemplateConfig {
 pub struct ComponentDescriptor {
     pub protocol_version: String,
     pub methods: Vec<MethodInfo>,
+    /// Optional tool facet — set when the component declares itself
+    /// installable via `forest global …` (TASKS/018-global-tools.md §1a.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<ToolFacet>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -95,6 +99,20 @@ pub struct MethodInfo {
     pub topic: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+}
+
+/// Tool facet returned by `_meta/describe` for components that double as CLI tools.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ToolFacet {
+    pub name: String,
+    #[serde(default = "default_true")]
+    pub argv_passthrough: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Run a single invocation against a component service, then exit.
@@ -221,6 +239,7 @@ fn build_descriptor<S, CS: ComponentService<S>>(service: &CS) -> ComponentDescri
     ComponentDescriptor {
         protocol_version: PROTOCOL_VERSION.to_string(),
         methods,
+        tool: None,
     }
 }
 

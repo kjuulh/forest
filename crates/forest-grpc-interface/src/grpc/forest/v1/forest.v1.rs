@@ -3323,7 +3323,7 @@ pub struct ComponentSummary {
     pub name: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
     pub latest_version: ::prost::alloc::string::String,
-    /// "binary" or "files"
+    /// "binary", "external", or "files"
     #[prost(string, tag="4")]
     pub kind: ::prost::alloc::string::String,
     /// from manifest
@@ -3343,6 +3343,18 @@ pub struct ComponentSummary {
     /// "public" or "private"
     #[prost(string, tag="10")]
     pub visibility: ::prost::alloc::string::String,
+    /// §1a.2e taxonomy
+    #[prost(enumeration="ComponentShape", tag="11")]
+    pub shape: i32,
+    /// populated for HYBRID / TOOL_*
+    #[prost(message, optional, tag="12")]
+    pub tool: ::core::option::Option<ToolFacet>,
+    /// names only; populated for COMPONENT / HYBRID
+    #[prost(string, repeated, tag="13")]
+    pub methods: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// For TOOL_EXTERNAL only; full URL is only on detail view.
+    #[prost(string, tag="14")]
+    pub upstream_host: ::prost::alloc::string::String,
 }
 /// GetComponentDetail — full component page (like crates.io crate page).
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -3367,6 +3379,82 @@ pub struct GetComponentDetailResponse {
     /// org members who can publish
     #[prost(string, repeated, tag="5")]
     pub owners: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ToolFacet {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
+    pub argv_passthrough: bool,
+    #[prost(string, tag="3")]
+    pub description: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListOrgToolsRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OrgToolEntry {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    /// component name
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    /// server-resolved (excludes prereleases)
+    #[prost(string, tag="3")]
+    pub latest_version: ::prost::alloc::string::String,
+    /// populated for HYBRID/TOOL_*
+    #[prost(message, optional, tag="4")]
+    pub tool: ::core::option::Option<ToolFacet>,
+    #[prost(enumeration="ComponentShape", tag="5")]
+    pub shape: i32,
+    /// populated for TOOL_EXTERNAL only
+    #[prost(string, tag="6")]
+    pub upstream_host: ::prost::alloc::string::String,
+}
+// --- Global-tools (TASKS/018-global-tools.md §1a.2c, §1a.2e) ---
+
+/// Shape taxonomy persisted on `components.shape`. The four observable
+/// kinds of registry artefact:
+///    COMPONENT          — binary + methods, no tool facet (status quo)
+///    HYBRID             — binary + methods + tool facet
+///    TOOL_BINARY        — binary + tool facet, no methods
+///    TOOL_EXTERNAL      — external manifest (URL-hosted) + tool facet
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ComponentShape {
+    Unspecified = 0,
+    Component = 1,
+    Hybrid = 2,
+    ToolBinary = 3,
+    ToolExternal = 4,
+}
+impl ComponentShape {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "COMPONENT_SHAPE_UNSPECIFIED",
+            Self::Component => "COMPONENT_SHAPE_COMPONENT",
+            Self::Hybrid => "COMPONENT_SHAPE_HYBRID",
+            Self::ToolBinary => "COMPONENT_SHAPE_TOOL_BINARY",
+            Self::ToolExternal => "COMPONENT_SHAPE_TOOL_EXTERNAL",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "COMPONENT_SHAPE_UNSPECIFIED" => Some(Self::Unspecified),
+            "COMPONENT_SHAPE_COMPONENT" => Some(Self::Component),
+            "COMPONENT_SHAPE_HYBRID" => Some(Self::Hybrid),
+            "COMPONENT_SHAPE_TOOL_BINARY" => Some(Self::ToolBinary),
+            "COMPONENT_SHAPE_TOOL_EXTERNAL" => Some(Self::ToolExternal),
+            _ => None,
+        }
+    }
 }
 // ── Per-type config messages ─────────────────────────────────────────
 
@@ -4060,8 +4148,13 @@ pub struct RegisterRequest {
 pub struct RegisterResponse {
     #[prost(message, optional, tag="1")]
     pub user: ::core::option::Option<User>,
+    /// Empty when email_verification_required is true.
     #[prost(message, optional, tag="2")]
     pub tokens: ::core::option::Option<AuthTokens>,
+    /// True when the server requires email verification before issuing tokens.
+    /// The caller (forage) is responsible for triggering the verification email.
+    #[prost(bool, tag="3")]
+    pub email_verification_required: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct LoginRequest {
@@ -4225,6 +4318,10 @@ pub struct AddEmailRequest {
 pub struct AddEmailResponse {
     #[prost(message, optional, tag="1")]
     pub email: ::core::option::Option<UserEmail>,
+    /// True when the server requires verification of this newly added email.
+    /// The caller (forage) should trigger the verification flow for it.
+    #[prost(bool, tag="2")]
+    pub email_verification_required: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct VerifyEmailRequest {
@@ -4235,6 +4332,20 @@ pub struct VerifyEmailRequest {
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct VerifyEmailResponse {
+}
+/// Service-account-only confirmation that an email has been verified via
+/// the out-of-band token-redemption flow. The caller has already proven
+/// the user owns this address (typically by clicking a link in their
+/// inbox) and asks forest to flip the verified flag. Forest looks up the
+/// owning user from the email — the caller is not expected to know the
+/// user_id.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ConfirmEmailVerificationRequest {
+    #[prost(string, tag="1")]
+    pub email: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ConfirmEmailVerificationResponse {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RemoveEmailRequest {

@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT stages, stage_states, status FROM release_intents WHERE id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "stages",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 1,
+        "name": "stage_states",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "status",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "5b3de22077603bcd313eca0db64a4c1409599dc3ec310996addc1ed58b2f8f78"
+}

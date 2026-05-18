@@ -195,6 +195,7 @@ mod tests {
                     description: None,
                 },
             ],
+            tool: None,
         };
 
         let contracts = component_contracts(&descriptor);

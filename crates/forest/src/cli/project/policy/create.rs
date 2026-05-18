@@ -107,7 +107,7 @@ impl CreateCommand {
             .await
             .context("create policy")?;
 
-        println!("Created policy '{}'", policy.name);
+        eprintln!("Created policy '{}'", policy.name);
         print_policy_details(&policy);
 
         Ok(())

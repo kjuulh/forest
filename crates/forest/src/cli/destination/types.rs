@@ -14,7 +14,7 @@ impl TypesCommand {
             .context("list destination types")?;
 
         if types.is_empty() {
-            println!("No destination types available");
+            eprintln!("No destination types available");
             return Ok(());
         }
 

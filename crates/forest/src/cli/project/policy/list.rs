@@ -30,7 +30,7 @@ impl ListCommand {
             .context("list policies")?;
 
         if policies.is_empty() {
-            println!("No policies found");
+            eprintln!("No policies found");
             return Ok(());
         }
 

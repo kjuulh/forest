@@ -4,7 +4,7 @@ use crate::{cli::prompts, grpc::GrpcClientState, state::State};
 
 #[derive(clap::Parser)]
 pub struct ListCommand {
-    #[arg(long, short = 'o')]
+    #[arg(long, short = 'o', visible_alias = "org")]
     organisation: Option<String>,
 }
 
@@ -22,7 +22,7 @@ impl ListCommand {
             .context("list environments")?;
 
         if envs.is_empty() {
-            println!("No environments found");
+            eprintln!("No environments found");
             return Ok(());
         }
 

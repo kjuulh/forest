@@ -76,7 +76,8 @@ impl UserService {
         })
     }
 
-    /// Create a user from an OAuth provider — no password, email marked as verified.
+    /// Create a user from an OAuth provider — no password, email is marked
+    /// verified at creation because the provider already vouched for it.
     pub async fn register_oauth_user(
         &self,
         username: &str,
@@ -90,7 +91,7 @@ impl UserService {
             .create_user(tx.as_executor(), user_id, username)
             .await?;
         self.repo
-            .add_user_email(tx.as_executor(), user_id, email)
+            .add_user_email_with_verified(tx.as_executor(), user_id, email, true)
             .await?;
 
         tx.commit().await?;
@@ -101,6 +102,10 @@ impl UserService {
             email: email.to_string(),
             created_at: user.created_at,
         })
+    }
+
+    pub async fn user_has_verified_email(&self, user_id: Uuid) -> anyhow::Result<bool> {
+        self.repo.user_has_verified_email(self.db(), user_id).await
     }
 
     pub async fn login_by_username(
