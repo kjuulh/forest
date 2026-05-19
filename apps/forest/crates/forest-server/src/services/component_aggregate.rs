@@ -121,6 +121,7 @@ async fn load_component_readme(
            AND c.name = $2
            AND c.version = $3
            AND lower(cf.file_path) IN ('readme.md', 'readme', 'readme.markdown')
+         ORDER BY lower(cf.file_path)
          LIMIT 1",
     )
     .bind(organisation)
@@ -137,20 +138,43 @@ async fn load_component_readme(
 
     let s3_key =
         crate::object_store::keys::component_file(organisation, name, version, &file_path);
-    let bytes = match object_store.get(&s3_key).await {
-        Ok(b) => b,
-        Err(e) => {
+    // 5s timeout — README is on the detail page hot path; a stalled S3
+    // request must not block the whole page render. 1 MiB cap on the
+    // decoded text — the gRPC write boundary caps writes at 64 KiB, but
+    // older objects predating that cap could still be larger.
+    const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+    const MAX_README_BYTES: usize = 1024 * 1024;
+    let fetch = object_store.get(&s3_key);
+    let bytes = match tokio::time::timeout(READ_TIMEOUT, fetch).await {
+        Ok(Ok(b)) => b,
+        Ok(Err(e)) => {
             // Don't fail the whole detail response if the README blob is
             // missing — log + return empty. The detail page degrades to
             // no README, which is the same as "never uploaded one".
             tracing::warn!("README S3 fetch failed for {organisation}/{name}@{version}: {e:#}");
             return Ok(String::new());
         }
+        Err(_) => {
+            tracing::warn!(
+                "README S3 fetch timed out (>{READ_TIMEOUT:?}) for {organisation}/{name}@{version}"
+            );
+            return Ok(String::new());
+        }
+    };
+
+    let truncated: &[u8] = if bytes.len() > MAX_README_BYTES {
+        tracing::warn!(
+            "README at {organisation}/{name}@{version} exceeds {MAX_README_BYTES} bytes ({} actual); truncating",
+            bytes.len()
+        );
+        &bytes[..MAX_README_BYTES]
+    } else {
+        &bytes
     };
 
     // README is markdown text; surface as UTF-8 string. Lossy decode
     // handles malformed bytes without panicking.
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    Ok(String::from_utf8_lossy(truncated).into_owned())
 }
 
 // ============================================================

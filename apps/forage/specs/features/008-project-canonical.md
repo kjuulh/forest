@@ -524,6 +524,24 @@ this section is the durable record for future readers.
   with no releases / no README / no extra components renders the
   centered Get-started panel only.
 
+### Post-implementation amendments
+
+- **Releases tab is now always visible** (was: "conditionally hidden when
+  no versions"). Rationale: the tab houses CD plumbing — Pipelines /
+  Triggers / Policies management — that a user reasonably wants to
+  configure before any release. Hiding the tab also hid the CD config
+  doorway. Implementation matches; spec text updated to reflect.
+- **Tabs collapsed to `Overview / Releases`** (was: Overview / Releases /
+  Deployments). "Deployments" was a misnomer — a deployment IS a
+  release. The /deployments URL 303-redirects to /releases for legacy
+  link survival.
+- **Anonymous users skip the component → project redirect.** The redirect
+  needs a session-scoped `list_projects` call to look up project
+  existence; without an access token there's no way to authenticate
+  that call. Anonymous traffic on `/components/{org}/{name}` lands on
+  the legacy detail page directly. Documented in the route handler as a
+  deliberate carve-out, not an oversight.
+
 ## Implications (for the implementation order section above)
 
 The "Implementation Order" section now needs to additionally cover:

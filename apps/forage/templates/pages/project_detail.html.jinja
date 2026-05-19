@@ -45,7 +45,11 @@
         {% elif summary %}
         <div class="shrink-0 w-full max-w-md">
             <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Add to project</p>
+            {% if summary.latest_version %}
             {{ code_block("forest components add " ~ summary.organisation ~ "/" ~ summary.name ~ "@" ~ summary.latest_version, copyable=true, id="add-cmd-header") }}
+            {% else %}
+            {{ code_block("forest components add " ~ summary.organisation ~ "/" ~ summary.name, copyable=true, id="add-cmd-header") }}
+            {% endif %}
         </div>
         {% endif %}
     </div>

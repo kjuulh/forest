@@ -1540,3 +1540,166 @@ async fn create_policy_requires_csrf() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
+
+// ─── 008 redirect + empty-state contracts ────────────────────────────────
+//
+// External links should keep working when forage canonicalises an artefact
+// onto its project URL. The redirects below have no UI fallback so they
+// need explicit tests — silent breakage just sends users to 404.
+
+/// P8 — `/components/{org}/{name}` 303-redirects to the project Overview
+/// when a project with that name exists in the org.
+#[tokio::test]
+async fn component_detail_303s_to_project_when_project_exists() {
+    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
+        list_projects_result: Some(Ok(vec!["my-tool".into()])),
+        ..Default::default()
+    });
+    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/components/testorg/my-tool")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Spec mandates 303 See Other specifically (soft redirect; reversible).
+    // Don't loosen to `is_redirection()` — that would allow a regression
+    // to 301 or 302 to silently pass.
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response.headers().get("location").unwrap().to_str().unwrap();
+    assert_eq!(location, "/orgs/testorg/projects/my-tool");
+}
+
+/// P9 — `/components/{org}/{name}` renders the legacy detail page when no
+/// project with that name exists. External component links keep working.
+#[tokio::test]
+async fn component_detail_renders_legacy_page_when_no_project() {
+    use forage_core::registry::{ComponentDetail, ComponentSummary, ToolShape};
+    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
+        list_projects_result: Some(Ok(vec![])),
+        ..Default::default()
+    });
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        get_component_detail_result: Some(Ok(ComponentDetail {
+            summary: ComponentSummary {
+                organisation: "testorg".into(),
+                name: "orphan".into(),
+                latest_version: "1.0.0".into(),
+                kind: "binary".into(),
+                description: "orphaned component, no project".into(),
+                created_at: String::new(),
+                updated_at: String::new(),
+                version_count: 1,
+                contracts: vec![],
+                visibility: "public".into(),
+                shape: ToolShape::Component,
+                tool: None,
+                methods: vec![],
+                upstream_host: String::new(),
+            },
+            versions: vec![],
+            readme: String::new(),
+            manifest_json: String::new(),
+            owners: vec![],
+        })),
+        ..Default::default()
+    });
+    let (state, sessions) = test_state_with_registry(MockForestClient::new(), platform, registry);
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/components/testorg/orphan")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // 200, not a redirect — the legacy page rendered.
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(html.contains("orphaned component, no project"));
+}
+
+/// P11 — `/orgs/{org}/projects/{project}/deployments` 303-redirects to the
+/// consolidated `/releases` tab. The old "Deployments" terminology was
+/// dropped (deployments ARE releases); this redirect keeps external links
+/// resolving.
+#[tokio::test]
+async fn deployments_url_303s_to_releases() {
+    let (state, sessions) = test_state();
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects/my-api/deployments")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Spec mandates 303 specifically (see comment on the sibling test).
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response.headers().get("location").unwrap().to_str().unwrap();
+    assert_eq!(location, "/orgs/testorg/projects/my-api/releases");
+}
+
+/// E14 — fresh project with no published versions and no README renders the
+/// centered Get-started panel — not a wall of empty section cards.
+#[tokio::test]
+async fn fresh_project_overview_renders_get_started_panel() {
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        // No detail → comp_versions empty, readme empty.
+        get_component_detail_result: Some(Err(forage_core::platform::PlatformError::NotFound(
+            "no component yet".into(),
+        ))),
+        ..Default::default()
+    });
+    let (state, sessions) = test_state_with_registry(
+        MockForestClient::new(),
+        MockPlatformClient::new(),
+        registry,
+    );
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects/never-published")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    // Get-started panel renders.
+    assert!(html.contains("Publish your first version"));
+    // And the typical Components/Releases section headers are absent.
+    assert!(!html.contains("<h2 class=\"text-lg font-bold\">Components</h2>"));
+}

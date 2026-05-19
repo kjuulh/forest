@@ -170,17 +170,27 @@ async fn component_detail(
 ) -> Result<Response, Response> {
     // Project canonicalisation: redirect to the project Overview when a
     // same-named project exists. Only consult `list_projects` for sessions
-    // that have an access token; anonymous/public traffic hits the
-    // legacy detail page directly. 303 = soft redirect; reversible.
+    // that have an access token — anonymous traffic can't pass an org
+    // membership check, so it skips the lookup and lands on the legacy
+    // page directly (matches public-component-detail behaviour). 303 = soft
+    // redirect; reversible. A `list_projects` failure is logged then skipped
+    // — degrades to the legacy page rather than 5xx on a transient blip.
     if let Some(ref session) = maybe_session.session {
-        if let Ok(projects) = state
+        match state
             .platform_client
             .list_projects(&session.access_token, &org)
             .await
         {
-            if projects.iter().any(|p| p == &name) {
-                return Ok(Redirect::to(&format!("/orgs/{org}/projects/{name}"))
-                    .into_response());
+            Ok(projects) => {
+                if projects.iter().any(|p| p == &name) {
+                    return Ok(Redirect::to(&format!("/orgs/{org}/projects/{name}"))
+                        .into_response());
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "component_detail: list_projects({org}) failed; falling through to legacy page: {e:#}"
+                );
             }
         }
     }

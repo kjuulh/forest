@@ -920,7 +920,6 @@ async fn project_detail(
                 readme_html => comp_readme_html,
                 manifest_html => manifest_html,
                 manifest => manifest_view,
-                project_has_releases => !comp_versions.is_empty(),
             },
         )
         .map_err(|e| {
@@ -956,16 +955,6 @@ async fn project_releases(
         ));
     }
 
-    // Same data as the Overview pulls so the tab strip's
-    // `project_has_releases` flag stays consistent across pages.
-    let component_versions_fut = async {
-        match state.registry_client.as_ref() {
-            Some(registry) => registry
-                .list_component_versions(&session.access_token, &org, &project)
-                .await,
-            None => Ok(vec![]),
-        }
-    };
     let (
         artifacts,
         projects,
@@ -973,7 +962,6 @@ async fn project_releases(
         dest_states,
         release_intents,
         project_pipelines,
-        component_versions,
     ) = tokio::join!(
         state
             .platform_client
@@ -993,7 +981,6 @@ async fn project_releases(
         state
             .platform_client
             .list_release_pipelines(&session.access_token, &org, &project),
-        component_versions_fut,
     );
     let artifacts = artifacts.map_err(|e| internal_error(&state, "list_artifacts", &e))?;
     let projects = warn_default("list_projects", projects);
@@ -1001,7 +988,6 @@ async fn project_releases(
     let dest_states = warn_default("get_destination_states", dest_states);
     let release_intents = warn_default("get_release_intent_states", release_intents);
     let project_pipelines = warn_default("list_release_pipelines", project_pipelines);
-    let component_versions = warn_default("list_component_versions", component_versions);
 
     let mut sorted_envs = environments.clone();
     sorted_envs.sort_by_key(|e| e.sort_order);
@@ -1052,7 +1038,6 @@ async fn project_releases(
                 timeline => data.timeline,
                 lanes => data.lanes,
                 env_options => env_options,
-                project_has_releases => !component_versions.is_empty(),
             },
         )
         .map_err(|e| internal_error(&state, "template error", &e))?;
