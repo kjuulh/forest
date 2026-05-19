@@ -1,6 +1,6 @@
-# forest shell zsh — interactive helpers
+# forest shell bash — interactive helpers
 
-function forest-tmp() {
+forest-tmp() {
   echo "creating tmp dir"
   dir=$(forest tmp)
 

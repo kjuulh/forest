@@ -6,7 +6,7 @@ use forest_grpc_interface::{
 use tonic::Response;
 
 use crate::{
-    grpc::artifacts::GrpcErrorExt,
+    grpc::{artifacts::GrpcErrorExt, authorize},
     services::{
         release_pipeline::{
             CreatePipelineParams, PipelineStages, ReleasePipelineRegistryState,
@@ -108,12 +108,21 @@ impl ReleasePipelineService for ReleasePipelinesServer {
         &self,
         request: tonic::Request<CreateReleasePipelineRequest>,
     ) -> Result<Response<CreateReleasePipelineResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let project = req
             .project
             .context("project is required")
             .to_internal_error()?;
+
+        authorize::require_project_access(
+            &self.state.db,
+            &actor,
+            &project,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let project_id = self
             .state
@@ -148,12 +157,21 @@ impl ReleasePipelineService for ReleasePipelinesServer {
         &self,
         request: tonic::Request<UpdateReleasePipelineRequest>,
     ) -> Result<Response<UpdateReleasePipelineResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let project = req
             .project
             .context("project is required")
             .to_internal_error()?;
+
+        authorize::require_project_access(
+            &self.state.db,
+            &actor,
+            &project,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let project_id = self
             .state
@@ -197,12 +215,21 @@ impl ReleasePipelineService for ReleasePipelinesServer {
         &self,
         request: tonic::Request<DeleteReleasePipelineRequest>,
     ) -> Result<Response<DeleteReleasePipelineResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let project = req
             .project
             .context("project is required")
             .to_internal_error()?;
+
+        authorize::require_project_access(
+            &self.state.db,
+            &actor,
+            &project,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let project_id = self
             .state
@@ -226,12 +253,21 @@ impl ReleasePipelineService for ReleasePipelinesServer {
         &self,
         request: tonic::Request<ListReleasePipelinesRequest>,
     ) -> Result<Response<ListReleasePipelinesResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let project = req
             .project
             .context("project is required")
             .to_internal_error()?;
+
+        authorize::require_project_access(
+            &self.state.db,
+            &actor,
+            &project,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let project_id = self
             .state

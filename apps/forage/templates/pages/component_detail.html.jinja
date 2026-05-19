@@ -8,7 +8,12 @@
 {% set is_tool = summary.shape == "hybrid" or summary.shape == "tool_binary" or summary.shape == "tool_external" %}
 
 {% block content %}
-<section class="app-container pt-12 pb-8">
+{# Layout mirrors project_detail.html.jinja: a 3-track grid on xl+
+   (`1fr | 48rem | 1fr`) keeps the centered content viewport-centered;
+   the right track hosts the sidebar. Below xl, the grid collapses to a
+   single column and the sidebar stacks under the main content. #}
+<section class="pt-12 pb-8 px-4 grid grid-cols-1 xl:grid-cols-[1fr_minmax(0,48rem)_1fr] gap-x-8">
+    <div class="mx-auto w-full max-w-3xl xl:mx-0 xl:max-w-none xl:col-start-2">
     <div class="mb-2">
         <a href="/components" class="text-sm text-gray-500 hover:text-gray-900">&larr; Back to registry</a>
     </div>
@@ -66,9 +71,7 @@
         </details>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
-        {# ── Main content ─────────────────────────────────────────── #}
-        <div class="md:col-span-3">
+    {# ── Main content ─────────────────────────────────────────────── #}
             {# Install / Add commands live in the header dropdown above. #}
 
             {# README (always shown for components; tools usually skip it). #}
@@ -209,10 +212,10 @@
                 {{ pretty_json_block(manifest_html, title="View raw manifest JSON") }}
             </div>
             {% endif %}
-        </div>
+    </div>{# /centered content track #}
 
-        {# ── Sidebar ──────────────────────────────────────────────── #}
-        <div class="md:col-span-1">
+    {# ── Sidebar ────────────────────────────────────────────────── #}
+    <aside class="mx-auto w-full max-w-3xl mt-10 xl:mx-0 xl:mt-0 xl:max-w-none xl:col-start-3 xl:w-52 xl:justify-self-start">
             <div class="space-y-6">
                 {% if not is_tool %}
                 <div>
@@ -286,7 +289,6 @@
                 </div>
                 {% endif %}
             </div>
-        </div>
-    </div>
+    </aside>
 </section>
 {% endblock %}

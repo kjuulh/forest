@@ -19,7 +19,7 @@ pub struct WebhookState {
 pub fn webhook_routes(state: WebhookState) -> Router {
     Router::new()
         .route(
-            "/webhooks/flux/notifications/{destination_name}",
+            "/webhooks/flux/notifications/{organisation}/{destination_name}",
             post(handle_flux_notification),
         )
         .with_state(state)
@@ -65,12 +65,12 @@ fn verify_hmac_signature(secret: &[u8], body: &[u8], signature_header: &str) -> 
 
 async fn handle_flux_notification(
     State(state): State<WebhookState>,
-    Path(destination_name): Path<String>,
+    Path((organisation, destination_name)): Path<(String, String)>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> impl IntoResponse {
-    // 1. Look up destination by name to get webhook_secret from metadata
-    let dest = match lookup_destination_with_secret(&state.db, &destination_name).await {
+    // 1. Look up destination by (org, name) to get webhook_secret from metadata
+    let dest = match lookup_destination_with_secret(&state.db, &organisation, &destination_name).await {
         Ok(Some(dest)) => dest,
         Ok(None) => {
             tracing::warn!(
@@ -224,12 +224,18 @@ struct DestinationWithSecret {
 
 async fn lookup_destination_with_secret(
     db: &PgPool,
+    organisation: &str,
     name: &str,
 ) -> anyhow::Result<Option<DestinationWithSecret>> {
-    let rec = sqlx::query("SELECT id, metadata FROM destinations WHERE name = $1 LIMIT 1")
-        .bind(name)
-        .fetch_optional(db)
-        .await?;
+    let rec = sqlx::query(
+        "SELECT id, metadata FROM destinations
+         WHERE organisation = $1 AND name = $2
+         LIMIT 1",
+    )
+    .bind(organisation)
+    .bind(name)
+    .fetch_optional(db)
+    .await?;
 
     let Some(rec) = rec else { return Ok(None) };
 

@@ -309,6 +309,19 @@ impl ForestAuth for MockForestClient {
         })
     }
 
+    async fn get_user_by_email(
+        &self,
+        _access_token: &str,
+        email: &str,
+    ) -> Result<UserProfile, AuthError> {
+        Ok(UserProfile {
+            user_id: "user-123".into(),
+            username: email.split('@').next().unwrap_or("user").into(),
+            profile_picture_url: None,
+            created_at: Some("2025-01-15T10:00:00Z".into()),
+        })
+    }
+
     async fn remove_email(
         &self,
         _access_token: &str,
@@ -565,6 +578,7 @@ impl ForestPlatform for MockPlatformClient {
     async fn update_destination(
         &self,
         _access_token: &str,
+        _organisation: &str,
         _name: &str,
         _metadata: &std::collections::HashMap<String, String>,
     ) -> Result<(), PlatformError> {

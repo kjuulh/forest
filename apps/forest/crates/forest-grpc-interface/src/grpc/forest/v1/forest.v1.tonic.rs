@@ -1599,7 +1599,6 @@ pub mod destination_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn delete_destination(
             &mut self,
             request: impl tonic::IntoRequest<super::DeleteDestinationRequest>,
@@ -1712,7 +1711,6 @@ pub mod destination_service_server {
             tonic::Response<super::UpdateDestinationResponse>,
             tonic::Status,
         >;
-        ///
         async fn delete_destination(
             &self,
             request: tonic::Request<super::DeleteDestinationRequest>,

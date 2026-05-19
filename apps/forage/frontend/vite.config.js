@@ -10,6 +10,8 @@ export default defineConfig({
     }),
   ],
   build: {
+    sourcemap: true,
+    minify: false,
     lib: {
       entry: "src/main.js",
       formats: ["iife"],

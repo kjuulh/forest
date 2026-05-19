@@ -6,8 +6,8 @@ import (
 )
 
 project: sdk.#ForestProject & {
-	name:         "service-example"
-	organisation: "rawpotion"
+	name:         "forest-hello"
+	organisation: "pworg2182261"
 }
 
 _destinationTypes: {

@@ -1,4 +1,4 @@
-//! Shell-eval script generators for `forest eval zsh` and `forest eval bash`.
+//! Shell-eval script generators for `forest shell zsh` and `forest shell bash`.
 //!
 //! Pure module — no I/O. Output is byte-stable per TASKS/018-global-tools.md
 //! §1a.7. The script prepends the shim directory to `$PATH` exactly once
@@ -33,7 +33,7 @@ pub fn eval_bash() -> String {
 
 fn render() -> String {
     format!(
-        "# forest eval — adds the global shim dir to PATH idempotently\n\
+        "# forest shell — adds the global shim dir to PATH idempotently\n\
          case \":$PATH:\" in\n  \
            *\":{SHIM_DIR_LITERAL}:\"*) ;;\n  \
            *) export PATH=\"{SHIM_DIR_LITERAL}:$PATH\" ;;\n\

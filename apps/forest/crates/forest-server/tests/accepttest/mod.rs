@@ -1,4 +1,5 @@
 mod fixtures;
+mod authz_coverage;
 mod authz_flow;
 mod component_flow;
 mod email_verification;

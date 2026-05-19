@@ -225,6 +225,8 @@ pub struct UpdateDestinationRequest {
     pub name: ::prost::alloc::string::String,
     #[prost(map="string, string", tag="2")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(string, tag="3")]
+    pub organisation: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateDestinationResponse {
@@ -233,6 +235,8 @@ pub struct UpdateDestinationResponse {
 pub struct DeleteDestinationRequest {
     #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub organisation: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteDestinationResponse {

@@ -201,27 +201,34 @@ impl ReleaseRegistry {
                 .await;
         }
 
-        // Non-pipeline mode: flat release to all requested destinations
+        // Non-pipeline mode: flat release to all requested destinations.
+        // Scope strictly to the project's organisation so `--env dev` (or a
+        // destination name typo) can never fan out into another org's
+        // destinations even though env/destination names may collide globally.
         let destination_recs = sqlx::query!(
             r#"
             SELECT DISTINCT d.id, d.name, d.environment
             FROM destinations d
             LEFT JOIN environments e ON d.environment_id = e.id
-            WHERE d.name = ANY($1) OR e.name = ANY($2)
+            WHERE d.organisation = $3
+              AND (d.name = ANY($1) OR e.name = ANY($2))
             "#,
             &destinations,
-            &environments
+            &environments,
+            organisation,
         )
         .fetch_all(&self.db)
         .await
         .context("release")?;
 
         if destination_recs.len() < destinations.len() {
-            anyhow::bail!("not all destinations exists")
+            anyhow::bail!("not all destinations exist in organisation {organisation}")
         }
 
         if destination_recs.is_empty() {
-            anyhow::bail!("found no destinations for requested environment");
+            anyhow::bail!(
+                "found no destinations in organisation {organisation} for requested environment"
+            );
         }
 
         let actor_id = actor.actor_id();

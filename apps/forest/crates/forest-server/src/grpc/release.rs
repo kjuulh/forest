@@ -315,6 +315,7 @@ impl ReleaseService for ReleaseServer {
         request: tonic::Request<GetArtifactBySlugRequest>,
     ) -> std::result::Result<tonic::Response<GetArtifactBySlugResponse>, tonic::Status> {
         tracing::debug!("get artifact by slug");
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let release_annotation = self
@@ -324,6 +325,16 @@ impl ReleaseService for ReleaseServer {
             .await
             .context("get release annotation by slug")
             .to_internal_error()?;
+
+        // The annotation carries its owning project; require the caller
+        // belongs to that org before exposing release metadata.
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &release_annotation.project.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         Ok(Response::new(GetArtifactBySlugResponse {
             artifact: Some(release_annotation.into()),
@@ -575,6 +586,7 @@ impl ReleaseService for ReleaseServer {
         request: tonic::Request<WaitReleaseRequest>,
     ) -> std::result::Result<tonic::Response<Self::WaitReleaseStream>, tonic::Status> {
         tracing::debug!("wait_release stream");
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let release_intent_id: uuid::Uuid = req
@@ -582,6 +594,26 @@ impl ReleaseService for ReleaseServer {
             .parse()
             .context("release_intent_id")
             .to_internal_error()?;
+
+        let intent_org = sqlx::query_scalar!(
+            "SELECT p.organisation FROM release_intents ri
+             JOIN projects p ON p.id = ri.project_id
+             WHERE ri.id = $1",
+            release_intent_id,
+        )
+        .fetch_optional(&self.state.db)
+        .await
+        .context("resolve intent organisation")
+        .to_internal_error()?
+        .ok_or_else(|| tonic::Status::not_found("release intent not found"))?;
+
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &intent_org,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let (tx, rx) = mpsc::channel(32);
         let release_registry = self.state.release_registry();
@@ -834,11 +866,7 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<GetReleasesByActorRequest>,
     ) -> std::result::Result<tonic::Response<GetReleasesByActorResponse>, tonic::Status> {
-        let _actor = request
-            .extensions()
-            .get::<Actor>()
-            .cloned()
-            .ok_or_else(|| tonic::Status::unauthenticated("missing actor"))?;
+        let caller = authorize::extract_actor(&request)?;
 
         let req = request.into_inner();
 
@@ -852,6 +880,23 @@ impl ReleaseService for ReleaseServer {
         if !valid_types.contains(&req.actor_type.as_str()) {
             return Err(tonic::Status::invalid_argument(
                 "actor_type must be 'user' or 'app'",
+            ));
+        }
+
+        // This endpoint is self-scoped: callers may only ask about their
+        // own activity. Without this check any authenticated user could
+        // enumerate every other user's release history.
+        let caller_matches = match (&caller, req.actor_type.as_str(), actor_id) {
+            (Actor::User { user_id }, "user", id) => *user_id == id,
+            (Actor::App { app_id, .. }, "app", id) => *app_id == id,
+            (Actor::ServiceAccount { service_account_id }, "app", id) => {
+                *service_account_id == id
+            }
+            _ => false,
+        };
+        if !caller_matches {
+            return Err(tonic::Status::permission_denied(
+                "callers may only query their own releases",
             ));
         }
 
@@ -1195,10 +1240,33 @@ impl ReleaseService for ReleaseServer {
     ) -> Result<Response<ApprovePlanStageResponse>, tonic::Status> {
         use crate::services::release_pipeline::{ApprovalStatus, PipelineStages, StageConfig, StageStates};
 
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
         let intent_id: Uuid = req.release_intent_id.parse()
             .context("invalid release_intent_id")
             .to_internal_error()?;
+
+        // Resolve owning org from the intent's project so we can authorize
+        // the caller before doing any mutation.
+        let intent_org = sqlx::query_scalar!(
+            "SELECT p.organisation FROM release_intents ri
+             JOIN projects p ON p.id = ri.project_id
+             WHERE ri.id = $1",
+            intent_id,
+        )
+        .fetch_optional(&self.state.db)
+        .await
+        .context("resolve intent organisation")
+        .to_internal_error()?
+        .ok_or_else(|| tonic::Status::not_found("release intent not found"))?;
+
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &intent_org,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let mut tx = self.state.db.begin().await
             .context("begin tx")
@@ -1279,10 +1347,31 @@ impl ReleaseService for ReleaseServer {
     ) -> Result<Response<RejectPlanStageResponse>, tonic::Status> {
         use crate::services::release_pipeline::{ApprovalStatus, PipelineStages, StageConfig, StageStates};
 
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
         let intent_id: Uuid = req.release_intent_id.parse()
             .context("invalid release_intent_id")
             .to_internal_error()?;
+
+        let intent_org = sqlx::query_scalar!(
+            "SELECT p.organisation FROM release_intents ri
+             JOIN projects p ON p.id = ri.project_id
+             WHERE ri.id = $1",
+            intent_id,
+        )
+        .fetch_optional(&self.state.db)
+        .await
+        .context("resolve intent organisation")
+        .to_internal_error()?
+        .ok_or_else(|| tonic::Status::not_found("release intent not found"))?;
+
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &intent_org,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let mut tx = self.state.db.begin().await
             .context("begin tx")
@@ -1363,10 +1452,31 @@ impl ReleaseService for ReleaseServer {
     ) -> Result<Response<GetPlanOutputResponse>, tonic::Status> {
         use crate::services::release_pipeline::{PipelineStages, StageConfig, StageStates};
 
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
         let intent_id: Uuid = req.release_intent_id.parse()
             .context("invalid release_intent_id")
             .to_internal_error()?;
+
+        let intent_org = sqlx::query_scalar!(
+            "SELECT p.organisation FROM release_intents ri
+             JOIN projects p ON p.id = ri.project_id
+             WHERE ri.id = $1",
+            intent_id,
+        )
+        .fetch_optional(&self.state.db)
+        .await
+        .context("resolve intent organisation")
+        .to_internal_error()?
+        .ok_or_else(|| tonic::Status::not_found("release intent not found"))?;
+
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &intent_org,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let intent = sqlx::query!(
             "SELECT stages, stage_states FROM release_intents WHERE id = $1",

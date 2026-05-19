@@ -457,9 +457,10 @@ async fn fetch_notifications(
                 let project_has_pipeline = pipelines_by_project.contains_key(project);
                 let has_pipeline = !pipeline_stages.is_empty() || project_has_pipeline;
 
-                // Build destinations.
-                let destinations: Vec<minijinja::Value> = matching_states
-                    .iter()
+                // Build destinations (deduped — one row per destination,
+                // latest state).
+                let destinations: Vec<minijinja::Value> = dedupe_destinations(&matching_states)
+                    .into_iter()
                     .map(|ds| {
                         context! {
                             name => ds.destination_name,
@@ -1269,9 +1270,10 @@ async fn artifact_detail(
     // Build env groups.
     let env_groups = build_env_groups(&matching_states);
 
-    // Build destinations with status.
-    let destinations: Vec<minijinja::Value> = matching_states
-        .iter()
+    // Build destinations with status (deduped — one row per destination,
+    // latest state).
+    let destinations: Vec<minijinja::Value> = dedupe_destinations(&matching_states)
+        .into_iter()
         .map(|ds| {
             context! {
                 name => ds.destination_name,
@@ -1433,6 +1435,43 @@ fn parse_description_metadata(desc: &str) -> std::collections::HashMap<String, S
 }
 
 /// Build env groups for display (grouped by best status).
+/// Reduce to one entry per destination_id, keeping the most recent state.
+/// Forest's release_states retains terminal rows alongside new in-flight
+/// ones for the same destination — without this, a re-deploy yields two
+/// rows that crash the Svelte `{#each ... (dest.name)}` with a duplicate
+/// key.
+fn dedupe_destinations<'a>(
+    matching_states: &[&'a forage_core::platform::DestinationState],
+) -> Vec<&'a forage_core::platform::DestinationState> {
+    fn recency(ds: &forage_core::platform::DestinationState) -> &str {
+        ds.completed_at
+            .as_deref()
+            .or(ds.started_at.as_deref())
+            .or(ds.queued_at.as_deref())
+            .unwrap_or("")
+    }
+    // Dedupe by destination_name (the field the Svelte `{#each ... (dest.name)}`
+    // keys on). This is a strictly tighter guarantee than deduping by
+    // destination_id and handles the rare case where forest yields two
+    // entries with the same name.
+    let mut by_name: std::collections::HashMap<&str, &forage_core::platform::DestinationState> =
+        std::collections::HashMap::new();
+    let mut order: Vec<&str> = Vec::new();
+    for ds in matching_states {
+        let key = ds.destination_name.as_str();
+        match by_name.get(key) {
+            Some(prev) if recency(prev) >= recency(ds) => {}
+            _ => {
+                if !by_name.contains_key(key) {
+                    order.push(key);
+                }
+                by_name.insert(key, ds);
+            }
+        }
+    }
+    order.into_iter().filter_map(|k| by_name.get(k).copied()).collect()
+}
+
 fn build_env_groups(
     matching_states: &[&forage_core::platform::DestinationState],
 ) -> Vec<minijinja::Value> {
@@ -1970,8 +2009,10 @@ fn build_timeline(
 
         let mut release_envs = Vec::new();
         let mut release_env_statuses = Vec::new();
-        let dests: Vec<minijinja::Value> = matching_states
-            .iter()
+        // Dedupe: a re-deploy leaves the old terminal row alongside the new
+        // in-flight one — render one card per destination, latest state.
+        let dests: Vec<minijinja::Value> = dedupe_destinations(&matching_states)
+            .into_iter()
             .map(|ds| {
                 release_envs.push(ds.environment.clone());
                 let status_str = ds.status.as_deref().unwrap_or("PENDING");
@@ -2407,8 +2448,11 @@ fn build_timeline_json(
 
         let mut release_envs: Vec<String> = Vec::new();
         let mut release_env_statuses: Vec<String> = Vec::new();
-        let destinations: Vec<ApiDestinationState> = matching_states
-            .iter()
+        // Dedupe — a re-deploy leaves both the old terminal state row and
+        // the new in-flight one for the same destination_name, which the
+        // Svelte `{#each ... (dest.name)}` then crashes on.
+        let destinations: Vec<ApiDestinationState> = dedupe_destinations(&matching_states)
+            .into_iter()
             .map(|ds| {
                 release_envs.push(ds.environment.clone());
                 let status_str = ds.status.as_deref().unwrap_or("PENDING");
@@ -3344,7 +3388,12 @@ async fn update_destination_submit(
 
     state
         .platform_client
-        .update_destination(&session.access_token, dest_name, &metadata)
+        .update_destination(
+            &session.access_token,
+            &current_org.name,
+            dest_name,
+            &metadata,
+        )
         .await
         .map_err(|e| {
             internal_error(&state, "update destination error", &e)
@@ -5410,4 +5459,54 @@ async fn regions_api() -> impl IntoResponse {
         .collect();
 
     Json(regions)
+}
+
+#[cfg(test)]
+mod dedupe_tests {
+    use super::dedupe_destinations;
+    use forage_core::platform::DestinationState;
+
+    fn ds(id: &str, name: &str, status: &str, completed_at: Option<&str>) -> DestinationState {
+        DestinationState {
+            destination_id: id.into(),
+            destination_name: name.into(),
+            environment: "prod".into(),
+            release_id: None,
+            artifact_id: None,
+            status: Some(status.into()),
+            error_message: None,
+            queued_at: None,
+            completed_at: completed_at.map(String::from),
+            queue_position: None,
+            started_at: None,
+        }
+    }
+
+    #[test]
+    fn dedupe_collapses_repeats_keeping_latest_by_name() {
+        let old = ds("d1", "prod-k8s", "SUCCEEDED", Some("2026-05-19T10:00:00Z"));
+        let new = ds("d1", "prod-k8s", "QUEUED", Some("2026-05-19T11:00:00Z"));
+        let refs = vec![&old, &new];
+        let result = dedupe_destinations(&refs);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].status.as_deref(), Some("QUEUED"));
+    }
+
+    #[test]
+    fn dedupe_collapses_same_name_different_id() {
+        let a = ds("d1", "prod-k8s", "SUCCEEDED", Some("2026-05-19T10:00:00Z"));
+        let b = ds("d2", "prod-k8s", "RUNNING", Some("2026-05-19T11:00:00Z"));
+        let refs = vec![&a, &b];
+        let result = dedupe_destinations(&refs);
+        assert_eq!(result.len(), 1, "same destination_name must collapse to one row");
+    }
+
+    #[test]
+    fn dedupe_preserves_distinct_destinations() {
+        let a = ds("d1", "prod-k8s", "SUCCEEDED", Some("2026-05-19T10:00:00Z"));
+        let b = ds("d2", "staging-k8s", "SUCCEEDED", Some("2026-05-19T10:00:00Z"));
+        let refs = vec![&a, &b];
+        let result = dedupe_destinations(&refs);
+        assert_eq!(result.len(), 2);
+    }
 }

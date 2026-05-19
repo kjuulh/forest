@@ -6,6 +6,9 @@ use crate::{grpc::GrpcClientState, state::State};
 
 #[derive(clap::Parser)]
 pub struct UpdateCommand {
+    #[arg(long, short = 'o')]
+    organisation: String,
+
     #[arg(long)]
     name: String,
 
@@ -27,7 +30,7 @@ impl UpdateCommand {
 
         state
             .grpc_client()
-            .update_destination(&self.name, metadata)
+            .update_destination(&self.organisation, &self.name, metadata)
             .await
             .context("update destination")?;
 

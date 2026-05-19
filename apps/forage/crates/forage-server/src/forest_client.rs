@@ -1541,6 +1541,7 @@ impl ForestPlatform for GrpcForestClient {
     async fn update_destination(
         &self,
         access_token: &str,
+        organisation: &str,
         name: &str,
         metadata: &std::collections::HashMap<String, String>,
     ) -> Result<(), PlatformError> {
@@ -1549,6 +1550,7 @@ impl ForestPlatform for GrpcForestClient {
             forage_grpc::UpdateDestinationRequest {
                 name: name.into(),
                 metadata: metadata.clone(),
+                organisation: organisation.into(),
             },
         )?;
         self.dest_client()

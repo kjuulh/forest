@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.id\n                     FROM destinations d\n                     JOIN environments e ON d.environment_id = e.id\n                     JOIN projects p ON p.id = $2\n                     WHERE e.name = $1\n                       AND e.organisation = p.organisation\n                       AND d.organisation = p.organisation",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cccf0dca1413abbf0f3e457fad9d612f979424303541d9323485307665b10bcc"
+}

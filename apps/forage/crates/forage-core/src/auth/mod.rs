@@ -74,6 +74,9 @@ pub enum AuthError {
     #[error("forest-server unavailable: {0}")]
     Unavailable(String),
 
+    #[error("not found")]
+    NotFound,
+
     #[error("{0}")]
     Other(String),
 }
@@ -155,6 +158,12 @@ pub trait ForestAuth: Send + Sync {
         &self,
         access_token: &str,
         username: &str,
+    ) -> Result<UserProfile, AuthError>;
+
+    async fn get_user_by_email(
+        &self,
+        access_token: &str,
+        email: &str,
     ) -> Result<UserProfile, AuthError>;
 
     async fn list_tokens(

@@ -85,34 +85,26 @@ impl DestinationService for DestinationServer {
     ) -> std::result::Result<tonic::Response<UpdateDestinationResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        let org = sqlx::query_scalar!(
-            "SELECT organisation FROM destinations WHERE name = $1",
-            req.name
-        )
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!("authz: {e}");
-            tonic::Status::internal("lookup failed")
-        })?
-        .ok_or_else(|| tonic::Status::not_found("destination not found"))?;
+        if req.organisation.is_empty() {
+            return Err(tonic::Status::invalid_argument("organisation is required"));
+        }
         let _authz = authorize::require_org_access(
             &self.state.db,
             &actor,
-            &org,
+            &req.organisation,
             authorize::OrgRole::Member,
         )
         .await?;
 
         self.state
             .destination_aggregate_service()
-            .update_metadata(&req.name, req.metadata)
+            .update_metadata(&req.organisation, &req.name, req.metadata)
             .await
             .context("update destination")
             .to_internal_error()?;
 
         self.state.event_bus().emit(EventPayload {
-            organisation: String::new(),
+            organisation: req.organisation.clone(),
             project: String::new(),
             resource_type: "destination",
             action: "updated",
@@ -129,34 +121,26 @@ impl DestinationService for DestinationServer {
     ) -> std::result::Result<tonic::Response<DeleteDestinationResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        let org = sqlx::query_scalar!(
-            "SELECT organisation FROM destinations WHERE name = $1",
-            req.name
-        )
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!("authz: {e}");
-            tonic::Status::internal("lookup failed")
-        })?
-        .ok_or_else(|| tonic::Status::not_found("destination not found"))?;
+        if req.organisation.is_empty() {
+            return Err(tonic::Status::invalid_argument("organisation is required"));
+        }
         let _authz = authorize::require_org_access(
             &self.state.db,
             &actor,
-            &org,
+            &req.organisation,
             authorize::OrgRole::Member,
         )
         .await?;
 
         self.state
             .destination_aggregate_service()
-            .delete_destination(&req.name)
+            .delete_destination(&req.organisation, &req.name)
             .await
             .context("delete destination")
             .to_internal_error()?;
 
         self.state.event_bus().emit(EventPayload {
-            organisation: String::new(),
+            organisation: req.organisation.clone(),
             project: String::new(),
             resource_type: "destination",
             action: "deleted",

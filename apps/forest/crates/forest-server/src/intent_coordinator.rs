@@ -414,13 +414,20 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                     continue;
                 }
 
-                // Resolve environment -> destinations
+                // Resolve environment -> destinations, scoped to the intent's
+                // owning organisation. Env names are globally non-unique so
+                // without this filter a `dev` deploy stage would fan out into
+                // every org's dev destinations.
                 let dest_recs = sqlx::query!(
                     r#"SELECT d.id
                      FROM destinations d
                      JOIN environments e ON d.environment_id = e.id
-                     WHERE e.name = $1"#,
+                     JOIN projects p ON p.id = $2
+                     WHERE e.name = $1
+                       AND e.organisation = p.organisation
+                       AND d.organisation = p.organisation"#,
                     environment.as_str(),
+                    intent.project_id,
                 )
                 .fetch_all(&mut *tx)
                 .await
@@ -551,13 +558,18 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 // that should execute so users can review the output before approving.
                 // The plan stage has its own built-in approval gate (AWAITING_APPROVAL).
 
-                // Resolve environment -> destinations
+                // Resolve environment -> destinations, scoped to the intent's
+                // owning organisation (see deploy-stage comment above).
                 let dest_recs = sqlx::query!(
                     r#"SELECT d.id
                      FROM destinations d
                      JOIN environments e ON d.environment_id = e.id
-                     WHERE e.name = $1"#,
+                     JOIN projects p ON p.id = $2
+                     WHERE e.name = $1
+                       AND e.organisation = p.organisation
+                       AND d.organisation = p.organisation"#,
                     environment.as_str(),
+                    intent.project_id,
                 )
                 .fetch_all(&mut *tx)
                 .await

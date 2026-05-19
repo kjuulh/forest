@@ -260,17 +260,21 @@ impl OrganisationService for OrganisationsServer {
         &self,
         request: tonic::Request<ListMembersRequest>,
     ) -> std::result::Result<tonic::Response<ListMembersResponse>, tonic::Status> {
-        let _claims = request
-            .extensions()
-            .get::<AppClaims>()
-            .ok_or_else(|| tonic::Status::unauthenticated("missing auth context"))?;
-
+        let actor = crate::grpc::authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let organisation_id = req
             .organisation_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid organisation_id"))?;
+
+        crate::grpc::authorize::require_org_access_by_id(
+            &self.state.db,
+            &actor,
+            organisation_id,
+            crate::grpc::authorize::OrgRole::Member,
+        )
+        .await?;
 
         let page_size = if req.page_size > 0 {
             req.page_size as i64

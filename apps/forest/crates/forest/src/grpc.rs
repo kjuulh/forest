@@ -1468,6 +1468,7 @@ impl GrpcClient {
 
     pub async fn update_destination(
         &self,
+        organisation: &str,
         name: &str,
         metadata: HashMap<String, String>,
     ) -> anyhow::Result<()> {
@@ -1476,6 +1477,7 @@ impl GrpcClient {
             .update_destination(UpdateDestinationRequest {
                 name: name.to_string(),
                 metadata,
+                organisation: organisation.to_string(),
             })
             .await
             .map_err(grpc_err)
@@ -1484,11 +1486,16 @@ impl GrpcClient {
         Ok(())
     }
 
-    pub async fn delete_destination(&self, name: &str) -> anyhow::Result<()> {
+    pub async fn delete_destination(
+        &self,
+        organisation: &str,
+        name: &str,
+    ) -> anyhow::Result<()> {
         self.destination_client()
             .await?
             .delete_destination(DeleteDestinationRequest {
                 name: name.to_string(),
+                organisation: organisation.to_string(),
             })
             .await
             .map_err(grpc_err)

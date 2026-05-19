@@ -6,6 +6,7 @@ use forest_grpc_interface::{
 use futures::StreamExt;
 use uuid::Uuid;
 
+use crate::grpc::authorize;
 use crate::services::release_health;
 use crate::state::State;
 
@@ -41,7 +42,16 @@ impl ReleaseHealthService for ReleaseHealthServer {
         &self,
         request: tonic::Request<ReportHealthRequest>,
     ) -> Result<tonic::Response<ReportHealthResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
+
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let release_intent_id = Uuid::parse_str(&req.release_intent_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid release_intent_id: {e}")))?;
@@ -115,10 +125,13 @@ impl ReleaseHealthService for ReleaseHealthServer {
         &self,
         request: tonic::Request<GetReleaseHealthRequest>,
     ) -> Result<tonic::Response<GetReleaseHealthResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let release_intent_id = Uuid::parse_str(&req.release_intent_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid release_intent_id: {e}")))?;
+
+        authorize_intent(&self.state.db, &actor, release_intent_id).await?;
 
         let rows = release_health::get_observations_for_intent(&self.state.db, release_intent_id)
             .await
@@ -152,10 +165,13 @@ impl ReleaseHealthService for ReleaseHealthServer {
         &self,
         request: tonic::Request<WatchReleaseHealthRequest>,
     ) -> Result<tonic::Response<Self::WatchReleaseHealthStream>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
         let release_intent_id = Uuid::parse_str(&req.release_intent_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid release_intent_id: {e}")))?;
+
+        authorize_intent(&self.state.db, &actor, release_intent_id).await?;
 
         let nats = self.state.nats.clone();
         let (tx, rx) = tokio::sync::mpsc::channel(32);
@@ -193,4 +209,30 @@ impl ReleaseHealthService for ReleaseHealthServer {
 
         Ok(tonic::Response::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
     }
+}
+
+/// Resolve a release intent's owning organisation and check membership.
+/// Returns NotFound if the intent doesn't exist (avoiding a probing
+/// oracle for unauthenticated callers).
+async fn authorize_intent(
+    db: &sqlx::PgPool,
+    actor: &crate::actor::Actor,
+    release_intent_id: Uuid,
+) -> Result<(), tonic::Status> {
+    let org = sqlx::query_scalar!(
+        "SELECT p.organisation FROM release_intents ri
+         JOIN projects p ON p.id = ri.project_id
+         WHERE ri.id = $1",
+        release_intent_id,
+    )
+    .fetch_optional(db)
+    .await
+    .map_err(|e| {
+        tracing::error!("authz: resolve intent org failed: {e}");
+        tonic::Status::internal("authorization lookup failed")
+    })?
+    .ok_or_else(|| tonic::Status::not_found("release intent not found"))?;
+
+    authorize::require_org_access(db, actor, &org, authorize::OrgRole::Member).await?;
+    Ok(())
 }

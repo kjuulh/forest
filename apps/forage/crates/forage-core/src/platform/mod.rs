@@ -475,6 +475,7 @@ pub trait ForestPlatform: Send + Sync {
     async fn update_destination(
         &self,
         access_token: &str,
+        organisation: &str,
         name: &str,
         metadata: &std::collections::HashMap<String, String>,
     ) -> Result<(), PlatformError>;

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT organisation FROM destinations WHERE name = $1",
+  "query": "SELECT p.organisation FROM release_intents ri\n         JOIN projects p ON p.id = ri.project_id\n         WHERE ri.id = $1",
   "describe": {
     "columns": [
       {
@@ -11,12 +11,12 @@
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "33ab6762870ff7b0ce45107567c2ef8346be56d98f427496c86f66be916ab11f"
+  "hash": "a32a908f206da92865620a5d7d294f63c5f48f752417adbfaa3ebdca78062c27"
 }

@@ -653,7 +653,7 @@
                   {/if}
                   <span class="{summary.color} text-sm">{summary.label}</span>
 
-                  {#each release.pipeline_stages as stage (stage.id || stage.environment || stage.stage_type)}
+                  {#each release.pipeline_stages as stage, i (stage.id || `${stage.stage_type}-${stage.environment}-${i}`)}
                     {#if stage.stage_type === "deploy" && summaryShowsStage(summary, stage.status)}
                       {@const badge = envBadgeClasses(stage.environment || "")}
                       {@const dot = statusDotColor(stage.status) || badge.dot}

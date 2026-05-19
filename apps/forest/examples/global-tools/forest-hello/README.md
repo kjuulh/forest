@@ -30,10 +30,10 @@ forest global run forest-hello world                  # bare name (via shim)
 forest-hello world                                     # PATH (via eval)
 ```
 
-To get the shim on your PATH, source the eval script in your shell rc:
+To get the shim on your PATH, source the shell-integration script in your rc file:
 
 ```sh
-eval "$(forest eval bash)"      # or `zsh`
+eval "$(forest shell bash)"     # or `zsh`
 ```
 
 ## Shape

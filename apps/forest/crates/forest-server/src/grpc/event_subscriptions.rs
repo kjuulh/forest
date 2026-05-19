@@ -4,7 +4,7 @@ use tonic::Response;
 
 use crate::{
     actor::Actor,
-    grpc::artifacts::GrpcErrorExt,
+    grpc::{artifacts::GrpcErrorExt, authorize},
     services::event_subscription::{
         CreateSubscriptionParams, EventSubscriptionRegistryState, SubscriptionRecord,
     },
@@ -36,20 +36,27 @@ impl EventSubscriptionService for EventSubscriptionsServer {
         &self,
         request: tonic::Request<CreateEventSubscriptionRequest>,
     ) -> Result<Response<CreateEventSubscriptionResponse>, tonic::Status> {
-        let actor = request.extensions().get::<Actor>().cloned();
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
+
         let (app_id, user_id) = match &actor {
-            Some(Actor::App {
+            Actor::App {
                 app_id,
                 organisation_id: _,
-            }) => (Some(*app_id), None),
-            Some(Actor::User { user_id }) => (None, Some(*user_id)),
-            Some(Actor::ServiceAccount { service_account_id }) => {
+            } => (Some(*app_id), None),
+            Actor::User { user_id } => (None, Some(*user_id)),
+            Actor::ServiceAccount { service_account_id } => {
                 // Service accounts are tracked via their id in the app_id column
                 (Some(*service_account_id), None)
             }
-            None => (None, None),
         };
 
         let rec = self
@@ -77,7 +84,16 @@ impl EventSubscriptionService for EventSubscriptionsServer {
         &self,
         request: tonic::Request<UpdateEventSubscriptionRequest>,
     ) -> Result<Response<UpdateEventSubscriptionResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
+
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let rec = self
             .state
@@ -104,7 +120,16 @@ impl EventSubscriptionService for EventSubscriptionsServer {
         &self,
         request: tonic::Request<DeleteEventSubscriptionRequest>,
     ) -> Result<Response<DeleteEventSubscriptionResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
+
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         self.state
             .event_subscription_registry()
@@ -120,7 +145,16 @@ impl EventSubscriptionService for EventSubscriptionsServer {
         &self,
         request: tonic::Request<ListEventSubscriptionsRequest>,
     ) -> Result<Response<ListEventSubscriptionsResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
+
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let recs = self
             .state

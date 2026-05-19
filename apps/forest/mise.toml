@@ -6,13 +6,13 @@ _.file = ".env"
 # .env to point at a local server (e.g. http://localhost:4040 for forest-team
 # dev work). The runner uses FOREST_SERVER_ADDR — separate variable, not set
 # here.
-FOREST_SERVER = "https://forest.development.understory.sh"
+#FOREST_SERVER = "https://forest.development.understory.sh"
 
 # CUE registry override — `forest.sh/...` modules resolve from forest's OCI
 # registry on the dev server (HTTPS, port 443, terminated at the platform
 # ALB; the forest task's HTTP/4042 backend serves /v2/* OCI). Everything
 # else falls back to the central CUE registry.
-CUE_REGISTRY = "forest.sh=registry.forest.development.understory.sh,registry.cuelang.org"
+#CUE_REGISTRY = "forest.sh=registry.forest.development.understory.sh,registry.cuelang.org"
 
 [tools]
 rust = { version = "1.93", components = "rust-src,rust-analyzer" }

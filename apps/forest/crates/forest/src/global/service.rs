@@ -225,52 +225,55 @@ impl GlobalService {
             }
         };
 
-        // Warm path: cache hit by sha.
-        if let Some(p) = self.cache.read_by_sha(&expected_sha).await? {
-            return Ok(p);
-        }
-
-        // Cold path: fetch.
-        let bytes = match fetch {
-            FetchPlan::Registry => {
-                self.grpc
-                    .download_component_binary(
-                        &qref.organisation,
-                        &qref.name,
-                        version,
-                        platform::os_str(host.os),
-                        platform::arch_str(host.arch),
-                    )
-                    .await
-                    .with_context(|| {
-                        format!("downloading {}/{}@{}", qref.organisation, qref.name, version)
-                    })?
-            }
-            FetchPlan::Url {
-                url,
-                archive,
-                binary_in_archive,
-                archive_sha,
-            } => {
-                let body = http_get(&url).await?;
-                if let Some(expected_archive_sha) = archive_sha {
-                    let actual_archive_sha = sha256_hex(&body);
-                    let want = expected_archive_sha
-                        .strip_prefix("sha256:")
-                        .unwrap_or(&expected_archive_sha);
-                    if actual_archive_sha != want {
-                        anyhow::bail!(
-                            "archive_sha256 mismatch for {url}: expected={want} actual={actual_archive_sha}"
-                        );
-                    }
+        // Cache hit by sha (e.g. same content under a different org/version)
+        // OR cold fetch — either way we now know the sha and can pin the
+        // lockfile so the next run takes the offline warm path.
+        let cached_path = if let Some(p) = self.cache.read_by_sha(&expected_sha).await? {
+            p
+        } else {
+            let bytes = match fetch {
+                FetchPlan::Registry => {
+                    self.grpc
+                        .download_component_binary(
+                            &qref.organisation,
+                            &qref.name,
+                            version,
+                            platform::os_str(host.os),
+                            platform::arch_str(host.arch),
+                        )
+                        .await
+                        .with_context(|| {
+                            format!("downloading {}/{}@{}", qref.organisation, qref.name, version)
+                        })?
                 }
-                extract_from_archive(&body, archive, binary_in_archive.as_deref())?
-            }
+                FetchPlan::Url {
+                    url,
+                    archive,
+                    binary_in_archive,
+                    archive_sha,
+                } => {
+                    let body = http_get(&url).await?;
+                    if let Some(expected_archive_sha) = archive_sha {
+                        let actual_archive_sha = sha256_hex(&body);
+                        let want = expected_archive_sha
+                            .strip_prefix("sha256:")
+                            .unwrap_or(&expected_archive_sha);
+                        if actual_archive_sha != want {
+                            anyhow::bail!(
+                                "archive_sha256 mismatch for {url}: expected={want} actual={actual_archive_sha}"
+                            );
+                        }
+                    }
+                    extract_from_archive(&body, archive, binary_in_archive.as_deref())?
+                }
+            };
+            self.cache.finalize(&bytes, &expected_sha).await?
         };
 
-        let cached_path = self.cache.finalize(&bytes, &expected_sha).await?;
-
-        // Update the lockfile with the version actually executed.
+        // Update the lockfile with the version actually executed. This must
+        // run for the cache-hit-by-sha branch too — otherwise the next run
+        // misses the warm path, refetches the manifest, hits the same sha,
+        // and loops forever.
         let mut lock = self.load_lockfile().await.unwrap_or_default();
         lock.insert(GlobalLockEntry {
             organisation: qref.organisation.clone(),

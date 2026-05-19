@@ -14,11 +14,13 @@ message CreateDestinationResponse {}
 message UpdateDestinationRequest {
   string name = 1;
   map<string, string> metadata = 2;
+  string organisation = 3;
 }
 message UpdateDestinationResponse {}
 
 message DeleteDestinationRequest {
   string name = 1;
+  string organisation = 2;
 }
 message DeleteDestinationResponse {}
 

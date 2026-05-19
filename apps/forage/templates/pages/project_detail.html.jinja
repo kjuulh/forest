@@ -12,7 +12,13 @@
 {% set show_get_started = not comp_versions and not readme_html %}
 
 {% block content %}
-<section class="app-container pt-12 pb-8">
+{# Layout: a 3-track grid (`1fr | 48rem | 1fr`) on xl+ screens keeps the
+   centered content track viewport-centered no matter what's in the side
+   tracks. The left track stays empty (page margin); the right track
+   hosts the Components/Metadata sidebar. Below xl, the grid collapses
+   to a single column and the sidebar stacks under the README. #}
+<section class="pt-12 pb-8 px-4 grid grid-cols-1 xl:grid-cols-[1fr_minmax(0,48rem)_1fr] gap-x-8">
+    <div class="mx-auto w-full max-w-3xl xl:mx-0 xl:max-w-none xl:col-start-2">
     {# ── Header ─────────────────────────────────────────────────── #}
     <div class="flex items-start justify-between mb-6 gap-4">
         <div class="min-w-0">
@@ -78,12 +84,10 @@
             {{ code_block("forest publish", copyable=true, id="get-started-cmd", class="text-xs") }}
         </div>
     </div>
+    </div>{# /app-container — empty-state branch #}
     {% else %}
 
-    {# ── Releases swimlane (top, just below the header) ──────────────
-       Compact view; full timeline on the Releases tab. Sits above the
-       README/sidebar grid so it spans the full width when the timeline
-       has lanes. #}
+    {# ── Recent releases swimlane (centered, above README) ──────── #}
     {% if project_has_timeline %}
     <div class="mb-10">
         <div class="flex items-center justify-between mb-4">
@@ -95,90 +99,81 @@
     <script src="/static/js/components/forage-components.js"></script>
     {% endif %}
 
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
-        <div class="md:col-span-3">
-            {# ── README (main content, GitHub-style) ───────────────── #}
-            {% if readme_html %}
-            <div class="prose prose-sm max-w-none">
-                {{ readme_html | safe }}
+    {# ── README (main content, GitHub-style) ───────────────────── #}
+    {% if readme_html %}
+    <div class="prose prose-sm max-w-none">
+        {{ readme_html | safe }}
+    </div>
+    {% endif %}
+    </div>{# /app-container #}
+
+    {# Sidebar: placed in the grid's right track on xl+. `w-52` caps the
+       width; `justify-self-start` anchors it next to the centered
+       content (the leftover right-track space becomes symmetric viewport
+       padding to mirror the empty left track). Below xl it stacks. #}
+    <aside class="mx-auto w-full max-w-3xl mt-10 xl:mx-0 xl:mt-0 xl:max-w-none xl:col-start-3 xl:w-52 xl:justify-self-start">
+        <div class="space-y-6">
+            {# ── Components (compact, GitHub-Releases-summary style) ──
+               The project's published artefacts. Latest first with a
+               "latest" pill; top 3 with a "+ N more" link to the full
+               Releases tab. #}
+            {% if comp_versions %}
+            <div>
+                <h3 class="text-sm font-bold mb-2 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+                    Components
+                </h3>
+                <ul class="space-y-2 text-sm">
+                    {% for v in comp_versions[:3] %}
+                    <li class="flex items-center justify-between gap-2">
+                        <a href="/components/{{ org_name }}/{{ project_name }}/{{ v.version }}" class="font-medium text-gray-700 hover:text-gray-900 hover:underline">v{{ v.version }}</a>
+                        <div class="flex items-center gap-1.5 shrink-0">
+                            {% if loop.index == 1 %}{{ badge("latest", variant="green") }}{% endif %}
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% if comp_versions | length > 3 %}
+                <a href="/orgs/{{ org_name }}/projects/{{ project_name }}/releases" class="block mt-2 text-xs text-gray-500 hover:text-gray-900">
+                    + {{ comp_versions | length - 3 }} more &rarr;
+                </a>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {# Metadata renders only when there's at least one item —
+               clean empty-state policy from spec 008. #}
+            {% if summary and (summary.created_at or summary.updated_at or summary.contracts) %}
+            <div>
+                <h3 class="text-sm font-bold mb-2">Metadata</h3>
+                <dl class="text-sm space-y-2">
+                    {% if summary.created_at %}
+                    <div>
+                        <dt class="text-gray-500">Created</dt>
+                        <dd>{{ ts(summary.created_at) }}</dd>
+                    </div>
+                    {% endif %}
+                    {% if summary.updated_at %}
+                    <div>
+                        <dt class="text-gray-500">Updated</dt>
+                        <dd>{{ ts(summary.updated_at) }}</dd>
+                    </div>
+                    {% endif %}
+                    {% if summary.contracts %}
+                    <div>
+                        <dt class="text-gray-500">Contracts</dt>
+                        <dd class="flex gap-1.5 flex-wrap mt-1">
+                            {% for contract in summary.contracts %}
+                            {{ badge(contract) }}
+                            {% endfor %}
+                        </dd>
+                    </div>
+                    {% endif %}
+                </dl>
             </div>
             {% endif %}
         </div>
-
-        {# ── Sidebar ────────────────────────────────────────────────── #}
-        <div class="md:col-span-1">
-            <div class="space-y-6">
-                {# Project-level sidebar: About / Components / Metadata.
-                   Component-specific surfaces (version / kind / shape /
-                   Distribution / manifest) belong on the component detail
-                   page, not the project Overview. Click a Components row
-                   below to drill into them. #}
-
-                {# ── Components (compact, GitHub-Releases-summary style) ──
-                   The project's published artefacts. Latest first with a
-                   "latest" pill; top 3 with a "+ N more" link to the full
-                   Releases tab. #}
-                {% if comp_versions %}
-                <div>
-                    <h3 class="text-sm font-bold mb-2 flex items-center gap-2">
-                        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
-                        Components
-                    </h3>
-                    <ul class="space-y-2 text-sm">
-                        {% for v in comp_versions[:3] %}
-                        <li class="flex items-center justify-between gap-2">
-                            <a href="/components/{{ org_name }}/{{ project_name }}/{{ v.version }}" class="font-medium text-gray-700 hover:text-gray-900 hover:underline">v{{ v.version }}</a>
-                            <div class="flex items-center gap-1.5 shrink-0">
-                                {% if loop.index == 1 %}{{ badge("latest", variant="green") }}{% endif %}
-                            </div>
-                        </li>
-                        {% endfor %}
-                    </ul>
-                    {% if comp_versions | length > 3 %}
-                    <a href="/orgs/{{ org_name }}/projects/{{ project_name }}/releases" class="block mt-2 text-xs text-gray-500 hover:text-gray-900">
-                        + {{ comp_versions | length - 3 }} more &rarr;
-                    </a>
-                    {% endif %}
-                </div>
-                {% endif %}
-
-                {# Metadata renders only when there's at least one item —
-                   clean empty-state policy from spec 008. #}
-                {% if summary and (summary.created_at or summary.updated_at or summary.contracts) %}
-                <div>
-                    <h3 class="text-sm font-bold mb-2">Metadata</h3>
-                    <dl class="text-sm space-y-2">
-                        {% if summary.created_at %}
-                        <div>
-                            <dt class="text-gray-500">Created</dt>
-                            <dd>{{ ts(summary.created_at) }}</dd>
-                        </div>
-                        {% endif %}
-                        {% if summary.updated_at %}
-                        <div>
-                            <dt class="text-gray-500">Updated</dt>
-                            <dd>{{ ts(summary.updated_at) }}</dd>
-                        </div>
-                        {% endif %}
-                        {% if summary.contracts %}
-                        <div>
-                            <dt class="text-gray-500">Contracts</dt>
-                            <dd class="flex gap-1.5 flex-wrap mt-1">
-                                {% for contract in summary.contracts %}
-                                {{ badge(contract) }}
-                                {% endfor %}
-                            </dd>
-                        </div>
-                        {% endif %}
-                    </dl>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-
-    {# Manifest, Distribution, version/shape/kind details all live on the
-       component detail page now — drill in from the Components list. #}
+    </aside>
 
     {% endif %}{# /show_get_started #}
 </section>

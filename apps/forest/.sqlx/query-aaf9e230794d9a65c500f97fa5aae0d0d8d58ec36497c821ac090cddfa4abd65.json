@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.organisation FROM release_intents ri\n             JOIN projects p ON p.id = ri.project_id\n             WHERE ri.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "organisation",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "aaf9e230794d9a65c500f97fa5aae0d0d8d58ec36497c821ac090cddfa4abd65"
+}

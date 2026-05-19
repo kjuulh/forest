@@ -59,6 +59,20 @@ impl GivenComponentFlow for Given<ComponentFlowData> {
     }
 
     async fn a_component(self, org: &str, name: &str, version: &str) -> Self {
+        // Component uploads now require the caller to be a member of the
+        // organisation. Create the org as part of the fixture so the test
+        // user owns it. If the org already exists (e.g. when registering
+        // a second version), creation returns AlreadyExists and we ignore.
+        let token = self.data().auth_token.clone();
+        let _ = self
+            .fixture()
+            .organisations()
+            .create_organisation(authed_request(
+                &token,
+                CreateOrganisationRequest { name: org.into() },
+            ))
+            .await;
+
         {
             let mut data = self.data_mut();
             data.component_org = org.into();
@@ -587,6 +601,17 @@ async fn test_cannot_republish_same_version() -> anyhow::Result<()> {
     let org = format!("comp-org-{}", uuid::Uuid::now_v7());
     let name = format!("comp-{}", uuid::Uuid::now_v7());
     let version = "1.0.0";
+
+    // Create the org so the registered user owns it (begin_upload now
+    // requires org membership).
+    fixture
+        .organisations()
+        .create_organisation(authed_request(
+            &token,
+            CreateOrganisationRequest { name: org.clone() },
+        ))
+        .await
+        .expect("create org");
 
     let mut client = fixture.registry();
 

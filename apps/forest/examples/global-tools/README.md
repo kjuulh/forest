@@ -30,7 +30,7 @@ The walkthrough covers:
 1. **Publishing** all artefact shapes via the unified `forest components publish`.
 2. **Subscribing** as a user — per-tool (`forest global add cuteorg/ripgrep`) and whole-catalogue (`forest global add cuteorg`).
 3. **Banning** a specific tool from a catalogue subscription.
-4. **Shell integration** via `forest eval zsh`.
+4. **Shell integration** via `forest shell zsh`.
 5. **Lazy invocation** — first call downloads, verifies sha, caches, exec's.
 6. **Cache inspection** — `forest global list`, `forest global which`, `forest global verify`.
 7. **Reproducible installs** via `forest.lock`.
@@ -240,7 +240,7 @@ fd  hello  jq  rg
 ### 4c. Shell integration
 
 ```sh
-$ echo 'eval "$(forest eval zsh)"' >> ~/.zshrc
+$ echo 'eval "$(forest shell zsh)"' >> ~/.zshrc
 $ source ~/.zshrc
 
 $ echo $PATH | tr ':' '\n' | head -3
@@ -249,7 +249,7 @@ $ echo $PATH | tr ':' '\n' | head -3
 /usr/bin
 ```
 
-`forest eval zsh` is idempotent — sourcing `.zshrc` twice does not duplicate the PATH entry.
+`forest shell zsh` is idempotent — sourcing `.zshrc` twice does not duplicate the PATH entry.
 
 ---
 

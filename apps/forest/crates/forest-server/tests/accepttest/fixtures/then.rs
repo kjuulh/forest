@@ -76,6 +76,7 @@ impl ThenReleaseFlow for Then<ReleaseFlowData> {
                     project: Some(Project {
                         organisation: org,
                         project: "test-project".into(),
+                        readme: String::new(),
                     }),
                 },
             ))

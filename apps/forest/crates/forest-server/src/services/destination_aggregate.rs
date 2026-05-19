@@ -123,11 +123,11 @@ impl DestinationAggregateService {
 
     pub async fn update_metadata(
         &self,
+        organisation: &str,
         name: &str,
         metadata: HashMap<String, String>,
     ) -> anyhow::Result<()> {
-        let org = self.resolve_organisation(name).await?;
-        let key = destination::stream_key(&org, name);
+        let key = destination::stream_key(organisation, name);
         let mut root = self
             .event_store
             .load_or_default::<DestinationAggregate>(&key)
@@ -135,15 +135,18 @@ impl DestinationAggregateService {
 
         DestinationAggregate::update_metadata(&mut root, metadata.clone())?;
 
+        let org_owned = organisation.to_string();
         let name_owned = name.to_string();
 
         self.event_store
             .save_with(&mut root, move |_events, tx| {
                 Box::pin(async move {
                     let res = sqlx::query(
-                        "UPDATE destinations SET metadata = $1 WHERE name = $2",
+                        "UPDATE destinations SET metadata = $1
+                         WHERE organisation = $2 AND name = $3",
                     )
                     .bind(serde_json::to_value(&metadata).unwrap())
+                    .bind(&org_owned)
                     .bind(&name_owned)
                     .execute(&mut **tx)
                     .await
@@ -160,9 +163,12 @@ impl DestinationAggregateService {
         Ok(())
     }
 
-    pub async fn delete_destination(&self, name: &str) -> anyhow::Result<()> {
-        let org = self.resolve_organisation(name).await?;
-        let key = destination::stream_key(&org, name);
+    pub async fn delete_destination(
+        &self,
+        organisation: &str,
+        name: &str,
+    ) -> anyhow::Result<()> {
+        let key = destination::stream_key(organisation, name);
         let mut root = self
             .event_store
             .load_or_default::<DestinationAggregate>(&key)
@@ -170,16 +176,21 @@ impl DestinationAggregateService {
 
         DestinationAggregate::delete(&mut root)?;
 
+        let org_owned = organisation.to_string();
         let name_owned = name.to_string();
 
         self.event_store
             .save_with(&mut root, move |_events, tx| {
                 Box::pin(async move {
-                    let res = sqlx::query("DELETE FROM destinations WHERE name = $1")
-                        .bind(&name_owned)
-                        .execute(&mut **tx)
-                        .await
-                        .context("delete destination projection")?;
+                    let res = sqlx::query(
+                        "DELETE FROM destinations
+                         WHERE organisation = $1 AND name = $2",
+                    )
+                    .bind(&org_owned)
+                    .bind(&name_owned)
+                    .execute(&mut **tx)
+                    .await
+                    .context("delete destination projection")?;
 
                     if res.rows_affected() != 1 {
                         anyhow::bail!("destination projection not found for delete");
@@ -190,21 +201,6 @@ impl DestinationAggregateService {
             .await?;
 
         Ok(())
-    }
-
-    // ----------------------------------------------------------
-    // Internal helpers
-    // ----------------------------------------------------------
-
-    async fn resolve_organisation(&self, name: &str) -> anyhow::Result<String> {
-        let row = sqlx::query("SELECT organisation FROM destinations WHERE name = $1")
-            .bind(name)
-            .fetch_optional(&self.db)
-            .await
-            .context("resolve destination organisation")?
-            .with_context(|| format!("destination '{}' not found", name))?;
-
-        Ok(row.get("organisation"))
     }
 
     // ----------------------------------------------------------

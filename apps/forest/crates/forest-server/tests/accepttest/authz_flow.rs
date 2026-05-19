@@ -310,22 +310,24 @@ async fn user_cannot_delete_destination_in_other_org() {
     let token_a = register_user(&fixture).await;
     let (org_a, _env, dest) = setup_org_with_destination(&fixture, &token_a).await;
 
-    // User B tries to delete it
+    // User B tries to delete it by claiming it lives in org A.
+    // The server must refuse because B is not a member of org A.
     let token_b = register_user(&fixture).await;
 
-    // DeleteDestinationRequest only takes `name` (globally unique) — no org param!
-    // This means ANY authenticated user can delete ANY destination by name.
     let result = fixture
         .destinations()
         .delete_destination(authed_request(
             &token_b,
-            DeleteDestinationRequest { name: dest },
+            DeleteDestinationRequest {
+                name: dest,
+                organisation: org_a,
+            },
         ))
         .await;
 
     assert!(
         result.is_err(),
-        "SECURITY: user B deleted org A's destination by name alone",
+        "SECURITY: user B deleted org A's destination",
     );
 }
 
@@ -366,6 +368,7 @@ async fn user_cannot_release_to_other_orgs_destination() {
                 project: Some(Project {
                     organisation: org_a.clone(),
                     project: "proj-a".into(),
+                    readme: String::new(),
                 }),
                 metadata: Default::default(),
                 source: Some(Source {
@@ -435,6 +438,7 @@ async fn user_cannot_list_triggers_in_other_org() {
                 project: Some(Project {
                     organisation: org_a,
                     project: "proj-triggers".into(),
+                    readme: String::new(),
                 }),
             },
         ))

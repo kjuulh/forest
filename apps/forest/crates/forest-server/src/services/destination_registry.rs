@@ -71,6 +71,7 @@ impl DestinationRegistry {
 
     pub async fn update_destination(
         &self,
+        organisation: &str,
         name: &str,
         metadata: HashMap<String, String>,
     ) -> anyhow::Result<()> {
@@ -80,9 +81,10 @@ impl DestinationRegistry {
                 SET
                     metadata = $1
                 WHERE
-                    name = $2
+                    organisation = $2 AND name = $3
                 ",
             serde_json::to_value(&metadata)?,
+            organisation,
             name,
         )
         .execute(&self.db)
@@ -96,9 +98,14 @@ impl DestinationRegistry {
         Ok(())
     }
 
-    pub async fn delete_destination(&self, name: &str) -> anyhow::Result<()> {
+    pub async fn delete_destination(
+        &self,
+        organisation: &str,
+        name: &str,
+    ) -> anyhow::Result<()> {
         let res = sqlx::query!(
-            "DELETE FROM destinations WHERE name = $1",
+            "DELETE FROM destinations WHERE organisation = $1 AND name = $2",
+            organisation,
             name,
         )
         .execute(&self.db)
