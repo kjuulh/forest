@@ -977,6 +977,84 @@ impl ReleaseService for ReleaseServer {
             project: Some(Project {
                 organisation: req.organisation,
                 project: req.project,
+                readme: String::new(),
+            }),
+        }))
+    }
+
+    async fn get_project(
+        &self,
+        request: tonic::Request<GetProjectRequest>,
+    ) -> std::result::Result<tonic::Response<GetProjectResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
+        let req = request.into_inner();
+
+        authorize::require_org_access(
+            &self.state.db, &actor, &req.organisation, authorize::OrgRole::Member,
+        ).await?;
+
+        let rec = self
+            .state
+            .release_registry()
+            .get_project(&req.organisation, &req.project)
+            .await
+            .context("get project")
+            .to_internal_error()?;
+
+        let rec = match rec {
+            Some(r) => r,
+            None => return Err(tonic::Status::not_found(format!(
+                "project {}/{} not found",
+                req.organisation, req.project
+            ))),
+        };
+
+        Ok(Response::new(GetProjectResponse {
+            project: Some(Project {
+                organisation: rec.organisation,
+                project: rec.project,
+                readme: rec.readme,
+            }),
+        }))
+    }
+
+    async fn update_project(
+        &self,
+        request: tonic::Request<UpdateProjectRequest>,
+    ) -> std::result::Result<tonic::Response<UpdateProjectResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
+        let req = request.into_inner();
+
+        // Member is enough to update the README — same level as project
+        // creation. Tighten to Admin if README curation needs to be
+        // gated; spec 008 doesn't require Admin for v1.
+        authorize::require_org_access(
+            &self.state.db, &actor, &req.organisation, authorize::OrgRole::Member,
+        ).await?;
+
+        // 64 KiB cap at the gRPC layer — matches the manifest cap from
+        // TASKS/018 for parity. Service layer also re-enforces.
+        const MAX_README_BYTES: usize = 64 * 1024;
+        if req.readme.len() > MAX_README_BYTES {
+            return Err(tonic::Status::invalid_argument(format!(
+                "readme exceeds {MAX_README_BYTES} bytes ({} actual)",
+                req.readme.len()
+            )));
+        }
+
+        let rec = self
+            .state
+            .release_registry()
+            .update_project_readme(&req.organisation, &req.project, &req.readme)
+            .await
+            .context("update project readme")
+            .to_internal_error()?;
+
+        Ok(Response::new(UpdateProjectResponse {
+            project: Some(Project {
+                organisation: rec.organisation,
+                project: rec.project,
+                readme: rec.readme,
             }),
         }))
     }
@@ -1654,6 +1732,9 @@ impl From<release_registry::Project> for grpc::Project {
         Self {
             organisation: value.organisation,
             project: value.project,
+            // README isn't populated on the slim release_registry::Project
+            // — fetch via GetProject when needed.
+            readme: String::new(),
         }
     }
 }

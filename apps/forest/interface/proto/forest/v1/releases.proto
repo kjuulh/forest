@@ -116,6 +116,29 @@ message CreateProjectResponse {
   Project project = 1;
 }
 
+// Single-project lookup. `Project.readme` carries the markdown that the
+// forage Overview renders.
+message GetProjectRequest {
+  string organisation = 1;
+  string project = 2;
+}
+message GetProjectResponse {
+  Project project = 1;
+}
+
+// Update mutable fields on a project. v1 only exposes `readme`; future
+// fields (description, visibility, …) can chain on with the same RPC.
+message UpdateProjectRequest {
+  string organisation = 1;
+  string project = 2;
+  // Replace the project's README markdown. Max 64 KiB. Empty string is a
+  // valid value (clears the README).
+  string readme = 3;
+}
+message UpdateProjectResponse {
+  Project project = 1;
+}
+
 
 message GetReleasesByActorRequest {
   string actor_id = 1;        // user_id or app_id
@@ -322,6 +345,8 @@ service ReleaseService {
   rpc GetOrganisations(GetOrganisationsRequest) returns (GetOrganisationsResponse);
   rpc GetProjects(GetProjectsRequest) returns (GetProjectsResponse);
   rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
+  rpc GetProject(GetProjectRequest) returns (GetProjectResponse);
+  rpc UpdateProject(UpdateProjectRequest) returns (UpdateProjectResponse);
   rpc GetDestinationStates(GetDestinationStatesRequest) returns (GetDestinationStatesResponse);
   rpc GetReleaseIntentStates(GetReleaseIntentStatesRequest) returns (GetReleaseIntentStatesResponse);
 
@@ -371,6 +396,12 @@ message ArtifactDestination {
 message Project {
   string organisation = 1;
   string project = 2;
+  // Markdown README, surfaced on the project Overview page in forage.
+  // Set via `forest project update --readme PATH` (and auto-uploaded from
+  // `README.md` during `forest publish`). 64 KiB cap enforced server-side.
+  // Empty string when no README has been uploaded — distinct from "no
+  // project" (which would be a different RPC error).
+  string readme = 3;
 }
 
 message Ref {

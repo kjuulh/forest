@@ -359,15 +359,18 @@ async fn org_components_forbidden_for_non_member() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-// ── Project-level components tab ───────────────────────────────
+// ── Project-level Components tab ──────────────────────────────
 //
-// Per specs/features/008, `/orgs/{org}/projects/{project}/components`
-// 301-redirects to the project Overview — the version list is now folded
-// into the Overview's Releases section.
+// `/orgs/{org}/projects/{project}/components` is the project's full
+// Components tab — sibling of Releases. The Overview's sidebar shows a
+// top-3 summary; this page lists every version.
 
 #[tokio::test]
-async fn project_components_legacy_url_redirects_to_overview() {
-    let registry = MockRegistryClient::new();
+async fn project_components_tab_renders_versions() {
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        list_component_versions_result: Some(Ok(sample_versions())),
+        ..Default::default()
+    });
     let (state, sessions) =
         test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
     let app = crate::build_router(state);
@@ -384,9 +387,14 @@ async fn project_components_legacy_url_redirects_to_overview() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
-    let location = response.headers().get("location").unwrap().to_str().unwrap();
-    assert_eq!(location, "/orgs/testorg/projects/my-component");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    // Lists the versions from the mock fixture.
+    assert!(html.contains("v1.2.0"));
+    assert!(html.contains("v1.1.0"));
 }
 
 // ── No registry configured ─────────────────────────────────────

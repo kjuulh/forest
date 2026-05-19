@@ -1,40 +1,38 @@
 {% extends "base.html.jinja" %}
-{% from "components/ui.html.jinja" import badge, kind_badge, empty_state, code_block %}
+{% from "components/ui.html.jinja" import badge, empty_state %}
+
+{# Project Components tab — full list of published component versions
+   for this project. The Overview's sidebar shows a top-3 summary; this
+   page is the "see all". Each card links into the canonical component
+   detail page (`/components/{org}/{name}/{version}`). #}
 
 {% block content %}
-<section class="app-container pt-12">
-    <div class="mb-8">
-        <h1 class="text-2xl font-bold">Component versions</h1>
-        <p class="mt-2 text-sm text-gray-600">Published component versions for this project.</p>
-    </div>
+<section class="app-container pt-12 pb-8">
+    <h1 class="text-2xl font-bold mb-6">Components</h1>
 
     {% if versions %}
-    <div class="border border-gray-200 rounded-lg divide-y divide-gray-200">
+    <div class="space-y-3">
         {% for v in versions %}
-        <div class="p-4 flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <a href="/components/{{ org_name }}/{{ project_name }}/{{ v.version }}" class="font-medium text-sm hover:underline">v{{ v.version }}</a>
-                {{ kind_badge(v.kind) }}
-                {% if v.protocol_version %}
-                <span class="text-xs text-gray-400">protocol {{ v.protocol_version }}</span>
-                {% endif %}
+        <a href="/components/{{ org_name }}/{{ project_name }}/{{ v.version }}" class="block border border-gray-200 rounded-lg p-4 hover:border-gray-400 transition-colors">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-bold text-base">v{{ v.version }}</span>
+                    {% if loop.index == 1 %}{{ badge("latest", variant="green") }}{% endif %}
+                    {% if v.protocol_version %}
+                    <span class="text-xs text-gray-400">protocol {{ v.protocol_version }}</span>
+                    {% endif %}
+                </div>
+                <div class="flex gap-1.5 flex-wrap">
+                    {% for platform in v.platforms %}
+                    {{ badge(platform) }}
+                    {% endfor %}
+                </div>
             </div>
-            <div class="flex gap-1.5 flex-wrap">
-                {% for platform in v.platforms %}
-                {{ badge(platform) }}
-                {% endfor %}
-            </div>
-        </div>
+        </a>
         {% endfor %}
     </div>
-
-    <div class="mt-4">
-        <h3 class="text-sm font-bold mb-2">Install</h3>
-        {{ code_block("forest components add " ~ org_name ~ "/" ~ project_name ~ "@latest", copyable=true, id="install-cmd") }}
-    </div>
-
     {% else %}
-    {{ empty_state("No component versions published yet.", hint="Publish with forest components publish") }}
+    {{ empty_state("No components published yet.", hint="Publish from this project directory: forest publish") }}
     {% endif %}
 </section>
 {% endblock %}

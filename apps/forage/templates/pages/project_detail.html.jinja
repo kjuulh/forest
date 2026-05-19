@@ -22,11 +22,14 @@
             {% if summary and summary.description %}
             <p class="mt-1 text-gray-600">{{ summary.description }}</p>
             {% endif %}
+            {# Project-level header keeps only visibility — component
+               version/shape/tool pills belong on the component detail page,
+               not the project Overview. #}
+            {% if summary and summary.visibility %}
             <div class="mt-2 flex items-center gap-2 flex-wrap">
-                {% if summary and summary.latest_version %}{{ badge("v" ~ summary.latest_version) }}{% endif %}
-                {% if summary %}{{ tool_shape_badge(summary.shape) }}{% endif %}
-                {% if summary and summary.visibility %}{{ visibility_badge(summary.visibility) }}{% endif %}
+                {{ visibility_badge(summary.visibility) }}
             </div>
+            {% endif %}
         </div>
         {# ── Install dropdown (GitHub "Code" button) ──────────────────
            Native <details>/<summary> so it's keyboard-accessible and works
@@ -90,49 +93,16 @@
         {# ── Sidebar ────────────────────────────────────────────────── #}
         <div class="md:col-span-1">
             <div class="space-y-6">
-                {% if summary %}
-                <div>
-                    <h3 class="text-sm font-bold mb-2">About</h3>
-                    <dl class="text-sm space-y-2">
-                        <div>
-                            <dt class="text-gray-500">Latest version</dt>
-                            <dd class="font-medium">{{ summary.latest_version | default("—") }}</dd>
-                        </div>
-                        <div>
-                            <dt class="text-gray-500">Kind</dt>
-                            <dd class="font-medium">{{ summary.kind }}</dd>
-                        </div>
-                        {% if summary.shape and summary.shape != "component" %}
-                        <div>
-                            <dt class="text-gray-500">Shape</dt>
-                            <dd class="font-medium">{{ summary.shape | replace("_", "-") }}</dd>
-                        </div>
-                        {% endif %}
-                    </dl>
-                </div>
-
-                {% if manifest and manifest.platforms %}
-                <div>
-                    <h3 class="text-sm font-bold mb-2">Distribution</h3>
-                    <table class="w-full text-xs">
-                        <tbody class="divide-y divide-gray-200">
-                            {% for platform_key, info in manifest.platforms | items %}
-                            <tr>
-                                <td class="py-1.5 pr-2 font-mono text-gray-700">{{ platform_key }}</td>
-                                <td class="py-1.5 text-right text-gray-500">{{ info.size | human_size }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% endif %}
-                {% endif %}{# /summary #}
+                {# Project-level sidebar: About / Components / Metadata.
+                   Component-specific surfaces (version / kind / shape /
+                   Distribution / manifest) belong on the component detail
+                   page, not the project Overview. Click a Components row
+                   below to drill into them. #}
 
                 {# ── Components (compact, GitHub-Releases-summary style) ──
-                   Sits just above Metadata so the most-stable info (About,
-                   Distribution) anchors the top of the sidebar and the
-                   version list is at the bottom where it doesn't crowd
-                   the eye-catching content. #}
+                   The project's published artefacts. Latest first with a
+                   "latest" pill; top 3 with a "+ N more" link to the full
+                   Releases tab. #}
                 {% if comp_versions %}
                 <div>
                     <h3 class="text-sm font-bold mb-2 flex items-center gap-2">
@@ -157,22 +127,25 @@
                 </div>
                 {% endif %}
 
+                {# Metadata renders only when there's at least one item —
+                   clean empty-state policy from spec 008. #}
+                {% if summary and (summary.created_at or summary.updated_at or summary.contracts) %}
                 <div>
                     <h3 class="text-sm font-bold mb-2">Metadata</h3>
                     <dl class="text-sm space-y-2">
-                        {% if summary and summary.created_at %}
+                        {% if summary.created_at %}
                         <div>
                             <dt class="text-gray-500">Created</dt>
                             <dd>{{ ts(summary.created_at) }}</dd>
                         </div>
                         {% endif %}
-                        {% if summary and summary.updated_at %}
+                        {% if summary.updated_at %}
                         <div>
                             <dt class="text-gray-500">Updated</dt>
                             <dd>{{ ts(summary.updated_at) }}</dd>
                         </div>
                         {% endif %}
-                        {% if summary and summary.contracts %}
+                        {% if summary.contracts %}
                         <div>
                             <dt class="text-gray-500">Contracts</dt>
                             <dd class="flex gap-1.5 flex-wrap mt-1">
@@ -184,16 +157,13 @@
                         {% endif %}
                     </dl>
                 </div>
+                {% endif %}
             </div>
         </div>
     </div>
 
-    {% if manifest_html %}
-    {# Raw manifest disclosure — power-user fallback at the very bottom. #}
-    <div class="mt-12">
-        {{ pretty_json_block(manifest_html, title="View raw manifest JSON") }}
-    </div>
-    {% endif %}
+    {# Manifest, Distribution, version/shape/kind details all live on the
+       component detail page now — drill in from the Components list. #}
 
     {% endif %}{# /show_get_started #}
 </section>

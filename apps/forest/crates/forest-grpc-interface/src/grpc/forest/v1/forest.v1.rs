@@ -2300,6 +2300,38 @@ pub struct CreateProjectResponse {
     #[prost(message, optional, tag="1")]
     pub project: ::core::option::Option<Project>,
 }
+/// Single-project lookup. `Project.readme` carries the markdown that the
+/// forage Overview renders.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetProjectRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub project: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetProjectResponse {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+}
+/// Update mutable fields on a project. v1 only exposes `readme`; future
+/// fields (description, visibility, …) can chain on with the same RPC.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateProjectRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub project: ::prost::alloc::string::String,
+    /// Replace the project's README markdown. Max 64 KiB. Empty string is a
+    /// valid value (clears the README).
+    #[prost(string, tag="3")]
+    pub readme: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateProjectResponse {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetReleasesByActorRequest {
     /// user_id or app_id
@@ -2668,6 +2700,13 @@ pub struct Project {
     pub organisation: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
     pub project: ::prost::alloc::string::String,
+    /// Markdown README, surfaced on the project Overview page in forage.
+    /// Set via `forest project update --readme PATH` (and auto-uploaded from
+    /// `README.md` during `forest publish`). 64 KiB cap enforced server-side.
+    /// Empty string when no README has been uploaded — distinct from "no
+    /// project" (which would be a different RPC error).
+    #[prost(string, tag="3")]
+    pub readme: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Ref {

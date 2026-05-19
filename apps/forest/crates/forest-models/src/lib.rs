@@ -61,6 +61,11 @@ impl From<Project> for forest_grpc_interface::Project {
         Self {
             organisation: value.organisation.to_string(),
             project: value.name.to_string(),
+            // The `readme` field is populated only by the dedicated
+            // GetProject/UpdateProject RPCs, where the service layer has
+            // direct access to the projects table. List-style RPCs that
+            // build Project structs from a slim model leave it empty.
+            readme: String::new(),
         }
     }
 }

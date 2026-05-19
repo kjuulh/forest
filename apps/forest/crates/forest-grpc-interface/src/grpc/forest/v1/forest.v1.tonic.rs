@@ -6812,6 +6812,54 @@ pub mod release_service_client {
                 .insert(GrpcMethod::new("forest.v1.ReleaseService", "CreateProject"));
             self.inner.unary(req, path, codec).await
         }
+        pub async fn get_project(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetProjectRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetProjectResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.ReleaseService/GetProject",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("forest.v1.ReleaseService", "GetProject"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn update_project(
+            &mut self,
+            request: impl tonic::IntoRequest<super::UpdateProjectRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UpdateProjectResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.ReleaseService/UpdateProject",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("forest.v1.ReleaseService", "UpdateProject"));
+            self.inner.unary(req, path, codec).await
+        }
         pub async fn get_destination_states(
             &mut self,
             request: impl tonic::IntoRequest<super::GetDestinationStatesRequest>,
@@ -7015,6 +7063,20 @@ pub mod release_service_server {
             request: tonic::Request<super::CreateProjectRequest>,
         ) -> std::result::Result<
             tonic::Response<super::CreateProjectResponse>,
+            tonic::Status,
+        >;
+        async fn get_project(
+            &self,
+            request: tonic::Request<super::GetProjectRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetProjectResponse>,
+            tonic::Status,
+        >;
+        async fn update_project(
+            &self,
+            request: tonic::Request<super::UpdateProjectRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UpdateProjectResponse>,
             tonic::Status,
         >;
         async fn get_destination_states(
@@ -7531,6 +7593,96 @@ pub mod release_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = CreateProjectSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.ReleaseService/GetProject" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetProjectSvc<T: ReleaseService>(pub Arc<T>);
+                    impl<
+                        T: ReleaseService,
+                    > tonic::server::UnaryService<super::GetProjectRequest>
+                    for GetProjectSvc<T> {
+                        type Response = super::GetProjectResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetProjectRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ReleaseService>::get_project(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetProjectSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.ReleaseService/UpdateProject" => {
+                    #[allow(non_camel_case_types)]
+                    struct UpdateProjectSvc<T: ReleaseService>(pub Arc<T>);
+                    impl<
+                        T: ReleaseService,
+                    > tonic::server::UnaryService<super::UpdateProjectRequest>
+                    for UpdateProjectSvc<T> {
+                        type Response = super::UpdateProjectResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::UpdateProjectRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ReleaseService>::update_project(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = UpdateProjectSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

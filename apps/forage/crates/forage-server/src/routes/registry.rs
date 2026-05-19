@@ -28,12 +28,11 @@ pub fn router() -> Router<AppState> {
             get(component_version_detail),
         )
         .route("/orgs/{org}/components", get(org_components))
-        // Legacy /projects/.../components 301s to the project Overview
-        // (specs/features/008: the project home subsumes the per-project
-        // component listing for the 1:1 case).
+        // Project-level Components tab — lists every version published
+        // under this project. Sibling to Releases (the deployment timeline).
         .route(
             "/orgs/{org}/projects/{project}/components",
-            get(project_components_redirect),
+            get(project_components),
         )
 }
 
@@ -365,12 +364,59 @@ async fn org_components(
 }
 
 
-/// Legacy `/orgs/{org}/projects/{project}/components` URL — 301 to the
-/// project Overview. The Overview now folds in the component version
-/// list (specs/features/008), so the dedicated Components tab is gone.
-async fn project_components_redirect(
+/// `GET /orgs/{org}/projects/{project}/components` — project's Components tab.
+///
+/// Lists every published version. Distinct from the Overview's sidebar
+/// summary (top 3 + "see all") and from the global `/orgs/{org}/components`
+/// (across-projects search).
+async fn project_components(
+    State(state): State<AppState>,
+    session: Session,
     Path((org, project)): Path<(String, String)>,
-) -> Response {
-    axum::response::Redirect::permanent(&format!("/orgs/{org}/projects/{project}"))
-        .into_response()
+) -> Result<Response, Response> {
+    let orgs = &session.user.orgs;
+    require_org_membership(&state, orgs, &org)?;
+
+    if !validate_slug(&project) {
+        return Err(error_page(
+            &state,
+            StatusCode::BAD_REQUEST,
+            "Invalid request",
+            "Invalid project name.",
+        ));
+    }
+
+    let registry = require_registry(&state)?;
+    let versions = registry
+        .list_component_versions(&session.access_token, &org, &project)
+        .await
+        .map_err(|e| internal_error(&state, "list_component_versions", &e))?;
+
+    let projects = state
+        .platform_client
+        .list_projects(&session.access_token, &org)
+        .await;
+    let projects = warn_default("list_projects", projects);
+
+    let html = state
+        .templates
+        .render(
+            "pages/project_components.html.jinja",
+            context! {
+                title => format!("Components - {project} - {org} - Forage"),
+                description => format!("Published components for {project}"),
+                user => context! { username => session.user.username },
+                csrf_token => &session.csrf_token,
+                current_org => &org,
+                orgs => orgs_context(orgs),
+                org_name => &org,
+                project_name => &project,
+                projects => projects,
+                versions => versions,
+                active_tab => "project_components",
+            },
+        )
+        .map_err(|e| internal_error(&state, "template error", &e))?;
+
+    Ok(Html(html).into_response())
 }

@@ -14,6 +14,19 @@ pub struct ReleaseRegistry {
     db: PgPool,
 }
 
+/// Single-project row, exposed by `get_project` + `update_project_readme`.
+///
+/// Distinct from `ProjectName` (a slim newtype) because the gRPC `Project`
+/// message now carries a README alongside the org/name. Add fields here
+/// when the proto grows (description, visibility, etc.).
+#[derive(Debug, Clone)]
+pub struct ProjectRecord {
+    pub id: Uuid,
+    pub organisation: String,
+    pub project: String,
+    pub readme: String,
+}
+
 impl ReleaseRegistry {
     #[allow(clippy::too_many_arguments)]
     pub async fn annotate(
@@ -583,6 +596,74 @@ impl ReleaseRegistry {
         .context("create project")?;
 
         Ok(rec.id)
+    }
+
+    /// Single-project lookup. Returns `None` when the project doesn't exist
+    /// (vs. `Err` for DB failures), so callers can render a clean 404.
+    /// Surfaces the README markdown as part of the project payload.
+    pub async fn get_project(
+        &self,
+        organisation: &str,
+        project: &str,
+    ) -> anyhow::Result<Option<ProjectRecord>> {
+        let rec = sqlx::query!(
+            "SELECT id, organisation, project, readme, created, updated
+             FROM projects
+             WHERE organisation = $1 AND project = $2",
+            organisation,
+            project,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("get project")?;
+
+        Ok(rec.map(|r| ProjectRecord {
+            id: r.id,
+            organisation: r.organisation,
+            project: r.project,
+            readme: r.readme,
+        }))
+    }
+
+    /// Replace mutable project fields. Currently README only.
+    ///
+    /// Validates the README size at the service boundary (64 KiB cap matches
+    /// the gRPC-layer guard in the handler; defence-in-depth so a buggy
+    /// caller can't poison the database).
+    pub async fn update_project_readme(
+        &self,
+        organisation: &str,
+        project: &str,
+        readme: &str,
+    ) -> anyhow::Result<ProjectRecord> {
+        const MAX_README_BYTES: usize = 64 * 1024;
+        if readme.len() > MAX_README_BYTES {
+            anyhow::bail!(
+                "readme exceeds {MAX_README_BYTES} bytes ({} actual)",
+                readme.len()
+            );
+        }
+
+        let rec = sqlx::query!(
+            "UPDATE projects
+             SET readme = $3, updated = now()
+             WHERE organisation = $1 AND project = $2
+             RETURNING id, organisation, project, readme",
+            organisation,
+            project,
+            readme,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("update project readme")?;
+
+        let rec = rec.context("project not found")?;
+        Ok(ProjectRecord {
+            id: rec.id,
+            organisation: rec.organisation,
+            project: rec.project,
+            readme: rec.readme,
+        })
     }
 
     pub async fn get_project_id(
