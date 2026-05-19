@@ -108,15 +108,14 @@
         <div class="max-w-6xl mx-auto px-4 mt-2">
             <div class="flex gap-1 -mb-px overflow-x-auto scrollbar-none">
                 {% if project_name is defined and project_name %}
-                {# ── Project-level tabs (specs/features/008) ──────────
-                   The Releases tab is hidden when no versions exist
-                   (clean empty-state policy). Deployments is always
-                   visible because it houses CD settings. #}
+                {# ── Project-level tabs ─────────────────────────────────
+                   Overview houses the catalogue (Components + README +
+                   Install). Releases is the timeline of releases
+                   performed (deployments to environments) plus CD
+                   plumbing. Always visible — a project can configure
+                   pipelines/triggers/policies before any deploy. #}
                 <a href="/orgs/{{ current_org }}/projects/{{ project_name }}" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'project_overview' %} text-gray-900 border-gray-900{% endif %}">Overview</a>
-                {% if project_has_releases is defined and project_has_releases %}
                 <a href="/orgs/{{ current_org }}/projects/{{ project_name }}/releases" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'project_releases' %} text-gray-900 border-gray-900{% endif %}">Releases</a>
-                {% endif %}
-                <a href="/orgs/{{ current_org }}/projects/{{ project_name }}/deployments" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'project_deployments' %} text-gray-900 border-gray-900{% endif %}">Deployments</a>
                 {% elif current_org is defined and current_org %}
                 {# ── Org-level tabs ─────────────────────────────────── #}
                 <a href="/dashboard" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'dashboard' %} text-gray-900 border-gray-900{% endif %}">Overview</a>

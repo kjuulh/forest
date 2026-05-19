@@ -26,6 +26,7 @@ async fn landing(
         .render("pages/landing.html.jinja", context! {
             title => "Forage - The Platform for Forest",
             description => "Push a forest.cue manifest, get production infrastructure.",
+            is_landing => true,
         })
         .map_err(|e| {
             tracing::error!("template error: {e:#}");

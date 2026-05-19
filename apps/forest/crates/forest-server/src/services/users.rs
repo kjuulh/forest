@@ -26,7 +26,15 @@ impl UserService {
     ) -> anyhow::Result<RegisteredUser> {
         self.native_credentials
             .password_fulfills_requirements(password)
-            .map_err(anyhow::Error::new)?;
+            .map_err(|errs| {
+                anyhow::anyhow!(
+                    "password didn't fulfill requirements: {}",
+                    errs.into_iter()
+                        .map(|e| e.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })?;
         let password_hash = self.native_credentials.hash(password)?;
 
         let mut tx = self.repo.begin().await?;
@@ -421,7 +429,15 @@ impl UserService {
 
         self.native_credentials
             .password_fulfills_requirements(new_password)
-            .map_err(anyhow::Error::new)?;
+            .map_err(|errs| {
+                anyhow::anyhow!(
+                    "password didn't fulfill requirements: {}",
+                    errs.into_iter()
+                        .map(|e| e.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })?;
         let password_hash = self.native_credentials.hash(new_password)?;
 
         let mut tx = self.repo.begin().await?;

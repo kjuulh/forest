@@ -67,6 +67,10 @@ rust-s3 = { version = "0.35", default-features = false, features = ["tokio-rustl
 tar = "0.4"
 zip = "2"
 
+# Telemetry: traces + logs + metrics over OTLP. `init()` is opt-in via the
+# `OTEL_SERVICE_NAME` env var; absent ⇒ pretty fmt to stdout (same as today).
+canopy-otel = { git = "https://github.com/understory-io/canopy-util-rs", version = "0.1.0" }
+
 [dev-dependencies]
 tempfile = "3"
 tokio-stream = "0.1"

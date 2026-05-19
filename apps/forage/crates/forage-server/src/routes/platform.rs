@@ -28,12 +28,15 @@ pub fn router() -> Router<AppState> {
         .route("/orgs/{org}/projects", get(projects_list))
         .route("/orgs/{org}/projects/{project}", get(project_detail))
         .route(
-            "/orgs/{org}/projects/{project}/deployments",
-            get(project_deployments),
-        )
-        .route(
             "/orgs/{org}/projects/{project}/releases",
             get(project_releases),
+        )
+        // Legacy /deployments URL — kept as a redirect to /releases for
+        // external links. The deployment timeline (and CD action chips)
+        // now live under "Releases" since a release IS a deployment.
+        .route(
+            "/orgs/{org}/projects/{project}/deployments",
+            get(deployments_to_releases_redirect),
         )
         .route(
             "/orgs/{org}/projects/{project}/releases/{slug}",
@@ -927,13 +930,15 @@ async fn project_detail(
     Ok(Html(html).into_response())
 }
 
-// ─── Project deployments (Continuous deployment timeline) ────────────
-//
-// Lifts the deployment timeline + Pipelines/Triggers/Policies management
-// chips out of the old project_detail page. After 008 the Overview is the
-// canonical home (Releases/README), and CD plumbing lives here.
 
-async fn project_deployments(
+// ─── Project releases (deployment timeline + CD plumbing) ────────────
+//
+// One canonical "Releases" tab shows every release performed for a
+// project: the timeline of which artefacts went to which environments,
+// plus links to Pipelines / Triggers / Policies management. The legacy
+// /deployments URL 303-redirects here.
+
+async fn project_releases(
     State(state): State<AppState>,
     session: Session,
     Path((org, project)): Path<(String, String)>,
@@ -951,8 +956,8 @@ async fn project_deployments(
         ));
     }
 
-    // Same flag drives the project tab strip everywhere — used to hide
-    // the Releases tab when no versions exist (specs/features/008).
+    // Same data as the Overview pulls so the tab strip's
+    // `project_has_releases` flag stays consistent across pages.
     let component_versions_fut = async {
         match state.registry_client.as_ref() {
             Some(registry) => registry
@@ -961,7 +966,15 @@ async fn project_deployments(
             None => Ok(vec![]),
         }
     };
-    let (artifacts, projects, environments, dest_states, release_intents, project_pipelines, component_versions) = tokio::join!(
+    let (
+        artifacts,
+        projects,
+        environments,
+        dest_states,
+        release_intents,
+        project_pipelines,
+        component_versions,
+    ) = tokio::join!(
         state
             .platform_client
             .list_artifacts(&session.access_token, &org, &project),
@@ -1023,10 +1036,10 @@ async fn project_deployments(
     let html = state
         .templates
         .render(
-            "pages/project_deployments.html.jinja",
+            "pages/project_releases.html.jinja",
             context! {
-                title => format!("Deployments - {project} - {org} - Forage"),
-                description => format!("Continuous deployment for {project}"),
+                title => format!("Releases - {project} - {org} - Forage"),
+                description => format!("Releases performed for {project} in {org}"),
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
                 current_org => &org,
@@ -1035,7 +1048,7 @@ async fn project_deployments(
                 project_name => &project,
                 projects => projects,
                 current_role => &current_role,
-                active_tab => "project_deployments",
+                active_tab => "project_releases",
                 timeline => data.timeline,
                 lanes => data.lanes,
                 env_options => env_options,
@@ -1047,91 +1060,13 @@ async fn project_deployments(
     Ok(Html(html).into_response())
 }
 
-// ─── Project releases list ───────────────────────────────────────────
-
-async fn project_releases(
-    State(state): State<AppState>,
-    session: Session,
+/// Legacy `/orgs/{org}/projects/{project}/deployments` — 303s to the
+/// consolidated Releases tab. Kept for external-link survival.
+async fn deployments_to_releases_redirect(
     Path((org, project)): Path<(String, String)>,
-) -> Result<Response, Response> {
-    let orgs = &session.user.orgs;
-    require_org_membership(&state, orgs, &org)?;
-
-    if !validate_slug(&project) {
-        return Err(error_page(
-            &state,
-            StatusCode::BAD_REQUEST,
-            "Invalid request",
-            "Invalid project name.",
-        ));
-    }
-
-    let (artifacts, projects) = tokio::join!(
-        state
-            .platform_client
-            .list_artifacts(&session.access_token, &org, &project),
-        state
-            .platform_client
-            .list_projects(&session.access_token, &org),
-    );
-    let artifacts = artifacts.map_err(|e| internal_error(&state, "list_artifacts", &e))?;
-    let projects = warn_default("list_projects", projects);
-
-    let releases: Vec<minijinja::Value> = artifacts
-        .iter()
-        .map(|a| {
-            let mut seen_envs = std::collections::HashSet::new();
-            let envs: Vec<String> = a
-                .destinations
-                .iter()
-                .filter(|d| seen_envs.insert(d.environment.clone()))
-                .map(|d| d.environment.clone())
-                .collect();
-            let status = if a.destinations.is_empty() {
-                "pending"
-            } else {
-                "deployed"
-            };
-            context! {
-                slug => a.slug,
-                title => a.context.title,
-                description => a.context.description,
-                created_at => a.created_at,
-                commit_sha => a.git_ref.as_ref().map(|r| r.commit_sha.clone()),
-                branch => a.git_ref.as_ref().and_then(|r| r.branch.clone()),
-                version => a.git_ref.as_ref().and_then(|r| r.version.clone()),
-                source_user => a.source.as_ref().and_then(|s| s.user.clone()),
-                source_type => a.source.as_ref().and_then(|s| s.source_type.clone()),
-                envs => envs,
-                status => status,
-            }
-        })
-        .collect();
-
-    let html = state
-        .templates
-        .render(
-            "pages/project_releases.html.jinja",
-            context! {
-                title => format!("Releases - {project} - {org} - Forage"),
-                description => format!("All releases for {project} in {org}"),
-                user => context! { username => session.user.username },
-                csrf_token => &session.csrf_token,
-                current_org => &org,
-                orgs => orgs_context(orgs),
-                org_name => &org,
-                project_name => &project,
-                projects => projects,
-                active_tab => "project_releases",
-                releases => releases,
-                project_has_releases => true,
-            },
-        )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
-
-    Ok(Html(html).into_response())
+) -> Response {
+    Redirect::to(&format!("/orgs/{org}/projects/{project}/releases"))
+        .into_response()
 }
 
 // ─── Artifact detail ─────────────────────────────────────────────────

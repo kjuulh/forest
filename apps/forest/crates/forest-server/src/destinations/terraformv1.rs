@@ -33,6 +33,34 @@ use crate::{
     temp_dir::TempDirectories,
 };
 
+/// Resolve the terraform-compatible binary to invoke.
+///
+/// Priority: `TERRAFORM_EXE` env override → first of `terraform` / `tofu`
+/// found on PATH → `terraform` (let spawn fail with a clear ENOENT).
+///
+/// Existed because the production forest-server image ships OpenTofu
+/// (`tofu`), not `terraform`, and was missing the `TERRAFORM_EXE=tofu`
+/// override — every release failed with `terraform init: No such file
+/// or directory`.
+fn resolve_terraform_exe() -> String {
+    if let Ok(exe) = std::env::var("TERRAFORM_EXE") {
+        if !exe.is_empty() {
+            return exe;
+        }
+    }
+    if let Ok(path_var) = std::env::var("PATH") {
+        for candidate in ["terraform", "tofu"] {
+            for dir in path_var.split(':') {
+                let candidate_path = std::path::Path::new(dir).join(candidate);
+                if candidate_path.is_file() {
+                    return candidate.to_string();
+                }
+            }
+        }
+    }
+    "terraform".to_string()
+}
+
 #[derive(Clone)]
 pub struct TerraformStateStore {
     // TODO: move to some kind of database
@@ -570,7 +598,7 @@ impl TerraformV1Destination {
     ) -> anyhow::Result<String> {
         tracing::debug!(path =% path.display(), "running terraform {} (capture)", args.join(" "));
 
-        let exe = std::env::var("TERRAFORM_EXE").unwrap_or("terraform".to_string());
+        let exe = resolve_terraform_exe();
 
         let mut cmd = tokio::process::Command::new(exe);
         cmd.current_dir(path)
@@ -652,7 +680,7 @@ impl TerraformV1Destination {
     ) -> anyhow::Result<()> {
         tracing::debug!(path =% path.display(), "running terraform {}", args.join(" "));
 
-        let exe = std::env::var("TERRAFORM_EXE").unwrap_or("terraform".to_string());
+        let exe = resolve_terraform_exe();
 
         let mut cmd = tokio::process::Command::new(exe);
         cmd.current_dir(path)
@@ -811,4 +839,28 @@ impl DestinationEdge for TerraformV1Destination {
 enum Mode {
     Prepare,
     Apply,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_terraform_exe_uses_env_override_when_set() {
+        // Single test to avoid env-var races between parallel cases.
+        let prev = std::env::var("TERRAFORM_EXE").ok();
+
+        unsafe { std::env::set_var("TERRAFORM_EXE", "my-custom-tf"); }
+        assert_eq!(resolve_terraform_exe(), "my-custom-tf");
+
+        unsafe { std::env::set_var("TERRAFORM_EXE", ""); }
+        // Empty env falls through to PATH search (or "terraform" fallback);
+        // never returns the empty string.
+        assert!(!resolve_terraform_exe().is_empty());
+
+        match prev {
+            Some(v) => unsafe { std::env::set_var("TERRAFORM_EXE", v) },
+            None => unsafe { std::env::remove_var("TERRAFORM_EXE") },
+        }
+    }
 }

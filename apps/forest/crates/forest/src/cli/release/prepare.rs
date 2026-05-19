@@ -6,12 +6,13 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
 use crate::{
+    component_cache::ComponentCacheState,
     contracts::{self, EnabledContracts},
     forest_context::ForestContextState,
     models::{ComponentReference, ProjectValue},
     services::{
-        component_binary, component_deno, project::ProjectParserState,
-        templates::TemplatesServiceState,
+        component_binary, component_deno, components::ComponentsServiceState,
+        project::ProjectParserState, templates::TemplatesServiceState,
     },
     state::State,
 };
@@ -47,6 +48,16 @@ impl PrepareCommand {
         enabled_contracts.require(contracts::CONTRACT_DEPLOYMENT)?;
 
         tracing::info!("enabled contracts: {}", enabled_contracts);
+
+        // Auto-resolve missing dependencies (cargo-build-style). Versioned
+        // deps that aren't already in the cache get downloaded here, so
+        // `release prepare` works on a clean checkout without the user
+        // having to remember to run `forest deps` first.
+        state
+            .components_service()
+            .get_components_project(project.clone())
+            .await
+            .context("auto-resolving project dependencies")?;
 
         // Get deployment for all dependencies
         //
@@ -181,12 +192,32 @@ impl PrepareCommand {
                 );
             };
 
-            let crate::models::ComponentSource::Local(component_path) = &component.source else {
-                anyhow::bail!(
-                    "component {}/{} must be a local dependency for release prepare",
-                    component.organisation, component.name
-                );
+            // Local deps use their declared path directly. Versioned
+            // deps were downloaded into the per-component cache dir;
+            // we read templates from there. Layout is identical to a
+            // local component, so the rest of this function is
+            // unchanged.
+            let component_path = match &component.source {
+                crate::models::ComponentSource::Local(path) => path.clone(),
+                crate::models::ComponentSource::Versioned(version) => {
+                    let cache_dir = state
+                        .component_cache()
+                        .versioned_component_dir(
+                            &component.organisation,
+                            &component.name,
+                            version,
+                        )
+                        .await?;
+                    if !cache_dir.exists() {
+                        anyhow::bail!(
+                            "component {}/{}@{} is not in the cache; run `forest deps` to download it first",
+                            component.organisation, component.name, version,
+                        );
+                    }
+                    cache_dir
+                }
             };
+            let component_path = &component_path;
 
             tokio::fs::create_dir_all(&output_path)
                 .await

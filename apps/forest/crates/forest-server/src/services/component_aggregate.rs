@@ -95,6 +95,64 @@ fn extract_host(url: &str) -> Option<String> {
     }
 }
 
+/// Load the README markdown for a component at a specific version.
+///
+/// Looks up the `component_files` projection for `README.md` (or
+/// case-insensitive variant) belonging to that version, then fetches the
+/// bytes from S3 and returns them as a UTF-8 string. Returns
+/// `Ok(String::new())` when no README is found — the caller decides
+/// whether that's an error or just an empty response.
+async fn load_component_readme(
+    db: &sqlx::PgPool,
+    object_store: &crate::object_store::ObjectStore,
+    organisation: &str,
+    name: &str,
+    version: &str,
+) -> anyhow::Result<String> {
+    use sqlx::Row;
+    // Look up the component_id matching this org/name/version, then find a
+    // README.md file path under it. The path is the in-archive name; the
+    // S3 key is derived from (org, name, version, path).
+    let row = sqlx::query(
+        "SELECT cf.file_path
+         FROM component_files cf
+         JOIN components c ON c.id = cf.component_id
+         WHERE c.organisation = $1
+           AND c.name = $2
+           AND c.version = $3
+           AND lower(cf.file_path) IN ('readme.md', 'readme', 'readme.markdown')
+         LIMIT 1",
+    )
+    .bind(organisation)
+    .bind(name)
+    .bind(version)
+    .fetch_optional(db)
+    .await
+    .context("query component_files for README")?;
+
+    let file_path: String = match row {
+        Some(r) => r.get("file_path"),
+        None => return Ok(String::new()),
+    };
+
+    let s3_key =
+        crate::object_store::keys::component_file(organisation, name, version, &file_path);
+    let bytes = match object_store.get(&s3_key).await {
+        Ok(b) => b,
+        Err(e) => {
+            // Don't fail the whole detail response if the README blob is
+            // missing — log + return empty. The detail page degrades to
+            // no README, which is the same as "never uploaded one".
+            tracing::warn!("README S3 fetch failed for {organisation}/{name}@{version}: {e:#}");
+            return Ok(String::new());
+        }
+    };
+
+    // README is markdown text; surface as UTF-8 string. Lossy decode
+    // handles malformed bytes without panicking.
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 // ============================================================
 // Service — orchestrates aggregate + projections
 // ============================================================
@@ -1115,10 +1173,24 @@ impl ComponentService {
             })
             .collect();
 
+        // Load README.md (if uploaded) from S3 at the latest version. The
+        // file is stored alongside the binary via `upload_file` —
+        // component_files records the path, S3 holds the bytes. Common
+        // README filenames (`README.md`, `readme.md`) both work.
+        let readme = load_component_readme(
+            &self.db,
+            &self.object_store,
+            organisation,
+            name,
+            &latest.version,
+        )
+        .await
+        .unwrap_or_default();
+
         Ok(Some(forest_grpc_interface::GetComponentDetailResponse {
             summary: Some(summary),
             versions: version_infos,
-            readme: String::new(), // TODO: load from S3 if README.md was uploaded
+            readme,
             manifest_json: manifest.unwrap_or_default(),
             owners: vec![],
         }))

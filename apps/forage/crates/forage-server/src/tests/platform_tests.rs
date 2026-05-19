@@ -620,12 +620,12 @@ async fn projects_list_platform_unavailable_returns_500() {
 
 // Per specs/features/008, the project Overview at `/orgs/{org}/projects/{project}`
 // no longer renders the `<release-timeline>` element — that moved to the
-// new Deployments tab at `/orgs/{org}/projects/{project}/deployments`. These
+// new Deployments tab at `/orgs/{org}/projects/{project}/releases`. These
 // three tests hit the Deployments URL so they keep asserting the timeline's
 // presence at the right place.
 
 #[tokio::test]
-async fn project_deployments_returns_200_with_artifacts() {
+async fn project_releases_returns_200_with_artifacts() {
     let (state, sessions) = test_state();
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
@@ -633,7 +633,7 @@ async fn project_deployments_returns_200_with_artifacts() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/orgs/testorg/projects/my-api/deployments")
+                .uri("/orgs/testorg/projects/my-api/releases")
                 .header("cookie", &cookie)
                 .body(Body::empty())
                 .unwrap(),
@@ -652,7 +652,7 @@ async fn project_deployments_returns_200_with_artifacts() {
 }
 
 #[tokio::test]
-async fn project_deployments_empty_artifacts_shows_empty_state() {
+async fn project_releases_empty_artifacts_shows_empty_state() {
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
         list_artifacts_result: Some(Ok(vec![])),
         ..Default::default()
@@ -664,7 +664,7 @@ async fn project_deployments_empty_artifacts_shows_empty_state() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/orgs/testorg/projects/my-api/deployments")
+                .uri("/orgs/testorg/projects/my-api/releases")
                 .header("cookie", &cookie)
                 .body(Body::empty())
                 .unwrap(),
@@ -682,7 +682,7 @@ async fn project_deployments_empty_artifacts_shows_empty_state() {
 }
 
 #[tokio::test]
-async fn project_deployments_shows_enriched_artifact_data() {
+async fn project_releases_shows_enriched_artifact_data() {
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
         list_artifacts_result: Some(Ok(vec![Artifact {
             artifact_id: "art-2".into(),
@@ -725,7 +725,7 @@ async fn project_deployments_shows_enriched_artifact_data() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/orgs/testorg/projects/my-api/deployments")
+                .uri("/orgs/testorg/projects/my-api/releases")
                 .header("cookie", &cookie)
                 .body(Body::empty())
                 .unwrap(),

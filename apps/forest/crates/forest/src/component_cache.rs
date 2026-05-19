@@ -10,7 +10,6 @@ use crate::{
 pub mod models;
 
 use anyhow::Context;
-use tokio::io::AsyncWriteExt;
 
 #[derive(Clone)]
 pub struct ComponentCache {
@@ -23,6 +22,24 @@ impl ComponentCache {
         let cache = self.locations.ensure_get_cache().await?;
 
         Ok(cache.join("components"))
+    }
+
+    /// Resolve the cache directory for a (org, name, version) tuple.
+    /// Used by `release prepare` to find a versioned dependency's
+    /// downloaded files (templates, schemas, …) when reading the
+    /// component as a path-like source.
+    pub async fn versioned_component_dir(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: &str,
+    ) -> anyhow::Result<PathBuf> {
+        Ok(self
+            .get_component_cache()
+            .await?
+            .join(organisation)
+            .join(name)
+            .join(version))
     }
 
     pub async fn get_local_components(&self) -> anyhow::Result<CacheComponents> {
@@ -125,34 +142,46 @@ impl ComponentCache {
         file_path: &str,
         file_content: &[u8],
     ) -> anyhow::Result<()> {
-        let file_path = self
+        // Path-traversal refusal: the publisher controls `file_path`,
+        // and a malicious or buggy publisher must not be able to write
+        // outside the per-component cache dir. Reject `..`, absolute,
+        // or empty rel_paths before joining.
+        if file_path.is_empty()
+            || file_path.starts_with('/')
+            || file_path.starts_with('\\')
+            || file_path
+                .split(['/', '\\'])
+                .any(|seg| seg == ".." || seg.is_empty())
+        {
+            anyhow::bail!("refusing unsafe component file path: {file_path:?}");
+        }
+
+        let component_root = self
             .get_component_cache()
             .await?
             .join(organisation)
             .join(name)
-            .join(version)
-            .join(file_path);
+            .join(version);
+        let dest = component_root.join(file_path);
 
-        if let Some(parent) = file_path.parent()
+        if let Some(parent) = dest.parent()
             && !parent.exists()
         {
             tracing::trace!("creating component dir: {}", parent.display());
-
             tokio::fs::create_dir_all(parent)
                 .await
                 .context("failed to create path")?;
         }
 
-        tracing::trace!("creating component file: {}", file_path.display());
-        let mut file = tokio::fs::File::create_new(file_path)
+        tracing::trace!("writing component file: {}", dest.display());
+        // Truncating write — re-downloads overwrite. The cache is
+        // content-addressed by (org, name, version); if the version
+        // is the same, the bytes should be the same (immutable
+        // versions). This makes interrupted-then-retried downloads
+        // converge.
+        tokio::fs::write(&dest, file_content)
             .await
-            .context("failed to create component file")?;
-        file.write_all(file_content)
-            .await
-            .context("failed to write to component file")?;
-        file.flush()
-            .await
-            .context("failed to flush component file")?;
+            .with_context(|| format!("failed to write component file {}", dest.display()))?;
 
         Ok(())
     }

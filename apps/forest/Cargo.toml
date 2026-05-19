@@ -4,6 +4,7 @@ members = [
   "examples/components-v2/crates/kubernetes-service",
   "examples/global-tools/forest-hello/crates/forest-hello",
   "components/forest-contrib/terraform-service/crates/terraform-service",
+  "components/forest-contrib/ecs-service/crates/ecs-service",
   "components/forest-contrib/render-template/crates/render-template",
   "components/forest-contrib/checkout/crates/checkout",
   "components/forest-contrib/git-commit-push/crates/git-commit-push",

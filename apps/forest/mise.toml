@@ -2,6 +2,18 @@
 RUST_LOG = "forest=debug,notmad=trace,info"
 _.file = ".env"
 
+# Default server for the `forest` CLI (publish, release, etc). Override in
+# .env to point at a local server (e.g. http://localhost:4040 for forest-team
+# dev work). The runner uses FOREST_SERVER_ADDR — separate variable, not set
+# here.
+FOREST_SERVER = "https://forest.development.understory.sh"
+
+# CUE registry override — `forest.sh/...` modules resolve from forest's OCI
+# registry on the dev server (HTTPS, port 443, terminated at the platform
+# ALB; the forest task's HTTP/4042 backend serves /v2/* OCI). Everything
+# else falls back to the central CUE registry.
+CUE_REGISTRY = "forest.sh=registry.forest.development.understory.sh,registry.cuelang.org"
+
 [tools]
 rust = { version = "1.93", components = "rust-src,rust-analyzer" }
 goreleaser = "latest"
@@ -17,8 +29,8 @@ alias = ["i", "install"]
 run = "cargo install --path crates/forest -f"
 
 [tasks.forest]
-env = { FOREST_SERVER = "http://localhost:4040" }
-#env = { FOREST_SERVER = "https://forest.data.api.understory.io:4000" }
+# FOREST_SERVER comes from [env] (default = forest.development.understory.sh)
+# or from .env (override, e.g. http://localhost:4040 when developing forest).
 dir = "{{ cwd }}"
 run = "cargo run -p forest -- "
 
@@ -27,7 +39,6 @@ dir = "./examples/my_project"
 run = "cargo run -p forest -- "
 
 [tasks."forest:publish"]
-env = { FOREST_SERVER = "http://localhost:4040" }
 dir = "{{ cwd }}"
 run = "cargo run -p forest -- components publish"
 

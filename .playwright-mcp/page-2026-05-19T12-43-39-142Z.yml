@@ -1,0 +1,79 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]:
+        - link "forage" [ref=e5] [cursor=pointer]:
+          - /url: /dashboard
+        - generic [ref=e6]: /
+        - link "pworg2182261" [ref=e7] [cursor=pointer]:
+          - /url: /orgs/pworg2182261/projects
+        - generic [ref=e8]: /
+        - group [ref=e9]:
+          - generic "Select project" [ref=e10] [cursor=pointer]:
+            - text: Select project
+            - img [ref=e11]
+      - generic [ref=e13]:
+        - link "Notifications" [ref=e14] [cursor=pointer]:
+          - /url: /notifications
+          - img [ref=e15]
+        - group [ref=e17]:
+          - generic "pwtest2182261" [ref=e18] [cursor=pointer]:
+            - text: pwtest2182261
+            - img [ref=e19]
+    - generic [ref=e22]:
+      - link "Overview" [ref=e23] [cursor=pointer]:
+        - /url: /dashboard
+      - link "Projects" [ref=e24] [cursor=pointer]:
+        - /url: /orgs/pworg2182261/projects
+      - link "Components" [ref=e25] [cursor=pointer]:
+        - /url: /orgs/pworg2182261/components
+      - link "Destinations" [ref=e26] [cursor=pointer]:
+        - /url: /orgs/pworg2182261/destinations
+      - link "Settings" [ref=e27] [cursor=pointer]:
+        - /url: /orgs/pworg2182261/settings
+  - main [ref=e28]:
+    - generic [ref=e29]:
+      - generic [ref=e30]:
+        - heading "Your organisations" [level=2] [ref=e31]
+        - link "P pworg2182261 admin" [ref=e33] [cursor=pointer]:
+          - /url: /orgs/pworg2182261/projects
+          - generic [ref=e34]:
+            - generic [ref=e36]: P
+            - generic [ref=e37]: pworg2182261
+          - generic [ref=e38]: admin
+        - group [ref=e39]:
+          - generic "Create new organisation" [ref=e40] [cursor=pointer]
+      - generic [ref=e41]:
+        - heading "Recent activity" [level=2] [ref=e42]
+        - generic [ref=e43]:
+          - img [ref=e44]
+          - paragraph [ref=e46]: No recent activity
+          - paragraph [ref=e47]: Activity will appear here when you create releases.
+  - contentinfo [ref=e48]:
+    - generic [ref=e49]:
+      - generic [ref=e50]:
+        - generic [ref=e51]:
+          - heading "Product" [level=3] [ref=e52]
+          - list [ref=e53]:
+            - listitem [ref=e54]:
+              - link "Pricing" [ref=e55] [cursor=pointer]:
+                - /url: /pricing
+            - listitem [ref=e56]:
+              - link "Components" [ref=e57] [cursor=pointer]:
+                - /url: /components
+        - generic [ref=e58]:
+          - heading "Platform" [level=3] [ref=e59]
+          - list [ref=e60]:
+            - listitem [ref=e61]:
+              - link "Dashboard" [ref=e62] [cursor=pointer]:
+                - /url: /dashboard
+            - listitem [ref=e63]:
+              - link "Account" [ref=e64] [cursor=pointer]:
+                - /url: /settings/account
+        - generic [ref=e65]:
+          - heading "Forest" [level=3] [ref=e66]
+          - list [ref=e67]:
+            - listitem [ref=e68]:
+              - link "Forest on Git" [ref=e69] [cursor=pointer]:
+                - /url: https://src.rawpotion.io/rawpotion/forest
+      - generic [ref=e70]: © 2026 Forage. Built with Forest.

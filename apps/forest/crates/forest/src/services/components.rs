@@ -338,8 +338,13 @@ impl ComponentsService {
             tokio::fs::write(&marker, format!("// {organisation}/{name}@{version}\n")).await?;
         }
 
-        // Download CUE spec files and vendor into project's cue.mod/pkg/
-        // This enables `import "forest.sh/{org}/{name}@v0"` in consumer CUE files
+        // Download every published file. Two destinations:
+        //   1. The component cache dir (faithful mirror — used by
+        //      `release prepare` to read templates/, schemas/, etc).
+        //   2. For .cue files: also vendor into the project's
+        //      `cue.mod/pkg/forest.sh/{org}/{name}@v{major}/` so
+        //      `import "forest.sh/{org}/{name}@v0"` in consumer CUE
+        //      resolves.
         if let Ok(Some(comp)) = self.grpc.get_component_version(name, organisation, version).await {
             if let Ok(mut file_stream) = self.grpc.get_component_files(&comp.id).await {
                 use futures::StreamExt;
@@ -348,6 +353,17 @@ impl ComponentsService {
                 while let Some(item) = file_stream.next().await {
                     match item {
                         Ok(f) => {
+                            if let Err(e) = self
+                                .component_cache
+                                .add_file(name, organisation, version, &f.file_path, &f.file_content)
+                                .await
+                            {
+                                tracing::warn!(
+                                    file = %f.file_path,
+                                    error = %e,
+                                    "failed to write component file to cache",
+                                );
+                            }
                             if f.file_path.ends_with(".cue") {
                                 cue_files.push((f.file_path, f.file_content));
                             }

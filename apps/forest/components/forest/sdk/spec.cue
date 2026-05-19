@@ -21,6 +21,16 @@ package sdk
 
 	codegen?: #ForestCodegen
 	upload?:  #ForestComponentUpload
+
+	// Optional file-set declaration. When `paths.include` is set,
+	// `forest components publish` only uploads files matching one of
+	// the globs (built-in safety excludes still apply on top). Absent
+	// ⇒ "include everything except defaults and `.forestignore`".
+	paths?: #ForestComponentPaths
+}
+
+#ForestComponentPaths: {
+	include?: [...string]
 }
 
 #ForestComponentUpload: {

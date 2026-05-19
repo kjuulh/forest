@@ -14,7 +14,7 @@
 {% block content %}
 <section class="app-container pt-12 pb-8">
     {# ── Header ─────────────────────────────────────────────────── #}
-    <div class="flex items-start justify-between mb-8">
+    <div class="flex items-start justify-between mb-6 gap-4">
         <div class="min-w-0">
             <h1 class="text-2xl font-bold flex items-center gap-2 flex-wrap">
                 <span class="text-gray-400 font-mono text-base">{{ org_name }}/</span>{{ project_name }}
@@ -22,12 +22,32 @@
             {% if summary and summary.description %}
             <p class="mt-1 text-gray-600">{{ summary.description }}</p>
             {% endif %}
+            <div class="mt-2 flex items-center gap-2 flex-wrap">
+                {% if summary and summary.latest_version %}{{ badge("v" ~ summary.latest_version) }}{% endif %}
+                {% if summary %}{{ tool_shape_badge(summary.shape) }}{% endif %}
+                {% if summary and summary.visibility %}{{ visibility_badge(summary.visibility) }}{% endif %}
+            </div>
         </div>
-        <div class="flex items-center gap-2 shrink-0 ml-4 flex-wrap justify-end">
-            {% if summary and summary.latest_version %}{{ badge("v" ~ summary.latest_version) }}{% endif %}
-            {% if summary %}{{ tool_shape_badge(summary.shape) }}{% endif %}
-            {% if summary and summary.visibility %}{{ visibility_badge(summary.visibility) }}{% endif %}
+        {# ── Install — prominent header block (GitHub "Code" button slot) ── #}
+        {% if is_tool %}
+        <div class="shrink-0 w-full max-w-md">
+            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Install</p>
+            {{ code_block("forest global add " ~ summary.organisation ~ "/" ~ summary.name, copyable=true, id="install-cmd-header") }}
+            {% if summary.latest_version %}
+            <details class="mt-1.5">
+                <summary class="text-xs text-gray-500 hover:text-gray-700 cursor-pointer">Pin to a specific version</summary>
+                <div class="mt-1.5">
+                    {{ code_block("forest global add " ~ summary.organisation ~ "/" ~ summary.name ~ "@" ~ summary.latest_version, copyable=true, id="install-cmd-pinned", class="text-xs") }}
+                </div>
+            </details>
+            {% endif %}
         </div>
+        {% elif summary %}
+        <div class="shrink-0 w-full max-w-md">
+            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Add to project</p>
+            {{ code_block("forest components add " ~ summary.organisation ~ "/" ~ summary.name ~ "@" ~ summary.latest_version, copyable=true, id="add-cmd-header") }}
+        </div>
+        {% endif %}
     </div>
 
     {% if show_get_started %}
@@ -43,14 +63,14 @@
 
     <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
         <div class="md:col-span-3">
-            {# ── Releases (top, the "file tree" slot) ─────────────────── #}
+            {# ── Components (top, the "file tree" slot) ─────────────────
+               Registry version publishes. Named after the entity ("we
+               publish components"), distinct from "Releases" — those are
+               the deployments performed (under the Releases tab). #}
             {% if comp_versions %}
             <div class="mb-8">
                 <div class="flex items-center justify-between mb-4">
-                    <h2 class="text-lg font-bold">Releases</h2>
-                    {% if comp_versions | length > 5 %}
-                    <a href="/orgs/{{ org_name }}/projects/{{ project_name }}/releases" class="text-sm text-gray-500 hover:text-gray-900">View all releases &rarr;</a>
-                    {% endif %}
+                    <h2 class="text-lg font-bold">Components</h2>
                 </div>
                 <div class="space-y-3">
                     {% for v in comp_versions[:5] %}
@@ -75,7 +95,7 @@
             </div>
             {% endif %}
 
-            {# ── README (below Releases — GitHub-style) ───────────────── #}
+            {# ── README (below Components — GitHub-style) ───────────── #}
             {% if readme_html %}
             <div class="prose prose-sm max-w-none border-t border-gray-200 pt-6 mt-2">
                 {{ readme_html | safe }}
@@ -91,22 +111,6 @@
         <div class="md:col-span-1">
             <div class="space-y-6">
                 {% if summary %}
-                {% if is_tool %}
-                <div>
-                    <h3 class="text-sm font-bold mb-2">Install</h3>
-                    {{ code_block("forest global add " ~ summary.organisation ~ "/" ~ summary.name, copyable=true, id="install-cmd-latest", class="text-xs") }}
-                    {% if summary.latest_version %}
-                    <p class="text-xs text-gray-500 mt-2 mb-1">Pin to a specific version:</p>
-                    {{ code_block("forest global add " ~ summary.organisation ~ "/" ~ summary.name ~ "@" ~ summary.latest_version, copyable=true, id="install-cmd-pinned", class="text-xs") }}
-                    {% endif %}
-                </div>
-                {% else %}
-                <div>
-                    <h3 class="text-sm font-bold mb-2">Add to project</h3>
-                    {{ code_block("forest components add " ~ summary.organisation ~ "/" ~ summary.name ~ "@" ~ summary.latest_version, copyable=true, id="add-cmd", class="text-xs") }}
-                </div>
-                {% endif %}
-
                 <div>
                     <h3 class="text-sm font-bold mb-2">About</h3>
                     <dl class="text-sm space-y-2">
