@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package forest.v1;
+
+import "forest/v1/releases.proto";
+
+// ── Stage type enum (useful for UI dropdowns / filtering) ────────────
+
+enum StageType {
+    STAGE_TYPE_UNSPECIFIED = 0;
+    STAGE_TYPE_DEPLOY = 1;
+    STAGE_TYPE_WAIT = 2;
+    STAGE_TYPE_PLAN = 3;
+}
+
+// ── Per-type config messages ─────────────────────────────────────────
+
+message DeployStageConfig {
+    string environment = 1;
+}
+
+message WaitStageConfig {
+    int64 duration_seconds = 1;
+}
+
+message PlanStageConfig {
+    string environment = 1;
+    bool auto_approve = 2;
+}
+
+// ── A single pipeline stage ──────────────────────────────────────────
+
+message PipelineStage {
+    string id = 1;
+    repeated string depends_on = 2;
+
+    oneof config {
+        DeployStageConfig deploy = 10;
+        WaitStageConfig wait = 11;
+        PlanStageConfig plan = 12;
+    }
+}
+
+// ── Runtime stage status (for observing pipeline progress) ───────────
+
+enum PipelineStageStatus {
+    PIPELINE_STAGE_STATUS_UNSPECIFIED = 0;
+    PIPELINE_STAGE_STATUS_PENDING = 1;
+    PIPELINE_STAGE_STATUS_ACTIVE = 2;
+    PIPELINE_STAGE_STATUS_SUCCEEDED = 3;
+    PIPELINE_STAGE_STATUS_FAILED = 4;
+    PIPELINE_STAGE_STATUS_CANCELLED = 5;
+    PIPELINE_STAGE_STATUS_AWAITING_APPROVAL = 6;
+}
+
+// ── Pipeline resource ────────────────────────────────────────────────
+
+message ReleasePipeline {
+    string id = 1;
+    string name = 2;
+    bool enabled = 3;
+    repeated PipelineStage stages = 4;
+    string created_at = 5;
+    string updated_at = 6;
+}
+
+// ── CRUD messages ────────────────────────────────────────────────────
+
+message CreateReleasePipelineRequest {
+    Project project = 1;
+    string name = 2;
+    repeated PipelineStage stages = 3;
+}
+message CreateReleasePipelineResponse {
+    ReleasePipeline pipeline = 1;
+}
+
+message UpdateReleasePipelineRequest {
+    Project project = 1;
+    string name = 2;
+    optional bool enabled = 3;
+    // When set, replaces all stages. When absent, stages are unchanged.
+    repeated PipelineStage stages = 4;
+    bool update_stages = 5;
+}
+message UpdateReleasePipelineResponse {
+    ReleasePipeline pipeline = 1;
+}
+
+message DeleteReleasePipelineRequest {
+    Project project = 1;
+    string name = 2;
+}
+message DeleteReleasePipelineResponse {}
+
+message ListReleasePipelinesRequest {
+    Project project = 1;
+}
+message ListReleasePipelinesResponse {
+    repeated ReleasePipeline pipelines = 1;
+}
+
+service ReleasePipelineService {
+    rpc CreateReleasePipeline(CreateReleasePipelineRequest) returns (CreateReleasePipelineResponse);
+    rpc UpdateReleasePipeline(UpdateReleasePipelineRequest) returns (UpdateReleasePipelineResponse);
+    rpc DeleteReleasePipeline(DeleteReleasePipelineRequest) returns (DeleteReleasePipelineResponse);
+    rpc ListReleasePipelines(ListReleasePipelinesRequest) returns (ListReleasePipelinesResponse);
+}

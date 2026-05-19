@@ -1,0 +1,65 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="app-container pt-12 pb-12">
+    <h1 class="text-2xl font-bold mb-8">Notifications</h1>
+
+    <div id="notifications-list">
+        {% include "components/notifications_list.html.jinja" %}
+    </div>
+</section>
+<script>
+(function() {
+    const container = document.getElementById("notifications-list");
+    if (!container) return;
+
+    // Track which release slugs the user has manually toggled open,
+    // so we don't slam them shut on the next poll.
+    const userToggled = new Set();
+    container.addEventListener("toggle", function(e) {
+        const details = e.target;
+        if (details.tagName !== "DETAILS") return;
+        const slug = details.dataset.slug;
+        if (!slug) return;
+        if (details.open) {
+            userToggled.add(slug);
+        } else {
+            userToggled.delete(slug);
+        }
+    }, true);
+
+    async function refresh() {
+        try {
+            const res = await fetch("/notifications?_partial=1", { credentials: "same-origin" });
+            if (!res.ok) return;
+            const html = await res.text();
+            container.innerHTML = html;
+            // Re-open any releases the user manually toggled open.
+            userToggled.forEach(function(slug) {
+                const el = container.querySelector('details[data-slug="' + slug + '"]');
+                if (el) el.open = true;
+            });
+            // Clean up slugs no longer in the DOM.
+            userToggled.forEach(function(slug) {
+                if (!container.querySelector('details[data-slug="' + slug + '"]')) {
+                    userToggled.delete(slug);
+                }
+            });
+        } catch {}
+    }
+
+    let timer = setInterval(refresh, 10000);
+
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+            clearInterval(timer);
+            timer = null;
+        } else {
+            // Immediate refresh on tab focus, then resume interval.
+            refresh();
+            timer = setInterval(refresh, 10000);
+        }
+    });
+})();
+</script>
+{% endblock %}

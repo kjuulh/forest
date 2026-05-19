@@ -1,0 +1,39 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="max-w-md mx-auto px-4 pt-24">
+    <h1 class="text-2xl font-bold text-center mb-2">Choose your username</h1>
+    <p class="text-center text-gray-600 mb-8">Pick a username for your new Forage account.</p>
+
+    {% if error %}
+    <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    <form method="POST" action="/auth/complete-profile" class="space-y-4">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+
+        <div>
+            <label for="username" class="block text-sm font-medium mb-1">Username</label>
+            <input
+                type="text"
+                id="username"
+                name="username"
+                value="{{ username }}"
+                required
+                minlength="3"
+                maxlength="64"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                placeholder="alice">
+            <p class="mt-1 text-xs text-gray-500">Lowercase letters, numbers, and hyphens. 3-64 characters.</p>
+        </div>
+
+        <button
+            type="submit"
+            class="w-full py-2 bg-gray-900 text-white rounded-md font-medium hover:bg-gray-800">
+            Continue
+        </button>
+    </form>
+</section>
+{% endblock %}

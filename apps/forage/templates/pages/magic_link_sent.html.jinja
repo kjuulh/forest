@@ -1,0 +1,16 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="max-w-md mx-auto px-4 pt-24 text-center">
+    <h1 class="text-2xl font-bold mb-4">Check your email</h1>
+    <p class="text-gray-600 mb-2">
+        We sent a magic link to <strong>{{ email }}</strong>.
+    </p>
+    <p class="text-gray-600 mb-8">
+        Click the link in the email to sign in. The link expires in 15 minutes.
+    </p>
+    <p class="text-sm text-gray-400">
+        Didn't receive it? Check your spam folder or <a href="/login" class="font-medium text-gray-900 hover:underline">try again</a>.
+    </p>
+</section>
+{% endblock %}

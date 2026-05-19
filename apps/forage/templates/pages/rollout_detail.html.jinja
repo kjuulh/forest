@@ -1,0 +1,89 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="app-container py-12">
+    <div class="flex items-center gap-2 text-sm text-gray-500 mb-6">
+        <a href="/orgs/{{ org_name }}/settings/compute" class="hover:text-gray-700">Compute</a>
+        <span>/</span>
+        <span class="text-gray-900 font-mono">{{ rollout.apply_id }}</span>
+    </div>
+
+    <div class="flex items-center justify-between mb-8">
+        <div class="flex items-center gap-3">
+            <h1 class="text-2xl font-bold">Rollout</h1>
+            {% if rollout.status == "succeeded" %}
+            <span class="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full">Succeeded</span>
+            {% elif rollout.status == "in_progress" %}
+            <span class="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">In Progress</span>
+            {% elif rollout.status == "failed" %}
+            <span class="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 px-2 py-0.5 rounded-full">Failed</span>
+            {% else %}
+            <span class="inline-flex items-center gap-1 text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">{{ rollout.status }}</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4 mb-8 text-sm">
+        <div>
+            <dt class="text-gray-500">Apply ID</dt>
+            <dd class="font-mono text-xs mt-0.5">{{ rollout.apply_id }}</dd>
+        </div>
+        <div>
+            <dt class="text-gray-500">Namespace</dt>
+            <dd class="font-mono text-xs mt-0.5">{{ rollout.namespace }}</dd>
+        </div>
+    </div>
+
+    <h2 class="text-lg font-semibold mb-4">Resources ({{ rollout.resources | length }})</h2>
+    <div class="border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-left text-gray-500">
+                <tr>
+                    <th class="px-5 py-3 font-medium">Name</th>
+                    <th class="px-5 py-3 font-medium">Kind</th>
+                    <th class="px-5 py-3 font-medium">Status</th>
+                    <th class="px-5 py-3 font-medium">Message</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for r in rollout.resources %}
+                <tr>
+                    <td class="px-5 py-3 font-medium font-mono text-gray-900">{{ r.name }}</td>
+                    <td class="px-5 py-3 text-xs font-mono text-gray-500">{{ r.kind }}</td>
+                    <td class="px-5 py-3">
+                        {% if r.status == "succeeded" %}
+                        <span class="inline-flex items-center gap-1 text-xs font-medium text-green-700">
+                            <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                            Succeeded
+                        </span>
+                        {% elif r.status == "in_progress" %}
+                        <span class="inline-flex items-center gap-1 text-xs font-medium text-blue-700">
+                            <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+                            In Progress
+                        </span>
+                        {% elif r.status == "failed" %}
+                        <span class="inline-flex items-center gap-1 text-xs font-medium text-red-700">
+                            <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                            Failed
+                        </span>
+                        {% else %}
+                        <span class="text-xs text-gray-500">{{ r.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-5 py-3 text-xs text-gray-500">{{ r.message }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if rollout.labels | length > 0 %}
+    <h2 class="text-lg font-semibold mt-8 mb-4">Labels</h2>
+    <div class="flex flex-wrap gap-2">
+        {% for label in rollout.labels %}
+        <span class="text-xs font-mono px-2 py-1 rounded bg-gray-100 text-gray-600">{{ label.key }}={{ label.value }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

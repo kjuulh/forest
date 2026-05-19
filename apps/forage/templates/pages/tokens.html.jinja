@@ -1,0 +1,72 @@
+{% extends "base.html.jinja" %}
+{% from "components/timestamp.html.jinja" import timeago as ts %}
+{% from "components/ui.html.jinja" import alert, empty_state %}
+
+{% block content %}
+<section class="app-container pt-12">
+    <div class="mb-8">
+        <h1 class="text-2xl font-bold">Personal Access Tokens</h1>
+    </div>
+
+    {% if created_token %}
+    <div class="mb-6 p-4 bg-green-50 border border-green-200 rounded-md">
+        <p class="text-sm font-medium text-green-800 mb-2">Token created successfully. Copy it now - it won't be shown again.</p>
+        <div class="flex items-center gap-2">
+            <code class="flex-1 px-3 py-2 bg-white border border-green-300 rounded text-sm font-mono break-all">{{ created_token }}</code>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="mb-8 p-6 border border-gray-200 rounded-lg">
+        <h2 class="font-bold mb-4">Create new token</h2>
+        <form method="POST" action="/settings/tokens" class="flex gap-3">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <input
+                type="text"
+                name="name"
+                required
+                placeholder="Token name (e.g. CI/CD)"
+                class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+            <button
+                type="submit"
+                class="px-4 py-2 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800">
+                Create
+            </button>
+        </form>
+    </div>
+
+    {% if tokens %}
+    <div class="border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="text-left px-6 py-3 font-medium">Name</th>
+                    <th class="text-left px-6 py-3 font-medium">Created</th>
+                    <th class="text-left px-6 py-3 font-medium">Last used</th>
+                    <th class="text-left px-6 py-3 font-medium">Expires</th>
+                    <th class="px-6 py-3"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+                {% for token in tokens %}
+                <tr>
+                    <td class="px-6 py-3 font-medium">{{ token.name }}</td>
+                    <td class="px-6 py-3 text-gray-600">{% if token.created_at %}{{ ts(token.created_at) }}{% else %}—{% endif %}</td>
+                    <td class="px-6 py-3 text-gray-600">{% if token.last_used %}{{ ts(token.last_used) }}{% else %}Never{% endif %}</td>
+                    <td class="px-6 py-3 text-gray-600">{% if token.expires_at %}{{ ts(token.expires_at) }}{% else %}Never{% endif %}</td>
+                    <td class="px-6 py-3 text-right">
+                        <form method="POST" action="/settings/tokens/{{ token.token_id }}/delete">
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                            <button type="submit" class="text-red-600 hover:text-red-800 text-sm">Revoke</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    {{ empty_state("No tokens yet.", hint="Create one above to use with the forest CLI.") }}
+    {% endif %}
+</section>
+{% endblock %}

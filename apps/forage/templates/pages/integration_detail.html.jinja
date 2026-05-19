@@ -1,0 +1,165 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="app-container py-12">
+    <div class="mb-8">
+        <a href="/orgs/{{ current_org }}/settings/integrations" class="text-sm text-gray-500 hover:text-gray-700">&larr; All integrations</a>
+    </div>
+
+    {# ── Header ───────────────────────────────────────────────── #}
+    <div class="flex items-start justify-between mb-8">
+        <div class="flex items-start gap-4">
+            <div class="w-12 h-12 rounded-lg border border-gray-200 flex items-center justify-center bg-white shrink-0">
+                {% if integration.integration_type == "webhook" %}
+                <svg class="w-6 h-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                </svg>
+                {% elif integration.integration_type == "slack" %}
+                <svg class="w-6 h-6 text-gray-600" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z"/>
+                </svg>
+                {% endif %}
+            </div>
+            <div>
+                <h1 class="text-2xl font-bold">{{ integration.name }}</h1>
+                <div class="flex items-center gap-2 mt-1">
+                    <span class="text-sm text-gray-500">{{ integration.type_display }}</span>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {{ 'bg-green-50 text-green-700' if integration.enabled else 'bg-gray-100 text-gray-500' }}">
+                        {{ "Active" if integration.enabled else "Paused" }}
+                    </span>
+                </div>
+            </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+            {% if integration.integration_type == "slack" and has_slack_oauth is defined and has_slack_oauth %}
+            <form method="POST" action="/orgs/{{ current_org }}/settings/integrations/{{ integration.id }}/reinstall" class="inline">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <button type="submit" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">
+                    Reinstall
+                </button>
+            </form>
+            {% endif %}
+            <form method="POST" action="/orgs/{{ current_org }}/settings/integrations/{{ integration.id }}/toggle" class="inline">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <input type="hidden" name="enabled" value="{{ 'false' if integration.enabled else 'true' }}">
+                <button type="submit" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">
+                    {{ "Pause" if integration.enabled else "Resume" }}
+                </button>
+            </form>
+            <form method="POST" action="/orgs/{{ current_org }}/settings/integrations/{{ integration.id }}/delete" class="inline" onsubmit="return confirm('Uninstall this integration? This cannot be undone.')">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <button type="submit" class="px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors">
+                    Uninstall
+                </button>
+            </form>
+        </div>
+    </div>
+
+    {% if test_sent is defined and test_sent %}
+    <div class="mb-6 px-4 py-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg">
+        Test notification sent. Check your endpoint for delivery.
+    </div>
+    {% endif %}
+
+    {# ── Configuration ────────────────────────────────────────── #}
+    <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Configuration</h2>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+            {% if config.type_name == "Webhook" %}
+            <div class="px-4 py-3 flex items-center justify-between">
+                <span class="text-sm text-gray-500">Payload URL</span>
+                <span class="text-sm text-gray-900 font-mono">{{ config.detail }}</span>
+            </div>
+            {% if config.has_secret is defined and config.has_secret %}
+            <div class="px-4 py-3 flex items-center justify-between">
+                <span class="text-sm text-gray-500">Signing</span>
+                <span class="text-sm text-gray-900">HMAC-SHA256 enabled</span>
+            </div>
+            {% endif %}
+            {% else %}
+            <div class="px-4 py-3">
+                <span class="text-sm text-gray-900">{{ config.detail }}</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {# ── Events ───────────────────────────────────────────────── #}
+    <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Events</h2>
+        <p class="text-sm text-gray-500 mb-3">Choose which deployment events trigger this integration.</p>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+            {% for rule in rules %}
+            <div class="flex items-center justify-between px-4 py-3">
+                <div>
+                    <span class="text-sm text-gray-700">{{ rule.label }}</span>
+                </div>
+                <form method="POST" action="/orgs/{{ current_org }}/settings/integrations/{{ integration.id }}/rules" class="inline">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <input type="hidden" name="notification_type" value="{{ rule.notification_type }}">
+                    <input type="hidden" name="enabled" value="{{ 'false' if rule.enabled else 'true' }}">
+                    <button type="submit" class="w-9 h-5 rounded-full relative transition-colors {{ 'bg-gray-900' if rule.enabled else 'bg-gray-300' }}" title="{{ 'Disable' if rule.enabled else 'Enable' }} {{ rule.label | lower }}">
+                        <span class="block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-[3px] transition-all {{ 'left-[calc(100%-1.125rem)]' if rule.enabled else 'left-[3px]' }}"></span>
+                    </button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {# ── Recent deliveries ────────────────────────────────────── #}
+    <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Recent deliveries</h2>
+        {% if deliveries | length > 0 %}
+        <div class="border border-gray-200 rounded-lg overflow-hidden">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Notification</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-100">
+                    {% for d in deliveries %}
+                    <tr>
+                        <td class="px-4 py-2 whitespace-nowrap">
+                            {% if d.status == "delivered" %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">Delivered</span>
+                            {% elif d.status == "failed" %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-50 text-red-700">Failed</span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-50 text-yellow-700">Pending</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-2 text-sm text-gray-700 font-mono truncate max-w-[200px]" title="{{ d.notification_id }}">{{ d.notification_id[:12] }}{% if d.notification_id | length > 12 %}&hellip;{% endif %}</td>
+                        <td class="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">{{ d.attempted_at[:19] | replace("T", " ") }} UTC</td>
+                        <td class="px-4 py-2 text-sm text-red-600 truncate max-w-[250px]" title="{{ d.error_message }}">{{ d.error_message | default("—", true) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="border border-gray-200 rounded-lg p-6 text-center">
+            <p class="text-sm text-gray-500">No deliveries yet. Send a test event or wait for a deployment notification.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    {# ── Test ─────────────────────────────────────────────────── #}
+    <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Testing</h2>
+        <div class="border border-gray-200 rounded-lg p-4">
+            <p class="text-sm text-gray-500 mb-3">Send a test <code class="text-xs bg-gray-100 px-1 py-0.5 rounded">release_succeeded</code> event to verify your endpoint is receiving payloads correctly.</p>
+            <form method="POST" action="/orgs/{{ current_org }}/settings/integrations/{{ integration.id }}/test">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <button type="submit" class="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">
+                    Send test event
+                </button>
+            </form>
+        </div>
+    </div>
+</section>
+{% endblock %}

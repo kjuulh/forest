@@ -1,0 +1,102 @@
+{% extends "base.html.jinja" %}
+{% from "components/settings_sidebar.html.jinja" import settings_layout %}
+
+{% block content %}
+{% call settings_layout(org_name, "compute") %}
+    <h2 class="text-lg font-bold mb-6">Compute</h2>
+
+    <p class="text-sm text-gray-500 mb-6">Managed container instances deployed through forage/containers destinations. Pay-as-you-go compute — no cluster setup required.</p>
+
+    {% if instances | length > 0 %}
+    <div class="border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-left text-gray-500">
+                <tr>
+                    <th class="px-5 py-3 font-medium">Project / Destination</th>
+                    <th class="px-5 py-3 font-medium">Image</th>
+                    <th class="px-5 py-3 font-medium">Region</th>
+                    <th class="px-5 py-3 font-medium">Replicas</th>
+                    <th class="px-5 py-3 font-medium">Resources</th>
+                    <th class="px-5 py-3 font-medium">Status</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for inst in instances %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-5 py-3">
+                        {% if inst.project %}
+                        <a href="/orgs/{{ org_name }}/projects/{{ inst.project }}" class="font-medium text-gray-900 hover:text-blue-600">{{ inst.project }}</a>
+                        <span class="text-gray-400">/</span>
+                        <span class="text-sm font-mono text-gray-600">{{ inst.destination }}</span>
+                        {% if inst.environment %}
+                        <span class="ml-1 text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">{{ inst.environment }}</span>
+                        {% endif %}
+                        {% else %}
+                        <span class="font-medium font-mono text-gray-900">{{ inst.resource_name }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-5 py-3 text-gray-600 font-mono text-xs">{{ inst.image }}</td>
+                    <td class="px-5 py-3">
+                        <span class="inline-flex items-center gap-1 text-xs font-mono">
+                            <span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+                            {{ inst.region }}
+                        </span>
+                    </td>
+                    <td class="px-5 py-3 text-gray-600 font-mono">{{ inst.replicas }}</td>
+                    <td class="px-5 py-3 text-xs text-gray-500 font-mono">{{ inst.cpu }} / {{ inst.memory }}</td>
+                    <td class="px-5 py-3">
+                        {% if inst.status == "running" %}
+                        <span class="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
+                            <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                            Running
+                        </span>
+                        {% elif inst.status == "pending" %}
+                        <span class="inline-flex items-center gap-1 text-xs font-medium text-yellow-700 bg-yellow-50 px-2 py-0.5 rounded-full">
+                            <span class="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>
+                            Pending
+                        </span>
+                        {% else %}
+                        <span class="text-xs text-gray-500">{{ inst.status }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="border border-dashed border-gray-300 rounded-lg p-8 text-center">
+        <svg class="mx-auto mb-3 w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
+        <p class="text-sm text-gray-500 mb-2">No compute instances running</p>
+        <p class="text-xs text-gray-400">Create a <a href="/orgs/{{ org_name }}/destinations" class="text-blue-600 hover:underline">forage/containers destination</a> and deploy to get started.</p>
+    </div>
+    {% endif %}
+
+    {% if rollouts | length > 0 %}
+    <h2 class="text-lg font-semibold mt-10 mb-4">Recent Rollouts</h2>
+    <div class="border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-100">
+        {% for rollout in rollouts %}
+        <a href="/orgs/{{ org_name }}/settings/compute/rollouts/{{ rollout.id }}" class="px-5 py-3 flex items-center justify-between hover:bg-gray-50 block">
+            <div class="flex items-center gap-3 min-w-0">
+                {% if rollout.status == "succeeded" %}
+                <span class="w-2 h-2 rounded-full bg-green-500 shrink-0"></span>
+                {% elif rollout.status == "in_progress" %}
+                <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse shrink-0"></span>
+                {% elif rollout.status == "failed" %}
+                <span class="w-2 h-2 rounded-full bg-red-500 shrink-0"></span>
+                {% else %}
+                <span class="w-2 h-2 rounded-full bg-gray-400 shrink-0"></span>
+                {% endif %}
+                <span class="text-sm font-medium font-mono text-gray-900 truncate">{{ rollout.apply_id }}</span>
+                <span class="text-xs text-gray-400">{{ rollout.resources | length }} resource{% if rollout.resources | length != 1 %}s{% endif %}</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-400">{{ rollout.status }}</span>
+                <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+{% endcall %}
+{% endblock %}

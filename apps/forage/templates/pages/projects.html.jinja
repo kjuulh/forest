@@ -1,0 +1,55 @@
+{% extends "base.html.jinja" %}
+{% from "components/timestamp.html.jinja" import timeago as ts %}
+{% from "components/ui.html.jinja" import empty_state %}
+
+{% block content %}
+<section class="app-container pt-12">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold">Projects</h1>
+    </div>
+
+    {% if projects | length > 5 %}
+    <div class="mb-6">
+        <input type="text" id="project-filter" placeholder="Filter projects..." class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" oninput="filterProjects(this.value)">
+    </div>
+    {% endif %}
+
+    {% if projects %}
+    <div class="space-y-2" id="project-list">
+        {% for project in projects %}
+        <a href="/orgs/{{ org_name }}/projects/{{ project }}" class="project-card flex items-center justify-between px-5 py-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:bg-gray-50 transition-colors" data-name="{{ project }}">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded bg-gray-100 flex items-center justify-center shrink-0">
+                    <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                </div>
+                <span class="font-medium">{{ project }}</span>
+            </div>
+            <svg class="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="p-8 border border-gray-200 rounded-lg text-center">
+        <svg class="w-12 h-12 text-gray-300 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+        <p class="text-gray-600 font-medium">No projects yet</p>
+        <p class="text-sm text-gray-400 mt-2 max-w-md mx-auto">Projects are created automatically when you deploy. Install the forest CLI and run your first release.</p>
+        <div class="bg-gray-950 rounded-md p-4 text-sm font-mono text-gray-300 text-left max-w-sm mx-auto mt-4">
+            <pre><span class="text-gray-500"># Install and deploy</span>
+forest init my-project
+forest release create --env dev</pre>
+        </div>
+    </div>
+    {% endif %}
+</section>
+
+{% if projects | length > 5 %}
+<script>
+function filterProjects(query) {
+    var q = query.toLowerCase();
+    document.querySelectorAll('.project-card').forEach(function(card) {
+        card.style.display = card.dataset.name.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+</script>
+{% endif %}
+{% endblock %}

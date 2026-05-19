@@ -1,0 +1,9 @@
+version: v2
+plugins:
+  - remote: buf.build/community/neoeinstein-prost:v0.5.0
+    out: crates/forage-grpc/src/grpc/
+  - remote: buf.build/community/neoeinstein-tonic:v0.5.0
+    out: crates/forage-grpc/src/grpc/
+    opt:
+      - client_mod_attribute=*=cfg(feature = "client")
+      - server_mod_attribute=*=cfg(feature = "server")

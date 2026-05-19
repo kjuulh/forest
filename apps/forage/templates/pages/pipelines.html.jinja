@@ -1,0 +1,125 @@
+{% extends "base.html.jinja" %}
+{% from "components/timestamp.html.jinja" import timeago as ts %}
+
+{% block content %}
+<section class="app-container pt-12">
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <h1 class="text-2xl font-bold">Release Pipelines</h1>
+            <p class="text-sm text-gray-500 mt-1">
+                <a href="/orgs/{{ current_org }}/projects/{{ current_project }}" class="hover:underline">{{ current_project }}</a>
+                &middot; Define multi-stage deployment pipelines as a DAG
+            </p>
+        </div>
+    </div>
+
+    {% if pipelines | length > 0 %}
+    <div class="space-y-3 mb-8">
+        {% for pipeline in pipelines %}
+        <details class="border border-gray-200 rounded-lg overflow-hidden group">
+            <summary class="px-4 py-3 flex items-center gap-3 flex-wrap cursor-pointer list-none hover:bg-gray-50">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                    {% if pipeline.enabled %}
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" title="Enabled"></span>
+                    {% else %}
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-gray-300 shrink-0" title="Disabled"></span>
+                    {% endif %}
+                    <span class="font-medium text-gray-900">{{ pipeline.name }}</span>
+                </div>
+
+                <div class="flex items-center gap-3 text-xs text-gray-500 shrink-0">
+                    {% if pipeline.stages_json %}
+                    <span class="font-mono">{{ pipeline.stage_count }} stage{{ "s" if pipeline.stage_count != 1 }}</span>
+                    {% else %}
+                    <span class="italic text-gray-400">no stages</span>
+                    {% endif %}
+                    {{ ts(pipeline.updated_at) }}
+                </div>
+
+                {% if is_admin %}
+                <div class="flex items-center gap-2 shrink-0" onclick="event.stopPropagation()">
+                    <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/pipelines/{{ pipeline.name }}/toggle">
+                        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                        {% if pipeline.enabled %}
+                        <button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Disable</button>
+                        {% else %}
+                        <input type="hidden" name="enabled" value="true">
+                        <button type="submit" class="text-xs px-2.5 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50">Enable</button>
+                        {% endif %}
+                    </form>
+                    <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/pipelines/{{ pipeline.name }}/delete" onsubmit="return confirm('Delete pipeline &quot;{{ pipeline.name }}&quot;?')">
+                        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                        <button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Delete</button>
+                    </form>
+                </div>
+                {% endif %}
+
+                <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </summary>
+
+            <div class="border-t border-gray-100 px-4 py-3">
+                {% if pipeline.stages_json %}
+                {% if is_admin %}
+                <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/pipelines/{{ pipeline.name }}/update" class="space-y-3">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <pipeline-builder data-target="edit-{{ pipeline.name }}"></pipeline-builder>
+                    <textarea id="edit-{{ pipeline.name }}" name="stages_json" hidden>{{ pipeline.stages_json }}</textarea>
+                    <button type="submit" class="text-xs px-3 py-1.5 rounded bg-gray-900 text-white hover:bg-gray-800">Save Changes</button>
+                </form>
+                {% else %}
+                <pipeline-builder data-target="view-{{ pipeline.name }}" data-readonly="true"></pipeline-builder>
+                <textarea id="view-{{ pipeline.name }}" hidden>{{ pipeline.stages_json }}</textarea>
+                {% endif %}
+                {% else %}
+                {% if is_admin %}
+                <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/pipelines/{{ pipeline.name }}/update" class="space-y-3">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <pipeline-builder data-target="edit-{{ pipeline.name }}"></pipeline-builder>
+                    <textarea id="edit-{{ pipeline.name }}" name="stages_json" hidden></textarea>
+                    <button type="submit" class="text-xs px-3 py-1.5 rounded bg-gray-900 text-white hover:bg-gray-800">Save Changes</button>
+                </form>
+                {% else %}
+                <p class="text-sm text-gray-400 italic">No stages configured yet.</p>
+                {% endif %}
+                {% endif %}
+            </div>
+        </details>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="border border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-500 mb-8">
+        <p class="mb-1">No release pipelines configured.</p>
+        {% if is_admin %}
+        <p class="text-sm">Create one below to define a multi-stage deployment DAG.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if is_admin %}
+    <div class="border border-gray-200 rounded-lg p-6">
+        <h2 class="text-lg font-semibold mb-4">Create Pipeline</h2>
+        <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/pipelines" class="space-y-4">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+
+            <div>
+                <label for="pipeline-name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input type="text" id="pipeline-name" name="name" required placeholder="e.g. deploy-to-production"
+                    class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+                <p class="text-xs text-gray-500 mt-1">A unique identifier for this pipeline.</p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Stages</label>
+                <pipeline-builder data-target="pipeline-stages"></pipeline-builder>
+                <textarea id="pipeline-stages" name="stages_json" hidden></textarea>
+            </div>
+
+            <button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">
+                Create Pipeline
+            </button>
+        </form>
+    </div>
+    {% endif %}
+</section>
+<script src="/static/js/pipeline-builder.js"></script>
+{% endblock %}

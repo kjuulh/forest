@@ -1,0 +1,122 @@
+[tools]
+rust = "latest"
+
+[env]
+_.file = ".env"
+
+# ─── Core Development ──────────────────────────────────────────────
+
+[tasks.develop]
+alias = ["d", "dev"]
+description = "Start the forage development server with postgres"
+depends = ["tailwind:build", "local:up"]
+run = "cargo run -p forage-server"
+
+[tasks.build]
+description = "Build release binary"
+run = "cargo build --release -p forage-server"
+
+[tasks.compile]
+description = "Build entire workspace in release mode"
+run = "cargo build --release"
+
+[tasks.test]
+description = "Run all tests"
+run = "cargo test --workspace"
+
+[tasks.check]
+description = "Run cargo check and clippy"
+run = ["cargo check --workspace", "cargo clippy --workspace -- -D warnings"]
+
+[tasks.fmt]
+description = "Format all code"
+run = "cargo fmt"
+
+[tasks."fmt:check"]
+description = "Check formatting"
+run = "cargo fmt -- --check"
+
+# ─── CI Pipelines ──────────────────────────────────────────────────
+
+[tasks."ci:pr"]
+description = "Run PR pipeline (check, test, build)"
+run = "cargo run -p ci -- pr"
+
+[tasks."ci:main"]
+description = "Run main pipeline (check, test, build, publish)"
+run = "cargo run -p ci -- main"
+
+# ─── Docker ────────────────────────────────────────────────────────
+
+[tasks."docker:build"]
+description = "Build forage-server Docker image"
+run = "docker build -f templates/forage-server.Dockerfile -t forage/forage-server:dev ."
+
+[tasks."docker:publish"]
+description = "Build and publish Docker image with tags"
+run = """
+COMMIT=$(git rev-parse --short HEAD)
+TIMESTAMP=$(date +%Y%m%d%H%M%S)
+REGISTRY=${CI_REGISTRY:-registry.forage.sh}
+IMAGE=${CI_IMAGE_NAME:-forage/forage-server}
+docker build -f templates/forage-server.Dockerfile \
+  -t $REGISTRY/$IMAGE:latest \
+  -t $REGISTRY/$IMAGE:$COMMIT \
+  -t $REGISTRY/$IMAGE:$TIMESTAMP \
+  .
+docker push $REGISTRY/$IMAGE:latest
+docker push $REGISTRY/$IMAGE:$COMMIT
+docker push $REGISTRY/$IMAGE:$TIMESTAMP
+"""
+
+# ─── Local Infrastructure ──────────────────────────────────────────
+
+[tasks."local:up"]
+description = "Start local services (postgres)"
+run = "docker compose -f templates/docker-compose.yaml up -d --wait"
+
+[tasks."local:down"]
+description = "Stop and remove local services"
+run = "docker compose -f templates/docker-compose.yaml down -v"
+
+[tasks."local:logs"]
+description = "Tail local service logs"
+run = "docker compose -f templates/docker-compose.yaml logs -f"
+
+# ─── Database ──────────────────────────────────────────────────────
+
+[tasks."db:shell"]
+description = "Connect to local postgres"
+run = "psql postgresql://forageuser:foragepassword@localhost:5433/forage"
+
+[tasks."db:migrate"]
+description = "Run database migrations"
+run = "cargo sqlx migrate run --source crates/forage-db/src/migrations"
+
+[tasks."db:prepare"]
+description = "Prepare sqlx offline query cache"
+run = "cargo sqlx prepare --workspace"
+
+# ─── Tailwind CSS ──────────────────────────────────────────────────
+
+[tasks."tailwind:build"]
+description = "Build tailwind CSS"
+sources = ["templates/**/*.jinja", "static/css/input.css", "static/js/**/*.js"]
+outputs = ["static/css/style.css"]
+run = "npx @tailwindcss/cli -i static/css/input.css -o static/css/style.css --minify"
+
+[tasks."tailwind:watch"]
+description = "Watch and rebuild tailwind CSS"
+run = "npx @tailwindcss/cli -i static/css/input.css -o static/css/style.css --watch"
+
+# ─── Testing Tools ────────────────────────────────────────────────
+
+[tasks."test:webhook"]
+description = "Start a webhook test server on port 9876"
+run = "python3 tools/webhook-test-server.py"
+
+# ─── Forest Commands ───────────────────────────────────────────────
+
+[tasks."forest:run"]
+description = "Run a forest command"
+run = "forest run {{arg(name='cmd')}}"

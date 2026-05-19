@@ -1,0 +1,78 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="app-container py-12">
+    <div class="flex items-center justify-between mb-8">
+        <h1 class="text-2xl font-bold">Set up two-factor authentication</h1>
+        <a href="/settings/account" class="text-sm text-gray-500 hover:text-gray-700">&larr; Account settings</a>
+    </div>
+
+    <div class="space-y-8">
+
+        {# Step 1: Scan QR code #}
+        <div>
+            <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">
+                Step 1 &mdash; Scan with your authenticator app
+            </h2>
+            <p class="text-sm text-gray-600 mb-4">
+                Use an app such as Google Authenticator, Authy, or 1Password to scan the QR code below.
+            </p>
+
+            <div class="flex flex-col items-start gap-6 sm:flex-row">
+                {# QR code #}
+                {% if qr_svg %}
+                <div class="border border-gray-200 rounded-lg p-4 bg-white flex-shrink-0 qr-container">
+                    {{ qr_svg | safe }}
+                </div>
+                <style>.qr-container svg { width: 200px; height: 200px; display: block; }</style>
+                {% endif %}
+
+                {# Manual entry fallback #}
+                <div class="flex-1">
+                    <p class="text-sm text-gray-600 mb-2">
+                        Can't scan? Enter this key manually in your authenticator app:
+                    </p>
+                    <div class="font-mono text-sm bg-gray-100 rounded-md px-3 py-2 break-all select-all">
+                        {{ secret }}
+                    </div>
+                    <p class="text-xs text-gray-400 mt-2">Time-based one-time password (TOTP), 30-second window</p>
+                </div>
+            </div>
+        </div>
+
+        {# Step 2: Verify #}
+        <div>
+            <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">
+                Step 2 &mdash; Enter the code from your app
+            </h2>
+            <p class="text-sm text-gray-600 mb-4">
+                Once you've added the account, enter the 6-digit code shown in your authenticator app to confirm setup.
+            </p>
+
+            <form method="POST" action="/settings/account/mfa/verify" class="flex gap-2 items-start">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <input type="hidden" name="mfa_id" value="{{ mfa_id }}">
+                <div class="flex-1">
+                    <input
+                        type="text"
+                        name="code"
+                        required
+                        autofocus
+                        autocomplete="one-time-code"
+                        inputmode="numeric"
+                        pattern="[0-9]{6}"
+                        maxlength="6"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-gray-900"
+                        placeholder="000000">
+                </div>
+                <button
+                    type="submit"
+                    class="px-4 py-2 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 whitespace-nowrap">
+                    Enable 2FA
+                </button>
+            </form>
+        </div>
+
+    </div>
+</section>
+{% endblock %}

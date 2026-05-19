@@ -1,0 +1,95 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="app-container pt-12">
+    <div class="mb-8">
+        <div class="flex items-center gap-2 text-sm text-gray-500 mb-2">
+            <a href="/orgs/{{ current_org }}/projects/{{ current_project }}/triggers" class="hover:underline">Triggers</a>
+            <span>&rsaquo;</span>
+            <span>{{ trigger.name }}</span>
+        </div>
+        <h1 class="text-2xl font-bold">Edit Trigger</h1>
+    </div>
+
+    <div class="border border-gray-200 rounded-lg p-6">
+        <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/triggers/{{ trigger.name }}" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+            <p class="text-sm text-gray-500 mb-2">Update filter patterns. Artifacts matching <strong>all</strong> patterns will be auto-released.</p>
+
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Branch pattern</label>
+                    <input type="text" name="branch_pattern" value="{{ trigger.branch_pattern }}" placeholder="e.g. main"
+                        class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Title pattern</label>
+                    <input type="text" name="title_pattern" value="{{ trigger.title_pattern }}" placeholder="e.g. ^Release.*"
+                        class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Author pattern</label>
+                    <input type="text" name="author_pattern" value="{{ trigger.author_pattern }}" placeholder="e.g. ci-bot"
+                        class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Commit message pattern</label>
+                    <input type="text" name="commit_message_pattern" value="{{ trigger.commit_message_pattern }}" placeholder="e.g. ^Merge pull request.*"
+                        class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Source type pattern</label>
+                    <input type="text" name="source_type_pattern" value="{{ trigger.source_type_pattern }}" placeholder="e.g. github-actions"
+                        class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+                </div>
+            </div>
+
+            <hr class="border-gray-200">
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Target environments</label>
+                {% if environments | length > 0 %}
+                <div class="flex flex-wrap gap-2">
+                    {% for env in environments %}
+                    <label class="inline-flex items-center gap-1.5 text-sm border border-gray-200 rounded-md px-3 py-1.5 cursor-pointer hover:bg-gray-50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
+                        <input type="checkbox" name="target_environments" value="{{ env.name }}"
+                            {% if env.name in trigger.target_environments %}checked{% endif %}
+                            class="rounded border-gray-300 text-blue-600">
+                        {{ env.name }}
+                    </label>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-sm text-gray-400">No environments configured.</p>
+                {% endif %}
+            </div>
+
+            {% if pipelines | length > 0 %}
+            <div>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="use-pipeline" name="use_pipeline" value="true"
+                        {% if trigger.use_pipeline %}checked{% endif %}
+                        class="rounded border-gray-300">
+                    <label for="use-pipeline" class="text-sm font-medium text-gray-700">Use release pipeline</label>
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="force-release" name="force_release" value="true"
+                    {% if trigger.force_release %}checked{% endif %}
+                    class="rounded border-gray-300">
+                <label for="force-release" class="text-sm text-gray-700">Force release (skip queue)</label>
+            </div>
+
+            <div class="flex items-center gap-3 pt-2">
+                <button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">
+                    Save Changes
+                </button>
+                <a href="/orgs/{{ current_org }}/projects/{{ current_project }}/triggers" class="text-sm text-gray-500 hover:text-gray-900">Cancel</a>
+            </div>
+        </form>
+    </div>
+</section>
+{% endblock %}

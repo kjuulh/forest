@@ -1,0 +1,7 @@
+target/
+.env
+.git/
+.jj/
+node_modules/
+.claude/
+**/Dockerfile

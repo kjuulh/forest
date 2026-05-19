@@ -1,0 +1,510 @@
+{% extends "base.html.jinja" %}
+{% from "components/timestamp.html.jinja" import timeago as ts %}
+
+{% block content %}
+<section class="app-container pt-12 pb-12">
+    {# ── Breadcrumb + heading ──────────────────────────────────── #}
+    <div class="mb-8">
+        <div class="flex items-center gap-2 text-sm text-gray-500 mb-2">
+            <a href="/orgs/{{ org_name }}/projects/{{ project_name }}" class="hover:text-gray-700">{{ project_name }}</a>
+            <span class="text-gray-300">/</span>
+            <a href="/orgs/{{ org_name }}/projects/{{ project_name }}/releases" class="hover:text-gray-700">Releases</a>
+        </div>
+        <div class="flex items-center gap-3">
+            {# Status dot #}
+            {% if summary_status == "RUNNING" %}
+            <span class="w-3 h-3 rounded-full bg-yellow-400 animate-pulse shrink-0"></span>
+            {% elif summary_status == "QUEUED" %}
+            <span class="w-3 h-3 rounded-full bg-blue-400 shrink-0"></span>
+            {% elif summary_status == "FAILED" %}
+            <span class="w-3 h-3 rounded-full bg-red-500 shrink-0"></span>
+            {% elif summary_status == "SUCCEEDED" %}
+            <span class="w-3 h-3 rounded-full bg-green-500 shrink-0"></span>
+            {% elif summary_status == "TIMED_OUT" %}
+            <span class="w-3 h-3 rounded-full bg-orange-400 shrink-0"></span>
+            {% elif summary_status == "CANCELLED" %}
+            <span class="w-3 h-3 rounded-full bg-gray-400 shrink-0"></span>
+            {% else %}
+            <span class="w-3 h-3 rounded-full bg-gray-300 shrink-0"></span>
+            {% endif %}
+
+            <h1 class="text-2xl font-bold">
+                {% if artifact.commit_message %}{{ artifact.commit_message }}{% else %}{{ artifact.title }}{% endif %}
+            </h1>
+            {% if artifact.version %}
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded text-sm font-medium bg-green-100 text-green-800">{{ artifact.version }}</span>
+            {% endif %}
+        </div>
+        <p class="text-sm font-mono text-gray-400 mt-1">{{ artifact.slug }}</p>
+
+        {# ── Metadata pills ────────────────────────────────────── #}
+        <div class="flex flex-wrap items-center gap-2 mt-3">
+            {% if artifact.branch %}
+            <span class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+                {{ artifact.branch }}
+            </span>
+            {% endif %}
+            {% if artifact.commit_sha %}
+            <span class="inline-flex items-center gap-1.5 text-xs font-mono px-2.5 py-1 rounded-full bg-gray-100 text-gray-600 border border-gray-200">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                {{ artifact.commit_sha[:8] }}
+            </span>
+            {% endif %}
+            {% if artifact.source_type %}
+            <span class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                {% if 'github' in artifact.source_type %}
+                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                {% elif 'gitlab' in artifact.source_type %}
+                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 01-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 014.82 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0118.6 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.51L23 13.45a.84.84 0 01-.35.94z"/></svg>
+                {% else %}
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                {% endif %}
+                {{ artifact.source_type | replace("_", " ") | replace("-", " ") }}
+            </span>
+            {% endif %}
+            {% if artifact.source_user %}
+            <a href="/users/{{ artifact.source_user }}" class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                {{ artifact.source_user }}
+            </a>
+            {% endif %}
+            <span class="text-xs text-gray-400">{{ ts(artifact.created_at) }}</span>
+        </div>
+    </div>
+
+    {% if artifact.description and not artifact.description is startingwith("Branch:") %}
+    <div class="mb-8">
+        <p class="text-gray-700">{{ artifact.description }}</p>
+    </div>
+    {% endif %}
+
+    {# ── Deploy action ─────────────────────────────────────────── #}
+    {% if is_admin %}
+    <div class="mb-8">
+        <details class="border border-gray-200 rounded-lg group">
+            <summary class="px-4 py-3 flex items-center gap-2 text-sm cursor-pointer list-none hover:bg-gray-50">
+                <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                <span class="font-medium text-gray-700">Deploy this release</span>
+                <svg class="w-3 h-3 text-gray-400 ml-auto transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </summary>
+            <div class="px-4 py-4 border-t border-gray-100">
+                <form method="post" action="/orgs/{{ org_name }}/projects/{{ project_name }}/deploy" class="space-y-4">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <input type="hidden" name="artifact_id" value="{{ artifact_id }}">
+
+                    {% if has_active_pipeline %}
+                    <div class="flex items-center gap-3 p-3 bg-purple-50 border border-purple-200 rounded-md">
+                        <input type="checkbox" id="use-pipeline" name="use_pipeline" value="true" checked class="rounded border-gray-300 text-purple-600 focus:ring-purple-500">
+                        <label for="use-pipeline" class="text-sm text-purple-800">
+                            Use pipeline <span class="text-purple-600 text-xs">(follows the configured multi-stage deployment pipeline)</span>
+                        </label>
+                    </div>
+                    {% endif %}
+
+                    <div id="env-select">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                        <select name="environment" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+                            <option value="">All environments (pipeline decides)</option>
+                            {% for env in environments %}
+                            <option value="{{ env.name }}">{{ env.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <p class="text-xs text-gray-500 mt-1">Leave empty when using a pipeline — it will deploy to all configured stages.</p>
+                    </div>
+
+                    <button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">
+                        Deploy
+                    </button>
+                </form>
+            </div>
+        </details>
+    </div>
+    {% endif %}
+
+    {# ── Pipeline stages ───────────────────────────────────────── #}
+    {% if has_pipeline and pipeline_stages | length > 0 %}
+    <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-900 mb-3">Pipeline</h2>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+            {% for stage in pipeline_stages %}
+            <div class="px-4 py-3 flex items-center gap-3 text-sm {{ 'opacity-50' if stage.status == 'PENDING' else '' }}">
+                {# Status icon #}
+                {% if stage.status == "SUCCEEDED" %}
+                <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                {% elif stage.status == "RUNNING" %}
+                <span class="w-4 h-4 shrink-0 flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse"></span></span>
+                {% elif stage.status == "QUEUED" %}
+                <svg class="w-4 h-4 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                {% elif stage.status == "FAILED" %}
+                <svg class="w-4 h-4 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                {% elif stage.status == "AWAITING_APPROVAL" or (stage.stage_type == "plan" and (stage.approval_status == "AWAITINGAPPROVAL" or stage.approval_status == "AWAITING_APPROVAL")) %}
+                <svg class="w-4 h-4 text-purple-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                {% else %}
+                <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/></svg>
+                {% endif %}
+
+                {# Stage label #}
+                {% if stage.stage_type == "deploy" %}
+                <span class="text-sm {{ 'text-gray-700' if stage.status == 'SUCCEEDED' else 'text-yellow-700' if stage.status == 'RUNNING' else 'text-red-700' if stage.status == 'FAILED' else 'text-gray-400' }}">
+                    {% if stage.status == "SUCCEEDED" %}Deployed to{% elif stage.status == "RUNNING" %}Deploying to{% elif stage.status == "QUEUED" %}Queued for{% elif stage.status == "FAILED" %}Failed on{% elif stage.status == "TIMED_OUT" %}Timed out on{% elif stage.status == "CANCELLED" %}Cancelled{% else %}Deploy to{% endif %}
+                </span>
+                <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full {% if 'prod' in stage.environment and 'preprod' not in stage.environment %}bg-pink-100 text-pink-800{% elif 'preprod' in stage.environment or 'pre-prod' in stage.environment %}bg-orange-100 text-orange-800{% elif 'stag' in stage.environment %}bg-yellow-100 text-yellow-800{% elif 'dev' in stage.environment %}bg-violet-100 text-violet-800{% else %}bg-gray-100 text-gray-700{% endif %}">
+                    {{ stage.environment }}
+                </span>
+                {% elif stage.stage_type == "wait" %}
+                <span class="text-sm {{ 'text-gray-700' if stage.status == 'SUCCEEDED' else 'text-yellow-700' if stage.status == 'RUNNING' else 'text-gray-400' }}">
+                    {% if stage.status == "SUCCEEDED" %}Waited{% elif stage.status == "RUNNING" %}Waiting{% elif stage.status == "FAILED" %}Wait failed{% elif stage.status == "CANCELLED" %}Wait cancelled{% else %}Wait{% endif %}
+                    {% if stage.duration_seconds %}{{ stage.duration_seconds }}s{% endif %}
+                </span>
+                {% elif stage.stage_type == "plan" %}
+                {% set plan_awaiting = stage.approval_status == "AWAITINGAPPROVAL" or stage.approval_status == "AWAITING_APPROVAL" or stage.status == "AWAITING_APPROVAL" %}
+                <span class="text-sm {{ 'text-purple-700' if plan_awaiting else 'text-gray-700' if stage.status == 'SUCCEEDED' else 'text-yellow-700' if stage.status == 'RUNNING' else 'text-red-700' if stage.status == 'FAILED' else 'text-gray-400' }}">
+                    {% if stage.status == "SUCCEEDED" %}Plan approved{% elif plan_awaiting %}Awaiting plan approval{% elif stage.status == "RUNNING" %}Planning{% elif stage.status == "FAILED" %}Plan failed{% elif stage.status == "CANCELLED" %}Plan cancelled{% else %}Plan{% endif %}
+                </span>
+                <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full {% if 'prod' in stage.environment and 'preprod' not in stage.environment %}bg-pink-100 text-pink-800{% elif 'preprod' in stage.environment or 'pre-prod' in stage.environment %}bg-orange-100 text-orange-800{% elif 'stag' in stage.environment %}bg-yellow-100 text-yellow-800{% elif 'dev' in stage.environment %}bg-violet-100 text-violet-800{% else %}bg-gray-100 text-gray-700{% endif %}">
+                    {{ stage.environment }}
+                </span>
+                {% if plan_awaiting and release_intent_id %}
+                <div class="flex items-center gap-2 ml-auto">
+                    <form method="post" action="/api/orgs/{{ org_name }}/projects/{{ project_name }}/plan-stages/{{ stage.id }}/approve" class="inline">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="release_intent_id" value="{{ release_intent_id }}">
+                        <input type="hidden" name="redirect_to" value="/orgs/{{ org_name }}/projects/{{ project_name }}/releases/{{ artifact.slug }}">
+                        <button type="submit" class="text-xs px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors">Approve plan</button>
+                    </form>
+                    <form method="post" action="/api/orgs/{{ org_name }}/projects/{{ project_name }}/plan-stages/{{ stage.id }}/reject" class="inline" onsubmit="return confirm('Reject this plan?')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="release_intent_id" value="{{ release_intent_id }}">
+                        <input type="hidden" name="redirect_to" value="/orgs/{{ org_name }}/projects/{{ project_name }}/releases/{{ artifact.slug }}">
+                        <button type="submit" class="text-xs px-3 py-1.5 rounded-md border border-red-300 text-red-600 hover:bg-red-50 transition-colors">Reject</button>
+                    </form>
+                </div>
+                {% endif %}
+                {% endif %}
+
+                {# Elapsed time #}
+                {% if stage.started_at %}
+                <span class="text-xs text-gray-400 tabular-nums">{{ ts(stage.started_at) }}</span>
+                {% endif %}
+
+                {# Error message #}
+                {% if stage.error_message %}
+                <span class="text-xs text-red-600 ml-auto">{{ stage.error_message }}</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {# Pipeline progress #}
+        {% set ns = namespace(done=0, total=0) %}
+        {% for stage in pipeline_stages %}
+            {% set ns.total = ns.total + 1 %}
+            {% if stage.status == "SUCCEEDED" %}{% set ns.done = ns.done + 1 %}{% endif %}
+        {% endfor %}
+        <p class="text-xs text-gray-400 mt-2">{{ ns.done }}/{{ ns.total }} stages complete</p>
+    </div>
+    {% elif has_pipeline %}
+    <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-900 mb-3">Pipeline</h2>
+        <div class="flex items-center gap-2 text-sm text-gray-500 p-4 border border-gray-200 rounded-lg">
+            <svg class="w-4 h-4 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span>Pipeline configured — waiting for release to be triggered.</span>
+        </div>
+    </div>
+    {% endif %}
+
+    {# ── Policy evaluations (approval, soak, branch) ──────────── #}
+    {% if policy_evaluations | length > 0 %}
+    {% set pns = namespace(passed=0, total=0, pending=0) %}
+    {% for eval in policy_evaluations %}
+        {% set pns.total = pns.total + 1 %}
+        {% if eval.passed %}
+            {% set pns.passed = pns.passed + 1 %}
+        {% else %}
+            {% set pns.pending = pns.pending + 1 %}
+        {% endif %}
+    {% endfor %}
+    <div class="mb-8">
+        <div class="flex items-center gap-3 mb-3">
+            <h2 class="text-sm font-semibold text-gray-900">Policy Requirements</h2>
+            {% if pns.passed == pns.total %}
+            <span class="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                {{ pns.passed }}/{{ pns.total }} passed
+            </span>
+            {% else %}
+            <span class="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                {{ pns.passed }}/{{ pns.total }} passed
+            </span>
+            {% endif %}
+        </div>
+
+        {# ── Pending / failed policies (expanded) ──────────────── #}
+        {% if pns.pending > 0 %}
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100 mb-3">
+            {% for eval in policy_evaluations %}
+            {% if not eval.passed %}
+            <div class="px-4 py-3">
+                <div class="flex items-center gap-3 text-sm">
+                    <svg class="w-4 h-4 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+
+                    {% if eval.policy_type == "approval" %}
+                    <span class="bg-emerald-100 text-emerald-700 text-xs font-medium px-1.5 py-0.5 rounded">Approval</span>
+                    {% elif eval.policy_type == "soak_time" %}
+                    <span class="bg-indigo-100 text-indigo-700 text-xs font-medium px-1.5 py-0.5 rounded">Soak Time</span>
+                    {% elif eval.policy_type == "branch_restriction" %}
+                    <span class="bg-orange-100 text-orange-700 text-xs font-medium px-1.5 py-0.5 rounded">Branch</span>
+                    {% endif %}
+
+                    <span class="text-gray-600">{{ eval.policy_name }}</span>
+                    <span class="text-xs text-gray-400 ml-auto">{{ eval.reason }}</span>
+                </div>
+
+                {# ── Approval UI ──────────────────────────────── #}
+                {% if eval.policy_type == "approval" and eval.approval_state %}
+                <div class="mt-3 ml-7">
+                    <div class="flex items-center gap-2 text-xs text-gray-500 mb-2">
+                        <span class="font-medium">{{ eval.approval_state.current_approvals }}/{{ eval.approval_state.required_approvals }} approvals</span>
+                    </div>
+
+                    {% if eval.approval_state.decisions | length > 0 %}
+                    <div class="space-y-1 mb-3">
+                        {% for d in eval.approval_state.decisions %}
+                        <div class="flex items-center gap-2 text-xs">
+                            {% if d.decision == "approved" %}
+                            <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                            <span class="text-green-700 font-medium">{{ d.username }}</span>
+                            <span class="text-gray-400">approved</span>
+                            {% else %}
+                            <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                            <span class="text-red-700 font-medium">{{ d.username }}</span>
+                            <span class="text-gray-400">rejected</span>
+                            {% endif %}
+                            {% if d.comment %}<span class="text-gray-400">— {{ d.comment }}</span>{% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    {% if is_release_author and not is_admin %}
+                    <p class="text-xs text-gray-500 italic">You cannot approve your own release.</p>
+                    {% else %}
+                    <div class="flex items-center gap-2">
+                        {% if not is_release_author %}
+                        <form method="post" action="/orgs/{{ org_name }}/projects/{{ project_name }}/releases/{{ artifact.slug }}/approve" class="inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <input type="hidden" name="release_intent_id" value="{{ release_intent_id }}">
+                            <input type="hidden" name="target_environment" value="{{ eval.target_environment }}">
+                            <button type="submit" class="text-xs px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors">Approve</button>
+                        </form>
+                        {% endif %}
+                        {% if is_admin %}
+                        <form method="post" action="/orgs/{{ org_name }}/projects/{{ project_name }}/releases/{{ artifact.slug }}/approve" class="inline" onsubmit="return confirm('Admin bypass — skip remaining approvals?')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <input type="hidden" name="release_intent_id" value="{{ release_intent_id }}">
+                            <input type="hidden" name="target_environment" value="{{ eval.target_environment }}">
+                            <input type="hidden" name="force_bypass" value="true">
+                            <button type="submit" class="text-xs px-3 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors">Bypass (Admin)</button>
+                        </form>
+                        {% endif %}
+                        <form method="post" action="/orgs/{{ org_name }}/projects/{{ project_name }}/releases/{{ artifact.slug }}/reject" class="inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <input type="hidden" name="release_intent_id" value="{{ release_intent_id }}">
+                            <input type="hidden" name="target_environment" value="{{ eval.target_environment }}">
+                            <button type="submit" class="text-xs px-3 py-1.5 rounded-md border border-red-300 text-red-600 hover:bg-red-50 transition-colors">Reject</button>
+                        </form>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {# ── Passed policies (collapsed) ───────────────────────── #}
+        {% if pns.passed > 0 %}
+        <details class="border border-gray-200 rounded-lg group">
+            <summary class="px-4 py-2.5 flex items-center gap-2 text-sm text-gray-500 cursor-pointer list-none hover:bg-gray-50">
+                <svg class="w-3 h-3 text-gray-400 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                {{ pns.passed }} passed polic{{ "y" if pns.passed == 1 else "ies" }}
+            </summary>
+            <div class="divide-y divide-gray-100 border-t border-gray-100">
+                {% for eval in policy_evaluations %}
+                {% if eval.passed %}
+                <div class="px-4 py-2.5 flex items-center gap-3 text-sm">
+                    <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+
+                    {% if eval.policy_type == "approval" %}
+                    <span class="bg-emerald-100 text-emerald-700 text-xs font-medium px-1.5 py-0.5 rounded">Approval</span>
+                    {% elif eval.policy_type == "soak_time" %}
+                    <span class="bg-indigo-100 text-indigo-700 text-xs font-medium px-1.5 py-0.5 rounded">Soak Time</span>
+                    {% elif eval.policy_type == "branch_restriction" %}
+                    <span class="bg-orange-100 text-orange-700 text-xs font-medium px-1.5 py-0.5 rounded">Branch</span>
+                    {% endif %}
+
+                    <span class="text-gray-600">{{ eval.policy_name }}</span>
+                    <span class="text-xs text-gray-400 ml-auto">{{ eval.reason }}</span>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </details>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# ── Destinations with status ──────────────────────────────── #}
+    {% if destinations | length > 0 or configured_destinations | length > 0 %}
+    <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-900 mb-3">Destinations</h2>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+            {% for dest in destinations %}
+            <div class="px-4 py-3 flex items-center gap-3 text-sm">
+                {# Status icon #}
+                {% if dest.status == "SUCCEEDED" %}
+                <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                {% elif dest.status == "RUNNING" or dest.status == "ASSIGNED" %}
+                <span class="w-4 h-4 shrink-0 flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse"></span></span>
+                {% elif dest.status == "QUEUED" %}
+                <svg class="w-4 h-4 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                {% elif dest.status == "FAILED" %}
+                <svg class="w-4 h-4 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                {% else %}
+                <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                {% endif %}
+
+                {# Environment badge #}
+                <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full {% if 'prod' in dest.environment and 'preprod' not in dest.environment %}bg-pink-100 text-pink-800{% elif 'preprod' in dest.environment or 'pre-prod' in dest.environment %}bg-orange-100 text-orange-800{% elif 'stag' in dest.environment %}bg-yellow-100 text-yellow-800{% elif 'dev' in dest.environment %}bg-violet-100 text-violet-800{% else %}bg-gray-100 text-gray-700{% endif %}">
+                    {{ dest.environment }}
+                </span>
+
+                <span class="text-gray-700">{{ dest.name }}</span>
+
+                {# Status label #}
+                {% if dest.status == "SUCCEEDED" %}
+                <span class="text-xs text-green-600">Deployed</span>
+                {% elif dest.status == "RUNNING" %}
+                <span class="text-xs text-yellow-600">Deploying</span>
+                {% elif dest.status == "QUEUED" %}
+                <span class="text-xs text-blue-600">Queued{% if dest.queue_position %} #{{ dest.queue_position }}{% endif %}</span>
+                {% elif dest.status == "FAILED" %}
+                <span class="text-xs text-red-600">Failed</span>
+                {% elif dest.status == "TIMED_OUT" %}
+                <span class="text-xs text-orange-600">Timed out</span>
+                {% elif dest.status == "CANCELLED" %}
+                <span class="text-xs text-gray-500">Cancelled</span>
+                {% endif %}
+
+                {# Error message #}
+                {% if dest.error_message %}
+                <span class="text-xs text-red-600 truncate ml-auto max-w-xs" title="{{ dest.error_message }}">{{ dest.error_message }}</span>
+                {% endif %}
+
+                {# Timestamp #}
+                {% if dest.completed_at %}
+                <time class="text-xs text-gray-400 ml-auto tabular-nums">{{ ts(dest.completed_at) }}</time>
+                {% elif dest.started_at %}
+                <time class="text-xs text-gray-400 ml-auto tabular-nums">{{ ts(dest.started_at) }}</time>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+
+        {# Show configured destinations that don't have live state yet #}
+        {% if configured_destinations | length > 0 and destinations | length == 0 %}
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+            {% for cd in configured_destinations %}
+            <div class="px-4 py-3 flex items-center gap-3 text-sm">
+                <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/></svg>
+                <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full {% if 'prod' in cd.environment and 'preprod' not in cd.environment %}bg-pink-100 text-pink-800{% elif 'preprod' in cd.environment or 'pre-prod' in cd.environment %}bg-orange-100 text-orange-800{% elif 'stag' in cd.environment %}bg-yellow-100 text-yellow-800{% elif 'dev' in cd.environment %}bg-violet-100 text-violet-800{% else %}bg-gray-100 text-gray-700{% endif %}">
+                    {{ cd.environment }}
+                </span>
+                <span class="text-gray-700">{{ cd.name }}</span>
+                <span class="text-xs text-gray-400">Not deployed</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# ── Logs ──────────────────────────────────────────────────── #}
+    {% if has_release_intents %}
+    <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-900 mb-3">Logs</h2>
+        <release-logs url="/api/orgs/{{ org_name }}/projects/{{ project_name }}/releases/{{ artifact.slug }}/logs"></release-logs>
+    </div>
+    {% endif %}
+
+    {# ── Spec (forest.cue) ──────────────────────────────────────── #}
+    {% if artifact_spec %}
+    <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-900 mb-3">Spec</h2>
+        <spec-viewer content="{{ artifact_spec | e }}" filename="forest.cue"></spec-viewer>
+    </div>
+    {% endif %}
+
+    {# ── Details ───────────────────────────────────────────────── #}
+    {% if artifact.commit_message or artifact.repo_url or artifact.source_email or artifact.run_url %}
+    <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-900 mb-3">Details</h2>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+            {% if artifact.commit_message %}
+            <div class="px-4 py-3 flex items-center gap-3 text-sm">
+                <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+                <span class="text-gray-700">{{ artifact.commit_message }}</span>
+            </div>
+            {% endif %}
+            {% if artifact.repo_url %}
+            <div class="px-4 py-3 flex items-center gap-3 text-sm">
+                <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                <a href="{{ artifact.repo_url }}" class="text-blue-600 hover:underline" target="_blank" rel="noopener">{{ artifact.repo_url }}</a>
+            </div>
+            {% endif %}
+            {% if artifact.source_email %}
+            <div class="px-4 py-3 flex items-center gap-3 text-sm">
+                <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                <span class="text-gray-500">{{ artifact.source_email }}</span>
+            </div>
+            {% endif %}
+            {% if artifact.run_url %}
+            <div class="px-4 py-3 flex items-center gap-3 text-sm">
+                <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <a href="{{ artifact.run_url }}" class="text-blue-600 hover:underline" target="_blank" rel="noopener">View CI run</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {# ── Links ─────────────────────────────────────────────────── #}
+    {% if artifact.web or artifact.pr %}
+    <div class="mb-8">
+        <h2 class="text-sm font-semibold text-gray-900 mb-3">Links</h2>
+        <div class="flex gap-3">
+            {% if artifact.web %}
+            <a href="{{ artifact.web }}" class="inline-flex items-center px-3 py-1.5 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50" target="_blank" rel="noopener">
+                <svg class="w-4 h-4 mr-1.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                Web
+            </a>
+            {% endif %}
+            {% if artifact.pr %}
+            <a href="{{ artifact.pr }}" class="inline-flex items-center px-3 py-1.5 border border-gray-200 rounded-md text-sm text-gray-700 hover:bg-gray-50" target="_blank" rel="noopener">
+                <svg class="w-4 h-4 mr-1.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                Pull request
+            </a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="text-sm text-gray-500">
+        <p>Created {{ ts(artifact.created_at) }}</p>
+    </div>
+</section>
+<script src="/static/js/components/forage-components.js"></script>
+{% endblock %}

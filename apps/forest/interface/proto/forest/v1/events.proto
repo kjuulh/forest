@@ -1,0 +1,119 @@
+syntax = "proto3";
+
+package forest.v1;
+
+// ── Event streaming ───────────────────────────────────────────────
+
+service EventService {
+  // Ephemeral server-streaming subscription. Client manages its own cursor.
+  rpc Subscribe(SubscribeEventsRequest) returns (stream OrgEvent);
+
+  // Durable subscription: resumes from the subscription's persisted cursor.
+  // Events are streamed, and the cursor is advanced as events are sent.
+  // Client should call AcknowledgeEvents to confirm processing.
+  rpc SubscribeDurable(SubscribeDurableRequest) returns (stream OrgEvent);
+
+  // Acknowledge that events up to (and including) the given sequence have
+  // been processed. Advances the subscription's cursor. Idempotent.
+  rpc AcknowledgeEvents(AcknowledgeEventsRequest) returns (AcknowledgeEventsResponse);
+}
+
+message SubscribeEventsRequest {
+  string organisation = 1;
+  string project = 2;                 // optional — empty means all projects in org
+  repeated string resource_types = 3; // optional filter: "release", "destination", etc.
+  repeated string actions = 4;        // optional filter: "created", "updated", etc.
+  int64 since_sequence = 5;           // 0 = latest only, >0 = replay from that sequence
+}
+
+message SubscribeDurableRequest {
+  string organisation = 1;
+  string subscription_name = 2;       // the registered subscription name
+}
+
+message AcknowledgeEventsRequest {
+  string organisation = 1;
+  string subscription_name = 2;
+  int64 sequence = 3;                 // advance cursor to this sequence
+}
+
+message AcknowledgeEventsResponse {
+  int64 cursor = 1;                   // the new cursor value
+}
+
+message OrgEvent {
+  int64 sequence = 1;           // monotonic cursor — client stores this for reconnect
+  string event_id = 2;          // UUID, dedup key
+  string timestamp = 3;         // RFC 3339
+  string organisation = 4;
+  string project = 5;           // empty for org-level events
+  string resource_type = 6;     // "release", "destination", "environment", "pipeline", "artifact", "policy", "app", "organisation"
+  string action = 7;            // "created", "updated", "deleted", "status_changed"
+  string resource_id = 8;       // ID of the changed resource
+  map<string, string> metadata = 9; // lightweight context (e.g. "status" → "SUCCEEDED")
+}
+
+// ── Subscription management ───────────────────────────────────────
+
+service EventSubscriptionService {
+  rpc CreateEventSubscription(CreateEventSubscriptionRequest) returns (CreateEventSubscriptionResponse);
+  rpc UpdateEventSubscription(UpdateEventSubscriptionRequest) returns (UpdateEventSubscriptionResponse);
+  rpc DeleteEventSubscription(DeleteEventSubscriptionRequest) returns (DeleteEventSubscriptionResponse);
+  rpc ListEventSubscriptions(ListEventSubscriptionsRequest) returns (ListEventSubscriptionsResponse);
+}
+
+message EventSubscription {
+  string id = 1;
+  string organisation = 2;
+  string name = 3;
+  repeated string resource_types = 4;
+  repeated string actions = 5;
+  repeated string projects = 6;
+  string status = 7;                  // "active", "paused"
+  int64 cursor = 8;                   // last acknowledged sequence
+  string created_at = 9;
+  string updated_at = 10;
+}
+
+message CreateEventSubscriptionRequest {
+  string organisation = 1;
+  string name = 2;
+  repeated string resource_types = 3; // empty = all
+  repeated string actions = 4;        // empty = all
+  repeated string projects = 5;       // empty = all projects in org
+}
+
+message CreateEventSubscriptionResponse {
+  EventSubscription subscription = 1;
+}
+
+message UpdateEventSubscriptionRequest {
+  string organisation = 1;
+  string name = 2;
+  optional string status = 3;         // "active" or "paused"
+  // To update filters, set update_filters = true and provide new values.
+  // Empty arrays mean "all" (no filter).
+  bool update_filters = 4;
+  repeated string resource_types = 5;
+  repeated string actions = 6;
+  repeated string projects = 7;
+}
+
+message UpdateEventSubscriptionResponse {
+  EventSubscription subscription = 1;
+}
+
+message DeleteEventSubscriptionRequest {
+  string organisation = 1;
+  string name = 2;
+}
+
+message DeleteEventSubscriptionResponse {}
+
+message ListEventSubscriptionsRequest {
+  string organisation = 1;
+}
+
+message ListEventSubscriptionsResponse {
+  repeated EventSubscription subscriptions = 1;
+}

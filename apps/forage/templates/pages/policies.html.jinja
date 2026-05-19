@@ -1,0 +1,213 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="app-container pt-12">
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <h1 class="text-2xl font-bold">Deployment Policies</h1>
+            <p class="text-sm text-gray-500 mt-1">
+                <a href="/orgs/{{ current_org }}/projects/{{ current_project }}" class="hover:underline">{{ current_project }}</a>
+                &middot; Gate deployments with soak times, branch restrictions, and approvals
+            </p>
+        </div>
+    </div>
+
+    {% if policies | length > 0 %}
+    <div class="space-y-3 mb-8">
+        {% for policy in policies %}
+        <div class="border border-gray-200 rounded-lg overflow-hidden">
+            <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                    {% if policy.enabled %}
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" title="Enabled"></span>
+                    {% else %}
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-gray-300 shrink-0" title="Disabled"></span>
+                    {% endif %}
+                    <span class="font-medium text-gray-900">{{ policy.name }}</span>
+                </div>
+
+                <div class="flex items-center gap-1.5 text-xs text-gray-500 flex-wrap">
+                    {% if policy.policy_type == "soak_time" %}
+                    <span class="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">Soak Time</span>
+                    <code class="bg-gray-100 px-1.5 py-0.5 rounded">{{ policy.config.source_environment }}</code>
+                    <span class="text-gray-300">&#8594;</span>
+                    <code class="bg-gray-100 px-1.5 py-0.5 rounded">{{ policy.config.target_environment }}</code>
+                    <span class="text-gray-400">&middot;</span>
+                    <span>{{ policy.config.duration_human }}</span>
+                    {% elif policy.policy_type == "branch_restriction" %}
+                    <span class="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">Branch Restriction</span>
+                    <code class="bg-gray-100 px-1.5 py-0.5 rounded">{{ policy.config.branch_pattern }}</code>
+                    <span class="text-gray-300">&#8594;</span>
+                    <code class="bg-gray-100 px-1.5 py-0.5 rounded">{{ policy.config.target_environment }}</code>
+                    {% elif policy.policy_type == "approval" %}
+                    <span class="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">Approval Required</span>
+                    <code class="bg-gray-100 px-1.5 py-0.5 rounded">{{ policy.config.target_environment }}</code>
+                    <span class="text-gray-400">&middot;</span>
+                    <span>{{ policy.config.required_approvals }} approval{{ 's' if policy.config.required_approvals != 1 }}</span>
+                    {% endif %}
+                </div>
+
+                {% if is_admin %}
+                <div class="flex items-center gap-2 shrink-0">
+                    <a href="/orgs/{{ current_org }}/projects/{{ current_project }}/policies/{{ policy.name }}" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Edit</a>
+                    <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/policies/{{ policy.name }}/toggle">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        {% if policy.enabled %}
+                        <button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Disable</button>
+                        {% else %}
+                        <input type="hidden" name="enabled" value="true">
+                        <button type="submit" class="text-xs px-2.5 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50">Enable</button>
+                        {% endif %}
+                    </form>
+                    <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/policies/{{ policy.name }}/delete" onsubmit="return confirm('Delete policy &quot;{{ policy.name }}&quot;?')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Delete</button>
+                    </form>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="border border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-500 mb-8">
+        <p class="mb-1">No deployment policies configured.</p>
+        {% if is_admin %}
+        <p class="text-sm">Create one below to gate deployments with soak times, branch restrictions, or approvals.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if is_admin %}
+    <div class="border border-gray-200 rounded-lg p-6">
+        <h2 class="text-lg font-semibold mb-4">Create Policy</h2>
+        <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/policies" class="space-y-4" id="policy-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+            <div>
+                <label for="policy-name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input type="text" id="policy-name" name="name" required placeholder="e.g. staging-soak-30m"
+                    class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+            </div>
+
+            <div>
+                <label for="policy-type" class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                <select id="policy-type" name="policy_type"
+                    class="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900">
+                    <option value="soak_time">Soak Time</option>
+                    <option value="branch_restriction">Branch Restriction</option>
+                    <option value="approval">Approval Required</option>
+                </select>
+                <p class="text-xs text-gray-500 mt-1" id="policy-type-desc">
+                    Require an artifact to succeed in a source environment for a duration before deploying to target.
+                </p>
+            </div>
+
+            {# Soak Time fields #}
+            <div id="soak-time-fields">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Source environment</label>
+                        <select name="source_environment" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+                            {% for env in environments %}
+                            <option value="{{ env.name }}">{{ env.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                        <select name="target_environment" id="soak-target-env" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+                            {% for env in environments %}
+                            <option value="{{ env.name }}">{{ env.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Soak duration (seconds)</label>
+                    <input type="number" name="duration_seconds" min="1" placeholder="1800"
+                        class="w-48 border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+                    <p class="text-xs text-gray-500 mt-1">e.g. 1800 = 30 minutes, 3600 = 1 hour</p>
+                </div>
+            </div>
+
+            {# Branch Restriction fields #}
+            <div id="branch-restriction-fields" class="hidden">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Branch pattern</label>
+                        <input type="text" name="branch_pattern" placeholder="e.g. main"
+                            class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                        <select name="target_environment" id="branch-target-env" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+                            {% for env in environments %}
+                            <option value="{{ env.name }}">{{ env.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            {# Approval fields #}
+            <div id="approval-fields" class="hidden">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                        <select name="target_environment" id="approval-target-env" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+                            {% for env in environments %}
+                            <option value="{{ env.name }}">{{ env.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Required approvals</label>
+                        <input type="number" name="required_approvals" min="1" value="1" placeholder="1"
+                            class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+                        <p class="text-xs text-gray-500 mt-1">Number of distinct approvals needed before deployment proceeds.</p>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">
+                Create Policy
+            </button>
+        </form>
+    </div>
+
+    <script>
+    (function() {
+        const typeSelect = document.getElementById('policy-type');
+        const sections = {
+            soak_time: document.getElementById('soak-time-fields'),
+            branch_restriction: document.getElementById('branch-restriction-fields'),
+            approval: document.getElementById('approval-fields'),
+        };
+        const desc = document.getElementById('policy-type-desc');
+
+        const descriptions = {
+            soak_time: 'Require an artifact to succeed in a source environment for a duration before deploying to target.',
+            branch_restriction: 'Only allow deployments to the target environment from a specific branch pattern.',
+            approval: 'Require one or more team members to approve before deploying to the target environment.',
+        };
+
+        function toggle() {
+            const v = typeSelect.value;
+            for (const [key, el] of Object.entries(sections)) {
+                const active = key === v;
+                el.classList.toggle('hidden', !active);
+                el.querySelectorAll('input, select').forEach(function(inp) {
+                    inp.disabled = !active;
+                });
+            }
+            desc.textContent = descriptions[v] || '';
+        }
+
+        typeSelect.addEventListener('change', toggle);
+        toggle();
+    })();
+    </script>
+    {% endif %}
+</section>
+{% endblock %}

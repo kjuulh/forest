@@ -1,0 +1,13 @@
+mod account_tests;
+mod auth_tests;
+mod integration_tests;
+mod nats_tests;
+mod pages_tests;
+mod platform_tests;
+mod slack_tests;
+mod token_tests;
+mod email_verification_tests;
+mod magic_link_tests;
+mod oauth_tests;
+mod registry_tests;
+mod webhook_delivery_tests;

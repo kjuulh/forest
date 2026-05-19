@@ -1,0 +1,118 @@
+@import "tailwindcss";
+@source "../../templates";
+
+/* ── App content container — single source of truth for page width ──── */
+@utility app-container {
+  max-width: 56rem; /* same as max-w-4xl */
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* ── Scrollbar-hidden utility for tab navigation ──────────────────────── */
+@utility scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ── Mobile/Desktop visibility ────────────────────────────────────────── */
+@utility mobile-only {
+  display: none;
+  @media (max-width: 39.999rem) {
+    display: block;
+  }
+}
+
+@utility desktop-only {
+  @media (max-width: 39.999rem) {
+    display: none;
+  }
+}
+
+/* ── Dark mode (system preference) ──────────────────────────────────────── */
+/* Remap Tailwind's color variables so all existing utilities adapt automatically. */
+@media (prefers-color-scheme: dark) {
+  :root, :host {
+    color-scheme: dark;
+
+    /* Neutrals — invert the gray scale for backgrounds/surfaces/text */
+    --color-white: oklch(14.5% 0.015 260);
+    --color-black: oklch(98% 0.002 248);
+    --color-gray-50: oklch(17.5% 0.02 260);
+    --color-gray-100: oklch(21% 0.024 265);
+    --color-gray-200: oklch(30% 0.025 257);
+    --color-gray-300: oklch(40% 0.025 260);
+    --color-gray-400: oklch(58% 0.02 264);
+    --color-gray-500: oklch(63% 0.02 264);
+    --color-gray-600: oklch(70.7% 0.017 261);
+    --color-gray-700: oklch(80% 0.012 258);
+    --color-gray-800: oklch(87.2% 0.008 258);
+    --color-gray-900: oklch(93% 0.005 265);
+    --color-gray-950: oklch(96.7% 0.003 265);
+
+    /* Green — darken light tints, lighten dark shades */
+    --color-green-50: oklch(20% 0.04 155);
+    --color-green-100: oklch(25% 0.06 155);
+    --color-green-200: oklch(30% 0.08 155);
+    --color-green-300: oklch(42% 0.12 154);
+    --color-green-700: oklch(75% 0.15 150);
+    --color-green-800: oklch(80% 0.12 150);
+
+    /* Red */
+    --color-red-50: oklch(22% 0.04 17);
+    --color-red-200: oklch(32% 0.06 18);
+    --color-red-600: oklch(65% 0.2 27);
+    --color-red-700: oklch(72% 0.18 27);
+    --color-red-800: oklch(77% 0.15 27);
+
+    /* Blue */
+    --color-blue-100: oklch(22% 0.04 255);
+    --color-blue-600: oklch(62% 0.2 263);
+    --color-blue-700: oklch(72% 0.17 264);
+    --color-blue-800: oklch(77% 0.15 265);
+
+    /* Orange */
+    --color-orange-100: oklch(25% 0.05 75);
+    --color-orange-800: oklch(78% 0.13 37);
+
+    /* Yellow */
+    --color-yellow-100: oklch(25% 0.06 103);
+    --color-yellow-700: oklch(72% 0.12 66);
+    --color-yellow-800: oklch(77% 0.1 62);
+
+    /* Violet */
+    --color-violet-100: oklch(22% 0.04 295);
+    --color-violet-200: oklch(28% 0.06 294);
+    --color-violet-400: oklch(45% 0.14 293);
+    --color-violet-600: oklch(60% 0.2 293);
+    --color-violet-800: oklch(75% 0.18 293);
+
+    /* Purple */
+    --color-purple-100: oklch(22% 0.04 307);
+    --color-purple-800: oklch(75% 0.17 304);
+
+    /* Pink */
+    --color-pink-100: oklch(22% 0.04 342);
+    --color-pink-800: oklch(75% 0.15 4);
+
+    /* Amber */
+    --color-amber-400: oklch(80% 0.17 84);
+  }
+
+  /* Form elements — inherit the dark palette */
+  input, textarea, select {
+    background-color: var(--color-gray-50);
+    color: var(--color-gray-900);
+    border-color: var(--color-gray-200);
+  }
+  input::placeholder, textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+  input:focus, textarea:focus, select:focus {
+    border-color: var(--color-green-300);
+  }
+}

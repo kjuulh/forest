@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package forest.v1;
+
+enum NotificationType {
+  NOTIFICATION_TYPE_UNSPECIFIED = 0;
+  NOTIFICATION_TYPE_RELEASE_ANNOTATED = 1;
+  NOTIFICATION_TYPE_RELEASE_STARTED = 2;
+  NOTIFICATION_TYPE_RELEASE_SUCCEEDED = 3;
+  NOTIFICATION_TYPE_RELEASE_FAILED = 4;
+}
+
+enum NotificationChannel {
+  NOTIFICATION_CHANNEL_UNSPECIFIED = 0;
+  NOTIFICATION_CHANNEL_CLI = 1;
+  NOTIFICATION_CHANNEL_SLACK = 2;
+}
+
+// Rich context about the release that triggered the notification.
+// Integrations decide which fields to use.
+message ReleaseContext {
+  string slug = 1;
+  string organisation = 2;
+  string project = 3;
+  string artifact_id = 4;
+  string release_intent_id = 5;
+  string destination = 6;
+  string environment = 7;
+  // Source info
+  string source_username = 8;
+  string source_email = 9;
+  string source_user_id = 17;
+  // Git ref
+  string commit_sha = 10;
+  string commit_branch = 11;
+  // Artifact context
+  string context_title = 12;
+  string context_description = 13;
+  string context_web = 14;
+  // Error info (populated on failure)
+  string error_message = 15;
+  // Number of destinations involved
+  int32 destination_count = 16;
+}
+
+message Notification {
+  string id = 1;
+  NotificationType notification_type = 2;
+  string title = 3;
+  string body = 4;
+  string organisation = 5;
+  string project = 6;
+  ReleaseContext release_context = 7;
+  string created_at = 8;
+}
+
+message NotificationPreference {
+  NotificationType notification_type = 1;
+  NotificationChannel channel = 2;
+  bool enabled = 3;
+}
+
+message GetNotificationPreferencesRequest {}
+message GetNotificationPreferencesResponse {
+  repeated NotificationPreference preferences = 1;
+}
+
+message SetNotificationPreferenceRequest {
+  NotificationType notification_type = 1;
+  NotificationChannel channel = 2;
+  bool enabled = 3;
+}
+message SetNotificationPreferenceResponse {
+  NotificationPreference preference = 1;
+}
+
+message ListenNotificationsRequest {
+  optional string organisation = 1;
+  optional string project = 2;
+}
+
+message ListNotificationsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+  optional string organisation = 3;
+  optional string project = 4;
+}
+message ListNotificationsResponse {
+  repeated Notification notifications = 1;
+  string next_page_token = 2;
+}
+
+service NotificationService {
+  rpc GetNotificationPreferences(GetNotificationPreferencesRequest) returns (GetNotificationPreferencesResponse);
+  rpc SetNotificationPreference(SetNotificationPreferenceRequest) returns (SetNotificationPreferenceResponse);
+  rpc ListenNotifications(ListenNotificationsRequest) returns (stream Notification);
+  rpc ListNotifications(ListNotificationsRequest) returns (ListNotificationsResponse);
+}

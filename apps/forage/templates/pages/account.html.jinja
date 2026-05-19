@@ -1,0 +1,252 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="app-container py-12">
+    <div class="flex items-center justify-between mb-8">
+        <h1 class="text-2xl font-bold">Account Settings</h1>
+        <a href="/dashboard" class="text-sm text-gray-500 hover:text-gray-700">&larr; Dashboard</a>
+    </div>
+
+    {% if error %}
+    <div class="mb-6 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    {# Profile Picture #}
+    <div class="mb-12">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Profile picture</h2>
+        <div class="flex items-center gap-6">
+            {% if user.profile_picture_url %}
+            <img src="{{ user.profile_picture_url }}" alt="{{ user.username }}" class="w-16 h-16 rounded-full object-cover shrink-0">
+            {% else %}
+            <div class="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center text-2xl font-bold text-gray-500 shrink-0">
+                {{ user.username[:1] | upper }}
+            </div>
+            {% endif %}
+            <div class="flex flex-col gap-2">
+                <form method="POST" action="/settings/account/picture" enctype="multipart/form-data" class="flex items-center gap-2">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <input type="file" name="picture" accept="image/jpeg,image/png,image/webp"
+                           class="text-sm text-gray-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border file:border-gray-300 file:text-sm file:bg-white file:text-gray-700 hover:file:bg-gray-50">
+                    <button type="submit" class="px-4 py-1.5 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 whitespace-nowrap">
+                        Upload
+                    </button>
+                </form>
+                {% if user.profile_picture_url %}
+                <form method="POST" action="/settings/account/picture/remove">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <button type="submit" class="text-xs text-red-600 hover:text-red-800">Remove picture</button>
+                </form>
+                {% endif %}
+                <p class="text-xs text-gray-400">JPEG, PNG, or WebP. Max 2 MB.</p>
+            </div>
+        </div>
+    </div>
+
+    {# Username #}
+    <div class="mb-12">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Username</h2>
+        <form method="POST" action="/settings/account/username" class="flex gap-2">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <input type="text" name="username" value="{{ user.username }}"
+                   class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+            <button type="submit" class="px-4 py-2 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 whitespace-nowrap">
+                Update
+            </button>
+        </form>
+    </div>
+
+    {# Emails #}
+    <div class="mb-12">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Email addresses</h2>
+        <div class="space-y-2 mb-4">
+            {% for email in user.emails %}
+            <div class="flex items-center justify-between px-4 py-3 border border-gray-200 rounded-lg">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm text-gray-900">{{ email.email }}</span>
+                    {% if email.verified %}
+                    <span class="text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">verified</span>
+                    {% else %}
+                    <span class="text-xs text-yellow-700 bg-yellow-100 px-1.5 py-0.5 rounded">unverified</span>
+                    {% endif %}
+                </div>
+                <form method="POST" action="/settings/account/emails/remove">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <input type="hidden" name="email" value="{{ email.email }}">
+                    <button type="submit" class="text-xs text-red-600 hover:text-red-800">Remove</button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+        <form method="POST" action="/settings/account/emails" class="flex gap-2">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <input type="email" name="email" placeholder="new@example.com"
+                   class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+            <button type="submit" class="px-4 py-2 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800 whitespace-nowrap">
+                Add email
+            </button>
+        </form>
+    </div>
+
+    {# Change password #}
+    <div class="mb-12">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Change password</h2>
+        <form method="POST" action="/settings/account/password" class="space-y-3">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <div>
+                <label class="block text-sm text-gray-700 mb-1">Current password</label>
+                <input type="password" name="current_password" required
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+            </div>
+            <div>
+                <label class="block text-sm text-gray-700 mb-1">New password</label>
+                <input type="password" name="new_password" required
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+            </div>
+            <div>
+                <label class="block text-sm text-gray-700 mb-1">Confirm new password</label>
+                <input type="password" name="new_password_confirm" required
+                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+            </div>
+            <button type="submit" class="px-4 py-2 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800">
+                Change password
+            </button>
+        </form>
+    </div>
+
+    {# Two-factor authentication #}
+    <div class="mb-12">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Two-factor authentication</h2>
+        {% if user.mfa_enabled %}
+        <div class="flex items-center justify-between px-4 py-3 border border-gray-200 rounded-lg mb-4">
+            <div class="flex items-center gap-2">
+                <span class="inline-block w-2 h-2 rounded-full bg-green-500"></span>
+                <span class="text-sm text-gray-900">Two-factor authentication is <strong>enabled</strong></span>
+            </div>
+        </div>
+        <p class="text-sm text-gray-500 mb-4">Enter your current authenticator code to disable 2FA.</p>
+        <form method="POST" action="/settings/account/mfa/disable" class="flex gap-2 items-start">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <div class="flex-1">
+                <input
+                    type="text"
+                    name="code"
+                    required
+                    autocomplete="one-time-code"
+                    inputmode="numeric"
+                    pattern="[0-9]{6}"
+                    maxlength="6"
+                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-gray-900"
+                    placeholder="000000">
+            </div>
+            <button type="submit"
+                    class="px-4 py-2 text-sm border border-red-300 text-red-700 rounded-md hover:bg-red-50 whitespace-nowrap">
+                Disable 2FA
+            </button>
+        </form>
+        {% else %}
+        <p class="text-sm text-gray-500 mb-4">
+            Add an extra layer of security to your account by requiring a code from your authenticator app when you sign in.
+        </p>
+        <form method="POST" action="/settings/account/mfa/setup">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <button type="submit"
+                    class="px-4 py-2 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800">
+                Enable two-factor authentication
+            </button>
+        </form>
+        {% endif %}
+    </div>
+
+    {# Linked Slack accounts #}
+    {% if has_slack_oauth %}
+    <div class="mb-12">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Linked Slack accounts</h2>
+        <p class="text-sm text-gray-500 mb-4">Link your Slack identity to receive personal DMs about your releases.</p>
+
+        {% if slack_links %}
+        <div class="space-y-2 mb-4">
+            {% for link in slack_links %}
+            <div class="flex items-center justify-between px-4 py-3 border border-gray-200 rounded-lg">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 bg-[#4A154B] rounded flex items-center justify-center flex-shrink-0">
+                        <svg class="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <p class="text-sm font-medium text-gray-900">{{ link.team_name }}</p>
+                        <p class="text-xs text-gray-500">@{{ link.slack_username }}</p>
+                    </div>
+                </div>
+                <form method="POST" action="/settings/account/slack/disconnect">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <input type="hidden" name="team_id" value="{{ link.team_id }}">
+                    <button type="submit" class="text-xs text-red-600 hover:text-red-800">Disconnect</button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <a href="/settings/account/slack/connect"
+           class="inline-flex items-center gap-2 px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 text-gray-700">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="#4A154B" aria-hidden="true">
+                <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+            </svg>
+            Add to Slack
+        </a>
+    </div>
+    {% endif %}
+
+    {# Notification preferences #}
+    <div class="mb-12">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Notification preferences</h2>
+        <p class="text-sm text-gray-500 mb-4">Choose which events trigger notifications on each channel.</p>
+        <div class="border border-gray-200 rounded-lg overflow-hidden">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="bg-gray-50 border-b border-gray-200">
+                        <th class="text-left px-4 py-3 font-medium text-gray-700">Event</th>
+                        <th class="text-center px-4 py-3 font-medium text-gray-700 w-24">CLI</th>
+                        <th class="text-center px-4 py-3 font-medium text-gray-700 w-24">Slack</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% set event_types = [
+                        {"key": "NOTIFICATION_TYPE_RELEASE_ANNOTATED", "label": "Release annotated"},
+                        {"key": "NOTIFICATION_TYPE_RELEASE_STARTED", "label": "Release started"},
+                        {"key": "NOTIFICATION_TYPE_RELEASE_SUCCEEDED", "label": "Release succeeded"},
+                        {"key": "NOTIFICATION_TYPE_RELEASE_FAILED", "label": "Release failed"},
+                    ] %}
+                    {% set channels = [
+                        {"key": "NOTIFICATION_CHANNEL_CLI", "label": "CLI"},
+                        {"key": "NOTIFICATION_CHANNEL_SLACK", "label": "Slack"},
+                    ] %}
+                    {% for event in event_types %}
+                    <tr>
+                        <td class="px-4 py-3 text-gray-700">{{ event.label }}</td>
+                        {% for ch in channels %}
+                        {% set pref_key = event.key ~ "|" ~ ch.key %}
+                        {% set is_enabled = pref_key in enabled_prefs %}
+                        <td class="text-center px-4 py-3">
+                            <form method="POST" action="/settings/account/notifications" class="inline">
+                                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                                <input type="hidden" name="notification_type" value="{{ event.key }}">
+                                <input type="hidden" name="channel" value="{{ ch.key }}">
+                                <input type="hidden" name="enabled" value="{{ 'false' if is_enabled else 'true' }}">
+                                <button type="submit" class="w-8 h-5 rounded-full relative transition-colors {{ 'bg-gray-900' if is_enabled else 'bg-gray-300' }}" title="{{ 'Disable' if is_enabled else 'Enable' }} {{ event.label | lower }} via {{ ch.label }}">
+                                    <span class="block w-3.5 h-3.5 rounded-full bg-white shadow-sm absolute top-0.5 transition-all {{ 'left-[calc(100%-1.125rem)]' if is_enabled else 'left-0.5' }}"></span>
+                                </button>
+                            </form>
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+{% endblock %}

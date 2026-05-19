@@ -1,0 +1,457 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="app-container py-12">
+    <div class="flex items-center justify-between mb-8">
+        <h1 class="text-2xl font-bold">Environments &amp; Destinations</h1>
+    </div>
+
+    {% if environments | length > 0 %}
+    <div class="space-y-6">
+        {% for env in environments %}
+        <div class="border border-gray-200 rounded-lg overflow-hidden">
+            <div class="px-5 py-3 bg-gray-50 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full shrink-0 {% if 'prod' in env.name and 'preprod' not in env.name %}bg-pink-500{% elif 'preprod' in env.name or 'pre-prod' in env.name %}bg-orange-500{% elif 'stag' in env.name %}bg-yellow-500{% elif 'dev' in env.name %}bg-violet-500{% else %}bg-gray-400{% endif %}"></span>
+                    <span class="font-medium text-gray-900">{{ env.name }}</span>
+                    {% if env.description %}
+                    <span class="text-xs text-gray-500">&mdash; {{ env.description }}</span>
+                    {% endif %}
+                </div>
+                <span class="text-xs text-gray-400">order: {{ env.sort_order }}</span>
+            </div>
+
+            {% if env.destinations | length > 0 %}
+            <div class="divide-y divide-gray-100">
+                {% for dest in env.destinations %}
+                <div class="px-5 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                    <a href="/orgs/{{ org_name }}/destinations/detail?name={{ dest.name | urlencode }}" class="flex items-center gap-3 min-w-0 flex-1">
+                        <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+                        <span class="text-sm font-medium text-gray-900">{{ dest.name }}</span>
+                        {% if dest.type_name %}
+                        <span class="text-xs px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{{ dest.type_name }}{% if dest.type_version %} v{{ dest.type_version }}{% endif %}</span>
+                        {% endif %}
+                        {% if dest.metadata | length > 0 %}
+                        <span class="text-xs text-gray-400">{{ dest.metadata | length }} key{% if dest.metadata | length != 1 %}s{% endif %}</span>
+                        {% endif %}
+                    </a>
+                    <button type="button" class="export-dest text-gray-300 hover:text-gray-600 transition-colors p-1 shrink-0" title="Copy JSON to clipboard"
+                        data-name="{{ dest.name }}"
+                        data-env="{{ env.name }}"
+                        data-type-org="{{ dest.type_org }}"
+                        data-type-name="{{ dest.type_name }}"
+                        data-type-version="{{ dest.type_version }}"
+                        data-metadata='{{ dest.metadata_json }}'>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    </button>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="px-5 py-3 text-sm text-gray-400">No destinations in this environment</div>
+            {% endif %}
+
+            {% if is_admin %}
+            <details class="border-t border-gray-100">
+                <summary class="px-5 py-3 bg-gray-50/50 text-sm text-gray-500 cursor-pointer hover:text-gray-700 select-none">Add destination to {{ env.name }}</summary>
+                <div class="px-5 py-4">
+                    <div class="mb-3">
+                        <details>
+                            <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700 select-none">Import from JSON</summary>
+                            <div class="mt-2 space-y-2">
+                                <textarea id="import-json-{{ loop.index }}" rows="4" placeholder='Paste destination JSON here...'
+                                    class="w-full text-xs font-mono px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500"></textarea>
+                                <div class="flex gap-2">
+                                    <button type="button" onclick="pasteAndImport({{ loop.index }})"
+                                        class="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors">Paste from clipboard</button>
+                                    <button type="button" onclick="importDestination({{ loop.index }})"
+                                        class="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors">Apply</button>
+                                </div>
+                            </div>
+                        </details>
+                    </div>
+                    <form method="post" action="/orgs/{{ org_name }}/destinations/create" class="space-y-3" id="create-dest-form-{{ loop.index }}">
+                        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                        <input type="hidden" name="environment" value="{{ env.name }}">
+                        <input type="hidden" name="type_organisation" id="type_organisation_{{ loop.index }}">
+                        <input type="hidden" name="type_name" id="type_name_{{ loop.index }}">
+                        <input type="hidden" name="type_version" id="type_version_{{ loop.index }}">
+
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Name</label>
+                            <input type="text" name="name" placeholder="e.g. my-app-prod" required
+                                class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Destination type <span class="text-gray-400">(optional)</span></label>
+                            <select id="destination_type_{{ loop.index }}"
+                                onchange="updateTypeFields({{ loop.index }})"
+                                class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white">
+                                <option value="">None (manual metadata only)</option>
+                                <option value="custom">Custom (manual metadata)</option>
+                                {% for dt in destination_types %}
+                                <option value="{{ dt.organisation }}/{{ dt.name }}@{{ dt.version }}">
+                                    {{ dt.organisation }}/{{ dt.name }} v{{ dt.version }}{% if dt.description %} &mdash; {{ dt.description }}{% endif %}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div id="type-fields-{{ loop.index }}" style="display:none;" class="space-y-2">
+                        </div>
+
+                        <div id="custom-fields-{{ loop.index }}" class="space-y-1">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Metadata <span class="text-gray-400">(key-value pairs)</span></label>
+                            <div class="space-y-1.5 create-meta-rows">
+                                <div class="flex gap-2 items-center metadata-row">
+                                    <input type="text" name="metadata_keys" placeholder="key" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
+                                    <input type="text" name="metadata_values" placeholder="value" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
+                                    <button type="button" onclick="this.closest('.metadata-row').remove()"
+                                        class="text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <button type="button" onclick="addMetaRow(this.previousElementSibling)"
+                                class="mt-1.5 text-xs text-green-600 hover:text-green-700 font-medium transition-colors flex items-center gap-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                                Add row
+                            </button>
+                        </div>
+
+                        <div id="extra-fields-{{ loop.index }}" style="display:none;" class="space-y-1">
+                            <div class="flex items-center gap-3 pt-2">
+                                <div class="flex-1 border-t border-gray-200"></div>
+                                <span class="text-xs text-gray-400">additional metadata</span>
+                                <div class="flex-1 border-t border-gray-200"></div>
+                            </div>
+                            <div class="space-y-1.5 extra-meta-rows">
+                            </div>
+                            <button type="button" onclick="addMetaRow(this.previousElementSibling)"
+                                class="mt-1.5 text-xs text-green-600 hover:text-green-700 font-medium transition-colors flex items-center gap-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                                Add row
+                            </button>
+                        </div>
+
+                        <div class="flex justify-end">
+                            <button type="submit" class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors">Create destination</button>
+                        </div>
+                    </form>
+                </div>
+            </details>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    {% if orphan_destinations | length > 0 %}
+    <div class="mt-6 border border-gray-200 rounded-lg overflow-hidden">
+        <div class="px-5 py-3 bg-gray-50">
+            <span class="font-medium text-gray-700">Other destinations</span>
+        </div>
+        <div class="divide-y divide-gray-100">
+            {% for dest in orphan_destinations %}
+            <a href="/orgs/{{ org_name }}/destinations/detail?name={{ dest.name | urlencode }}" class="px-5 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors block">
+                <div class="flex items-center gap-3">
+                    <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    <span class="text-sm text-gray-900">{{ dest.name }}</span>
+                    <span class="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">{{ dest.environment }}</span>
+                    {% if dest.type_name %}
+                    <span class="text-xs px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{{ dest.type_name }}{% if dest.type_version %} v{{ dest.type_version }}{% endif %}</span>
+                    {% endif %}
+                </div>
+                <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="border border-gray-200 rounded-lg p-8 text-center text-gray-500">
+        <p class="font-medium text-gray-700">No environments yet</p>
+        <p class="mt-1 text-sm">Create your first environment below, or use <code class="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700">forest env create</code> from the CLI.</p>
+    </div>
+    {% endif %}
+
+    {% if is_admin %}
+    <div class="mt-8 border border-gray-200 rounded-lg overflow-hidden">
+        <div class="px-5 py-3 bg-gray-50">
+            <span class="font-medium text-gray-900">Create environment</span>
+        </div>
+        <div class="px-5 py-4">
+            <form method="post" action="/orgs/{{ org_name }}/destinations/environments" class="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <div class="flex-1">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Name</label>
+                    <input type="text" name="name" placeholder="e.g. production" required
+                        class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                </div>
+                <div class="flex-1">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Description <span class="text-gray-400">(optional)</span></label>
+                    <input type="text" name="description" placeholder="e.g. Live production environment"
+                        class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                </div>
+                <div class="w-24">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Order</label>
+                    <input type="number" name="sort_order" value="0"
+                        class="w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                </div>
+                <button type="submit" class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors">Create</button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+</section>
+
+<script>
+const destTypes = {{ destination_types_json | safe }};
+
+function addMetaRow(container) {
+    const row = document.createElement('div');
+    row.className = 'flex gap-2 items-center metadata-row';
+    row.innerHTML = `
+        <input type="text" name="metadata_keys" placeholder="key" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
+        <input type="text" name="metadata_values" placeholder="value" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
+        <button type="button" onclick="this.closest('.metadata-row').remove()"
+            class="text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>`;
+    container.appendChild(row);
+    row.querySelector('input').focus();
+}
+
+document.querySelectorAll('.export-dest').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        const dest = {
+            name: btn.dataset.name,
+            environment: btn.dataset.env,
+            type: {
+                organisation: btn.dataset.typeOrg || '',
+                name: btn.dataset.typeName || '',
+                version: parseInt(btn.dataset.typeVersion) || 0,
+            },
+            metadata: JSON.parse(btn.dataset.metadata || '{}'),
+        };
+        const json = JSON.stringify(dest, null, 2);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(json).then(function() {
+                // Show a "Copied!" badge next to the button
+                const badge = document.createElement('span');
+                badge.textContent = 'Copied!';
+                badge.className = 'text-xs text-green-600 font-medium ml-1';
+                btn.parentElement.insertBefore(badge, btn.nextSibling);
+                setTimeout(function() { badge.remove(); }, 1500);
+            });
+        } else {
+            // Fallback: download as file
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = dest.name + '.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    });
+});
+
+function pasteAndImport(idx) {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(function(text) {
+            document.getElementById('import-json-' + idx).value = text;
+            importDestination(idx);
+        }).catch(function() {
+            // Clipboard read denied — user can paste manually
+            document.getElementById('import-json-' + idx).focus();
+        });
+    } else {
+        document.getElementById('import-json-' + idx).focus();
+    }
+}
+
+function importDestination(idx) {
+    const textarea = document.getElementById('import-json-' + idx);
+    let data;
+    try {
+        data = JSON.parse(textarea.value);
+    } catch (e) {
+        alert('Invalid JSON: ' + e.message);
+        return;
+    }
+
+    const form = document.getElementById('create-dest-form-' + idx);
+    if (!form) return;
+
+    // Fill name
+    const nameInput = form.querySelector('input[name="name"]');
+    if (nameInput && data.name) nameInput.value = data.name;
+
+    // Select destination type if present
+    if (data.type && data.type.name) {
+        const typeKey = data.type.organisation + '/' + data.type.name + '@' + data.type.version;
+        const select = document.getElementById('destination_type_' + idx);
+        if (select) {
+            // Try to find matching option
+            for (const opt of select.options) {
+                if (opt.value.startsWith(typeKey)) {
+                    select.value = opt.value;
+                    break;
+                }
+            }
+            updateTypeFields(idx);
+        }
+    }
+
+    // Fill metadata values into the type-driven fields or custom fields
+    if (data.metadata) {
+        const typeFieldsContainer = document.getElementById('type-fields-' + idx);
+        const extraContainer = document.getElementById('extra-fields-' + idx);
+
+        if (typeFieldsContainer && typeFieldsContainer.style.display !== 'none') {
+            // Type-driven: fill matching schema inputs, put the rest in extra fields
+            const schemaKeys = new Set();
+            typeFieldsContainer.querySelectorAll('input[name="metadata_keys"]').forEach(function(keyInput) {
+                schemaKeys.add(keyInput.value);
+                const valueInput = keyInput.nextElementSibling;
+                if (valueInput && data.metadata[keyInput.value] !== undefined) {
+                    valueInput.value = data.metadata[keyInput.value];
+                }
+            });
+
+            // Put non-schema keys into extra fields
+            if (extraContainer) {
+                const extraRows = extraContainer.querySelector('.extra-meta-rows');
+                extraRows.innerHTML = '';
+                Object.entries(data.metadata).forEach(function(entry) {
+                    if (!schemaKeys.has(entry[0])) {
+                        addMetaRow(extraRows);
+                        const rows = extraRows.querySelectorAll('.metadata-row');
+                        const lastRow = rows[rows.length - 1];
+                        const inputs = lastRow.querySelectorAll('input');
+                        inputs[0].value = entry[0];
+                        inputs[1].value = entry[1];
+                    }
+                });
+            }
+        } else {
+            // Custom mode: populate key/value rows
+            const customContainer = document.getElementById('custom-fields-' + idx);
+            if (customContainer) {
+                const rowsContainer = customContainer.querySelector('.create-meta-rows');
+                rowsContainer.innerHTML = '';
+                Object.entries(data.metadata).forEach(function(entry) {
+                    addMetaRow(rowsContainer);
+                    const rows = rowsContainer.querySelectorAll('.metadata-row');
+                    const lastRow = rows[rows.length - 1];
+                    const inputs = lastRow.querySelectorAll('input');
+                    inputs[0].value = entry[0];
+                    inputs[1].value = entry[1];
+                });
+            }
+        }
+    }
+
+    textarea.value = '';
+    textarea.closest('details').removeAttribute('open');
+}
+
+function updateTypeFields(idx) {
+    const select = document.getElementById('destination_type_' + idx);
+    const typeFieldsContainer = document.getElementById('type-fields-' + idx);
+    const customContainer = document.getElementById('custom-fields-' + idx);
+    const extraContainer = document.getElementById('extra-fields-' + idx);
+    const orgInput = document.getElementById('type_organisation_' + idx);
+    const nameInput = document.getElementById('type_name_' + idx);
+    const versionInput = document.getElementById('type_version_' + idx);
+
+    const val = select.value;
+
+    // Reset hidden type fields
+    orgInput.value = '';
+    nameInput.value = '';
+    versionInput.value = '';
+
+    if (val === '' || val === 'custom') {
+        typeFieldsContainer.style.display = 'none';
+        typeFieldsContainer.innerHTML = '';
+        extraContainer.style.display = 'none';
+        extraContainer.querySelectorAll('input').forEach(function(el) { el.disabled = true; });
+        customContainer.style.display = 'block';
+        customContainer.querySelectorAll('input').forEach(function(el) { el.disabled = false; });
+        return;
+    }
+
+    // Hide full custom section, show extra section for additional metadata
+    customContainer.style.display = 'none';
+    customContainer.querySelectorAll('input').forEach(function(el) { el.disabled = true; });
+    extraContainer.style.display = 'block';
+    extraContainer.querySelectorAll('input').forEach(function(el) { el.disabled = false; });
+
+    const type = destTypes.find(function(t) {
+        return (t.organisation + '/' + t.name + '@' + t.version) === val;
+    });
+    if (!type) return;
+
+    // Populate hidden type fields
+    orgInput.value = type.organisation;
+    nameInput.value = type.name;
+    versionInput.value = type.version;
+
+    typeFieldsContainer.style.display = 'block';
+    typeFieldsContainer.innerHTML = '';
+
+    if (!type.fields || type.fields.length === 0) {
+        typeFieldsContainer.innerHTML = '<p class="text-xs text-gray-400">This type has no required fields.</p>';
+        return;
+    }
+
+    type.fields.forEach(function(field) {
+        const inputType = field.field_type === 'secret' ? 'password'
+                        : field.field_type === 'number' ? 'number'
+                        : field.field_type === 'url'    ? 'url'
+                        : 'text';
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'space-y-0.5';
+
+        const label = document.createElement('label');
+        label.className = 'block text-xs font-medium text-gray-600';
+        label.textContent = field.label || field.name;
+        if (field.required) {
+            const req = document.createElement('span');
+            req.className = 'text-red-500 ml-0.5';
+            req.textContent = '*';
+            label.appendChild(req);
+        }
+        if (field.description) {
+            const hint = document.createElement('span');
+            hint.className = 'ml-1 text-gray-400 font-normal';
+            hint.textContent = '— ' + field.description;
+            label.appendChild(hint);
+        }
+
+        // Hidden key input
+        const keyInput = document.createElement('input');
+        keyInput.type = 'hidden';
+        keyInput.name = 'metadata_keys';
+        keyInput.value = field.name;
+
+        // Visible value input
+        const valueInput = document.createElement('input');
+        valueInput.type = inputType;
+        valueInput.name = 'metadata_values';
+        valueInput.placeholder = field.default_value || '';
+        valueInput.required = field.required;
+        valueInput.className = 'w-full text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono';
+
+        wrapper.appendChild(label);
+        wrapper.appendChild(keyInput);
+        wrapper.appendChild(valueInput);
+        typeFieldsContainer.appendChild(wrapper);
+    });
+}
+</script>
+{% endblock %}

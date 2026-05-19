@@ -1,0 +1,49 @@
+{% extends "base.html.jinja" %}
+{% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, empty_state, pagination %}
+
+{% block content %}
+<section class="app-container pt-12">
+    <div class="flex items-center justify-between mb-8">
+        <h1 class="text-2xl font-bold">Components</h1>
+    </div>
+
+    <form method="GET" action="/orgs/{{ org_name }}/components" class="flex gap-3 mb-8">
+        <input type="text" name="q" value="{{ query }}" placeholder="Search components..." class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none">
+        <button type="submit" class="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800">Search</button>
+    </form>
+
+    {% if components %}
+    <div class="space-y-3">
+        {% for c in components %}
+        <a href="/components/{{ c.organisation }}/{{ c.name }}" class="block p-5 border border-gray-200 rounded-lg hover:border-gray-400 transition-colors">
+            <div class="flex items-center justify-between">
+                <div class="min-w-0">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <h2 class="font-bold text-base truncate">{{ c.name }}</h2>
+                        {{ badge("v" ~ c.latest_version) }}
+                        {{ kind_badge(c.kind) }}
+                        {{ visibility_badge(c.visibility) }}
+                    </div>
+                    {% if c.description %}
+                    <p class="mt-1 text-sm text-gray-600 truncate">{{ c.description }}</p>
+                    {% endif %}
+                </div>
+                <div class="text-right text-xs text-gray-400 shrink-0 ml-4">
+                    <div>{{ c.version_count }} version{{ "s" if c.version_count != 1 }}</div>
+                </div>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+
+    {{ pagination("/orgs/" ~ org_name ~ "/components", page, total_pages, {"q": query}) }}
+
+    {% else %}
+    {% if query %}
+    {{ empty_state('No components found for "' ~ query ~ '".') }}
+    {% else %}
+    {{ empty_state("No components published yet.", hint="Publish with forest components publish ./my-component") }}
+    {% endif %}
+    {% endif %}
+</section>
+{% endblock %}

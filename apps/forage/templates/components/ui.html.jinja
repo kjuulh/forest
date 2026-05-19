@@ -1,0 +1,129 @@
+{# Shared UI macros for consistent styling across templates.
+   Usage: {% from "components/ui.html.jinja" import badge, env_badge, alert, empty_state, pagination, code_block %}
+#}
+
+{# ── Badge ─────────────────────────────────────────────────────── #}
+{# Renders an inline badge with a color variant.
+   Variants: gray (default), green, red, blue, violet, cyan, pink, orange, yellow, amber
+   Usage: {{ badge("v1.0.0") }}
+          {{ badge("binary", variant="violet") }}
+#}
+{% macro badge(label, variant="gray") %}
+{% set colors = {
+    "gray": "bg-gray-100 text-gray-700",
+    "green": "bg-green-100 text-green-800",
+    "red": "bg-red-100 text-red-800",
+    "blue": "bg-blue-100 text-blue-800",
+    "violet": "bg-violet-100 text-violet-700",
+    "cyan": "bg-cyan-100 text-cyan-700",
+    "pink": "bg-pink-100 text-pink-800",
+    "orange": "bg-orange-100 text-orange-800",
+    "yellow": "bg-yellow-100 text-yellow-800",
+    "amber": "bg-amber-100 text-amber-700"
+} %}
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ colors[variant] | default(colors.gray) }}">{{ label }}</span>
+{%- endmacro %}
+
+{# ── Environment badge ─────────────────────────────────────────── #}
+{# Renders an environment name with appropriate color.
+   Usage: {{ env_badge("production") }}
+#}
+{% macro env_badge(env) %}
+{% if 'prod' in env and 'preprod' not in env %}{% set variant = "pink" %}
+{% elif 'preprod' in env or 'pre-prod' in env %}{% set variant = "orange" %}
+{% elif 'stag' in env %}{% set variant = "yellow" %}
+{% elif 'dev' in env %}{% set variant = "violet" %}
+{% elif 'test' in env %}{% set variant = "cyan" %}
+{% else %}{% set variant = "gray" %}{% endif %}
+{{ badge(env, variant=variant) }}
+{%- endmacro %}
+
+{# ── Alert ─────────────────────────────────────────────────────── #}
+{# Renders a dismissible alert box.
+   Variants: error (red), success (green), info (blue), warning (yellow)
+   Usage: {{ alert("Something went wrong", variant="error") }}
+#}
+{% macro alert(message, variant="error") %}
+{% set styles = {
+    "error": "bg-red-50 border-red-200 text-red-700",
+    "success": "bg-green-50 border-green-200 text-green-700",
+    "info": "bg-blue-50 border-blue-200 text-blue-700",
+    "warning": "bg-yellow-50 border-yellow-200 text-yellow-700"
+} %}
+<div class="mb-6 p-4 border rounded-md text-sm {{ styles[variant] | default(styles.error) }}">
+    {{ message }}
+</div>
+{%- endmacro %}
+
+{# ── Empty state ───────────────────────────────────────────────── #}
+{# Renders a centered empty state card.
+   Usage: {{ empty_state("No projects yet.", hint="Deploy with forest release create") }}
+#}
+{% macro empty_state(message, hint="") %}
+<div class="p-6 border border-gray-200 rounded-lg text-center">
+    <p class="text-gray-600">{{ message }}</p>
+    {% if hint %}
+    <p class="text-sm text-gray-400 mt-2">{{ hint }}</p>
+    {% endif %}
+</div>
+{%- endmacro %}
+
+{# ── Pagination ────────────────────────────────────────────────── #}
+{# Renders prev/next pagination controls.
+   Usage: {{ pagination(base_url="/components", page=page, total_pages=total_pages, params={"q": query}) }}
+#}
+{% macro pagination(base_url, page, total_pages, params={}) %}
+{% if total_pages > 1 %}
+{% set qs = "?" %}
+{% for k, v in params | items %}{% if v %}{% set qs = qs ~ k ~ "=" ~ v ~ "&" %}{% endif %}{% endfor %}
+<nav class="mt-8 flex items-center justify-center gap-2">
+    {% if page > 1 %}
+    <a href="{{ base_url }}{{ qs }}page={{ page - 1 }}" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:border-gray-400">Previous</a>
+    {% endif %}
+    <span class="text-sm text-gray-500">Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="{{ base_url }}{{ qs }}page={{ page + 1 }}" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:border-gray-400">Next</a>
+    {% endif %}
+</nav>
+{% endif %}
+{%- endmacro %}
+
+{# ── Code block ────────────────────────────────────────────────── #}
+{# Renders a dark code block with optional copy button.
+   Usage: {{ code_block("forest components add org/name@1.0", copyable=true, id="install") }}
+#}
+{% macro code_block(content, copyable=false, id="", class="") %}
+<div class="bg-gray-950 rounded-md p-3 text-sm font-mono text-gray-300 {{ class }} {% if copyable %}relative group{% endif %}">
+    <pre{% if id %} id="{{ id }}"{% endif %}>{{ content }}</pre>
+    {% if copyable %}
+    <button onclick="navigator.clipboard.writeText(document.getElementById('{{ id }}').textContent.trim());this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)" class="absolute top-2 right-2 px-2 py-0.5 text-xs bg-gray-800 text-gray-400 rounded hover:text-white opacity-0 group-hover:opacity-100 transition-opacity">Copy</button>
+    {% endif %}
+</div>
+{%- endmacro %}
+
+{# ── Kind badge ────────────────────────────────────────────────── #}
+{# Renders a component kind badge (binary/files).
+   Usage: {{ kind_badge("binary") }}
+#}
+{% macro kind_badge(kind) %}
+{% if kind == "binary" %}{{ badge("binary", variant="violet") }}{% else %}{{ badge("files", variant="cyan") }}{% endif %}
+{%- endmacro %}
+
+{# ── Visibility badge ──────────────────────────────────────────── #}
+{# Renders a public/private visibility indicator.
+   Usage: {{ visibility_badge("public") }}
+#}
+{% macro visibility_badge(visibility) %}
+{% if visibility == "public" %}{{ badge("public", variant="green") }}{% else %}{{ badge("private", variant="gray") }}{% endif %}
+{%- endmacro %}
+
+{# ── Section heading ───────────────────────────────────────────── #}
+{# Renders a page heading with optional action slot.
+   Usage: {{ section_heading("Projects") }}
+#}
+{% macro section_heading(title) %}
+<div class="flex items-center justify-between mb-8">
+    <h1 class="text-2xl font-bold">{{ title }}</h1>
+    {{ caller() if caller is defined }}
+</div>
+{%- endmacro %}

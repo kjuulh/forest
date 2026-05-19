@@ -1,0 +1,9 @@
+{# Reusable timestamp macro.
+   Renders relative time with local-time tooltip on hover.
+   Usage: {% from "components/timestamp.html.jinja" import timeago %}
+          {{ timeago(item.created_at) }}
+          {{ timeago(item.created_at, class="text-xs text-gray-400") }}
+#}
+{% macro timeago(value, class="") %}
+<time datetime="{{ value }}" class="{{ class }}">{{ value | timeago }}</time>
+{% endmacro %}

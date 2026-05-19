@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package forest.v1;
+
+message BeginUploadArtifactRequest {}
+message BeginUploadArtifactResponse {
+  string upload_id = 1;
+}
+
+message UploadArtifactRequest {
+  string upload_id  = 1;
+
+  string env = 2;
+  string destination = 3;
+
+  string file_name = 4;
+  string file_content = 5;
+
+  // Category of the file: "deployment" (default), "spec", or "attachment"
+  string category = 6;
+}
+message UploadArtifactResponse {}
+
+message CommitArtifactRequest{
+  string upload_id = 1;
+}
+message CommitArtifactResponse {
+  string artifact_id = 1;
+}
+
+message GetArtifactFilesRequest {
+  // The artifact_id (UUID from annotations/artifacts table)
+  string artifact_id = 1;
+  // Optional filter: "deployment", "spec", "attachment". Empty = all categories.
+  optional string category = 2;
+}
+message GetArtifactFilesResponse {
+  repeated ArtifactFile files = 1;
+}
+message ArtifactFile {
+  string file_name = 1;
+  string category = 2;
+  string env = 3;
+  string destination = 4;
+  string content = 5;
+}
+
+message GetArtifactSpecRequest {
+  string artifact_id = 1;
+}
+message GetArtifactSpecResponse {
+  // The spec file content (forest.cue), empty string if no spec was uploaded.
+  string content = 1;
+}
+
+service ArtifactService {
+  rpc BeginUploadArtifact(BeginUploadArtifactRequest) returns (BeginUploadArtifactResponse);
+  rpc UploadArtifact(stream UploadArtifactRequest) returns (UploadArtifactResponse);
+  rpc CommitArtifact(CommitArtifactRequest) returns (CommitArtifactResponse);
+  rpc GetArtifactFiles(GetArtifactFilesRequest) returns (GetArtifactFilesResponse);
+  rpc GetArtifactSpec(GetArtifactSpecRequest) returns (GetArtifactSpecResponse);
+}

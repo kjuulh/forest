@@ -1,0 +1,15 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="max-w-md mx-auto px-4 pt-24 text-center">
+    <h1 class="text-2xl font-bold mb-4">Link expired or already used</h1>
+    <p class="text-gray-600 mb-8">
+        Verification links expire after 15 minutes and can only be used once. Please request a new link to continue.
+    </p>
+    <p>
+        <a href="/auth/verify-email/resend" class="inline-block bg-gray-900 text-white px-6 py-2 rounded font-medium hover:bg-gray-700">
+            Request a new link
+        </a>
+    </p>
+</section>
+{% endblock %}

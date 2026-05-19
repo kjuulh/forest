@@ -1,0 +1,265 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="app-container pt-12">
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <h1 class="text-2xl font-bold">Triggers</h1>
+            <p class="text-sm text-gray-500 mt-1">
+                <a href="/orgs/{{ current_org }}/projects/{{ current_project }}" class="hover:underline">{{ current_project }}</a>
+                &middot; Automatically release artifacts matching these rules
+            </p>
+        </div>
+    </div>
+
+    {% if triggers | length > 0 %}
+    <div class="space-y-3 mb-8">
+        {% for trigger in triggers %}
+        <div class="border border-gray-200 rounded-lg overflow-hidden">
+            <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                    {% if trigger.enabled %}
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" title="Enabled"></span>
+                    {% else %}
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-gray-300 shrink-0" title="Disabled"></span>
+                    {% endif %}
+                    <span class="font-medium text-gray-900">{{ trigger.name }}</span>
+                </div>
+
+                {# Summary of patterns #}
+                <div class="flex items-center gap-1.5 text-xs text-gray-500 flex-wrap">
+                    {% if trigger.branch_pattern %}
+                    <code class="bg-gray-100 px-1.5 py-0.5 rounded">branch: {{ trigger.branch_pattern }}</code>
+                    {% endif %}
+                    {% if trigger.title_pattern %}
+                    <code class="bg-gray-100 px-1.5 py-0.5 rounded">title: {{ trigger.title_pattern }}</code>
+                    {% endif %}
+                    {% if trigger.author_pattern %}
+                    <code class="bg-gray-100 px-1.5 py-0.5 rounded">author: {{ trigger.author_pattern }}</code>
+                    {% endif %}
+                    {% if trigger.commit_message_pattern %}
+                    <code class="bg-gray-100 px-1.5 py-0.5 rounded">msg: {{ trigger.commit_message_pattern }}</code>
+                    {% endif %}
+                    {% if trigger.source_type_pattern %}
+                    <code class="bg-gray-100 px-1.5 py-0.5 rounded">src: {{ trigger.source_type_pattern }}</code>
+                    {% endif %}
+                    <span class="text-gray-300">&#8594;</span>
+                    {% for env in trigger.target_environments %}
+                    <span class="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{{ env }}</span>
+                    {% endfor %}
+                    {% if trigger.use_pipeline %}
+                    <span class="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">pipeline</span>
+                    {% endif %}
+                    {% if trigger.force_release %}
+                    <span class="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">force</span>
+                    {% endif %}
+                </div>
+
+                {% if is_admin %}
+                <div class="flex items-center gap-2 shrink-0">
+                    <a href="/orgs/{{ current_org }}/projects/{{ current_project }}/triggers/{{ trigger.name }}" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Edit</a>
+                    <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/triggers/{{ trigger.name }}/toggle">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        {% if trigger.enabled %}
+                        <button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Disable</button>
+                        {% else %}
+                        <input type="hidden" name="enabled" value="true">
+                        <button type="submit" class="text-xs px-2.5 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50">Enable</button>
+                        {% endif %}
+                    </form>
+                    <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/triggers/{{ trigger.name }}/delete" onsubmit="return confirm('Delete trigger &quot;{{ trigger.name }}&quot;?')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Delete</button>
+                    </form>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="border border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-500 mb-8">
+        <p class="mb-1">No triggers configured.</p>
+        {% if is_admin %}
+        <p class="text-sm">Create one below to automatically release matching artifacts.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if is_admin %}
+    <div class="border border-gray-200 rounded-lg p-6">
+        <h2 class="text-lg font-semibold mb-4">Create Trigger</h2>
+        <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/triggers" class="space-y-4" id="trigger-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="name" id="trigger-name-hidden" value="">
+
+            <p class="text-sm text-gray-500 mb-2">Add at least one filter pattern. Artifacts matching <strong>all</strong> patterns will be auto-released.</p>
+
+            {# Pattern rows #}
+            <div class="space-y-3" id="pattern-rows">
+            </div>
+
+            <button type="button" id="add-pattern-btn" class="text-sm text-gray-500 hover:text-gray-900 flex items-center gap-1">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                Add filter
+            </button>
+
+            <hr class="border-gray-200">
+
+            {# Target environments #}
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Target environments</label>
+                {% if environments | length > 0 %}
+                <div class="flex flex-wrap gap-2">
+                    {% for env in environments %}
+                    <label class="inline-flex items-center gap-1.5 text-sm border border-gray-200 rounded-md px-3 py-1.5 cursor-pointer hover:bg-gray-50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
+                        <input type="checkbox" name="target_environments" value="{{ env.name }}" class="rounded border-gray-300 text-blue-600">
+                        {{ env.name }}
+                    </label>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-sm text-gray-400">No environments configured. <a href="/orgs/{{ current_org }}/destinations" class="underline">Create one first.</a></p>
+                {% endif %}
+            </div>
+
+            {# Pipeline selection #}
+            {% if pipelines | length > 0 %}
+            <div>
+                <div class="flex items-center gap-2 mb-2">
+                    <input type="checkbox" id="use-pipeline" name="use_pipeline" value="true"
+                        class="rounded border-gray-300"
+                        onchange="document.getElementById('pipeline-select-row').style.display = this.checked ? '' : 'none'">
+                    <label for="use-pipeline" class="text-sm font-medium text-gray-700">Use release pipeline</label>
+                </div>
+                <div id="pipeline-select-row" class="ml-6 hidden">
+                    <p class="text-xs text-gray-500 mb-1">Releases matching this trigger will use the selected pipeline's deployment stages.</p>
+                </div>
+            </div>
+            {% endif %}
+
+            {# Options #}
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="force-release" name="force_release" value="true"
+                    class="rounded border-gray-300">
+                <label for="force-release" class="text-sm text-gray-700">Force release (skip queue)</label>
+            </div>
+
+            {# Auto-generated name preview #}
+            <div class="flex items-center gap-2 text-sm text-gray-500">
+                <span>Name:</span>
+                <span id="trigger-name-preview" class="font-mono text-gray-700"></span>
+            </div>
+
+            <button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">
+                Create Trigger
+            </button>
+        </form>
+    </div>
+
+    <script>
+    (function() {
+        const PATTERN_TYPES = [
+            { value: 'branch_pattern', label: 'Branch', placeholder: 'e.g. main' },
+            { value: 'title_pattern', label: 'Title', placeholder: 'e.g. ^Release.*' },
+            { value: 'author_pattern', label: 'Author', placeholder: 'e.g. ci-bot' },
+            { value: 'commit_message_pattern', label: 'Commit message', placeholder: 'e.g. ^Merge pull request.*' },
+            { value: 'source_type_pattern', label: 'Source type', placeholder: 'e.g. github-actions' },
+        ];
+
+        const rows = document.getElementById('pattern-rows');
+        const addBtn = document.getElementById('add-pattern-btn');
+        const nameHidden = document.getElementById('trigger-name-hidden');
+        const namePreview = document.getElementById('trigger-name-preview');
+
+        function updateName() {
+            const parts = [];
+            rows.querySelectorAll('.pattern-row').forEach(row => {
+                const val = row.querySelector('input[type="text"]')?.value?.trim();
+                if (val) parts.push(val);
+            });
+            const envs = [];
+            document.querySelectorAll('input[name="target_environments"]:checked').forEach(cb => {
+                envs.push(cb.value);
+            });
+            let name = '';
+            if (parts.length > 0 && envs.length > 0) {
+                name = parts[0] + '-to-' + envs.join('-');
+            } else if (parts.length > 0) {
+                name = parts[0];
+            }
+            nameHidden.value = name;
+            namePreview.textContent = name || '(auto-generated from pattern)';
+        }
+
+        function addRow() {
+            // Find which types are already used
+            const used = new Set();
+            rows.querySelectorAll('select').forEach(sel => used.add(sel.value));
+            const available = PATTERN_TYPES.filter(t => !used.has(t.value));
+            if (available.length === 0) return;
+
+            const type = available[0];
+            const row = document.createElement('div');
+            row.className = 'pattern-row flex items-center gap-2';
+            row.innerHTML = `
+                <select name="_pattern_type" class="border border-gray-300 rounded-md px-2 py-1.5 text-sm bg-white min-w-[140px]">
+                    ${PATTERN_TYPES.map(t =>
+                        `<option value="${t.value}" ${t.value === type.value ? 'selected' : ''} ${used.has(t.value) && t.value !== type.value ? 'disabled' : ''}>${t.label}</option>`
+                    ).join('')}
+                </select>
+                <input type="text" name="${type.value}" placeholder="${type.placeholder}"
+                    class="flex-1 border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 font-mono">
+                <button type="button" class="remove-btn text-gray-400 hover:text-red-500 p-1" title="Remove">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            `;
+
+            const select = row.querySelector('select');
+            const input = row.querySelector('input[type="text"]');
+
+            select.addEventListener('change', () => {
+                const newType = PATTERN_TYPES.find(t => t.value === select.value);
+                input.name = select.value;
+                input.placeholder = newType?.placeholder || '';
+                updateName();
+                updateAvailable();
+            });
+            input.addEventListener('input', updateName);
+            row.querySelector('.remove-btn').addEventListener('click', () => {
+                row.remove();
+                updateName();
+                updateAvailable();
+            });
+
+            rows.appendChild(row);
+            input.focus();
+            updateName();
+            updateAvailable();
+        }
+
+        function updateAvailable() {
+            const used = new Set();
+            rows.querySelectorAll('select').forEach(sel => used.add(sel.value));
+            // Update options in all selects
+            rows.querySelectorAll('select').forEach(sel => {
+                const current = sel.value;
+                sel.querySelectorAll('option').forEach(opt => {
+                    opt.disabled = used.has(opt.value) && opt.value !== current;
+                });
+            });
+            addBtn.style.display = used.size >= PATTERN_TYPES.length ? 'none' : '';
+        }
+
+        addBtn.addEventListener('click', addRow);
+        document.querySelectorAll('input[name="target_environments"]').forEach(cb => {
+            cb.addEventListener('change', updateName);
+        });
+
+        // Start with one row
+        addRow();
+    })();
+    </script>
+    {% endif %}
+</section>
+{% endblock %}

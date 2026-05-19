@@ -1,0 +1,142 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="app-container py-12">
+    <nav class="flex items-center gap-1.5 text-sm text-gray-500 mb-6">
+        <a href="/orgs/{{ org_name }}/destinations" class="hover:text-gray-900 transition-colors">Destinations</a>
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        <span class="text-gray-900 font-medium">{{ dest_name }}</span>
+    </nav>
+
+    <div class="flex items-start justify-between mb-8">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">{{ dest_name }}</h1>
+            <p class="text-sm text-gray-500 mt-1">
+                Environment:
+                <span class="inline-flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full shrink-0 {% if 'prod' in dest_environment and 'preprod' not in dest_environment %}bg-pink-500{% elif 'preprod' in dest_environment or 'pre-prod' in dest_environment %}bg-orange-500{% elif 'stag' in dest_environment %}bg-yellow-500{% elif 'dev' in dest_environment %}bg-violet-500{% else %}bg-gray-400{% endif %}"></span>
+                    <span class="font-medium text-gray-700">{{ dest_environment }}</span>
+                </span>
+            </p>
+        </div>
+    </div>
+
+    {# Type info #}
+    <div class="border border-gray-200 rounded-lg overflow-hidden mb-6">
+        <div class="px-5 py-3 bg-gray-50">
+            <span class="text-sm font-medium text-gray-900">Type</span>
+        </div>
+        <div class="px-5 py-4">
+            {% if dest_type_name %}
+            <div class="flex items-center gap-4">
+                <div>
+                    <span class="text-xs text-gray-500">Name</span>
+                    <p class="text-sm font-medium text-gray-900">{{ dest_type_name }}</p>
+                </div>
+                {% if dest_type_organisation %}
+                <div>
+                    <span class="text-xs text-gray-500">Organisation</span>
+                    <p class="text-sm font-medium text-gray-900">{{ dest_type_organisation }}</p>
+                </div>
+                {% endif %}
+                {% if dest_type_version %}
+                <div>
+                    <span class="text-xs text-gray-500">Version</span>
+                    <p class="text-sm font-medium text-gray-900">v{{ dest_type_version }}</p>
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <p class="text-sm text-gray-400">No type assigned</p>
+            {% endif %}
+        </div>
+    </div>
+
+    {# Metadata section #}
+    <div class="border border-gray-200 rounded-lg overflow-hidden">
+        <div class="px-5 py-3 bg-gray-50 flex items-center justify-between">
+            <span class="text-sm font-medium text-gray-900">Metadata</span>
+            {% if metadata | length > 0 %}
+            <span class="text-xs text-gray-400">{{ metadata | length }} key{% if metadata | length != 1 %}s{% endif %}</span>
+            {% endif %}
+        </div>
+
+        {% if is_admin %}
+        <form method="post" action="/orgs/{{ org_name }}/destinations/detail/update?name={{ dest_name | urlencode }}" id="metadata-form">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <div class="divide-y divide-gray-100" id="metadata-rows">
+                {% for entry in metadata %}
+                <div class="px-5 py-3 flex items-center gap-3 metadata-row">
+                    <input type="text" name="metadata_keys" value="{{ entry.key }}"
+                        placeholder="key"
+                        class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+                    <input type="text" name="metadata_values" value="{{ entry.value }}"
+                        placeholder="value"
+                        class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+                    <button type="button" onclick="this.closest('.metadata-row').remove()"
+                        class="text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                {% endfor %}
+                {# One empty row to start #}
+                <div class="px-5 py-3 flex items-center gap-3 metadata-row">
+                    <input type="text" name="metadata_keys" placeholder="key"
+                        class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+                    <input type="text" name="metadata_values" placeholder="value"
+                        class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+                    <button type="button" onclick="this.closest('.metadata-row').remove()"
+                        class="text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
+                <button type="button" id="add-row-btn"
+                    class="text-sm text-green-600 hover:text-green-700 font-medium transition-colors flex items-center gap-1">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    Add row
+                </button>
+                <button type="submit"
+                    class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors">
+                    Save metadata
+                </button>
+            </div>
+        </form>
+        {% else %}
+        {# Read-only view for non-admins #}
+        {% if metadata | length > 0 %}
+        <div class="divide-y divide-gray-100">
+            {% for entry in metadata %}
+            <div class="px-5 py-3 flex items-center gap-3">
+                <span class="flex-1 text-sm font-mono text-gray-600">{{ entry.key }}</span>
+                <span class="flex-1 text-sm font-mono text-gray-900">{{ entry.value }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="px-5 py-4 text-sm text-gray-400">No metadata</div>
+        {% endif %}
+        {% endif %}
+    </div>
+</section>
+
+<script>
+document.getElementById('add-row-btn')?.addEventListener('click', function() {
+    const container = document.getElementById('metadata-rows');
+    const row = document.createElement('div');
+    row.className = 'px-5 py-3 flex items-center gap-3 metadata-row';
+    row.innerHTML = `
+        <input type="text" name="metadata_keys" placeholder="key"
+            class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+        <input type="text" name="metadata_values" placeholder="value"
+            class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+        <button type="button" onclick="this.closest('.metadata-row').remove()"
+            class="text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>`;
+    container.appendChild(row);
+    row.querySelector('input').focus();
+});
+</script>
+{% endblock %}

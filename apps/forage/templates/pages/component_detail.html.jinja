@@ -1,0 +1,133 @@
+{% extends "base.html.jinja" %}
+{% from "components/timestamp.html.jinja" import timeago as ts %}
+{% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, empty_state, code_block %}
+
+{% block content %}
+<section class="app-container pt-12 pb-8">
+    <div class="mb-2">
+        <a href="/components" class="text-sm text-gray-500 hover:text-gray-900">&larr; Back to registry</a>
+    </div>
+
+    <div class="flex items-start justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold">{{ summary.organisation }}/{{ summary.name }}</h1>
+            <p class="mt-1 text-gray-600">{{ summary.description }}</p>
+        </div>
+        <div class="flex items-center gap-2 shrink-0 ml-4">
+            {{ badge("v" ~ (selected_version | default(summary.latest_version))) }}
+            {{ kind_badge(summary.kind) }}
+            {{ visibility_badge(summary.visibility) }}
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+        {# Main content #}
+        <div class="md:col-span-3">
+            {% if readme_html %}
+            <div class="prose prose-sm max-w-none">
+                {{ readme_html | safe }}
+            </div>
+            {% else %}
+            {{ empty_state("No README available for this component.") }}
+            {% endif %}
+
+            {# Versions table #}
+            <div id="versions" class="mt-8">
+                <h2 class="text-lg font-bold mb-4">Versions</h2>
+                {% if versions %}
+                <div class="border border-gray-200 rounded-lg divide-y divide-gray-200">
+                    {% for v in versions %}
+                    <div class="p-4 flex items-center justify-between{% if selected_version == v.version %} bg-gray-50{% endif %}">
+                        <div class="flex items-center gap-3">
+                            <a href="/components/{{ summary.organisation }}/{{ summary.name }}/{{ v.version }}" class="font-medium text-sm hover:underline">v{{ v.version }}</a>
+                            <span class="text-xs text-gray-400">{{ v.kind }}</span>
+                            {% if v.protocol_version %}
+                            <span class="text-xs text-gray-400">protocol {{ v.protocol_version }}</span>
+                            {% endif %}
+                        </div>
+                        <div class="flex gap-1.5 flex-wrap">
+                            {% for platform in v.platforms %}
+                            {{ badge(platform) }}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-sm text-gray-500">No versions published yet.</p>
+                {% endif %}
+            </div>
+
+            {# Manifest viewer #}
+            {% if manifest_json %}
+            <div class="mt-8">
+                <h2 class="text-lg font-bold mb-4">Manifest</h2>
+                {{ code_block(manifest_json, class="overflow-x-auto") }}
+            </div>
+            {% endif %}
+        </div>
+
+        {# Sidebar #}
+        <div class="md:col-span-1">
+            <div class="space-y-6">
+                <div>
+                    <h3 class="text-sm font-bold mb-2">Install</h3>
+                    {{ code_block("forest components add " ~ summary.organisation ~ "/" ~ summary.name ~ "@" ~ (selected_version | default(summary.latest_version)), copyable=true, id="install-cmd", class="text-xs") }}
+                </div>
+
+                <div>
+                    <h3 class="text-sm font-bold mb-2">Metadata</h3>
+                    <dl class="text-sm space-y-2">
+                        <div>
+                            <dt class="text-gray-500">Latest version</dt>
+                            <dd class="font-medium">{{ summary.latest_version }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-gray-500">Total versions</dt>
+                            <dd class="font-medium">{{ summary.version_count }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-gray-500">Kind</dt>
+                            <dd class="font-medium">{{ summary.kind }}</dd>
+                        </div>
+                        {% if summary.created_at %}
+                        <div>
+                            <dt class="text-gray-500">Created</dt>
+                            <dd>{{ ts(summary.created_at) }}</dd>
+                        </div>
+                        {% endif %}
+                        {% if summary.updated_at %}
+                        <div>
+                            <dt class="text-gray-500">Updated</dt>
+                            <dd>{{ ts(summary.updated_at) }}</dd>
+                        </div>
+                        {% endif %}
+                    </dl>
+                </div>
+
+                {% if summary.contracts %}
+                <div>
+                    <h3 class="text-sm font-bold mb-2">Contracts</h3>
+                    <div class="flex gap-1.5 flex-wrap">
+                        {% for contract in summary.contracts %}
+                        {{ badge(contract) }}
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if owners %}
+                <div>
+                    <h3 class="text-sm font-bold mb-2">Owners</h3>
+                    <ul class="text-sm space-y-1">
+                        {% for owner in owners %}
+                        <li class="text-gray-600">{{ owner }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

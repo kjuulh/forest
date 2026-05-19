@@ -1,0 +1,72 @@
+{% extends "base.html.jinja" %}
+{% from "components/timestamp.html.jinja" import timeago as ts %}
+{% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, empty_state, pagination %}
+
+{% block content %}
+<section class="app-container pt-12 pb-8">
+    <div class="mb-8">
+        <h1 class="text-2xl font-bold">Component Registry</h1>
+        <p class="mt-2 text-gray-600">Discover and share reusable forest components.</p>
+    </div>
+
+    <form method="GET" action="/components" class="flex gap-3 mb-8">
+        <input type="text" name="q" value="{{ query }}" placeholder="Search components..." class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none">
+        <select name="org" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-gray-900 focus:border-gray-900 outline-none">
+            <option value="">All organisations</option>
+            {% if orgs is defined and orgs %}
+            {% for o in orgs %}
+            <option value="{{ o.name }}"{% if filter_org == o.name %} selected{% endif %}>{{ o.name }}</option>
+            {% endfor %}
+            {% endif %}
+            {% if filter_org and (orgs is not defined or not orgs | selectattr("name", "equalto", filter_org) | list) %}
+            <option value="{{ filter_org }}" selected>{{ filter_org }}</option>
+            {% endif %}
+        </select>
+        <button type="submit" class="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800">Search</button>
+    </form>
+
+    {% if components %}
+    <div class="space-y-3">
+        {% for c in components %}
+        <a href="/components/{{ c.organisation }}/{{ c.name }}" class="block p-5 border border-gray-200 rounded-lg hover:border-gray-400 transition-colors">
+            <div class="flex items-center justify-between">
+                <div class="min-w-0">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <h2 class="font-bold text-base truncate">{{ c.organisation }}/{{ c.name }}</h2>
+                        {{ badge("v" ~ c.latest_version) }}
+                        {{ kind_badge(c.kind) }}
+                        {{ visibility_badge(c.visibility) }}
+                    </div>
+                    {% if c.description %}
+                    <p class="mt-1 text-sm text-gray-600 truncate">{{ c.description }}</p>
+                    {% endif %}
+                </div>
+                <div class="text-right text-xs text-gray-400 shrink-0 ml-4">
+                    <div>{{ c.version_count }} version{{ "s" if c.version_count != 1 }}</div>
+                    {% if c.updated_at %}
+                    {{ ts(c.updated_at, class="text-xs text-gray-400") }}
+                    {% endif %}
+                </div>
+            </div>
+            {% if c.contracts %}
+            <div class="mt-2 flex gap-1.5 flex-wrap">
+                {% for contract in c.contracts %}
+                {{ badge(contract, variant="gray") }}
+                {% endfor %}
+            </div>
+            {% endif %}
+        </a>
+        {% endfor %}
+    </div>
+
+    {{ pagination("/components", page, total_pages, {"q": query, "org": filter_org}) }}
+
+    {% else %}
+    {% if query %}
+    {{ empty_state('No components found for "' ~ query ~ '".', hint="Try a different search term.") }}
+    {% else %}
+    {{ empty_state("No components published yet.", hint="Publish components via the forest CLI.") }}
+    {% endif %}
+    {% endif %}
+</section>
+{% endblock %}

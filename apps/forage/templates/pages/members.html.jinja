@@ -1,0 +1,84 @@
+{% extends "base.html.jinja" %}
+{% from "components/timestamp.html.jinja" import timeago as ts %}
+{% from "components/settings_sidebar.html.jinja" import settings_layout %}
+
+{% block content %}
+{% call settings_layout(org_name, "members") %}
+    <h2 class="text-lg font-bold mb-6">Members</h2>
+
+    {% if is_admin %}
+    <div class="mb-8 p-4 border border-gray-200 rounded-lg">
+        <h2 class="font-medium text-sm mb-3">Add member</h2>
+        <form method="POST" action="/orgs/{{ org_name }}/settings/members" class="flex gap-3 items-end">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <div class="flex-1">
+                <label for="username" class="block text-xs text-gray-500 mb-1">Username</label>
+                <input type="text" id="username" name="username" required
+                       class="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+            </div>
+            <div>
+                <label for="role" class="block text-xs text-gray-500 mb-1">Role</label>
+                <select id="role" name="role" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+                    <option value="member">Member</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <button type="submit" class="px-4 py-1.5 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-800">
+                Add
+            </button>
+        </form>
+    </div>
+    {% endif %}
+
+    <div class="border border-gray-200 rounded-lg overflow-x-auto">
+        <table class="w-full text-sm min-w-full">
+            <thead class="bg-gray-50 border-b border-gray-200">
+                <tr>
+                    <th class="text-left px-4 py-3 font-medium text-gray-500">Username</th>
+                    <th class="text-left px-4 py-3 font-medium text-gray-500">Role</th>
+                    <th class="text-left px-4 py-3 font-medium text-gray-500">Joined</th>
+                    {% if is_admin %}
+                    <th class="text-right px-4 py-3 font-medium text-gray-500">Actions</th>
+                    {% endif %}
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for member in members %}
+                <tr>
+                    <td class="px-4 py-3 font-medium">{{ member.username }}</td>
+                    <td class="px-4 py-3">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
+                            {% if member.role == 'owner' %}bg-purple-100 text-purple-800
+                            {% elif member.role == 'admin' %}bg-blue-100 text-blue-800
+                            {% else %}bg-gray-100 text-gray-800{% endif %}">
+                            {{ member.role }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3 text-gray-500">{% if member.joined_at %}{{ ts(member.joined_at) }}{% else %}—{% endif %}</td>
+                    {% if is_admin %}
+                    <td class="px-4 py-3 text-right">
+                        {% if member.role != 'owner' %}
+                        <div class="flex gap-2 justify-end">
+                            <form method="POST" action="/orgs/{{ org_name }}/settings/members/{{ member.user_id }}/role" class="inline-flex gap-1">
+                                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                                <select name="role" class="px-2 py-1 text-xs border border-gray-300 rounded">
+                                    <option value="member" {% if member.role == 'member' %}selected{% endif %}>Member</option>
+                                    <option value="admin" {% if member.role == 'admin' %}selected{% endif %}>Admin</option>
+                                </select>
+                                <button type="submit" class="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">Update</button>
+                            </form>
+                            <form method="POST" action="/orgs/{{ org_name }}/settings/members/{{ member.user_id }}/remove" class="inline">
+                                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                                <button type="submit" class="px-2 py-1 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50">Remove</button>
+                            </form>
+                        </div>
+                        {% endif %}
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endcall %}
+{% endblock %}

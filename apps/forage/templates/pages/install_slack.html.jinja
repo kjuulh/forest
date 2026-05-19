@@ -1,0 +1,105 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="max-w-2xl mx-auto px-4 py-12">
+    <div class="mb-8">
+        <a href="/orgs/{{ current_org }}/settings/integrations" class="text-sm text-gray-500 hover:text-gray-700">&larr; All integrations</a>
+    </div>
+
+    <div class="flex items-start gap-4 mb-8">
+        <div class="w-14 h-14 rounded-lg border border-gray-200 flex items-center justify-center shrink-0">
+            <svg class="w-7 h-7 text-gray-600" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+            </svg>
+        </div>
+        <div>
+            <h1 class="text-2xl font-bold">Install Slack</h1>
+            <p class="text-sm text-gray-500 mt-1">Post deployment notifications directly to Slack channels from <strong>{{ current_org }}</strong>.</p>
+        </div>
+    </div>
+
+    {% if error is defined and error %}
+    <div class="mb-6 px-4 py-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">{{ error }}</div>
+    {% endif %}
+
+    {# ── How it works ──────────────────────────────────────────── #}
+    <div class="mb-8 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+        <h3 class="text-sm font-semibold text-gray-700 mb-2">How it works</h3>
+        <ul class="text-sm text-gray-600 space-y-1.5">
+            <li class="flex items-start gap-2">
+                <span class="text-gray-400 mt-0.5">1.</span>
+                <span>Rich Block Kit messages with release metadata, status badges, and color-coded sidebars</span>
+            </li>
+            <li class="flex items-start gap-2">
+                <span class="text-gray-400 mt-0.5">2.</span>
+                <span>Notifications include organisation, project, destination, commit, branch, and author</span>
+            </li>
+            <li class="flex items-start gap-2">
+                <span class="text-gray-400 mt-0.5">3.</span>
+                <span>Configure which events trigger notifications (releases started, succeeded, failed, annotated)</span>
+            </li>
+            <li class="flex items-start gap-2">
+                <span class="text-gray-400 mt-0.5">4.</span>
+                <span>Failed deliveries are retried up to 3 times with exponential backoff</span>
+            </li>
+        </ul>
+    </div>
+
+    {% if has_slack_oauth %}
+    {# ── OAuth "Add to Slack" flow ─────────────────────────────── #}
+    <div class="mb-8">
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">Connect with Slack</h3>
+        <p class="text-sm text-gray-500 mb-4">Click the button below to authorize Forage to post to a Slack channel. You'll choose which channel during the Slack authorization flow.</p>
+        <a href="{{ slack_oauth_url }}" class="inline-flex items-center gap-3 px-5 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors font-medium text-sm">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+            </svg>
+            Add to Slack
+        </a>
+    </div>
+
+    <div class="relative my-8">
+        <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+        <div class="relative flex justify-center text-sm"><span class="px-3 bg-white text-gray-400">or use a webhook URL</span></div>
+    </div>
+    {% endif %}
+
+    {# ── Manual webhook URL form ───────────────────────────────── #}
+    <form method="POST" action="/orgs/{{ current_org }}/settings/integrations/slack" class="space-y-5">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+
+        {% if has_slack_oauth %}
+        <p class="text-sm text-gray-500 mb-2">Alternatively, paste a Slack Incoming Webhook URL directly. Create one in your <a href="https://api.slack.com/apps" target="_blank" rel="noopener" class="text-gray-700 underline hover:text-gray-900">Slack App settings</a>.</p>
+        {% else %}
+        <p class="text-sm text-gray-500 mb-2">Paste a Slack Incoming Webhook URL. Create one in your <a href="https://api.slack.com/apps" target="_blank" rel="noopener" class="text-gray-700 underline hover:text-gray-900">Slack App settings</a> under <strong>Incoming Webhooks</strong>.</p>
+        {% endif %}
+
+        <div>
+            <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input type="text" id="name" name="name" placeholder="e.g. #deploys" required
+                   class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent">
+            <p class="text-xs text-gray-400 mt-1">A friendly name to identify this integration</p>
+        </div>
+
+        <div>
+            <label for="webhook_url" class="block text-sm font-medium text-gray-700 mb-1">Webhook URL</label>
+            <input type="url" id="webhook_url" name="webhook_url" placeholder="https://hooks.slack.com/services/T.../B.../..." required
+                   class="w-full px-3 py-2 text-sm font-mono border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent">
+            <p class="text-xs text-gray-400 mt-1">Must be a <code class="bg-gray-200 px-1 py-0.5 rounded">https://hooks.slack.com/</code> URL</p>
+        </div>
+
+        <div>
+            <label for="channel_name" class="block text-sm font-medium text-gray-700 mb-1">Channel name <span class="font-normal text-gray-400">(optional)</span></label>
+            <input type="text" id="channel_name" name="channel_name" placeholder="#deploys"
+                   class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent">
+            <p class="text-xs text-gray-400 mt-1">For display purposes only (defaults to #general)</p>
+        </div>
+
+        <div class="pt-2">
+            <button type="submit" class="w-full px-4 py-2.5 text-sm font-medium bg-gray-900 text-white rounded-md hover:bg-gray-800 transition-colors">
+                Install Slack integration
+            </button>
+        </div>
+    </form>
+</section>
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends "base.html.jinja" %}
+{% from "components/settings_sidebar.html.jinja" import settings_layout %}
+
+{% block content %}
+{% call settings_layout(org_name, "general") %}
+    <div class="space-y-8">
+        <div>
+            <h2 class="text-lg font-bold mb-4">Organisation</h2>
+            <div class="p-4 border border-gray-200 rounded-lg">
+                <dl class="text-sm space-y-3">
+                    <div class="flex items-center justify-between">
+                        <dt class="text-gray-500">Name</dt>
+                        <dd class="font-medium">{{ org_name }}</dd>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <dt class="text-gray-500">Role</dt>
+                        <dd class="font-medium">{{ current_role }}</dd>
+                    </div>
+                </dl>
+            </div>
+        </div>
+    </div>
+{% endcall %}
+{% endblock %}

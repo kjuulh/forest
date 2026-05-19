@@ -1,0 +1,123 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="max-w-4xl mx-auto px-4 pt-24 pb-8 text-center">
+    <h1 class="text-4xl font-bold tracking-tight">Simple, transparent pricing</h1>
+    <p class="mt-4 text-lg text-gray-600">Start free. Scale when you need to. No surprises.</p>
+    <p class="mt-2 text-sm text-gray-400">Forage is in early access. Pricing may change.</p>
+</section>
+
+<section class="max-w-6xl mx-auto px-4 py-12">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div class="p-6 border border-gray-200 rounded-lg">
+            <h3 class="font-bold text-lg">Free</h3>
+            <p class="mt-2 text-3xl font-bold">$0</p>
+            <p class="text-sm text-gray-500">forever</p>
+            <ul class="mt-6 space-y-3 text-sm">
+                <li>1 project</li>
+                <li>1 environment</li>
+                <li>256MB RAM, shared CPU</li>
+                <li>Community components</li>
+            </ul>
+            <a href="/signup" class="mt-8 block text-center py-2 border border-gray-300 rounded-md text-sm font-medium hover:border-gray-400">
+                Get started
+            </a>
+        </div>
+
+        <div class="p-6 border border-gray-200 rounded-lg">
+            <h3 class="font-bold text-lg">Developer</h3>
+            <p class="mt-2 text-3xl font-bold">$10<span class="text-base font-normal text-gray-500">/mo</span></p>
+            <p class="text-sm text-gray-500">per user</p>
+            <ul class="mt-6 space-y-3 text-sm">
+                <li>3 projects</li>
+                <li>3 environments each</li>
+                <li>512MB RAM, dedicated CPU</li>
+                <li>Custom domains</li>
+            </ul>
+            <a href="/signup" class="mt-8 block text-center py-2 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800">
+                Start trial
+            </a>
+        </div>
+
+        <div class="p-6 border-2 border-gray-900 rounded-lg relative">
+            <span class="absolute -top-3 left-4 bg-gray-900 text-white text-xs px-2 py-0.5 rounded">Popular</span>
+            <h3 class="font-bold text-lg">Team</h3>
+            <p class="mt-2 text-3xl font-bold">$25<span class="text-base font-normal text-gray-500">/user/mo</span></p>
+            <p class="text-sm text-gray-500">billed monthly</p>
+            <ul class="mt-6 space-y-3 text-sm">
+                <li>Unlimited projects</li>
+                <li>Unlimited environments</li>
+                <li>Up to 4GB RAM, 2 vCPU</li>
+                <li>Private component registry</li>
+                <li>Team management, RBAC</li>
+            </ul>
+            <a href="/signup" class="mt-8 block text-center py-2 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800">
+                Start trial
+            </a>
+        </div>
+
+        <div class="p-6 border border-gray-200 rounded-lg">
+            <h3 class="font-bold text-lg">Enterprise</h3>
+            <p class="mt-2 text-3xl font-bold">Custom</p>
+            <p class="text-sm text-gray-500">tailored to your needs</p>
+            <ul class="mt-6 space-y-3 text-sm">
+                <li>Dedicated infrastructure</li>
+                <li>SLA guarantees</li>
+                <li>SSO / SAML</li>
+                <li>Audit logs</li>
+                <li>Priority support</li>
+            </ul>
+            <a href="mailto:sales@forage.sh" class="mt-8 block text-center py-2 border border-gray-300 rounded-md text-sm font-medium hover:border-gray-400">
+                Contact sales
+            </a>
+        </div>
+    </div>
+</section>
+
+<section class="max-w-4xl mx-auto px-4 py-12">
+    <h2 class="text-2xl font-bold text-center mb-8">Usage-based add-ons</h2>
+    <div class="overflow-hidden border border-gray-200 rounded-lg">
+        <table class="w-full text-sm">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="text-left px-6 py-3 font-medium">Resource</th>
+                    <th class="text-left px-6 py-3 font-medium">Price</th>
+                    <th class="text-left px-6 py-3 font-medium">Included free</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+                <tr>
+                    <td class="px-6 py-3">Compute (vCPU)</td>
+                    <td class="px-6 py-3">$0.05/hour</td>
+                    <td class="px-6 py-3">Varies by plan</td>
+                </tr>
+                <tr>
+                    <td class="px-6 py-3">Memory</td>
+                    <td class="px-6 py-3">$0.01/GB-hour</td>
+                    <td class="px-6 py-3">Varies by plan</td>
+                </tr>
+                <tr>
+                    <td class="px-6 py-3">Storage</td>
+                    <td class="px-6 py-3">$0.10/GB-month</td>
+                    <td class="px-6 py-3">1GB</td>
+                </tr>
+                <tr>
+                    <td class="px-6 py-3">Bandwidth</td>
+                    <td class="px-6 py-3">$0.05/GB</td>
+                    <td class="px-6 py-3">10GB</td>
+                </tr>
+                <tr class="text-gray-400">
+                    <td class="px-6 py-3">Managed Databases <span class="text-xs">(coming soon)</span></td>
+                    <td class="px-6 py-3">TBD</td>
+                    <td class="px-6 py-3">-</td>
+                </tr>
+                <tr class="text-gray-400">
+                    <td class="px-6 py-3">Managed Services <span class="text-xs">(coming soon)</span></td>
+                    <td class="px-6 py-3">TBD</td>
+                    <td class="px-6 py-3">-</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,864 @@
+syntax = "proto3";
+
+package forest.v1;
+
+import "google/protobuf/duration.proto";
+
+// ---------------------------------------------------------------------------
+// ForageService — the control plane RPC surface that forest-server uses to
+// drive deployments against a forage cluster.  The scheduler calls
+// ApplyResources with the full desired-state bundle; forage reconciles.
+// ---------------------------------------------------------------------------
+service ForageService {
+  // Apply a batch of resources (create / update / delete).
+  // This is the main entry-point used by the forage/containers@1 destination.
+  rpc ApplyResources(ApplyResourcesRequest) returns (ApplyResourcesResponse);
+
+  // Poll / stream the rollout status of a previous apply.
+  rpc WatchRollout(WatchRolloutRequest) returns (stream RolloutEvent);
+
+  // Tear down all resources associated with a release / project.
+  rpc DeleteResources(DeleteResourcesRequest) returns (DeleteResourcesResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Apply
+// ---------------------------------------------------------------------------
+message ApplyResourcesRequest {
+  // Caller-chosen idempotency key (release_state id works well).
+  string apply_id = 1;
+
+  // Namespace / tenant isolation — maps to the forest organisation.
+  string namespace = 2;
+
+  // The ordered list of resources to reconcile.  Forage processes them in
+  // order so that dependencies (e.g. Service before HTTPRoute) are met.
+  repeated ForageResource resources = 3;
+
+  // Labels propagated to every resource for bookkeeping.
+  map<string, string> labels = 4;
+}
+
+message ApplyResourcesResponse {
+  // Server-generated rollout id for status tracking.
+  string rollout_id = 1;
+}
+
+message WatchRolloutRequest {
+  string rollout_id = 1;
+}
+
+message RolloutEvent {
+  string resource_name = 1;
+  string resource_kind = 2;
+  RolloutStatus status = 3;
+  string message = 4;
+}
+
+enum RolloutStatus {
+  ROLLOUT_STATUS_UNSPECIFIED = 0;
+  ROLLOUT_STATUS_PENDING = 1;
+  ROLLOUT_STATUS_IN_PROGRESS = 2;
+  ROLLOUT_STATUS_SUCCEEDED = 3;
+  ROLLOUT_STATUS_FAILED = 4;
+  ROLLOUT_STATUS_ROLLED_BACK = 5;
+}
+
+message DeleteResourcesRequest {
+  string namespace = 1;
+  // Selector labels — all resources matching these labels are removed.
+  map<string, string> labels = 2;
+}
+
+message DeleteResourcesResponse {}
+
+// ===========================================================================
+// Resource envelope — every item in the apply list is one of these.
+// ===========================================================================
+message ForageResource {
+  // Unique name within the namespace (e.g. "my-api", "my-api-worker").
+  string name = 1;
+
+  oneof spec {
+    ContainerServiceSpec container_service = 10;
+    ServiceSpec         service           = 11;
+    RouteSpec           route             = 12;
+    CronJobSpec         cron_job          = 13;
+    JobSpec             job               = 14;
+  }
+}
+
+// ===========================================================================
+//  ContainerServiceSpec — the primary workload.
+//  Combines the concerns of Deployment + Pod in a single cohesive spec.
+// ===========================================================================
+message ContainerServiceSpec {
+  // ---- Scheduling & scaling ------------------------------------------------
+  ScalingPolicy scaling = 1;
+
+  // ---- Pod-level settings --------------------------------------------------
+  // Main application container (exactly one required).
+  Container container = 2;
+
+  // Optional sidecar containers that share the pod network.
+  repeated Container sidecars = 3;
+
+  // Init containers run sequentially before the main container starts.
+  repeated Container init_containers = 4;
+
+  // ---- Volumes available to all containers in the pod ----------------------
+  repeated Volume volumes = 5;
+
+  // ---- Update strategy -----------------------------------------------------
+  UpdateStrategy update_strategy = 6;
+
+  // ---- Pod-level configuration ---------------------------------------------
+  PodConfig pod_config = 7;
+}
+
+// ---------------------------------------------------------------------------
+//  Container — describes a single OCI container.
+// ---------------------------------------------------------------------------
+message Container {
+  // Human-readable name (must be unique within the pod).
+  string name = 1;
+
+  // OCI image reference, e.g. "registry.forage.sh/org/app:v1.2.3".
+  string image = 2;
+
+  // Override the image entrypoint.
+  repeated string command = 3;
+
+  // Arguments passed to the entrypoint.
+  repeated string args = 4;
+
+  // Working directory inside the container.
+  string working_dir = 5;
+
+  // Environment variables — static values and references.
+  repeated EnvVar env = 6;
+
+  // Ports the container listens on.
+  repeated ContainerPort ports = 7;
+
+  // Resource requests and limits.
+  ResourceRequirements resources = 8;
+
+  // Volume mounts into this container's filesystem.
+  repeated VolumeMount volume_mounts = 9;
+
+  // Health probes.
+  Probe liveness_probe = 10;
+  Probe readiness_probe = 11;
+  Probe startup_probe = 12;
+
+  // Lifecycle hooks.
+  Lifecycle lifecycle = 13;
+
+  // Security context for this container.
+  ContainerSecurityContext security_context = 14;
+
+  // Image pull policy: "Always", "IfNotPresent", "Never".
+  string image_pull_policy = 15;
+
+  // Whether stdin / tty are allocated (usually false for services).
+  bool stdin = 16;
+  bool tty = 17;
+}
+
+// ---------------------------------------------------------------------------
+//  Environment variables
+// ---------------------------------------------------------------------------
+message EnvVar {
+  string name = 1;
+
+  oneof value_source {
+    // Literal value.
+    string value = 2;
+
+    // Reference to a secret key.
+    SecretKeyRef secret_ref = 3;
+
+    // Reference to a config-map key.
+    ConfigKeyRef config_ref = 4;
+
+    // Downward-API field (e.g. "metadata.name", "status.podIP").
+    string field_ref = 5;
+
+    // Resource field (e.g. "limits.cpu").
+    string resource_field_ref = 6;
+  }
+}
+
+message SecretKeyRef {
+  string secret_name = 1;
+  string key = 2;
+}
+
+message ConfigKeyRef {
+  string config_name = 1;
+  string key = 2;
+}
+
+// ---------------------------------------------------------------------------
+//  Ports
+// ---------------------------------------------------------------------------
+message ContainerPort {
+  // Friendly name (e.g. "http", "grpc", "metrics").
+  string name = 1;
+
+  // The port number inside the container.
+  uint32 container_port = 2;
+
+  // Protocol: TCP (default), UDP, SCTP.
+  string protocol = 3;
+}
+
+// ---------------------------------------------------------------------------
+//  Resources
+// ---------------------------------------------------------------------------
+message ResourceRequirements {
+  ResourceList requests = 1;
+  ResourceList limits = 2;
+}
+
+message ResourceList {
+  // CPU in Kubernetes quantity format: "100m", "0.5", "2".
+  string cpu = 1;
+
+  // Memory in Kubernetes quantity format: "128Mi", "1Gi".
+  string memory = 2;
+
+  // Ephemeral storage: "1Gi".
+  string ephemeral_storage = 3;
+
+  // GPU / accelerator requests (e.g. "nvidia.com/gpu": "1").
+  map<string, string> extended = 4;
+}
+
+// ---------------------------------------------------------------------------
+//  Volumes & mounts
+// ---------------------------------------------------------------------------
+message Volume {
+  // Volume name referenced by VolumeMount.name.
+  string name = 1;
+
+  oneof source {
+    EmptyDirVolume  empty_dir  = 10;
+    SecretVolume    secret     = 11;
+    ConfigMapVolume config_map = 12;
+    PVCVolume       pvc        = 13;
+    HostPathVolume  host_path  = 14;
+    NfsVolume       nfs        = 15;
+  }
+}
+
+message EmptyDirVolume {
+  // "Memory" for tmpfs, empty for node disk.
+  string medium = 1;
+
+  // Size limit (e.g. "256Mi").  Empty means node default.
+  string size_limit = 2;
+}
+
+message SecretVolume {
+  string secret_name = 1;
+  // Optional: mount only specific keys.
+  repeated KeyToPath items = 2;
+  // Octal file mode (e.g. 0644). Default 0644.
+  uint32 default_mode = 3;
+  bool optional = 4;
+}
+
+message ConfigMapVolume {
+  string config_map_name = 1;
+  repeated KeyToPath items = 2;
+  uint32 default_mode = 3;
+  bool optional = 4;
+}
+
+message KeyToPath {
+  string key = 1;
+  string path = 2;
+  uint32 mode = 3;
+}
+
+message PVCVolume {
+  string claim_name = 1;
+  bool read_only = 2;
+}
+
+message HostPathVolume {
+  string path = 1;
+  // "Directory", "File", "DirectoryOrCreate", "FileOrCreate", etc.
+  string type = 2;
+}
+
+message NfsVolume {
+  string server = 1;
+  string path = 2;
+  bool read_only = 3;
+}
+
+message VolumeMount {
+  // Must match a Volume.name.
+  string name = 1;
+
+  // Absolute path inside the container.
+  string mount_path = 2;
+
+  // Optional sub-path within the volume.
+  string sub_path = 3;
+
+  bool read_only = 4;
+}
+
+// ---------------------------------------------------------------------------
+//  Probes
+// ---------------------------------------------------------------------------
+message Probe {
+  oneof handler {
+    HttpGetProbe  http_get  = 1;
+    TcpSocketProbe tcp_socket = 2;
+    ExecProbe     exec      = 3;
+    GrpcProbe     grpc      = 4;
+  }
+
+  uint32 initial_delay_seconds = 10;
+  uint32 period_seconds = 11;
+  uint32 timeout_seconds = 12;
+  uint32 success_threshold = 13;
+  uint32 failure_threshold = 14;
+}
+
+message HttpGetProbe {
+  string path = 1;
+  uint32 port = 2;
+  string scheme = 3; // "HTTP" or "HTTPS"
+  repeated HttpHeader http_headers = 4;
+}
+
+message HttpHeader {
+  string name = 1;
+  string value = 2;
+}
+
+message TcpSocketProbe {
+  uint32 port = 1;
+}
+
+message ExecProbe {
+  repeated string command = 1;
+}
+
+message GrpcProbe {
+  uint32 port = 1;
+  string service = 2;
+}
+
+// ---------------------------------------------------------------------------
+//  Lifecycle hooks
+// ---------------------------------------------------------------------------
+message Lifecycle {
+  LifecycleHandler post_start = 1;
+  LifecycleHandler pre_stop = 2;
+}
+
+message LifecycleHandler {
+  oneof action {
+    ExecProbe exec = 1;
+    HttpGetProbe http_get = 2;
+    TcpSocketProbe tcp_socket = 3;
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Security
+// ---------------------------------------------------------------------------
+message ContainerSecurityContext {
+  bool run_as_non_root = 1;
+  int64 run_as_user = 2;
+  int64 run_as_group = 3;
+  bool read_only_root_filesystem = 4;
+  bool privileged = 5;
+  bool allow_privilege_escalation = 6;
+
+  Capabilities capabilities = 7;
+
+  // SELinux options (optional).
+  string se_linux_type = 8;
+
+  // Seccomp profile: "RuntimeDefault", "Unconfined", or a localhost path.
+  string seccomp_profile = 9;
+}
+
+message Capabilities {
+  repeated string add = 1;
+  repeated string drop = 2;
+}
+
+message PodSecurityContext {
+  int64 run_as_user = 1;
+  int64 run_as_group = 2;
+  bool run_as_non_root = 3;
+  int64 fs_group = 4;
+
+  // Supplemental groups for all containers.
+  repeated int64 supplemental_groups = 5;
+
+  // "OnRootMismatch" or "Always".
+  string fs_group_change_policy = 6;
+
+  string seccomp_profile = 7;
+}
+
+// ---------------------------------------------------------------------------
+//  Scaling
+// ---------------------------------------------------------------------------
+message ScalingPolicy {
+  // Fixed replica count (used when autoscaling is not configured).
+  uint32 replicas = 1;
+
+  // Optional horizontal autoscaler.
+  AutoscalingPolicy autoscaling = 2;
+}
+
+message AutoscalingPolicy {
+  uint32 min_replicas = 1;
+  uint32 max_replicas = 2;
+
+  // Target average CPU utilisation percentage (e.g. 70).
+  uint32 target_cpu_utilization_percent = 3;
+
+  // Target average memory utilisation percentage.
+  uint32 target_memory_utilization_percent = 4;
+
+  // Custom metrics (e.g. queue depth, RPS).
+  repeated CustomMetric custom_metrics = 5;
+
+  // Scale-down stabilisation window.
+  google.protobuf.Duration scale_down_stabilization = 6;
+}
+
+message CustomMetric {
+  // Metric name as exposed by the metrics adapter.
+  string name = 1;
+
+  // One of "Value", "AverageValue", "Utilization".
+  string target_type = 2;
+
+  // Target threshold (interpretation depends on target_type).
+  string target_value = 3;
+}
+
+// ---------------------------------------------------------------------------
+//  Update strategy
+// ---------------------------------------------------------------------------
+message UpdateStrategy {
+  // "RollingUpdate" (default) or "Recreate".
+  string type = 1;
+
+  RollingUpdateConfig rolling_update = 2;
+}
+
+message RollingUpdateConfig {
+  // Absolute number or percentage (e.g. "1", "25%").
+  string max_unavailable = 1;
+  string max_surge = 2;
+}
+
+// ---------------------------------------------------------------------------
+//  Pod-level configuration
+// ---------------------------------------------------------------------------
+message PodConfig {
+  // Service account name for RBAC / workload identity.
+  string service_account_name = 1;
+
+  // Restart policy: "Always" (default for services), "OnFailure", "Never".
+  string restart_policy = 2;
+
+  // Graceful shutdown window.
+  uint32 termination_grace_period_seconds = 3;
+
+  // DNS policy: "ClusterFirst" (default), "Default", "None".
+  string dns_policy = 4;
+  PodDnsConfig dns_config = 5;
+
+  // Host networking (rare, but needed for some infra workloads).
+  bool host_network = 6;
+
+  // Node scheduling.
+  map<string, string> node_selector = 7;
+  repeated Toleration tolerations = 8;
+  Affinity affinity = 9;
+
+  // Topology spread constraints for HA.
+  repeated TopologySpreadConstraint topology_spread_constraints = 10;
+
+  // Image pull secrets.
+  repeated string image_pull_secrets = 11;
+
+  // Pod-level security context.
+  PodSecurityContext security_context = 12;
+
+  // Priority class name for preemption.
+  string priority_class_name = 13;
+
+  // Runtime class (e.g. "gvisor", "kata").
+  string runtime_class_name = 14;
+
+  // Annotations passed to the pod template (not the workload resource).
+  map<string, string> annotations = 15;
+
+  // Labels passed to the pod template.
+  map<string, string> labels = 16;
+}
+
+message PodDnsConfig {
+  repeated string nameservers = 1;
+  repeated string searches = 2;
+  repeated DnsOption options = 3;
+}
+
+message DnsOption {
+  string name = 1;
+  string value = 2;
+}
+
+message Toleration {
+  string key = 1;
+  // "Equal" or "Exists".
+  string operator = 2;
+  string value = 3;
+  // "NoSchedule", "PreferNoSchedule", "NoExecute".
+  string effect = 4;
+  // Toleration seconds for NoExecute.
+  int64 toleration_seconds = 5;
+}
+
+message Affinity {
+  NodeAffinity node_affinity = 1;
+  PodAffinity pod_affinity = 2;
+  PodAntiAffinity pod_anti_affinity = 3;
+}
+
+message NodeAffinity {
+  repeated PreferredSchedulingTerm preferred = 1;
+  NodeSelector required = 2;
+}
+
+message PreferredSchedulingTerm {
+  int32 weight = 1;
+  NodeSelectorTerm preference = 2;
+}
+
+message NodeSelector {
+  repeated NodeSelectorTerm terms = 1;
+}
+
+message NodeSelectorTerm {
+  repeated NodeSelectorRequirement match_expressions = 1;
+  repeated NodeSelectorRequirement match_fields = 2;
+}
+
+message NodeSelectorRequirement {
+  string key = 1;
+  // "In", "NotIn", "Exists", "DoesNotExist", "Gt", "Lt".
+  string operator = 2;
+  repeated string values = 3;
+}
+
+message PodAffinity {
+  repeated WeightedPodAffinityTerm preferred = 1;
+  repeated PodAffinityTerm required = 2;
+}
+
+message PodAntiAffinity {
+  repeated WeightedPodAffinityTerm preferred = 1;
+  repeated PodAffinityTerm required = 2;
+}
+
+message WeightedPodAffinityTerm {
+  int32 weight = 1;
+  PodAffinityTerm term = 2;
+}
+
+message PodAffinityTerm {
+  LabelSelector label_selector = 1;
+  string topology_key = 2;
+  repeated string namespaces = 3;
+}
+
+message LabelSelector {
+  map<string, string> match_labels = 1;
+  repeated LabelSelectorRequirement match_expressions = 2;
+}
+
+message LabelSelectorRequirement {
+  string key = 1;
+  // "In", "NotIn", "Exists", "DoesNotExist".
+  string operator = 2;
+  repeated string values = 3;
+}
+
+message TopologySpreadConstraint {
+  // Max difference in spread (e.g. 1 for even distribution).
+  int32 max_skew = 1;
+
+  // "zone", "hostname", or any node label.
+  string topology_key = 2;
+
+  // "DoNotSchedule" or "ScheduleAnyway".
+  string when_unsatisfiable = 3;
+
+  LabelSelector label_selector = 4;
+}
+
+// ===========================================================================
+//  ServiceSpec — L4 load balancing & service discovery.
+//  Combines Service + optional gateway route into one resource when desired.
+// ===========================================================================
+message ServiceSpec {
+  // The ContainerServiceSpec name this service fronts.
+  string target = 1;
+
+  // Service type: "ClusterIP" (default), "NodePort", "LoadBalancer", "Headless".
+  string type = 2;
+
+  repeated ServicePort ports = 3;
+
+  // Session affinity: "None" (default), "ClientIP".
+  string session_affinity = 4;
+
+  // Optional: expose this service externally via the gateway.
+  // Setting this is equivalent to creating a separate RouteSpec.
+  // Allows combining Service + Route into one resource for simpler configs.
+  InlineRoute inline_route = 5;
+
+  // Extra annotations on the Service object (e.g. cloud LB configs).
+  map<string, string> annotations = 6;
+}
+
+message ServicePort {
+  string name = 1;
+  uint32 port = 2;
+  uint32 target_port = 3;
+  string protocol = 4; // TCP, UDP, SCTP
+  // Only for NodePort type.
+  uint32 node_port = 5;
+}
+
+message InlineRoute {
+  // Hostname(s) to match (e.g. "api.example.com").
+  repeated string hostnames = 1;
+
+  // Path matching rules.  If empty, matches all paths to the first port.
+  repeated RouteRule rules = 2;
+
+  // TLS configuration.
+  RouteTls tls = 3;
+}
+
+// ===========================================================================
+//  RouteSpec — Gateway API HTTPRoute (standalone).
+//  Use this when you need routing rules separate from the service definition.
+// ===========================================================================
+message RouteSpec {
+  // The ServiceSpec name this route targets.
+  string target_service = 1;
+
+  // Hostname(s) this route matches.
+  repeated string hostnames = 2;
+
+  // Matching & routing rules.
+  repeated RouteRule rules = 3;
+
+  // TLS termination config.
+  RouteTls tls = 4;
+
+  // Which gateway to attach to (empty = cluster default).
+  string gateway_ref = 5;
+
+  // Route priority / ordering.
+  int32 priority = 6;
+}
+
+message RouteRule {
+  // Path matching.
+  repeated RouteMatch matches = 1;
+
+  // Backend(s) traffic is sent to.
+  repeated RouteBackend backends = 2;
+
+  // Request / response filters applied to this rule.
+  repeated RouteFilter filters = 3;
+
+  // Timeout for the entire request.
+  google.protobuf.Duration timeout = 4;
+}
+
+message RouteMatch {
+  // Path match.
+  PathMatch path = 1;
+
+  // Header conditions.
+  repeated HeaderMatch headers = 2;
+
+  // Query parameter conditions.
+  repeated QueryParamMatch query_params = 3;
+
+  // HTTP method constraint.
+  string method = 4;
+}
+
+message PathMatch {
+  // "Exact", "PathPrefix" (default), "RegularExpression".
+  string type = 1;
+  string value = 2;
+}
+
+message HeaderMatch {
+  // "Exact" (default), "RegularExpression".
+  string type = 1;
+  string name = 2;
+  string value = 3;
+}
+
+message QueryParamMatch {
+  string type = 1;
+  string name = 2;
+  string value = 3;
+}
+
+message RouteBackend {
+  // Service name.
+  string service = 1;
+  // Port on the backend service.
+  uint32 port = 2;
+  // Traffic weight for canary / blue-green (1-100).
+  uint32 weight = 3;
+}
+
+message RouteFilter {
+  oneof filter {
+    RequestHeaderModifier  request_header_modifier  = 1;
+    ResponseHeaderModifier response_header_modifier = 2;
+    RequestRedirect        request_redirect         = 3;
+    UrlRewrite             url_rewrite              = 4;
+    RequestMirror          request_mirror           = 5;
+  }
+}
+
+message RequestHeaderModifier {
+  map<string, string> set = 1;
+  map<string, string> add = 2;
+  repeated string remove = 3;
+}
+
+message ResponseHeaderModifier {
+  map<string, string> set = 1;
+  map<string, string> add = 2;
+  repeated string remove = 3;
+}
+
+message RequestRedirect {
+  string scheme = 1;
+  string hostname = 2;
+  uint32 port = 3;
+  string path = 4;
+  uint32 status_code = 5; // 301, 302, etc.
+}
+
+message UrlRewrite {
+  string hostname = 1;
+  PathMatch path = 2;
+}
+
+message RequestMirror {
+  string service = 1;
+  uint32 port = 2;
+}
+
+message RouteTls {
+  // "Terminate" (default) or "Passthrough".
+  string mode = 1;
+
+  // Secret name containing the TLS certificate.
+  string certificate_ref = 2;
+}
+
+// ===========================================================================
+//  CronJobSpec — scheduled workload.
+// ===========================================================================
+message CronJobSpec {
+  // Cron schedule (e.g. "*/5 * * * *").
+  string schedule = 1;
+
+  // Timezone (e.g. "Europe/Copenhagen").  Empty = UTC.
+  string timezone = 2;
+
+  // Container that runs the job.
+  Container container = 3;
+
+  // Volumes for the job pod.
+  repeated Volume volumes = 4;
+
+  // Job-level config.
+  JobConfig job_config = 5;
+
+  // Pod-level config (node selector, tolerations, etc.).
+  PodConfig pod_config = 6;
+
+  // "Allow", "Forbid", "Replace".
+  string concurrency_policy = 7;
+
+  // Number of successful/failed jobs to retain.
+  uint32 successful_jobs_history_limit = 8;
+  uint32 failed_jobs_history_limit = 9;
+
+  // Suspend the cron schedule.
+  bool suspend = 10;
+
+  // Deadline in seconds for starting the job if it missed its schedule.
+  int64 starting_deadline_seconds = 11;
+}
+
+// ===========================================================================
+//  JobSpec — one-shot workload.
+// ===========================================================================
+message JobSpec {
+  // Container that runs the job.
+  Container container = 1;
+
+  // Volumes for the job pod.
+  repeated Volume volumes = 2;
+
+  // Job-level config.
+  JobConfig job_config = 3;
+
+  // Pod-level config.
+  PodConfig pod_config = 4;
+}
+
+message JobConfig {
+  // Number of times the job should complete successfully.
+  uint32 completions = 1;
+
+  // Max parallel pods.
+  uint32 parallelism = 2;
+
+  // "NonIndexed" (default) or "Indexed".
+  string completion_mode = 3;
+
+  // Number of retries before marking failed.
+  uint32 backoff_limit = 4;
+
+  // Active deadline (seconds) — job killed if it runs longer.
+  int64 active_deadline_seconds = 5;
+
+  // TTL after finished (seconds) — auto-cleanup.
+  int64 ttl_seconds_after_finished = 6;
+
+  // Restart policy: "OnFailure" (default) or "Never".
+  string restart_policy = 7;
+}

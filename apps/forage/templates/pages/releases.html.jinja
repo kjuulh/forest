@@ -1,0 +1,12 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="app-container py-12">
+    <div class="flex items-center justify-between mb-8">
+        <h1 class="text-2xl font-bold">Continuous deployment</h1>
+    </div>
+
+    <release-timeline org="{{ org_name }}"></release-timeline>
+</section>
+<script src="/static/js/components/forage-components.js"></script>
+{% endblock %}

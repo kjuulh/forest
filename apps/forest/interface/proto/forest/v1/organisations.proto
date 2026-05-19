@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package forest.v1;
+
+import "google/protobuf/timestamp.proto";
+
+message Organisation {
+  string organisation_id = 1;
+  string name = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message CreateOrganisationRequest {
+  string name = 1;
+}
+message CreateOrganisationResponse {
+  string organisation_id = 1;
+}
+
+message GetOrganisationRequest {
+  oneof identifier {
+    string organisation_id = 1;
+    string name = 2;
+  }
+}
+message GetOrganisationResponse {
+  Organisation organisation = 1;
+}
+
+message SearchOrganisationsRequest {
+  string query = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+message SearchOrganisationsResponse {
+  repeated Organisation organisations = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}
+
+message ListMyOrganisationsRequest {
+  // Optional role filter (e.g. "admin"); empty means all roles
+  string role = 1;
+}
+message ListMyOrganisationsResponse {
+  repeated Organisation organisations = 1;
+  // The role the caller has in each organisation (parallel to organisations)
+  repeated string roles = 2;
+}
+
+// -- Members ------------------------------------------------------------------
+
+message OrganisationMember {
+  string user_id = 1;
+  string username = 2;
+  string role = 3;
+  google.protobuf.Timestamp joined_at = 4;
+}
+
+message AddMemberRequest {
+  string organisation_id = 1;
+  string user_id = 2;
+  string role = 3;
+}
+message AddMemberResponse {
+  OrganisationMember member = 1;
+}
+
+message RemoveMemberRequest {
+  string organisation_id = 1;
+  string user_id = 2;
+}
+message RemoveMemberResponse {}
+
+message UpdateMemberRoleRequest {
+  string organisation_id = 1;
+  string user_id = 2;
+  string role = 3;
+}
+message UpdateMemberRoleResponse {
+  OrganisationMember member = 1;
+}
+
+message ListMembersRequest {
+  string organisation_id = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+message ListMembersResponse {
+  repeated OrganisationMember members = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}
+
+service OrganisationService {
+  rpc CreateOrganisation(CreateOrganisationRequest) returns (CreateOrganisationResponse);
+  rpc GetOrganisation(GetOrganisationRequest) returns (GetOrganisationResponse);
+  rpc SearchOrganisations(SearchOrganisationsRequest) returns (SearchOrganisationsResponse);
+  rpc ListMyOrganisations(ListMyOrganisationsRequest) returns (ListMyOrganisationsResponse);
+  rpc AddMember(AddMemberRequest) returns (AddMemberResponse);
+  rpc RemoveMember(RemoveMemberRequest) returns (RemoveMemberResponse);
+  rpc UpdateMemberRole(UpdateMemberRoleRequest) returns (UpdateMemberRoleResponse);
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
+}
