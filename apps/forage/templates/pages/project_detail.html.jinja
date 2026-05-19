@@ -80,6 +80,21 @@
     </div>
     {% else %}
 
+    {# ── Releases swimlane (top, just below the header) ──────────────
+       Compact view; full timeline on the Releases tab. Sits above the
+       README/sidebar grid so it spans the full width when the timeline
+       has lanes. #}
+    {% if project_has_timeline %}
+    <div class="mb-10">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold">Recent releases</h2>
+            <a href="/orgs/{{ org_name }}/projects/{{ project_name }}/releases" class="text-sm text-gray-500 hover:text-gray-900">View all &rarr;</a>
+        </div>
+        <release-timeline org="{{ org_name }}" project="{{ project_name }}" csrf="{{ csrf_token }}" username="{{ user.username }}" role="{{ current_role }}" limit="3"></release-timeline>
+    </div>
+    <script src="/static/js/components/forage-components.js"></script>
+    {% endif %}
+
     <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
         <div class="md:col-span-3">
             {# ── README (main content, GitHub-style) ───────────────── #}

@@ -12,6 +12,10 @@
   export let csrf = "";
   export let username = "";
   export let role = "";
+  // Cap how many releases the timeline renders. Empty string / "0" /
+  // missing → render all. Used by the project Overview to show a top-3
+  // summary linked to the full Releases tab.
+  export let limit = "";
 
   // Reactive state
   let timeline = [];
@@ -579,17 +583,19 @@
       {/each}
     </div>
 
-    <!-- Timeline cards -->
+    <!-- Timeline cards. When `limit` is set (Overview summary use case),
+         render only the first N items; the rest are accessible via the
+         full Releases tab. -->
     <div bind:this={timelineEl} class="space-y-3 min-w-0" style="grid-row: 1;">
-      {#each timeline as item (itemKey(item))}
+      {#each (limit && Number(limit) > 0 ? timeline.slice(0, Number(limit)) : timeline) as item (itemKey(item))}
         {#if item.kind === "release" && item.release}
           {@const release = item.release}
           <div data-release data-envs={release.dest_envs} class="border border-gray-200 rounded-lg overflow-hidden">
             <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
               <div class="flex items-center gap-2 min-w-0 flex-1">
                 <span class="inline-block w-6 h-6 rounded-full bg-gray-200 shrink-0" data-avatar></span>
-                <a href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}" class="font-medium text-gray-900 hover:text-black truncate">
-                  {release.title}
+                <a href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}" class="font-medium text-gray-900 hover:text-black truncate" title={release.title}>
+                  {release.title?.length > 80 ? release.title.slice(0, 80) + "…" : release.title}
                 </a>
               </div>
               <div class="flex items-center gap-4 text-xs text-gray-500 shrink-0 flex-wrap">
@@ -885,8 +891,8 @@
                   <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
                     <div class="flex items-center gap-2 min-w-0 flex-1">
                       <span class="inline-block w-6 h-6 rounded-full bg-gray-200 shrink-0" data-avatar></span>
-                      <a href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}" class="font-medium text-gray-900 hover:text-black truncate">
-                        {release.title}
+                      <a href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}" class="font-medium text-gray-900 hover:text-black truncate" title={release.title}>
+                        {release.title?.length > 80 ? release.title.slice(0, 80) + "…" : release.title}
                       </a>
                     </div>
                     <div class="flex items-center gap-4 text-xs text-gray-500 shrink-0">

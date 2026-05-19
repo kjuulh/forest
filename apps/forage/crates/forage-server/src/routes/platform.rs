@@ -920,6 +920,12 @@ async fn project_detail(
                 readme_html => comp_readme_html,
                 manifest_html => manifest_html,
                 manifest => manifest_view,
+                // Whether to render the embedded release-timeline summary
+                // on Overview. We hide the section entirely when zero
+                // releases exist so the page stays clean — the timeline
+                // component would otherwise render its own empty state
+                // and crowd the Overview's Get-started panel.
+                project_has_timeline => !data.timeline.is_empty(),
             },
         )
         .map_err(|e| {
@@ -3426,12 +3432,47 @@ async fn add_member_submit(
         ));
     }
 
+    let identifier = form.username.trim();
+    if identifier.is_empty() {
+        return Err(error_page(
+            &state,
+            StatusCode::BAD_REQUEST,
+            "Invalid request",
+            "Please enter a username or email address.",
+        ));
+    }
+
+    let lookup = if identifier.contains('@') {
+        state
+            .forest_client
+            .get_user_by_email(&session.access_token, identifier)
+            .await
+    } else {
+        state
+            .forest_client
+            .get_user_by_username(&session.access_token, identifier)
+            .await
+    };
+
+    let user_id = match lookup {
+        Ok(profile) => profile.user_id,
+        Err(forage_core::auth::AuthError::NotFound) => {
+            return Err(error_page(
+                &state,
+                StatusCode::NOT_FOUND,
+                "User not found",
+                &format!("No user matches \"{identifier}\". Check the spelling or try the email address."),
+            ));
+        }
+        Err(e) => return Err(internal_error(&state, "failed to look up user", &e)),
+    };
+
     let _ = state
         .platform_client
         .add_member(
             &session.access_token,
             &current_org.organisation_id,
-            &form.username,
+            &user_id,
             &form.role,
         )
         .await
