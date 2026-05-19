@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::Context;
 use drop_queue::DropQueue;
-use rand::Rng;
+use rand::RngExt;
 
 use crate::state::State;
 

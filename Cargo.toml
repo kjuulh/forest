@@ -43,7 +43,7 @@ semver = "1.0.26"
 futures = "0.3.31"
 notmad = "0.11.0"
 drop-queue = { version = "0.0.9", features = ["notmad"] }
-rand = "0.9.1"
+rand = "0.10"
 noworkers = "0.1.0"
 tower = { version = "0.5.2", features = ["tokio", "tracing"] }
 http = "1.4.0"
@@ -51,11 +51,11 @@ http = "1.4.0"
 bytes = "1.10.1"
 prost = "0.14.1"
 prost-types = "0.14.1"
-tonic = { version = "=0.14.2", features = [
+tonic = { version = "=0.14.6", features = [
   "gzip",
   "tls-aws-lc",
   "tls-webpki-roots",
 ] }
-tonic-prost = "=0.14.2"
+tonic-prost = "=0.14.6"
 async-nats = "0.40"
 insta = "1"

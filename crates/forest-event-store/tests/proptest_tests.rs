@@ -3,7 +3,7 @@ use forest_event_store::{
     RecordedEvent, StreamCategory, StreamQuery,
 };
 use proptest::prelude::*;
-use rand::Rng;
+use rand::{Rng as RandRng, RngExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -111,7 +111,7 @@ fn uid() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
-fn random_event(rng: &mut impl Rng) -> LedgerEvent {
+fn random_event(rng: &mut impl RandRng) -> LedgerEvent {
     match rng.random_range(0u8..3) {
         0 => LedgerEvent::Credited {
             amount: rng.random_range(1..=10000i64),
