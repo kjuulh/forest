@@ -79,6 +79,16 @@ fn warn_default<T: Default>(context: &str, result: Result<T, impl std::fmt::Disp
     }
 }
 
+/// Render markdown → sanitised HTML. Shared by the registry and platform
+/// routes so the project Overview and the legacy component-detail page
+/// produce identical output for the same source markdown.
+pub(super) fn render_markdown(md: &str) -> String {
+    let parser = pulldown_cmark::Parser::new(md);
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, parser);
+    ammonia::clean(&html)
+}
+
 fn orgs_context(orgs: &[CachedOrg]) -> Vec<minijinja::Value> {
     orgs.iter()
         .map(|o| context! { name => o.name, role => o.role })

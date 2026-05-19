@@ -10,6 +10,24 @@
   padding-right: 1rem;
 }
 
+/* ── JSON pretty-printer tokens (specs/features/007) ──────────────── */
+/* Server-side tokeniser in forage-server::pretty_json emits these
+   classes; the .json-pretty wrapper scopes them so the styles only apply
+   to manifest blocks. The bg + base text colors are fixed (not Tailwind
+   variables) so the @media dark-mode palette remap can't invert them —
+   the JSON block stays dark-on-dark in both themes. */
+.json-pretty {
+  background-color: #0a0a0a !important;
+  color: #d1d5db !important;
+}
+.json-pretty .json-key    { color: #93c5fd; }  /* blue-300 */
+.json-pretty .json-string { color: #86efac; }  /* green-300 */
+.json-pretty .json-number { color: #fcd34d; }  /* amber-300 */
+.json-pretty .json-bool   { color: #c4b5fd; }  /* violet-300 */
+.json-pretty .json-null   { color: #f87171; }  /* red-400 */
+.json-pretty .json-punct  { color: #9ca3af; }  /* gray-400 — slightly brighter for legibility */
+.json-pretty .json-raw    { color: #f87171; }  /* red-400 — invalid fallback */
+
 /* ── Scrollbar-hidden utility for tab navigation ──────────────────────── */
 @utility scrollbar-none {
   -ms-overflow-style: none;

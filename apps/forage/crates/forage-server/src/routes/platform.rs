@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{error_page, internal_error, warn_default};
 use crate::auth::{self, Session};
+use crate::manifest_view::ManifestView;
+use crate::pretty_json;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -25,6 +27,10 @@ pub fn router() -> Router<AppState> {
         .route("/orgs", post(create_org_submit))
         .route("/orgs/{org}/projects", get(projects_list))
         .route("/orgs/{org}/projects/{project}", get(project_detail))
+        .route(
+            "/orgs/{org}/projects/{project}/deployments",
+            get(project_deployments),
+        )
         .route(
             "/orgs/{org}/projects/{project}/releases",
             get(project_releases),
@@ -778,7 +784,30 @@ async fn project_detail(
             None => Ok(vec![]),
         }
     };
-    let (artifacts, projects, environments, dest_states, release_intents, project_pipelines, component_versions) = tokio::join!(
+    // Per specs/features/008: the project Overview folds in the canonical
+    // component's detail (shape, tool facet, README, manifest) when the
+    // 1:1 name match holds. If the component doesn't exist yet (fresh
+    // project) or the call fails, the Overview renders the Get-started
+    // panel — no error to the user.
+    let comp_detail_fut = async {
+        match state.registry_client.as_ref() {
+            Some(registry) => registry
+                .get_component_detail(&session.access_token, &org, &project)
+                .await
+                .ok(),
+            None => None,
+        }
+    };
+    let (
+        artifacts,
+        projects,
+        environments,
+        dest_states,
+        release_intents,
+        project_pipelines,
+        component_versions,
+        comp_detail,
+    ) = tokio::join!(
         state
             .platform_client
             .list_artifacts(&session.access_token, &org, &project),
@@ -798,6 +827,7 @@ async fn project_detail(
             .platform_client
             .list_release_pipelines(&session.access_token, &org, &project),
         component_versions_fut,
+        comp_detail_fut,
     );
     let artifacts = artifacts.map_err(|e| internal_error(&state, "list_artifacts", &e))?;
     let projects = warn_default("list_projects", projects);
@@ -840,6 +870,28 @@ async fn project_detail(
     let data = build_timeline(items, &org, &environments, &dest_states, &release_intents, &pipelines_map);
 
 
+    // Project Overview folds in the canonical component's catalog data.
+    // When the component exists: shape badge, install copy, README markdown,
+    // manifest pretty JSON + structured view. When it doesn't, all of these
+    // are None/empty and the template shows the Get-started panel.
+    let comp_summary = comp_detail.as_ref().map(|d| d.summary.clone());
+    let comp_versions = comp_detail.as_ref().map(|d| d.versions.clone()).unwrap_or_default();
+    let comp_readme_html = comp_detail
+        .as_ref()
+        .filter(|d| !d.readme.is_empty())
+        .map(|d| super::render_markdown(&d.readme))
+        .unwrap_or_default();
+    let manifest_raw = comp_detail
+        .as_ref()
+        .map(|d| d.manifest_json.clone())
+        .unwrap_or_default();
+    let manifest_html = if manifest_raw.is_empty() {
+        String::new()
+    } else {
+        pretty_json::tokenize(&manifest_raw)
+    };
+    let manifest_view = ManifestView::parse(&manifest_raw);
+
     let html = state
         .templates
         .render(
@@ -860,11 +912,137 @@ async fn project_detail(
                 lanes => data.lanes,
                 env_options => env_options,
                 component_versions => component_versions,
+                summary => comp_summary,
+                comp_versions => &comp_versions,
+                readme_html => comp_readme_html,
+                manifest_html => manifest_html,
+                manifest => manifest_view,
+                project_has_releases => !comp_versions.is_empty(),
             },
         )
         .map_err(|e| {
             internal_error(&state, "template error", &e)
         })?;
+
+    Ok(Html(html).into_response())
+}
+
+// ─── Project deployments (Continuous deployment timeline) ────────────
+//
+// Lifts the deployment timeline + Pipelines/Triggers/Policies management
+// chips out of the old project_detail page. After 008 the Overview is the
+// canonical home (Releases/README), and CD plumbing lives here.
+
+async fn project_deployments(
+    State(state): State<AppState>,
+    session: Session,
+    Path((org, project)): Path<(String, String)>,
+) -> Result<Response, Response> {
+    let orgs = &session.user.orgs;
+    let current_org = require_org_membership(&state, orgs, &org)?;
+    let current_role = current_org.role.clone();
+
+    if !validate_slug(&project) {
+        return Err(error_page(
+            &state,
+            StatusCode::BAD_REQUEST,
+            "Invalid request",
+            "Invalid project name.",
+        ));
+    }
+
+    // Same flag drives the project tab strip everywhere — used to hide
+    // the Releases tab when no versions exist (specs/features/008).
+    let component_versions_fut = async {
+        match state.registry_client.as_ref() {
+            Some(registry) => registry
+                .list_component_versions(&session.access_token, &org, &project)
+                .await,
+            None => Ok(vec![]),
+        }
+    };
+    let (artifacts, projects, environments, dest_states, release_intents, project_pipelines, component_versions) = tokio::join!(
+        state
+            .platform_client
+            .list_artifacts(&session.access_token, &org, &project),
+        state
+            .platform_client
+            .list_projects(&session.access_token, &org),
+        state
+            .platform_client
+            .list_environments(&session.access_token, &org),
+        state
+            .platform_client
+            .get_destination_states(&session.access_token, &org, Some(&project)),
+        state
+            .platform_client
+            .get_release_intent_states(&session.access_token, &org, Some(&project), true),
+        state
+            .platform_client
+            .list_release_pipelines(&session.access_token, &org, &project),
+        component_versions_fut,
+    );
+    let artifacts = artifacts.map_err(|e| internal_error(&state, "list_artifacts", &e))?;
+    let projects = warn_default("list_projects", projects);
+    let environments = warn_default("list_environments", environments);
+    let dest_states = warn_default("get_destination_states", dest_states);
+    let release_intents = warn_default("get_release_intent_states", release_intents);
+    let project_pipelines = warn_default("list_release_pipelines", project_pipelines);
+    let component_versions = warn_default("list_component_versions", component_versions);
+
+    let mut sorted_envs = environments.clone();
+    sorted_envs.sort_by_key(|e| e.sort_order);
+    let env_options: Vec<minijinja::Value> = if !sorted_envs.is_empty() {
+        sorted_envs
+            .iter()
+            .map(|e| context! { name => e.name })
+            .collect()
+    } else {
+        let mut env_seen = std::collections::HashSet::new();
+        artifacts
+            .iter()
+            .flat_map(|a| a.destinations.iter())
+            .filter(|d| env_seen.insert(d.environment.clone()))
+            .map(|d| context! { name => d.environment })
+            .collect()
+    };
+
+    let items: Vec<ArtifactWithProject> = artifacts
+        .into_iter()
+        .map(|a| ArtifactWithProject {
+            artifact: a,
+            project_name: project.clone(),
+        })
+        .collect();
+    let mut pipelines_map = PipelinesByProject::new();
+    if !project_pipelines.is_empty() {
+        pipelines_map.insert(project.clone(), project_pipelines);
+    }
+    let data = build_timeline(items, &org, &environments, &dest_states, &release_intents, &pipelines_map);
+
+    let html = state
+        .templates
+        .render(
+            "pages/project_deployments.html.jinja",
+            context! {
+                title => format!("Deployments - {project} - {org} - Forage"),
+                description => format!("Continuous deployment for {project}"),
+                user => context! { username => session.user.username },
+                csrf_token => &session.csrf_token,
+                current_org => &org,
+                orgs => orgs_context(orgs),
+                org_name => &org,
+                project_name => &project,
+                projects => projects,
+                current_role => &current_role,
+                active_tab => "project_deployments",
+                timeline => data.timeline,
+                lanes => data.lanes,
+                env_options => env_options,
+                project_has_releases => !component_versions.is_empty(),
+            },
+        )
+        .map_err(|e| internal_error(&state, "template error", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -946,6 +1124,7 @@ async fn project_releases(
                 projects => projects,
                 active_tab => "project_releases",
                 releases => releases,
+                project_has_releases => true,
             },
         )
         .map_err(|e| {

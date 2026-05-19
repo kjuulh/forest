@@ -10,7 +10,7 @@ use forage_core::platform::{
     UpdateReleasePipelineInput, UpdateTriggerInput,
 };
 use forage_core::registry::{
-    ComponentDetail, ComponentSearchResult, ComponentSummary, ComponentVersionInfo, ForestRegistry,
+    ComponentDetail, ComponentSearchResult, ComponentVersionInfo, ForestRegistry, ToolSummary,
 };
 use forage_core::integrations::InMemoryIntegrationStore;
 use forage_core::session::{
@@ -1015,6 +1015,7 @@ pub(crate) struct MockRegistryBehavior {
     pub get_component_detail_result: Option<Result<ComponentDetail, PlatformError>>,
     pub list_component_versions_result: Option<Result<Vec<ComponentVersionInfo>, PlatformError>>,
     pub get_component_manifest_result: Option<Result<String, PlatformError>>,
+    pub list_org_tools_result: Option<Result<Vec<ToolSummary>, PlatformError>>,
 }
 
 pub(crate) struct MockRegistryClient {
@@ -1083,6 +1084,15 @@ impl ForestRegistry for MockRegistryClient {
     ) -> Result<String, PlatformError> {
         let b = self.behavior.lock().unwrap();
         b.get_component_manifest_result.clone().unwrap_or(Ok(String::new()))
+    }
+
+    async fn list_org_tools(
+        &self,
+        _access_token: &str,
+        _organisation: &str,
+    ) -> Result<Vec<ToolSummary>, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.list_org_tools_result.clone().unwrap_or(Ok(vec![]))
     }
 }
 

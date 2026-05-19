@@ -117,6 +117,15 @@ impl TemplateEngine {
         env.add_filter("urlencode", |v: String| -> String {
             urlencoding::encode(&v).into_owned()
         });
+        // Compact sha256 chip — `5df1c9…ec945`. Used in the Platforms table
+        // and anywhere a long content-address would dominate the row.
+        env.add_filter("short_sha", |v: String| -> String {
+            crate::manifest_view::ManifestView::short_sha(&v)
+        });
+        // Human-readable byte count for manifest sizes (e.g. "438.0 KB").
+        env.add_filter("human_size", |v: u64| -> String {
+            crate::manifest_view::ManifestView::human_size(v)
+        });
 
         // Default asset hash for tests/dev — overridden in production by compute_asset_hashes
         env.add_global("css_hash", "dev");

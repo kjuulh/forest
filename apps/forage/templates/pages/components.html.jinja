@@ -1,6 +1,6 @@
 {% extends "base.html.jinja" %}
 {% from "components/timestamp.html.jinja" import timeago as ts %}
-{% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, empty_state, pagination %}
+{% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, tool_shape_badge, empty_state, pagination %}
 
 {% block content %}
 <section class="app-container pt-12 pb-8">
@@ -31,11 +31,12 @@
         <a href="/components/{{ c.organisation }}/{{ c.name }}" class="block p-5 border border-gray-200 rounded-lg hover:border-gray-400 transition-colors">
             <div class="flex items-center justify-between">
                 <div class="min-w-0">
-                    <div class="flex items-center gap-2 min-w-0">
+                    <div class="flex items-center gap-2 min-w-0 flex-wrap">
                         <h2 class="font-bold text-base truncate">{{ c.organisation }}/{{ c.name }}</h2>
                         {{ badge("v" ~ c.latest_version) }}
-                        {{ kind_badge(c.kind) }}
+                        {{ tool_shape_badge(c.shape) }}
                         {{ visibility_badge(c.visibility) }}
+                        {% if c.upstream_host %}<span class="text-xs text-gray-500">← {{ c.upstream_host }}</span>{% endif %}
                     </div>
                     {% if c.description %}
                     <p class="mt-1 text-sm text-gray-600 truncate">{{ c.description }}</p>

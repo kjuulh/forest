@@ -108,10 +108,15 @@
         <div class="max-w-6xl mx-auto px-4 mt-2">
             <div class="flex gap-1 -mb-px overflow-x-auto scrollbar-none">
                 {% if project_name is defined and project_name %}
-                {# ── Project-level tabs ─────────────────────────────── #}
+                {# ── Project-level tabs (specs/features/008) ──────────
+                   The Releases tab is hidden when no versions exist
+                   (clean empty-state policy). Deployments is always
+                   visible because it houses CD settings. #}
                 <a href="/orgs/{{ current_org }}/projects/{{ project_name }}" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'project_overview' %} text-gray-900 border-gray-900{% endif %}">Overview</a>
+                {% if project_has_releases is defined and project_has_releases %}
                 <a href="/orgs/{{ current_org }}/projects/{{ project_name }}/releases" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'project_releases' %} text-gray-900 border-gray-900{% endif %}">Releases</a>
-                <a href="/orgs/{{ current_org }}/projects/{{ project_name }}/components" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'project_components' %} text-gray-900 border-gray-900{% endif %}">Components</a>
+                {% endif %}
+                <a href="/orgs/{{ current_org }}/projects/{{ project_name }}/deployments" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'project_deployments' %} text-gray-900 border-gray-900{% endif %}">Deployments</a>
                 {% elif current_org is defined and current_org %}
                 {# ── Org-level tabs ─────────────────────────────────── #}
                 <a href="/dashboard" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'dashboard' %} text-gray-900 border-gray-900{% endif %}">Overview</a>
@@ -132,20 +137,26 @@
         <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
             <a href="/" class="text-xl font-bold tracking-tight">forage</a>
             <div class="flex items-center gap-6">
+                {% if not (is_landing is defined and is_landing) %}
                 <a href="/pricing" class="text-sm text-gray-600 hover:text-gray-900 desktop-only">Pricing</a>
                 <a href="/components" class="text-sm text-gray-600 hover:text-gray-900 desktop-only">Components</a>
+                {% endif %}
                 <a href="/login" class="text-sm font-medium px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800">Sign in</a>
+                {% if not (is_landing is defined and is_landing) %}
                 <button type="button" onclick="document.getElementById('marketing-mobile-menu').classList.toggle('hidden')" class="text-gray-500 hover:text-gray-900 p-1 mobile-only">
                     <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
                     </svg>
                 </button>
+                {% endif %}
             </div>
         </div>
+        {% if not (is_landing is defined and is_landing) %}
         <div id="marketing-mobile-menu" class="hidden border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-2">
             <a href="/pricing" class="block text-sm text-gray-600 hover:text-gray-900 py-1">Pricing</a>
             <a href="/components" class="block text-sm text-gray-600 hover:text-gray-900 py-1">Components</a>
         </div>
+        {% endif %}
     </nav>
     {% endif %}
 

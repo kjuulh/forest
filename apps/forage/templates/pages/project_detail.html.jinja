@@ -1,54 +1,187 @@
 {% extends "base.html.jinja" %}
+{% from "components/timestamp.html.jinja" import timeago as ts %}
+{% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, tool_shape_badge, empty_state, code_block, pretty_json_block %}
+
+{# Project Overview — the canonical home (specs/features/008).
+   Shape-aware: when the project has a 1:1 canonical component, fold its
+   shape/tool/manifest data into the page. When the project has no
+   releases, render only the centered Get-started panel — no empty cards.
+#}
+
+{% set is_tool = summary and (summary.shape == "hybrid" or summary.shape == "tool_binary" or summary.shape == "tool_external") %}
+{% set show_get_started = not comp_versions and not readme_html %}
 
 {% block content %}
-<section class="app-container pt-12">
-    <div class="flex items-center justify-between mb-8">
-        <h1 class="text-2xl font-bold">Continuous deployment</h1>
-        <div class="flex items-center gap-4">
-            <a href="/orgs/{{ org_name }}/projects/{{ project_name }}/pipelines" class="text-sm text-gray-500 hover:text-gray-900 flex items-center gap-1">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8m-8 6h16"/></svg>
-                Pipelines
-            </a>
-            <a href="/orgs/{{ org_name }}/projects/{{ project_name }}/triggers" class="text-sm text-gray-500 hover:text-gray-900 flex items-center gap-1">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                Triggers
-            </a>
-            <a href="/orgs/{{ org_name }}/projects/{{ project_name }}/policies" class="text-sm text-gray-500 hover:text-gray-900 flex items-center gap-1">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-                Policies
-            </a>
+<section class="app-container pt-12 pb-8">
+    {# ── Header ─────────────────────────────────────────────────── #}
+    <div class="flex items-start justify-between mb-8">
+        <div class="min-w-0">
+            <h1 class="text-2xl font-bold flex items-center gap-2 flex-wrap">
+                <span class="text-gray-400 font-mono text-base">{{ org_name }}/</span>{{ project_name }}
+            </h1>
+            {% if summary and summary.description %}
+            <p class="mt-1 text-gray-600">{{ summary.description }}</p>
+            {% endif %}
+        </div>
+        <div class="flex items-center gap-2 shrink-0 ml-4 flex-wrap justify-end">
+            {% if summary and summary.latest_version %}{{ badge("v" ~ summary.latest_version) }}{% endif %}
+            {% if summary %}{{ tool_shape_badge(summary.shape) }}{% endif %}
+            {% if summary and summary.visibility %}{{ visibility_badge(summary.visibility) }}{% endif %}
         </div>
     </div>
 
-    <release-timeline org="{{ org_name }}" project="{{ project_name }}" csrf="{{ csrf_token }}" username="{{ user.username }}" role="{{ current_role }}"></release-timeline>
-
-    {% if component_versions is defined and component_versions %}
-    <div class="mt-12">
-        <div class="flex items-center justify-between mb-4">
-            <h2 class="text-lg font-bold">Component versions</h2>
-            <a href="/orgs/{{ org_name }}/projects/{{ project_name }}/components" class="text-sm text-gray-500 hover:text-gray-900">View all &rarr;</a>
+    {% if show_get_started %}
+    {# ── Get-started panel (only when project is empty out-of-box) ─ #}
+    <div class="max-w-md mx-auto text-center border border-gray-200 rounded-lg p-8 mt-6">
+        <h2 class="text-lg font-bold mb-2">Publish your first version</h2>
+        <p class="text-sm text-gray-600 mb-4">Run <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">forest publish</code> from the project directory to ship the first release.</p>
+        <div class="text-left">
+            {{ code_block("forest publish", copyable=true, id="get-started-cmd", class="text-xs") }}
         </div>
-        <div class="border border-gray-200 rounded-lg divide-y divide-gray-200">
-            {% for v in component_versions[:5] %}
-            <div class="p-3 flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                    <a href="/components/{{ org_name }}/{{ project_name }}/{{ v.version }}" class="font-medium text-sm hover:underline">v{{ v.version }}</a>
-                    {% if v.kind == "binary" %}
-                    <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-violet-100 text-violet-700">binary</span>
-                    {% else %}
-                    <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-cyan-100 text-cyan-700">files</span>
+    </div>
+    {% else %}
+
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+        <div class="md:col-span-3">
+            {# ── Releases (top, the "file tree" slot) ─────────────────── #}
+            {% if comp_versions %}
+            <div class="mb-8">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-bold">Releases</h2>
+                    {% if comp_versions | length > 5 %}
+                    <a href="/orgs/{{ org_name }}/projects/{{ project_name }}/releases" class="text-sm text-gray-500 hover:text-gray-900">View all releases &rarr;</a>
                     {% endif %}
                 </div>
-                <div class="flex gap-1 flex-wrap">
-                    {% for platform in v.platforms %}
-                    <span class="text-xs text-gray-400">{{ platform }}</span>
+                <div class="space-y-3">
+                    {% for v in comp_versions[:5] %}
+                    <div class="border border-gray-200 rounded-lg p-4">
+                        <div class="flex items-center justify-between flex-wrap gap-2">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <a href="/components/{{ org_name }}/{{ project_name }}/{{ v.version }}" class="font-bold text-base hover:underline">v{{ v.version }}</a>
+                                {% if loop.index == 1 %}{{ badge("latest", variant="green") }}{% endif %}
+                                {% if v.protocol_version %}
+                                <span class="text-xs text-gray-400">protocol {{ v.protocol_version }}</span>
+                                {% endif %}
+                            </div>
+                            <div class="flex gap-1.5 flex-wrap">
+                                {% for platform in v.platforms %}
+                                {{ badge(platform) }}
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
                     {% endfor %}
                 </div>
             </div>
-            {% endfor %}
+            {% endif %}
+
+            {# ── README (below Releases — GitHub-style) ───────────────── #}
+            {% if readme_html %}
+            <div class="prose prose-sm max-w-none border-t border-gray-200 pt-6 mt-2">
+                {{ readme_html | safe }}
+            </div>
+            {% endif %}
+
+            {# Components section (multi-component case) — deferred to a
+               future spec; v1 assumes 1:1 (project name == canonical
+               component name) so nothing renders here. #}
+        </div>
+
+        {# ── Sidebar ────────────────────────────────────────────────── #}
+        <div class="md:col-span-1">
+            <div class="space-y-6">
+                {% if summary %}
+                {% if is_tool %}
+                <div>
+                    <h3 class="text-sm font-bold mb-2">Install</h3>
+                    {{ code_block("forest global add " ~ summary.organisation ~ "/" ~ summary.name, copyable=true, id="install-cmd-latest", class="text-xs") }}
+                    {% if summary.latest_version %}
+                    <p class="text-xs text-gray-500 mt-2 mb-1">Pin to a specific version:</p>
+                    {{ code_block("forest global add " ~ summary.organisation ~ "/" ~ summary.name ~ "@" ~ summary.latest_version, copyable=true, id="install-cmd-pinned", class="text-xs") }}
+                    {% endif %}
+                </div>
+                {% else %}
+                <div>
+                    <h3 class="text-sm font-bold mb-2">Add to project</h3>
+                    {{ code_block("forest components add " ~ summary.organisation ~ "/" ~ summary.name ~ "@" ~ summary.latest_version, copyable=true, id="add-cmd", class="text-xs") }}
+                </div>
+                {% endif %}
+
+                <div>
+                    <h3 class="text-sm font-bold mb-2">About</h3>
+                    <dl class="text-sm space-y-2">
+                        <div>
+                            <dt class="text-gray-500">Latest version</dt>
+                            <dd class="font-medium">{{ summary.latest_version | default("—") }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-gray-500">Kind</dt>
+                            <dd class="font-medium">{{ summary.kind }}</dd>
+                        </div>
+                        {% if summary.shape and summary.shape != "component" %}
+                        <div>
+                            <dt class="text-gray-500">Shape</dt>
+                            <dd class="font-medium">{{ summary.shape | replace("_", "-") }}</dd>
+                        </div>
+                        {% endif %}
+                    </dl>
+                </div>
+
+                {% if manifest and manifest.platforms %}
+                <div>
+                    <h3 class="text-sm font-bold mb-2">Distribution</h3>
+                    <table class="w-full text-xs">
+                        <tbody class="divide-y divide-gray-200">
+                            {% for platform_key, info in manifest.platforms | items %}
+                            <tr>
+                                <td class="py-1.5 pr-2 font-mono text-gray-700">{{ platform_key }}</td>
+                                <td class="py-1.5 text-right text-gray-500">{{ info.size | human_size }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+                {% endif %}{# /summary #}
+
+                <div>
+                    <h3 class="text-sm font-bold mb-2">Metadata</h3>
+                    <dl class="text-sm space-y-2">
+                        {% if summary and summary.created_at %}
+                        <div>
+                            <dt class="text-gray-500">Created</dt>
+                            <dd>{{ ts(summary.created_at) }}</dd>
+                        </div>
+                        {% endif %}
+                        {% if summary and summary.updated_at %}
+                        <div>
+                            <dt class="text-gray-500">Updated</dt>
+                            <dd>{{ ts(summary.updated_at) }}</dd>
+                        </div>
+                        {% endif %}
+                        {% if summary and summary.contracts %}
+                        <div>
+                            <dt class="text-gray-500">Contracts</dt>
+                            <dd class="flex gap-1.5 flex-wrap mt-1">
+                                {% for contract in summary.contracts %}
+                                {{ badge(contract) }}
+                                {% endfor %}
+                            </dd>
+                        </div>
+                        {% endif %}
+                    </dl>
+                </div>
+            </div>
         </div>
     </div>
+
+    {% if manifest_html %}
+    {# Raw manifest disclosure — power-user fallback at the very bottom. #}
+    <div class="mt-12">
+        {{ pretty_json_block(manifest_html, title="View raw manifest JSON") }}
+    </div>
     {% endif %}
+
+    {% endif %}{# /show_get_started #}
 </section>
-<script src="/static/js/components/forage-components.js"></script>
 {% endblock %}

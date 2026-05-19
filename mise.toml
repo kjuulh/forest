@@ -1,0 +1,59 @@
+[env]
+_.file = ".env"
+
+[tools]
+rust = "1.93"
+
+# ─── Local stack ──────────────────────────────────────────────────
+
+[tasks."local:up"]
+description = "Bring up the local stacks for both apps (postgres, etc.)"
+depends = ["forest:local:up", "forage:local:up"]
+
+[tasks."local:down"]
+description = "Tear down the local stacks for both apps"
+depends = ["forest:local:down", "forage:local:down"]
+
+[tasks."forest:local:up"]
+dir = "apps/forest"
+run = "mise run local:up"
+
+[tasks."forest:local:down"]
+dir = "apps/forest"
+run = "mise run local:down"
+
+[tasks."forage:local:up"]
+dir = "apps/forage"
+run = "mise run local:up"
+
+[tasks."forage:local:down"]
+dir = "apps/forage"
+run = "mise run local:down"
+
+# ─── Dev (run both servers) ───────────────────────────────────────
+
+[tasks."dev"]
+description = "Start both forest and forage dev servers in parallel"
+depends = ["forest:dev", "forage:dev"]
+
+# ─── Per-app passthroughs ─────────────────────────────────────────
+
+[tasks."forest:dev"]
+description = "Run forest's mise develop task in apps/forest"
+dir = "apps/forest"
+run = "mise run develop"
+
+[tasks."forage:dev"]
+description = "Run forage's mise develop task in apps/forage"
+dir = "apps/forage"
+run = "mise run develop"
+
+[tasks."forest:test"]
+description = "Run forest's test suite"
+dir = "apps/forest"
+run = "mise run test"
+
+[tasks."forage:test"]
+description = "Run forage's test suite"
+dir = "apps/forage"
+run = "mise run test"

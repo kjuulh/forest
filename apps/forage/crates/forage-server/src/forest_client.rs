@@ -12,6 +12,7 @@ use forage_core::platform::{
 };
 use forage_core::registry::{
     ComponentDetail, ComponentSearchResult, ComponentSummary, ComponentVersionInfo, ForestRegistry,
+    ToolSummary,
 };
 use forage_grpc::policy_service_client::PolicyServiceClient;
 use forage_grpc::registry_service_client::RegistryServiceClient;
@@ -2460,9 +2461,42 @@ impl ForestRegistry for GrpcForestClient {
             .into_inner();
         Ok(resp.manifest_json)
     }
+
+    #[tracing::instrument(skip_all)]
+    async fn list_org_tools(
+        &self,
+        access_token: &str,
+        organisation: &str,
+    ) -> Result<Vec<ToolSummary>, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::ListOrgToolsRequest {
+                organisation: organisation.into(),
+            },
+        )?;
+        let mut stream = self
+            .registry_client()
+            .list_org_tools(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+
+        let mut tools = Vec::new();
+        loop {
+            match stream.message().await {
+                Ok(Some(entry)) => tools.push(convert_tool_summary(entry)),
+                Ok(None) => break,
+                Err(status) => return Err(map_platform_status(status)),
+            }
+        }
+        Ok(tools)
+    }
 }
 
 fn convert_component_summary(s: forage_grpc::ComponentSummary) -> ComponentSummary {
+    let shape = convert_shape(s.shape);
+    let tool = s.tool.map(convert_tool_facet);
+    let upstream_host = s.upstream_host;
     ComponentSummary {
         organisation: s.organisation,
         name: s.name,
@@ -2474,6 +2508,50 @@ fn convert_component_summary(s: forage_grpc::ComponentSummary) -> ComponentSumma
         version_count: s.version_count,
         contracts: s.contracts,
         visibility: s.visibility,
+        shape,
+        tool,
+        methods: s.methods,
+        upstream_host,
+    }
+}
+
+fn convert_tool_facet(t: forage_grpc::ToolFacet) -> forage_core::registry::ToolFacet {
+    forage_core::registry::ToolFacet {
+        name: t.name,
+        argv_passthrough: t.argv_passthrough,
+        description: t.description,
+    }
+}
+
+/// Map the proto enum (as i32, since prost emits `Enumeration` as i32 fields)
+/// to the domain `ToolShape`. Unknown / future variants degrade to
+/// `ToolShape::Unknown`, matching the spec's forward-compat rule.
+fn convert_shape(raw: i32) -> forage_core::registry::ToolShape {
+    use forage_core::registry::ToolShape;
+    match forage_grpc::ComponentShape::try_from(raw) {
+        Ok(forage_grpc::ComponentShape::Component) => ToolShape::Component,
+        Ok(forage_grpc::ComponentShape::Hybrid) => ToolShape::Hybrid,
+        Ok(forage_grpc::ComponentShape::ToolBinary) => ToolShape::ToolBinary,
+        Ok(forage_grpc::ComponentShape::ToolExternal) => ToolShape::ToolExternal,
+        Ok(forage_grpc::ComponentShape::Unspecified) | Err(_) => ToolShape::Unknown,
+    }
+}
+
+fn convert_tool_summary(e: forage_grpc::OrgToolEntry) -> forage_core::registry::ToolSummary {
+    use forage_core::registry::ToolSummary;
+    let shape = convert_shape(e.shape);
+    let (description, argv_passthrough) = match e.tool {
+        Some(t) => (t.description, t.argv_passthrough),
+        None => (String::new(), false),
+    };
+    ToolSummary {
+        organisation: e.organisation,
+        name: e.name,
+        latest_version: e.latest_version,
+        shape,
+        description,
+        argv_passthrough,
+        upstream_host: e.upstream_host,
     }
 }
 
@@ -2604,5 +2682,90 @@ mod tests {
     fn ui_page_to_proto_clamps_zero_and_negative_to_zero() {
         assert_eq!(ui_page_to_proto(0), 0);
         assert_eq!(ui_page_to_proto(-5), 0);
+    }
+
+    // ── Tools (TASKS/018 + specs/features/007) ───────────────────────
+
+    fn make_tool_entry(
+        shape: forage_grpc::ComponentShape,
+        upstream_host: &str,
+        tool: Option<forage_grpc::ToolFacet>,
+    ) -> forage_grpc::OrgToolEntry {
+        forage_grpc::OrgToolEntry {
+            organisation: "cuteorg".into(),
+            name: "forest-hello".into(),
+            latest_version: "0.1.0".into(),
+            tool,
+            shape: shape as i32,
+            upstream_host: upstream_host.into(),
+        }
+    }
+
+    #[test]
+    fn convert_tool_summary_maps_all_fields() {
+        // P5 — every field on OrgToolEntry survives the conversion intact.
+        let entry = make_tool_entry(
+            forage_grpc::ComponentShape::ToolBinary,
+            "",
+            Some(forage_grpc::ToolFacet {
+                name: "forest-hello".into(),
+                argv_passthrough: true,
+                description: "Print a friendly greeting".into(),
+            }),
+        );
+        let s = convert_tool_summary(entry);
+        assert_eq!(s.organisation, "cuteorg");
+        assert_eq!(s.name, "forest-hello");
+        assert_eq!(s.latest_version, "0.1.0");
+        assert_eq!(s.shape, forage_core::registry::ToolShape::ToolBinary);
+        assert_eq!(s.description, "Print a friendly greeting");
+        assert!(s.argv_passthrough);
+        assert_eq!(s.upstream_host, "");
+    }
+
+    #[test]
+    fn convert_tool_summary_handles_missing_facet() {
+        // E3 — a tool with no facet (shouldn't happen post-server-validation,
+        // but the conversion stays total). Description falls back to empty,
+        // argv_passthrough to false.
+        let entry = make_tool_entry(forage_grpc::ComponentShape::ToolExternal, "github.com", None);
+        let s = convert_tool_summary(entry);
+        assert_eq!(s.description, "");
+        assert!(!s.argv_passthrough);
+        assert_eq!(s.upstream_host, "github.com");
+        assert_eq!(s.shape, forage_core::registry::ToolShape::ToolExternal);
+    }
+
+    #[test]
+    fn convert_shape_maps_every_proto_variant() {
+        use forage_core::registry::ToolShape;
+        assert_eq!(
+            convert_shape(forage_grpc::ComponentShape::Component as i32),
+            ToolShape::Component
+        );
+        assert_eq!(
+            convert_shape(forage_grpc::ComponentShape::Hybrid as i32),
+            ToolShape::Hybrid
+        );
+        assert_eq!(
+            convert_shape(forage_grpc::ComponentShape::ToolBinary as i32),
+            ToolShape::ToolBinary
+        );
+        assert_eq!(
+            convert_shape(forage_grpc::ComponentShape::ToolExternal as i32),
+            ToolShape::ToolExternal
+        );
+    }
+
+    #[test]
+    fn convert_shape_unknown_for_unspecified_and_invalid() {
+        // Forward-compat: an unknown variant (e.g. a future server adds one)
+        // degrades to Unknown rather than panicking.
+        use forage_core::registry::ToolShape;
+        assert_eq!(
+            convert_shape(forage_grpc::ComponentShape::Unspecified as i32),
+            ToolShape::Unknown
+        );
+        assert_eq!(convert_shape(999), ToolShape::Unknown);
     }
 }

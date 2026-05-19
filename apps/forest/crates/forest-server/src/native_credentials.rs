@@ -24,6 +24,22 @@ mod requirements;
 #[error("password did not meet requirements: {}", .0.join("; "))]
 pub struct PasswordValidationError(pub Vec<String>);
 
+impl IntoIterator for PasswordValidationError {
+    type Item = String;
+    type IntoIter = std::vec::IntoIter<String>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a PasswordValidationError {
+    type Item = &'a String;
+    type IntoIter = std::slice::Iter<'a, String>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
 impl NativeCredentials {
     pub fn password_fulfills_requirements(
         &self,

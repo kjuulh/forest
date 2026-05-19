@@ -1,6 +1,11 @@
 {% extends "base.html.jinja" %}
 {% from "components/timestamp.html.jinja" import timeago as ts %}
-{% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, empty_state, code_block %}
+{% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, tool_shape_badge, empty_state, code_block, pretty_json_block %}
+
+{# One detail page for every artefact. The shape (component / hybrid /
+   tool_binary / tool_external) drives which sections render: tool surfaces
+   only appear when the artefact ships a tool facet. #}
+{% set is_tool = summary.shape == "hybrid" or summary.shape == "tool_binary" or summary.shape == "tool_external" %}
 
 {% block content %}
 <section class="app-container pt-12 pb-8">
@@ -9,46 +14,135 @@
     </div>
 
     <div class="flex items-start justify-between mb-6">
-        <div>
-            <h1 class="text-2xl font-bold">{{ summary.organisation }}/{{ summary.name }}</h1>
+        <div class="min-w-0">
+            <h1 class="text-2xl font-bold flex items-center gap-2 flex-wrap">
+                <span class="text-gray-400 font-mono text-base">{{ summary.organisation }}/</span>{{ summary.name }}
+            </h1>
+            {% if summary.description %}
             <p class="mt-1 text-gray-600">{{ summary.description }}</p>
+            {% endif %}
         </div>
-        <div class="flex items-center gap-2 shrink-0 ml-4">
+        <div class="flex items-center gap-2 shrink-0 ml-4 flex-wrap justify-end">
             {{ badge("v" ~ (selected_version | default(summary.latest_version))) }}
-            {{ kind_badge(summary.kind) }}
+            {{ tool_shape_badge(summary.shape) }}
             {{ visibility_badge(summary.visibility) }}
         </div>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
-        {# Main content #}
+        {# ── Main content ─────────────────────────────────────────── #}
         <div class="md:col-span-3">
-            {% if readme_html %}
-            <div class="prose prose-sm max-w-none">
-                {{ readme_html | safe }}
+            {# Install (top, package-manager idiom). Only renders when the
+               artefact has a tool facet — a plain component is added to a
+               project via `forest components add`, not installed globally. #}
+            {% if is_tool %}
+            <div class="mb-8">
+                <h2 class="text-sm font-bold text-gray-500 uppercase tracking-wide mb-3">Install</h2>
+                {{ code_block("forest global add " ~ summary.organisation ~ "/" ~ summary.name, copyable=true, id="install-cmd-latest") }}
+                {% if summary.latest_version %}
+                <div class="mt-2">
+                    <p class="text-xs text-gray-500 mb-1">Pin to a specific version:</p>
+                    {{ code_block("forest global add " ~ summary.organisation ~ "/" ~ summary.name ~ "@" ~ summary.latest_version, copyable=true, id="install-cmd-pinned", class="text-xs") }}
+                </div>
+                {% endif %}
             </div>
-            {% else %}
-            {{ empty_state("No README available for this component.") }}
             {% endif %}
 
-            {# Versions table #}
-            <div id="versions" class="mt-8">
-                <h2 class="text-lg font-bold mb-4">Versions</h2>
-                {% if versions %}
+            {# README (always shown for components; tools usually skip it). #}
+            {% if readme_html %}
+            <div class="prose prose-sm max-w-none mb-8">
+                {{ readme_html | safe }}
+            </div>
+            {% elif not is_tool %}
+            <div class="mb-8">
+                {{ empty_state("No README available for this component.") }}
+            </div>
+            {% endif %}
+
+            {# ── Domain / Services / Ports — shape-aware ─────────────── #}
+            {% if summary.shape == "hybrid" and summary.methods %}
+            <div class="mb-8">
+                <h2 class="text-lg font-bold mb-3">Methods</h2>
+                <p class="text-sm text-gray-600 mb-3">This component exposes named methods alongside its tool surface. Invoke with <code class="text-xs bg-gray-100 px-1 rounded">forest run &lt;method&gt;</code>.</p>
                 <div class="border border-gray-200 rounded-lg divide-y divide-gray-200">
+                    {% for method in summary.methods %}
+                    <div class="px-4 py-2.5 font-mono text-sm">{{ method }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% elif summary.shape == "component" and summary.methods %}
+            <div class="mb-8">
+                <h2 class="text-lg font-bold mb-3">Methods</h2>
+                <div class="border border-gray-200 rounded-lg divide-y divide-gray-200">
+                    {% for method in summary.methods %}
+                    <div class="px-4 py-2.5 font-mono text-sm">{{ method }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if summary.shape == "tool_external" %}
+            <div class="mb-8">
+                <h2 class="text-lg font-bold mb-3">Upstream</h2>
+                <p class="text-sm text-gray-600 mb-3">This tool is hosted externally; Forest fetches the binary directly from the upstream URL and verifies it against the manifest's sha256.</p>
+                {% if manifest and manifest.url %}
+                <dl class="text-sm space-y-2 border border-gray-200 rounded-lg p-4">
+                    <div class="flex flex-col gap-1">
+                        <dt class="text-xs text-gray-500 uppercase tracking-wide">URL</dt>
+                        <dd><a href="{{ manifest.url }}" class="font-mono text-xs text-gray-700 hover:underline break-all" rel="noopener noreferrer" target="_blank">{{ manifest.url }}</a></dd>
+                    </div>
+                    {% if manifest.archive %}
+                    <div class="flex items-center justify-between">
+                        <dt class="text-xs text-gray-500 uppercase tracking-wide">Archive</dt>
+                        <dd>{{ badge(manifest.archive) }}</dd>
+                    </div>
+                    {% endif %}
+                    {% if manifest.binary_in_archive %}
+                    <div class="flex items-center justify-between gap-3">
+                        <dt class="text-xs text-gray-500 uppercase tracking-wide shrink-0">Binary path</dt>
+                        <dd class="font-mono text-xs text-gray-700 break-all">{{ manifest.binary_in_archive }}</dd>
+                    </div>
+                    {% endif %}
+                    {% if manifest.archive_sha256 %}
+                    <div class="flex items-center justify-between gap-3">
+                        <dt class="text-xs text-gray-500 uppercase tracking-wide shrink-0">Archive sha256</dt>
+                        <dd class="font-mono text-xs text-gray-700" title="{{ manifest.archive_sha256 }}">{{ manifest.archive_sha256 | short_sha }}</dd>
+                    </div>
+                    {% endif %}
+                </dl>
+                {% elif summary.upstream_host %}
+                <p class="text-sm"><span class="text-gray-500">Host:</span> <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{{ summary.upstream_host }}</code></p>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if summary.shape == "tool_binary" %}
+            <div class="mb-8">
+                <h2 class="text-lg font-bold mb-3">Invocation</h2>
+                <p class="text-sm text-gray-600">Argv-passthrough binary — <code class="text-xs bg-gray-100 px-1 rounded">forest global run</code> forwards all arguments to the tool verbatim. No <code class="text-xs bg-gray-100 px-1 rounded">_meta/describe</code> protocol; no methods.</p>
+            </div>
+            {% endif %}
+
+            {# ── Releases — GitHub-style cards ─────────────────────────── #}
+            <div id="releases" class="mb-8">
+                <h2 class="text-lg font-bold mb-4">Releases</h2>
+                {% if versions %}
+                <div class="space-y-3">
                     {% for v in versions %}
-                    <div class="p-4 flex items-center justify-between{% if selected_version == v.version %} bg-gray-50{% endif %}">
-                        <div class="flex items-center gap-3">
-                            <a href="/components/{{ summary.organisation }}/{{ summary.name }}/{{ v.version }}" class="font-medium text-sm hover:underline">v{{ v.version }}</a>
-                            <span class="text-xs text-gray-400">{{ v.kind }}</span>
-                            {% if v.protocol_version %}
-                            <span class="text-xs text-gray-400">protocol {{ v.protocol_version }}</span>
-                            {% endif %}
-                        </div>
-                        <div class="flex gap-1.5 flex-wrap">
-                            {% for platform in v.platforms %}
-                            {{ badge(platform) }}
-                            {% endfor %}
+                    <div class="border border-gray-200 rounded-lg p-4{% if selected_version == v.version %} bg-gray-50{% endif %}" id="v{{ v.version }}">
+                        <div class="flex items-center justify-between flex-wrap gap-2">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <a href="/components/{{ summary.organisation }}/{{ summary.name }}/{{ v.version }}" class="font-bold text-base hover:underline">v{{ v.version }}</a>
+                                {% if loop.index == 1 %}{{ badge("latest", variant="green") }}{% endif %}
+                                {% if v.protocol_version %}
+                                <span class="text-xs text-gray-400">protocol {{ v.protocol_version }}</span>
+                                {% endif %}
+                            </div>
+                            <div class="flex gap-1.5 flex-wrap">
+                                {% for platform in v.platforms %}
+                                {{ badge(platform) }}
+                                {% endfor %}
+                            </div>
                         </div>
                     </div>
                     {% endfor %}
@@ -58,21 +152,57 @@
                 {% endif %}
             </div>
 
-            {# Manifest viewer #}
-            {% if manifest_json %}
-            <div class="mt-8">
-                <h2 class="text-lg font-bold mb-4">Manifest</h2>
-                {{ code_block(manifest_json, class="overflow-x-auto") }}
+            {# ── Distribution (native platforms table) ─────────────────── #}
+            {% if manifest and manifest.platforms %}
+            <div class="mb-8">
+                <h2 class="text-lg font-bold mb-3">Distribution</h2>
+                <p class="text-sm text-gray-600 mb-3">Each platform ships the binary as a content-addressed blob — the sha256 below is what Forest verifies before exec.</p>
+                <div class="border border-gray-200 rounded-lg overflow-hidden">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                            <tr>
+                                <th class="px-4 py-2 text-left font-medium">Platform</th>
+                                <th class="px-4 py-2 text-left font-medium">sha256</th>
+                                <th class="px-4 py-2 text-right font-medium">Size</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            {% for platform_key, info in manifest.platforms | items %}
+                            <tr>
+                                <td class="px-4 py-2.5 font-mono text-xs">{{ platform_key }}</td>
+                                <td class="px-4 py-2.5 font-mono text-xs text-gray-600" title="{{ info.sha256 }}">{{ info.sha256 | short_sha }}</td>
+                                <td class="px-4 py-2.5 text-right text-gray-600">{{ info.size | human_size }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+
+            {# ── Raw manifest JSON — power-user debug surface ──────────── #}
+            {% if manifest_html %}
+            <div class="mb-8">
+                {{ pretty_json_block(manifest_html, title="View raw manifest JSON") }}
             </div>
             {% endif %}
         </div>
 
-        {# Sidebar #}
+        {# ── Sidebar ──────────────────────────────────────────────── #}
         <div class="md:col-span-1">
             <div class="space-y-6">
+                {% if not is_tool %}
                 <div>
-                    <h3 class="text-sm font-bold mb-2">Install</h3>
+                    <h3 class="text-sm font-bold mb-2">Add to project</h3>
                     {{ code_block("forest components add " ~ summary.organisation ~ "/" ~ summary.name ~ "@" ~ (selected_version | default(summary.latest_version)), copyable=true, id="install-cmd", class="text-xs") }}
+                </div>
+                {% endif %}
+
+                <div>
+                    <h3 class="text-sm font-bold mb-2">Source org</h3>
+                    <a href="/orgs/{{ summary.organisation }}/components" class="text-sm text-gray-700 hover:text-gray-900 hover:underline">
+                        {{ summary.organisation }}'s components
+                    </a>
                 </div>
 
                 <div>
@@ -80,7 +210,7 @@
                     <dl class="text-sm space-y-2">
                         <div>
                             <dt class="text-gray-500">Latest version</dt>
-                            <dd class="font-medium">{{ summary.latest_version }}</dd>
+                            <dd class="font-medium">{{ summary.latest_version | default("—") }}</dd>
                         </div>
                         <div>
                             <dt class="text-gray-500">Total versions</dt>
@@ -90,6 +220,12 @@
                             <dt class="text-gray-500">Kind</dt>
                             <dd class="font-medium">{{ summary.kind }}</dd>
                         </div>
+                        {% if summary.shape and summary.shape != "component" %}
+                        <div>
+                            <dt class="text-gray-500">Shape</dt>
+                            <dd class="font-medium">{{ summary.shape | replace("_", "-") }}</dd>
+                        </div>
+                        {% endif %}
                         {% if summary.created_at %}
                         <div>
                             <dt class="text-gray-500">Created</dt>

@@ -93,8 +93,8 @@
    Usage: {{ code_block("forest components add org/name@1.0", copyable=true, id="install") }}
 #}
 {% macro code_block(content, copyable=false, id="", class="") %}
-<div class="bg-gray-950 rounded-md p-3 text-sm font-mono text-gray-300 {{ class }} {% if copyable %}relative group{% endif %}">
-    <pre{% if id %} id="{{ id }}"{% endif %}>{{ content }}</pre>
+<div class="bg-gray-950 rounded-md p-3 text-sm font-mono text-gray-300 overflow-x-auto {{ class }} {% if copyable %}relative group{% endif %}">
+    <pre{% if id %} id="{{ id }}"{% endif %} class="whitespace-pre">{{ content }}</pre>
     {% if copyable %}
     <button onclick="navigator.clipboard.writeText(document.getElementById('{{ id }}').textContent.trim());this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)" class="absolute top-2 right-2 px-2 py-0.5 text-xs bg-gray-800 text-gray-400 rounded hover:text-white opacity-0 group-hover:opacity-100 transition-opacity">Copy</button>
     {% endif %}
@@ -115,6 +115,34 @@
 #}
 {% macro visibility_badge(visibility) %}
 {% if visibility == "public" %}{{ badge("public", variant="green") }}{% else %}{{ badge("private", variant="gray") }}{% endif %}
+{%- endmacro %}
+
+{# ── Tool shape badge ──────────────────────────────────────────── #}
+{# Renders the artefact-shape badge.
+   Accepts the snake_case ToolShape variants (component / hybrid /
+   tool_binary / tool_external / unknown).
+   Usage: {{ tool_shape_badge("tool_binary") }}
+#}
+{% macro tool_shape_badge(shape) %}
+{% if shape == "hybrid" %}{{ badge("hybrid", variant="pink") }}
+{%- elif shape == "tool_binary" %}{{ badge("tool", variant="violet") }}
+{%- elif shape == "tool_external" %}{{ badge("tool-ext", variant="cyan") }}
+{%- elif shape == "component" %}{{ badge("component", variant="gray") }}
+{%- else %}{{ badge("tool", variant="violet") }}{% endif %}
+{%- endmacro %}
+
+{# ── Pretty JSON block ─────────────────────────────────────────── #}
+{# Renders the server-side-tokenised JSON HTML in a styled <pre> block.
+   The `html` argument is the output of pretty_json::tokenize() — already
+   HTML-safe and pre-escaped at the Rust layer. The <details> wrapper
+   makes the section collapsible.
+   Usage: {{ pretty_json_block(manifest_html, title="Manifest") }}
+#}
+{% macro pretty_json_block(html, title="Manifest", open=false) %}
+<details class="border border-gray-200 rounded-lg overflow-hidden"{% if open %} open{% endif %}>
+    <summary class="px-4 py-2 text-sm font-medium text-gray-700 cursor-pointer hover:bg-gray-50 select-none">{{ title }}</summary>
+    <div class="bg-gray-950 p-4 text-xs font-mono leading-relaxed text-gray-300 overflow-x-auto json-pretty"><pre>{{ html | safe }}</pre></div>
+</details>
 {%- endmacro %}
 
 {# ── Section heading ───────────────────────────────────────────── #}
