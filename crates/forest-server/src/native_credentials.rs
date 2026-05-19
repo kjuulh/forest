@@ -20,13 +20,20 @@ trait PasswordRequirement {
 
 mod requirements;
 
+#[derive(Debug, thiserror::Error)]
+#[error("password did not meet requirements: {}", .0.join("; "))]
+pub struct PasswordValidationError(pub Vec<String>);
+
 impl NativeCredentials {
-    pub fn password_fulfills_requirements(&self, password: &str) -> Result<(), Vec<anyhow::Error>> {
+    pub fn password_fulfills_requirements(
+        &self,
+        password: &str,
+    ) -> Result<(), PasswordValidationError> {
         let mut errors = Vec::new();
 
         for requirement in self.get_requirements() {
             if let Err(e) = requirement.fulfill_requirements(password) {
-                errors.push(e);
+                errors.push(format!("{e}"));
             }
         }
 
@@ -34,7 +41,7 @@ impl NativeCredentials {
             return Ok(());
         }
 
-        Err(errors)
+        Err(PasswordValidationError(errors))
     }
 
     pub fn hash(&self, password: impl Into<Vec<u8>>) -> anyhow::Result<Vec<u8>> {

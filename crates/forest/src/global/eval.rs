@@ -7,10 +7,13 @@
 /// The shim directory path that the eval scripts prepend to `$PATH`.
 ///
 /// Hard-coded as a literal in the emitted script — NOT resolved here.
-/// Resolution happens in the user's shell at source-time so `$HOME`
-/// expands correctly even if `$HOME` was unset when `forest eval zsh`
-/// was first invoked.
-pub const SHIM_DIR_LITERAL: &str = "$HOME/.cache/forest/global/shims";
+/// Resolution happens in the user's shell at source-time so `$XDG_CACHE_HOME`
+/// and `$HOME` expand correctly per the user's environment. The POSIX
+/// `${VAR:-default}` form means "use $XDG_CACHE_HOME if it's set and non-empty,
+/// otherwise fall back to $HOME/.cache" — matching the XDG Base Directory spec
+/// and Forest's runtime `xdg_cache_home()` resolver in `global::paths`.
+pub const SHIM_DIR_LITERAL: &str =
+    "${XDG_CACHE_HOME:-$HOME/.cache}/forest/global/shims";
 
 /// Render the zsh eval script. Byte-stable; same input always yields
 /// byte-identical output.
@@ -70,8 +73,9 @@ mod tests {
         // P6 (structural lemma): emitted script contains the exact substring
         // that makes double-sourcing safe.
         let script = eval_zsh();
+        let expected = format!("*\":{SHIM_DIR_LITERAL}:\"*) ;;");
         assert!(
-            script.contains("*\":$HOME/.cache/forest/global/shims:\"*) ;;"),
+            script.contains(&expected),
             "missing PATH-presence case guard in: {script}"
         );
     }
@@ -89,8 +93,9 @@ mod tests {
     #[test]
     fn exports_path_with_shim_dir_prepended_on_miss() {
         let script = eval_zsh();
+        let expected = format!("export PATH=\"{SHIM_DIR_LITERAL}:$PATH\"");
         assert!(
-            script.contains("export PATH=\"$HOME/.cache/forest/global/shims:$PATH\""),
+            script.contains(&expected),
             "missing PATH-prepend in: {script}"
         );
     }
@@ -104,12 +109,13 @@ mod tests {
         );
     }
 
-    // --- Negative: must NOT eagerly expand HOME ---
+    // --- Negative: must NOT eagerly expand HOME or XDG_CACHE_HOME ---
 
     #[test]
     fn never_substitutes_home_at_render_time() {
-        // The script must contain literal "$HOME", never the expanded path —
-        // expansion happens in the user's shell.
+        // The script must contain literal `$HOME` and `$XDG_CACHE_HOME`, never
+        // their expanded values — expansion happens in the user's shell so the
+        // emitted script is portable across users / environments.
         let script = eval_zsh();
         let home_expanded = std::env::var("HOME").unwrap_or_default();
         if !home_expanded.is_empty() {
@@ -118,9 +124,20 @@ mod tests {
                 "script must not pre-expand $HOME at render time; got: {script}"
             );
         }
+        let xdg_expanded = std::env::var("XDG_CACHE_HOME").unwrap_or_default();
+        if !xdg_expanded.is_empty() {
+            assert!(
+                !script.contains(&format!("{xdg_expanded}/forest")),
+                "script must not pre-expand $XDG_CACHE_HOME at render time; got: {script}"
+            );
+        }
         assert!(
             script.contains("$HOME"),
             "script must contain literal $HOME: {script}"
+        );
+        assert!(
+            script.contains("${XDG_CACHE_HOME:-"),
+            "script must honor $XDG_CACHE_HOME via POSIX default-expansion: {script}"
         );
     }
 

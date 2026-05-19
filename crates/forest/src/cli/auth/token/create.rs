@@ -2,11 +2,13 @@ use anyhow::Context;
 
 use crate::{grpc::GrpcClientState, state::State};
 
+use super::resolve_user_id;
+
 #[derive(clap::Parser)]
 pub struct CreateTokenCommand {
-    /// User ID to create the token for
+    /// User ID to create the token for. Defaults to the currently logged-in user.
     #[arg(long)]
-    user_id: String,
+    user_id: Option<String>,
 
     /// Name for the token
     #[arg(long)]
@@ -23,6 +25,8 @@ pub struct CreateTokenCommand {
 
 impl CreateTokenCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        let user_id = resolve_user_id(state, self.user_id.as_deref()).await?;
+
         let name = match &self.name {
             Some(n) => n.clone(),
             None => inquire::Text::new("Token name:").prompt()?,
@@ -30,7 +34,7 @@ impl CreateTokenCommand {
 
         let resp = state
             .grpc_client()
-            .create_personal_access_token(&self.user_id, &name, self.scopes.clone(), self.expires_in)
+            .create_personal_access_token(&user_id, &name, self.scopes.clone(), self.expires_in)
             .await
             .context("failed to create token")?;
 

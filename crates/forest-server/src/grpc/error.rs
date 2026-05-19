@@ -1,3 +1,4 @@
+use crate::native_credentials::PasswordValidationError;
 use crate::repositories::error::DbError;
 
 /// Converts an `anyhow::Error` from the service layer into the appropriate
@@ -17,6 +18,13 @@ pub fn to_status(err: anyhow::Error) -> tonic::Status {
                 tonic::Status::internal("internal error")
             }
         };
+    }
+
+    // Password validation failures are user-actionable; surface the rule list
+    // so the CLI can show "password must contain at least one uppercase letter"
+    // instead of "internal error".
+    if let Some(pwd_err) = err.downcast_ref::<PasswordValidationError>() {
+        return tonic::Status::invalid_argument(pwd_err.to_string());
     }
 
     // Log the full error chain for debugging, return a safe message.

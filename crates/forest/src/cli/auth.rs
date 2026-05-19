@@ -14,7 +14,11 @@ pub struct AuthCommand {
 
 #[derive(clap::Subcommand)]
 enum Commands {
-    /// Create a new account
+    /// Create a new account.
+    ///
+    /// Password requirements: at least 12 characters, containing at least
+    /// one lowercase letter and one uppercase letter. Set `FOREST_PASSWORD`
+    /// to bypass the interactive prompt (useful in CI / non-TTY contexts).
     Register(register::RegisterCommand),
     /// Authenticate with the forest server
     Login(login::LoginCommand),

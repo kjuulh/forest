@@ -6,6 +6,11 @@ use crate::{
     user_state::{UserState, UserStateLoaderState, compute_refresh_after},
 };
 
+/// Register a new account.
+///
+/// Password requirements: at least 12 characters, containing at least one
+/// lowercase letter and one uppercase letter. Set `FOREST_PASSWORD` to bypass
+/// the interactive prompt (useful in non-TTY contexts like CI).
 #[derive(clap::Parser)]
 pub struct RegisterCommand {
     /// Username for the new account. Aliased as `--user`.

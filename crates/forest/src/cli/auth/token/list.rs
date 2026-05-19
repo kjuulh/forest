@@ -2,18 +2,22 @@ use anyhow::Context;
 
 use crate::{grpc::GrpcClientState, state::State};
 
+use super::resolve_user_id;
+
 #[derive(clap::Parser)]
 pub struct ListTokensCommand {
-    /// User ID to list tokens for
+    /// User ID to list tokens for. Defaults to the currently logged-in user.
     #[arg(long)]
-    user_id: String,
+    user_id: Option<String>,
 }
 
 impl ListTokensCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        let user_id = resolve_user_id(state, self.user_id.as_deref()).await?;
+
         let tokens = state
             .grpc_client()
-            .list_personal_access_tokens(&self.user_id)
+            .list_personal_access_tokens(&user_id)
             .await
             .context("failed to list tokens")?;
 

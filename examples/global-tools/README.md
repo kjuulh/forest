@@ -43,7 +43,11 @@ The walkthrough covers:
 - A Forest server running locally (`forest serve` in another terminal) or pointed at by `FOREST_SERVER_URL`.
 - `forest auth login` completed against a test organisation called `cuteorg` (admin role required for publishing).
 - `cue` on `$PATH` (per Q6.a). Future work: Forest auto-installs `cue` via FU1.
+- `CUE_REGISTRY` pointing at your forest-server's CUE/OCI endpoint (port 4042 by default). The repo's `mise.toml` sets this to `localhost:4042+insecure` for local dev.
+- The Forest SDK module (`forest.sh/forest/sdk@v0`) must be published to that registry, since every example's `forest.cue` imports it. See **TASKS/021-sdk-bootstrap.md** — a fresh server doesn't have the SDK seeded yet; until the auto-seed lands, publish it manually before running the example. Symptom of the missing seed: `forest publish` fails with `cannot find package "forest.sh/forest/sdk@v0": module not found`.
 - Linux/amd64 or macOS/arm64 for the demo (other platforms work but the example only ships those two).
+
+**Password requirements** for `forest auth register`: minimum 12 characters, at least one lowercase letter, at least one uppercase letter. Set `FOREST_PASSWORD` to bypass the interactive prompt in CI.
 
 ```sh
 $ forest auth status

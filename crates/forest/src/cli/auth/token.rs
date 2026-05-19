@@ -6,6 +6,23 @@ mod create;
 mod delete;
 mod list;
 
+/// Resolve the user id for personal-access-token operations. Falls back to the
+/// currently logged-in user when `--user-id` is not provided.
+pub(super) async fn resolve_user_id(
+    state: &State,
+    user_id: Option<&str>,
+) -> anyhow::Result<String> {
+    if let Some(id) = user_id {
+        return Ok(id.to_string());
+    }
+    let current = state
+        .user_state()
+        .get_state()
+        .await?
+        .context("not logged in — run `forest auth login` or pass --user-id")?;
+    Ok(current.user_id)
+}
+
 #[derive(clap::Parser)]
 pub struct TokenCommand {
     #[command(subcommand)]
