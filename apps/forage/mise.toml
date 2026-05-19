@@ -9,7 +9,7 @@ _.file = ".env"
 [tasks.develop]
 alias = ["d", "dev"]
 description = "Start the forage development server with postgres"
-depends = ["tailwind:build", "local:up"]
+depends = ["frontend:build", "tailwind:build", "local:up"]
 run = "cargo run -p forage-server"
 
 [tasks.build]
@@ -108,6 +108,23 @@ run = "npx @tailwindcss/cli -i static/css/input.css -o static/css/style.css --mi
 [tasks."tailwind:watch"]
 description = "Watch and rebuild tailwind CSS"
 run = "npx @tailwindcss/cli -i static/css/input.css -o static/css/style.css --watch"
+
+# ─── Frontend (Svelte) ─────────────────────────────────────────────
+
+# Bundles the Svelte web components (release-timeline, etc.) into
+# static/js/components/forage-components.js. `mise run dev` depends on
+# this so changes to .svelte files are picked up automatically.
+[tasks."frontend:build"]
+description = "Build Svelte web components"
+dir = "frontend"
+sources = ["frontend/src/**/*.svelte", "frontend/src/**/*.js", "frontend/package.json", "frontend/vite.config.js"]
+outputs = ["static/js/components/forage-components.js"]
+run = "npm run build"
+
+[tasks."frontend:watch"]
+description = "Watch and rebuild Svelte components"
+dir = "frontend"
+run = "npm run dev"
 
 # ─── Testing Tools ────────────────────────────────────────────────
 

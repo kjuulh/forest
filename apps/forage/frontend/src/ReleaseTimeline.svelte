@@ -728,10 +728,15 @@
                 <svg class="w-3 h-3 text-gray-400 shrink-0 ml-auto transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
               </summary>
 
-              <!-- Release details -->
+              <!-- Release details — clamp the body to ~400 chars so
+                   very long commit messages don't dominate the page.
+                   Full text in a `title=` tooltip for hover. -->
               <div class="px-4 py-3 border-t border-gray-100 space-y-3">
                 {#if release.description}
-                  <p class="text-sm text-gray-700">{release.description}</p>
+                  {@const desc = release.description}
+                  <p class="text-sm text-gray-700 whitespace-pre-wrap break-words" title={desc}>
+                    {desc.length > 400 ? desc.slice(0, 400) + "…" : desc}
+                  </p>
                 {/if}
                 <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-500">
                   <span class="font-mono text-gray-400">{release.slug}</span>
