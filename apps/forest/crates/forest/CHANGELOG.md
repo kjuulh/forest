@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/understory-io/forest/compare/v0.1.4...v0.1.5) (2026-05-20)
+
+
+### Features
+
+* **forest:** link release notes in the auto-nag message ([d535e66](https://github.com/understory-io/forest/commit/d535e6630bc74395a3c0043b54bb5371a2b5f6cd))
+
 ## [0.1.4](https://github.com/understory-io/forest/compare/v0.1.3...v0.1.4) (2026-05-20)
 
 
