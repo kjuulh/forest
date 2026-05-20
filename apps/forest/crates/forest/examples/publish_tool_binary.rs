@@ -5,13 +5,20 @@
 //!   FOREST_ACCESS_TOKEN    bearer token (forest auth token create)
 //!   ORG_NAME, COMP_NAME, COMP_VERSION
 //!   BINARY_PATH, OS, ARCH
-//!   DESCRIPTION (optional)
-//!   README_PATH (optional — uploads as component file `README.md`)
+//!   DESCRIPTION                  (optional — used both for the tool facet
+//!                                 AND pushed to the project as `project.description`)
+//!   README_PATH                  (optional — uploads as component file `README.md`)
+//!
+//! Project-level (spec 009) — pushed via UpdateProject:
+//!   PROJECT_GIT_URL, PROJECT_HOMEPAGE, PROJECT_DOCS_URL,
+//!   PROJECT_SUPPORT_URL, PROJECT_DOMAIN, PROJECT_OWNER
 
 use forest_grpc_interface::registry_service_client::RegistryServiceClient;
+use forest_grpc_interface::release_service_client::ReleaseServiceClient;
 use forest_grpc_interface::{
-    BeginUploadRequest, CommitUploadRequest, PublishManifestRequest, UploadBinaryMetadata,
-    UploadBinaryRequest, UploadFileRequest, upload_binary_request::Msg,
+    BeginUploadRequest, CommitUploadRequest, CreateProjectRequest, ProjectMetadata,
+    PublishManifestRequest, UpdateProjectRequest, UploadBinaryMetadata, UploadBinaryRequest,
+    UploadFileRequest, upload_binary_request::Msg,
 };
 use sha2::{Digest, Sha256};
 use tonic::metadata::MetadataValue;
@@ -101,5 +108,47 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     println!("OK — {org}/{name}@{version} published");
+
+    // Push project-level description + blessed metadata (spec 009).
+    // Mirrors what `forest publish` does for real publishes: read CUE,
+    // upsert the project, push UpdateProject with field-mask.
+    let env_or_empty = |k: &str| std::env::var(k).unwrap_or_default();
+    let metadata = ProjectMetadata {
+        git_url: env_or_empty("PROJECT_GIT_URL"),
+        homepage: env_or_empty("PROJECT_HOMEPAGE"),
+        docs_url: env_or_empty("PROJECT_DOCS_URL"),
+        support_url: env_or_empty("PROJECT_SUPPORT_URL"),
+        domain: env_or_empty("PROJECT_DOMAIN"),
+        owner: env_or_empty("PROJECT_OWNER"),
+    };
+    let project_description = description.clone();
+
+    let auth_token_meta2: MetadataValue<_> = format!("Bearer {token}").parse()?;
+    let channel2 = Channel::from_shared(server)?.connect().await?;
+    let mut release =
+        ReleaseServiceClient::with_interceptor(channel2, move |mut req: tonic::Request<()>| {
+            req.metadata_mut().insert("authorization", auth_token_meta2.clone());
+            Ok(req)
+        });
+
+    // Idempotent — server upserts on conflict.
+    release
+        .create_project(CreateProjectRequest {
+            organisation: org.clone(),
+            project: name.clone(),
+        })
+        .await?;
+
+    release
+        .update_project(UpdateProjectRequest {
+            organisation: org.clone(),
+            project: name.clone(),
+            readme: None,
+            description: Some(project_description),
+            metadata: Some(metadata),
+        })
+        .await?;
+
+    println!("OK — {org}/{name} project description + metadata pushed");
     Ok(())
 }
