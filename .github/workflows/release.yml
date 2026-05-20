@@ -150,23 +150,57 @@ jobs:
             "${ARTIFACT_PATH}" \
             "${CHECKSUM_PATH}"
 
-  upload-install-script:
-    # The forest repo is private, so an unauthenticated curl-pipe-to-
-    # bash install path is not viable. Instead, we attach `install.sh`
-    # to each release as an asset; end users fetch it via:
-    #     gh release download --repo understory-io/forest --pattern install.sh
-    #     bash install.sh
-    # The script then uses the same `gh` auth to download the platform
-    # tarball.
+  publish-install-script:
+    # End users can't `curl | bash` directly from the forest repo
+    # because it's private. Two distribution paths instead:
+    #
+    #   1. Attach `install.sh` to each forest release as an asset.
+    #      Users who already have `gh` access can fetch it via:
+    #        gh release download --repo understory-io/forest --pattern install.sh
+    #
+    #   2. Mirror it to the *public* `understory-io/homebrew-tap` repo
+    #      as `install-forest.sh`, so a one-liner works:
+    #        curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh | bash
+    #      The script itself still needs `gh auth` to fetch the
+    #      platform tarball — only the script's distribution is public.
     needs: [build]
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Upload install.sh to release
+
+      - name: Attach install.sh to the forest release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ github.event.release.tag_name }}" \
             scripts/install.sh \
             --clobber
+
+      # GitHub App token scoped to homebrew-tap. Same App that used to
+      # carry the formula; now it just keeps install-forest.sh in sync.
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.BREW_APP_ID }}
+          private-key: ${{ secrets.BREW_SSH_KEY }}
+          owner: understory-io
+          repositories: homebrew-tap
+
+      - name: Mirror install.sh to homebrew-tap
+        run: |
+          git clone "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/understory-io/homebrew-tap.git" tap
+          cp scripts/install.sh tap/install-forest.sh
+          cd tap
+          # Bail out cleanly if the content is identical — install.sh
+          # only changes when we ship a tweak to the installer itself,
+          # not on every release.
+          if git diff --quiet install-forest.sh; then
+              echo "install-forest.sh is up to date (no commit needed)"
+              exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add install-forest.sh
+          git commit -m "Sync install-forest.sh from forest ${{ github.event.release.tag_name }}"
+          git push

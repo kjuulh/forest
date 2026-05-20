@@ -96,12 +96,20 @@ gh release download "$VERSION" \
 tar -xzf "$tmp/$asset" -C "$tmp"
 
 target_path="$PREFIX/bin/$BIN"
+mkdir -p "$PREFIX/bin" 2>/dev/null || true
 if [ -w "$PREFIX/bin" ]; then
     install -m 0755 "$tmp/$BIN" "$target_path"
 else
-    # Need sudo to write to /usr/local/bin on most setups.
-    echo "==> $PREFIX/bin is not writable; using sudo"
-    sudo install -m 0755 "$tmp/$BIN" "$target_path"
+    # /usr/local/bin (or any system path) needs sudo. When this script
+    # is being piped from curl, stdin is the pipe — `sudo` would have
+    # nowhere to read the password from. Reattach to /dev/tty if it
+    # exists, otherwise fail with a clear message.
+    echo "==> $PREFIX/bin is not writable; trying sudo"
+    if [ -e /dev/tty ]; then
+        sudo install -m 0755 "$tmp/$BIN" "$target_path" </dev/tty
+    else
+        err "Need sudo for $PREFIX/bin but no /dev/tty available. Re-run with PREFIX=\$HOME/.local (or any writable prefix), or download + run the script directly instead of piping."
+    fi
 fi
 
 echo "==> $BIN $VERSION installed at $target_path"
