@@ -179,6 +179,7 @@ async fn components_search(
                 csrf_token => csrf_token,
                 orgs => orgs,
                 current_org => current_org,
+                active_tab => "components",
             },
         )
         .map_err(|e| internal_error(&state, "template error", &e))?;
@@ -293,6 +294,7 @@ async fn component_detail(
                 csrf_token => csrf_token,
                 orgs => orgs,
                 current_org => current_org,
+                active_tab => "components",
             },
         )
         .map_err(|e| internal_error(&state, "template error", &e))?;
@@ -375,6 +377,7 @@ async fn component_version_detail(
                 csrf_token => csrf_token,
                 orgs => orgs,
                 current_org => current_org,
+                active_tab => "components",
             },
         )
         .map_err(|e| internal_error(&state, "template error", &e))?;
