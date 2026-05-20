@@ -141,6 +141,22 @@ enum Commands {
 
 pub async fn execute() -> anyhow::Result<()> {
     let cli = Command::parse();
+
+    // Resolve the active context once, up front. Two outcomes ride
+    // on this:
+    //   1. CUE_REGISTRY gets derived from the context's server if
+    //      it's not already set in the parent shell, so users don't
+    //      have to remember to export it after switching contexts.
+    //   2. We print a kubectl-style banner so the active context is
+    //      always visible at command start.
+    //
+    // The resolve is best-effort — a broken or missing context store
+    // shouldn't prevent the command from running (in particular
+    // `forest context provision …` itself runs before any context
+    // exists). On failure we just skip both banner and overlay.
+    apply_context_env_overlay(&cli);
+    maybe_print_context_banner(&cli);
+
     let state = State::new(cli.config.clone()).await?;
 
     notmad::Mad::builder()
@@ -151,6 +167,77 @@ pub async fn execute() -> anyhow::Result<()> {
         .map_err(unwrap_run_errors)?;
 
     Ok(())
+}
+
+/// Resolve the active context and set `CUE_REGISTRY` in the process
+/// environment if it's not already there. Pure side-effect; silent
+/// on failure.
+///
+/// Uses `try_resolve` (not `resolve`) so we never trigger the
+/// first-run bootstrap as a side effect — that would race with
+/// `forest context provision`, which expects the contexts file to
+/// be absent.
+fn apply_context_env_overlay(cli: &Command) {
+    // Skip when the user has already set CUE_REGISTRY explicitly —
+    // they're overriding the derived value on purpose.
+    if std::env::var_os("CUE_REGISTRY").is_some() {
+        return;
+    }
+    let Ok(store) = crate::contexts::ContextStore::from_env() else {
+        return;
+    };
+    let Ok(Some(entry)) = store.try_resolve(cli.config.context.as_deref()) else {
+        return;
+    };
+    let Some(registry) = crate::contexts::derive_cue_registry(&entry.server) else {
+        return;
+    };
+    // SAFETY: we're at the top of `execute()`, before any other
+    // thread has been spawned (Mad / tokio runtime have not yet
+    // touched env). `std::env::set_var` is marked unsafe in newer
+    // Rust precisely because of cross-thread races; here there are
+    // none.
+    unsafe {
+        std::env::set_var("CUE_REGISTRY", registry);
+    }
+}
+
+/// Print a kubectl-style one-line banner identifying the active
+/// context. Skips for noisy / non-interactive cases:
+///   - `forest context …` (the user is already looking at contexts;
+///     the banner would compete with the command's own output).
+///   - `forest self …` (the binary may be mid-replacement).
+///   - stderr is not a TTY (piped output, redirected to a file).
+///   - `NO_COLOR=1` *and* the command is one of the above — actually
+///     NO_COLOR just suppresses colour, the banner still prints.
+fn maybe_print_context_banner(cli: &Command) {
+    use std::io::IsTerminal;
+    let Some(command) = cli.command.as_ref() else {
+        return;
+    };
+    if matches!(command, Commands::Context(_) | Commands::Self_(_)) {
+        return;
+    }
+    if !std::io::stderr().is_terminal() {
+        return;
+    }
+    let Ok(store) = crate::contexts::ContextStore::from_env() else {
+        return;
+    };
+    // Same `try_resolve` rule as the env overlay: never bootstrap a
+    // default context just to print a banner. If the file doesn't
+    // exist (very first install before provision), silently skip.
+    let Ok(Some(entry)) = store.try_resolve(cli.config.context.as_deref()) else {
+        return;
+    };
+
+    if std::env::var_os("NO_COLOR").is_some() {
+        eprintln!("◆ {}", entry.name);
+    } else {
+        // Dim diamond + cyan bold name. Bright enough to be obvious
+        // without overwhelming the actual command output.
+        eprintln!("\x1b[2m◆\x1b[0m \x1b[1;36m{}\x1b[0m", entry.name);
+    }
 }
 
 fn unwrap_run_errors(error: MadError) -> anyhow::Error {

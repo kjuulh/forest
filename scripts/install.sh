@@ -131,3 +131,48 @@ case ":$PATH:" in
     *":$PREFIX/bin:"*) ;;
     *) echo "    note: $PREFIX/bin is not in your PATH" ;;
 esac
+
+# ── Optional first-run context provisioning ───────────────────────
+#
+# If the operator sets FOREST_PROFILE=name=...,server=... in the
+# environment, seed a context for the freshly-installed binary so the
+# user doesn't have to run `forest context create` manually after
+# install. If no context exists yet, the provisioned one becomes the
+# active default; if some do, it is added without changing the
+# active. Idempotent — re-running the installer with the same
+# FOREST_PROFILE just updates the server URL.
+#
+# Renamed from FOREST_CONTEXT to avoid colliding with forest's
+# runtime `FOREST_CONTEXT=<name>` env which selects WHICH context to
+# use per-invocation.
+if [ -n "${FOREST_PROFILE:-}" ]; then
+    profile_name=""
+    profile_server=""
+    # Parse comma-separated key=value pairs. Tolerant: ignores empty
+    # segments, unknown keys, and whitespace around `=`.
+    IFS=','
+    for pair in $FOREST_PROFILE; do
+        unset IFS
+        key="${pair%%=*}"
+        val="${pair#*=}"
+        # Trim leading/trailing whitespace from key.
+        key="$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        case "$key" in
+            name) profile_name="$val" ;;
+            server) profile_server="$val" ;;
+            "") ;; # empty segment from trailing comma
+            *) echo "==> FOREST_PROFILE: ignoring unknown key '$key'" >&2 ;;
+        esac
+        IFS=','
+    done
+    unset IFS
+
+    if [ -z "$profile_name" ] || [ -z "$profile_server" ]; then
+        echo "==> FOREST_PROFILE was set but missing name= or server=; skipping context provision." >&2
+    else
+        echo "==> Provisioning context '$profile_name' → $profile_server"
+        if ! "$target_path" context provision --name "$profile_name" --server "$profile_server"; then
+            echo "==> Context provision failed; install completed but no context was seeded." >&2
+        fi
+    fi
+fi

@@ -22,6 +22,38 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_CONTEXT: &str = "default";
 const DEFAULT_SERVER: &str = "http://localhost:4040";
 
+/// Derive a `CUE_REGISTRY` value from a Forest server URL.
+///
+/// The convention across deployments has been:
+///
+///   server   `https://forest.understory.sh`
+///   →
+///   CUE_REGISTRY = `forest.sh=registry.forest.understory.sh,registry.cuelang.org`
+///
+/// i.e. the `forest.sh` CUE module namespace points at
+/// `registry.<server-host>`, with the public CUE registry kept as a
+/// fallback so cuelang.org modules still resolve.
+///
+/// Returns `None` when the server URL can't be parsed or has no host
+/// (e.g. someone wrote `forest_server = "localhost:4040"` without a
+/// scheme). Callers should fall back to whatever the parent shell
+/// already had in `CUE_REGISTRY`.
+pub fn derive_cue_registry(server: &str) -> Option<String> {
+    // Tolerate URLs missing a scheme by trying the raw value first;
+    // if that fails, retry with `https://` prepended. This keeps the
+    // helper friendly to half-typed user input without pulling in a
+    // proper URL parser.
+    let after_scheme = server.split_once("://").map(|(_, rest)| rest).unwrap_or(server);
+    let host = after_scheme
+        .split('/')
+        .next()
+        .and_then(|host_port| host_port.split(':').next())
+        .filter(|h| !h.is_empty())?;
+    Some(format!(
+        "forest.sh=registry.{host},registry.cuelang.org"
+    ))
+}
+
 /// On-disk shape of `contexts.json`. Kept stable; adding fields requires
 /// `#[serde(default)]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,6 +246,22 @@ impl ContextStore {
             })
     }
 
+    /// Resolve a context by name, or the active one if `name` is None,
+    /// *without* triggering the first-run bootstrap. Returns `Ok(None)`
+    /// when no `contexts.json` exists on disk.
+    ///
+    /// This is the right entry point for callers that want to *read*
+    /// the context state (banners, env overlays) without side-effects.
+    /// Use [`Self::resolve`] when bootstrapping is desired (typical
+    /// command execution).
+    pub fn try_resolve(&self, name: Option<&str>) -> Result<Option<ContextEntry>> {
+        let Some(file) = self.read_file()? else {
+            return Ok(None);
+        };
+        let want = name.unwrap_or(&file.active);
+        Ok(file.contexts.iter().find(|c| c.name == want).cloned())
+    }
+
     /// Resolve a context by name, or the active one if `name` is None.
     pub fn resolve(&self, name: Option<&str>) -> Result<ContextEntry> {
         let file = self.load_or_bootstrap()?;
@@ -314,6 +362,54 @@ impl ContextStore {
             })?;
         }
         Ok(())
+    }
+
+    /// Install-time provisioning: idempotently register a context with
+    /// "first-run takes the default" semantics.
+    ///
+    /// - If `contexts.json` doesn't yet exist, the new entry becomes the
+    ///   sole context and is set active.
+    /// - If it does exist and the name is new, the entry is appended;
+    ///   the previously-active context stays active.
+    /// - If a context with that name already exists, its server URL is
+    ///   updated in place (so re-running `install.sh` with a refreshed
+    ///   FOREST_PROFILE picks up the change without manual cleanup).
+    ///
+    /// Differs from [`Self::create`] in two ways: it never errors on
+    /// duplicate names, and the "should I become active" decision is
+    /// derived from the disk state rather than a caller-supplied flag.
+    pub fn provision(&self, name: &str, server: &str) -> Result<ContextEntry> {
+        validate_name(name)?;
+        match self.read_file()? {
+            None => {
+                // First run: skip the load_or_bootstrap default and
+                // make the provisioned context the only one.
+                let entry = ContextEntry::new(name, server);
+                let file = ContextsFile {
+                    active: name.to_string(),
+                    contexts: vec![entry.clone()],
+                };
+                std::fs::create_dir_all(self.context_dir(name))
+                    .with_context(|| format!("creating context dir for {name}"))?;
+                self.write_file(&file)?;
+                Ok(entry)
+            }
+            Some(mut file) => {
+                if let Some(existing) = file.contexts.iter_mut().find(|c| c.name == name) {
+                    existing.server = server.to_string();
+                    let cloned = existing.clone();
+                    self.write_file(&file)?;
+                    Ok(cloned)
+                } else {
+                    let entry = ContextEntry::new(name, server);
+                    file.contexts.push(entry.clone());
+                    std::fs::create_dir_all(self.context_dir(name))
+                        .with_context(|| format!("creating context dir for {name}"))?;
+                    self.write_file(&file)?;
+                    Ok(entry)
+                }
+            }
+        }
     }
 
     pub fn set_server(&self, name: &str, server: &str) -> Result<()> {
@@ -453,5 +549,94 @@ mod tests {
         assert!(validate_name("1bad").is_err());
         assert!(validate_name("a..b").is_err());
         assert!(validate_name("ok-name").is_ok());
+    }
+
+    // ── provision ────────────────────────────────────────────────
+
+    #[test]
+    fn provision_on_empty_disk_creates_sole_active_context() {
+        let td = TempDir::new().unwrap();
+        let s = store(&td);
+        // No bootstrap was triggered yet — `contexts.json` does not exist.
+        assert!(!s.contexts_file().exists());
+
+        let entry = s
+            .provision("understory-prod", "https://forest.understory.sh")
+            .unwrap();
+        assert_eq!(entry.name, "understory-prod");
+        assert_eq!(entry.server, "https://forest.understory.sh");
+
+        // The provisioned context is the only one AND is active —
+        // the bootstrap default never got created.
+        let file = s.list().unwrap();
+        assert_eq!(file.contexts.len(), 1);
+        assert_eq!(file.contexts[0].name, "understory-prod");
+        assert_eq!(file.active, "understory-prod");
+    }
+
+    #[test]
+    fn provision_does_not_change_active_when_other_contexts_exist() {
+        let td = TempDir::new().unwrap();
+        let s = store(&td);
+        // Bootstrap a `default` so the file exists with active=default.
+        let _ = s.load_or_bootstrap().unwrap();
+        assert_eq!(s.active().unwrap().name, "default");
+
+        s.provision("understory-prod", "https://forest.understory.sh")
+            .unwrap();
+
+        let file = s.list().unwrap();
+        assert_eq!(file.contexts.len(), 2);
+        assert_eq!(
+            file.active, "default",
+            "the provisioned context must NOT steal the active slot"
+        );
+    }
+
+    #[test]
+    fn provision_is_idempotent_and_updates_server() {
+        let td = TempDir::new().unwrap();
+        let s = store(&td);
+        s.provision("prod", "https://old.example.com").unwrap();
+        s.provision("prod", "https://new.example.com").unwrap();
+        let entry = s.resolve(Some("prod")).unwrap();
+        assert_eq!(entry.server, "https://new.example.com");
+        // Only one entry: re-provisioning didn't duplicate.
+        assert_eq!(s.list().unwrap().contexts.len(), 1);
+    }
+
+    // ── derive_cue_registry ──────────────────────────────────────
+
+    #[test]
+    fn derive_cue_registry_pulls_host_and_prepends_registry() {
+        assert_eq!(
+            derive_cue_registry("https://forest.understory.sh"),
+            Some("forest.sh=registry.forest.understory.sh,registry.cuelang.org".into())
+        );
+    }
+
+    #[test]
+    fn derive_cue_registry_handles_port_and_path() {
+        assert_eq!(
+            derive_cue_registry("https://forest.example.com:4040/api"),
+            Some("forest.sh=registry.forest.example.com,registry.cuelang.org".into())
+        );
+    }
+
+    #[test]
+    fn derive_cue_registry_tolerates_missing_scheme() {
+        assert_eq!(
+            derive_cue_registry("forest.example.com"),
+            Some("forest.sh=registry.forest.example.com,registry.cuelang.org".into())
+        );
+    }
+
+    #[test]
+    fn derive_cue_registry_returns_none_for_no_host() {
+        assert_eq!(derive_cue_registry(""), None);
+        // Bare port with no host: nothing to derive from.
+        assert_eq!(derive_cue_registry(":4040"), None);
+        // Just `/path` with no host either.
+        assert_eq!(derive_cue_registry("/api"), None);
     }
 }

@@ -34,6 +34,12 @@ enum Commands {
     Rename(RenameCommand),
     /// Update a context's server URL.
     SetServer(SetServerCommand),
+    /// Install-time provisioning. Idempotent — re-running with the
+    /// same name updates the server. Used by `install.sh` to seed a
+    /// default context from a `FOREST_PROFILE` env var. If no context
+    /// exists yet, the provisioned one becomes active; otherwise it
+    /// is added without changing the active context.
+    Provision(ProvisionCommand),
 }
 
 impl ContextCommand {
@@ -46,6 +52,7 @@ impl ContextCommand {
             Commands::Delete(cmd) => cmd.execute(state).await,
             Commands::Rename(cmd) => cmd.execute(state).await,
             Commands::SetServer(cmd) => cmd.execute(state).await,
+            Commands::Provision(cmd) => cmd.execute(state).await,
         }
     }
 }
@@ -221,6 +228,39 @@ impl SetServerCommand {
         let store = ContextStore::from_env()?;
         store.set_server(&self.name, &self.server)?;
         eprintln!("set {} server to {}", self.name, self.server);
+        Ok(())
+    }
+}
+
+// --- provision -----------------------------------------------------------
+
+#[derive(Args)]
+pub struct ProvisionCommand {
+    /// Context name (e.g. `understory-prod`). Must match the same
+    /// validation rules as other context names.
+    #[arg(long)]
+    name: String,
+    /// Forest server URL (e.g. `https://forest.understory.sh`).
+    #[arg(long)]
+    server: String,
+}
+
+impl ProvisionCommand {
+    pub async fn execute(&self, _state: &State) -> anyhow::Result<()> {
+        let store = ContextStore::from_env()?;
+        let was_first = !store.contexts_file().exists();
+        let entry = store.provision(&self.name, &self.server)?;
+        if was_first {
+            eprintln!(
+                "provisioned '{}' ({}) and set as active context",
+                entry.name, entry.server
+            );
+        } else {
+            eprintln!(
+                "provisioned '{}' ({}) (active context unchanged — use `forest context use {}` to switch)",
+                entry.name, entry.server, entry.name
+            );
+        }
         Ok(())
     }
 }
