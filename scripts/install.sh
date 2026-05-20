@@ -127,9 +127,23 @@ fi
 echo "==> $BIN $VERSION installed at $target_path"
 
 # Friendly nudge if PREFIX/bin isn't on PATH (common when PREFIX is overridden).
+# Suggest the concrete shell-rc edit so the user can act without guessing.
 case ":$PATH:" in
     *":$PREFIX/bin:"*) ;;
-    *) echo "    note: $PREFIX/bin is not in your PATH" ;;
+    *)
+        rc="your shell config"
+        case "${SHELL##*/}" in
+            bash) rc="~/.bashrc" ;;
+            zsh)  rc="~/.zshrc"  ;;
+            fish) rc="~/.config/fish/config.fish" ;;
+        esac
+        echo "    note: $PREFIX/bin is not in your PATH"
+        if [ "${SHELL##*/}" = "fish" ]; then
+            echo "    add to $rc:  fish_add_path $PREFIX/bin"
+        else
+            echo "    add to $rc:  export PATH=\"$PREFIX/bin:\$PATH\""
+        fi
+        ;;
 esac
 
 # ── Optional first-run context provisioning ───────────────────────
