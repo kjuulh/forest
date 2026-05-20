@@ -172,15 +172,7 @@ async fn perform_update(version: Option<&str>) -> anyhow::Result<()> {
     }
 
     eprintln!("==> Verifying checksum…");
-    let status = tokio::process::Command::new("shasum")
-        .args(["-a", "256", "-c", &checksum])
-        .current_dir(tmp.path())
-        .status()
-        .await
-        .context("invoke shasum")?;
-    if !status.success() {
-        anyhow::bail!("checksum verification failed for {asset}");
-    }
+    verify_sha256(tmp.path(), &checksum).await?;
 
     eprintln!("==> Extracting…");
     let status = tokio::process::Command::new("tar")
@@ -201,6 +193,45 @@ async fn perform_update(version: Option<&str>) -> anyhow::Result<()> {
 
     eprintln!("==> forest {target_tag} installed");
     Ok(())
+}
+
+/// Verify the freshly-downloaded tarball against the matching
+/// `*.sha256` file in `dir`. Picks whichever SHA-256 tool the host
+/// provides:
+///
+///   - `sha256sum` (coreutils, default on Linux)
+///   - `shasum -a 256` (BSD / macOS, ships with Perl)
+///
+/// Both consume the same `<hex>  <filename>` format, so either's
+/// `-c` mode validates the file produced by either tool on the
+/// build side.
+async fn verify_sha256(dir: &Path, checksum_file: &str) -> anyhow::Result<()> {
+    // Candidates in priority order: (tool name, args before the file).
+    let candidates: &[(&str, &[&str])] =
+        &[("sha256sum", &["-c"]), ("shasum", &["-a", "256", "-c"])];
+
+    for (tool, args) in candidates {
+        let result = tokio::process::Command::new(tool)
+            .args(*args)
+            .arg(checksum_file)
+            .current_dir(dir)
+            .status()
+            .await;
+        match result {
+            // Tool ran, verify either passed or failed loudly — done.
+            Ok(status) if status.success() => return Ok(()),
+            Ok(_) => {
+                anyhow::bail!("checksum verification failed for {checksum_file}");
+            }
+            // Tool missing: silently try the next one.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e).with_context(|| format!("invoke {tool}")),
+        }
+    }
+    anyhow::bail!(
+        "neither `sha256sum` nor `shasum` is on PATH; cannot verify download. \
+         Install coreutils (Linux) or ensure shasum is available (macOS) and retry."
+    )
 }
 
 /// Atomically replace the current binary with the freshly-downloaded

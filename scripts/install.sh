@@ -88,8 +88,20 @@ gh release download "$VERSION" \
 # ── Verify checksum ───────────────────────────────────────────────
 # The sha256 file's path-form was generated server-side relative to
 # the working directory at build time, so the check has to run in
-# the tmpdir. `-c` cross-checks the listed file against the digest.
-( cd "$tmp" && shasum -a 256 -c "$checksum" ) \
+# the tmpdir. Pick whichever tool is on the host: `sha256sum` ships
+# in coreutils on Linux, `shasum -a 256` ships with Perl on macOS
+# (and most BSDs). Both produce identical `<hex>  <file>` output.
+verify_sha256() {
+    local sumfile="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum -c "$sumfile"
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 -c "$sumfile"
+    else
+        err "Neither sha256sum nor shasum is on \$PATH; cannot verify download."
+    fi
+}
+( cd "$tmp" && verify_sha256 "$checksum" ) \
     || err "Checksum verification failed for $asset."
 
 # ── Extract + install ─────────────────────────────────────────────
