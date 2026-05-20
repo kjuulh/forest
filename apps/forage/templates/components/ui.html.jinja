@@ -91,14 +91,30 @@
 {# ── Code block ────────────────────────────────────────────────── #}
 {# Renders a dark code block with optional copy button.
    Usage: {{ code_block("forest components add org/name@1.0", copyable=true, id="install") }}
+
+   The outer wrapper is `relative` (anchor for the copy button) and a
+   separate inner `<div>` carries `overflow-x-auto`. Keeping the scroll
+   container distinct from the positioning context means the copy button
+   stays pinned to the visible right edge — if it lived inside the
+   scroll container, scrolling right would push it out of view.
+
+   Colors use literal hex values (bypassing the Tailwind gray scale that
+   `input.css` inverts under `prefers-color-scheme: dark`) so the code
+   block stays dark-on-dark in both themes, matching `.json-pretty`.
 #}
 {% macro code_block(content, copyable=false, id="", class="") %}
-<div class="bg-gray-950 rounded-md p-3 text-sm font-mono text-gray-300 overflow-x-auto {{ class }} {% if copyable %}relative group{% endif %}">
-    <pre{% if id %} id="{{ id }}"{% endif %} class="whitespace-pre">{{ content }}</pre>
-    {% if copyable %}
-    <button onclick="navigator.clipboard.writeText(document.getElementById('{{ id }}').textContent.trim());this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)" class="absolute top-2 right-2 px-2 py-0.5 text-xs bg-gray-800 text-gray-400 rounded hover:text-white opacity-0 group-hover:opacity-100 transition-opacity">Copy</button>
-    {% endif %}
+{% if copyable %}
+<div class="relative group bg-[#0a0a0a] rounded-md text-sm font-mono text-[#d1d5db] {{ class }}">
+    <div class="overflow-x-auto p-3 pr-12">
+        <pre{% if id %} id="{{ id }}"{% endif %} class="whitespace-pre">{{ content }}</pre>
+    </div>
+    <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('{{ id }}').textContent.trim());this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)" class="absolute top-2 right-2 px-2 py-0.5 text-xs bg-[#1f2937] text-[#9ca3af] rounded hover:text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity">Copy</button>
 </div>
+{% else %}
+<div class="bg-[#0a0a0a] rounded-md p-3 text-sm font-mono text-[#d1d5db] overflow-x-auto {{ class }}">
+    <pre{% if id %} id="{{ id }}"{% endif %} class="whitespace-pre">{{ content }}</pre>
+</div>
+{% endif %}
 {%- endmacro %}
 
 {# ── Kind badge ────────────────────────────────────────────────── #}
