@@ -94,6 +94,20 @@ jobs:
       # macos-latest arm), add a `rustup target add ${{ matrix.target }}`
       # step here.
 
+      # release-please bumps `apps/forest/crates/forest/Cargo.toml`
+      # but doesn't touch `apps/forest/Cargo.lock` — its rust strategy
+      # looks for a lockfile next to the package, not up the tree at
+      # the workspace root. The version delta breaks `--locked` builds.
+      # Refresh just the forest entry (without pulling new external
+      # versions) so `cargo build --locked` accepts the lockfile.
+      - name: Sync lockfile after release-please version bump
+        working-directory: ${{ env.CARGO_DIR }}
+        # `-p forest` re-resolves *only* the forest crate entry in
+        # Cargo.lock. External dep versions stay pinned — this is just
+        # to update the `version = "X.Y.Z"` field on the forest entry
+        # to match the bumped Cargo.toml. Idempotent in normal pushes.
+        run: cargo update -p forest
+
       - name: Build
         working-directory: ${{ env.CARGO_DIR }}
         env:
