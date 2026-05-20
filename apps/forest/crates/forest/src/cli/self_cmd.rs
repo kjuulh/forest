@@ -152,6 +152,9 @@ async fn perform_update(version: Option<&str>) -> anyhow::Result<()> {
     let tmp = tempfile::tempdir().context("create temp dir for download")?;
 
     eprintln!("==> Downloading {asset}…");
+    // `gh release download` will fail loudly if the tag doesn't exist
+    // or the user lacks repo access. It also writes its own progress
+    // output to stdout, so we don't need to wrap it in a spinner here.
     let status = tokio::process::Command::new("gh")
         .args([
             "release", "download", &target_tag,
