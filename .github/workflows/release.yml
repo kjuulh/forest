@@ -150,97 +150,23 @@ jobs:
             "${ARTIFACT_PATH}" \
             "${CHECKSUM_PATH}"
 
-  update-homebrew:
+  upload-install-script:
+    # The forest repo is private, so an unauthenticated curl-pipe-to-
+    # bash install path is not viable. Instead, we attach `install.sh`
+    # to each release as an asset; end users fetch it via:
+    #     gh release download --repo understory-io/forest --pattern install.sh
+    #     bash install.sh
+    # The script then uses the same `gh` auth to download the platform
+    # tarball.
     needs: [build]
-    # Only push a new formula on real releases. Dry-runs (PR /
-    # workflow_dispatch) stop after the build matrix.
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
-      - name: Download checksums
+      - uses: actions/checkout@v4
+      - name: Upload install.sh to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          gh release download "${TAG}" \
-            --repo "${{ github.repository }}" \
-            --pattern "*.sha256" \
-            --dir checksums
-
-      - name: Generate formula
-        run: |
-          TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
-          REPO="${{ github.repository }}"
-          BINARY_NAME="forest"
-
-          # Strip filename + whitespace; keep only the hex digest.
-          get_sha() {
-            grep "$1" checksums/*.sha256 | awk '{print $1}'
-          }
-
-          SHA_DARWIN_ARM=$(get_sha "aarch64-apple-darwin")
-          SHA_LINUX_AMD=$(get_sha "x86_64-unknown-linux-gnu")
-          SHA_LINUX_ARM=$(get_sha "aarch64-unknown-linux-gnu")
-
-          cat > forest.rb <<FORMULA
-          class Forest < Formula
-            desc "Codify your development workflows: CI, deployments, and component sharing"
-            homepage "https://github.com/${REPO}"
-            version "${VERSION}"
-            license "MIT"
-
-            on_macos do
-              on_arm do
-                url "https://github.com/${REPO}/releases/download/${TAG}/${BINARY_NAME}-${TAG}-aarch64-apple-darwin.tar.gz"
-                sha256 "${SHA_DARWIN_ARM}"
-              end
-            end
-
-            on_linux do
-              on_arm do
-                url "https://github.com/${REPO}/releases/download/${TAG}/${BINARY_NAME}-${TAG}-aarch64-unknown-linux-gnu.tar.gz"
-                sha256 "${SHA_LINUX_ARM}"
-              end
-              on_intel do
-                url "https://github.com/${REPO}/releases/download/${TAG}/${BINARY_NAME}-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
-                sha256 "${SHA_LINUX_AMD}"
-              end
-            end
-
-            def install
-              bin.install "${BINARY_NAME}"
-            end
-
-            test do
-              # Smoke test: the binary should at least print its
-              # version. The exact format is "forest <semver>" from
-              # clap's default --version handler, so just match the
-              # name and the version we just installed.
-              assert_match version.to_s, shell_output("#{bin}/${BINARY_NAME} --version")
-            end
-          end
-          FORMULA
-
-      - uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ secrets.BREW_APP_ID }}
-          private-key: ${{ secrets.BREW_SSH_KEY }}
-          owner: understory-io
-          repositories: homebrew-tap
-
-      - name: Push to homebrew-tap
-        run: |
-          git clone "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/understory-io/homebrew-tap.git" tap
-          mkdir -p tap/Formula
-          cp forest.rb tap/Formula/forest.rb
-          cd tap
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/forest.rb
-          # Allow empty in case nothing changed (re-running on the same
-          # tag after a manual edit). The commit message references the
-          # release for traceability.
-          git commit -m "Update forest to ${{ github.event.release.tag_name }}" || echo "no changes"
-          git push
+          gh release upload "${{ github.event.release.tag_name }}" \
+            scripts/install.sh \
+            --clobber

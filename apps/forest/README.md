@@ -8,16 +8,24 @@ With `forest` you can quickly compose a shareable workflow to initiate a starter
 
 **Install `forest`**
 
-*bargo*
+The forest repository is private, so installs go through `gh` so the
+GitHub CLI's auth is reused:
 
 ```bash
-cargo (b)install forest
+gh auth login      # one-time; needs read access to understory-io/forest
+gh release download --repo understory-io/forest --pattern install.sh
+bash install.sh    # installs the latest forest to /usr/local/bin
 ```
 
-*brew*
+To pin a version: `bash install.sh v0.2.0`. To install elsewhere:
+`PREFIX=$HOME/.local bash install.sh`.
+
+*Or build from source* (requires repo access):
 
 ```bash
-brew install forest/tap/forest  
+gh repo clone understory-io/forest
+cd forest
+cargo install --path apps/forest/crates/forest --locked
 ```
 
 **Create service**
