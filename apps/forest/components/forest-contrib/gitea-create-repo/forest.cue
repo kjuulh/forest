@@ -5,6 +5,11 @@ import "forest.sh/forest/sdk@v0"
 project: sdk.#ForestProject & {
 	name:         "gitea-create-repo"
 	organisation: "forest-contrib"
+	description:  "Create a Gitea repository via REST. Reads the API token from a file path so the secret never hits the CLI or env."
+	metadata: {
+		domain: "forest"
+		owner:  "forest"
+	}
 }
 
 forest: component: sdk.#ForestComponent & {

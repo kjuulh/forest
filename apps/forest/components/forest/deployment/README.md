@@ -16,12 +16,3 @@ shapes) covers the full release lifecycle:
 - **`status`** — health check the target. Used by the scheduler to
   decide when a release has succeeded or failed.
 
-## Who uses it
-
-- `forest-contrib/ecs-service` — AWS ECS Fargate target
-- `forest-contrib/terraform-service` — terraform-managed target
-- Your own component — declare a dependency on `forest/deployment` and
-  implement the hooks. Forest's runner takes care of wiring you in.
-
-Bump the major version when the trait shape changes; minor bumps for
-new optional hooks (e.g. a future `rollback` hook).

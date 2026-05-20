@@ -5,6 +5,11 @@ import "forest.sh/forest/sdk@v0"
 project: sdk.#ForestProject & {
 	name:         "terraform-service"
 	organisation: "forest-contrib"
+	description:  "Deploy a Terraform-managed service. Implements the forest/deployment hooks for terraform-shaped destinations."
+	metadata: {
+		domain: "forest"
+		owner:  "forest"
+	}
 }
 
 dependencies: sdk.#ForestDependencies & {

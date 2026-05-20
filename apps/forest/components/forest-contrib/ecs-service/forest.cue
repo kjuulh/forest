@@ -21,6 +21,11 @@ import "forest.sh/forest/sdk@v0"
 project: sdk.#ForestProject & {
 	name:         "ecs-service"
 	organisation: "forest-contrib"
+	description:  "Deploy an AWS ECS Fargate service. Implements the forest/deployment hooks for ECS-shaped destinations."
+	metadata: {
+		domain: "forest"
+		owner:  "forest"
+	}
 }
 
 dependencies: sdk.#ForestDependencies & {

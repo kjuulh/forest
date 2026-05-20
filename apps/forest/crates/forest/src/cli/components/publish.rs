@@ -180,12 +180,25 @@ impl PublishCommand {
             }
         }
 
-        // 7. Publish manifest
-        tracing::info!("publishing manifest");
-        let manifest_json = serde_json::to_string(&manifest)?;
-        client
-            .publish_component_manifest(&upload_context, &manifest_json)
-            .await?;
+        // 7. Publish manifest — skipped for CUE-only components. The
+        //    server's manifest validator (forest-manifest::parse) only
+        //    accepts `kind: "binary"` and `kind: "external"`; a pure CUE
+        //    library (e.g. forest/sdk, forest/deployment) has neither a
+        //    binary nor an external manifest and so doesn't carry any of
+        //    the rule-derived shape constraints. commit_upload defaults
+        //    the shape to "component" when no manifest was published —
+        //    forage renders that gracefully (no platforms table, no
+        //    install command). Adding a proper `Library` shape is
+        //    tracked separately; this keeps SDK publishes unblocked.
+        if kind != "cue" {
+            tracing::info!("publishing manifest");
+            let manifest_json = serde_json::to_string(&manifest)?;
+            client
+                .publish_component_manifest(&upload_context, &manifest_json)
+                .await?;
+        } else {
+            tracing::info!("CUE-only component — skipping manifest publish");
+        }
 
         // 8. Commit
         tracing::info!("committing upload");

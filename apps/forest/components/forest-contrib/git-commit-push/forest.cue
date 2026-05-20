@@ -5,6 +5,11 @@ import "forest.sh/forest/sdk@v0"
 project: sdk.#ForestProject & {
 	name:         "git-commit-push"
 	organisation: "forest-contrib"
+	description:  "Stage, commit, and push. Idempotent against partially set-up repos — inits, adds origin, creates the branch as needed."
+	metadata: {
+		domain: "forest"
+		owner:  "forest"
+	}
 }
 
 forest: component: sdk.#ForestComponent & {

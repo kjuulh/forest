@@ -5,6 +5,11 @@ import "forest.sh/forest/sdk@v0"
 project: sdk.#ForestProject & {
 	name:         "checkout"
 	organisation: "forest-contrib"
+	description:  "Forest-shaped `git clone` — spiritual successor to GitHub's actions/checkout. Works against any URL git understands."
+	metadata: {
+		domain: "forest"
+		owner:  "forest"
+	}
 }
 
 forest: component: sdk.#ForestComponent & {
