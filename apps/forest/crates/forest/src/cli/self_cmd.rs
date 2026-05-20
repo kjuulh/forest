@@ -368,10 +368,14 @@ pub async fn maybe_print_update_nag() {
     let current = current_version();
     if latest > current {
         // Single line, leading newline so it isn't glued to the
-        // command's last bit of output.
+        // command's last bit of output. The second line links to the
+        // GitHub release so curious users can read the changelog
+        // before upgrading — important for `forest`, which sits in
+        // the bootstrap path and shouldn't surprise users mid-release.
         eprintln!(
             "\n✨ forest {latest} is available (you have {current}). \
-             Run `forest self update` to upgrade."
+             Run `forest self update` to upgrade.\n   \
+             Release notes: https://github.com/{REPO}/releases/tag/v{latest}"
         );
     }
 }
