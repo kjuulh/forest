@@ -23,6 +23,16 @@ name: Release
 on:
   release:
     types: [published]
+  # Dry-run on PRs that could affect the release build. Same matrix,
+  # same SSH setup, same compile — just no upload + no formula push.
+  # Catches things like a new private git dep showing up in the
+  # workspace lockfile (which forced us into SSH-auth here to begin
+  # with) BEFORE a tag goes out the door.
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "apps/forest/**"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -31,6 +41,11 @@ env:
   CARGO_TERM_COLOR: always
   BINARY_NAME: forest
   CARGO_DIR: apps/forest
+  # Make cargo shell out to `git` for fetches so it picks up the SSH
+  # agent + the global insteadOf rule below — same convention as
+  # ci.yaml. Without this cargo uses libgit2 internally and can't talk
+  # to a deploy-key-protected private repo (canopy-util-rs as of 2026-05).
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
   build:
@@ -48,6 +63,23 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      # SSH auth for private git deps (canopy-otel etc.). Same
+      # pattern the Dockerfile and ci.yaml use: load the deploy key
+      # into the agent, then rewrite https→ssh globally so cargo's
+      # git-fetch-with-cli mode talks SSH to github.com. Without
+      # this `cargo build --locked -p forest` still tries to fetch
+      # other workspace members' private git deps during lockfile
+      # validation.
+      - name: Setup ssh agent
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.HB_GITHUB_SSH_KEY }}
+      - name: Setup git for private auth
+        run: |
+          git config --global url."ssh://git@github.com".insteadOf https://github.com
+          mkdir -p -m 0600 ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
 
       # Match ci.yaml's Rust pin (1.93 via mise/tools). Using mise here
       # avoids drift between CI and local development. The action also
@@ -71,10 +103,22 @@ jobs:
           SQLX_OFFLINE: "true"
         run: cargo build --release --locked --target ${{ matrix.target }} -p forest
 
+      # Tag name is set on `release: published`; absent on PR /
+      # workflow_dispatch dry runs. Fall back to the short SHA so the
+      # artifact has a stable name during dry-runs.
+      - name: Resolve release ref
+        id: ref
+        run: |
+          if [ -n "${{ github.event.release.tag_name }}" ]; then
+            echo "name=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Package
         working-directory: ${{ env.CARGO_DIR }}
         run: |
-          ARTIFACT="${BINARY_NAME}-${{ github.event.release.tag_name }}-${{ matrix.target }}.tar.gz"
+          ARTIFACT="${BINARY_NAME}-${{ steps.ref.outputs.name }}-${{ matrix.target }}.tar.gz"
           tar czf "$ARTIFACT" -C target/${{ matrix.target }}/release "${BINARY_NAME}"
           shasum -a 256 "$ARTIFACT" > "${ARTIFACT}.sha256"
           # Surface absolute paths to the upload step.
@@ -82,6 +126,9 @@ jobs:
           echo "CHECKSUM_PATH=${PWD}/${ARTIFACT}.sha256" >> "$GITHUB_ENV"
 
       - name: Upload to release
+        # Only on real release publish. PR / manual dry runs build the
+        # tarball but stop here.
+        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -91,6 +138,9 @@ jobs:
 
   update-homebrew:
     needs: [build]
+    # Only push a new formula on real releases. Dry-runs (PR /
+    # workflow_dispatch) stop after the build matrix.
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
       - name: Download checksums
