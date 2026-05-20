@@ -1,0 +1,46 @@
+name: Release Please
+
+# Drives the release flow for the forest CLI (apps/forest/crates/forest).
+#
+# On every push to main, release-please scans the conventional-commit
+# history scoped to commits with `(forest)` in their subject (e.g.
+# `feat(forest): …`, `fix(forest,forage): …`). When there is at least
+# one such commit since the last release, it opens — or updates — a
+# release PR that bumps `apps/forest/Cargo.toml`'s workspace version
+# and appends to `apps/forest/CHANGELOG.md`.
+#
+# Merging that PR causes release-please to create a `v<version>` tag
+# and publish a GitHub release; `release.yml` then takes over to build
+# the cross-platform binaries and update the Homebrew formula.
+#
+# The GitHub App token (BREW_APP_ID / BREW_SSH_KEY) is the same one
+# the understory-mcp release flow uses. Its installation must include
+# the `forest` repository — an org-admin one-time setting.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.BREW_APP_ID }}
+          private-key: ${{ secrets.BREW_SSH_KEY }}
+
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          token: ${{ steps.app-token.outputs.token }}
