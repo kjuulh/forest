@@ -1121,19 +1121,27 @@ impl ComponentService {
         let manifest_value: Option<serde_json::Value> = manifest
             .as_ref()
             .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok());
+        // Shape and kind are per-version (a component can be republished
+        // with a different shape — e.g. tool_external → tool_binary). The
+        // summary header must reflect the *latest* version, not whichever
+        // row Postgres returns first.
         let shape_str: String = sqlx::query_scalar::<_, String>(
-            "SELECT shape FROM components WHERE organisation = $1 AND name = $2 LIMIT 1",
+            "SELECT shape FROM components
+             WHERE organisation = $1 AND name = $2 AND version = $3",
         )
         .bind(organisation)
         .bind(name)
+        .bind(&latest.version)
         .fetch_one(&self.db)
         .await
         .unwrap_or_else(|_| "component".into());
         let kind_str: String = sqlx::query_scalar::<_, String>(
-            "SELECT kind FROM components WHERE organisation = $1 AND name = $2 LIMIT 1",
+            "SELECT kind FROM components
+             WHERE organisation = $1 AND name = $2 AND version = $3",
         )
         .bind(organisation)
         .bind(name)
+        .bind(&latest.version)
         .fetch_one(&self.db)
         .await
         .unwrap_or_else(|_| "binary".into());

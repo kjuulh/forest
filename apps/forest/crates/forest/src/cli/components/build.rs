@@ -67,6 +67,16 @@ impl BuildCommand {
             .and_then(|p| p.organisation.as_deref())
             .unwrap_or("forest");
 
+        // Prebuilt components carry their binaries on disk — nothing to
+        // compile. `forest publish` reads `upload.prebuilt` directly.
+        if matches!(upload.source_type, SourceType::Prebuilt) {
+            tracing::info!(
+                "component '{}' uses upload.type=prebuilt — skipping build",
+                component.name,
+            );
+            return Ok(());
+        }
+
         // Deno/TypeScript components: auto-run codegen if stale, then generate meta.json
         if matches!(upload.source_type, SourceType::Deno | SourceType::Typescript) {
             // Auto-run codegen if forest.component.cue is newer than forestgen output
@@ -164,7 +174,7 @@ impl BuildCommand {
                 SourceType::Docker => {
                     build_docker(state, component, &upload.source, target).await?;
                 }
-                SourceType::Deno | SourceType::Typescript => unreachable!(),
+                SourceType::Deno | SourceType::Typescript | SourceType::Prebuilt => unreachable!(),
             }
         }
 
@@ -334,8 +344,9 @@ fn resolve_targets(
                 SourceType::Docker => {
                     target.docker_platform = Some(docker_platform(os, arch)?);
                 }
-                SourceType::Deno | SourceType::Typescript => {
-                    // No binary targets for Deno/TypeScript
+                SourceType::Deno | SourceType::Typescript | SourceType::Prebuilt => {
+                    // No build targets — Deno/TS run from source, prebuilt
+                    // binaries are supplied directly.
                 }
             }
 
@@ -659,4 +670,8 @@ pub enum SourceType {
     Deno,
     #[serde(rename = "typescript")]
     Typescript,
+    /// Author-supplied binaries listed per-platform under `upload.prebuilt`.
+    /// `forest build` is a no-op; `forest publish` handles the upload.
+    #[serde(rename = "prebuilt")]
+    Prebuilt,
 }

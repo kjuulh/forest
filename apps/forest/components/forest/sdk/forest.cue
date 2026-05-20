@@ -12,5 +12,5 @@ project: #ForestProject & {
 
 forest: component: {
 	name:    "sdk"
-	version: "0.4.0"
+	version: "0.6.0"
 }
