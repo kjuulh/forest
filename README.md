@@ -22,10 +22,11 @@ Point forest at your server in one step by passing `FOREST_PROFILE` to the
 installer. The first context provisioned becomes the active default:
 
 ```bash
-FOREST_PROFILE='name=understory-prod,server=https://forest.understory.sh' \
-  bash <(curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh)
+curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh \
+  | FOREST_PROFILE='name=understory-prod,server=https://forest.development.understory.sh' bash -s -- v0.1.3
 ```
 
+The trailing `v0.1.3` pins the forest version; drop it to install the latest.
 `CUE_REGISTRY` is derived from the server automatically, so you don't have to
 remember to export it. Every command afterwards prints a one-line banner
 showing which context it's running against.
@@ -39,6 +40,20 @@ curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/ins
 # Install under ~/.local/bin instead of /usr/local/bin (no sudo)
 curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh | PREFIX=$HOME/.local bash
 ```
+
+### Shell integration
+
+Add the forest shell integration to your shell rc file so completions and
+helper functions are available in every new session:
+
+```bash
+# ~/.zshrc (or ~/.bashrc — swap `zsh` for `bash`)
+eval "$(forest shell zsh)"
+```
+
+This sources the bits forest needs to feel native: tab completion, the
+`forest cd` helper, and any per-context env hooks. Run `forest shell --help`
+for the full list of supported shells.
 
 ### Keeping forest up to date
 
