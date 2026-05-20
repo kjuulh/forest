@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.6](https://github.com/understory-io/forest/compare/v0.1.5...v0.1.6) (2026-05-20)
+
+
+### Features
+
+* **forest:** gate context banner to mutations on non-default contexts ([7fcd28e](https://github.com/understory-io/forest/commit/7fcd28e3e45d180ef87e40ce5f1435f7bd837486))
+* prebuilt upload mode + SDK update + per-version shape ([#15](https://github.com/understory-io/forest/issues/15)) ([928af13](https://github.com/understory-io/forest/commit/928af13da62e8528b1ba2612eb33f00ebc83bc9a))
+
 ## [0.1.5](https://github.com/understory-io/forest/compare/v0.1.4...v0.1.5) (2026-05-20)
 
 
