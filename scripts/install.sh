@@ -155,8 +155,13 @@ if [ -n "${FOREST_PROFILE:-}" ]; then
         unset IFS
         key="${pair%%=*}"
         val="${pair#*=}"
-        # Trim leading/trailing whitespace from key.
-        key="$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        # Trim whitespace from BOTH key and value. Users routinely paste
+        # FOREST_PROFILE from docs / wikis with stray spaces around `=`
+        # or `,`, and a server URL with a leading space would later
+        # fail as an invalid URL with a confusing error.
+        trim() { echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
+        key="$(trim "$key")"
+        val="$(trim "$val")"
         case "$key" in
             name) profile_name="$val" ;;
             server) profile_server="$val" ;;
