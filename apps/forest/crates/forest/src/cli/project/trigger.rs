@@ -24,6 +24,10 @@ enum Commands {
 }
 
 impl TriggerCommand {
+    pub fn is_mutation(&self) -> bool {
+        !matches!(self.commands, Commands::List(_))
+    }
+
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         match &self.commands {
             Commands::Create(cmd) => cmd.execute(state).await,

@@ -25,6 +25,14 @@ enum Commands {
 }
 
 impl OrganisationCommand {
+    pub fn is_mutation(&self) -> bool {
+        match &self.commands {
+            Commands::Create(_) => true,
+            Commands::Show(_) | Commands::Search(_) => false,
+            Commands::Member(c) => c.is_mutation(),
+        }
+    }
+
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         // The --format flag is hoisted to global Config; subcommands read it
         // from state.config.format.

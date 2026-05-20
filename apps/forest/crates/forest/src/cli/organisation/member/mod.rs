@@ -32,6 +32,10 @@ enum Commands {
 }
 
 impl MemberCommand {
+    pub fn is_mutation(&self) -> bool {
+        !matches!(self.commands, Commands::List(_))
+    }
+
     pub async fn execute(&self, state: &State, format: &OutputFormat) -> anyhow::Result<()> {
         match &self.commands {
             Commands::Add(cmd) => cmd.execute(state, format).await,

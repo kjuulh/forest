@@ -15,6 +15,10 @@ enum Commands {
 }
 
 impl PreferencesCommand {
+    pub fn is_mutation(&self) -> bool {
+        matches!(self.commands, Commands::Set(_))
+    }
+
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         match &self.commands {
             Commands::List(cmd) => cmd.execute(state).await,

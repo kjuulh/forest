@@ -203,19 +203,22 @@ fn apply_context_env_overlay(cli: &Command) {
 }
 
 /// Print a kubectl-style one-line banner identifying the active
-/// context. Skips for noisy / non-interactive cases:
-///   - `forest context …` (the user is already looking at contexts;
-///     the banner would compete with the command's own output).
-///   - `forest self …` (the binary may be mid-replacement).
-///   - stderr is not a TTY (piped output, redirected to a file).
-///   - `NO_COLOR=1` *and* the command is one of the above — actually
-///     NO_COLOR just suppresses colour, the banner still prints.
+/// context. The banner is a guardrail against accidentally pushing
+/// to the wrong server, so we only print it when *both* conditions
+/// hold:
+///   - The active context is not the local `default` (the assumption
+///     is that `default` is dev-localhost; non-default = shared/prod).
+///   - The command is about to perform a server-side mutation
+///     (upload an artifact, release, write a resource…). Read-only
+///     commands and purely local commands don't warrant the warning.
+///
+/// Also skipped for the always-noisy cases: stderr not a TTY.
 fn maybe_print_context_banner(cli: &Command) {
     use std::io::IsTerminal;
     let Some(command) = cli.command.as_ref() else {
         return;
     };
-    if matches!(command, Commands::Context(_) | Commands::Self_(_)) {
+    if !is_server_mutation(command) {
         return;
     }
     if !std::io::stderr().is_terminal() {
@@ -230,6 +233,10 @@ fn maybe_print_context_banner(cli: &Command) {
     let Ok(Some(entry)) = store.try_resolve(cli.config.context.as_deref()) else {
         return;
     };
+    // The whole point is to flag non-default contexts.
+    if entry.name == "default" {
+        return;
+    }
 
     if std::env::var_os("NO_COLOR").is_some() {
         eprintln!("◆ {}", entry.name);
@@ -237,6 +244,42 @@ fn maybe_print_context_banner(cli: &Command) {
         // Dim diamond + cyan bold name. Bright enough to be obvious
         // without overwhelming the actual command output.
         eprintln!("\x1b[2m◆\x1b[0m \x1b[1;36m{}\x1b[0m", entry.name);
+    }
+}
+
+/// True if `command` is about to mutate state on the forest server
+/// (upload, create, update, delete, release…). Used to gate the
+/// non-default-context banner so read-only and purely local commands
+/// stay quiet.
+fn is_server_mutation(command: &Commands) -> bool {
+    match command {
+        // Always mutates: pushes an artifact, drives a release.
+        Commands::Publish(_) | Commands::Release(_) => true,
+        // Subcommand-mixed: drill in to skip read-only variants.
+        Commands::Auth(cmd) => cmd.is_mutation(),
+        Commands::Project(cmd) => cmd.is_mutation(),
+        Commands::Destination(cmd) => cmd.is_mutation(),
+        Commands::Environment(cmd) => cmd.is_mutation(),
+        Commands::Organisation(cmd) => cmd.is_mutation(),
+        Commands::Notifications(cmd) => cmd.is_mutation(),
+        // Local-only or read-only.
+        Commands::Init(_)
+        | Commands::Add(_)
+        | Commands::Build(_)
+        | Commands::Generate(_)
+        | Commands::Validate(_)
+        | Commands::Update(_)
+        | Commands::Run(_)
+        | Commands::Components(_)
+        | Commands::Docs(_)
+        | Commands::Admin(_)
+        | Commands::Context(_)
+        | Commands::Tool(_)
+        | Commands::Template(_)
+        | Commands::Global(_)
+        | Commands::Shell(_)
+        | Commands::Tmp(_)
+        | Commands::Self_(_) => false,
     }
 }
 

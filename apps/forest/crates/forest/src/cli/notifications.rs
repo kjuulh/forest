@@ -22,6 +22,13 @@ enum Commands {
 }
 
 impl NotificationsCommand {
+    pub fn is_mutation(&self) -> bool {
+        match &self.commands {
+            Commands::Listen(_) | Commands::List(_) => false,
+            Commands::Preferences(c) => c.is_mutation(),
+        }
+    }
+
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         match &self.commands {
             Commands::Listen(cmd) => cmd.execute(state).await,

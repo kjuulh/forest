@@ -33,6 +33,13 @@ enum Commands {
 }
 
 impl DestinationCommand {
+    pub fn is_mutation(&self) -> bool {
+        matches!(
+            self.commands,
+            Commands::Create(_) | Commands::Update(_) | Commands::Delete(_)
+        )
+    }
+
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         match &self.commands {
             Commands::Create(cmd) => cmd.execute(state).await,

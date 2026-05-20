@@ -43,6 +43,16 @@ enum Commands {
 }
 
 impl ProjectCommand {
+    pub fn is_mutation(&self) -> bool {
+        match &self.commands {
+            Commands::Create(_) | Commands::Init(_) | Commands::Publish(_) => true,
+            Commands::List(_) | Commands::Releases(_) => false,
+            Commands::Trigger(c) => c.is_mutation(),
+            Commands::Policy(c) => c.is_mutation(),
+            Commands::Pipeline(c) => c.is_mutation(),
+        }
+    }
+
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         match &self.commands {
             Commands::Create(cmd) => cmd.execute(state).await,
