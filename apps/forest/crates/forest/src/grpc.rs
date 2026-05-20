@@ -1187,6 +1187,8 @@ impl GrpcClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
             })
             .await
@@ -1388,6 +1390,36 @@ impl GrpcClient {
             .await
             .map_err(grpc_err)
             .context("create project (grpc)")?;
+
+        Ok(())
+    }
+
+    /// Partial update: each Some() field is replaced, None is left alone.
+    ///
+    /// `forest publish` uses this to push README + description + blessed
+    /// metadata (from forest.cue) in one round trip. See
+    /// specs/features/009-project-metadata.md.
+    pub async fn update_project(
+        &self,
+        organisation: &str,
+        project: &str,
+        readme: Option<String>,
+        description: Option<String>,
+        metadata: Option<ProjectMetadata>,
+    ) -> anyhow::Result<()> {
+        let mut client = self.release_client().await?;
+
+        client
+            .update_project(UpdateProjectRequest {
+                organisation: organisation.to_string(),
+                project: project.to_string(),
+                readme,
+                description,
+                metadata,
+            })
+            .await
+            .map_err(grpc_err)
+            .context("update project (grpc)")?;
 
         Ok(())
     }
@@ -1685,6 +1717,8 @@ impl GrpcClient {
                     organisation: organisation.to_string(),
                     project: project.to_string(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.to_string(),
                 branch_pattern,
@@ -1729,6 +1763,8 @@ impl GrpcClient {
                     organisation: organisation.to_string(),
                     project: project.to_string(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.to_string(),
                 enabled,
@@ -1764,6 +1800,8 @@ impl GrpcClient {
                     organisation: organisation.to_string(),
                     project: project.to_string(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.to_string(),
             })
@@ -1786,6 +1824,8 @@ impl GrpcClient {
                     organisation: organisation.to_string(),
                     project: project.to_string(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
             })
             .await
@@ -1826,6 +1866,8 @@ impl GrpcClient {
                     organisation: organisation.to_string(),
                     project: project.to_string(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.to_string(),
                 policy_type,
@@ -1855,6 +1897,8 @@ impl GrpcClient {
                     organisation: organisation.to_string(),
                     project: project.to_string(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.to_string(),
                 enabled,
@@ -1882,6 +1926,8 @@ impl GrpcClient {
                     organisation: organisation.to_string(),
                     project: project.to_string(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.to_string(),
             })
@@ -1904,6 +1950,8 @@ impl GrpcClient {
                     organisation: organisation.to_string(),
                     project: project.to_string(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
             })
             .await
@@ -1927,6 +1975,8 @@ impl GrpcClient {
                     organisation: organisation.to_string(),
                     project: project.to_string(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 target_environment: target_environment.to_string(),
                 branch,
@@ -1969,6 +2019,8 @@ impl GrpcClient {
                     organisation: organisation.to_string(),
                     project: project.to_string(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.to_string(),
                 stages,
@@ -2001,6 +2053,8 @@ impl GrpcClient {
                     organisation: organisation.to_string(),
                     project: project.to_string(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.to_string(),
                 enabled,
@@ -2029,6 +2083,8 @@ impl GrpcClient {
                     organisation: organisation.to_string(),
                     project: project.to_string(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.to_string(),
             })
@@ -2051,6 +2107,8 @@ impl GrpcClient {
                     organisation: organisation.to_string(),
                     project: project.to_string(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
             })
             .await
@@ -2495,9 +2553,12 @@ impl From<crate::models::project::Project> for forest_grpc_interface::Project {
         Self {
             organisation: value.organisation,
             project: value.project,
-            // README is fetched separately via GetProject; CLI-side models
-            // don't carry it.
+            // README / description / metadata are fetched separately via
+            // GetProject; CLI-side `models::project::Project` is a slim
+            // identifier pair and doesn't carry the wider project payload.
             readme: String::new(),
+            description: String::new(),
+            metadata: Some(Default::default()),
         }
     }
 }

@@ -18,6 +18,53 @@ pub struct Organisation {
     pub role: String,
 }
 
+/// Project payload — the canonical Overview surface in forage.
+///
+/// `description` is the project-level prose (with a fallback to the
+/// canonical component's manifest description, applied in the handler).
+/// `readme` is the markdown body. `metadata` is the blessed "About"
+/// sidebar block. See spec 009.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Project {
+    pub organisation: String,
+    pub project: String,
+    #[serde(default)]
+    pub readme: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub metadata: ProjectMetadata,
+}
+
+/// Blessed project metadata. Mirrors the forest server's struct; kept
+/// separate so forage-core stays prost-free.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectMetadata {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub git_url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub homepage: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub docs_url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub support_url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub owner: String,
+}
+
+impl ProjectMetadata {
+    pub fn is_empty(&self) -> bool {
+        self.git_url.is_empty()
+            && self.homepage.is_empty()
+            && self.docs_url.is_empty()
+            && self.support_url.is_empty()
+            && self.domain.is_empty()
+            && self.owner.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Artifact {
     pub artifact_id: String,
@@ -387,6 +434,16 @@ pub trait ForestPlatform: Send + Sync {
         access_token: &str,
         organisation: &str,
     ) -> Result<Vec<String>, PlatformError>;
+
+    /// Fetch the project's full payload (readme + description + metadata).
+    /// Returns `None` when the project doesn't exist so callers can show
+    /// an empty Overview without a fatal error.
+    async fn get_project(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        project: &str,
+    ) -> Result<Option<Project>, PlatformError>;
 
     async fn list_artifacts(
         &self,

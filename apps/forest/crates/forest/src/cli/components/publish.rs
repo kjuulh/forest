@@ -1,4 +1,5 @@
 use anyhow::Context;
+use forest_grpc_interface::ProjectMetadata;
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -71,6 +72,11 @@ impl PublishCommand {
         tracing::info!(
             "publishing component {organisation}/{name}@{version}"
         );
+
+        // Sync project-level metadata (description, About-sidebar fields, README)
+        // from forest.cue → server. CUE is source of truth: missing in CUE = cleared.
+        // See specs/features/009-project-metadata.md.
+        sync_project_fields(state, &current_dir, organisation, name, &doc).await?;
 
         // Dispatch: `external:` block in forest.cue means external manifest mode
         // (TASKS/018-global-tools.md §1a.2b). No build, no UploadBinary.
@@ -189,6 +195,96 @@ impl PublishCommand {
 
         Ok(())
     }
+}
+
+/// Ensure the project exists and push its declared fields (description,
+/// metadata, README) up to the server before the artefact upload.
+///
+/// - Calls `create_project` first (idempotent: server upserts on conflict)
+///   so a publish into a brand-new project still works without a separate
+///   `forest project create` step.
+/// - Reads `project.description` and `project.metadata.*` from the
+///   already-parsed CUE JSON.
+/// - Reads README.md from the project directory if present.
+/// - Sends all three to `UpdateProject` with field-mask semantics — empty
+///   values clear the server. See spec §"Publish flow".
+async fn sync_project_fields(
+    state: &State,
+    current_dir: &std::path::Path,
+    organisation: &str,
+    name: &str,
+    doc: &serde_json::Value,
+) -> anyhow::Result<()> {
+    let client = state.grpc_client();
+
+    // Idempotent — server treats existing project as a no-op via ON CONFLICT.
+    client
+        .create_project(organisation, name)
+        .await
+        .context("ensure project exists")?;
+
+    let project = doc.get("project");
+
+    // String fields default to "" when missing from CUE (= clear server-side).
+    let description = project
+        .and_then(|p| p.get("description"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let metadata = project
+        .and_then(|p| p.get("metadata"))
+        .map(extract_project_metadata)
+        .unwrap_or_default();
+
+    let readme = read_optional_readme(current_dir).await?;
+
+    client
+        .update_project(
+            organisation,
+            name,
+            Some(readme),
+            Some(description),
+            Some(metadata),
+        )
+        .await
+        .context("push project description + metadata + readme")?;
+
+    Ok(())
+}
+
+/// Pull blessed metadata fields out of the parsed CUE JSON.
+/// Missing keys become empty strings (cleared server-side per spec).
+fn extract_project_metadata(meta: &serde_json::Value) -> ProjectMetadata {
+    let s = |key: &str| -> String {
+        meta.get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    ProjectMetadata {
+        git_url: s("git_url"),
+        homepage: s("homepage"),
+        docs_url: s("docs_url"),
+        support_url: s("support_url"),
+        domain: s("domain"),
+        owner: s("owner"),
+    }
+}
+
+/// Read a project's README.md (case-insensitive) if present. Returns
+/// empty string when absent — server treats that as "clear", matching
+/// the missing-in-CUE-clears policy.
+async fn read_optional_readme(current_dir: &std::path::Path) -> anyhow::Result<String> {
+    for candidate in ["README.md", "Readme.md", "readme.md"] {
+        let p = current_dir.join(candidate);
+        match tokio::fs::read_to_string(&p).await {
+            Ok(contents) => return Ok(contents),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e).with_context(|| format!("read {}", p.display())),
+        }
+    }
+    Ok(String::new())
 }
 
 /// Read the optional `tool` facet from a component's `_meta/describe`

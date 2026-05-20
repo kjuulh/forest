@@ -821,6 +821,32 @@ fn convert_organisations(
         .collect()
 }
 
+fn convert_project(p: forage_grpc::Project) -> forage_core::platform::Project {
+    forage_core::platform::Project {
+        organisation: p.organisation,
+        project: p.project,
+        readme: p.readme,
+        description: p.description,
+        metadata: p
+            .metadata
+            .map(convert_project_metadata)
+            .unwrap_or_default(),
+    }
+}
+
+fn convert_project_metadata(
+    m: forage_grpc::ProjectMetadata,
+) -> forage_core::platform::ProjectMetadata {
+    forage_core::platform::ProjectMetadata {
+        git_url: m.git_url,
+        homepage: m.homepage,
+        docs_url: m.docs_url,
+        support_url: m.support_url,
+        domain: m.domain,
+        owner: m.owner,
+    }
+}
+
 fn convert_artifact(a: forage_grpc::Artifact) -> Artifact {
     let ctx = a.context.unwrap_or_default();
     let source = a.source.map(|s| ArtifactSource {
@@ -1157,6 +1183,32 @@ impl ForestPlatform for GrpcForestClient {
     }
 
     #[tracing::instrument(skip_all)]
+    async fn get_project(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        project: &str,
+    ) -> Result<Option<forage_core::platform::Project>, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::GetProjectRequest {
+                organisation: organisation.into(),
+                project: project.into(),
+            },
+        )?;
+        let resp = match self.release_client().get_project(req).await {
+            Ok(r) => r.into_inner(),
+            Err(status) if status.code() == tonic::Code::NotFound => return Ok(None),
+            Err(status) => return Err(map_platform_status(status)),
+        };
+        let proto = match resp.project {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        Ok(Some(convert_project(proto)))
+    }
+
+    #[tracing::instrument(skip_all)]
     async fn list_projects(
         &self,
         access_token: &str,
@@ -1197,6 +1249,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
             },
         )?;
@@ -1698,6 +1752,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
             },
         )?;
@@ -1724,6 +1780,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: input.name.clone(),
                 branch_pattern: input.branch_pattern.clone(),
@@ -1764,6 +1822,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.into(),
                 enabled: input.enabled,
@@ -1804,6 +1864,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.into(),
             },
@@ -1828,6 +1890,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
             },
         )?;
@@ -1855,6 +1919,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: input.name.clone(),
                 policy_type,
@@ -1905,6 +1971,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.into(),
                 enabled: input.enabled,
@@ -1937,6 +2005,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.into(),
             },
@@ -1962,6 +2032,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
             },
         )?;
@@ -1992,6 +2064,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: input.name.clone(),
                 stages: convert_stages_to_grpc(&input.stages),
@@ -2024,6 +2098,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.into(),
                 enabled: input.enabled,
@@ -2057,6 +2133,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 name: name.into(),
             },
@@ -2161,6 +2239,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 target_environment: target_environment.into(),
                 branch: None,
@@ -2198,6 +2278,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 release_intent_id: release_intent_id.into(),
                 target_environment: target_environment.into(),
@@ -2230,6 +2312,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 release_intent_id: release_intent_id.into(),
                 target_environment: target_environment.into(),
@@ -2260,6 +2344,8 @@ impl ForestPlatform for GrpcForestClient {
                     organisation: organisation.into(),
                     project: project.into(),
                     readme: String::new(),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 release_intent_id: release_intent_id.into(),
                 target_environment: target_environment.into(),

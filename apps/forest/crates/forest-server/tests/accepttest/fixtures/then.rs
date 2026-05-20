@@ -77,6 +77,8 @@ impl ThenReleaseFlow for Then<ReleaseFlowData> {
                         organisation: org,
                         project: "test-project".into(),
                         readme: String::new(),
+                        description: String::new(),
+                        metadata: Some(Default::default()),
                     }),
                 },
             ))

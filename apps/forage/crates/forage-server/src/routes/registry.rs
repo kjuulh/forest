@@ -68,6 +68,36 @@ fn require_registry(state: &AppState) -> Result<&dyn forage_core::registry::Fore
         })
 }
 
+/// Build the (description, metadata) pair the project + component
+/// templates need for the header and About sidebar. Project description
+/// wins; the component manifest description is the fallback. See spec
+/// 009 §"Forage UI".
+fn project_overview_ctx(
+    project: Option<&forage_core::platform::Project>,
+    component_description: Option<&str>,
+) -> (String, Option<minijinja::Value>) {
+    let description = project
+        .map(|p| p.description.clone())
+        .filter(|d| !d.is_empty())
+        .or_else(|| component_description.map(|s| s.to_string()))
+        .unwrap_or_default();
+
+    let metadata_ctx = project.map(|p| {
+        let m = &p.metadata;
+        context! {
+            git_url => &m.git_url,
+            homepage => &m.homepage,
+            docs_url => &m.docs_url,
+            support_url => &m.support_url,
+            domain => &m.domain,
+            owner => &m.owner,
+            has_any => !m.is_empty(),
+        }
+    });
+
+    (description, metadata_ctx)
+}
+
 /// Deduplicate component summaries by (organisation, name), keeping the first occurrence
 /// (which is the latest version since results are sorted by updated_at DESC).
 fn dedup_components(
@@ -197,18 +227,30 @@ async fn component_detail(
     let registry = require_registry(&state)?;
     let token = resolve_token(&maybe_session, &state);
 
-    let detail = registry
-        .get_component_detail(&token, &org, &name)
-        .await
-        .map_err(|e| match e {
-            forage_core::platform::PlatformError::NotFound(_) => error_page(
-                &state,
-                StatusCode::NOT_FOUND,
-                "Component not found",
-                &format!("The component {org}/{name} does not exist."),
-            ),
-            other => internal_error(&state, "get_component_detail", &other),
-        })?;
+    let (detail_res, project_res) = tokio::join!(
+        registry.get_component_detail(&token, &org, &name),
+        state.platform_client.get_project(&token, &org, &name),
+    );
+
+    let detail = detail_res.map_err(|e| match e {
+        forage_core::platform::PlatformError::NotFound(_) => error_page(
+            &state,
+            StatusCode::NOT_FOUND,
+            "Component not found",
+            &format!("The component {org}/{name} does not exist."),
+        ),
+        other => internal_error(&state, "get_component_detail", &other),
+    })?;
+    // get_project is best-effort: a missing project (component without
+    // a matching project row) still renders the component page; the
+    // About sidebar block just stays hidden in that case.
+    let project_info = match project_res {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("component_detail: get_project failed: {e:#}");
+            None
+        }
+    };
 
     let readme_html = if detail.readme.is_empty() {
         String::new()
@@ -225,6 +267,12 @@ async fn component_detail(
 
     let (user, csrf_token, orgs, current_org) = maybe_user_context(&maybe_session);
 
+    let (project_description, project_metadata_ctx) =
+        project_overview_ctx(
+            project_info.as_ref(),
+            Some(detail.summary.description.as_str()).filter(|s| !s.is_empty()),
+        );
+
     let html = state
         .templates
         .render(
@@ -238,6 +286,8 @@ async fn component_detail(
                 manifest_html => manifest_html,
                 manifest => manifest_view,
                 owners => &detail.owners,
+                project_description => &project_description,
+                project_metadata => project_metadata_ctx,
                 active_detail_tab => "readme",
                 user => user,
                 csrf_token => csrf_token,
@@ -259,9 +309,10 @@ async fn component_version_detail(
     let registry = require_registry(&state)?;
     let token = resolve_token(&maybe_session, &state);
 
-    let (detail_res, manifest_res) = tokio::join!(
+    let (detail_res, manifest_res, project_res) = tokio::join!(
         registry.get_component_detail(&token, &org, &name),
         registry.get_component_manifest(&token, &org, &name, &version),
+        state.platform_client.get_project(&token, &org, &name),
     );
 
     let detail = detail_res.map_err(|e| match e {
@@ -273,6 +324,13 @@ async fn component_version_detail(
         ),
         other => internal_error(&state, "get_component_detail", &other),
     })?;
+    let project_info = match project_res {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("component_version_detail: get_project failed: {e:#}");
+            None
+        }
+    };
 
     let manifest_json = warn_default("get_component_manifest", manifest_res);
     let manifest_html = if manifest_json.is_empty() {
@@ -290,6 +348,12 @@ async fn component_version_detail(
 
     let (user, csrf_token, orgs, current_org) = maybe_user_context(&maybe_session);
 
+    let (project_description, project_metadata_ctx) =
+        project_overview_ctx(
+            project_info.as_ref(),
+            Some(detail.summary.description.as_str()).filter(|s| !s.is_empty()),
+        );
+
     let html = state
         .templates
         .render(
@@ -304,6 +368,8 @@ async fn component_version_detail(
                 manifest => manifest_view,
                 owners => &detail.owners,
                 selected_version => &version,
+                project_description => &project_description,
+                project_metadata => project_metadata_ctx,
                 active_detail_tab => "readme",
                 user => user,
                 csrf_token => csrf_token,

@@ -169,6 +169,21 @@ fn orgs_context(orgs: &[CachedOrg]) -> Vec<minijinja::Value> {
         .collect()
 }
 
+/// Convert the blessed project metadata into a template-friendly context.
+/// `has_any` lets the template branch on whether to render the About
+/// block at all (matches the 008 clean-empty-state policy).
+fn project_metadata_to_context(m: &forage_core::platform::ProjectMetadata) -> minijinja::Value {
+    context! {
+        git_url => &m.git_url,
+        homepage => &m.homepage,
+        docs_url => &m.docs_url,
+        support_url => &m.support_url,
+        domain => &m.domain,
+        owner => &m.owner,
+        has_any => !m.is_empty(),
+    }
+}
+
 
 #[allow(clippy::result_large_err)]
 fn require_org_membership<'a>(
@@ -811,6 +826,7 @@ async fn project_detail(
         project_pipelines,
         component_versions,
         comp_detail,
+        project_info,
     ) = tokio::join!(
         state
             .platform_client
@@ -832,6 +848,9 @@ async fn project_detail(
             .list_release_pipelines(&session.access_token, &org, &project),
         component_versions_fut,
         comp_detail_fut,
+        state
+            .platform_client
+            .get_project(&session.access_token, &org, &project),
     );
     let artifacts = artifacts.map_err(|e| internal_error(&state, "list_artifacts", &e))?;
     let projects = warn_default("list_projects", projects);
@@ -840,6 +859,16 @@ async fn project_detail(
     let release_intents = warn_default("get_release_intent_states", release_intents);
     let project_pipelines = warn_default("list_release_pipelines", project_pipelines);
     let component_versions = warn_default("list_component_versions", component_versions);
+    // Project-level description + blessed metadata. A missing project
+    // (Ok(None)) or a transient gRPC failure both degrade to empty —
+    // the Overview still renders with the component-level fallback.
+    let project_info: Option<forage_core::platform::Project> = match project_info {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("project_detail: get_project failed: {e:#}");
+            None
+        }
+    };
 
     // Environment options for the deploy dropdown (sorted by sort_order).
     let mut sorted_envs = environments.clone();
@@ -880,11 +909,39 @@ async fn project_detail(
     // are None/empty and the template shows the Get-started panel.
     let comp_summary = comp_detail.as_ref().map(|d| d.summary.clone());
     let comp_versions = comp_detail.as_ref().map(|d| d.versions.clone()).unwrap_or_default();
-    let comp_readme_html = comp_detail
+    // Prefer the project-level README over a component's `component_files`
+    // README (which may be tied to a single version). Falls back to the
+    // component README when the project doesn't carry one — same policy
+    // as the description below.
+    let project_readme = project_info
         .as_ref()
-        .filter(|d| !d.readme.is_empty())
-        .map(|d| super::render_markdown(&d.readme))
+        .map(|p| p.readme.as_str())
+        .unwrap_or("");
+    let comp_readme_html = if !project_readme.is_empty() {
+        super::render_markdown(project_readme)
+    } else {
+        comp_detail
+            .as_ref()
+            .filter(|d| !d.readme.is_empty())
+            .map(|d| super::render_markdown(&d.readme))
+            .unwrap_or_default()
+    };
+    // Description: project-level wins, component manifest as fallback.
+    // See spec 009 §"Forage UI".
+    let project_description = project_info
+        .as_ref()
+        .map(|p| p.description.clone())
+        .filter(|d| !d.is_empty())
+        .or_else(|| {
+            comp_summary
+                .as_ref()
+                .map(|s| s.description.clone())
+                .filter(|d| !d.is_empty())
+        })
         .unwrap_or_default();
+    let project_metadata_ctx = project_info
+        .as_ref()
+        .map(|p| project_metadata_to_context(&p.metadata));
     let manifest_raw = comp_detail
         .as_ref()
         .map(|d| d.manifest_json.clone())
@@ -919,6 +976,8 @@ async fn project_detail(
                 summary => comp_summary,
                 comp_versions => &comp_versions,
                 readme_html => comp_readme_html,
+                project_description => &project_description,
+                project_metadata => project_metadata_ctx,
                 manifest_html => manifest_html,
                 manifest => manifest_view,
                 // Whether to render the embedded release-timeline summary

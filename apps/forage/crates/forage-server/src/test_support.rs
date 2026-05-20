@@ -47,6 +47,7 @@ pub(crate) struct MockBehavior {
 pub(crate) struct MockPlatformBehavior {
     pub list_orgs_result: Option<Result<Vec<Organisation>, PlatformError>>,
     pub list_projects_result: Option<Result<Vec<String>, PlatformError>>,
+    pub get_project_result: Option<Result<Option<forage_core::platform::Project>, PlatformError>>,
     pub list_artifacts_result: Option<Result<Vec<Artifact>, PlatformError>>,
     pub create_organisation_result: Option<Result<String, PlatformError>>,
     pub list_members_result: Option<Result<Vec<OrgMember>, PlatformError>>,
@@ -403,6 +404,22 @@ impl ForestPlatform for MockPlatformClient {
         b.list_projects_result
             .clone()
             .unwrap_or(Ok(vec!["my-api".into()]))
+    }
+
+    async fn get_project(
+        &self,
+        _access_token: &str,
+        organisation: &str,
+        project: &str,
+    ) -> Result<Option<forage_core::platform::Project>, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.get_project_result
+            .clone()
+            .unwrap_or_else(|| Ok(Some(forage_core::platform::Project {
+                organisation: organisation.into(),
+                project: project.into(),
+                ..Default::default()
+            })))
     }
 
     async fn list_artifacts(

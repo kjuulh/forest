@@ -126,14 +126,23 @@ message GetProjectResponse {
   Project project = 1;
 }
 
-// Update mutable fields on a project. v1 only exposes `readme`; future
-// fields (description, visibility, …) can chain on with the same RPC.
+// Update mutable fields on a project. Field-mask semantics: each
+// optional field is updated only when present in the request. Sending
+// an empty string for a present field clears that field. This lets
+// `forest publish` push README, description, and metadata in one round
+// trip while still permitting partial updates from other tooling.
 message UpdateProjectRequest {
   string organisation = 1;
   string project = 2;
   // Replace the project's README markdown. Max 64 KiB. Empty string is a
   // valid value (clears the README).
-  string readme = 3;
+  optional string readme = 3;
+  // Replace the project's description. Max 4096 chars. Empty allowed.
+  // See specs/features/009-project-metadata.md.
+  optional string description = 4;
+  // Replace the entire metadata blob. Per-field length caps enforced
+  // server-side. To clear all metadata, send an empty ProjectMetadata.
+  optional ProjectMetadata metadata = 5;
 }
 message UpdateProjectResponse {
   Project project = 1;
@@ -402,6 +411,33 @@ message Project {
   // Empty string when no README has been uploaded — distinct from "no
   // project" (which would be a different RPC error).
   string readme = 3;
+  // Human-readable description shown on the project Overview header.
+  // Set via `forest.cue` `project.description` and pushed by `forest
+  // publish`. ≤ 4096 chars, empty allowed.
+  // See specs/features/009-project-metadata.md.
+  string description = 4;
+  // Blessed project metadata (About sidebar). Length caps per field
+  // enforced server-side; no URL validation — bad URLs render as bad
+  // links and are fixed by re-publishing.
+  ProjectMetadata metadata = 5;
+}
+
+// Blessed project metadata — surfaced in the project Overview's About
+// sidebar. v1 fields are deliberately small and link/identity-focused.
+// New keys require a spec update (009).
+message ProjectMetadata {
+  // Upstream source repository.
+  string git_url = 1;
+  // Public landing page / marketing site.
+  string homepage = 2;
+  // Docs site URL.
+  string docs_url = 3;
+  // Issue tracker / Slack channel / on-call link.
+  string support_url = 4;
+  // Business or team domain — e.g. "payments", "infra".
+  string domain = 5;
+  // Responsible team or person.
+  string owner = 6;
 }
 
 message Ref {

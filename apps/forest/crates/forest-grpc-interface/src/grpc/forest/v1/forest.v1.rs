@@ -2318,8 +2318,11 @@ pub struct GetProjectResponse {
     #[prost(message, optional, tag="1")]
     pub project: ::core::option::Option<Project>,
 }
-/// Update mutable fields on a project. v1 only exposes `readme`; future
-/// fields (description, visibility, …) can chain on with the same RPC.
+/// Update mutable fields on a project. Field-mask semantics: each
+/// optional field is updated only when present in the request. Sending
+/// an empty string for a present field clears that field. This lets
+/// `forest publish` push README, description, and metadata in one round
+/// trip while still permitting partial updates from other tooling.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateProjectRequest {
     #[prost(string, tag="1")]
@@ -2328,8 +2331,16 @@ pub struct UpdateProjectRequest {
     pub project: ::prost::alloc::string::String,
     /// Replace the project's README markdown. Max 64 KiB. Empty string is a
     /// valid value (clears the README).
-    #[prost(string, tag="3")]
-    pub readme: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="3")]
+    pub readme: ::core::option::Option<::prost::alloc::string::String>,
+    /// Replace the project's description. Max 4096 chars. Empty allowed.
+    /// See specs/features/009-project-metadata.md.
+    #[prost(string, optional, tag="4")]
+    pub description: ::core::option::Option<::prost::alloc::string::String>,
+    /// Replace the entire metadata blob. Per-field length caps enforced
+    /// server-side. To clear all metadata, send an empty ProjectMetadata.
+    #[prost(message, optional, tag="5")]
+    pub metadata: ::core::option::Option<ProjectMetadata>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateProjectResponse {
@@ -2711,6 +2722,41 @@ pub struct Project {
     /// project" (which would be a different RPC error).
     #[prost(string, tag="3")]
     pub readme: ::prost::alloc::string::String,
+    /// Human-readable description shown on the project Overview header.
+    /// Set via `forest.cue` `project.description` and pushed by `forest
+    /// publish`. ≤ 4096 chars, empty allowed.
+    /// See specs/features/009-project-metadata.md.
+    #[prost(string, tag="4")]
+    pub description: ::prost::alloc::string::String,
+    /// Blessed project metadata (About sidebar). Length caps per field
+    /// enforced server-side; no URL validation — bad URLs render as bad
+    /// links and are fixed by re-publishing.
+    #[prost(message, optional, tag="5")]
+    pub metadata: ::core::option::Option<ProjectMetadata>,
+}
+/// Blessed project metadata — surfaced in the project Overview's About
+/// sidebar. v1 fields are deliberately small and link/identity-focused.
+/// New keys require a spec update (009).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ProjectMetadata {
+    /// Upstream source repository.
+    #[prost(string, tag="1")]
+    pub git_url: ::prost::alloc::string::String,
+    /// Public landing page / marketing site.
+    #[prost(string, tag="2")]
+    pub homepage: ::prost::alloc::string::String,
+    /// Docs site URL.
+    #[prost(string, tag="3")]
+    pub docs_url: ::prost::alloc::string::String,
+    /// Issue tracker / Slack channel / on-call link.
+    #[prost(string, tag="4")]
+    pub support_url: ::prost::alloc::string::String,
+    /// Business or team domain — e.g. "payments", "infra".
+    #[prost(string, tag="5")]
+    pub domain: ::prost::alloc::string::String,
+    /// Responsible team or person.
+    #[prost(string, tag="6")]
+    pub owner: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Ref {

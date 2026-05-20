@@ -1,6 +1,6 @@
 {% extends "base.html.jinja" %}
 {% from "components/timestamp.html.jinja" import timeago as ts %}
-{% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, tool_shape_badge, empty_state, code_block, pretty_json_block %}
+{% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, tool_shape_badge, empty_state, code_block, pretty_json_block, about_block %}
 
 {# One detail page for every artefact. The shape (component / hybrid /
    tool_binary / tool_external) drives which sections render: tool surfaces
@@ -23,8 +23,9 @@
             <h1 class="text-2xl font-bold flex items-center gap-2 flex-wrap">
                 <span class="text-gray-400 font-mono text-base">{{ summary.organisation }}/</span>{{ summary.name }}
             </h1>
-            {% if summary.description %}
-            <p class="mt-1 text-gray-600">{{ summary.description }}</p>
+            {# Description: handler resolves project.description → component manifest description fallback. #}
+            {% if project_description %}
+            <p class="mt-1 text-gray-600">{{ project_description }}</p>
             {% endif %}
             {# Component-specific badges: version + shape + visibility.
                Unlike the project Overview (which hides these because they
@@ -217,6 +218,10 @@
     {# ── Sidebar ────────────────────────────────────────────────── #}
     <aside class="mx-auto w-full max-w-3xl mt-10 xl:mx-0 xl:mt-0 xl:max-w-none xl:col-start-3 xl:w-52 xl:justify-self-start">
             <div class="space-y-6">
+                {# About (blessed project metadata, spec 009) — inherits
+                   from the parent project. Macro hides itself when empty. #}
+                {{ about_block(project_metadata) }}
+
                 {% if not is_tool %}
                 <div>
                     <h3 class="text-sm font-bold mb-2">Add to project</h3>

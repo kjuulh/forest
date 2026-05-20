@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE projects\n               SET readme = COALESCE($3, readme),\n                   description = COALESCE($4, description),\n                   metadata = COALESCE($5, metadata),\n                   updated = now()\n               WHERE organisation = $1 AND project = $2\n               RETURNING id, organisation, project, readme, description,\n                         metadata as \"metadata: sqlx::types::Json<ProjectMetadata>\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "organisation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "project",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "readme",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "metadata: sqlx::types::Json<ProjectMetadata>",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6ad8fbf15c3b1b26ed879f884f4f2ea7d840cb657923cdd86601491544eccf88"
+}

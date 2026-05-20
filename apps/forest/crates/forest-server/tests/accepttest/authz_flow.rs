@@ -369,6 +369,8 @@ async fn user_cannot_release_to_other_orgs_destination() {
                     organisation: org_a.clone(),
                     project: "proj-a".into(),
                     readme: String::new(),
+                        description: String::new(),
+                        metadata: Some(Default::default()),
                 }),
                 metadata: Default::default(),
                 source: Some(Source {
@@ -439,6 +441,8 @@ async fn user_cannot_list_triggers_in_other_org() {
                     organisation: org_a,
                     project: "proj-triggers".into(),
                     readme: String::new(),
+                        description: String::new(),
+                        metadata: Some(Default::default()),
                 }),
             },
         ))

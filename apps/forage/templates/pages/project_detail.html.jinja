@@ -1,6 +1,6 @@
 {% extends "base.html.jinja" %}
 {% from "components/timestamp.html.jinja" import timeago as ts %}
-{% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, tool_shape_badge, empty_state, code_block, pretty_json_block %}
+{% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, tool_shape_badge, empty_state, code_block, pretty_json_block, about_block %}
 
 {# Project Overview — the canonical home (specs/features/008).
    Shape-aware: when the project has a 1:1 canonical component, fold its
@@ -25,8 +25,9 @@
             <h1 class="text-2xl font-bold flex items-center gap-2 flex-wrap">
                 <span class="text-gray-400 font-mono text-base">{{ org_name }}/</span>{{ project_name }}
             </h1>
-            {% if summary and summary.description %}
-            <p class="mt-1 text-gray-600">{{ summary.description }}</p>
+            {# Description: handler resolves project.description → component.description fallback. #}
+            {% if project_description %}
+            <p class="mt-1 text-gray-600">{{ project_description }}</p>
             {% endif %}
             {# Project-level header keeps only visibility — component
                version/shape/tool pills belong on the component detail page,
@@ -113,6 +114,11 @@
        padding to mirror the empty left track). Below xl it stacks. #}
     <aside class="mx-auto w-full max-w-3xl mt-10 xl:mx-0 xl:mt-0 xl:max-w-none xl:col-start-3 xl:w-52 xl:justify-self-start">
         <div class="space-y-6">
+            {# ── About (blessed project metadata, spec 009) ───────────
+               First sidebar item, GitHub-rail style: identity / links
+               before the artefact list. Macro hides itself when empty. #}
+            {{ about_block(project_metadata) }}
+
             {# ── Components (compact, GitHub-Releases-summary style) ──
                The project's published artefacts. Latest first with a
                "latest" pill; top 3 with a "+ N more" link to the full

@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, organisation, project, readme, description,\n                      metadata as \"metadata: sqlx::types::Json<ProjectMetadata>\",\n                      created, updated\n               FROM projects\n               WHERE organisation = $1 AND project = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "organisation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "project",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "readme",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "metadata: sqlx::types::Json<ProjectMetadata>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "created",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "23f9a4eeaa1409a89e4012ae005f9235feef0392f00e752e7ed0e11a0d699d97"
+}

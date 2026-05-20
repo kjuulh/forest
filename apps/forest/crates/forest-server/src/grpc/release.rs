@@ -1023,6 +1023,8 @@ impl ReleaseService for ReleaseServer {
                 organisation: req.organisation,
                 project: req.project,
                 readme: String::new(),
+                description: String::new(),
+                metadata: Some(Default::default()),
             }),
         }))
     }
@@ -1055,11 +1057,7 @@ impl ReleaseService for ReleaseServer {
         };
 
         Ok(Response::new(GetProjectResponse {
-            project: Some(Project {
-                organisation: rec.organisation,
-                project: rec.project,
-                readme: rec.readme,
-            }),
+            project: Some(project_record_to_proto(rec)),
         }))
     }
 
@@ -1070,37 +1068,43 @@ impl ReleaseService for ReleaseServer {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
-        // Member is enough to update the README — same level as project
-        // creation. Tighten to Admin if README curation needs to be
-        // gated; spec 008 doesn't require Admin for v1.
+        // Member is enough to update mutable project fields — same level
+        // as project creation. Tighten to Admin if metadata curation
+        // needs to be gated; spec 008/009 don't require Admin for v1.
         authorize::require_org_access(
             &self.state.db, &actor, &req.organisation, authorize::OrgRole::Member,
         ).await?;
 
-        // 64 KiB cap at the gRPC layer — matches the manifest cap from
-        // TASKS/018 for parity. Service layer also re-enforces.
-        const MAX_README_BYTES: usize = 64 * 1024;
-        if req.readme.len() > MAX_README_BYTES {
-            return Err(tonic::Status::invalid_argument(format!(
-                "readme exceeds {MAX_README_BYTES} bytes ({} actual)",
-                req.readme.len()
-            )));
-        }
-
+        // Map proto field-mask (`optional` fields) → service-layer
+        // partial update. Empty values clear; absent fields are left
+        // untouched. Length/validation caps re-enforced in the service.
+        let metadata = req.metadata.map(proto_metadata_to_record);
         let rec = self
             .state
             .release_registry()
-            .update_project_readme(&req.organisation, &req.project, &req.readme)
+            .update_project_fields(
+                &req.organisation,
+                &req.project,
+                req.readme.as_deref(),
+                req.description.as_deref(),
+                metadata,
+            )
             .await
-            .context("update project readme")
-            .to_internal_error()?;
+            .map_err(|e| {
+                // Surface validation failures as InvalidArgument so the
+                // CLI can show a useful message instead of a 500.
+                let msg = format!("{e:#}");
+                if msg.contains("exceeds") {
+                    tonic::Status::invalid_argument(msg)
+                } else if msg.contains("project not found") {
+                    tonic::Status::not_found(msg)
+                } else {
+                    tonic::Status::internal(msg)
+                }
+            })?;
 
         Ok(Response::new(UpdateProjectResponse {
-            project: Some(Project {
-                organisation: rec.organisation,
-                project: rec.project,
-                readme: rec.readme,
-            }),
+            project: Some(project_record_to_proto(rec)),
         }))
     }
 
@@ -1561,6 +1565,44 @@ impl ReleaseService for ReleaseServer {
     }
 }
 
+fn project_record_to_proto(
+    rec: crate::services::release_registry::ProjectRecord,
+) -> Project {
+    Project {
+        organisation: rec.organisation,
+        project: rec.project,
+        readme: rec.readme,
+        description: rec.description,
+        metadata: Some(record_metadata_to_proto(rec.metadata)),
+    }
+}
+
+fn record_metadata_to_proto(
+    m: crate::services::release_registry::ProjectMetadata,
+) -> forest_grpc_interface::ProjectMetadata {
+    forest_grpc_interface::ProjectMetadata {
+        git_url: m.git_url,
+        homepage: m.homepage,
+        docs_url: m.docs_url,
+        support_url: m.support_url,
+        domain: m.domain,
+        owner: m.owner,
+    }
+}
+
+fn proto_metadata_to_record(
+    m: forest_grpc_interface::ProjectMetadata,
+) -> crate::services::release_registry::ProjectMetadata {
+    crate::services::release_registry::ProjectMetadata {
+        git_url: m.git_url,
+        homepage: m.homepage,
+        docs_url: m.docs_url,
+        support_url: m.support_url,
+        domain: m.domain,
+        owner: m.owner,
+    }
+}
+
 fn stage_status_to_proto(
     status: &crate::services::release_pipeline::StageStatus,
 ) -> forest_grpc_interface::PipelineRunStageStatus {
@@ -1842,9 +1884,11 @@ impl From<release_registry::Project> for grpc::Project {
         Self {
             organisation: value.organisation,
             project: value.project,
-            // README isn't populated on the slim release_registry::Project
-            // — fetch via GetProject when needed.
+            // README + description + metadata aren't populated on the
+            // slim release_registry::Project — fetch via GetProject.
             readme: String::new(),
+            description: String::new(),
+            metadata: Some(Default::default()),
         }
     }
 }

@@ -199,6 +199,8 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
                         organisation: org,
                         project: "test-project".into(),
                         readme: String::new(),
+                        description: String::new(),
+                        metadata: Some(Default::default()),
                     }),
                     metadata: HashMap::new(),
                     source: Some(Source {

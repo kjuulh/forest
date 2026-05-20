@@ -14,17 +14,86 @@ pub struct ReleaseRegistry {
     db: PgPool,
 }
 
-/// Single-project row, exposed by `get_project` + `update_project_readme`.
+/// Single-project row, exposed by `get_project` + `update_project_*`.
 ///
 /// Distinct from `ProjectName` (a slim newtype) because the gRPC `Project`
-/// message now carries a README alongside the org/name. Add fields here
-/// when the proto grows (description, visibility, etc.).
+/// message carries README + description + blessed metadata. Add fields
+/// here when the proto grows (visibility, …).
 #[derive(Debug, Clone)]
 pub struct ProjectRecord {
     pub id: Uuid,
     pub organisation: String,
     pub project: String,
     pub readme: String,
+    pub description: String,
+    pub metadata: ProjectMetadata,
+}
+
+/// Blessed project metadata persisted as a JSONB blob on `projects`.
+///
+/// `skip_serializing_if` keeps the JSONB tight — unset fields are simply
+/// absent from the row, which makes ad-hoc SQL queries readable and
+/// avoids storing six empty strings on every project.
+///
+/// See specs/features/009-project-metadata.md for the field contract.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectMetadata {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub git_url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub homepage: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub docs_url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub support_url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub owner: String,
+}
+
+impl ProjectMetadata {
+    pub fn is_empty(&self) -> bool {
+        self.git_url.is_empty()
+            && self.homepage.is_empty()
+            && self.docs_url.is_empty()
+            && self.support_url.is_empty()
+            && self.domain.is_empty()
+            && self.owner.is_empty()
+    }
+}
+
+/// Per-field length caps. No URL well-formedness check by design —
+/// the UI renders these as plain `<a href>`, and we'd rather not block
+/// a publish on a typo. See spec §Validation.
+fn validate_metadata(m: &ProjectMetadata) -> anyhow::Result<()> {
+    const URL_MAX: usize = 512;
+    const TEXT_MAX: usize = 256;
+    let url_field = |name: &str, value: &str| -> anyhow::Result<()> {
+        if value.chars().count() > URL_MAX {
+            anyhow::bail!(
+                "metadata.{name} exceeds {URL_MAX} chars ({} actual)",
+                value.chars().count()
+            );
+        }
+        Ok(())
+    };
+    let text_field = |name: &str, value: &str| -> anyhow::Result<()> {
+        if value.chars().count() > TEXT_MAX {
+            anyhow::bail!(
+                "metadata.{name} exceeds {TEXT_MAX} chars ({} actual)",
+                value.chars().count()
+            );
+        }
+        Ok(())
+    };
+    url_field("git_url", &m.git_url)?;
+    url_field("homepage", &m.homepage)?;
+    url_field("docs_url", &m.docs_url)?;
+    url_field("support_url", &m.support_url)?;
+    text_field("domain", &m.domain)?;
+    text_field("owner", &m.owner)?;
+    Ok(())
 }
 
 impl ReleaseRegistry {
@@ -607,16 +676,19 @@ impl ReleaseRegistry {
 
     /// Single-project lookup. Returns `None` when the project doesn't exist
     /// (vs. `Err` for DB failures), so callers can render a clean 404.
-    /// Surfaces the README markdown as part of the project payload.
+    /// Surfaces the README, description, and blessed metadata as part of
+    /// the project payload.
     pub async fn get_project(
         &self,
         organisation: &str,
         project: &str,
     ) -> anyhow::Result<Option<ProjectRecord>> {
         let rec = sqlx::query!(
-            "SELECT id, organisation, project, readme, created, updated
-             FROM projects
-             WHERE organisation = $1 AND project = $2",
+            r#"SELECT id, organisation, project, readme, description,
+                      metadata as "metadata: sqlx::types::Json<ProjectMetadata>",
+                      created, updated
+               FROM projects
+               WHERE organisation = $1 AND project = $2"#,
             organisation,
             project,
         )
@@ -629,12 +701,14 @@ impl ReleaseRegistry {
             organisation: r.organisation,
             project: r.project,
             readme: r.readme,
+            description: r.description,
+            metadata: r.metadata.0,
         }))
     }
 
-    /// Replace mutable project fields. Currently README only.
+    /// Replace the project's README markdown.
     ///
-    /// Validates the README size at the service boundary (64 KiB cap matches
+    /// Validates the size at the service boundary (64 KiB cap matches
     /// the gRPC-layer guard in the handler; defence-in-depth so a buggy
     /// caller can't poison the database).
     pub async fn update_project_readme(
@@ -652,10 +726,11 @@ impl ReleaseRegistry {
         }
 
         let rec = sqlx::query!(
-            "UPDATE projects
-             SET readme = $3, updated = now()
-             WHERE organisation = $1 AND project = $2
-             RETURNING id, organisation, project, readme",
+            r#"UPDATE projects
+               SET readme = $3, updated = now()
+               WHERE organisation = $1 AND project = $2
+               RETURNING id, organisation, project, readme, description,
+                         metadata as "metadata: sqlx::types::Json<ProjectMetadata>""#,
             organisation,
             project,
             readme,
@@ -670,6 +745,155 @@ impl ReleaseRegistry {
             organisation: rec.organisation,
             project: rec.project,
             readme: rec.readme,
+            description: rec.description,
+            metadata: rec.metadata.0,
+        })
+    }
+
+    /// Replace the project's description. ≤ 4096 chars; empty allowed
+    /// (clears). See specs/features/009-project-metadata.md.
+    pub async fn update_project_description(
+        &self,
+        organisation: &str,
+        project: &str,
+        description: &str,
+    ) -> anyhow::Result<ProjectRecord> {
+        const MAX_DESCRIPTION_CHARS: usize = 4096;
+        if description.chars().count() > MAX_DESCRIPTION_CHARS {
+            anyhow::bail!(
+                "description exceeds {MAX_DESCRIPTION_CHARS} chars ({} actual)",
+                description.chars().count()
+            );
+        }
+
+        let rec = sqlx::query!(
+            r#"UPDATE projects
+               SET description = $3, updated = now()
+               WHERE organisation = $1 AND project = $2
+               RETURNING id, organisation, project, readme, description,
+                         metadata as "metadata: sqlx::types::Json<ProjectMetadata>""#,
+            organisation,
+            project,
+            description,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("update project description")?;
+
+        let rec = rec.context("project not found")?;
+        Ok(ProjectRecord {
+            id: rec.id,
+            organisation: rec.organisation,
+            project: rec.project,
+            readme: rec.readme,
+            description: rec.description,
+            metadata: rec.metadata.0,
+        })
+    }
+
+    /// Replace the project's blessed metadata blob.
+    ///
+    /// Per-field length caps applied in `validate_metadata`. No URL
+    /// well-formedness check by design — see spec §Validation.
+    pub async fn update_project_metadata(
+        &self,
+        organisation: &str,
+        project: &str,
+        metadata: ProjectMetadata,
+    ) -> anyhow::Result<ProjectRecord> {
+        validate_metadata(&metadata)?;
+
+        let rec = sqlx::query!(
+            r#"UPDATE projects
+               SET metadata = $3, updated = now()
+               WHERE organisation = $1 AND project = $2
+               RETURNING id, organisation, project, readme, description,
+                         metadata as "metadata: sqlx::types::Json<ProjectMetadata>""#,
+            organisation,
+            project,
+            sqlx::types::Json(&metadata) as _,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("update project metadata")?;
+
+        let rec = rec.context("project not found")?;
+        Ok(ProjectRecord {
+            id: rec.id,
+            organisation: rec.organisation,
+            project: rec.project,
+            readme: rec.readme,
+            description: rec.description,
+            metadata: rec.metadata.0,
+        })
+    }
+
+    /// Combined partial update — any field with `Some(_)` is replaced;
+    /// fields with `None` are left untouched. Atomic (single SQL).
+    ///
+    /// Used by the `UpdateProject` gRPC handler so a `forest publish`
+    /// can push README + description + metadata in one round trip
+    /// without intermediate states leaking to readers.
+    pub async fn update_project_fields(
+        &self,
+        organisation: &str,
+        project: &str,
+        readme: Option<&str>,
+        description: Option<&str>,
+        metadata: Option<ProjectMetadata>,
+    ) -> anyhow::Result<ProjectRecord> {
+        const MAX_README_BYTES: usize = 64 * 1024;
+        const MAX_DESCRIPTION_CHARS: usize = 4096;
+
+        if let Some(r) = readme {
+            if r.len() > MAX_README_BYTES {
+                anyhow::bail!(
+                    "readme exceeds {MAX_README_BYTES} bytes ({} actual)",
+                    r.len()
+                );
+            }
+        }
+        if let Some(d) = description {
+            if d.chars().count() > MAX_DESCRIPTION_CHARS {
+                anyhow::bail!(
+                    "description exceeds {MAX_DESCRIPTION_CHARS} chars ({} actual)",
+                    d.chars().count()
+                );
+            }
+        }
+        if let Some(m) = &metadata {
+            validate_metadata(m)?;
+        }
+
+        let metadata_json = metadata.map(sqlx::types::Json);
+
+        let rec = sqlx::query!(
+            r#"UPDATE projects
+               SET readme = COALESCE($3, readme),
+                   description = COALESCE($4, description),
+                   metadata = COALESCE($5, metadata),
+                   updated = now()
+               WHERE organisation = $1 AND project = $2
+               RETURNING id, organisation, project, readme, description,
+                         metadata as "metadata: sqlx::types::Json<ProjectMetadata>""#,
+            organisation,
+            project,
+            readme,
+            description,
+            metadata_json as _,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("update project fields")?;
+
+        let rec = rec.context("project not found")?;
+        Ok(ProjectRecord {
+            id: rec.id,
+            organisation: rec.organisation,
+            project: rec.project,
+            readme: rec.readme,
+            description: rec.description,
+            metadata: rec.metadata.0,
         })
     }
 
@@ -1016,4 +1240,84 @@ pub struct AnnotationContext {
     pub source: Source,
     pub context: ArtifactContext,
     pub reference: Reference,
+}
+
+#[cfg(test)]
+mod project_metadata_tests {
+    use super::*;
+
+    #[test]
+    fn is_empty_when_all_fields_blank() {
+        let m = ProjectMetadata::default();
+        assert!(m.is_empty());
+    }
+
+    #[test]
+    fn is_empty_false_for_any_populated_field() {
+        let mut m = ProjectMetadata::default();
+        m.domain = "payments".into();
+        assert!(!m.is_empty());
+    }
+
+    #[test]
+    fn validate_metadata_accepts_empty() {
+        validate_metadata(&ProjectMetadata::default()).unwrap();
+    }
+
+    #[test]
+    fn validate_metadata_accepts_well_formed_fields() {
+        let m = ProjectMetadata {
+            git_url: "https://github.com/org/repo".into(),
+            homepage: "https://example.com".into(),
+            docs_url: "https://docs.example.com".into(),
+            support_url: "https://example.slack.com/channels/forest".into(),
+            domain: "payments".into(),
+            owner: "platform-team".into(),
+        };
+        validate_metadata(&m).unwrap();
+    }
+
+    #[test]
+    fn validate_metadata_does_not_check_url_wellformedness() {
+        // Spec §Validation: bad URLs render as bad links; not the
+        // server's job to reject them.
+        let m = ProjectMetadata {
+            git_url: "not a url".into(),
+            ..Default::default()
+        };
+        validate_metadata(&m).unwrap();
+    }
+
+    #[test]
+    fn validate_metadata_rejects_oversized_url() {
+        let m = ProjectMetadata {
+            git_url: "x".repeat(513),
+            ..Default::default()
+        };
+        let err = validate_metadata(&m).unwrap_err().to_string();
+        assert!(err.contains("git_url"), "{err}");
+        assert!(err.contains("exceeds"), "{err}");
+    }
+
+    #[test]
+    fn validate_metadata_rejects_oversized_text_field() {
+        let m = ProjectMetadata {
+            owner: "x".repeat(257),
+            ..Default::default()
+        };
+        let err = validate_metadata(&m).unwrap_err().to_string();
+        assert!(err.contains("owner"), "{err}");
+    }
+
+    #[test]
+    fn serde_roundtrip_drops_empty_fields() {
+        let m = ProjectMetadata {
+            git_url: "https://x".into(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        assert_eq!(json, r#"{"git_url":"https://x"}"#);
+        let back: ProjectMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, m);
+    }
 }
