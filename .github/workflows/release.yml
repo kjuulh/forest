@@ -192,15 +192,18 @@ jobs:
           git clone "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/understory-io/homebrew-tap.git" tap
           cp scripts/install.sh tap/install-forest.sh
           cd tap
-          # Bail out cleanly if the content is identical — install.sh
-          # only changes when we ship a tweak to the installer itself,
-          # not on every release.
-          if git diff --quiet install-forest.sh; then
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Stage first, then check the cached diff. `git diff
+          # install-forest.sh` (worktree-vs-HEAD) ignores UNTRACKED
+          # files, so the very first run reports "no change" and the
+          # mirror is never created — that's the bug v0.1.3 shipped
+          # with. `git diff --cached` against the index correctly
+          # treats a newly-added file as a change.
+          git add install-forest.sh
+          if git diff --cached --quiet -- install-forest.sh; then
               echo "install-forest.sh is up to date (no commit needed)"
               exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add install-forest.sh
           git commit -m "Sync install-forest.sh from forest ${{ github.event.release.tag_name }}"
           git push
