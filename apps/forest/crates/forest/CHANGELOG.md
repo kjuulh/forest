@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/understory-io/forest/compare/v0.1.3...v0.1.4) (2026-05-20)
+
+
+### Bug Fixes
+
+* **forest:** clarify gh-release-download error path ([af1a1fa](https://github.com/understory-io/forest/commit/af1a1faf8c987c2259d9d5d37c61212f65fee242))
+
 ## [0.1.3](https://github.com/understory-io/forest/compare/v0.1.2...v0.1.3) (2026-05-20)
 
 
