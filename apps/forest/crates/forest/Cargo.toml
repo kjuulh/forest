@@ -6,7 +6,12 @@ repository = "https://git.kjuulh.io/kjuulh/forest"
 readme = "../../README.md"
 license = "MIT"
 
-version.workspace = true
+# `forest` carries its own version — release-please owns this number
+# and bumps it on each release-please PR merge. The rest of the
+# workspace continues to use `version.workspace = true` for now;
+# they're not distributed externally so their version doesn't matter
+# for users.
+version = "0.1.0"
 
 [dependencies]
 forest-grpc-interface.workspace = true
