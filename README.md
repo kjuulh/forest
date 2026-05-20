@@ -10,11 +10,25 @@ gh auth login   # one-time
 curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh | bash
 ```
 
-Check it works:
+Check it works (doesn't write any state to disk):
 
 ```bash
-forest --version
+forest self check
 ```
+
+### Set up a context during install
+
+Point forest at your server in one step by passing `FOREST_PROFILE` to the
+installer. The first context provisioned becomes the active default:
+
+```bash
+FOREST_PROFILE='name=understory-prod,server=https://forest.understory.sh' \
+  bash <(curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh)
+```
+
+`CUE_REGISTRY` is derived from the server automatically, so you don't have to
+remember to export it. Every command afterwards prints a one-line banner
+showing which context it's running against.
 
 ### Other ways
 
@@ -25,6 +39,16 @@ curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/ins
 # Install under ~/.local/bin instead of /usr/local/bin (no sudo)
 curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh | PREFIX=$HOME/.local bash
 ```
+
+### Keeping forest up to date
+
+```bash
+forest self check     # is a newer version available?
+forest self update    # upgrade to latest
+```
+
+A one-line nag also prints at the end of every command when a newer release
+exists (cached 24h; suppress with `FOREST_NO_UPDATE_CHECK=1` or `CI=true`).
 
 ## What's here
 

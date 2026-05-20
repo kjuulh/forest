@@ -177,7 +177,26 @@ if [ -n "${FOREST_PROFILE:-}" ]; then
     else
         echo "==> Provisioning context '$profile_name' → $profile_server"
         if ! "$target_path" context provision --name "$profile_name" --server "$profile_server"; then
-            echo "==> Context provision failed; install completed but no context was seeded." >&2
+            echo "==> Context provision failed. The installed forest binary may be" >&2
+            echo "    older than the version that introduced 'context provision'." >&2
+            echo "    Try: $target_path self update, then re-run this installer." >&2
         fi
     fi
+fi
+
+# ── Next steps banner ────────────────────────────────────────────
+#
+# After a successful install the user is dropped at a prompt with no
+# breadcrumbs. Print a short hint at the end so they know what to try
+# next. This is the LAST thing the user sees from install.sh, so it
+# should be brief and actionable.
+echo
+echo "Next:"
+if [ -n "${FOREST_PROFILE:-}" ] && [ -n "${profile_name:-}" ]; then
+    echo "  forest context active        # confirm '$profile_name' is the active context"
+    echo "  forest init                  # scaffold a new project"
+else
+    echo "  forest context create <name> --server <url>   # point forest at a server"
+    echo "  forest context active                         # see active context"
+    echo "  forest init                                   # scaffold a new project"
 fi
