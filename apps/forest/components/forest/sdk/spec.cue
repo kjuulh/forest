@@ -13,6 +13,31 @@ package sdk
 #ForestProject: {
 	name:         string & =~"^[a-z][a-z0-9-]*$"
 	organisation: string & =~"^[a-z][a-z0-9-]*$"
+
+	// Optional human-readable description shown on the project Overview
+	// header. `forest publish` pushes this to the server on every
+	// publish; missing here = cleared server-side.
+	// See specs/features/009-project-metadata.md.
+	description?: string
+
+	// Blessed project metadata. Surfaced in the project Overview's
+	// "About" sidebar (links + identity).
+	metadata?: #ProjectMetadata
+}
+
+#ProjectMetadata: {
+	// Upstream source repository.
+	git_url?: string
+	// Public landing page / marketing site.
+	homepage?: string
+	// Docs site URL.
+	docs_url?: string
+	// Issue tracker / Slack channel / on-call link.
+	support_url?: string
+	// Business or team domain — e.g. "payments", "infra".
+	domain?: string
+	// Responsible team or person.
+	owner?: string
 }
 
 #ForestComponent: {
