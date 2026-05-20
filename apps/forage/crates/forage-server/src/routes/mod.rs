@@ -92,7 +92,15 @@ fn warn_default<T: Default>(context: &str, result: Result<T, impl std::fmt::Disp
 pub(super) fn render_markdown(md: &str) -> String {
     use std::collections::{HashMap, HashSet};
 
-    let parser = pulldown_cmark::Parser::new(md);
+    // Enable GFM tables alongside the CommonMark baseline. Tables are
+    // ubiquitous in component / project READMEs (think "platforms" or
+    // "inputs" rows), and rendering them as plain `|--|` text in the
+    // sidebar looked unfinished. Other GFM extensions stay off by
+    // default — add them deliberately when there's a use case.
+    let mut opts = pulldown_cmark::Options::empty();
+    opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
+
+    let parser = pulldown_cmark::Parser::new_ext(md, opts);
     let mut html = String::new();
     pulldown_cmark::html::push_html(&mut html, parser);
 
@@ -146,4 +154,40 @@ fn require_org_membership<'a>(
             "You don't have access to this organisation.",
         )
     })
+}
+
+#[cfg(test)]
+mod markdown_tests {
+    use super::render_markdown;
+
+    #[test]
+    fn gfm_table_renders_to_html_table() {
+        let md = "\
+| Method  | Description     |
+| ------- | --------------- |
+| init    | Bootstrap repo  |
+| publish | Ship a version  |
+";
+        let html = render_markdown(md);
+        assert!(html.contains("<table"), "expected <table> in: {html}");
+        assert!(html.contains("<thead"), "expected <thead> in: {html}");
+        assert!(html.contains("<tbody"), "expected <tbody> in: {html}");
+        assert!(html.contains("<th>Method</th>"), "{html}");
+        assert!(html.contains("<td>publish</td>"), "{html}");
+    }
+
+    #[test]
+    fn fenced_code_class_survives_sanitisation() {
+        let html = render_markdown("```rust\nlet x = 1;\n```\n");
+        assert!(html.contains(r#"class="language-rust""#), "{html}");
+    }
+
+    #[test]
+    fn arbitrary_class_token_dropped() {
+        // Inline HTML smuggling the `hidden` class shouldn't survive.
+        // pulldown-cmark passes raw HTML straight through, so this is
+        // the ammonia layer's job.
+        let html = render_markdown(r#"<div class="hidden">x</div>"#);
+        assert!(!html.contains("class=\"hidden\""), "{html}");
+    }
 }
