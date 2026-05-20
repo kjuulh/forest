@@ -297,3 +297,26 @@
     </aside>
 </section>
 {% endblock %}
+
+{% block extra_assets %}
+{# Syntax highlighting for README code blocks (see project_detail). #}
+{% if readme_html %}
+{# Two themes, matched by media query — see project_detail.html.jinja. #}
+<link rel="stylesheet" href="/static/css/vendor/highlight-github.min.css"
+      media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="/static/css/vendor/highlight-github-dark.min.css"
+      media="(prefers-color-scheme: dark)">
+<script src="/static/js/vendor/highlight.min.js" defer></script>
+{# CUE is not in highlight.js's bundled language set — see project_detail. #}
+<script src="/static/js/vendor/highlight-cue.js" defer></script>
+<script defer>
+    document.addEventListener('DOMContentLoaded', function () {
+        if (typeof hljs !== 'undefined') {
+            document.querySelectorAll('.prose pre code').forEach(function (el) {
+                hljs.highlightElement(el);
+            });
+        }
+    });
+</script>
+{% endif %}
+{% endblock %}

@@ -184,3 +184,31 @@
     {% endif %}{# /show_get_started #}
 </section>
 {% endblock %}
+
+{% block extra_assets %}
+{# Syntax highlighting for README code blocks. Loaded only on pages
+   that render a README; degrades to plain monospace under noscript. #}
+{% if readme_html %}
+{# Two themes, matched by media query — Tailwind's dark-mode strategy
+   here is `prefers-color-scheme` (see input.css), so highlight.js
+   should pick the same signal. The browser only fetches the rules
+   that apply, so this isn't double-loading. #}
+<link rel="stylesheet" href="/static/css/vendor/highlight-github.min.css"
+      media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="/static/css/vendor/highlight-github-dark.min.css"
+      media="(prefers-color-scheme: dark)">
+<script src="/static/js/vendor/highlight.min.js" defer></script>
+{# CUE is not in highlight.js's bundled language set — register our
+   own minimal grammar. Must load AFTER the core bundle. #}
+<script src="/static/js/vendor/highlight-cue.js" defer></script>
+<script defer>
+    document.addEventListener('DOMContentLoaded', function () {
+        if (typeof hljs !== 'undefined') {
+            document.querySelectorAll('.prose pre code').forEach(function (el) {
+                hljs.highlightElement(el);
+            });
+        }
+    });
+</script>
+{% endif %}
+{% endblock %}

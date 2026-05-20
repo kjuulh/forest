@@ -82,11 +82,40 @@ fn warn_default<T: Default>(context: &str, result: Result<T, impl std::fmt::Disp
 /// Render markdown → sanitised HTML. Shared by the registry and platform
 /// routes so the project Overview and the legacy component-detail page
 /// produce identical output for the same source markdown.
+///
+/// `class` is allowed on `<code>` and `<pre>` so the `language-<lang>`
+/// hint pulldown-cmark emits for fenced blocks survives sanitisation
+/// and reaches highlight.js on the client. The class values are
+/// further restricted to the `language-*` prefix so attackers can't
+/// inject arbitrary Tailwind utility classes (e.g. `hidden`) that
+/// would visually rewrite the document.
 pub(super) fn render_markdown(md: &str) -> String {
+    use std::collections::{HashMap, HashSet};
+
     let parser = pulldown_cmark::Parser::new(md);
     let mut html = String::new();
     pulldown_cmark::html::push_html(&mut html, parser);
-    ammonia::clean(&html)
+
+    let mut tag_attrs: HashMap<&str, HashSet<&str>> = HashMap::new();
+    tag_attrs.insert("code", HashSet::from(["class"]));
+    tag_attrs.insert("pre", HashSet::from(["class"]));
+
+    ammonia::Builder::default()
+        .tag_attributes(tag_attrs)
+        .attribute_filter(|_element, attribute, value| {
+            // For `class`, only allow `language-*` tokens. Drop the
+            // attribute entirely if any token doesn't match.
+            if attribute == "class" {
+                let all_lang = value
+                    .split_ascii_whitespace()
+                    .all(|tok| tok.starts_with("language-"));
+                if all_lang { Some(value.into()) } else { None }
+            } else {
+                Some(value.into())
+            }
+        })
+        .clean(&html)
+        .to_string()
 }
 
 fn orgs_context(orgs: &[CachedOrg]) -> Vec<minijinja::Value> {

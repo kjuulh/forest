@@ -181,5 +181,9 @@
         } catch(e) {}
     });
     </script>
+    {# Pages that need page-specific JS / CSS (e.g. syntax highlighting
+       on README pages) extend this block. Kept opt-in so we don't ship
+       highlight.js on every page. #}
+    {% block extra_assets %}{% endblock %}
 </body>
 </html>
