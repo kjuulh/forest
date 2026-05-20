@@ -126,6 +126,13 @@ impl TemplateEngine {
         env.add_filter("human_size", |v: u64| -> String {
             crate::manifest_view::ManifestView::human_size(v)
         });
+        // Short display label for a URL — strips scheme/www, collapses
+        // GitHub/GitLab repo URLs to `org/repo`, caps to 48 chars. Used
+        // by the About sidebar (spec 009). See
+        // `forage_core::platform::prettify_url` for the rules.
+        env.add_filter("prettify_url", |v: String| -> String {
+            forage_core::platform::prettify_url(&v)
+        });
 
         // Default asset hash for tests/dev — overridden in production by compute_asset_hashes
         env.add_global("css_hash", "dev");

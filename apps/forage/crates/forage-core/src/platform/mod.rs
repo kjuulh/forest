@@ -65,6 +65,121 @@ impl ProjectMetadata {
     }
 }
 
+/// Turn a URL into a short display label suitable for an About sidebar
+/// entry. Raw URLs are visually noisy — the user already sees the icon,
+/// they just need to know *which* repo / host the link points at.
+///
+/// Rules:
+/// - Empty → empty (caller hides the row).
+/// - Strip `https://` / `http://` and `www.`.
+/// - Strip trailing `/`.
+/// - `github.com/<org>/<repo>` → `<org>/<repo>` (canonical form for both
+///   forges below).
+/// - `gitlab.com/<group>/<project>` → `<group>/<project>`.
+/// - Anything else: keep `host/path` but cap at 48 chars with an `…`.
+///
+/// Strings that don't parse as URLs are returned unchanged (within the
+/// length cap), so a malformed metadata value still shows the raw text.
+pub fn prettify_url(url: &str) -> String {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    // Strip scheme + www.
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed);
+    let without_www = without_scheme.strip_prefix("www.").unwrap_or(without_scheme);
+    let trailing_slash_trimmed = without_www.trim_end_matches('/');
+
+    // Forge-specific: GitHub / GitLab repo URLs collapse to `org/repo`.
+    for forge in ["github.com/", "gitlab.com/"] {
+        if let Some(rest) = trailing_slash_trimmed.strip_prefix(forge) {
+            // Take the first two path segments. Anything deeper (issues,
+            // tree/main, …) is dropped — the icon already tells the user
+            // "this is a git repo".
+            let mut parts = rest.split('/');
+            let org = parts.next().unwrap_or("");
+            let repo = parts.next().unwrap_or("");
+            if !org.is_empty() && !repo.is_empty() {
+                return format!("{org}/{repo}");
+            }
+            // Single-segment GitHub URL (org page) — fall through to host
+            // handling so we still get something readable.
+            break;
+        }
+    }
+
+    cap_chars(trailing_slash_trimmed, 48)
+}
+
+/// Truncate a string to `max` chars by ellipsis. Operates on chars, not
+/// bytes, so multi-byte URLs (rare but legal) don't split mid-codepoint.
+fn cap_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+#[cfg(test)]
+mod prettify_url_tests {
+    use super::*;
+
+    #[test]
+    fn empty_in_empty_out() {
+        assert_eq!(prettify_url(""), "");
+        assert_eq!(prettify_url("   "), "");
+    }
+
+    #[test]
+    fn github_repo_collapses_to_org_slash_repo() {
+        assert_eq!(
+            prettify_url("https://github.com/rawpotion/forest-hello"),
+            "rawpotion/forest-hello"
+        );
+        // Trailing slash + extra path segments dropped.
+        assert_eq!(
+            prettify_url("https://github.com/rawpotion/forest-hello/issues"),
+            "rawpotion/forest-hello"
+        );
+    }
+
+    #[test]
+    fn gitlab_repo_collapses_too() {
+        assert_eq!(
+            prettify_url("https://gitlab.com/group/project"),
+            "group/project"
+        );
+    }
+
+    #[test]
+    fn homepage_strips_scheme_and_www() {
+        assert_eq!(
+            prettify_url("https://www.example.com/"),
+            "example.com"
+        );
+        assert_eq!(prettify_url("http://forest.rawpotion.io"), "forest.rawpotion.io");
+    }
+
+    #[test]
+    fn long_url_is_capped_with_ellipsis() {
+        let pretty = prettify_url("https://very-long.example.com/path/that/keeps/going/and/going/forever");
+        // 48 chars including the ellipsis at the end.
+        assert!(pretty.chars().count() <= 48);
+        assert!(pretty.ends_with('…'));
+    }
+
+    #[test]
+    fn malformed_url_falls_back_to_raw() {
+        assert_eq!(prettify_url("not a url"), "not a url");
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Artifact {
     pub artifact_id: String,

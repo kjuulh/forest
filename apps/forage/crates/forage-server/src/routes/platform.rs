@@ -171,7 +171,8 @@ fn orgs_context(orgs: &[CachedOrg]) -> Vec<minijinja::Value> {
 
 /// Convert the blessed project metadata into a template-friendly context.
 /// `has_any` lets the template branch on whether to render the About
-/// block at all (matches the 008 clean-empty-state policy).
+/// block at all (matches the 008 clean-empty-state policy). URL
+/// shortening is done in the template via the `prettify_url` filter.
 fn project_metadata_to_context(m: &forage_core::platform::ProjectMetadata) -> minijinja::Value {
     context! {
         git_url => &m.git_url,
