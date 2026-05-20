@@ -76,9 +76,9 @@ tracing-opentelemetry = "0.33"
 tabled = "0.20"
 chrono = "0.4"
 itertools = "0.14.0"
+tempfile = "3"
 
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
 proptest = "1"
-tempfile = "3"

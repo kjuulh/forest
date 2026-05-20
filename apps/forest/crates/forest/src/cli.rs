@@ -40,6 +40,7 @@ mod organisation;
 mod project;
 mod release;
 mod run;
+mod self_cmd;
 mod shell;
 mod template;
 mod tmp;
@@ -132,6 +133,10 @@ enum Commands {
     /// Manage temporary directories
     #[command(hide = true)]
     Tmp(TmpCommand),
+
+    /// Update the forest CLI itself (`self update` / `self check`)
+    #[command(name = "self")]
+    Self_(self_cmd::SelfCommand),
 }
 
 pub async fn execute() -> anyhow::Result<()> {
@@ -196,11 +201,18 @@ impl CommandHandler {
         let state = &self.state;
         let cli = &self.cli;
 
-        match cli
+        let command = cli
             .command
             .as_ref()
-            .expect("commands are required should've been caught by clap")
-        {
+            .expect("commands are required should've been caught by clap");
+
+        // Skip the auto-nag for `forest self …` — the user is already
+        // engaging with the update flow, no need to prompt them again,
+        // and `self update` would print the nag while the binary is
+        // mid-replacement.
+        let print_nag = !matches!(command, Commands::Self_(_));
+
+        let result = match command {
             Commands::Init(cmd) => cmd.execute(state).await,
             Commands::Add(cmd) => cmd.execute(state).await,
             Commands::Build(cmd) => cmd.execute(state).await,
@@ -225,7 +237,17 @@ impl CommandHandler {
             Commands::Global(cmd) => cmd.execute(state).await,
             Commands::Shell(cmd) => cmd.execute(state).await,
             Commands::Tmp(cmd) => cmd.execute(state).await,
+            Commands::Self_(cmd) => cmd.execute(state).await,
+        };
+
+        // Only nag on success — if the user's command already failed
+        // we shouldn't add noise. The nag itself is best-effort and
+        // silent on its own failures.
+        if print_nag && result.is_ok() {
+            self_cmd::maybe_print_update_nag().await;
         }
+
+        result
     }
 }
 
