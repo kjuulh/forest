@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/understory-io/forest/compare/v0.1.1...v0.1.2) (2026-05-20)
+
+
+### Features
+
+* release ([24b2ef2](https://github.com/understory-io/forest/commit/24b2ef241c8510549def87b9c56e56db45d5063d))
+
 ## [0.1.1](https://github.com/understory-io/forest/compare/v0.1.0...v0.1.1) (2026-05-20)
 
 
