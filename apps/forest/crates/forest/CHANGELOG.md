@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.3](https://github.com/understory-io/forest/compare/v0.1.2...v0.1.3) (2026-05-20)
+
+
+### Features
+
+* **forest:** FOREST_PROFILE install-time context + active-context banner + CUE_REGISTRY derivation ([f3b489e](https://github.com/understory-io/forest/commit/f3b489e7d29223743ef9168ac9500b81f2b20d21))
+* **forest:** self-update via `forest self update` + auto-nag ([b3bccb5](https://github.com/understory-io/forest/commit/b3bccb5431da5c928423bf4ac90516e918b24538))
+
+
+### Bug Fixes
+
+* **forest:** portable sha256 check (Linux \`sha256sum\` + macOS \`shasum\`) ([7822860](https://github.com/understory-io/forest/commit/7822860c04cdcba8efe72f1e1802e203b3ca8a53))
+
 ## [0.1.2](https://github.com/understory-io/forest/compare/v0.1.1...v0.1.2) (2026-05-20)
 
 
