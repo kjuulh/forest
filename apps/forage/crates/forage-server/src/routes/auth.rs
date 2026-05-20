@@ -52,6 +52,22 @@ pub fn router() -> Router<AppState> {
             "/settings/account/slack/disconnect",
             post(slack_disconnect),
         )
+        .route(
+            "/settings/account/github/connect",
+            get(github_link_start),
+        )
+        .route(
+            "/settings/account/github/disconnect",
+            post(github_link_disconnect),
+        )
+        .route(
+            "/settings/account/google/connect",
+            get(google_link_start),
+        )
+        .route(
+            "/settings/account/google/disconnect",
+            post(google_link_disconnect),
+        )
         .route("/settings/account/picture", post(upload_picture_submit))
         .route("/settings/account/picture/remove", post(remove_picture_submit))
         .route("/avatars/{user_id}", get(serve_avatar))
@@ -742,9 +758,16 @@ async fn delete_token_submit(
 
 // ─── Account settings ────────────────────────────────────────────────
 
+#[derive(Deserialize, Default)]
+struct AccountPageQuery {
+    flash: Option<String>,
+    error: Option<String>,
+}
+
 async fn account_page(
     State(state): State<AppState>,
     session: Session,
+    Query(query): Query<AccountPageQuery>,
 ) -> Result<Response, Response> {
     let prefs = state
         .platform_client
@@ -761,6 +784,18 @@ async fn account_page(
         vec![]
     };
 
+    let forest_identities = state
+        .forest_client
+        .list_linked_identities(&session.access_token, &session.user.user_id)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "failed to fetch linked identities");
+            vec![]
+        });
+
+    let linked_accounts =
+        forage_core::auth::merge_linked_identities(forest_identities, &slack_links);
+
     // Fetch fresh user info to get current mfa_enabled state.
     let mfa_enabled = state
         .forest_client
@@ -769,17 +804,64 @@ async fn account_page(
         .map(|u| u.mfa_enabled)
         .unwrap_or(false);
 
-    render_account(&state, &session, None, &prefs, &slack_links, mfa_enabled)
+    render_account(
+        &state,
+        &session,
+        None,
+        &prefs,
+        &slack_links,
+        &linked_accounts,
+        mfa_enabled,
+        flash_message(query.flash.as_deref()),
+        error_message(query.error.as_deref()),
+    )
+}
+
+/// Translate a `?flash=...` query parameter into a user-facing message.
+/// Returning `None` keeps the banner hidden.
+fn flash_message(flash: Option<&str>) -> Option<&'static str> {
+    match flash? {
+        "linked_github" => Some("GitHub account linked."),
+        "linked_google" => Some("Google account linked."),
+        _ => None,
+    }
+}
+
+/// Translate a `?error=...` query parameter into a user-facing message.
+fn error_message(error: Option<&str>) -> Option<&'static str> {
+    match error? {
+        "access_denied_github" => Some("GitHub authorisation was cancelled."),
+        "access_denied_google" => Some("Google authorisation was cancelled."),
+        "already_linked_other_github" => {
+            Some("This GitHub account is already linked to another Forage user.")
+        }
+        "already_linked_other_google" => {
+            Some("This Google account is already linked to another Forage user.")
+        }
+        "already_linked_github" => {
+            Some("You already have a GitHub account linked. Disconnect it first to switch.")
+        }
+        "already_linked_google" => {
+            Some("You already have a Google account linked. Disconnect it first to switch.")
+        }
+        "link_failed_github" => Some("Linking your GitHub account failed. Please try again."),
+        "link_failed_google" => Some("Linking your Google account failed. Please try again."),
+        _ => None,
+    }
 }
 
 #[allow(clippy::result_large_err)]
+#[allow(clippy::too_many_arguments)]
 fn render_account(
     state: &AppState,
     session: &Session,
     error: Option<&str>,
     notification_prefs: &[forage_core::platform::NotificationPreference],
     slack_links: &[SlackUserLink],
+    linked_accounts: &[forage_core::auth::LinkedIdentity],
     mfa_enabled: bool,
+    flash: Option<&str>,
+    oauth_error: Option<&str>,
 ) -> Result<Response, Response> {
     let html = state
         .templates
@@ -808,6 +890,8 @@ fn render_account(
                     .map(|p| format!("{}|{}", p.notification_type, p.channel))
                     .collect::<Vec<_>>(),
                 has_slack_oauth => state.slack_config.is_some(),
+                has_github_oauth => state.github_oauth_config.is_some(),
+                has_google_oauth => state.google_oauth_config.is_some(),
                 slack_links => slack_links.iter().map(|l| context! {
                     id => &l.id,
                     team_id => &l.team_id,
@@ -815,6 +899,21 @@ fn render_account(
                     slack_user_id => &l.slack_user_id,
                     slack_username => &l.slack_username,
                 }).collect::<Vec<_>>(),
+                linked_accounts => linked_accounts.iter().map(|l| context! {
+                    provider => l.provider.as_str(),
+                    provider_display => l.provider.display_name(),
+                    external_id => &l.external_id,
+                    display_name => &l.display_name,
+                    email => &l.email,
+                    avatar_url => &l.avatar_url,
+                    subtitle => &l.subtitle,
+                    linked_at => &l.linked_at,
+                    disconnect_key => &l.disconnect_key,
+                }).collect::<Vec<_>>(),
+                has_github_link => linked_accounts.iter().any(|l| l.provider == forage_core::auth::LinkedProvider::GitHub),
+                has_google_link => linked_accounts.iter().any(|l| l.provider == forage_core::auth::LinkedProvider::Google),
+                flash => flash,
+                oauth_error => oauth_error,
             },
         )
         .map_err(|e| {
@@ -845,7 +944,7 @@ async fn update_username_submit(
     }
 
     if let Err(e) = validate_username(&form.username) {
-        return render_account(&state, &session, Some(&e.0), &[], &[], false);
+        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None);
     }
 
     match state
@@ -867,11 +966,11 @@ async fn update_username_submit(
             Ok(Redirect::to("/settings/account").into_response())
         }
         Err(forage_core::auth::AuthError::AlreadyExists(_)) => {
-            render_account(&state, &session, Some("Username is already taken."), &[], &[], false)
+            render_account(&state, &session, Some("Username is already taken."), &[], &[], &[], false, None, None)
         }
         Err(e) => {
             tracing::error!("failed to update username: {e}");
-            render_account(&state, &session, Some("Could not update username. Please try again."), &[], &[], false)
+            render_account(&state, &session, Some("Could not update username. Please try again."), &[], &[], &[], false, None, None)
         }
     }
 }
@@ -899,11 +998,11 @@ async fn change_password_submit(
     }
 
     if form.new_password != form.new_password_confirm {
-        return render_account(&state, &session, Some("New passwords do not match."), &[], &[], false);
+        return render_account(&state, &session, Some("New passwords do not match."), &[], &[], &[], false, None, None);
     }
 
     if let Err(e) = validate_password(&form.new_password) {
-        return render_account(&state, &session, Some(&e.0), &[], &[], false);
+        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None);
     }
 
     match state
@@ -918,11 +1017,11 @@ async fn change_password_submit(
     {
         Ok(()) => Ok(Redirect::to("/settings/account").into_response()),
         Err(forage_core::auth::AuthError::InvalidCredentials) => {
-            render_account(&state, &session, Some("Current password is incorrect."), &[], &[], false)
+            render_account(&state, &session, Some("Current password is incorrect."), &[], &[], &[], false, None, None)
         }
         Err(e) => {
             tracing::error!("failed to change password: {e}");
-            render_account(&state, &session, Some("Could not change password. Please try again."), &[], &[], false)
+            render_account(&state, &session, Some("Could not change password. Please try again."), &[], &[], &[], false, None, None)
         }
     }
 }
@@ -948,7 +1047,7 @@ async fn add_email_submit(
     }
 
     if let Err(e) = validate_email(&form.email) {
-        return render_account(&state, &session, Some(&e.0), &[], &[], false);
+        return render_account(&state, &session, Some(&e.0), &[], &[], &[], false, None, None);
     }
 
     match state
@@ -982,11 +1081,11 @@ async fn add_email_submit(
             Ok(Redirect::to("/settings/account").into_response())
         }
         Err(forage_core::auth::AuthError::AlreadyExists(_)) => {
-            render_account(&state, &session, Some("Email is already registered."), &[], &[], false)
+            render_account(&state, &session, Some("Email is already registered."), &[], &[], &[], false, None, None)
         }
         Err(e) => {
             tracing::error!("failed to add email: {e}");
-            render_account(&state, &session, Some("Could not add email. Please try again."), &[], &[], false)
+            render_account(&state, &session, Some("Could not add email. Please try again."), &[], &[], &[], false, None, None)
         }
     }
 }
@@ -1031,7 +1130,7 @@ async fn remove_email_submit(
         }
         Err(e) => {
             tracing::error!("failed to remove email: {e}");
-            render_account(&state, &session, Some("Could not remove email. Please try again."), &[], &[], false)
+            render_account(&state, &session, Some("Could not remove email. Please try again."), &[], &[], &[], false, None, None)
         }
     }
 }
@@ -1451,7 +1550,11 @@ async fn google_oauth_start(
     maybe: MaybeSession,
 ) -> Result<Response, Response> {
     if maybe.session.is_some() {
-        return Ok(Redirect::to("/dashboard").into_response());
+        // Logged-in user hit the bare login route. Clear any stale link
+        // cookie *before* bouncing — otherwise an abandoned link flow's
+        // cookie lingers until expiry and could mis-dispatch a later
+        // login callback.
+        return Ok(redirect_clearing_link_cookie("/dashboard", "google"));
     }
 
     let config = state.google_oauth_config.as_ref().ok_or_else(|| {
@@ -1479,11 +1582,19 @@ async fn google_oauth_start(
         "forage_oauth_state={}; HttpOnly; SameSite=Lax; Path=/auth/google; Max-Age=600",
         oauth_state
     );
+    // Clear any stale link-purpose cookie left from an abandoned link
+    // flow on this browser — otherwise the callback would dispatch into
+    // the link branch unexpectedly.
+    let clear_link = "forage_oauth_link_user=; HttpOnly; SameSite=Lax; Path=/auth/google; Max-Age=0";
 
     let mut headers = HeaderMap::new();
-    headers.insert(
+    headers.append(
         axum::http::header::SET_COOKIE,
         state_cookie.parse().unwrap(),
+    );
+    headers.append(
+        axum::http::header::SET_COOKIE,
+        clear_link.parse().unwrap(),
     );
     headers.insert(
         axum::http::header::LOCATION,
@@ -1493,27 +1604,86 @@ async fn google_oauth_start(
     Ok((StatusCode::FOUND, headers).into_response())
 }
 
+/// OAuth 2.0 authorization-code callback query parameters. Used by
+/// both Google and GitHub callbacks — both providers conform to the
+/// same RFC 6749 §4.1.2 shape (`code` on success, `error` on denial,
+/// always `state`). Renamed from `GoogleCallbackQuery` so the GitHub
+/// callback doesn't pick up Google-specific fields if this struct ever
+/// gains one.
 #[derive(Deserialize)]
-struct GoogleCallbackQuery {
+struct OAuthCallbackQuery {
     code: Option<String>,
     state: Option<String>,
     error: Option<String>,
 }
 
 /// GET /auth/google/callback — handle the OAuth callback from Google.
+///
+/// See `github_oauth_callback` doc for the link-vs-login dispatch logic.
 async fn google_oauth_callback(
     State(state): State<AppState>,
     maybe: MaybeSession,
     jar: CookieJar,
-    Query(query): Query<GoogleCallbackQuery>,
+    Query(query): Query<OAuthCallbackQuery>,
 ) -> Result<Response, Response> {
-    if maybe.session.is_some() {
+    // ── 1. CSRF anchor: validate the OAuth state cookie FIRST. ────────
+    // Doing this before reading the link cookie prevents an attacker
+    // from leaking link-vs-login dispatch context through error-path
+    // disclosure (e.g. a forged `?error=access_denied` with a planted
+    // link cookie used to bounce to `/settings/account` rather than
+    // `/login`). State mismatch produces a generic 403 — no clue about
+    // which branch we'd have taken.
+    let expected_state = jar
+        .get("forage_oauth_state")
+        .map(|c| c.value().to_string());
+    let received_state = query.state.as_deref().unwrap_or("");
+    // Require a non-empty expected state so an injected empty-value
+    // `forage_oauth_state=` cookie combined with a missing `?state=`
+    // parameter (both `""`) can't pass the equality check.
+    match expected_state {
+        Some(ref expected) if !expected.is_empty() && expected == received_state => {}
+        _ => {
+            return Err(error_page(
+                &state,
+                StatusCode::FORBIDDEN,
+                "Invalid request",
+                "OAuth state mismatch. Please try again.",
+            ));
+        }
+    }
+
+    // ── 2. Dispatch link-vs-login. ────────────────────────────────────
+    let link_cookie_user_id = jar
+        .get(LINK_PURPOSE_COOKIE)
+        .map(|c| c.value().to_string());
+    let is_link_flow = link_cookie_user_id.is_some()
+        && maybe
+            .session
+            .as_ref()
+            .map(|s| s.user.user_id.clone())
+            == link_cookie_user_id;
+
+    if !is_link_flow && link_cookie_user_id.is_some() {
+        return Err(error_page(
+            &state,
+            StatusCode::FORBIDDEN,
+            "Link mismatch",
+            "Your session does not match the account that started this link. Please try again.",
+        ));
+    }
+
+    if maybe.session.is_some() && !is_link_flow {
         return Ok(Redirect::to("/dashboard").into_response());
     }
 
     // Handle denial from Google.
     if query.error.is_some() {
-        return Ok(Redirect::to("/login").into_response());
+        return Ok(Redirect::to(if is_link_flow {
+            "/settings/account?error=access_denied_google"
+        } else {
+            "/login"
+        })
+        .into_response());
     }
 
     let config = state.google_oauth_config.as_ref().ok_or_else(|| {
@@ -1524,24 +1694,6 @@ async fn google_oauth_callback(
             "Google sign-in is not configured.",
         )
     })?;
-
-    // Validate state to prevent CSRF.
-    let expected_state = jar
-        .get("forage_oauth_state")
-        .map(|c| c.value().to_string());
-    let received_state = query.state.as_deref().unwrap_or("");
-
-    match expected_state {
-        Some(ref expected) if expected == received_state => {}
-        _ => {
-            return Err(error_page(
-                &state,
-                StatusCode::FORBIDDEN,
-                "Invalid request",
-                "OAuth state mismatch. Please try again.",
-            ));
-        }
-    }
 
     let code = query.code.as_deref().unwrap_or("");
     if code.is_empty() {
@@ -1577,6 +1729,19 @@ async fn google_oauth_callback(
                 "Failed to verify your Google account. Please try again.",
             )
         })?;
+
+    // If we're linking (not logging in), branch into the link flow.
+    if is_link_flow {
+        let session = maybe.session.as_ref().expect("is_link_flow implies session");
+        return Ok(complete_link_flow(
+            &state,
+            session,
+            "google",
+            forage_core::auth::LinkedProvider::Google,
+            identity,
+        )
+        .await);
+    }
 
     // Step 2: Tell Forest to find-or-create this user by their verified identity.
     let result = state
@@ -1680,7 +1845,7 @@ async fn github_oauth_start(
     maybe: MaybeSession,
 ) -> Result<Response, Response> {
     if maybe.session.is_some() {
-        return Ok(Redirect::to("/dashboard").into_response());
+        return Ok(redirect_clearing_link_cookie("/dashboard", "github"));
     }
 
     let config = state.github_oauth_config.as_ref().ok_or_else(|| {
@@ -1707,11 +1872,17 @@ async fn github_oauth_start(
         "forage_oauth_state={}; HttpOnly; SameSite=Lax; Path=/auth/github; Max-Age=600",
         oauth_state
     );
+    // Clear any stale link-purpose cookie (see google_oauth_start).
+    let clear_link = "forage_oauth_link_user=; HttpOnly; SameSite=Lax; Path=/auth/github; Max-Age=0";
 
     let mut headers = HeaderMap::new();
-    headers.insert(
+    headers.append(
         axum::http::header::SET_COOKIE,
         state_cookie.parse().unwrap(),
+    );
+    headers.append(
+        axum::http::header::SET_COOKIE,
+        clear_link.parse().unwrap(),
     );
     headers.insert(
         axum::http::header::LOCATION,
@@ -1722,18 +1893,73 @@ async fn github_oauth_start(
 }
 
 /// GET /auth/github/callback — handle the OAuth callback from GitHub.
+///
+/// Dispatches between two flows based on the `forage_oauth_link_user`
+/// cookie set by `/settings/account/github/connect`:
+///   - Cookie present + session matches → **link flow** (Forest
+///     `LinkOAuthProvider`).
+///   - Cookie absent + no session → **login flow** (existing
+///     `OAuthLogin` behaviour).
+///   - Cookie absent + session present → bounce to /dashboard.
+///   - Cookie present + session missing or mismatched → 403.
 async fn github_oauth_callback(
     State(state): State<AppState>,
     maybe: MaybeSession,
     jar: CookieJar,
-    Query(query): Query<GoogleCallbackQuery>,
+    Query(query): Query<OAuthCallbackQuery>,
 ) -> Result<Response, Response> {
-    if maybe.session.is_some() {
+    // CSRF anchor first — see google_oauth_callback for rationale.
+    let expected_state = jar
+        .get("forage_oauth_state")
+        .map(|c| c.value().to_string());
+    let received_state = query.state.as_deref().unwrap_or("");
+    // Require a non-empty expected state so an injected empty-value
+    // `forage_oauth_state=` cookie combined with a missing `?state=`
+    // parameter (both `""`) can't pass the equality check.
+    match expected_state {
+        Some(ref expected) if !expected.is_empty() && expected == received_state => {}
+        _ => {
+            return Err(error_page(
+                &state,
+                StatusCode::FORBIDDEN,
+                "Invalid request",
+                "OAuth state mismatch. Please try again.",
+            ));
+        }
+    }
+
+    let link_cookie_user_id = jar
+        .get(LINK_PURPOSE_COOKIE)
+        .map(|c| c.value().to_string());
+    let is_link_flow = link_cookie_user_id.is_some()
+        && maybe
+            .session
+            .as_ref()
+            .map(|s| s.user.user_id.clone())
+            == link_cookie_user_id;
+
+    if !is_link_flow && link_cookie_user_id.is_some() {
+        // Cookie set for linking, but session is missing or belongs to
+        // a different user — refuse to proceed.
+        return Err(error_page(
+            &state,
+            StatusCode::FORBIDDEN,
+            "Link mismatch",
+            "Your session does not match the account that started this link. Please try again.",
+        ));
+    }
+
+    if maybe.session.is_some() && !is_link_flow {
         return Ok(Redirect::to("/dashboard").into_response());
     }
 
     if query.error.is_some() {
-        return Ok(Redirect::to("/login").into_response());
+        return Ok(Redirect::to(if is_link_flow {
+            "/settings/account?error=access_denied_github"
+        } else {
+            "/login"
+        })
+        .into_response());
     }
 
     let config = state.github_oauth_config.as_ref().ok_or_else(|| {
@@ -1744,24 +1970,6 @@ async fn github_oauth_callback(
             "GitHub sign-in is not configured.",
         )
     })?;
-
-    // Validate state.
-    let expected_state = jar
-        .get("forage_oauth_state")
-        .map(|c| c.value().to_string());
-    let received_state = query.state.as_deref().unwrap_or("");
-
-    match expected_state {
-        Some(ref expected) if expected == received_state => {}
-        _ => {
-            return Err(error_page(
-                &state,
-                StatusCode::FORBIDDEN,
-                "Invalid request",
-                "OAuth state mismatch. Please try again.",
-            ));
-        }
-    }
 
     let code = query.code.as_deref().unwrap_or("");
     if code.is_empty() {
@@ -1797,6 +2005,19 @@ async fn github_oauth_callback(
                 "Failed to verify your GitHub account. Please try again.",
             )
         })?;
+
+    // If we're linking (not logging in), branch into the link flow.
+    if is_link_flow {
+        let session = maybe.session.as_ref().expect("is_link_flow implies session");
+        return Ok(complete_link_flow(
+            &state,
+            session,
+            "github",
+            forage_core::auth::LinkedProvider::GitHub,
+            identity,
+        )
+        .await);
+    }
 
     // Step 2: Tell Forest to find-or-create this user.
     let result = state
@@ -2817,5 +3038,265 @@ async fn verify_email_resend_submit(
         tracing::warn!(error = %e, "verify-email resend enqueue failed");
     }
     render_verify_email_check_inbox(&state, &form.email).map_err(|s| s.into_response())
+}
+
+// ─── Account-level OAuth account linking (GitHub / Google) ──────────
+//
+// These routes let a signed-in user explicitly link an external OAuth
+// identity to their Forage account. Distinct from `/auth/<provider>`,
+// which mints a session. The two share the provider's authorize URL
+// and callback; dispatch happens via the `forage_oauth_link_user`
+// cookie set here. See `specs/features/010-account-integrations.md`.
+
+const LINK_PURPOSE_COOKIE: &str = "forage_oauth_link_user";
+
+#[allow(clippy::result_large_err)]
+fn build_link_start_response(
+    state: &AppState,
+    session: &Session,
+    provider: &str,
+    authorize_url: &str,
+    state_token: &str,
+) -> Result<Response, Response> {
+    let cookie_path = format!("/auth/{provider}");
+    let state_cookie = format!(
+        "forage_oauth_state={state_token}; HttpOnly; SameSite=Lax; Path={cookie_path}; Max-Age=600"
+    );
+    let link_cookie = format!(
+        "{LINK_PURPOSE_COOKIE}={user_id}; HttpOnly; SameSite=Lax; Path={cookie_path}; Max-Age=600",
+        user_id = session.user.user_id,
+    );
+
+    let mut headers = axum::http::HeaderMap::new();
+    headers.append(axum::http::header::SET_COOKIE, state_cookie.parse().map_err(|_| {
+        internal_error(state, "cookie parse", &"state cookie")
+    })?);
+    headers.append(axum::http::header::SET_COOKIE, link_cookie.parse().map_err(|_| {
+        internal_error(state, "cookie parse", &"link cookie")
+    })?);
+    headers.insert(axum::http::header::LOCATION, authorize_url.parse().map_err(|_| {
+        internal_error(state, "url parse", &authorize_url)
+    })?);
+
+    Ok((StatusCode::FOUND, headers).into_response())
+}
+
+/// Build the cookie header values that clear the link/state cookies for a
+/// provider — used after a successful or failed link callback so the
+/// cookies don't leak into a later login attempt.
+fn clear_link_cookies(provider: &str) -> [String; 2] {
+    let path = format!("/auth/{provider}");
+    [
+        format!("forage_oauth_state=; HttpOnly; SameSite=Lax; Path={path}; Max-Age=0"),
+        format!("{LINK_PURPOSE_COOKIE}=; HttpOnly; SameSite=Lax; Path={path}; Max-Age=0"),
+    ]
+}
+
+/// Build a 302 redirect response that *also* clears the link-purpose
+/// cookie for the given provider. Used by the login-start routes when
+/// they bounce an already-authenticated user — without this, an
+/// abandoned link cookie would survive the redirect and mis-dispatch a
+/// later login callback.
+fn redirect_clearing_link_cookie(location: &str, provider: &str) -> Response {
+    let clear = format!(
+        "{LINK_PURPOSE_COOKIE}=; HttpOnly; SameSite=Lax; Path=/auth/{provider}; Max-Age=0"
+    );
+    let mut headers = axum::http::HeaderMap::new();
+    if let Ok(v) = clear.parse() {
+        headers.append(axum::http::header::SET_COOKIE, v);
+    }
+    if let Ok(v) = location.parse() {
+        headers.insert(axum::http::header::LOCATION, v);
+    }
+    (StatusCode::FOUND, headers).into_response()
+}
+
+/// GET /settings/account/github/connect — kick off the GitHub linking
+/// flow. Requires an active session; sets the link-purpose cookie and
+/// redirects to GitHub's authorize URL. The callback at
+/// `/auth/github/callback` dispatches based on this cookie.
+async fn github_link_start(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Response, Response> {
+    let config = state.github_oauth_config.as_ref().ok_or_else(|| {
+        error_page(
+            &state,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Not available",
+            "GitHub sign-in is not configured.",
+        )
+    })?;
+
+    let oauth_state = generate_oauth_state();
+    let redirect_uri = format!("{}/auth/github/callback", config.redirect_host);
+    let auth_url = format!(
+        "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope={}&state={}",
+        urlencoding::encode(&config.client_id),
+        urlencoding::encode(&redirect_uri),
+        urlencoding::encode("read:user user:email"),
+        urlencoding::encode(&oauth_state),
+    );
+
+    build_link_start_response(&state, &session, "github", &auth_url, &oauth_state)
+}
+
+/// GET /settings/account/google/connect — symmetric to the GitHub
+/// version. Uses `openid email profile` scope.
+async fn google_link_start(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Response, Response> {
+    let config = state.google_oauth_config.as_ref().ok_or_else(|| {
+        error_page(
+            &state,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Not available",
+            "Google sign-in is not configured.",
+        )
+    })?;
+
+    let oauth_state = generate_oauth_state();
+    let redirect_uri = format!("{}/auth/google/callback", config.redirect_host);
+    let auth_url = format!(
+        "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}&access_type=offline",
+        urlencoding::encode(&config.client_id),
+        urlencoding::encode(&redirect_uri),
+        urlencoding::encode("openid email profile"),
+        urlencoding::encode(&oauth_state),
+    );
+
+    build_link_start_response(&state, &session, "google", &auth_url, &oauth_state)
+}
+
+#[derive(Deserialize)]
+struct ProviderDisconnectForm {
+    _csrf: String,
+}
+
+/// POST /settings/account/github/disconnect — unlink the user's GitHub
+/// identity from their Forage account.
+async fn github_link_disconnect(
+    State(state): State<AppState>,
+    session: Session,
+    Form(form): Form<ProviderDisconnectForm>,
+) -> Result<Response, Response> {
+    disconnect_oauth_provider(
+        &state,
+        &session,
+        &form._csrf,
+        forage_core::auth::LinkedProvider::GitHub,
+    )
+    .await
+}
+
+/// POST /settings/account/google/disconnect — unlink the user's Google
+/// identity from their Forage account.
+async fn google_link_disconnect(
+    State(state): State<AppState>,
+    session: Session,
+    Form(form): Form<ProviderDisconnectForm>,
+) -> Result<Response, Response> {
+    disconnect_oauth_provider(
+        &state,
+        &session,
+        &form._csrf,
+        forage_core::auth::LinkedProvider::Google,
+    )
+    .await
+}
+
+async fn disconnect_oauth_provider(
+    state: &AppState,
+    session: &Session,
+    csrf: &str,
+    provider: forage_core::auth::LinkedProvider,
+) -> Result<Response, Response> {
+    if !auth::validate_csrf(session, csrf) {
+        return Err(error_page(
+            state,
+            StatusCode::FORBIDDEN,
+            "Forbidden",
+            "Invalid CSRF token.",
+        ));
+    }
+
+    state
+        .forest_client
+        .unlink_oauth_provider(&session.access_token, &session.user.user_id, provider)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, provider = provider.as_str(), "unlink oauth provider failed");
+            match &e {
+                forage_core::auth::AuthError::PermissionDenied(_) => error_page(
+                    state,
+                    StatusCode::FORBIDDEN,
+                    "Forbidden",
+                    "You are not allowed to unlink this account.",
+                ),
+                forage_core::auth::AuthError::NotAuthenticated
+                | forage_core::auth::AuthError::InvalidCredentials => Redirect::to("/login").into_response(),
+                _ => error_page(
+                    state,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Unlink failed",
+                    "Failed to unlink the account. Please try again.",
+                ),
+            }
+        })?;
+
+    Ok(Redirect::to("/settings/account").into_response())
+}
+
+/// Continue the OAuth callback as a *link* flow (rather than login).
+/// Reused by both github and google callbacks once they have decoded
+/// the OIDC identity.
+async fn complete_link_flow(
+    state: &AppState,
+    session: &Session,
+    provider_str: &str,
+    provider: forage_core::auth::LinkedProvider,
+    identity: forage_core::auth::OidcIdentity,
+) -> Response {
+    let input = forage_core::auth::link_input_from_oidc(provider, &identity);
+    let clear = clear_link_cookies(provider_str);
+
+    let result = state
+        .forest_client
+        .link_oauth_provider(&session.access_token, &session.user.user_id, &input)
+        .await;
+
+    let mut headers = axum::http::HeaderMap::new();
+    for c in &clear {
+        if let Ok(v) = c.parse() {
+            headers.append(axum::http::header::SET_COOKIE, v);
+        }
+    }
+
+    let location: String = match result {
+        Ok(()) => format!("/settings/account?flash=linked_{provider_str}"),
+        Err(forage_core::auth::AuthError::AlreadyExists(msg))
+            if msg.contains("already linked to another user") =>
+        {
+            format!("/settings/account?error=already_linked_other_{provider_str}")
+        }
+        Err(forage_core::auth::AuthError::AlreadyExists(_)) => {
+            format!("/settings/account?error=already_linked_{provider_str}")
+        }
+        Err(e) => {
+            tracing::error!(error = %e, provider = provider_str, "link oauth provider failed");
+            format!("/settings/account?error=link_failed_{provider_str}")
+        }
+    };
+
+    headers.insert(
+        axum::http::header::LOCATION,
+        match location.parse() {
+            Ok(v) => v,
+            Err(_) => "/settings/account".parse().unwrap(),
+        },
+    );
+
+    (StatusCode::FOUND, headers).into_response()
 }
 

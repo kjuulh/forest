@@ -961,6 +961,27 @@ impl UserRepository {
 
         Ok(())
     }
+
+    /// User-scoped delete. Returns the number of rows deleted (0 if the
+    /// token doesn't exist or doesn't belong to `user_id`). Used by the
+    /// gRPC handler to enforce that callers can only delete their own
+    /// tokens without leaking whether an arbitrary `token_id` exists.
+    pub async fn delete_personal_access_token_for_user(
+        &self,
+        db: impl PgExecutor<'_>,
+        id: Uuid,
+        user_id: Uuid,
+    ) -> Result<u64, DbError> {
+        let result = sqlx::query!(
+            "DELETE FROM personal_access_tokens WHERE id = $1 AND user_id = $2",
+            id,
+            user_id,
+        )
+        .execute(db)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
 }
 
 // ─── State trait ─────────────────────────────────────────────────────

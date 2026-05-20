@@ -163,33 +163,32 @@ impl UsersService for UsersServer {
             .get_mfa_for_user(authenticated.user_id)
             .await
             .map_err(error::to_status)?;
-        if let Some(mfa) = mfa {
-            if mfa.verified {
-                let state_data = serde_json::json!({
-                    "user_id": authenticated.user_id.to_string(),
-                    "type": "mfa_login"
-                });
-                let state_token = format!("mfa-{}", Uuid::now_v7());
-                let expires_mfa =
-                    Utc::now() + chrono::Duration::minutes(5);
-                self.service()
-                    .create_oauth_state(
-                        "mfa",
-                        &state_token,
-                        None,
-                        &state_data,
-                        Some(expires_mfa),
-                    )
-                    .await
-                    .map_err(error::to_status)?;
+        if let Some(mfa) = mfa
+            && mfa.verified
+        {
+            let state_data = serde_json::json!({
+                "user_id": authenticated.user_id.to_string(),
+                "type": "mfa_login"
+            });
+            let state_token = format!("mfa-{}", Uuid::now_v7());
+            let expires_mfa = Utc::now() + chrono::Duration::minutes(5);
+            self.service()
+                .create_oauth_state(
+                    "mfa",
+                    &state_token,
+                    None,
+                    &state_data,
+                    Some(expires_mfa),
+                )
+                .await
+                .map_err(error::to_status)?;
 
-                return Ok(tonic::Response::new(LoginResponse {
-                    user: None,
-                    tokens: None,
-                    mfa_required: true,
-                    mfa_session_token: state_token,
-                }));
-            }
+            return Ok(tonic::Response::new(LoginResponse {
+                user: None,
+                tokens: None,
+                mfa_required: true,
+                mfa_session_token: state_token,
+            }));
         }
 
         let (refresh_token, hash) = self
@@ -354,11 +353,15 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<UpdateUserRequest>,
     ) -> std::result::Result<tonic::Response<UpdateUserResponse>, tonic::Status> {
+        let unauth = crate::grpc::authorize::unauthenticated_actor(&request);
         let req = request.into_inner();
         let user_id = req
             .user_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+        let _actor = unauth
+            .require_authenticated()?
+            .require_user_self_or_service_account(user_id)?;
 
         if let Some(username) = req.username {
             self.service()
@@ -391,11 +394,15 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<DeleteUserRequest>,
     ) -> std::result::Result<tonic::Response<DeleteUserResponse>, tonic::Status> {
+        let unauth = crate::grpc::authorize::unauthenticated_actor(&request);
         let req = request.into_inner();
         let user_id = req
             .user_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+        let _actor = unauth
+            .require_authenticated()?
+            .require_user_self_or_service_account(user_id)?;
 
         self.service()
             .delete_user(user_id)
@@ -409,6 +416,13 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<ListUsersRequest>,
     ) -> std::result::Result<tonic::Response<ListUsersResponse>, tonic::Status> {
+        // Username/email search is an enumeration vector — gate behind
+        // *any* authenticated actor. (Admin-only would be ideal, but
+        // Forest has no platform-admin concept today.) Closes
+        // adversarial review gap #5.
+        let unauth = crate::grpc::authorize::unauthenticated_actor(&request);
+        let _actor = unauth.require_authenticated()?.into_actor();
+
         let req = request.into_inner();
         let page_size = if req.page_size > 0 {
             req.page_size as i64
@@ -451,6 +465,12 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<GetUserStatsRequest>,
     ) -> std::result::Result<tonic::Response<GetUserStatsResponse>, tonic::Status> {
+        // Stats are aggregate counts (release / annotation totals) used
+        // on public-ish profile pages. Allow any authenticated caller —
+        // not just self — but require a session.
+        let unauth = crate::grpc::authorize::unauthenticated_actor(&request);
+        let _actor = unauth.require_authenticated()?.into_actor();
+
         let req = request.into_inner();
 
         let user_id = match req.identifier {
@@ -493,11 +513,15 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<ChangePasswordRequest>,
     ) -> std::result::Result<tonic::Response<ChangePasswordResponse>, tonic::Status> {
+        let unauth = crate::grpc::authorize::unauthenticated_actor(&request);
         let req = request.into_inner();
         let user_id = req
             .user_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+        let _actor = unauth
+            .require_authenticated()?
+            .require_user_self_or_service_account(user_id)?;
 
         self.service()
             .change_password(user_id, &req.current_password, &req.new_password)
@@ -513,11 +537,15 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<AddEmailRequest>,
     ) -> std::result::Result<tonic::Response<AddEmailResponse>, tonic::Status> {
+        let unauth = crate::grpc::authorize::unauthenticated_actor(&request);
         let req = request.into_inner();
         let user_id = req
             .user_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+        let _actor = unauth
+            .require_authenticated()?
+            .require_user_self_or_service_account(user_id)?;
 
         self.enforce_registration_policy(&req.email)?;
 
@@ -572,15 +600,9 @@ impl UsersService for UsersServer {
     ) -> std::result::Result<tonic::Response<ConfirmEmailVerificationResponse>, tonic::Status> {
         // Service-account-only. The caller (forage) has already validated
         // a redemption token; we just flip the bit.
-        let actor = request.extensions().get::<Actor>().cloned();
-        match &actor {
-            Some(Actor::ServiceAccount { .. }) => {}
-            _ => {
-                return Err(tonic::Status::permission_denied(
-                    "ConfirmEmailVerification requires service account authentication",
-                ));
-            }
-        }
+        let _actor = crate::grpc::authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
 
         let req = request.into_inner();
 
@@ -605,11 +627,15 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<RemoveEmailRequest>,
     ) -> std::result::Result<tonic::Response<RemoveEmailResponse>, tonic::Status> {
+        let unauth = crate::grpc::authorize::unauthenticated_actor(&request);
         let req = request.into_inner();
         let user_id = req
             .user_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+        let _actor = unauth
+            .require_authenticated()?
+            .require_user_self_or_service_account(user_id)?;
 
         self.service()
             .remove_email(user_id, &req.email)
@@ -627,15 +653,9 @@ impl UsersService for UsersServer {
     ) -> std::result::Result<tonic::Response<OAuthLoginResponse>, tonic::Status> {
         // Require service-account auth — only trusted callers (e.g. Forage)
         // can submit pre-verified identity info.
-        let actor = request.extensions().get::<Actor>().cloned();
-        match &actor {
-            Some(Actor::ServiceAccount { .. }) => {}
-            _ => {
-                return Err(tonic::Status::permission_denied(
-                    "OAuth login requires service account authentication",
-                ));
-            }
-        }
+        let _actor = crate::grpc::authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
 
         let req = request.into_inner();
 
@@ -716,15 +736,15 @@ impl UsersService for UsersServer {
 
         // Set profile picture from provider data if user doesn't already have one.
         // Uses a conditional update to avoid race conditions with concurrent logins.
-        if let Some(ref data) = provider_data {
-            if let Some(picture_url) = data.get("picture_url").and_then(|v| v.as_str()) {
-                if !picture_url.is_empty() && picture_url.starts_with("https://") {
-                    self.service()
-                        .set_profile_picture_url_if_unset(user_id, picture_url)
-                        .await
-                        .map_err(error::to_status)?;
-                }
-            }
+        if let Some(ref data) = provider_data
+            && let Some(picture_url) = data.get("picture_url").and_then(|v| v.as_str())
+            && !picture_url.is_empty()
+            && picture_url.starts_with("https://")
+        {
+            self.service()
+                .set_profile_picture_url_if_unset(user_id, picture_url)
+                .await
+                .map_err(error::to_status)?;
         }
 
         // Load user profile.
@@ -778,11 +798,18 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<LinkOAuthProviderRequest>,
     ) -> std::result::Result<tonic::Response<LinkOAuthProviderResponse>, tonic::Status> {
+        let unauth = crate::grpc::authorize::unauthenticated_actor(&request);
         let req = request.into_inner();
         let user_id = req
             .user_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+        // Self-or-SA: Forage's OAuth signup flow auto-links via its
+        // service account; users can also link providers to their own
+        // account.
+        let _actor = unauth
+            .require_authenticated()?
+            .require_user_self_or_service_account(user_id)?;
 
         let provider = forest_grpc_interface::OAuthProvider::try_from(req.provider)
             .map_err(|_| tonic::Status::invalid_argument("invalid provider"))?;
@@ -794,8 +821,22 @@ impl UsersService for UsersServer {
             Some(req.provider_email.as_str())
         };
 
+        // Merge display_name into provider_data_json so the read path
+        // can surface it via OAuthConnection.provider_display_name.
+        // If the caller passed neither, store None.
+        let provider_data = build_link_provider_data(
+            &req.provider_display_name,
+            &req.provider_data_json,
+        );
+
         self.service()
-            .link_oauth_provider(user_id, &provider_str, &req.provider_user_id, provider_email, None)
+            .link_oauth_provider(
+                user_id,
+                &provider_str,
+                &req.provider_user_id,
+                provider_email,
+                provider_data.as_ref(),
+            )
             .await
             .map_err(error::to_status)?;
 
@@ -808,11 +849,19 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<UnlinkOAuthProviderRequest>,
     ) -> std::result::Result<tonic::Response<UnlinkOAuthProviderResponse>, tonic::Status> {
+        let unauth = crate::grpc::authorize::unauthenticated_actor(&request);
         let req = request.into_inner();
         let user_id = req
             .user_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+        // Unlink is user-self only (no service-account bypass): Forage's
+        // signup-time service account has no legitimate need to unlink
+        // providers on behalf of arbitrary users. Closes adversarial
+        // review gap #10.
+        let _actor = unauth
+            .require_authenticated()?
+            .require_user_self(user_id)?;
 
         let provider = forest_grpc_interface::OAuthProvider::try_from(req.provider)
             .map_err(|_| tonic::Status::invalid_argument("invalid provider"))?;
@@ -832,11 +881,15 @@ impl UsersService for UsersServer {
         request: tonic::Request<CreatePersonalAccessTokenRequest>,
     ) -> std::result::Result<tonic::Response<CreatePersonalAccessTokenResponse>, tonic::Status>
     {
+        let unauth = crate::grpc::authorize::unauthenticated_actor(&request);
         let req = request.into_inner();
         let user_id = req
             .user_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+        let _actor = unauth
+            .require_authenticated()?
+            .require_user_self_or_service_account(user_id)?;
 
         let mut raw_bytes = [0u8; 32];
         rand::fill(&mut raw_bytes[..]);
@@ -874,11 +927,15 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<ListPersonalAccessTokensRequest>,
     ) -> std::result::Result<tonic::Response<ListPersonalAccessTokensResponse>, tonic::Status> {
+        let unauth = crate::grpc::authorize::unauthenticated_actor(&request);
         let req = request.into_inner();
         let user_id = req
             .user_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+        let _actor = unauth
+            .require_authenticated()?
+            .require_user_self_or_service_account(user_id)?;
 
         let tokens = self
             .service()
@@ -896,16 +953,48 @@ impl UsersService for UsersServer {
         request: tonic::Request<DeletePersonalAccessTokenRequest>,
     ) -> std::result::Result<tonic::Response<DeletePersonalAccessTokenResponse>, tonic::Status>
     {
+        // PATs are addressed by token_id only — the caller doesn't supply
+        // the owning user. The gate gives us an authenticated actor and
+        // we then branch by variant to either scope the delete to the
+        // user's own user_id (closing enumeration via token_id) or to
+        // let a service account bypass (used by background cleanup).
+        let actor = crate::grpc::authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .into_actor();
         let req = request.into_inner();
         let token_id = req
             .token_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid token_id"))?;
 
-        self.service()
-            .delete_personal_access_token(token_id)
-            .await
-            .map_err(error::to_status)?;
+        match actor {
+            Actor::User { user_id } => {
+                let n = self
+                    .service()
+                    .delete_personal_access_token_for_user(token_id, user_id)
+                    .await
+                    .map_err(error::to_status)?;
+                if n == 0 {
+                    // Mirror "not found" for both "doesn't exist" and
+                    // "exists but not yours" so token ids aren't
+                    // enumerable.
+                    return Err(tonic::Status::not_found("token not found"));
+                }
+            }
+            Actor::ServiceAccount { .. } => {
+                self.service()
+                    .delete_personal_access_token(token_id)
+                    .await
+                    .map_err(error::to_status)?;
+            }
+            Actor::App { .. } => {
+                // Apps are org-scoped; PATs are user-scoped. There is
+                // no owner relationship between an App and a PAT.
+                return Err(tonic::Status::permission_denied(
+                    "app tokens cannot delete personal access tokens",
+                ));
+            }
+        }
 
         Ok(tonic::Response::new(DeletePersonalAccessTokenResponse {}))
     }
@@ -1172,11 +1261,16 @@ fn profile_to_grpc_user(profile: crate::services::users::UserProfile) -> User {
         oauth_connections: profile
             .oauth_connections
             .into_iter()
-            .map(|c| OAuthConnection {
-                provider: provider_str_to_enum(&c.provider) as i32,
-                provider_user_id: c.provider_user_id,
-                provider_email: c.provider_email.unwrap_or_default(),
-                linked_at: Some(datetime_to_timestamp(c.linked_at)),
+            .map(|c| {
+                let (display_name, data_json) = split_provider_data(c.provider_data.as_ref());
+                OAuthConnection {
+                    provider: provider_str_to_enum(&c.provider) as i32,
+                    provider_user_id: c.provider_user_id,
+                    provider_email: c.provider_email.unwrap_or_default(),
+                    linked_at: Some(datetime_to_timestamp(c.linked_at)),
+                    provider_display_name: display_name,
+                    provider_data_json: data_json,
+                }
             })
             .collect(),
         mfa_enabled: profile.mfa_enabled,
@@ -1220,5 +1314,189 @@ fn datetime_to_timestamp(dt: chrono::DateTime<chrono::Utc>) -> prost_types::Time
     prost_types::Timestamp {
         seconds: dt.timestamp(),
         nanos: dt.timestamp_subsec_nanos() as i32,
+    }
+}
+
+// Note: per-handler authz lives on the typed gate in
+// `crate::grpc::authorize` (`UnauthenticatedActor` → `AuthenticatedActor`
+// → `Actor`). Free helpers used to live here; they were removed once
+// the gate replaced them.
+
+/// Compose a `provider_data` JSONB value to store on `identities` from
+/// the request fields. If the caller supplied a JSON blob, parse and
+/// optionally merge `display_name` into it under the `"display_name"`
+/// key. Returns `None` when both inputs are empty so we don't write a
+/// pointless `{}` row.
+fn build_link_provider_data(
+    display_name: &str,
+    data_json: &str,
+) -> Option<serde_json::Value> {
+    let mut value = if data_json.is_empty() {
+        serde_json::Value::Object(serde_json::Map::new())
+    } else {
+        // Tolerate malformed JSON — we'd rather store the link than
+        // refuse it because the caller sent garbage extras.
+        serde_json::from_str(data_json).unwrap_or_else(|_| {
+            serde_json::Value::Object(serde_json::Map::new())
+        })
+    };
+
+    // Coerce non-object JSON (arrays, numbers, strings) to an empty
+    // object. Without this, a well-formed but non-object data_json
+    // would silently drop the display_name in the merge step below
+    // (the Object pattern match would fail). Caught by second
+    // adversarial review.
+    if !matches!(value, serde_json::Value::Object(_)) {
+        value = serde_json::Value::Object(serde_json::Map::new());
+    }
+
+    if !display_name.is_empty()
+        && let serde_json::Value::Object(map) = &mut value
+    {
+        map.insert(
+            "display_name".to_string(),
+            serde_json::Value::String(display_name.to_string()),
+        );
+    }
+
+    match &value {
+        serde_json::Value::Object(map) if map.is_empty() => None,
+        _ => Some(value),
+    }
+}
+
+/// Reverse of [`build_link_provider_data`]. Extract the display name (if
+/// present) and re-serialise the *remaining* JSON for the wire — the
+/// `display_name` key is removed from the JSON so the value rides on
+/// exactly one field (`provider_display_name`) rather than two.
+///
+/// Returns empty strings when no data is available — gRPC `string`
+/// fields are non-nullable. Returns empty JSON (`""`) rather than `"{}"`
+/// when stripping `display_name` leaves nothing else so the wire stays
+/// compact.
+fn split_provider_data(data: Option<&serde_json::Value>) -> (String, String) {
+    let Some(value) = data else {
+        return (String::new(), String::new());
+    };
+    let display_name = value
+        .get("display_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // Clone the object so we can remove `display_name` without mutating
+    // the caller's value. Non-object JSON is preserved verbatim (no
+    // display_name to strip).
+    let stripped = match value {
+        serde_json::Value::Object(map) => {
+            let mut cloned = map.clone();
+            cloned.remove("display_name");
+            if cloned.is_empty() {
+                None
+            } else {
+                Some(serde_json::Value::Object(cloned))
+            }
+        }
+        other => Some(other.clone()),
+    };
+
+    let json = match stripped {
+        Some(v) => serde_json::to_string(&v).unwrap_or_default(),
+        None => String::new(),
+    };
+    (display_name, json)
+}
+
+
+#[cfg(test)]
+mod provider_data_tests {
+    use super::{build_link_provider_data, split_provider_data};
+    use serde_json::json;
+
+    #[test]
+    fn build_returns_none_when_both_inputs_empty() {
+        assert!(build_link_provider_data("", "").is_none());
+    }
+
+    #[test]
+    fn build_with_only_display_name_creates_object() {
+        let v = build_link_provider_data("kjuulh", "").unwrap();
+        assert_eq!(v.get("display_name").and_then(|x| x.as_str()), Some("kjuulh"));
+    }
+
+    #[test]
+    fn build_merges_display_name_into_provided_json() {
+        let v = build_link_provider_data("kjuulh", r#"{"avatar_url":"https://a"}"#).unwrap();
+        assert_eq!(v.get("display_name").and_then(|x| x.as_str()), Some("kjuulh"));
+        assert_eq!(v.get("avatar_url").and_then(|x| x.as_str()), Some("https://a"));
+    }
+
+    #[test]
+    fn build_tolerates_malformed_json_by_starting_fresh() {
+        // The caller sent garbage extras — we still preserve the
+        // display_name rather than rejecting the whole link.
+        let v = build_link_provider_data("kjuulh", "not-json{").unwrap();
+        assert_eq!(v.get("display_name").and_then(|x| x.as_str()), Some("kjuulh"));
+    }
+
+    #[test]
+    fn build_coerces_non_object_json_to_empty_object_before_merging_display_name() {
+        // A caller sending a JSON array / number / string as
+        // provider_data_json would, before the second adversarial
+        // review fix, silently drop the display_name (the Object
+        // match in the merge step would fail). Verify the merge still
+        // succeeds for each non-object shape.
+        for body in [r#"[1,2,3]"#, r#"42"#, r#""string-not-object""#, r#"null"#] {
+            let v = build_link_provider_data("kjuulh", body)
+                .unwrap_or_else(|| panic!("expected merge to succeed for {body}"));
+            assert_eq!(
+                v.get("display_name").and_then(|x| x.as_str()),
+                Some("kjuulh"),
+                "display_name lost when data_json was {body}"
+            );
+            // The non-object body is dropped, not preserved alongside.
+            assert!(
+                matches!(v, serde_json::Value::Object(_)),
+                "result should be an object for {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn split_returns_empty_when_no_data() {
+        assert_eq!(split_provider_data(None), (String::new(), String::new()));
+    }
+
+    #[test]
+    fn split_extracts_display_name_and_strips_it_from_json() {
+        let v = json!({"display_name": "kjuulh", "avatar_url": "https://a"});
+        let (display, json_str) = split_provider_data(Some(&v));
+        assert_eq!(display, "kjuulh");
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        // display_name MUST NOT appear in the JSON — it would ride twice
+        // on the wire if it did.
+        assert!(
+            parsed.get("display_name").is_none(),
+            "display_name should be stripped, got: {json_str}"
+        );
+        assert_eq!(parsed.get("avatar_url").and_then(|x| x.as_str()), Some("https://a"));
+    }
+
+    #[test]
+    fn split_returns_empty_json_when_only_display_name_present() {
+        // Stripping display_name leaves nothing → empty JSON, not "{}".
+        let v = json!({"display_name": "kjuulh"});
+        let (display, json_str) = split_provider_data(Some(&v));
+        assert_eq!(display, "kjuulh");
+        assert_eq!(json_str, "");
+    }
+
+    #[test]
+    fn split_empty_display_when_only_other_keys_present() {
+        let v = json!({"avatar_url": "https://a"});
+        let (display, json_str) = split_provider_data(Some(&v));
+        assert_eq!(display, "");
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed.get("avatar_url").and_then(|x| x.as_str()), Some("https://a"));
     }
 }

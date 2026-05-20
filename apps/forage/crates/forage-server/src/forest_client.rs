@@ -166,7 +166,7 @@ fn map_status(status: tonic::Status) -> AuthError {
     match status.code() {
         tonic::Code::Unauthenticated => AuthError::InvalidCredentials,
         tonic::Code::AlreadyExists => AuthError::AlreadyExists(status.message().into()),
-        tonic::Code::PermissionDenied => AuthError::NotAuthenticated,
+        tonic::Code::PermissionDenied => AuthError::PermissionDenied(status.message().into()),
         tonic::Code::Unavailable => AuthError::Unavailable(status.message().into()),
         tonic::Code::NotFound => AuthError::NotFound,
         _ => AuthError::Other(status.message().into()),
@@ -804,6 +804,158 @@ impl ForestAuth for GrpcForestClient {
             is_new_user: resp.is_new_user,
         })
     }
+
+    #[tracing::instrument(skip_all)]
+    async fn list_linked_identities(
+        &self,
+        access_token: &str,
+        user_id: &str,
+    ) -> Result<Vec<forage_core::auth::LinkedIdentity>, AuthError> {
+        let req = Self::authed_request(
+            access_token,
+            forage_grpc::GetUserRequest {
+                identifier: Some(forage_grpc::get_user_request::Identifier::UserId(
+                    user_id.into(),
+                )),
+            },
+        )?;
+
+        let resp = self
+            .client()
+            .get_user(req)
+            .await
+            .map_err(map_status)?
+            .into_inner();
+
+        let user = resp.user.ok_or(AuthError::Other("no user in response".into()))?;
+
+        let identities = user
+            .oauth_connections
+            .into_iter()
+            .filter_map(convert_oauth_connection_to_linked)
+            .collect();
+
+        Ok(identities)
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn link_oauth_provider(
+        &self,
+        access_token: &str,
+        user_id: &str,
+        input: &forage_core::auth::LinkOAuthInput,
+    ) -> Result<(), AuthError> {
+        let provider_enum = linked_provider_to_proto(input.provider)
+            .ok_or_else(|| AuthError::Other("unsupported provider".into()))?;
+
+        let req = Self::authed_request(
+            access_token,
+            forage_grpc::LinkOAuthProviderRequest {
+                user_id: user_id.into(),
+                provider: provider_enum,
+                provider_user_id: input.provider_user_id.clone(),
+                provider_email: input.provider_email.clone(),
+                provider_display_name: input.provider_display_name.clone(),
+                provider_data_json: input.provider_data_json.clone(),
+            },
+        )?;
+
+        self.client()
+            .link_o_auth_provider(req)
+            .await
+            .map_err(map_status)?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn unlink_oauth_provider(
+        &self,
+        access_token: &str,
+        user_id: &str,
+        provider: forage_core::auth::LinkedProvider,
+    ) -> Result<(), AuthError> {
+        let provider_enum = linked_provider_to_proto(provider)
+            .ok_or_else(|| AuthError::Other("unsupported provider".into()))?;
+
+        let req = Self::authed_request(
+            access_token,
+            forage_grpc::UnlinkOAuthProviderRequest {
+                user_id: user_id.into(),
+                provider: provider_enum,
+            },
+        )?;
+
+        self.client()
+            .unlink_o_auth_provider(req)
+            .await
+            .map_err(map_status)?;
+
+        Ok(())
+    }
+}
+
+/// Map a forage-core `LinkedProvider` into the Forest proto enum value.
+/// Returns `None` for `Slack`, which Forest does not know about.
+fn linked_provider_to_proto(p: forage_core::auth::LinkedProvider) -> Option<i32> {
+    match p {
+        forage_core::auth::LinkedProvider::GitHub => {
+            Some(forage_grpc::OAuthProvider::OauthProviderGithub as i32)
+        }
+        forage_core::auth::LinkedProvider::Google => {
+            Some(forage_grpc::OAuthProvider::OauthProviderGoogle as i32)
+        }
+        forage_core::auth::LinkedProvider::Slack => None,
+    }
+}
+
+/// Map a Forest `OAuthConnection` into a forage-core `LinkedIdentity`.
+/// Returns `None` for providers we don't surface on the UI
+/// (e.g. `MAGIC_LINK`).
+fn convert_oauth_connection_to_linked(
+    c: forage_grpc::OAuthConnection,
+) -> Option<forage_core::auth::LinkedIdentity> {
+    use forage_grpc::OAuthProvider as P;
+    let provider = match P::try_from(c.provider).ok()? {
+        P::OauthProviderGithub => forage_core::auth::LinkedProvider::GitHub,
+        P::OauthProviderGoogle => forage_core::auth::LinkedProvider::Google,
+        _ => return None,
+    };
+    let linked_at = c.linked_at.as_ref().and_then(|ts| {
+        chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32).map(|dt| dt.to_rfc3339())
+    });
+    let provider_email = if c.provider_email.is_empty() {
+        None
+    } else {
+        Some(c.provider_email.as_str())
+    };
+    // Decode the provider-specific extras Forest stored at link time.
+    // Both fields are best-effort — fall back to `None` if missing or
+    // malformed so the link still renders.
+    let display_name_override = if c.provider_display_name.is_empty() {
+        None
+    } else {
+        Some(c.provider_display_name.clone())
+    };
+    let extras: Option<forage_core::auth::ProviderDataExtras> = if c.provider_data_json.is_empty() {
+        None
+    } else {
+        serde_json::from_str(&c.provider_data_json).ok()
+    };
+    let mut identity = forage_core::auth::linked_identity_from_forest(
+        provider,
+        &c.provider_user_id,
+        provider_email,
+        linked_at.as_deref(),
+        extras.as_ref(),
+    );
+    // The server-side helper splits `display_name` out of the JSON and
+    // sends it via the dedicated field — prefer it when present, since
+    // it's the value the link flow explicitly wrote.
+    if let Some(name) = display_name_override {
+        identity.display_name = name;
+    }
+    Some(identity)
 }
 
 fn convert_organisations(
@@ -2909,5 +3061,149 @@ mod tests {
             ToolShape::Unknown
         );
         assert_eq!(convert_shape(999), ToolShape::Unknown);
+    }
+
+    // ─── map_status: error code translation ──────────────────────────
+    //
+    // The route layer in `routes/auth.rs::complete_link_flow` pattern-matches
+    // on the `AuthError::AlreadyExists(msg)` body to differentiate
+    // "already linked to another user" (cross-user conflict, 409) from
+    // "already linked to same user" (idempotent re-link). These tests
+    // pin the contract between Forest's friendly constraint messages
+    // (in `repositories/error.rs`) and the route layer's substring
+    // matching.
+
+    #[test]
+    fn map_status_translates_cross_user_constraint_message() {
+        let status = tonic::Status::already_exists(
+            "this external account is already linked to another user",
+        );
+        match map_status(status) {
+            AuthError::AlreadyExists(msg) => {
+                assert!(
+                    msg.contains("already linked to another user"),
+                    "route layer relies on this substring; got: {msg}"
+                );
+            }
+            other => panic!("expected AlreadyExists, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_status_translates_same_user_constraint_message() {
+        let status = tonic::Status::already_exists(
+            "user already has an account linked for this provider",
+        );
+        match map_status(status) {
+            AuthError::AlreadyExists(msg) => {
+                // This message is what the route layer falls through to —
+                // it triggers `already_linked_<provider>` (vs `already_linked_other_<provider>`).
+                assert!(
+                    msg.contains("user already has an account linked"),
+                    "expected the same-user message verbatim; got: {msg}"
+                );
+            }
+            other => panic!("expected AlreadyExists, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_status_unauthenticated_maps_to_invalid_credentials() {
+        let status = tonic::Status::unauthenticated("invalid token");
+        assert!(matches!(
+            map_status(status),
+            AuthError::InvalidCredentials
+        ));
+    }
+
+    #[test]
+    fn map_status_permission_denied_preserves_message() {
+        let status = tonic::Status::permission_denied(
+            "you can only link providers to your own account",
+        );
+        match map_status(status) {
+            AuthError::PermissionDenied(msg) => {
+                assert!(msg.contains("link providers to your own account"));
+            }
+            other => panic!("expected PermissionDenied, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_status_unavailable_maps_to_unavailable_with_message() {
+        let status = tonic::Status::unavailable("forest restarting");
+        match map_status(status) {
+            AuthError::Unavailable(msg) => assert!(msg.contains("forest restarting")),
+            other => panic!("expected Unavailable, got {other:?}"),
+        }
+    }
+
+    // ─── convert_oauth_connection_to_linked: extras handling ─────────
+
+    #[test]
+    fn convert_oauth_connection_decodes_provider_data_extras() {
+        let conn = forage_grpc::OAuthConnection {
+            provider: forage_grpc::OAuthProvider::OauthProviderGithub as i32,
+            provider_user_id: "12345".into(),
+            provider_email: "kasper@understory.io".into(),
+            linked_at: None,
+            provider_display_name: "kjuulh".into(),
+            provider_data_json: r#"{"login":"kjuulh","avatar_url":"https://example.com/a.png","name":"Kasper Hermansen"}"#.into(),
+        };
+        let id = convert_oauth_connection_to_linked(conn).expect("github should convert");
+        assert_eq!(id.provider, forage_core::auth::LinkedProvider::GitHub);
+        assert_eq!(id.external_id, "12345");
+        // provider_display_name wins over the JSON-embedded login.
+        assert_eq!(id.display_name, "kjuulh");
+        assert_eq!(id.email.as_deref(), Some("kasper@understory.io"));
+        assert_eq!(id.avatar_url.as_deref(), Some("https://example.com/a.png"));
+    }
+
+    #[test]
+    fn convert_oauth_connection_falls_back_when_extras_empty() {
+        let conn = forage_grpc::OAuthConnection {
+            provider: forage_grpc::OAuthProvider::OauthProviderGoogle as i32,
+            provider_user_id: "g-sub".into(),
+            provider_email: "kasper@understory.io".into(),
+            linked_at: None,
+            provider_display_name: String::new(),
+            provider_data_json: String::new(),
+        };
+        let id = convert_oauth_connection_to_linked(conn).expect("google should convert");
+        // With no extras and no display_name, falls back to email.
+        assert_eq!(id.display_name, "kasper@understory.io");
+        assert_eq!(id.avatar_url, None);
+    }
+
+    #[test]
+    fn convert_oauth_connection_skips_unknown_providers() {
+        let conn = forage_grpc::OAuthConnection {
+            provider: forage_grpc::OAuthProvider::OauthProviderMagicLink as i32,
+            provider_user_id: "x".into(),
+            provider_email: String::new(),
+            linked_at: None,
+            provider_display_name: String::new(),
+            provider_data_json: String::new(),
+        };
+        assert!(
+            convert_oauth_connection_to_linked(conn).is_none(),
+            "magic-link is not surfaced on the linked-accounts UI"
+        );
+    }
+
+    #[test]
+    fn convert_oauth_connection_tolerates_malformed_provider_data_json() {
+        // Defensive: a corrupt JSON blob shouldn't drop the whole identity.
+        let conn = forage_grpc::OAuthConnection {
+            provider: forage_grpc::OAuthProvider::OauthProviderGithub as i32,
+            provider_user_id: "12345".into(),
+            provider_email: "kasper@understory.io".into(),
+            linked_at: None,
+            provider_display_name: "kjuulh".into(),
+            provider_data_json: "not-json{".into(),
+        };
+        let id = convert_oauth_connection_to_linked(conn).expect("identity should still render");
+        // display_name still wins because the field is parsed separately.
+        assert_eq!(id.display_name, "kjuulh");
     }
 }

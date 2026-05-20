@@ -4221,6 +4221,15 @@ pub struct OAuthConnection {
     pub provider_email: ::prost::alloc::string::String,
     #[prost(message, optional, tag="4")]
     pub linked_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// Human-readable display name from the provider (e.g. GitHub login,
+    /// Google "name"). Empty if not provided.
+    #[prost(string, tag="5")]
+    pub provider_display_name: ::prost::alloc::string::String,
+    /// Provider-specific extras (avatar_url, login, etc.) as JSON.
+    /// Empty if not provided. The structure is provider-dependent and
+    /// best-effort — readers should tolerate missing keys.
+    #[prost(string, tag="6")]
+    pub provider_data_json: ::prost::alloc::string::String,
 }
 // ─── Authentication ──────────────────────────────────────────────────
 
@@ -4488,6 +4497,15 @@ pub struct LinkOAuthProviderRequest {
     pub provider_user_id: ::prost::alloc::string::String,
     #[prost(string, tag="4")]
     pub provider_email: ::prost::alloc::string::String,
+    /// Optional human-readable display name (e.g. GitHub login). Stored on
+    /// the identity and surfaced via OAuthConnection.
+    #[prost(string, tag="5")]
+    pub provider_display_name: ::prost::alloc::string::String,
+    /// Optional provider-specific extras as JSON (avatar_url, login, etc.).
+    /// Stored as JSONB in `identities.provider_data` and echoed back via
+    /// OAuthConnection.provider_data_json.
+    #[prost(string, tag="6")]
+    pub provider_data_json: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct LinkOAuthProviderResponse {

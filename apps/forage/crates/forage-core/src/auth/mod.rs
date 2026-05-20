@@ -1,6 +1,12 @@
+pub mod linked;
 pub mod magic_link;
 mod validation;
 
+pub use linked::{
+    LinkOAuthInput, LinkedIdentity, LinkedProvider, ProviderDataExtras, link_input_from_github,
+    link_input_from_oidc, linked_identity_from_forest, linked_identity_from_slack,
+    merge_linked_identities,
+};
 pub use validation::{validate_email, validate_password, validate_username};
 
 use serde::{Deserialize, Serialize};
@@ -67,6 +73,12 @@ pub enum AuthError {
 
     #[error("not authenticated")]
     NotAuthenticated,
+
+    /// The caller is authenticated but the operation is not allowed for
+    /// them (gRPC `PermissionDenied`). Distinct from `NotAuthenticated`
+    /// so the UI can surface a 403 rather than redirecting to login.
+    #[error("permission denied: {0}")]
+    PermissionDenied(String),
 
     #[error("token expired")]
     TokenExpired,
@@ -266,6 +278,42 @@ pub trait ForestAuth: Send + Sync {
         user_id: &str,
         code: &str,
     ) -> Result<(), AuthError>;
+
+    /// List the OAuth identities linked to a user (GitHub, Google, etc.).
+    /// Sourced from Forest's `identities` table via `GetUser`.
+    /// Slack identities are NOT included — they live in Forage's
+    /// `slack_user_links` and are merged in the route handler.
+    async fn list_linked_identities(
+        &self,
+        access_token: &str,
+        user_id: &str,
+    ) -> Result<Vec<linked::LinkedIdentity>, AuthError>;
+
+    /// Link an OAuth provider to an existing user.
+    /// Maps Forest's `LinkOAuthProvider` RPC. The provider profile must
+    /// already have been verified by the caller (OIDC exchange).
+    ///
+    /// Errors:
+    /// - `AuthError::AlreadyExists("provider")` — this external account is
+    ///   already linked to another Forage user.
+    /// - `AuthError::AlreadyExists("user_provider")` — this user already
+    ///   has a link for this provider; disconnect first.
+    async fn link_oauth_provider(
+        &self,
+        access_token: &str,
+        user_id: &str,
+        input: &linked::LinkOAuthInput,
+    ) -> Result<(), AuthError>;
+
+    /// Unlink an OAuth provider from a user.
+    /// Maps Forest's `UnlinkOAuthProvider` RPC. Idempotent at the API
+    /// level (Forest returns success even if no row existed).
+    async fn unlink_oauth_provider(
+        &self,
+        access_token: &str,
+        user_id: &str,
+        provider: linked::LinkedProvider,
+    ) -> Result<(), AuthError>;
 }
 
 /// Identity info obtained from an OIDC provider after exchanging the auth code.
@@ -275,6 +323,9 @@ pub struct OidcIdentity {
     pub email: String,
     pub name: String,
     pub picture_url: Option<String>,
+    /// Provider-native handle (e.g. GitHub `login`). None when the
+    /// provider does not expose one separate from `name`.
+    pub login: Option<String>,
 }
 
 /// Trait for exchanging an OAuth authorization code with a provider.

@@ -1,3 +1,4 @@
+mod account_link_tests;
 mod account_tests;
 mod auth_tests;
 mod integration_tests;

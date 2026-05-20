@@ -202,13 +202,19 @@ async fn google_callback_missing_state_cookie_returns_403() {
 
 #[tokio::test]
 async fn google_callback_with_error_redirects_to_login() {
+    // OAuth 2.0 RFC 6749 §4.1.2.1 requires the provider to return the
+    // original `state` alongside any error. We now validate state
+    // before reading other query params (adversarial review #3), so
+    // this test sends the state cookie + matching state param to
+    // exercise the realistic error path.
     let (state, _sessions) = test_state_with_google_oauth();
     let app = build_router(state);
 
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/auth/google/callback?error=access_denied")
+                .uri("/auth/google/callback?error=access_denied&state=test-state")
+                .header("cookie", "forage_oauth_state=test-state")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -223,6 +229,49 @@ async fn google_callback_with_error_redirects_to_login() {
         .to_str()
         .unwrap();
     assert_eq!(location, "/login");
+}
+
+#[tokio::test]
+async fn google_callback_with_error_and_no_state_is_rejected() {
+    // Spec-violating providers (or attackers) sending an error without
+    // the state parameter should fail at CSRF validation. Closes the
+    // info-leak path adversarial review #3 documented.
+    let (state, _sessions) = test_state_with_google_oauth();
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/auth/google/callback?error=access_denied")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn google_callback_with_empty_state_cookie_returns_403() {
+    // Defense in depth: an injected empty-value state cookie combined
+    // with a missing `?state=` query parameter (both empty strings)
+    // must not bypass CSRF. Closes adversarial review pass 2 MEDIUM-1.
+    let (state, _sessions) = test_state_with_google_oauth();
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/auth/google/callback?code=x&state=")
+                .header("cookie", "forage_oauth_state=")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -425,4 +474,69 @@ async fn signup_page_shows_google_button_when_configured() {
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
     assert!(html.contains("Continue with Google"));
+}
+
+// ─── GitHub callback parity tests ────────────────────────────────────
+//
+// The GitHub callback shares its structure with Google's. The
+// link-flow path is covered in account_link_tests.rs; these tests
+// cover the bare login error paths and CSRF edge cases that adversarial
+// review pass 2 NIT-3 flagged as Google-only.
+
+#[tokio::test]
+async fn github_callback_with_error_and_valid_state_redirects_to_login() {
+    let (state, _sessions) = test_state_with_github_oauth();
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/auth/github/callback?error=access_denied&state=test-state")
+                .header("cookie", "forage_oauth_state=test-state")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response.headers().get("location").unwrap().to_str().unwrap();
+    assert_eq!(location, "/login");
+}
+
+#[tokio::test]
+async fn github_callback_with_error_and_no_state_is_rejected() {
+    let (state, _sessions) = test_state_with_github_oauth();
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/auth/github/callback?error=access_denied")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn github_callback_with_empty_state_cookie_returns_403() {
+    let (state, _sessions) = test_state_with_github_oauth();
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/auth/github/callback?code=x&state=")
+                .header("cookie", "forage_oauth_state=")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }

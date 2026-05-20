@@ -59,6 +59,12 @@ fn constraint_message_unique(constraint: Option<&str>) -> String {
         Some("user_emails_email_key") | Some("user_emails_pkey") => {
             "email already in use".to_string()
         }
+        Some("identities_provider_external_id_key") => {
+            "this external account is already linked to another user".to_string()
+        }
+        Some("identities_user_provider_key") => {
+            "user already has an account linked for this provider".to_string()
+        }
         Some(name) => format!("resource already exists ({name})"),
         None => "resource already exists".to_string(),
     }

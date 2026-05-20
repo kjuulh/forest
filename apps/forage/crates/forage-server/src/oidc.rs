@@ -95,6 +95,7 @@ impl OidcExchange for GoogleOidcExchange {
             email: userinfo.email,
             name: userinfo.name,
             picture_url: userinfo.picture,
+            login: None,
         })
     }
 }
@@ -212,11 +213,13 @@ impl OidcExchange for GitHubOidcExchange {
                 .ok_or_else(|| AuthError::Other("no verified primary email on GitHub account".into()))?
         };
 
+        let login = user.login.clone();
         Ok(OidcIdentity {
             sub: user.id.to_string(),
             email,
-            name: user.name.unwrap_or(user.login),
+            name: user.name.unwrap_or_else(|| login.clone()),
             picture_url: user.avatar_url,
+            login: Some(login),
         })
     }
 }

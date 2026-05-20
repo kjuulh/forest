@@ -85,6 +85,13 @@ message OAuthConnection {
   string provider_user_id = 2;
   string provider_email = 3;
   google.protobuf.Timestamp linked_at = 4;
+  // Human-readable display name from the provider (e.g. GitHub login,
+  // Google "name"). Empty if not provided.
+  string provider_display_name = 5;
+  // Provider-specific extras (avatar_url, login, etc.) as JSON.
+  // Empty if not provided. The structure is provider-dependent and
+  // best-effort — readers should tolerate missing keys.
+  string provider_data_json = 6;
 }
 
 // ─── Authentication ──────────────────────────────────────────────────
@@ -266,6 +273,13 @@ message LinkOAuthProviderRequest {
   OAuthProvider provider = 2;
   string provider_user_id = 3;
   string provider_email = 4;
+  // Optional human-readable display name (e.g. GitHub login). Stored on
+  // the identity and surfaced via OAuthConnection.
+  string provider_display_name = 5;
+  // Optional provider-specific extras as JSON (avatar_url, login, etc.).
+  // Stored as JSONB in `identities.provider_data` and echoed back via
+  // OAuthConnection.provider_data_json.
+  string provider_data_json = 6;
 }
 
 message LinkOAuthProviderResponse {

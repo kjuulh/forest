@@ -250,6 +250,7 @@ impl UserService {
                     provider_user_id: i.provider_user_id,
                     provider_email: i.provider_email,
                     linked_at: i.created_at,
+                    provider_data: i.provider_data,
                 })
                 .collect(),
             mfa_enabled,
@@ -640,6 +641,21 @@ impl UserService {
         Ok(())
     }
 
+    /// Delete a PAT only if it belongs to `user_id`. Returns the number
+    /// of rows deleted — callers can treat 0 as "not found or not yours"
+    /// without distinguishing the two (avoids enumeration of token ids).
+    pub async fn delete_personal_access_token_for_user(
+        &self,
+        token_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<u64> {
+        let n = self
+            .repo
+            .delete_personal_access_token_for_user(self.db(), token_id, user_id)
+            .await?;
+        Ok(n)
+    }
+
     // ── MFA ──────────────────────────────────────────────────────────
 
     pub async fn setup_mfa(
@@ -725,6 +741,10 @@ pub struct UserOAuthConnection {
     pub provider_user_id: String,
     pub provider_email: Option<String>,
     pub linked_at: chrono::DateTime<chrono::Utc>,
+    /// Provider-specific extras stored in `identities.provider_data`.
+    /// `display_name` is convention: callers writing a row may populate
+    /// `{"display_name": "kjuulh", "login": "kjuulh", "avatar_url": "..."}`.
+    pub provider_data: Option<serde_json::Value>,
 }
 
 pub struct UserSummary {

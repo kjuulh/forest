@@ -40,6 +40,10 @@ pub(crate) struct MockBehavior {
     pub setup_mfa_result: Option<Result<MfaSetup, AuthError>>,
     pub verify_mfa_setup_result: Option<Result<(), AuthError>>,
     pub disable_mfa_result: Option<Result<(), AuthError>>,
+    pub list_linked_identities_result:
+        Option<Result<Vec<forage_core::auth::LinkedIdentity>, AuthError>>,
+    pub link_oauth_provider_result: Option<Result<(), AuthError>>,
+    pub unlink_oauth_provider_result: Option<Result<(), AuthError>>,
 }
 
 /// Configurable mock behavior for platform (orgs, projects, artifacts).
@@ -356,6 +360,35 @@ impl ForestAuth for MockForestClient {
             tokens: ok_tokens(),
             is_new_user: false,
         }))
+    }
+
+    async fn list_linked_identities(
+        &self,
+        _access_token: &str,
+        _user_id: &str,
+    ) -> Result<Vec<forage_core::auth::LinkedIdentity>, AuthError> {
+        let b = self.behavior.lock().unwrap();
+        b.list_linked_identities_result.clone().unwrap_or(Ok(vec![]))
+    }
+
+    async fn link_oauth_provider(
+        &self,
+        _access_token: &str,
+        _user_id: &str,
+        _input: &forage_core::auth::LinkOAuthInput,
+    ) -> Result<(), AuthError> {
+        let b = self.behavior.lock().unwrap();
+        b.link_oauth_provider_result.clone().unwrap_or(Ok(()))
+    }
+
+    async fn unlink_oauth_provider(
+        &self,
+        _access_token: &str,
+        _user_id: &str,
+        _provider: forage_core::auth::LinkedProvider,
+    ) -> Result<(), AuthError> {
+        let b = self.behavior.lock().unwrap();
+        b.unlink_oauth_provider_result.clone().unwrap_or(Ok(()))
     }
 }
 
@@ -1015,6 +1048,7 @@ impl auth::OidcExchange for MockOidcExchange {
             email: "test@example.com".into(),
             name: "Test User".into(),
             picture_url: None,
+            login: None,
         }))
     }
 }
@@ -1036,6 +1070,37 @@ pub(crate) fn test_state_with_google_oauth() -> (AppState, Arc<InMemorySessionSt
             redirect_host: "http://localhost:3000".into(),
         })
         .with_google_oidc_exchange(Arc::new(MockOidcExchange::new()));
+    (state, sessions)
+}
+
+pub(crate) fn test_state_with_github_oauth() -> (AppState, Arc<InMemorySessionStore>) {
+    let (state, sessions) = test_state();
+    let state = state
+        .with_github_oauth_config(crate::state::GitHubOAuthConfig {
+            client_id: "test-github-client-id".into(),
+            client_secret: "test-github-client-secret".into(),
+            redirect_host: "http://localhost:3000".into(),
+        })
+        .with_github_oidc_exchange(Arc::new(MockOidcExchange::new()));
+    (state, sessions)
+}
+
+/// Set up both GitHub and Google OAuth for testing the unified linking UI.
+pub(crate) fn test_state_with_both_oauth() -> (AppState, Arc<InMemorySessionStore>) {
+    let (state, sessions) = test_state();
+    let state = state
+        .with_google_oauth_config(crate::state::GoogleOAuthConfig {
+            client_id: "test-google-client-id".into(),
+            client_secret: "test-google-client-secret".into(),
+            redirect_host: "http://localhost:3000".into(),
+        })
+        .with_google_oidc_exchange(Arc::new(MockOidcExchange::new()))
+        .with_github_oauth_config(crate::state::GitHubOAuthConfig {
+            client_id: "test-github-client-id".into(),
+            client_secret: "test-github-client-secret".into(),
+            redirect_host: "http://localhost:3000".into(),
+        })
+        .with_github_oidc_exchange(Arc::new(MockOidcExchange::new()));
     (state, sessions)
 }
 

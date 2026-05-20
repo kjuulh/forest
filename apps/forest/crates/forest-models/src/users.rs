@@ -135,6 +135,12 @@ impl From<OAuthConnection> for forest_grpc_interface::OAuthConnection {
             provider_user_id: value.provider_user_id,
             provider_email: value.provider_email.unwrap_or_default(),
             linked_at: Some(datetime_to_timestamp(value.linked_at)),
+            // The forest-models OAuthConnection does not carry these
+            // extras yet — populate empty so the wire shape is satisfied.
+            // The full data is plumbed via the services::users path that
+            // bypasses this conversion.
+            provider_display_name: String::new(),
+            provider_data_json: String::new(),
         }
     }
 }
