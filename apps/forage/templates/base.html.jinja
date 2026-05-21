@@ -121,13 +121,14 @@
                 {# ── Org-level tabs ─────────────────────────────────── #}
                 <a href="/dashboard" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'dashboard' %} text-gray-900 border-gray-900{% endif %}">Overview</a>
                 <a href="/orgs/{{ current_org }}/projects" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'projects' %} text-gray-900 border-gray-900{% endif %}">Projects</a>
-                {# Component registry is a global resource; link directly
-                   to /components rather than the org-scoped view so the
-                   nav matches users' mental model. The org-scoped page at
-                   /orgs/{org}/components still exists as a filtered view
-                   reachable from org pages, but it's not the primary
-                   entry point. #}
-                <a href="/components" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'components' %} text-gray-900 border-gray-900{% endif %}">Components</a>
+                {# Org-scoped components view — `/orgs/{org}/components`.
+                   While in an org context, the Components tab shows that
+                   org's catalogue (and surfaces the org-level install
+                   button, spec 011). The global cross-org registry at
+                   `/components` is still reachable directly and from the
+                   marketing/footer nav; this tab anchors users to the
+                   org they're currently inside. #}
+                <a href="/orgs/{{ current_org }}/components" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'components' %} text-gray-900 border-gray-900{% endif %}">Components</a>
                 <a href="/orgs/{{ current_org }}/destinations" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'destinations' %} text-gray-900 border-gray-900{% endif %}">Destinations</a>
                 <a href="/orgs/{{ current_org }}/settings" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'settings' %} text-gray-900 border-gray-900{% endif %}">Settings</a>
                 {% else %}

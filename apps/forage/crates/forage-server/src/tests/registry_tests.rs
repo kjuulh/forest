@@ -697,6 +697,52 @@ async fn org_components_install_uses_native_details_element() {
     );
 }
 
+#[tokio::test]
+async fn org_context_nav_points_components_tab_at_org_components() {
+    // Routing regression guard for spec 011 (post-merge). PR #17
+    // briefly pointed the org-context nav at /components (global
+    // registry); that orphaned the org-scoped page and made the
+    // install button invisible from the nav. This test pins the
+    // correction: while inside an org, the Components nav tab must
+    // link to /orgs/{org}/components.
+    //
+    // We render the org-scoped page itself (any org-context page
+    // works — the nav is identical), then assert the nav <a> for
+    // Components has the org-scoped href, not the global one.
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        search_components_result: Some(Ok(ComponentSearchResult {
+            components: vec![sample_summary()],
+            total_count: 1,
+        })),
+        ..Default::default()
+    });
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+    let cookie = create_test_session(&sessions).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/components")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        html.contains(r#"href="/orgs/testorg/components""#),
+        "org-context Components nav tab must link to /orgs/{{org}}/components"
+    );
+}
+
 /// Extract the inner text of the first `<pre id="…">…</pre>` block,
 /// trimmed. Used by spec-011 tests to assert exact equality on the
 /// rendered install command rather than substring-matching against
