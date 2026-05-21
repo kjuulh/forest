@@ -22,8 +22,8 @@
     {# ── Header ─────────────────────────────────────────────────── #}
     <div class="flex items-start justify-between mb-6 gap-4">
         <div class="min-w-0">
-            <h1 class="text-2xl font-bold flex items-center gap-2 flex-wrap">
-                <span class="text-gray-400 font-mono text-base">{{ org_name }}/</span><span>{{ project_name }}</span>
+            <h1 class="text-2xl font-bold">
+                <span class="text-gray-400 font-mono">{{ org_name }}/</span><span>{{ project_name }}</span>
             </h1>
             {# Description: handler resolves project.description → component.description fallback. #}
             {% if project_description %}
