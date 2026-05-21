@@ -51,18 +51,13 @@ impl CueEvaluator {
             return Ok(cached.clone());
         }
 
-        let output = Command::new("cue")
-            .arg("eval")
-            .arg("--out=json")
-            .arg(path)
-            .output()
-            .await
-            .with_context(|| {
-                format!(
-                    "running `cue eval --out=json {}` — is the `cue` binary on PATH?",
-                    path.display()
-                )
-            })?;
+        let output = crate::tools::cue::output(|| {
+            let mut cmd = Command::new("cue");
+            cmd.arg("eval").arg("--out=json").arg(path);
+            cmd
+        })
+        .await
+        .with_context(|| format!("running `cue eval --out=json {}`", path.display()))?;
 
         if !output.status.success() {
             return Err(anyhow!(

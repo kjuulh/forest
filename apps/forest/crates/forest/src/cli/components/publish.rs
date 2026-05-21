@@ -32,12 +32,15 @@ impl PublishCommand {
             }
         }
 
-        let mut cmd = tokio::process::Command::new("cue");
-        cmd.args(&cue_args);
-        if let Ok(registry) = std::env::var("CUE_REGISTRY") {
-            cmd.env("CUE_REGISTRY", registry);
-        }
-        let output = cmd.output().await?;
+        let output = crate::tools::cue::output(|| {
+            let mut cmd = tokio::process::Command::new("cue");
+            cmd.args(&cue_args);
+            if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+                cmd.env("CUE_REGISTRY", registry);
+            }
+            cmd
+        })
+        .await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -562,16 +565,17 @@ async fn publish_prebuilt(
 /// definition (hidden from `cue export`), we use `cue eval --expression`
 /// to extract its concrete value.
 async fn eval_tool_facet(dir: &std::path::Path) -> anyhow::Result<serde_json::Value> {
-    let mut cmd = tokio::process::Command::new("cue");
-    cmd.current_dir(dir)
-        .args(["eval", "--out=json", "-e", "#Tool", "."]);
-    if let Ok(registry) = std::env::var("CUE_REGISTRY") {
-        cmd.env("CUE_REGISTRY", registry);
-    }
-    let output = cmd
-        .output()
-        .await
-        .context("running `cue eval -e #Tool`")?;
+    let output = crate::tools::cue::output(|| {
+        let mut cmd = tokio::process::Command::new("cue");
+        cmd.current_dir(dir)
+            .args(["eval", "--out=json", "-e", "#Tool", "."]);
+        if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+            cmd.env("CUE_REGISTRY", registry);
+        }
+        cmd
+    })
+    .await
+    .context("running `cue eval -e #Tool`")?;
     if !output.status.success() {
         anyhow::bail!(
             "cue eval -e #Tool failed: {}",

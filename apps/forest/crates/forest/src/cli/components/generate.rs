@@ -139,18 +139,20 @@ async fn run_cue_def_openapi_in_dir(
     cue_files: &[&str],
     dir: &std::path::Path,
 ) -> anyhow::Result<String> {
-    let mut cmd = tokio::process::Command::new("cue");
-    if let Ok(registry) = std::env::var("CUE_REGISTRY") {
-        cmd.env("CUE_REGISTRY", registry);
-    }
-    cmd.arg("def");
-    for f in cue_files {
-        cmd.arg(f);
-    }
-    cmd.args(["--out", "openapi"]);
-    cmd.current_dir(dir);
-
-    let output = cmd.output().await?;
+    let output = crate::tools::cue::output(|| {
+        let mut cmd = tokio::process::Command::new("cue");
+        if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+            cmd.env("CUE_REGISTRY", registry);
+        }
+        cmd.arg("def");
+        for f in cue_files {
+            cmd.arg(f);
+        }
+        cmd.args(["--out", "openapi"]);
+        cmd.current_dir(dir);
+        cmd
+    })
+    .await?;
     let stdout = String::from_utf8(output.stdout)?;
     let stderr = String::from_utf8(output.stderr)?;
     if !output.status.success() {
@@ -164,13 +166,15 @@ async fn run_cue_def_openapi_in_dir(
 /// and have a forest.component.cue file (i.e., they are components, not just CUE modules).
 async fn discover_component_dependencies() -> anyhow::Result<Vec<(String, PathBuf)>> {
     // Read forest.cue to get dependencies
-    let mut cmd = tokio::process::Command::new("cue");
-    if let Ok(registry) = std::env::var("CUE_REGISTRY") {
-        cmd.env("CUE_REGISTRY", registry);
-    }
-    cmd.args(["export", "--out", "json", "forest.cue"]);
-
-    let output = cmd.output().await?;
+    let output = crate::tools::cue::output(|| {
+        let mut cmd = tokio::process::Command::new("cue");
+        if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+            cmd.env("CUE_REGISTRY", registry);
+        }
+        cmd.args(["export", "--out", "json", "forest.cue"]);
+        cmd
+    })
+    .await?;
     if !output.status.success() {
         return Ok(vec![]);
     }

@@ -27,17 +27,19 @@ impl BuildCommand {
         } else {
             vec!["./forest.cue", "./spec.cue"]
         };
-        let mut cmd = tokio::process::Command::new("cue");
-        cmd.arg("export");
-        for f in &cue_files {
-            cmd.arg(f);
-        }
-        cmd.args(["--out", "json"]);
-        if let Ok(registry) = std::env::var("CUE_REGISTRY") {
-            cmd.env("CUE_REGISTRY", registry);
-        }
-
-        let output = cmd.output().await?;
+        let output = crate::tools::cue::output(|| {
+            let mut cmd = tokio::process::Command::new("cue");
+            cmd.arg("export");
+            for f in &cue_files {
+                cmd.arg(f);
+            }
+            cmd.args(["--out", "json"]);
+            if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+                cmd.env("CUE_REGISTRY", registry);
+            }
+            cmd
+        })
+        .await?;
         let stdout = String::from_utf8(output.stdout)?;
         let stderr = String::from_utf8(output.stderr)?;
 

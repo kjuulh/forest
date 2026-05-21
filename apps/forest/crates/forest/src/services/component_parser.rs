@@ -46,15 +46,16 @@ async fn get_component_spec_from_cue(path: &Path) -> anyhow::Result<Option<RawCo
         return Ok(None);
     }
 
-    let mut cmd = tokio::process::Command::new("cue");
-    cmd.arg("export")
-        .arg(&forest_cue);
-    if spec_cue.exists() {
-        cmd.arg(&spec_cue);
-    }
-    cmd.arg("--out").arg("json");
-
-    let output = cmd.output().await?;
+    let output = crate::tools::cue::output(|| {
+        let mut cmd = tokio::process::Command::new("cue");
+        cmd.arg("export").arg(&forest_cue);
+        if spec_cue.exists() {
+            cmd.arg(&spec_cue);
+        }
+        cmd.arg("--out").arg("json");
+        cmd
+    })
+    .await?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         tracing::warn!("failed to parse v2 component CUE at {}: {}", path.display(), stderr);

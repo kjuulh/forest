@@ -343,18 +343,20 @@ impl ProjectParser {
         let file_path = dir.join(FOREST_PROJECT_CUE_FILE);
         if file_path.exists() {
             // 1. Transform cue into toml
-            let mut cmd = tokio::process::Command::new("cue");
-            cmd.arg("export")
-                .arg(&file_path)
-                .arg("--out")
-                .arg("toml");
+            let output = crate::tools::cue::output(|| {
+                let mut cmd = tokio::process::Command::new("cue");
+                cmd.arg("export")
+                    .arg(&file_path)
+                    .arg("--out")
+                    .arg("toml");
 
-            // Pass CUE_REGISTRY if set (enables module imports from OCI registry)
-            if let Ok(registry) = std::env::var("CUE_REGISTRY") {
-                cmd.env("CUE_REGISTRY", registry);
-            }
-
-            let output = cmd.output().await?;
+                // Pass CUE_REGISTRY if set (enables module imports from OCI registry)
+                if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+                    cmd.env("CUE_REGISTRY", registry);
+                }
+                cmd
+            })
+            .await?;
 
             let stderr =
                 std::string::String::from_utf8(output.stderr).context("interpret stderr")?;
@@ -393,13 +395,15 @@ impl ProjectParser {
         let file_path = dir.join(FOREST_PROJECT_YAML_FILE);
         if file_path.exists() {
             // 1. Transform cue into toml
-            let output = tokio::process::Command::new("cue")
-                .arg("export")
-                .arg(&file_path)
-                .arg("--out")
-                .arg("toml")
-                .output()
-                .await?;
+            let output = crate::tools::cue::output(|| {
+                let mut cmd = tokio::process::Command::new("cue");
+                cmd.arg("export")
+                    .arg(&file_path)
+                    .arg("--out")
+                    .arg("toml");
+                cmd
+            })
+            .await?;
 
             let stderr =
                 std::string::String::from_utf8(output.stderr).context("interpret stderr")?;

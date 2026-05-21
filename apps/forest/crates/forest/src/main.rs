@@ -24,6 +24,7 @@ mod models;
 mod project_artifacts;
 
 mod otel;
+mod tools;
 
 mod forest_context;
 
