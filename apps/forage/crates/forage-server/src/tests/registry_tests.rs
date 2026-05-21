@@ -359,6 +359,366 @@ async fn org_components_forbidden_for_non_member() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
+// ── Org-scoped install button (spec 011) ──────────────────────
+//
+// `/orgs/{org}/components` surfaces `forest global add <org>` so users
+// can subscribe their workstation to the entire org catalogue in one
+// command. The button mirrors the per-tool install dropdown on
+// `project_detail.html.jinja` but renders a *single* command (no version
+// pin — `forest global add` doesn't accept a version at org scope).
+
+#[tokio::test]
+async fn org_components_renders_install_command() {
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        search_components_result: Some(Ok(ComponentSearchResult {
+            components: vec![sample_summary()],
+            total_count: 1,
+        })),
+        ..Default::default()
+    });
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+    let cookie = create_test_session(&sessions).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/components")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        html.contains("forest global add testorg"),
+        "expected org install command in page; got: {html}"
+    );
+    assert!(
+        html.contains("org-install-cmd"),
+        "expected copyable code-block id for install command"
+    );
+}
+
+#[tokio::test]
+async fn org_components_install_command_uses_path_org_not_session_org() {
+    // The session belongs to the default test org, but the URL targets a
+    // different org slug. The install command must reflect the URL slug.
+    // This catches the regression where someone wires the button to a
+    // session variable instead of the route param.
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        search_components_result: Some(Ok(ComponentSearchResult {
+            components: vec![sample_summary()],
+            total_count: 1,
+        })),
+        ..Default::default()
+    });
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+    let cookie = create_test_session_with_orgs(&sessions, &["testorg", "second-org"]).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/second-org/components")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    // Tightened (post-review A3): extract the literal text content of
+    // <pre id="org-install-cmd"> and assert exact equality, rather than
+    // a substring search against the whole document. The mock returns
+    // sample_summary() (organisation = "testorg"), which renders
+    // "testorg" in unrelated hrefs; a substring-only assertion is one
+    // careless edit away from a false negative.
+    let cmd = extract_pre_text(&html, "org-install-cmd");
+    assert_eq!(
+        cmd, "forest global add second-org",
+        "install command should embed path org, not session org"
+    );
+}
+
+#[tokio::test]
+async fn org_components_install_caption_uses_path_org() {
+    // Companion to the command assertion above (post-review C1). The
+    // dropdown caption ("Subscribes your workstation to <org>'s catalogue
+    // …") is the second place `org_name` lands in the markup. A
+    // future regression that hardcodes "your org" here would slip past
+    // a test that only checks the install command. We assert the
+    // caption span carries the path org slug.
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        search_components_result: Some(Ok(ComponentSearchResult {
+            components: vec![sample_summary()],
+            total_count: 1,
+        })),
+        ..Default::default()
+    });
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+    let cookie = create_test_session_with_orgs(&sessions, &["testorg", "second-org"]).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/second-org/components")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    // Caption template:
+    //   …Subscribes your workstation to <span class="font-mono">{{ org_name }}</span>…
+    // A successful render contains the exact span markup with the path org.
+    assert!(
+        html.contains(r#"<span class="font-mono">second-org</span>"#),
+        "caption span should contain the path org name; got: {html}"
+    );
+    // And the dropdown header line ("Subscribe to every tool in <org>")
+    // is the other org-naming spot inside the panel — same logic.
+    assert!(
+        html.contains("Subscribe to every tool in second-org"),
+        "dropdown header should name the path org; got: {html}"
+    );
+}
+
+#[tokio::test]
+async fn org_components_install_button_hidden_when_no_components() {
+    // True-empty catalogue (no components, no query). Hide the install
+    // button — there is nothing for `forest global add` to install yet,
+    // and the empty-state CTA already tells the user to publish first.
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        search_components_result: Some(Ok(ComponentSearchResult {
+            components: vec![],
+            total_count: 0,
+        })),
+        ..Default::default()
+    });
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+    let cookie = create_test_session(&sessions).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/components")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        !html.contains("forest global add testorg"),
+        "install button must not render when org has zero components"
+    );
+}
+
+#[tokio::test]
+async fn org_components_install_button_visible_on_filtered_empty_search() {
+    // The catalogue is non-empty in principle, but the user's query
+    // filtered everything out. Still show the install button — the org
+    // *does* publish things, the user just narrowed too far.
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        search_components_result: Some(Ok(ComponentSearchResult {
+            components: vec![],
+            total_count: 0,
+        })),
+        ..Default::default()
+    });
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+    let cookie = create_test_session(&sessions).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/components?q=nonexistent")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        html.contains("forest global add testorg"),
+        "install button should still render on filtered-empty searches"
+    );
+}
+
+#[tokio::test]
+async fn org_components_empty_state_renders_when_no_components() {
+    // Sister of `_hidden_when_no_components` (post-review C4): the
+    // earlier test only asserts the install button does *not* render;
+    // it can't detect a regression that eats the entire `{% else %}`
+    // branch and leaves the page blank where the empty state used to
+    // live. This test pins the empty-state copy explicitly.
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        search_components_result: Some(Ok(ComponentSearchResult {
+            components: vec![],
+            total_count: 0,
+        })),
+        ..Default::default()
+    });
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+    let cookie = create_test_session(&sessions).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/components")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        html.contains("No components published yet."),
+        "empty-state copy must render when org has zero components"
+    );
+    assert!(
+        !html.contains("forest global add testorg"),
+        "install button must still be hidden alongside the empty state"
+    );
+}
+
+#[tokio::test]
+async fn org_components_install_uses_native_details_element() {
+    // Markup-structure guard (post-review C2-lite). The spec promises
+    // keyboard accessibility via native <details>/<summary>; a
+    // regression to <div onclick="..."> would pass every other test
+    // (the strings would still render) but break Enter/Space toggling
+    // for keyboard users. We don't have a browser driver, but we
+    // *can* assert the element is structurally what we promised.
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        search_components_result: Some(Ok(ComponentSearchResult {
+            components: vec![sample_summary()],
+            total_count: 1,
+        })),
+        ..Default::default()
+    });
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+    let cookie = create_test_session(&sessions).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/components")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    // base.html.jinja has its own <details>/<summary> elements for
+    // nav dropdowns, so we can't just grep for the first <summary>.
+    // Anchor on the install button's distinctive bg-green-600 class —
+    // that's unique to the install summary.
+    let summary_marker = "<summary class=\"inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600";
+    let summary_open = html
+        .find(summary_marker)
+        .expect("install dropdown <summary> with bg-green-600 must exist");
+    let summary_close_rel = html[summary_open..]
+        .find("</summary>")
+        .expect("install <summary> must be closed");
+    let summary_slice = &html[summary_open..summary_open + summary_close_rel];
+    assert!(
+        summary_slice.contains("Install"),
+        "install <summary> must contain the visible label \"Install\"; got: {summary_slice}"
+    );
+    // And the parent must be <details> — keyboard a11y guarantee.
+    // Stronger than "rfind('<details') is Some": that would false-pass
+    // if a nav <details> opened+closed earlier and the green summary
+    // landed inside a sibling <div>. Find the latest <details opening
+    // before the summary and assert no </details> intervenes — i.e.,
+    // that <details> is genuinely still open when the summary appears.
+    let before_summary = &html[..summary_open];
+    let parent_details_open = before_summary
+        .rfind("<details")
+        .expect("install <summary> must be nested inside <details> for keyboard toggling");
+    let between = &before_summary[parent_details_open..];
+    assert!(
+        !between.contains("</details>"),
+        "install <summary> must be inside an *open* <details>, not after a closed one; window: {between}"
+    );
+}
+
+/// Extract the inner text of the first `<pre id="…">…</pre>` block,
+/// trimmed. Used by spec-011 tests to assert exact equality on the
+/// rendered install command rather than substring-matching against
+/// the whole document (which is brittle when unrelated content
+/// happens to contain the org slug).
+fn extract_pre_text(html: &str, id: &str) -> String {
+    let needle = format!(r#"<pre id="{id}""#);
+    let start = html
+        .find(&needle)
+        .unwrap_or_else(|| panic!("missing <pre id=\"{id}\"> in rendered html"));
+    let after_id = &html[start..];
+    let content_start = after_id
+        .find('>')
+        .unwrap_or_else(|| panic!("malformed <pre> for id {id}"))
+        + 1;
+    let rest = &after_id[content_start..];
+    let content_end = rest
+        .find("</pre>")
+        .unwrap_or_else(|| panic!("unclosed <pre> for id {id}"));
+    rest[..content_end].trim().to_string()
+}
+
 // ── Project-level Components tab ──────────────────────────────
 //
 // `/orgs/{org}/projects/{project}/components` is the project's full
