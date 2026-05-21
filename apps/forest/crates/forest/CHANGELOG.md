@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.7](https://github.com/understory-io/forest/compare/v0.1.6...v0.1.7) (2026-05-21)
+
+
+### Features
+
+* **forest:** auto-sync shims after `global add` (+ --no-sync opt-out) ([#18](https://github.com/understory-io/forest/issues/18)) ([1895726](https://github.com/understory-io/forest/commit/1895726ecdd2525ac59ac7bc85c634c7e30a9df7))
+* **forest:** bootstrap cue on first use ([#21](https://github.com/understory-io/forest/issues/21)) ([e208ae4](https://github.com/understory-io/forest/commit/e208ae47bf745080e4ec91338520631d5056cea8))
+* **forest:** web/device login flow for `forest auth login` ([#23](https://github.com/understory-io/forest/issues/23)) ([4bc31ff](https://github.com/understory-io/forest/commit/4bc31ffada410c80c4abf87e2eb43d52db4e24ff))
+
 ## [0.1.6](https://github.com/understory-io/forest/compare/v0.1.5...v0.1.6) (2026-05-20)
 
 
