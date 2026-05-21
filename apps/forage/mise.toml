@@ -1,5 +1,7 @@
 [tools]
 rust = "latest"
+node = "latest"
+"github:tailwindlabs/tailwindcss" = "4"
 
 [env]
 _.file = ".env"
@@ -103,26 +105,40 @@ run = "cargo sqlx prepare --workspace"
 description = "Build tailwind CSS"
 sources = ["templates/**/*.jinja", "static/css/input.css", "static/js/**/*.js"]
 outputs = ["static/css/style.css"]
-run = "npx @tailwindcss/cli -i static/css/input.css -o static/css/style.css --minify"
+run = "tailwindcss -i static/css/input.css -o static/css/style.css --minify"
 
 [tasks."tailwind:watch"]
 description = "Watch and rebuild tailwind CSS"
-run = "npx @tailwindcss/cli -i static/css/input.css -o static/css/style.css --watch"
+run = "tailwindcss -i static/css/input.css -o static/css/style.css --watch"
 
 # ─── Frontend (Svelte) ─────────────────────────────────────────────
+
+[tasks."frontend:install"]
+description = "Install Svelte frontend npm dependencies"
+dir = "frontend"
+sources = ["frontend/package.json", "frontend/package-lock.json"]
+outputs = ["frontend/node_modules/.package-lock.json"]
+run = "npm install"
 
 # Bundles the Svelte web components (release-timeline, etc.) into
 # static/js/components/forage-components.js. `mise run dev` depends on
 # this so changes to .svelte files are picked up automatically.
 [tasks."frontend:build"]
 description = "Build Svelte web components"
+depends = ["frontend:install"]
 dir = "frontend"
-sources = ["frontend/src/**/*.svelte", "frontend/src/**/*.js", "frontend/package.json", "frontend/vite.config.js"]
+sources = [
+  "frontend/src/**/*.svelte",
+  "frontend/src/**/*.js",
+  "frontend/package.json",
+  "frontend/vite.config.js",
+]
 outputs = ["static/js/components/forage-components.js"]
 run = "npm run build"
 
 [tasks."frontend:watch"]
 description = "Watch and rebuild Svelte components"
+depends = ["frontend:install"]
 dir = "frontend"
 run = "npm run dev"
 
