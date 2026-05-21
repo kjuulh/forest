@@ -5,25 +5,20 @@ Codify your development workflows — CI, deployments, component sharing — as
 
 ## Install
 
-```bash
-gh auth login   # one-time
-curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh | bash
-```
-
-Check it works (doesn't write any state to disk):
-
-```bash
-forest self check
-```
-
-### Set up a context during install
-
 Point forest at your server in one step by passing `FOREST_PROFILE` to the
 installer. The first context provisioned becomes the active default:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh \
   | FOREST_PROFILE='name=understory-prod,server=https://forest.development.understory.sh' bash -s -- v0.1.3
+```
+
+Add the forest shell integration to your shell rc file so completions and
+helper functions are available in every new session:
+
+```bash
+# ~/.zshrc (or ~/.bashrc — swap `zsh` for `bash`)
+eval "$(forest shell zsh)"
 ```
 
 The trailing `v0.1.3` pins the forest version; drop it to install the latest.
@@ -68,24 +63,9 @@ curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/ins
 curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh | PREFIX=$HOME/.local bash
 ```
 
-### Shell integration
-
-Add the forest shell integration to your shell rc file so completions and
-helper functions are available in every new session:
-
-```bash
-# ~/.zshrc (or ~/.bashrc — swap `zsh` for `bash`)
-eval "$(forest shell zsh)"
-```
-
-This sources the bits forest needs to feel native: tab completion, the
-`forest cd` helper, and any per-context env hooks. Run `forest shell --help`
-for the full list of supported shells.
-
 ### Keeping forest up to date
 
 ```bash
-forest self check     # is a newer version available?
 forest self update    # upgrade to latest
 ```
 
