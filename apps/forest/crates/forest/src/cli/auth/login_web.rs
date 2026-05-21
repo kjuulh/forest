@@ -51,31 +51,25 @@ pub async fn run(state: &State) -> anyhow::Result<()> {
         .await
         .context("the server may not support web login (try --password)")?;
 
-    // Print the user-facing prompt. Keep it short — users have to act
-    // on this; long preambles get skimmed and the code missed.
+    // Print the one-time code prominently, then auto-open the browser.
+    // No "Press Enter" prompt — most users have already seen the prompt
+    // they just clicked through, and waiting for input here means
+    // headless / scripted flows hang. The browser opens via the
+    // `webbrowser` crate which uses xdg-open / open / start as
+    // appropriate for the platform.
     eprintln!();
     eprintln!("! First copy your one-time code: {}", init.user_code);
-    eprintln!(
-        "Press Enter to open {} in your browser…",
-        init.verification_uri
-    );
-
-    // Block on Enter so the user has time to read the code before the
-    // browser steals focus. Non-blocking modes (CI, `--web` over SSH
-    // without a TTY) should still work because read_line returns
-    // immediately on EOF.
+    eprintln!("Opening {} in your browser…", init.verification_uri);
     let _ = std::io::Write::flush(&mut std::io::stderr());
-    let mut buf = String::new();
-    let _ = std::io::stdin().read_line(&mut buf);
 
-    // Best-effort browser open. On headless boxes this prints to stderr
-    // and continues — the user can still copy the URL from the message
-    // we already printed.
+    // Best-effort browser open. On headless boxes this fails and we
+    // fall through to the "open this URL manually" hint — the polling
+    // loop still works, the user just has to do the navigation by hand
+    // (perhaps on another device).
     if let Err(e) = webbrowser::open(&init.verification_uri_complete) {
         eprintln!(
-            "(could not open a browser automatically: {e}. \
-             Visit {} on another device and enter the code above.)",
-            init.verification_uri
+            "(couldn't open a browser automatically: {e}. \
+             Visit the URL above on another device and enter the code.)"
         );
     }
 
@@ -85,14 +79,23 @@ pub async fn run(state: &State) -> anyhow::Result<()> {
     let deadline = std::time::Instant::now() + server_expiry.min(MAX_TOTAL_WAIT);
 
     let mut current_interval = interval;
-    eprintln!("Waiting for approval…");
+    eprintln!("Waiting for approval… (press Ctrl-C to cancel)");
 
     loop {
         if std::time::Instant::now() >= deadline {
             anyhow::bail!("device login expired before approval — run `forest auth login` again");
         }
 
-        tokio::time::sleep(current_interval).await;
+        // Race the sleep against SIGINT so Ctrl-C exits the loop instead
+        // of hanging up to interval_seconds. Without this, the user sees
+        // an unresponsive terminal until the next poll boundary.
+        tokio::select! {
+            _ = tokio::time::sleep(current_interval) => {}
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!();
+                anyhow::bail!("cancelled");
+            }
+        }
 
         let resp = state
             .grpc_client()

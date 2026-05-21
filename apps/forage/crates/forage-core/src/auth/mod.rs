@@ -314,6 +314,24 @@ pub trait ForestAuth: Send + Sync {
         user_id: &str,
         provider: linked::LinkedProvider,
     ) -> Result<(), AuthError>;
+
+    /// Approve a forest CLI device-login grant on behalf of the
+    /// browser-authenticated user. Service-account-only on the forest
+    /// side. See apps/forest/TASKS/022-device-login.md.
+    async fn approve_device_login(
+        &self,
+        user_code: &str,
+        user_id: &str,
+        approving_ip: &str,
+        approving_user_agent: &str,
+    ) -> Result<(), AuthError>;
+
+    /// Deny a forest CLI device-login grant. Service-account-only.
+    async fn deny_device_login(
+        &self,
+        user_code: &str,
+        user_id: &str,
+    ) -> Result<(), AuthError>;
 }
 
 /// Identity info obtained from an OIDC provider after exchanging the auth code.

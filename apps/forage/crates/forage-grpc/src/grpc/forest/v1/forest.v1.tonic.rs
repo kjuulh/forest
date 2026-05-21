@@ -12880,6 +12880,104 @@ pub mod users_service_client {
                 .insert(GrpcMethod::new("forest.v1.UsersService", "VerifyLoginMfa"));
             self.inner.unary(req, path, codec).await
         }
+        pub async fn initiate_device_login(
+            &mut self,
+            request: impl tonic::IntoRequest<super::InitiateDeviceLoginRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::InitiateDeviceLoginResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.UsersService/InitiateDeviceLogin",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("forest.v1.UsersService", "InitiateDeviceLogin"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn poll_device_login(
+            &mut self,
+            request: impl tonic::IntoRequest<super::PollDeviceLoginRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::PollDeviceLoginResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.UsersService/PollDeviceLogin",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("forest.v1.UsersService", "PollDeviceLogin"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn approve_device_login(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ApproveDeviceLoginRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ApproveDeviceLoginResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.UsersService/ApproveDeviceLogin",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("forest.v1.UsersService", "ApproveDeviceLogin"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn deny_device_login(
+            &mut self,
+            request: impl tonic::IntoRequest<super::DenyDeviceLoginRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::DenyDeviceLoginResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.UsersService/DenyDeviceLogin",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("forest.v1.UsersService", "DenyDeviceLogin"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -13059,6 +13157,34 @@ pub mod users_service_server {
             request: tonic::Request<super::VerifyLoginMfaRequest>,
         ) -> std::result::Result<
             tonic::Response<super::VerifyLoginMfaResponse>,
+            tonic::Status,
+        >;
+        async fn initiate_device_login(
+            &self,
+            request: tonic::Request<super::InitiateDeviceLoginRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::InitiateDeviceLoginResponse>,
+            tonic::Status,
+        >;
+        async fn poll_device_login(
+            &self,
+            request: tonic::Request<super::PollDeviceLoginRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::PollDeviceLoginResponse>,
+            tonic::Status,
+        >;
+        async fn approve_device_login(
+            &self,
+            request: tonic::Request<super::ApproveDeviceLoginRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ApproveDeviceLoginResponse>,
+            tonic::Status,
+        >;
+        async fn deny_device_login(
+            &self,
+            request: tonic::Request<super::DenyDeviceLoginRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::DenyDeviceLoginResponse>,
             tonic::Status,
         >;
     }
@@ -14275,6 +14401,190 @@ pub mod users_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = VerifyLoginMfaSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.UsersService/InitiateDeviceLogin" => {
+                    #[allow(non_camel_case_types)]
+                    struct InitiateDeviceLoginSvc<T: UsersService>(pub Arc<T>);
+                    impl<
+                        T: UsersService,
+                    > tonic::server::UnaryService<super::InitiateDeviceLoginRequest>
+                    for InitiateDeviceLoginSvc<T> {
+                        type Response = super::InitiateDeviceLoginResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::InitiateDeviceLoginRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as UsersService>::initiate_device_login(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = InitiateDeviceLoginSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.UsersService/PollDeviceLogin" => {
+                    #[allow(non_camel_case_types)]
+                    struct PollDeviceLoginSvc<T: UsersService>(pub Arc<T>);
+                    impl<
+                        T: UsersService,
+                    > tonic::server::UnaryService<super::PollDeviceLoginRequest>
+                    for PollDeviceLoginSvc<T> {
+                        type Response = super::PollDeviceLoginResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::PollDeviceLoginRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as UsersService>::poll_device_login(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = PollDeviceLoginSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.UsersService/ApproveDeviceLogin" => {
+                    #[allow(non_camel_case_types)]
+                    struct ApproveDeviceLoginSvc<T: UsersService>(pub Arc<T>);
+                    impl<
+                        T: UsersService,
+                    > tonic::server::UnaryService<super::ApproveDeviceLoginRequest>
+                    for ApproveDeviceLoginSvc<T> {
+                        type Response = super::ApproveDeviceLoginResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ApproveDeviceLoginRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as UsersService>::approve_device_login(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ApproveDeviceLoginSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.UsersService/DenyDeviceLogin" => {
+                    #[allow(non_camel_case_types)]
+                    struct DenyDeviceLoginSvc<T: UsersService>(pub Arc<T>);
+                    impl<
+                        T: UsersService,
+                    > tonic::server::UnaryService<super::DenyDeviceLoginRequest>
+                    for DenyDeviceLoginSvc<T> {
+                        type Response = super::DenyDeviceLoginResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::DenyDeviceLoginRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as UsersService>::deny_device_login(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = DenyDeviceLoginSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

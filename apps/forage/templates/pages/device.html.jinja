@@ -1,0 +1,77 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="max-w-md mx-auto px-4 pt-24">
+    <h1 class="text-2xl font-bold text-center mb-2">Authorise Forest CLI</h1>
+    <p class="text-center text-gray-600 mb-8">
+        Approve a sign-in request from the <code>forest</code> command line tool.
+    </p>
+
+    {% if result == "approved" %}
+        <div class="mb-6 p-4 bg-green-50 border border-green-200 rounded-md text-sm text-green-800">
+            <p class="font-medium">You're signed in.</p>
+            <p class="mt-1">You can close this tab and return to your terminal.</p>
+        </div>
+    {% elif result == "denied" %}
+        <div class="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-md text-sm text-gray-800">
+            <p class="font-medium">Sign-in denied.</p>
+            <p class="mt-1">The terminal request was cancelled. You can close this tab.</p>
+        </div>
+    {% else %}
+        {% if error %}
+        <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <div class="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900">
+            <p class="font-medium">Only approve if you started this from your own terminal.</p>
+            <p class="mt-1">
+                Approving will let the device sign in to Forest as
+                <strong>{{ user.username }}</strong>.
+            </p>
+        </div>
+
+        <form method="POST" action="/device" class="space-y-4">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+
+            <div>
+                <label for="user_code" class="block text-sm font-medium mb-1">
+                    One-time code
+                </label>
+                <input
+                    type="text"
+                    id="user_code"
+                    name="user_code"
+                    value="{{ user_code }}"
+                    required
+                    autocomplete="off"
+                    spellcheck="false"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-md text-base font-mono tracking-widest text-center uppercase focus:outline-none focus:ring-2 focus:ring-gray-900"
+                    placeholder="XXXX-XXXX">
+                <p class="mt-2 text-xs text-gray-500">
+                    The code is shown in your terminal where you ran
+                    <code>forest auth login</code>.
+                </p>
+            </div>
+
+            <div class="flex gap-2">
+                <button
+                    type="submit"
+                    name="action"
+                    value="approve"
+                    class="flex-1 py-2 bg-gray-900 text-white rounded-md font-medium hover:bg-gray-800">
+                    Approve
+                </button>
+                <button
+                    type="submit"
+                    name="action"
+                    value="deny"
+                    class="flex-1 py-2 bg-white border border-gray-300 text-gray-900 rounded-md font-medium hover:bg-gray-50">
+                    Deny
+                </button>
+            </div>
+        </form>
+    {% endif %}
+</section>
+{% endblock %}

@@ -893,6 +893,64 @@ impl ForestAuth for GrpcForestClient {
 
         Ok(())
     }
+
+    #[tracing::instrument(skip_all)]
+    async fn approve_device_login(
+        &self,
+        user_code: &str,
+        user_id: &str,
+        approving_ip: &str,
+        approving_user_agent: &str,
+    ) -> Result<(), AuthError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or(AuthError::Other("service account key not configured".into()))?;
+
+        let req = bearer_request(
+            service_key,
+            forage_grpc::ApproveDeviceLoginRequest {
+                user_code: user_code.into(),
+                user_id: user_id.into(),
+                approving_ip: approving_ip.into(),
+                approving_user_agent: approving_user_agent.into(),
+            },
+        )
+        .map_err(AuthError::Other)?;
+
+        self.client()
+            .approve_device_login(req)
+            .await
+            .map_err(map_status)?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn deny_device_login(
+        &self,
+        user_code: &str,
+        user_id: &str,
+    ) -> Result<(), AuthError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or(AuthError::Other("service account key not configured".into()))?;
+
+        let req = bearer_request(
+            service_key,
+            forage_grpc::DenyDeviceLoginRequest {
+                user_code: user_code.into(),
+                user_id: user_id.into(),
+            },
+        )
+        .map_err(AuthError::Other)?;
+
+        self.client()
+            .deny_device_login(req)
+            .await
+            .map_err(map_status)?;
+        Ok(())
+    }
 }
 
 /// Map a forage-core `LinkedProvider` into the Forest proto enum value.

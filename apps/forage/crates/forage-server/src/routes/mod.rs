@@ -1,4 +1,5 @@
 mod auth;
+mod device;
 mod events;
 mod integrations;
 mod pages;
@@ -18,6 +19,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .merge(pages::router())
         .merge(auth::router())
+        .merge(device::router())
         .merge(platform::router())
         .merge(events::router())
         .merge(integrations::router())

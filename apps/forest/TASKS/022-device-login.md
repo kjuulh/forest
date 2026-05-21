@@ -1,8 +1,8 @@
 # 022: Forest Device Login — `gh auth login`-style web flow
 
-Status: In-flight. Server-side, DB, CLI (beads 022.1–022.7) and FOREST_PROFILE
-`web=` parser shipped; forage `/device` route and full end-to-end docs still
-pending. See §8 for slice-level status.
+Status: End-to-end flow shipped (beads 022.1–022.7 + 022.9). Pending:
+022.8 status-command polish, 022.10 long-form docs guide, 022.11–14
+Kani / sweep job / e2e round-trip test. See §8 for slice details.
 
 ## 0. Why
 
@@ -366,10 +366,17 @@ Also shipped:
 - **022.6** ContextEntry `web_url` field — `crates/forest/src/contexts.rs`. Resolution chain: explicit field → `FOREST_WEB_URL` env → convention (`forest.X → forage.X`, `localhost:4040 → localhost:3000`) → None. 8 new unit tests. New `forest context set-web-url <name> <url>` / `--clear` subcommand. `forest context provision` gains `--web-url`. `scripts/install.sh` parses `web=` from `FOREST_PROFILE` and forwards it through.
 - **022.7** CLI flow — `crates/forest/src/cli/auth/login.rs` + new `login_web.rs`. Interactive picker (web recommended) when stdin is a TTY; non-TTY defaults to web with a deprecation hint. `--web` / `--password` flags skip the prompt. `--username` / `--email` only valid with `--password`. Polls server with `interval_seconds`, honours `SlowDown` by widening the interval (+5s, cap 30s). Browser opens with `webbrowser` crate; failure prints the URL for manual entry. Tokens written through the existing `UserStateLoader` — storage unchanged.
 
+Also shipped:
+
+- **022.9 Forage `/device` route** — `apps/forage/crates/forage-server/src/routes/device.rs` + `templates/pages/device.html.jinja`. GET pre-fills `user_code` from query string when present; logged-out users redirect to `/login?return_to=…` and return automatically. POST handler validates CSRF, calls `ApproveDeviceLogin` / `DenyDeviceLogin` on forest-server via the existing service-account credential (same trust pattern as `OAuthLogin`). 9 unit tests including unauth redirect, CSRF rejection, unknown-action 400, empty-code re-render, friendly-error rendering on forest-side rejection. Phishing-mitigation warning ("only approve if you started this") asserted by a test so future copy edits don't silently drop it.
+- **CLI hardening from in-flight feedback**:
+  - Auto-open the browser instead of waiting for Enter — `webbrowser` crate uses xdg-open / open / start as appropriate.
+  - `Ctrl-C` now interrupts the poll loop via `tokio::select!` against `tokio::signal::ctrl_c()`; previously the user had to wait for the next poll boundary.
+- **ForestAuth trait** — `approve_device_login` and `deny_device_login` methods + GrpcForestClient impl using `bearer_request(service_key, …)` — same pattern as `confirm_email_verification`. MockForestClient gets matching behaviour knobs for forage's test suite.
+
 Pending:
 
 - **022.8** `forest auth status` printing login method. Cosmetic.
-- **022.9** Forage `/device` route — GET form + POST handler calling ApproveDeviceLogin / DenyDeviceLogin via the existing service-account credential. **Required for the feature to work end-to-end** but in a different app (`apps/forage`) so naturally a follow-up PR.
-- **022.10** README + cli.md + `docs/guides/web-login.md`.
+- **022.10** Long-form `docs/guides/web-login.md` with screenshots. README and cli.md reference already updated.
 - **022.11–14** Deferred: Kani harness on state transitions, sweep job for stale grants, end-to-end CLI↔forage↔server round-trip test.
 - **Open**: per-IP rate limit on `Initiate` (currently relies on forage-layer rate limits + the slow-down poll defence). Flagged in §6.

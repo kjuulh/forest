@@ -44,6 +44,8 @@ pub(crate) struct MockBehavior {
         Option<Result<Vec<forage_core::auth::LinkedIdentity>, AuthError>>,
     pub link_oauth_provider_result: Option<Result<(), AuthError>>,
     pub unlink_oauth_provider_result: Option<Result<(), AuthError>>,
+    pub approve_device_login_result: Option<Result<(), AuthError>>,
+    pub deny_device_login_result: Option<Result<(), AuthError>>,
 }
 
 /// Configurable mock behavior for platform (orgs, projects, artifacts).
@@ -390,6 +392,26 @@ impl ForestAuth for MockForestClient {
     ) -> Result<(), AuthError> {
         let b = self.behavior.lock().unwrap();
         b.unlink_oauth_provider_result.clone().unwrap_or(Ok(()))
+    }
+
+    async fn approve_device_login(
+        &self,
+        _user_code: &str,
+        _user_id: &str,
+        _approving_ip: &str,
+        _approving_user_agent: &str,
+    ) -> Result<(), AuthError> {
+        let b = self.behavior.lock().unwrap();
+        b.approve_device_login_result.clone().unwrap_or(Ok(()))
+    }
+
+    async fn deny_device_login(
+        &self,
+        _user_code: &str,
+        _user_id: &str,
+    ) -> Result<(), AuthError> {
+        let b = self.behavior.lock().unwrap();
+        b.deny_device_login_result.clone().unwrap_or(Ok(()))
     }
 }
 
