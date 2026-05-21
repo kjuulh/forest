@@ -267,7 +267,20 @@ async fn main() -> anyhow::Result<()> {
     if let Some(ref store) = integration_store {
         state = state.with_integration_store(store.clone());
 
-        if let Some(service_token) = env_var_nonempty("FORAGE_SERVICE_TOKEN") {
+        // The notification listener subscribes to forest's stream as a
+        // service account — it sets `organisation: None, project: None`
+        // so it gets every notification regardless of recipient. That's
+        // exactly the trust model `FOREST_SERVICE_ACCOUNT_API_KEY`
+        // already represents, so we reuse it here instead of carrying a
+        // second forest-side credential (was `FORAGE_SERVICE_TOKEN`).
+        //
+        // Forest's `poll_notifications` only references the caller's
+        // user_id in the preferences NOT-EXISTS subquery (skip-if-muted);
+        // a service-account caller has no preferences, so nothing gets
+        // muted and the listener receives the full stream — identical
+        // to the previous PAT-based behaviour, with one fewer secret to
+        // manage.
+        if let Some(service_token) = forest_client.service_account_key().map(String::from) {
             let forage_url = forage_host.clone();
 
             if let Some(ref js) = nats_jetstream {
@@ -300,7 +313,9 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
         } else {
-            tracing::warn!("FORAGE_SERVICE_TOKEN not set — notification listener disabled");
+            tracing::warn!(
+                "FOREST_SERVICE_ACCOUNT_API_KEY not set — notification listener disabled"
+            );
         }
     }
 
