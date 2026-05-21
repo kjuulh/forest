@@ -74,6 +74,12 @@ pub struct ContextEntry {
     /// reserved for follow-up CLI polish.
     #[serde(default)]
     pub default_organisation: Option<String>,
+    /// Optional public-facing forage URL (no trailing slash), used by
+    /// `forest auth login --web` to know where to send the browser. See
+    /// TASKS/022-device-login.md §1.3. When `None`, the CLI falls back
+    /// to `FOREST_WEB_URL`, then a `forest. → forage.` convention.
+    #[serde(default)]
+    pub web_url: Option<String>,
 }
 
 impl ContextEntry {
@@ -83,8 +89,58 @@ impl ContextEntry {
             server: server.into(),
             created_at: Some(now_iso8601()),
             default_organisation: None,
+            web_url: None,
         }
     }
+
+    /// Resolve the web URL for this context, walking the fallback chain
+    /// documented in TASKS/022-device-login.md §1.3:
+    ///   1. explicit `web_url` field
+    ///   2. `FOREST_WEB_URL` env var (per-invocation override)
+    ///   3. convention: replace first label `forest` → `forage`,
+    ///      `https://` enforced. Localhost-by-port maps to forage's
+    ///      default dev port (3000).
+    ///   4. `None` when no rule applies.
+    pub fn resolve_web_url(&self) -> Option<String> {
+        if let Some(url) = self.web_url.as_ref().filter(|s| !s.is_empty()) {
+            return Some(url.trim_end_matches('/').to_string());
+        }
+        if let Ok(env_url) = std::env::var("FOREST_WEB_URL") {
+            if !env_url.is_empty() {
+                return Some(env_url.trim_end_matches('/').to_string());
+            }
+        }
+        derive_web_url_from_server(&self.server)
+    }
+}
+
+/// Convention: `https://forest.dev.foo` → `https://forage.dev.foo`,
+/// `http://localhost:4040` → `http://localhost:3000` (forage's dev port,
+/// per `apps/forage/crates/forage-server/src/main.rs:81`).
+/// Returns None for shapes we can't safely derive (raw IPs, server URLs
+/// that don't start with `forest.`, etc.) — callers should surface a
+/// clear "configure web_url" error rather than guess.
+fn derive_web_url_from_server(server: &str) -> Option<String> {
+    // Manual parse — avoids pulling in the `url` crate just for this.
+    // We accept `<scheme>://<host>[:<port>][/<rest>]` and ignore the rest.
+    let (scheme, rest) = server.split_once("://")?;
+    if scheme != "http" && scheme != "https" {
+        return None;
+    }
+    let authority = rest.split('/').next()?;
+    // Strip port if present — the convention maps forest's gRPC port
+    // (e.g. 4040) to forage's HTTP port (3000), not the same number.
+    let host = authority.split(':').next()?;
+
+    // Localhost special case.
+    if host == "localhost" || host == "127.0.0.1" {
+        return Some(format!("{scheme}://{host}:3000"));
+    }
+
+    // Generic case: first label must be "forest"; rewrite to "forage"
+    // and force https (forage in production is HTTPS-only).
+    let rest_of_host = host.strip_prefix("forest.")?;
+    Some(format!("https://forage.{rest_of_host}"))
 }
 
 fn now_iso8601() -> String {
@@ -423,6 +479,21 @@ impl ContextStore {
         self.write_file(&file)?;
         Ok(())
     }
+
+    /// Set (or clear, with `web_url=None`) the web_url for a context.
+    /// Used by `forest context set-web-url` and by FOREST_PROFILE
+    /// provisioning when a `web=` value is supplied.
+    pub fn set_web_url(&self, name: &str, web_url: Option<&str>) -> Result<()> {
+        let mut file = self.load_or_bootstrap()?;
+        let entry = file
+            .contexts
+            .iter_mut()
+            .find(|c| c.name == name)
+            .ok_or_else(|| anyhow!("context '{name}' not found"))?;
+        entry.web_url = web_url.map(|s| s.trim_end_matches('/').to_string());
+        self.write_file(&file)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -530,6 +601,90 @@ mod tests {
         s.set_server("env", "http://new").unwrap();
         let entry = s.resolve(Some("env")).unwrap();
         assert_eq!(entry.server, "http://new");
+    }
+
+    // ── web_url resolution chain (TASKS/022-device-login.md §1.3) ────
+
+    #[test]
+    fn resolve_web_url_uses_explicit_field_first() {
+        let mut e = ContextEntry::new("p", "https://forest.dev.example.com");
+        e.web_url = Some("https://override.example".into());
+        assert_eq!(
+            e.resolve_web_url().as_deref(),
+            Some("https://override.example")
+        );
+    }
+
+    #[test]
+    fn resolve_web_url_derives_from_forest_subdomain() {
+        let e = ContextEntry::new("p", "https://forest.dev.understory.sh");
+        assert_eq!(
+            e.resolve_web_url().as_deref(),
+            Some("https://forage.dev.understory.sh")
+        );
+    }
+
+    #[test]
+    fn resolve_web_url_derives_localhost_to_port_3000() {
+        let e = ContextEntry::new("p", "http://localhost:4040");
+        assert_eq!(
+            e.resolve_web_url().as_deref(),
+            Some("http://localhost:3000")
+        );
+    }
+
+    #[test]
+    fn resolve_web_url_returns_none_for_unguessable_host() {
+        // A raw IP or a non-`forest.` hostname has no convention; the CLI
+        // must surface a clear error rather than silently guess.
+        let e = ContextEntry::new("p", "https://10.0.0.1:4040");
+        assert_eq!(e.resolve_web_url(), None);
+    }
+
+    #[test]
+    fn resolve_web_url_returns_none_for_non_http_scheme() {
+        let e = ContextEntry::new("p", "grpc://forest.example.com");
+        assert_eq!(e.resolve_web_url(), None);
+    }
+
+    #[test]
+    fn set_web_url_persists_value() {
+        let td = TempDir::new().unwrap();
+        let s = store(&td);
+        s.create("c", "https://forest.example.com", false).unwrap();
+        s.set_web_url("c", Some("https://forage.example.com"))
+            .unwrap();
+        let entry = s.resolve(Some("c")).unwrap();
+        assert_eq!(
+            entry.web_url.as_deref(),
+            Some("https://forage.example.com")
+        );
+    }
+
+    #[test]
+    fn set_web_url_can_clear() {
+        let td = TempDir::new().unwrap();
+        let s = store(&td);
+        s.create("c", "https://forest.example.com", false).unwrap();
+        s.set_web_url("c", Some("https://forage.example.com"))
+            .unwrap();
+        s.set_web_url("c", None).unwrap();
+        let entry = s.resolve(Some("c")).unwrap();
+        assert!(entry.web_url.is_none());
+    }
+
+    #[test]
+    fn set_web_url_strips_trailing_slash() {
+        let td = TempDir::new().unwrap();
+        let s = store(&td);
+        s.create("c", "https://forest.example.com", false).unwrap();
+        s.set_web_url("c", Some("https://forage.example.com/"))
+            .unwrap();
+        let entry = s.resolve(Some("c")).unwrap();
+        assert_eq!(
+            entry.web_url.as_deref(),
+            Some("https://forage.example.com")
+        );
     }
 
     #[test]

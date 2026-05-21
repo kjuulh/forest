@@ -102,6 +102,11 @@ pub async fn execute() -> anyhow::Result<()> {
 
         registration_email_domain_regex,
         require_email_verification,
+
+        web_app_url: std::env::var("FOREST_WEB_APP_URL")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| v.trim_end_matches('/').to_string()),
     };
 
     validate_config(&config)?;

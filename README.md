@@ -31,6 +31,33 @@ The trailing `v0.1.3` pins the forest version; drop it to install the latest.
 remember to export it. Every command afterwards prints a one-line banner
 showing which context it's running against.
 
+If you also want `forest auth login` to default to the browser flow without
+extra configuration, add a `web=` key pointing at forage:
+
+```bash
+FOREST_PROFILE='name=understory-prod,server=https://forest.development.understory.sh,web=https://forage.development.understory.sh'
+```
+
+When `web=` is omitted the CLI falls back to a `forest. → forage.`
+convention; set it explicitly if your deployment doesn't match that pattern.
+
+## Logging in
+
+```bash
+forest auth login
+```
+
+Opens your browser at the active context's forage URL, shows a short
+one-time code, and signs you in once you approve. Mirrors `gh auth login`.
+
+- `forest auth login --web` — skip the prompt, go straight to the browser.
+- `forest auth login --password` — legacy username/email + password flow
+  (still required for scripts that pipe a password from stdin or set
+  `FOREST_PASSWORD`).
+- `FOREST_WEB_URL=https://forage.example.com` — one-shot override of the
+  forage URL the CLI sends the browser to. Useful when testing against a
+  staging forage that doesn't match the context's stored `web_url`.
+
 ### Other ways
 
 ```bash

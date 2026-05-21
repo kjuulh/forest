@@ -435,11 +435,27 @@ Authentication commands.
 
 ```bash
 forest auth register    # Create a new account
-forest auth login       # Authenticate with the server
+forest auth login       # Authenticate with the server (interactive picker; web or password)
 forest auth logout      # Log out
 forest auth status      # Show current auth status
 forest auth token       # Manage personal access tokens
 ```
+
+### `forest auth login` modes
+
+The interactive picker (TTY default) offers two paths; flags select non-interactively:
+
+| Flag | Behaviour |
+|---|---|
+| `--web` | Open browser at the active context's forage URL, display a one-time code, poll for approval (RFC 8628 device authorization grant). Default when stdin/stderr is not a TTY. |
+| `--password` | Legacy username/email + password flow. MFA challenge in the terminal. Required when piping `FOREST_PASSWORD` from a script. |
+| `--username <u>` / `--email <e>` | Imply `--password`. Mutually exclusive with `--web`. |
+
+Configuring where the browser opens (web flow):
+
+1. The context's `web_url` field (`forest context set-web-url <name> <url>`).
+2. `FOREST_WEB_URL=…` for a per-invocation override.
+3. Convention: `forest.X` → `forage.X`; `localhost:4040` → `localhost:3000`.
 
 ---
 

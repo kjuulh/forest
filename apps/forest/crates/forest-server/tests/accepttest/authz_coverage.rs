@@ -51,6 +51,8 @@ const EXEMPT: &[(&str, &str)] = &[
     ("users.rs::get_user_stats", "self-scoped via the actor"),
     ("users.rs::verify_email", "email-verification token authenticates the action"),
     ("users.rs::confirm_email_verification", "service-account internal call, scoped at the route"),
+    ("users.rs::initiate_device_login", "RFC 8628: CLI has no token yet — by design"),
+    ("users.rs::poll_device_login", "RFC 8628: device_code is the bearer; auth happens out-of-band in browser"),
 
     // ─── OrganisationService ─────────────────────────────────────────
     ("organisations.rs::create_organisation", "anyone authenticated may create their own org"),

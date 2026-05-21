@@ -162,6 +162,7 @@ esac
 if [ -n "${FOREST_PROFILE:-}" ]; then
     profile_name=""
     profile_server=""
+    profile_web=""
     # Parse comma-separated key=value pairs. Tolerant: ignores empty
     # segments, unknown keys, and whitespace around `=`.
     IFS=','
@@ -179,6 +180,7 @@ if [ -n "${FOREST_PROFILE:-}" ]; then
         case "$key" in
             name) profile_name="$val" ;;
             server) profile_server="$val" ;;
+            web) profile_web="$val" ;;
             "") ;; # empty segment from trailing comma
             *) echo "==> FOREST_PROFILE: ignoring unknown key '$key'" >&2 ;;
         esac
@@ -190,7 +192,12 @@ if [ -n "${FOREST_PROFILE:-}" ]; then
         echo "==> FOREST_PROFILE was set but missing name= or server=; skipping context provision." >&2
     else
         echo "==> Provisioning context '$profile_name' → $profile_server"
-        if ! "$target_path" context provision --name "$profile_name" --server "$profile_server"; then
+        provision_args="context provision --name $profile_name --server $profile_server"
+        if [ -n "$profile_web" ]; then
+            provision_args="$provision_args --web-url $profile_web"
+        fi
+        # shellcheck disable=SC2086
+        if ! "$target_path" $provision_args; then
             echo "==> Context provision failed. The installed forest binary may be" >&2
             echo "    older than the version that introduced 'context provision'." >&2
             echo "    Try: $target_path self update, then re-run this installer." >&2

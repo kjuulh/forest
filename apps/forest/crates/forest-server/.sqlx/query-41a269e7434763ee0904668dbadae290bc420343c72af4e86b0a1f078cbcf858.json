@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE device_login_grants\n                       SET last_polled_at = $2\n                       WHERE device_code_hash = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "41a269e7434763ee0904668dbadae290bc420343c72af4e86b0a1f078cbcf858"
+}

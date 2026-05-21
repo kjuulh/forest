@@ -68,6 +68,7 @@ fn base_test_config() -> forest_server::Config {
         service_account_token_hash: None,
         registration_email_domain_regex: None,
         require_email_verification: false,
+        web_app_url: Some("http://forage.test.invalid".into()),
     }
 }
 

@@ -1,6 +1,7 @@
 use crate::state::State;
 
 mod login;
+mod login_web;
 mod logout;
 mod register;
 mod status;

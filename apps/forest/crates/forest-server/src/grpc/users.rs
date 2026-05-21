@@ -7,7 +7,11 @@ use uuid::Uuid;
 use super::error;
 use crate::{
     actor::Actor,
-    services::{registration_policy::RegistrationPolicyState, users::UserServiceState},
+    services::{
+        device_login_aggregate::{DeviceLoginAggregateServiceState, DeviceLoginPollOutcome},
+        registration_policy::RegistrationPolicyState,
+        users::UserServiceState,
+    },
     state::State,
     tokens::TokenServiceState,
 };
@@ -1241,6 +1245,154 @@ impl UsersService for UsersServer {
                 expires_in_seconds: expires.timestamp(),
             }),
         }))
+    }
+
+    // ── Device authorization grant (RFC 8628) ────────────────────────
+
+    async fn initiate_device_login(
+        &self,
+        request: tonic::Request<InitiateDeviceLoginRequest>,
+    ) -> std::result::Result<tonic::Response<InitiateDeviceLoginResponse>, tonic::Status>
+    {
+        let req = request.into_inner();
+        let initiated = self
+            .state
+            .device_login_aggregate_service()
+            .initiate(&req.client_name, &req.client_version, req.scopes)
+            .await
+            .map_err(error::to_status)?;
+
+        Ok(tonic::Response::new(InitiateDeviceLoginResponse {
+            device_code: initiated.device_code,
+            user_code: initiated.user_code,
+            verification_uri: initiated.verification_uri,
+            verification_uri_complete: initiated.verification_uri_complete,
+            expires_in_seconds: initiated.expires_in_seconds,
+            interval_seconds: initiated.interval_seconds,
+        }))
+    }
+
+    async fn poll_device_login(
+        &self,
+        request: tonic::Request<PollDeviceLoginRequest>,
+    ) -> std::result::Result<tonic::Response<PollDeviceLoginResponse>, tonic::Status> {
+        let req = request.into_inner();
+        let outcome = self
+            .state
+            .device_login_aggregate_service()
+            .poll(&req.device_code)
+            .await
+            .map_err(error::to_status)?;
+
+        let (status, user, tokens) = match outcome {
+            DeviceLoginPollOutcome::Pending => (DeviceLoginStatus::Pending, None, None),
+            DeviceLoginPollOutcome::Denied => (DeviceLoginStatus::Denied, None, None),
+            DeviceLoginPollOutcome::Expired => (DeviceLoginStatus::Expired, None, None),
+            DeviceLoginPollOutcome::SlowDown => (DeviceLoginStatus::SlowDown, None, None),
+            DeviceLoginPollOutcome::Approved { user_id } => {
+                let profile = self
+                    .service()
+                    .get_user(user_id)
+                    .await
+                    .map_err(error::to_status)?
+                    .ok_or_else(|| {
+                        tonic::Status::internal("approved user not found")
+                    })?;
+
+                let (refresh_token, hash) = self
+                    .state
+                    .tokens()
+                    .generate_refresh_token()
+                    .map_err(error::to_status)?;
+
+                let expires = Utc::now()
+                    .checked_add_days(Days::new(30))
+                    .expect("to be able to add 30 days");
+
+                let session = self
+                    .state
+                    .user_service()
+                    .create_session(profile.user_id, &hash, Some(expires))
+                    .await
+                    .map_err(error::to_status)?;
+
+                let access_token = self
+                    .state
+                    .tokens()
+                    .issue_access_token(
+                        &profile.user_id.to_string(),
+                        &session.session_id.to_string(),
+                        vec![],
+                    )
+                    .map_err(error::to_status)?;
+
+                (
+                    DeviceLoginStatus::Approved,
+                    Some(profile_to_grpc_user(profile)),
+                    Some(AuthTokens {
+                        access_token: access_token.as_string(),
+                        refresh_token,
+                        expires_in_seconds: expires.timestamp(),
+                    }),
+                )
+            }
+        };
+
+        Ok(tonic::Response::new(PollDeviceLoginResponse {
+            status: status as i32,
+            user,
+            tokens,
+        }))
+    }
+
+    async fn approve_device_login(
+        &self,
+        request: tonic::Request<ApproveDeviceLoginRequest>,
+    ) -> std::result::Result<tonic::Response<ApproveDeviceLoginResponse>, tonic::Status>
+    {
+        // Service-account-only — see TASKS/022-device-login.md §1.4.
+        let _actor = crate::grpc::authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+
+        let req = request.into_inner();
+        let user_id = Uuid::parse_str(&req.user_id)
+            .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+
+        self.state
+            .device_login_aggregate_service()
+            .approve(
+                &req.user_code,
+                user_id,
+                &req.approving_ip,
+                &req.approving_user_agent,
+            )
+            .await
+            .map_err(error::to_status)?;
+
+        Ok(tonic::Response::new(ApproveDeviceLoginResponse {}))
+    }
+
+    async fn deny_device_login(
+        &self,
+        request: tonic::Request<DenyDeviceLoginRequest>,
+    ) -> std::result::Result<tonic::Response<DenyDeviceLoginResponse>, tonic::Status>
+    {
+        let _actor = crate::grpc::authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+
+        let req = request.into_inner();
+        let user_id = Uuid::parse_str(&req.user_id)
+            .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
+
+        self.state
+            .device_login_aggregate_service()
+            .deny(&req.user_code, user_id)
+            .await
+            .map_err(error::to_status)?;
+
+        Ok(tonic::Response::new(DenyDeviceLoginResponse {}))
     }
 }
 

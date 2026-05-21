@@ -4670,6 +4670,97 @@ pub struct VerifyLoginMfaResponse {
     #[prost(message, optional, tag="2")]
     pub tokens: ::core::option::Option<AuthTokens>,
 }
+// ─── Device authorization grant (RFC 8628) ───────────────────────────
+//
+// See `apps/forest/TASKS/022-device-login.md` for the full flow.
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InitiateDeviceLoginRequest {
+    /// e.g. "forest-cli/0.3.2 darwin-arm64". Free-form, used for audit and
+    /// for rendering "Approve forest-cli/0.3.2?" in the forage approval UI.
+    #[prost(string, tag="1")]
+    pub client_name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub client_version: ::prost::alloc::string::String,
+    /// Reserved for future per-scope authorisation. Today the server stores
+    /// and echoes them back but does not enforce anything.
+    #[prost(string, repeated, tag="3")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InitiateDeviceLoginResponse {
+    /// Opaque, base64url-encoded random material. The CLI keeps this and
+    /// sends it back via PollDeviceLogin; it is never displayed to the user.
+    #[prost(string, tag="1")]
+    pub device_code: ::prost::alloc::string::String,
+    /// Human-typeable code, grouped with a dash for readability,
+    /// e.g. "BCDF-GHJK". Case- and dash-insensitive on the approval side.
+    #[prost(string, tag="2")]
+    pub user_code: ::prost::alloc::string::String,
+    /// Base verification URL (no user_code embedded), e.g.
+    /// "<https://forage.example.com/device".> For headless devices the user
+    /// visits this URL and types the user_code by hand.
+    #[prost(string, tag="3")]
+    pub verification_uri: ::prost::alloc::string::String,
+    /// Convenience URL with the user_code pre-filled as a query parameter.
+    /// The CLI opens this in the user's browser.
+    #[prost(string, tag="4")]
+    pub verification_uri_complete: ::prost::alloc::string::String,
+    /// Lifetime of the grant in seconds (server-authoritative, default 900).
+    #[prost(int64, tag="5")]
+    pub expires_in_seconds: i64,
+    /// Minimum interval (in seconds) the CLI should wait between polls.
+    /// Polling faster yields DEVICE_LOGIN_STATUS_SLOW_DOWN.
+    #[prost(int32, tag="6")]
+    pub interval_seconds: i32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PollDeviceLoginRequest {
+    #[prost(string, tag="1")]
+    pub device_code: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PollDeviceLoginResponse {
+    #[prost(enumeration="DeviceLoginStatus", tag="1")]
+    pub status: i32,
+    /// Populated only when status == DEVICE_LOGIN_STATUS_APPROVED. Identical
+    /// shape to a successful LoginResponse so the CLI's storage code is
+    /// unchanged from the password flow.
+    #[prost(message, optional, tag="2")]
+    pub user: ::core::option::Option<User>,
+    #[prost(message, optional, tag="3")]
+    pub tokens: ::core::option::Option<AuthTokens>,
+}
+/// Service-account-only. Called by the forage backend after the user
+/// clicks Approve in /device.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApproveDeviceLoginRequest {
+    /// Looked up case-insensitively, dashes/whitespace stripped.
+    #[prost(string, tag="1")]
+    pub user_code: ::prost::alloc::string::String,
+    /// The forage-authenticated user who clicked Approve.
+    #[prost(string, tag="2")]
+    pub user_id: ::prost::alloc::string::String,
+    /// Forwarded from forage for audit. Optional but recommended.
+    #[prost(string, tag="3")]
+    pub approving_ip: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub approving_user_agent: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApproveDeviceLoginResponse {
+}
+/// Service-account-only.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DenyDeviceLoginRequest {
+    #[prost(string, tag="1")]
+    pub user_code: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DenyDeviceLoginResponse {
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum OAuthProvider {
@@ -4732,6 +4823,49 @@ impl MfaType {
         match value {
             "MFA_TYPE_UNSPECIFIED" => Some(Self::Unspecified),
             "MFA_TYPE_TOTP" => Some(Self::Totp),
+            _ => None,
+        }
+    }
+}
+/// Status reported to the polling CLI. The internal aggregate state is
+/// richer (see `domains::device_login::DeviceGrantStatus`); in particular
+/// the internal `Consumed` state — set after a successful poll has handed
+/// tokens to the CLI — is mapped to EXPIRED here so a replay attacker
+/// cannot distinguish a stolen-and-used device_code from natural expiry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum DeviceLoginStatus {
+    Unspecified = 0,
+    Pending = 1,
+    Approved = 2,
+    Denied = 3,
+    Expired = 4,
+    SlowDown = 5,
+}
+impl DeviceLoginStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "DEVICE_LOGIN_STATUS_UNSPECIFIED",
+            Self::Pending => "DEVICE_LOGIN_STATUS_PENDING",
+            Self::Approved => "DEVICE_LOGIN_STATUS_APPROVED",
+            Self::Denied => "DEVICE_LOGIN_STATUS_DENIED",
+            Self::Expired => "DEVICE_LOGIN_STATUS_EXPIRED",
+            Self::SlowDown => "DEVICE_LOGIN_STATUS_SLOW_DOWN",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "DEVICE_LOGIN_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "DEVICE_LOGIN_STATUS_PENDING" => Some(Self::Pending),
+            "DEVICE_LOGIN_STATUS_APPROVED" => Some(Self::Approved),
+            "DEVICE_LOGIN_STATUS_DENIED" => Some(Self::Denied),
+            "DEVICE_LOGIN_STATUS_EXPIRED" => Some(Self::Expired),
+            "DEVICE_LOGIN_STATUS_SLOW_DOWN" => Some(Self::SlowDown),
             _ => None,
         }
     }

@@ -863,6 +863,39 @@ impl GrpcClient {
         Ok(resp.into_inner())
     }
 
+    pub async fn initiate_device_login(
+        &self,
+        client_name: &str,
+        client_version: &str,
+    ) -> anyhow::Result<InitiateDeviceLoginResponse> {
+        let mut client = self.users_client().await?;
+        let resp = client
+            .initiate_device_login(InitiateDeviceLoginRequest {
+                client_name: client_name.into(),
+                client_version: client_version.into(),
+                scopes: vec![],
+            })
+            .await
+            .map_err(grpc_err)
+            .context("initiate device login")?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn poll_device_login(
+        &self,
+        device_code: &str,
+    ) -> anyhow::Result<PollDeviceLoginResponse> {
+        let mut client = self.users_client().await?;
+        let resp = client
+            .poll_device_login(PollDeviceLoginRequest {
+                device_code: device_code.into(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("poll device login")?;
+        Ok(resp.into_inner())
+    }
+
     pub async fn verify_login_mfa(
         &self,
         mfa_session_token: &str,

@@ -7,24 +7,72 @@ use crate::{
     user_state::{UserState, UserStateLoaderState, compute_refresh_after},
 };
 
+use super::login_web;
+
 #[derive(clap::Parser)]
 pub struct LoginCommand {
-    /// Login with username (mutually exclusive with --email). Aliased as `--user`.
+    /// Open a browser and approve the login there (RFC 8628 device
+    /// authorization grant). Default when invoked without a mode flag
+    /// in non-TTY contexts. Mutually exclusive with --password.
+    #[arg(long, conflicts_with_all = ["password_flag", "username", "email"])]
+    web: bool,
+
+    /// Use the legacy username/email + password flow. Required for
+    /// scripts that pipe passwords from stdin or set FOREST_PASSWORD.
+    /// Mutually exclusive with --web.
+    #[arg(long = "password")]
+    password_flag: bool,
+
+    /// Login with username. Only valid with --password.
     #[arg(long, conflicts_with = "email", visible_alias = "user")]
     username: Option<String>,
 
-    /// Login with email (mutually exclusive with --username)
+    /// Login with email. Only valid with --password.
     #[arg(long, conflicts_with = "username")]
     email: Option<String>,
 }
 
 impl LoginCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        // Username/email implies password mode.
+        let want_password = self.password_flag
+            || self.username.is_some()
+            || self.email.is_some();
+
+        let mode = if self.web {
+            LoginMode::Web
+        } else if want_password {
+            LoginMode::Password
+        } else if std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+            // Interactive picker — TASKS/022-device-login.md §1.1.
+            let choice = inquire::Select::new(
+                "How would you like to authenticate Forest?",
+                vec!["Login with a web browser  (recommended)", "Login with a password"],
+            )
+            .prompt()?;
+            if choice.starts_with("Login with a web") {
+                LoginMode::Web
+            } else {
+                LoginMode::Password
+            }
+        } else {
+            eprintln!(
+                "Defaulting to web login; pass --password for the legacy username/password flow."
+            );
+            LoginMode::Web
+        };
+
+        match mode {
+            LoginMode::Web => login_web::run(state).await,
+            LoginMode::Password => self.execute_password(state).await,
+        }
+    }
+
+    async fn execute_password(&self, state: &State) -> anyhow::Result<()> {
         let identifier = match (&self.username, &self.email) {
             (Some(username), _) => login_request::Identifier::Username(username.clone()),
             (_, Some(email)) => login_request::Identifier::Email(email.clone()),
             (None, None) => {
-                // Interactive: ask what to use
                 let choice =
                     inquire::Select::new("Login with:", vec!["Username", "Email"]).prompt()?;
 
@@ -98,4 +146,9 @@ impl LoginCommand {
 
         Ok(())
     }
+}
+
+enum LoginMode {
+    Web,
+    Password,
 }

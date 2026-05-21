@@ -34,6 +34,10 @@ enum Commands {
     Rename(RenameCommand),
     /// Update a context's server URL.
     SetServer(SetServerCommand),
+    /// Update (or clear with `--clear`) a context's web URL — where
+    /// `forest auth login --web` opens the browser. Falls back to the
+    /// `forest. → forage.` convention when unset.
+    SetWebUrl(SetWebUrlCommand),
     /// Install-time provisioning. Idempotent — re-running with the
     /// same name updates the server. Used by `install.sh` to seed a
     /// default context from a `FOREST_PROFILE` env var. If no context
@@ -52,6 +56,7 @@ impl ContextCommand {
             Commands::Delete(cmd) => cmd.execute(state).await,
             Commands::Rename(cmd) => cmd.execute(state).await,
             Commands::SetServer(cmd) => cmd.execute(state).await,
+            Commands::SetWebUrl(cmd) => cmd.execute(state).await,
             Commands::Provision(cmd) => cmd.execute(state).await,
         }
     }
@@ -232,6 +237,38 @@ impl SetServerCommand {
     }
 }
 
+// --- set-web-url ---------------------------------------------------------
+
+#[derive(Args)]
+pub struct SetWebUrlCommand {
+    name: String,
+    /// New web URL. Mutually exclusive with `--clear`.
+    web_url: Option<String>,
+    /// Clear the stored web URL (fall back to convention / env var).
+    #[arg(long, conflicts_with = "web_url")]
+    clear: bool,
+}
+
+impl SetWebUrlCommand {
+    pub async fn execute(&self, _state: &State) -> anyhow::Result<()> {
+        let store = ContextStore::from_env()?;
+        let new = if self.clear {
+            None
+        } else {
+            self.web_url.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("pass a URL or `--clear` to remove the stored web URL")
+            })?;
+            self.web_url.as_deref()
+        };
+        store.set_web_url(&self.name, new)?;
+        match new {
+            Some(url) => eprintln!("set {} web URL to {url}", self.name),
+            None => eprintln!("cleared web URL for {}", self.name),
+        }
+        Ok(())
+    }
+}
+
 // --- provision -----------------------------------------------------------
 
 #[derive(Args)]
@@ -243,6 +280,11 @@ pub struct ProvisionCommand {
     /// Forest server URL (e.g. `https://forest.understory.sh`).
     #[arg(long)]
     server: String,
+    /// Optional forage web URL. When omitted, the CLI falls back to a
+    /// `forest. → forage.` convention. Pass-through from FOREST_PROFILE
+    /// `web=` key.
+    #[arg(long = "web-url")]
+    web_url: Option<String>,
 }
 
 impl ProvisionCommand {
@@ -250,6 +292,9 @@ impl ProvisionCommand {
         let store = ContextStore::from_env()?;
         let was_first = !store.contexts_file().exists();
         let entry = store.provision(&self.name, &self.server)?;
+        if let Some(web) = self.web_url.as_deref() {
+            store.set_web_url(&self.name, Some(web))?;
+        }
         if was_first {
             eprintln!(
                 "provisioned '{}' ({}) and set as active context",

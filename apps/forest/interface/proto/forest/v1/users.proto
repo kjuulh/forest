@@ -51,6 +51,15 @@ service UsersService {
   rpc VerifyMfa(VerifyMfaRequest) returns (VerifyMfaResponse);
   rpc DisableMfa(DisableMfaRequest) returns (DisableMfaResponse);
   rpc VerifyLoginMfa(VerifyLoginMfaRequest) returns (VerifyLoginMfaResponse);
+
+  // Device authorization grant (RFC 8628). See TASKS/022-device-login.md.
+  // Initiate and Poll are unauthenticated — by definition the CLI has
+  // no token yet. Approve and Deny require service-account auth: forage
+  // calls them after the browser-side user clicks the button.
+  rpc InitiateDeviceLogin(InitiateDeviceLoginRequest) returns (InitiateDeviceLoginResponse);
+  rpc PollDeviceLogin(PollDeviceLoginRequest) returns (PollDeviceLoginResponse);
+  rpc ApproveDeviceLogin(ApproveDeviceLoginRequest) returns (ApproveDeviceLoginResponse);
+  rpc DenyDeviceLogin(DenyDeviceLoginRequest) returns (DenyDeviceLoginResponse);
 }
 
 // ─── Core types ──────────────────────────────────────────────────────
@@ -399,3 +408,87 @@ message VerifyLoginMfaResponse {
   User user = 1;
   AuthTokens tokens = 2;
 }
+
+// ─── Device authorization grant (RFC 8628) ───────────────────────────
+//
+// See `apps/forest/TASKS/022-device-login.md` for the full flow.
+
+message InitiateDeviceLoginRequest {
+  // e.g. "forest-cli/0.3.2 darwin-arm64". Free-form, used for audit and
+  // for rendering "Approve forest-cli/0.3.2?" in the forage approval UI.
+  string client_name = 1;
+  string client_version = 2;
+  // Reserved for future per-scope authorisation. Today the server stores
+  // and echoes them back but does not enforce anything.
+  repeated string scopes = 3;
+}
+
+message InitiateDeviceLoginResponse {
+  // Opaque, base64url-encoded random material. The CLI keeps this and
+  // sends it back via PollDeviceLogin; it is never displayed to the user.
+  string device_code = 1;
+  // Human-typeable code, grouped with a dash for readability,
+  // e.g. "BCDF-GHJK". Case- and dash-insensitive on the approval side.
+  string user_code = 2;
+  // Base verification URL (no user_code embedded), e.g.
+  // "https://forage.example.com/device". For headless devices the user
+  // visits this URL and types the user_code by hand.
+  string verification_uri = 3;
+  // Convenience URL with the user_code pre-filled as a query parameter.
+  // The CLI opens this in the user's browser.
+  string verification_uri_complete = 4;
+  // Lifetime of the grant in seconds (server-authoritative, default 900).
+  int64 expires_in_seconds = 5;
+  // Minimum interval (in seconds) the CLI should wait between polls.
+  // Polling faster yields DEVICE_LOGIN_STATUS_SLOW_DOWN.
+  int32 interval_seconds = 6;
+}
+
+message PollDeviceLoginRequest {
+  string device_code = 1;
+}
+
+message PollDeviceLoginResponse {
+  DeviceLoginStatus status = 1;
+  // Populated only when status == DEVICE_LOGIN_STATUS_APPROVED. Identical
+  // shape to a successful LoginResponse so the CLI's storage code is
+  // unchanged from the password flow.
+  User user = 2;
+  AuthTokens tokens = 3;
+}
+
+// Status reported to the polling CLI. The internal aggregate state is
+// richer (see `domains::device_login::DeviceGrantStatus`); in particular
+// the internal `Consumed` state — set after a successful poll has handed
+// tokens to the CLI — is mapped to EXPIRED here so a replay attacker
+// cannot distinguish a stolen-and-used device_code from natural expiry.
+enum DeviceLoginStatus {
+  DEVICE_LOGIN_STATUS_UNSPECIFIED = 0;
+  DEVICE_LOGIN_STATUS_PENDING = 1;
+  DEVICE_LOGIN_STATUS_APPROVED = 2;
+  DEVICE_LOGIN_STATUS_DENIED = 3;
+  DEVICE_LOGIN_STATUS_EXPIRED = 4;
+  DEVICE_LOGIN_STATUS_SLOW_DOWN = 5;
+}
+
+// Service-account-only. Called by the forage backend after the user
+// clicks Approve in /device.
+message ApproveDeviceLoginRequest {
+  // Looked up case-insensitively, dashes/whitespace stripped.
+  string user_code = 1;
+  // The forage-authenticated user who clicked Approve.
+  string user_id = 2;
+  // Forwarded from forage for audit. Optional but recommended.
+  string approving_ip = 3;
+  string approving_user_agent = 4;
+}
+
+message ApproveDeviceLoginResponse {}
+
+// Service-account-only.
+message DenyDeviceLoginRequest {
+  string user_code = 1;
+  string user_id = 2;
+}
+
+message DenyDeviceLoginResponse {}

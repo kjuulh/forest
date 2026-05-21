@@ -87,6 +87,14 @@ pub struct Config {
     /// `FOREST_REQUIRE_EMAIL_VERIFICATION`. Required when
     /// `registration_email_domain_regex` is set.
     pub require_email_verification: bool,
+
+    /// Public-facing URL of the forage web app (no trailing slash), e.g.
+    /// `https://forage.example.com`. Used to build the
+    /// `verification_uri` returned from `InitiateDeviceLogin`. Set via
+    /// `FOREST_WEB_APP_URL`. When `None`, `InitiateDeviceLogin` returns
+    /// `failed_precondition` — i.e. the operator must opt in before
+    /// the web-login flow becomes usable.
+    pub web_app_url: Option<String>,
 }
 
 /// Pure validator for inter-field invariants on `Config`.
@@ -156,6 +164,7 @@ mod tests {
             service_account_token_hash: None,
             registration_email_domain_regex: None,
             require_email_verification: false,
+            web_app_url: None,
         }
     }
 

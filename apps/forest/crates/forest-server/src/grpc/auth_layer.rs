@@ -161,6 +161,12 @@ fn auth_mode(path: &str) -> AuthMode {
         "/forest.v1.UsersService/Login",
         "/forest.v1.UsersService/RefreshToken",
         "/forest.v1.UsersService/VerifyLoginMfa",
+        // Device authorization grant: the CLI has no token yet, that's
+        // the whole point. Approve/Deny are NOT on this list — they
+        // require service-account auth and are checked at the handler
+        // level via `require_service_account()`.
+        "/forest.v1.UsersService/InitiateDeviceLogin",
+        "/forest.v1.UsersService/PollDeviceLogin",
         "/forest.v1.StatusService/",
         // Runner service uses release-scoped tokens, not JWT
         "/forest.v1.RunnerService/",
