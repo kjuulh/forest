@@ -20,8 +20,11 @@
 
     <div class="flex items-start justify-between mb-6 gap-4">
         <div class="min-w-0">
-            <h1 class="text-2xl font-bold">
-                <span class="text-gray-400 font-mono">{{ summary.organisation }}/</span><span>{{ summary.name }}</span>
+            {# Single visual unit: monospace path, dimmer org and slash
+               recede so the component name leads. Matches project header
+               for visual parity. #}
+            <h1 class="font-mono text-3xl tracking-tight leading-tight">
+                <span class="text-gray-500">{{ summary.organisation }}</span><span class="text-gray-300 mx-0.5">/</span><span class="font-bold text-gray-900">{{ summary.name }}</span>
             </h1>
             {# Description: handler resolves project.description → component manifest description fallback. #}
             {% if project_description %}

@@ -40,6 +40,9 @@ async fn device_page(
     session: Session,
     Query(params): Query<DeviceQuery>,
 ) -> Result<Response, Response> {
+    if state.service_account_key.is_none() {
+        return render_device(&state, &session, "", None, Some("unconfigured"));
+    }
     let user_code_prefill = params.user_code.unwrap_or_default();
     render_device(&state, &session, &user_code_prefill, None, None)
 }
@@ -57,6 +60,13 @@ async fn device_submit(
     headers: HeaderMap,
     Form(form): Form<DeviceForm>,
 ) -> Result<Response, Response> {
+    if state.service_account_key.is_none() {
+        // Defence in depth — the GET handler already shunts users to
+        // the "unconfigured" page, but a stale form post must not slip
+        // through to forest_client and mint a misleading
+        // "code wasn't recognised" error.
+        return render_device(&state, &session, "", None, Some("unconfigured"));
+    }
     if !auth::validate_csrf(&session, &form._csrf) {
         return Err(error_page(
             &state,

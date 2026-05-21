@@ -59,7 +59,10 @@ pub async fn run(state: &State) -> anyhow::Result<()> {
     // appropriate for the platform.
     eprintln!();
     eprintln!("! First copy your one-time code: {}", init.user_code);
-    eprintln!("Opening {} in your browser…", init.verification_uri);
+    eprintln!(
+        "Opening {} in your browser…",
+        format_terminal_hyperlink(&init.verification_uri, &init.verification_uri)
+    );
     let _ = std::io::Write::flush(&mut std::io::stderr());
 
     // Best-effort browser open. On headless boxes this fails and we
@@ -148,4 +151,54 @@ pub async fn run(state: &State) -> anyhow::Result<()> {
             }
         }
     }
+}
+
+/// Wrap `text` as an OSC 8 terminal hyperlink pointing at `url` when
+/// stderr is a TTY likely to support it. Falls back to the plain URL
+/// otherwise — never lets the escape bytes leak into a log file or a
+/// CI pipe.
+///
+/// OSC 8 is supported by iTerm2, kitty, alacritty, WezTerm, modern
+/// GNOME Terminal, VS Code's terminal, etc. Terminals that don't
+/// understand the sequence silently drop it on most implementations,
+/// but a few mangle the output, so we gate on TTY + a TERM allowlist.
+fn format_terminal_hyperlink(url: &str, text: &str) -> String {
+    if !supports_hyperlinks() {
+        return text.to_string();
+    }
+    // The closing sequence `\x1b]8;;\x1b\\` resets the link state.
+    // `\x1b\\` is the ST (String Terminator).
+    format!("\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\")
+}
+
+fn supports_hyperlinks() -> bool {
+    use std::io::IsTerminal;
+    if !std::io::stderr().is_terminal() {
+        return false;
+    }
+    // Respect the de-facto disable switch.
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    // Explicit opt-in / opt-out wins. Many terminals advertise via
+    // FORCE_HYPERLINK or set TERM_PROGRAM.
+    if std::env::var_os("FORCE_HYPERLINK").is_some() {
+        return true;
+    }
+    if let Ok(prog) = std::env::var("TERM_PROGRAM") {
+        // Known-good terminals on macOS / cross-platform.
+        if matches!(
+            prog.as_str(),
+            "iTerm.app" | "WezTerm" | "vscode" | "Hyper" | "ghostty" | "Apple_Terminal"
+        ) {
+            return true;
+        }
+    }
+    if let Ok(term) = std::env::var("TERM") {
+        if term.contains("kitty") || term.contains("alacritty") || term == "xterm-ghostty" {
+            return true;
+        }
+    }
+    // Default to off — better a plain URL than mangled output.
+    false
 }

@@ -73,8 +73,22 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("connecting to forest-server at {forest_endpoint}");
 
     let mut forest_client = GrpcForestClient::connect_lazy(&forest_endpoint)?;
-    if let Ok(service_key) = std::env::var("FOREST_SERVICE_ACCOUNT_API_KEY") {
-        forest_client = forest_client.with_service_account_key(service_key);
+    match std::env::var("FOREST_SERVICE_ACCOUNT_API_KEY") {
+        Ok(service_key) if !service_key.is_empty() => {
+            forest_client = forest_client.with_service_account_key(service_key);
+        }
+        _ => {
+            // The CLI device-login flow and the OAuth callback path
+            // both require this key to call forest-server's
+            // service-account-only RPCs. Without it, `/device` falls
+            // back to an explicit "not configured" message rather than
+            // pretending the code is invalid.
+            tracing::warn!(
+                "FOREST_SERVICE_ACCOUNT_API_KEY not set — \
+                 CLI device login (/device) and any service-account-only \
+                 forest RPC will be disabled."
+            );
+        }
     }
     let template_engine = TemplateEngine::new()?;
 
