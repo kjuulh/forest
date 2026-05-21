@@ -25,16 +25,21 @@ pub struct SmtpConfig {
 
 impl SmtpConfig {
     pub fn from_env() -> Option<Self> {
-        let host = std::env::var("SMTP_HOST").ok()?;
-        let port = std::env::var("SMTP_PORT")
-            .ok()
+        // Treat unset and empty-string the same: the infra layer wires
+        // forage's SMTP slots through a console-managed secret where
+        // unpopulated keys arrive as "". Without this guard a blank
+        // SMTP_HOST would let SmtpConfig build, the email consumer
+        // would start, and the first send would fail at the TCP layer.
+        let nonempty = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+
+        let host = nonempty("SMTP_HOST")?;
+        let port = nonempty("SMTP_PORT")
             .and_then(|p| p.parse().ok())
             .unwrap_or(587);
-        let username = std::env::var("SMTP_USERNAME").ok();
-        let password = std::env::var("SMTP_PASSWORD").ok();
-        let from_address =
-            std::env::var("SMTP_FROM").unwrap_or_else(|_| "noreply@forage.dev".into());
-        let use_tls = std::env::var("SMTP_TLS")
+        let username = nonempty("SMTP_USERNAME");
+        let password = nonempty("SMTP_PASSWORD");
+        let from_address = nonempty("SMTP_FROM").unwrap_or_else(|| "noreply@forage.dev".into());
+        let use_tls = nonempty("SMTP_TLS")
             .map(|v| v != "false" && v != "0")
             .unwrap_or(true);
         Some(Self {

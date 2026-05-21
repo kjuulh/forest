@@ -19,6 +19,19 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Read an env var, treating "unset" and "set to empty string" the same way.
+///
+/// The infra-platform layer wires forage's OAuth / SMTP / service-token
+/// slots through a console-managed Secrets Manager secret. Slots that the
+/// operator hasn't populated arrive as empty strings (Secrets Manager
+/// can't store `None` for a JSON value), so we have to filter those out
+/// here — otherwise `if let Ok(...)` happily picks them up and forage
+/// boots with a half-configured Slack/Google/etc. client that fails at
+/// runtime with a worse error.
+fn env_var_nonempty(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.is_empty())
+}
+
 use forage_core::session::{FileSessionStore, SessionStore};
 use forage_db::PgSessionStore;
 
@@ -188,9 +201,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Slack OAuth config (optional, enables "Add to Slack" button)
-    if let (Ok(client_id), Ok(client_secret)) = (
-        std::env::var("SLACK_CLIENT_ID"),
-        std::env::var("SLACK_CLIENT_SECRET"),
+    if let (Some(client_id), Some(client_secret)) = (
+        env_var_nonempty("SLACK_CLIENT_ID"),
+        env_var_nonempty("SLACK_CLIENT_SECRET"),
     ) {
         tracing::info!("Slack OAuth enabled");
         state = state.with_slack_config(crate::state::SlackConfig {
@@ -202,9 +215,9 @@ async fn main() -> anyhow::Result<()> {
 
     // Google OAuth config (optional, enables "Continue with Google" button)
     // Forage handles the full OIDC exchange — needs both client_id and client_secret.
-    if let (Ok(client_id), Ok(client_secret)) = (
-        std::env::var("GOOGLE_CLIENT_ID"),
-        std::env::var("GOOGLE_CLIENT_SECRET"),
+    if let (Some(client_id), Some(client_secret)) = (
+        env_var_nonempty("GOOGLE_CLIENT_ID"),
+        env_var_nonempty("GOOGLE_CLIENT_SECRET"),
     ) {
         tracing::info!("Google OAuth enabled");
         let google_config = crate::state::GoogleOAuthConfig {
@@ -219,9 +232,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // GitHub OAuth config (optional, enables "Continue with GitHub" button)
-    if let (Ok(client_id), Ok(client_secret)) = (
-        std::env::var("GITHUB_APP_CLIENT_ID"),
-        std::env::var("GITHUB_APP_CLIENT_SECRET"),
+    if let (Some(client_id), Some(client_secret)) = (
+        env_var_nonempty("GITHUB_APP_CLIENT_ID"),
+        env_var_nonempty("GITHUB_APP_CLIENT_SECRET"),
     ) {
         tracing::info!("GitHub OAuth enabled");
         let github_config = crate::state::GitHubOAuthConfig {
@@ -254,7 +267,7 @@ async fn main() -> anyhow::Result<()> {
     if let Some(ref store) = integration_store {
         state = state.with_integration_store(store.clone());
 
-        if let Ok(service_token) = std::env::var("FORAGE_SERVICE_TOKEN") {
+        if let Some(service_token) = env_var_nonempty("FORAGE_SERVICE_TOKEN") {
             let forage_url = forage_host.clone();
 
             if let Some(ref js) = nats_jetstream {
