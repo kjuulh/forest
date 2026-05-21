@@ -472,34 +472,41 @@ function updateTypeFields(idx) {
         return Array.from(list.querySelectorAll('.env-card')).indexOf(card);
     }
 
-    function commitReorder(card) {
-        const newIndex = indexOf(card);
-        if (newIndex < 0 || newIndex === originalIndex) return;
-
-        const movedId = card.dataset.envId;
-        const newOrder = newIndex * 10;
-        const csrfInput = document.querySelector('input[name="_csrf"]');
-        const csrf = csrfInput ? csrfInput.value : '';
-        const orgName = list.dataset.org;
-
+    function postOrder(orgName, csrf, envId, sortOrder) {
         const body = new URLSearchParams();
         body.set('_csrf', csrf);
-        body.set('sort_order', String(newOrder));
-
-        fetch('/orgs/' + encodeURIComponent(orgName) + '/destinations/environments/' + encodeURIComponent(movedId) + '/order', {
+        body.set('sort_order', String(sortOrder));
+        return fetch('/orgs/' + encodeURIComponent(orgName) + '/destinations/environments/' + encodeURIComponent(envId) + '/order', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: body.toString(),
             credentials: 'same-origin',
-        }).then(function(resp) {
-            if (!resp.ok && resp.status !== 0) {
-                console.error('env reorder failed:', resp.status);
-            }
-            window.location.reload();
-        }).catch(function(err) {
-            console.error('env reorder error:', err);
-            window.location.reload();
         });
+    }
+
+    async function commitReorder(card) {
+        const newIndex = indexOf(card);
+        if (newIndex < 0 || newIndex === originalIndex) return;
+
+        const cards = Array.from(list.querySelectorAll('.env-card'));
+        const csrfInput = document.querySelector('input[name="_csrf"]');
+        const csrf = csrfInput ? csrfInput.value : '';
+        const orgName = list.dataset.org;
+
+        // Renumber every env from its current DOM position so the order is
+        // exactly index*10 across the board — no gaps inherited from before.
+        try {
+            for (let i = 0; i < cards.length; i++) {
+                const resp = await postOrder(orgName, csrf, cards[i].dataset.envId, i * 10);
+                if (!resp.ok && resp.status !== 0) {
+                    console.error('env reorder failed for', cards[i].dataset.envId, 'status', resp.status);
+                    break;
+                }
+            }
+        } catch (err) {
+            console.error('env reorder error:', err);
+        }
+        window.location.reload();
     }
 
     // Live DOM preview during dragover. Bound to the list container so it
