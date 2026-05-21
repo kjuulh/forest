@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/understory-io/forest/compare/v0.1.7...v0.1.8) (2026-05-21)
+
+
+### Features
+
+* **forage:** /device approval route for forest CLI web login ([#30](https://github.com/understory-io/forest/issues/30)) ([ee7ed88](https://github.com/understory-io/forest/commit/ee7ed88459df9f3f39171100ac4491e52b1108ff))
+
 ## [0.1.7](https://github.com/understory-io/forest/compare/v0.1.6...v0.1.7) (2026-05-21)
 
 
