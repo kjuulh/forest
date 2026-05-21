@@ -1,6 +1,25 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @source "../../templates";
+@source "../js/**/*.js";
+
+/* ── Compact text utilities ───────────────────────────────────────────────
+   Small font sizes used by the pipeline-builder node editor. Tailwind's
+   heuristic scanner doesn't extract arbitrary-value classes like
+   `text-[10px]` from JS string literals, so we expose them as named
+   utilities the scanner can detect normally. */
+@utility text-2xs {
+  font-size: 11px;
+  line-height: 14px;
+}
+@utility text-3xs {
+  font-size: 10px;
+  line-height: 13px;
+}
+@utility text-4xs {
+  font-size: 9px;
+  line-height: 12px;
+}
 
 /* ── App content container — single source of truth for page width ──── */
 @utility app-container {
