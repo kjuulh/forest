@@ -60,6 +60,7 @@ pub(crate) struct MockPlatformBehavior {
     pub update_member_role_result: Option<Result<OrgMember, PlatformError>>,
     pub get_artifact_by_slug_result: Option<Result<Artifact, PlatformError>>,
     pub list_environments_result: Option<Result<Vec<Environment>, PlatformError>>,
+    pub update_environment_result: Option<Result<Environment, PlatformError>>,
     pub list_destinations_result: Option<Result<Vec<Destination>, PlatformError>>,
     pub list_triggers_result: Option<Result<Vec<Trigger>, PlatformError>>,
     pub create_trigger_result: Option<Result<Trigger, PlatformError>>,
@@ -601,6 +602,27 @@ impl ForestPlatform for MockPlatformClient {
             name: name.into(),
             description: description.map(|s| s.to_string()),
             sort_order,
+            created_at: "2026-03-08T00:00:00Z".into(),
+        })
+    }
+
+    async fn update_environment(
+        &self,
+        _access_token: &str,
+        id: &str,
+        description: Option<&str>,
+        sort_order: Option<i32>,
+    ) -> Result<Environment, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        if let Some(result) = b.update_environment_result.clone() {
+            return result;
+        }
+        Ok(Environment {
+            id: id.into(),
+            organisation: "testorg".into(),
+            name: "env".into(),
+            description: description.map(|s| s.to_string()),
+            sort_order: sort_order.unwrap_or(0),
             created_at: "2026-03-08T00:00:00Z".into(),
         })
     }

@@ -629,6 +629,14 @@ pub trait ForestPlatform: Send + Sync {
         sort_order: i32,
     ) -> Result<Environment, PlatformError>;
 
+    async fn update_environment(
+        &self,
+        access_token: &str,
+        id: &str,
+        description: Option<&str>,
+        sort_order: Option<i32>,
+    ) -> Result<Environment, PlatformError>;
+
     async fn create_destination(
         &self,
         access_token: &str,

@@ -49,6 +49,10 @@ pub fn router() -> Router<AppState> {
             post(create_environment_submit),
         )
         .route(
+            "/orgs/{org}/destinations/environments/{id}/order",
+            post(reorder_environment_submit),
+        )
+        .route(
             "/orgs/{org}/destinations/create",
             post(create_destination_submit),
         )
@@ -3219,6 +3223,36 @@ async fn create_environment_submit(
         .await
         .map_err(|e| {
             internal_error(&state, "create environment error", &e)
+        })?;
+
+    Ok(Redirect::to(&format!("/orgs/{org}/destinations")).into_response())
+}
+
+#[derive(Deserialize)]
+struct ReorderEnvironmentForm {
+    _csrf: String,
+    sort_order: i32,
+}
+
+async fn reorder_environment_submit(
+    State(state): State<AppState>,
+    session: Session,
+    Path((org, id)): Path<(String, String)>,
+    Form(form): Form<ReorderEnvironmentForm>,
+) -> Result<Response, Response> {
+    let orgs = &session.user.orgs;
+    let current_org = require_org_membership(&state, orgs, &org)?;
+    require_admin(&state, current_org)?;
+    if !auth::validate_csrf(&session, &form._csrf) {
+        return Err(error_page(&state, StatusCode::FORBIDDEN, "Invalid request", "CSRF validation failed. Please try again."));
+    }
+
+    state
+        .platform_client
+        .update_environment(&session.access_token, &id, None, Some(form.sort_order))
+        .await
+        .map_err(|e| {
+            internal_error(&state, "update environment error", &e)
         })?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/destinations")).into_response())

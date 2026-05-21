@@ -1673,6 +1673,41 @@ impl ForestPlatform for GrpcForestClient {
     }
 
     #[tracing::instrument(skip_all)]
+    async fn update_environment(
+        &self,
+        access_token: &str,
+        id: &str,
+        description: Option<&str>,
+        sort_order: Option<i32>,
+    ) -> Result<Environment, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::UpdateEnvironmentRequest {
+                id: id.into(),
+                description: description.map(|s| s.to_string()),
+                sort_order,
+            },
+        )?;
+        let resp = self
+            .env_client()
+            .update_environment(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        let e = resp
+            .environment
+            .ok_or(PlatformError::Other("no environment in response".into()))?;
+        Ok(Environment {
+            id: e.id,
+            organisation: e.organisation,
+            name: e.name,
+            description: e.description.filter(|v| !v.is_empty()),
+            sort_order: e.sort_order,
+            created_at: e.created_at,
+        })
+    }
+
+    #[tracing::instrument(skip_all)]
     async fn create_destination(
         &self,
         access_token: &str,

@@ -1170,6 +1170,192 @@ async fn destinations_page_shows_empty_state() {
     assert!(html.contains("No environments yet"));
 }
 
+// ─── Environment reordering ─────────────────────────────────────────
+
+#[tokio::test]
+async fn reorder_environment_success_redirects() {
+    let (state, sessions) = test_state();
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/orgs/testorg/destinations/environments/env-prod/order")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("_csrf=test-csrf&sort_order=20"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response.headers().get("location").unwrap(),
+        "/orgs/testorg/destinations"
+    );
+}
+
+#[tokio::test]
+async fn reorder_environment_invalid_csrf_returns_403() {
+    let (state, sessions) = test_state();
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/orgs/testorg/destinations/environments/env-prod/order")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("_csrf=wrong-token&sort_order=20"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn reorder_environment_non_admin_returns_403() {
+    let (state, sessions) = test_state();
+    let cookie = create_test_session_member(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/orgs/testorg/destinations/environments/env-prod/order")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("_csrf=test-csrf&sort_order=20"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn reorder_environment_non_member_returns_403() {
+    let (state, sessions) = test_state();
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/orgs/otherorg/destinations/environments/env-prod/order")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("_csrf=test-csrf&sort_order=20"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn reorder_environment_unauthenticated_redirects() {
+    let response = test_app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/orgs/testorg/destinations/environments/env-prod/order")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("_csrf=test-csrf&sort_order=20"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert!(response.headers().get("location").unwrap().to_str().unwrap().starts_with("/login"));
+}
+
+#[tokio::test]
+async fn destinations_page_renders_drag_handles_for_admin() {
+    let (state, sessions) = test_state_with(
+        MockForestClient::new(),
+        MockPlatformClient::with_behavior(MockPlatformBehavior {
+            list_environments_result: Some(Ok(vec![
+                forage_core::platform::Environment {
+                    id: "env-prod".into(),
+                    organisation: "testorg".into(),
+                    name: "prod".into(),
+                    description: None,
+                    sort_order: 0,
+                    created_at: "2026-03-08T00:00:00Z".into(),
+                },
+            ])),
+            ..Default::default()
+        }),
+    );
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/destinations")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(html.contains("data-env-id=\"env-prod\""), "expected drag-target attribute for admin");
+    assert!(html.contains("draggable=\"true\""), "expected draggable cards for admin");
+}
+
+#[tokio::test]
+async fn destinations_page_no_drag_handles_for_non_admin() {
+    let (state, sessions) = test_state_with(
+        MockForestClient::new(),
+        MockPlatformClient::with_behavior(MockPlatformBehavior {
+            list_environments_result: Some(Ok(vec![
+                forage_core::platform::Environment {
+                    id: "env-prod".into(),
+                    organisation: "testorg".into(),
+                    name: "prod".into(),
+                    description: None,
+                    sort_order: 0,
+                    created_at: "2026-03-08T00:00:00Z".into(),
+                },
+            ])),
+            ..Default::default()
+        }),
+    );
+    let cookie = create_test_session_member(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/destinations")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(!html.contains("draggable=\"true\""), "non-admin should not see drag handles");
+}
+
 // ─── Releases ────────────────────────────────────────────────────────
 
 #[tokio::test]

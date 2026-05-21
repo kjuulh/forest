@@ -7,11 +7,16 @@
     </div>
 
     {% if environments | length > 0 %}
-    <div class="space-y-6">
+    <div id="env-list" class="space-y-6" data-org="{{ org_name }}">
         {% for env in environments %}
-        <div class="border border-gray-200 rounded-lg overflow-hidden">
+        <div class="env-card border border-gray-200 rounded-lg overflow-hidden{% if is_admin %} cursor-move{% endif %}"
+             data-env-id="{{ env.id }}"
+             {% if is_admin %}draggable="true"{% endif %}>
             <div class="px-5 py-3 bg-gray-50 flex items-center justify-between">
                 <div class="flex items-center gap-2">
+                    {% if is_admin %}
+                    <span class="env-drag-handle text-gray-300 select-none" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+                    {% endif %}
                     <span class="w-2 h-2 rounded-full shrink-0 {% if 'prod' in env.name and 'preprod' not in env.name %}bg-pink-500{% elif 'preprod' in env.name or 'pre-prod' in env.name %}bg-orange-500{% elif 'stag' in env.name %}bg-yellow-500{% elif 'dev' in env.name %}bg-violet-500{% else %}bg-gray-400{% endif %}"></span>
                     <span class="font-medium text-gray-900">{{ env.name }}</span>
                     {% if env.description %}
@@ -453,5 +458,86 @@ function updateTypeFields(idx) {
         typeFieldsContainer.appendChild(wrapper);
     });
 }
+
+{% if is_admin %}
+// ─── Environment drag-and-drop reordering ────────────────────────────
+(function() {
+    const list = document.getElementById('env-list');
+    if (!list) return;
+
+    let dragged = null;
+    let originalNextSibling = null;
+
+    list.querySelectorAll('.env-card').forEach(function(card) {
+        card.addEventListener('dragstart', function(e) {
+            dragged = card;
+            originalNextSibling = card.nextElementSibling;
+            card.classList.add('opacity-50');
+            e.dataTransfer.effectAllowed = 'move';
+            // Some browsers require setData to start a drag
+            try { e.dataTransfer.setData('text/plain', card.dataset.envId); } catch (_) {}
+        });
+
+        card.addEventListener('dragend', function() {
+            card.classList.remove('opacity-50');
+        });
+
+        card.addEventListener('dragover', function(e) {
+            if (!dragged || dragged === card) return;
+            e.preventDefault();
+            const rect = card.getBoundingClientRect();
+            const insertBefore = (e.clientY - rect.top) < rect.height / 2;
+            if (insertBefore) {
+                list.insertBefore(dragged, card);
+            } else {
+                list.insertBefore(dragged, card.nextElementSibling);
+            }
+        });
+
+        card.addEventListener('drop', function(e) {
+            e.preventDefault();
+            if (!dragged) return;
+            const cards = Array.from(list.querySelectorAll('.env-card'));
+            const newIndex = cards.indexOf(dragged);
+            const movedId = dragged.dataset.envId;
+            const newOrder = newIndex * 10;
+
+            // Skip if position unchanged
+            if (dragged.nextElementSibling === originalNextSibling) {
+                dragged = null;
+                return;
+            }
+
+            const csrfInput = document.querySelector('input[name="_csrf"]');
+            const csrf = csrfInput ? csrfInput.value : '';
+            const orgName = list.dataset.org;
+
+            const body = new URLSearchParams();
+            body.set('_csrf', csrf);
+            body.set('sort_order', String(newOrder));
+
+            fetch('/orgs/' + encodeURIComponent(orgName) + '/destinations/environments/' + encodeURIComponent(movedId) + '/order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: body.toString(),
+                credentials: 'same-origin',
+                redirect: 'manual',
+            }).then(function(resp) {
+                // Manual redirect leaves resp.type === 'opaqueredirect' on 3xx — that's success.
+                if (resp.ok || resp.type === 'opaqueredirect') {
+                    // Reload to pick up the authoritative server order (and badge values).
+                    window.location.reload();
+                } else {
+                    window.location.reload();
+                }
+            }).catch(function() {
+                window.location.reload();
+            });
+
+            dragged = null;
+        });
+    });
+})();
+{% endif %}
 </script>
 {% endblock %}
