@@ -3,7 +3,7 @@
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
 
-use crate::global::service::{GlobalService, ToolSource, ToolStatus};
+use crate::global::service::{GlobalService, SyncOutcome, ToolSource, ToolStatus};
 use crate::global::shim::QualifiedRef;
 use crate::state::State;
 
@@ -221,6 +221,12 @@ pub struct AddCommand {
     /// Repeatable.
     #[arg(long = "alias")]
     alias: Vec<String>,
+
+    /// Skip the implicit `forest global sync` step after writing the
+    /// dependency. Useful in scripts / CI that don't want extra network
+    /// calls during `add`.
+    #[arg(long = "no-sync")]
+    no_sync: bool,
 }
 
 impl AddCommand {
@@ -251,6 +257,7 @@ impl AddCommand {
             for s in &outcome.shadowed {
                 eprintln!("  · {}  shadowed by [dependencies]", s);
             }
+            self.run_post_add_sync(&svc).await;
             return Ok(());
         }
 
@@ -268,8 +275,52 @@ impl AddCommand {
         } else {
             eprintln!("(no tool facet — no shim created)");
         }
+        self.run_post_add_sync(&svc).await;
         Ok(())
     }
+
+    /// Reconcile shims with `forest.cue` after a successful add. The
+    /// dependency has already been persisted, so a sync failure here is
+    /// surfaced as a warning — the user can re-run `forest global sync`.
+    async fn run_post_add_sync(&self, svc: &GlobalService) {
+        if self.no_sync {
+            return;
+        }
+        match svc.sync_shims().await {
+            Ok(out) => {
+                for line in format_post_add_sync(&out) {
+                    eprintln!("{line}");
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "warning: post-add sync failed: {e:#}; run `forest global sync` to retry"
+                );
+            }
+        }
+    }
+}
+
+/// Render the stderr lines for the post-add sync step. Returns an empty
+/// vec when there is nothing to report (no shims created or deleted) so
+/// callers can stay quiet in the common case.
+fn format_post_add_sync(out: &SyncOutcome) -> Vec<String> {
+    if out.created.is_empty() && out.deleted.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = Vec::with_capacity(1 + out.created.len() + out.deleted.len());
+    lines.push(format!(
+        "sync (after add): {} shim(s) created, {} deleted",
+        out.created.len(),
+        out.deleted.len()
+    ));
+    for s in &out.created {
+        lines.push(format!("  + {s}"));
+    }
+    for s in &out.deleted {
+        lines.push(format!("  − {s}"));
+    }
+    lines
 }
 
 fn parse_kv_list(items: &[String], flag: &str) -> anyhow::Result<Vec<(String, String)>> {
@@ -529,4 +580,99 @@ fn parse_component_ref(s: &str) -> anyhow::Result<(String, String, Option<String
         anyhow::bail!("malformed reference: {s:?}");
     }
     Ok((org.to_string(), name.to_string(), version))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct AddHarness {
+        #[command(flatten)]
+        add: AddCommand,
+    }
+
+    #[test]
+    fn no_sync_flag_defaults_to_false() {
+        let h = AddHarness::try_parse_from(["forest-global-add", "cuteorg/rg"]).unwrap();
+        assert!(!h.add.no_sync);
+    }
+
+    #[test]
+    fn no_sync_flag_is_recognised() {
+        let h =
+            AddHarness::try_parse_from(["forest-global-add", "cuteorg/rg", "--no-sync"]).unwrap();
+        assert!(h.add.no_sync);
+    }
+
+    #[test]
+    fn no_sync_works_with_catalogue_form() {
+        let h = AddHarness::try_parse_from([
+            "forest-global-add",
+            "cuteorg",
+            "--ban",
+            "foo",
+            "--no-sync",
+        ])
+        .unwrap();
+        assert!(h.add.no_sync);
+        assert_eq!(h.add.component, "cuteorg");
+        assert_eq!(h.add.ban, vec!["foo".to_string()]);
+    }
+
+    #[test]
+    fn no_sync_is_a_flag_not_a_value_arg() {
+        // `--no-sync=true` should NOT be accepted because the field is a
+        // bool flag (SetTrue), not a value-taking argument.
+        let res =
+            AddHarness::try_parse_from(["forest-global-add", "cuteorg/rg", "--no-sync=true"]);
+        assert!(res.is_err(), "expected clap error, got Ok");
+    }
+
+    #[test]
+    fn format_post_add_sync_handles_many_entries() {
+        let out = SyncOutcome {
+            created: vec!["a".into(), "b".into()],
+            deleted: vec!["c".into(), "d".into(), "e".into()],
+        };
+        let lines = format_post_add_sync(&out);
+        assert_eq!(lines.len(), 1 + 2 + 3);
+        assert_eq!(lines[0], "sync (after add): 2 shim(s) created, 3 deleted");
+        assert_eq!(&lines[1..3], &["  + a".to_string(), "  + b".to_string()]);
+        assert_eq!(
+            &lines[3..6],
+            &[
+                "  − c".to_string(),
+                "  − d".to_string(),
+                "  − e".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn format_post_add_sync_is_silent_when_no_changes() {
+        let out = SyncOutcome {
+            created: vec![],
+            deleted: vec![],
+        };
+        assert!(format_post_add_sync(&out).is_empty());
+    }
+
+    #[test]
+    fn format_post_add_sync_reports_created_and_deleted() {
+        let out = SyncOutcome {
+            created: vec!["rg".into()],
+            deleted: vec!["old".into()],
+        };
+        let lines = format_post_add_sync(&out);
+        assert_eq!(
+            lines,
+            vec![
+                "sync (after add): 1 shim(s) created, 1 deleted".to_string(),
+                "  + rg".to_string(),
+                "  − old".to_string(),
+            ]
+        );
+    }
 }
