@@ -466,75 +466,84 @@ function updateTypeFields(idx) {
     if (!list) return;
 
     let dragged = null;
-    let originalNextSibling = null;
+    let originalIndex = -1;
+
+    function indexOf(card) {
+        return Array.from(list.querySelectorAll('.env-card')).indexOf(card);
+    }
+
+    function commitReorder(card) {
+        const newIndex = indexOf(card);
+        if (newIndex < 0 || newIndex === originalIndex) return;
+
+        const movedId = card.dataset.envId;
+        const newOrder = newIndex * 10;
+        const csrfInput = document.querySelector('input[name="_csrf"]');
+        const csrf = csrfInput ? csrfInput.value : '';
+        const orgName = list.dataset.org;
+
+        const body = new URLSearchParams();
+        body.set('_csrf', csrf);
+        body.set('sort_order', String(newOrder));
+
+        fetch('/orgs/' + encodeURIComponent(orgName) + '/destinations/environments/' + encodeURIComponent(movedId) + '/order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString(),
+            credentials: 'same-origin',
+        }).then(function(resp) {
+            if (!resp.ok && resp.status !== 0) {
+                console.error('env reorder failed:', resp.status);
+            }
+            window.location.reload();
+        }).catch(function(err) {
+            console.error('env reorder error:', err);
+            window.location.reload();
+        });
+    }
+
+    // Live DOM preview during dragover. Bound to the list container so it
+    // works even when the cursor is over the dragged element itself.
+    list.addEventListener('dragover', function(e) {
+        if (!dragged) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+
+        const target = e.target.closest('.env-card');
+        if (!target || target === dragged) return;
+
+        const rect = target.getBoundingClientRect();
+        const insertBefore = (e.clientY - rect.top) < rect.height / 2;
+        if (insertBefore) {
+            list.insertBefore(dragged, target);
+        } else {
+            list.insertBefore(dragged, target.nextElementSibling);
+        }
+    });
+
+    // Suppress default browser handling on drop (navigation to URL etc).
+    list.addEventListener('drop', function(e) {
+        if (dragged) e.preventDefault();
+    });
 
     list.querySelectorAll('.env-card').forEach(function(card) {
         card.addEventListener('dragstart', function(e) {
             dragged = card;
-            originalNextSibling = card.nextElementSibling;
+            originalIndex = indexOf(card);
             card.classList.add('opacity-50');
             e.dataTransfer.effectAllowed = 'move';
-            // Some browsers require setData to start a drag
             try { e.dataTransfer.setData('text/plain', card.dataset.envId); } catch (_) {}
         });
 
+        // dragend always fires on the source when a drag ends, regardless
+        // of where (or whether) the user dropped. Use it as the commit
+        // hook so we don't depend on drop firing on the right target.
         card.addEventListener('dragend', function() {
             card.classList.remove('opacity-50');
-        });
-
-        card.addEventListener('dragover', function(e) {
-            if (!dragged || dragged === card) return;
-            e.preventDefault();
-            const rect = card.getBoundingClientRect();
-            const insertBefore = (e.clientY - rect.top) < rect.height / 2;
-            if (insertBefore) {
-                list.insertBefore(dragged, card);
-            } else {
-                list.insertBefore(dragged, card.nextElementSibling);
-            }
-        });
-
-        card.addEventListener('drop', function(e) {
-            e.preventDefault();
-            if (!dragged) return;
-            const cards = Array.from(list.querySelectorAll('.env-card'));
-            const newIndex = cards.indexOf(dragged);
-            const movedId = dragged.dataset.envId;
-            const newOrder = newIndex * 10;
-
-            // Skip if position unchanged
-            if (dragged.nextElementSibling === originalNextSibling) {
-                dragged = null;
-                return;
-            }
-
-            const csrfInput = document.querySelector('input[name="_csrf"]');
-            const csrf = csrfInput ? csrfInput.value : '';
-            const orgName = list.dataset.org;
-
-            const body = new URLSearchParams();
-            body.set('_csrf', csrf);
-            body.set('sort_order', String(newOrder));
-
-            fetch('/orgs/' + encodeURIComponent(orgName) + '/destinations/environments/' + encodeURIComponent(movedId) + '/order', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: body.toString(),
-                credentials: 'same-origin',
-                redirect: 'manual',
-            }).then(function(resp) {
-                // Manual redirect leaves resp.type === 'opaqueredirect' on 3xx — that's success.
-                if (resp.ok || resp.type === 'opaqueredirect') {
-                    // Reload to pick up the authoritative server order (and badge values).
-                    window.location.reload();
-                } else {
-                    window.location.reload();
-                }
-            }).catch(function() {
-                window.location.reload();
-            });
-
+            const moved = dragged;
             dragged = null;
+            if (!moved) return;
+            commitReorder(moved);
         });
     });
 })();
