@@ -149,6 +149,58 @@ case ":$PATH:" in
         ;;
 esac
 
+# ── Shell integration ────────────────────────────────────────────
+# `forest shell <shell>` emits an eval-able block (PATH prepend for
+# tools installed via `forest global add` + helper functions like
+# `forest-tmp`). For users to benefit, they need an `eval` line in
+# their shell rc file. We add it once, idempotently — running the
+# installer twice doesn't duplicate the line.
+#
+# Set FOREST_NO_SHELL_INTEGRATION=1 to skip this — useful for image
+# builds, CI, and dotfile-managed setups (chezmoi/yadm/etc.) that
+# don't want random appends.
+#
+# The `command -v forest >/dev/null` guard means the appended line
+# silently no-ops in any environment where forest isn't on PATH
+# (e.g. a remote box you scp'd your dotfiles to), instead of
+# printing "command not found" on every shell start.
+if [ -z "${FOREST_NO_SHELL_INTEGRATION:-}" ]; then
+    case "${SHELL##*/}" in
+        zsh)  rc_path="$HOME/.zshrc";  rc_display="~/.zshrc";  forest_shell_arg="zsh"  ;;
+        bash) rc_path="$HOME/.bashrc"; rc_display="~/.bashrc"; forest_shell_arg="bash" ;;
+        *)    rc_path="";              rc_display="";          forest_shell_arg=""     ;;
+    esac
+
+    if [ -n "$rc_path" ]; then
+        # Detect ANY prior `forest shell` line so we never duplicate,
+        # even if the user added it by hand or with an older marker.
+        if [ -f "$rc_path" ] && grep -qF 'forest shell' "$rc_path"; then
+            echo "==> forest shell integration already present in $rc_display"
+        else
+            integration_block="
+# forest shell integration (added by install.sh — see \`forest shell --help\`)
+command -v forest >/dev/null 2>&1 && eval \"\$(forest shell $forest_shell_arg)\""
+
+            if printf '%s\n' "$integration_block" >> "$rc_path" 2>/dev/null; then
+                echo "==> added forest shell integration to $rc_display"
+                echo "    run 'source $rc_display' or open a new shell to activate"
+            else
+                # File unwritable — almost always means it's owned by
+                # root via a misconfigured shell. Print the line so
+                # the user can paste it manually.
+                echo "==> could not write to $rc_path; add this to your rc file:"
+                echo "    command -v forest >/dev/null 2>&1 && eval \"\$(forest shell $forest_shell_arg)\""
+            fi
+        fi
+    else
+        # zsh and bash are what `forest shell` supports today; fish
+        # users can still benefit once `forest shell fish` exists.
+        # Surface a hint instead of silently doing nothing.
+        echo "    note: shell integration is auto-installed for zsh and bash only"
+        echo "          (detected shell: ${SHELL##*/}); skip with FOREST_NO_SHELL_INTEGRATION=1"
+    fi
+fi
+
 # ── Optional first-run context provisioning ───────────────────────
 #
 # If the operator sets FOREST_PROFILE=name=...,server=... in the

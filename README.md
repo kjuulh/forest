@@ -25,12 +25,15 @@ gh release download --repo understory-io/forest --pattern install.sh -O - \
   | FOREST_PROFILE='name=understory-prod,server=https://forest.development.understory.sh' bash
 ```
 
-Add the forest shell integration to your shell rc file so completions and
-helper functions are available in every new session:
+The installer also appends the forest shell integration to your shell rc
+file (`~/.zshrc` for zsh, `~/.bashrc` for bash) so completions and
+helper functions are available in every new session. Already present →
+skipped. To opt out, pass `FOREST_NO_SHELL_INTEGRATION=1`. For other
+shells, add this line yourself:
 
 ```bash
 # ~/.zshrc (or ~/.bashrc — swap `zsh` for `bash`)
-eval "$(forest shell zsh)"
+command -v forest >/dev/null 2>&1 && eval "$(forest shell zsh)"
 ```
 
 To pin to a specific version, pass it to both the download (so the script
