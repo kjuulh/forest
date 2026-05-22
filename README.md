@@ -15,7 +15,12 @@ gh release download --repo understory-io/forest --pattern install.sh -O - | bash
 ```
 
 The script downloads the platform tarball + checksum, verifies it, and
-installs `forest` to `/usr/local/bin` (override with `PREFIX=`).
+installs `forest` to `~/.local/bin` — no sudo needed. If `~/.local/bin`
+isn't on your `PATH`, the installer also appends an entry to your
+`~/.zshrc` / `~/.bashrc` to fix that (idempotent; opt out with
+`FOREST_NO_SHELL_INTEGRATION=1`). For a system-wide install, pass
+`PREFIX=/usr/local` — that path needs sudo, which the script handles
+when a TTY is attached.
 
 Point forest at your server in one step by passing `FOREST_PROFILE` to
 the installer — the first context provisioned becomes the active default:
@@ -79,8 +84,11 @@ one-time code, and signs you in once you approve. Mirrors `gh auth login`.
 ### Other ways
 
 ```bash
-# Install under ~/.local/bin instead of /usr/local/bin (no sudo)
-gh release download --repo understory-io/forest --pattern install.sh -O - | PREFIX=$HOME/.local bash
+# System-wide install (needs sudo for /usr/local/bin)
+gh release download --repo understory-io/forest --pattern install.sh -O - | PREFIX=/usr/local bash
+
+# Arbitrary prefix (still no sudo if you own it)
+gh release download --repo understory-io/forest --pattern install.sh -O - | PREFIX=$HOME/opt/forest bash
 ```
 
 ### Keeping forest up to date

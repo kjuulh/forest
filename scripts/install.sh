@@ -14,9 +14,13 @@
 #   The signed-in user must have read access to understory-io/forest.
 #
 # ── Usage ─────────────────────────────────────────────────────────
-#   ./install.sh                     # install latest release
+#   ./install.sh                     # install latest release (to ~/.local/bin)
 #   ./install.sh v0.2.1              # install a specific tag
-#   PREFIX=$HOME/.local ./install.sh # install under PREFIX/bin (default /usr/local)
+#   PREFIX=/usr/local ./install.sh   # system-wide install (needs sudo)
+#
+# Default install location is `$HOME/.local/bin` — no sudo required.
+# Falls back to `/usr/local` when running as root (image builds, CI) or
+# when HOME is unset. Override with PREFIX=… either way.
 #
 # ── Bootstrap ─────────────────────────────────────────────────────
 #   gh release download --repo understory-io/forest --pattern install.sh -O - | bash
@@ -29,8 +33,20 @@ set -euo pipefail
 
 REPO="understory-io/forest"
 BIN="forest"
-PREFIX="${PREFIX:-/usr/local}"
 VERSION="${1:-}"
+
+# Default install location resolves to $HOME/.local when there's a real
+# user (no sudo dance, XDG-conventional), and /usr/local when running
+# as root or without a HOME — covers Docker image builds, CI, and any
+# system-wide install where the operator deliberately set PREFIX.
+default_prefix() {
+    if [ "$(id -u 2>/dev/null)" = "0" ] || [ -z "${HOME:-}" ]; then
+        echo "/usr/local"
+    else
+        echo "$HOME/.local"
+    fi
+}
+PREFIX="${PREFIX:-$(default_prefix)}"
 
 err() { echo "install.sh: $*" >&2; exit 1; }
 
@@ -129,22 +145,66 @@ fi
 
 echo "==> $BIN $VERSION installed at $target_path"
 
-# Friendly nudge if PREFIX/bin isn't on PATH (common when PREFIX is overridden).
-# Suggest the concrete shell-rc edit so the user can act without guessing.
+# ── PATH integration ─────────────────────────────────────────────
+# If $PREFIX/bin isn't on PATH (default-install on macOS, or any
+# PREFIX override), try to fix it by appending to the same shell rc
+# the integration block lives in. Marker comment is distinct so the
+# PATH block and the `forest shell` eval block can be re-detected
+# / managed independently.
+#
+# Same FOREST_NO_SHELL_INTEGRATION env var controls both (the user
+# almost always wants them together or not at all). Unknown shells
+# and unwritable rc files fall back to a print-this-line nudge.
 case ":$PATH:" in
-    *":$PREFIX/bin:"*) ;;
+    *":$PREFIX/bin:"*)
+        # Already on PATH, nothing to do.
+        :
+        ;;
     *)
-        rc="your shell config"
-        case "${SHELL##*/}" in
-            bash) rc="~/.bashrc" ;;
-            zsh)  rc="~/.zshrc"  ;;
-            fish) rc="~/.config/fish/config.fish" ;;
-        esac
-        echo "    note: $PREFIX/bin is not in your PATH"
-        if [ "${SHELL##*/}" = "fish" ]; then
-            echo "    add to $rc:  fish_add_path $PREFIX/bin"
-        else
-            echo "    add to $rc:  export PATH=\"$PREFIX/bin:\$PATH\""
+        path_added=
+        if [ -z "${FOREST_NO_SHELL_INTEGRATION:-}" ]; then
+            case "${SHELL##*/}" in
+                zsh)  path_rc="$HOME/.zshrc";  path_rc_display="~/.zshrc"  ;;
+                bash) path_rc="$HOME/.bashrc"; path_rc_display="~/.bashrc" ;;
+                *)    path_rc="";              path_rc_display=""          ;;
+            esac
+
+            if [ -n "$path_rc" ]; then
+                path_marker="# forest install: prepend $PREFIX/bin to PATH"
+                if [ -f "$path_rc" ] && grep -qF "$path_marker" "$path_rc"; then
+                    echo "==> $PREFIX/bin PATH entry already present in $path_rc_display"
+                    path_added=1
+                else
+                    path_block="
+$path_marker (added by install.sh)
+case \":\$PATH:\" in
+    *\":$PREFIX/bin:\"*) ;;
+    *) export PATH=\"$PREFIX/bin:\$PATH\" ;;
+esac"
+                    if printf '%s\n' "$path_block" >> "$path_rc" 2>/dev/null; then
+                        echo "==> added $PREFIX/bin to PATH in $path_rc_display"
+                        echo "    run 'source $path_rc_display' or open a new shell to activate"
+                        path_added=1
+                    fi
+                fi
+            fi
+        fi
+
+        # Fall-through nudge for cases where we couldn't auto-add
+        # (FOREST_NO_SHELL_INTEGRATION set, unknown shell, unwritable rc).
+        if [ -z "${path_added:-}" ]; then
+            rc="your shell config"
+            case "${SHELL##*/}" in
+                bash) rc="~/.bashrc" ;;
+                zsh)  rc="~/.zshrc"  ;;
+                fish) rc="~/.config/fish/config.fish" ;;
+            esac
+            echo "    note: $PREFIX/bin is not in your PATH"
+            if [ "${SHELL##*/}" = "fish" ]; then
+                echo "    add to $rc:  fish_add_path $PREFIX/bin"
+            else
+                echo "    add to $rc:  export PATH=\"$PREFIX/bin:\$PATH\""
+            fi
         fi
         ;;
 esac
