@@ -5,12 +5,24 @@ Codify your development workflows — CI, deployments, component sharing — as
 
 ## Install
 
-Point forest at your server in one step by passing `FOREST_PROFILE` to the
-installer. The first context provisioned becomes the active default:
+Forest is distributed as a release asset on this repo. Because the repo
+is private, the install script uses the GitHub CLI (which you need
+authenticated anyway for day-to-day forest access) instead of an
+unauthenticated `curl` against a public mirror.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh \
-  | FOREST_PROFILE='name=understory-prod,server=https://forest.development.understory.sh' bash -s -- v0.1.3
+gh release download --repo understory-io/forest --pattern install.sh -O - | bash
+```
+
+The script downloads the platform tarball + checksum, verifies it, and
+installs `forest` to `/usr/local/bin` (override with `PREFIX=`).
+
+Point forest at your server in one step by passing `FOREST_PROFILE` to
+the installer — the first context provisioned becomes the active default:
+
+```bash
+gh release download --repo understory-io/forest --pattern install.sh -O - \
+  | FOREST_PROFILE='name=understory-prod,server=https://forest.development.understory.sh' bash
 ```
 
 Add the forest shell integration to your shell rc file so completions and
@@ -21,7 +33,15 @@ helper functions are available in every new session:
 eval "$(forest shell zsh)"
 ```
 
-The trailing `v0.1.3` pins the forest version; drop it to install the latest.
+To pin to a specific version, pass it to both the download (so the script
+itself comes from that release) and to the install script (so it grabs
+the matching tarball). `bash -s --` forwards positional args when the
+script comes in via stdin:
+
+```bash
+gh release download v0.1.7 --repo understory-io/forest --pattern install.sh -O - | bash -s -- v0.1.7
+```
+
 `CUE_REGISTRY` is derived from the server automatically, so you don't have to
 remember to export it. Every command afterwards prints a one-line banner
 showing which context it's running against.
@@ -56,11 +76,8 @@ one-time code, and signs you in once you approve. Mirrors `gh auth login`.
 ### Other ways
 
 ```bash
-# Pin a specific version
-curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh | bash -s -- v0.2.0
-
 # Install under ~/.local/bin instead of /usr/local/bin (no sudo)
-curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh | PREFIX=$HOME/.local bash
+gh release download --repo understory-io/forest --pattern install.sh -O - | PREFIX=$HOME/.local bash
 ```
 
 ### Keeping forest up to date

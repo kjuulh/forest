@@ -19,6 +19,9 @@
 #   PREFIX=$HOME/.local ./install.sh # install under PREFIX/bin (default /usr/local)
 #
 # ── Bootstrap ─────────────────────────────────────────────────────
+#   gh release download --repo understory-io/forest --pattern install.sh -O - | bash
+#
+# Or the two-step form if you want to inspect the script first:
 #   gh release download --repo understory-io/forest --pattern install.sh
 #   bash install.sh
 

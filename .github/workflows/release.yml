@@ -1,13 +1,20 @@
 name: Release
 
-# Builds the forest CLI for the platforms Homebrew needs, attaches
-# tarballs + SHA256 sums to the GitHub release, then regenerates
-# `Formula/forest.rb` in understory-io/homebrew-tap so
-# `brew install understory-io/tap/forest` picks up the new version.
+# Builds the forest CLI for the supported platforms, attaches tarballs
+# + SHA256 sums + the install script to the GitHub release.
 #
 # Triggered by `release-please.yml` publishing a release after a merge
 # of its auto-generated release PR. The release tag is in the form
 # `v<X.Y.Z>` (no component prefix, see release-please-config.json).
+#
+# Distribution model is single-source: everything users need to install
+# forest lives on the release itself.
+#
+#   gh release download --repo understory-io/forest --pattern install.sh -O - | bash
+#
+# No homebrew tap, no mirrored install script, no separate distribution
+# repo — install.sh on each release is the single source of truth and
+# uses `gh release download` to fetch the matching platform tarball.
 #
 # This workflow intentionally builds ONLY the `forest` CLI — not
 # `forest-server` (server-side, has private git deps) and not the
@@ -15,10 +22,10 @@ name: Release
 # ci.yaml). The `forest` crate has no private deps and is cheap to
 # build natively on each target.
 #
-# Windows builds are intentionally omitted — Homebrew has no Windows
-# story, and the CLI's primary distribution channel here is Homebrew.
-# Windows users can build from source until a Scoop / Chocolatey
-# manifest is set up.
+# Windows builds are intentionally omitted — they're not on the
+# supported target list (`scripts/install.sh` rejects them). Windows
+# users can build from source until a Scoop / Chocolatey manifest is
+# set up.
 
 on:
   release:
@@ -151,18 +158,13 @@ jobs:
             "${CHECKSUM_PATH}"
 
   publish-install-script:
-    # End users can't `curl | bash` directly from the forest repo
-    # because it's private. Two distribution paths instead:
+    # End users can't `curl | bash` directly from the forest repo because
+    # it's private — but they can `gh release download` it. Each release
+    # carries `install.sh` as an asset; the script itself uses
+    # `gh release download` (same auth the user already needs for forest)
+    # to fetch the matching platform tarball.
     #
-    #   1. Attach `install.sh` to each forest release as an asset.
-    #      Users who already have `gh` access can fetch it via:
-    #        gh release download --repo understory-io/forest --pattern install.sh
-    #
-    #   2. Mirror it to the *public* `understory-io/homebrew-tap` repo
-    #      as `install-forest.sh`, so a one-liner works:
-    #        curl -fsSL https://raw.githubusercontent.com/understory-io/homebrew-tap/main/install-forest.sh | bash
-    #      The script itself still needs `gh auth` to fetch the
-    #      platform tarball — only the script's distribution is public.
+    #   gh release download --repo understory-io/forest --pattern install.sh -O - | bash
     needs: [build]
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
@@ -176,34 +178,3 @@ jobs:
           gh release upload "${{ github.event.release.tag_name }}" \
             scripts/install.sh \
             --clobber
-
-      # GitHub App token scoped to homebrew-tap. Same App that used to
-      # carry the formula; now it just keeps install-forest.sh in sync.
-      - uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ secrets.BREW_APP_ID }}
-          private-key: ${{ secrets.BREW_SSH_KEY }}
-          owner: understory-io
-          repositories: homebrew-tap
-
-      - name: Mirror install.sh to homebrew-tap
-        run: |
-          git clone "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/understory-io/homebrew-tap.git" tap
-          cp scripts/install.sh tap/install-forest.sh
-          cd tap
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Stage first, then check the cached diff. `git diff
-          # install-forest.sh` (worktree-vs-HEAD) ignores UNTRACKED
-          # files, so the very first run reports "no change" and the
-          # mirror is never created — that's the bug v0.1.3 shipped
-          # with. `git diff --cached` against the index correctly
-          # treats a newly-added file as a change.
-          git add install-forest.sh
-          if git diff --cached --quiet -- install-forest.sh; then
-              echo "install-forest.sh is up to date (no commit needed)"
-              exit 0
-          fi
-          git commit -m "Sync install-forest.sh from forest ${{ github.event.release.tag_name }}"
-          git push
