@@ -37,6 +37,10 @@ pub fn router() -> Router<AppState> {
             post(remove_email_submit),
         )
         .route(
+            "/settings/account/emails/resend-verification",
+            post(resend_verification_submit),
+        )
+        .route(
             "/settings/account/notifications",
             post(update_notification_preference),
         )
@@ -823,6 +827,7 @@ fn flash_message(flash: Option<&str>) -> Option<&'static str> {
     match flash? {
         "linked_github" => Some("GitHub account linked."),
         "linked_google" => Some("Google account linked."),
+        "verification_resent" => Some("Verification email sent. Check your inbox."),
         _ => None,
     }
 }
@@ -846,6 +851,12 @@ fn error_message(error: Option<&str>) -> Option<&'static str> {
         }
         "link_failed_github" => Some("Linking your GitHub account failed. Please try again."),
         "link_failed_google" => Some("Linking your Google account failed. Please try again."),
+        "verification_resend_ineligible" => {
+            Some("That email isn't eligible for verification right now.")
+        }
+        "verification_resend_failed" => {
+            Some("Couldn't send the verification email. Please try again.")
+        }
         _ => None,
     }
 }
@@ -1133,6 +1144,72 @@ async fn remove_email_submit(
             render_account(&state, &session, Some("Could not remove email. Please try again."), &[], &[], &[], false, None, None)
         }
     }
+}
+
+// ─── Resend verification email (account settings) ───────────────────
+
+#[derive(Deserialize)]
+struct ResendVerificationForm {
+    _csrf: String,
+    email: String,
+}
+
+/// Resend a verification email for an unverified address on the
+/// session user's account. Triggered by the "Try sending again" button
+/// next to each unverified email in /settings/account.
+///
+/// Ownership check is critical: we only resend for emails that already
+/// belong to the caller — otherwise this becomes a free "trigger an
+/// email to anyone" endpoint and forest's email-verification token
+/// (issued by forage) leaks signal about who has an account.
+async fn resend_verification_submit(
+    State(state): State<AppState>,
+    session: Session,
+    Form(form): Form<ResendVerificationForm>,
+) -> Result<Response, Response> {
+    if !auth::validate_csrf(&session, &form._csrf) {
+        return Err(error_page(
+            &state,
+            StatusCode::FORBIDDEN,
+            "Invalid request",
+            "CSRF validation failed.",
+        ));
+    }
+
+    // The submitted email must belong to the caller AND must currently
+    // be unverified — verified emails don't need a resend, and a
+    // resend request for one that's not on the account is a likely
+    // probe / tampered form. The error message is generic to avoid
+    // leaking which case triggered (not-yours vs already-verified).
+    let owned_unverified = session
+        .user
+        .emails
+        .iter()
+        .any(|e| e.email == form.email && !e.verified);
+    if !owned_unverified {
+        return Ok(Redirect::to(
+            "/settings/account?error=verification_resend_ineligible",
+        )
+        .into_response());
+    }
+
+    if let Err(e) = enqueue_verification_email(&state, &form.email).await {
+        tracing::warn!(
+            error = %e,
+            user_id = %session.user.user_id,
+            "resend verification email failed to enqueue"
+        );
+        return Ok(Redirect::to(
+            "/settings/account?error=verification_resend_failed",
+        )
+        .into_response());
+    }
+
+    tracing::info!(
+        user_id = %session.user.user_id,
+        "resend verification email enqueued from account page"
+    );
+    Ok(Redirect::to("/settings/account?flash=verification_resent").into_response())
 }
 
 // ─── MFA setup / disable (account settings) ──────────────────────────

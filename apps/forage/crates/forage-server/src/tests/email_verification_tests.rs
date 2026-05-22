@@ -326,3 +326,175 @@ async fn add_email_with_verification_required_enqueues_email() {
         .unwrap();
     assert_eq!(count, 1);
 }
+
+// ─── /settings/account "Try sending again" button ─────────────────────
+
+#[tokio::test]
+async fn account_resend_verification_enqueues_email_and_redirects_with_flash() {
+    let (state, sessions) = test_state();
+    let store = std::sync::Arc::new(InMemoryMagicLinkStore::new());
+    let state = state.with_magic_link_store(store.clone());
+    let cookie = create_test_session_unverified_email(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/account/emails/resend-verification")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("email=test@example.com&_csrf=test-csrf"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get("location")
+        .expect("redirect location")
+        .to_str()
+        .unwrap();
+    assert_eq!(location, "/settings/account?flash=verification_resent");
+
+    // A new email-verify token was enqueued.
+    let count = store
+        .count_recent(
+            TOKEN_TYPE_EMAIL_VERIFY,
+            "test@example.com",
+            chrono::Utc::now() - chrono::Duration::minutes(15),
+        )
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[tokio::test]
+async fn account_resend_verification_for_already_verified_email_is_ineligible() {
+    // The default session helper marks the email as verified. The
+    // handler must refuse to re-send and never enqueue a token.
+    let (state, sessions) = test_state();
+    let store = std::sync::Arc::new(InMemoryMagicLinkStore::new());
+    let state = state.with_magic_link_store(store.clone());
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/account/emails/resend-verification")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("email=test@example.com&_csrf=test-csrf"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get("location")
+        .expect("redirect location")
+        .to_str()
+        .unwrap();
+    assert_eq!(
+        location,
+        "/settings/account?error=verification_resend_ineligible"
+    );
+
+    // No token issued.
+    let count = store
+        .count_recent(
+            TOKEN_TYPE_EMAIL_VERIFY,
+            "test@example.com",
+            chrono::Utc::now() - chrono::Duration::minutes(15),
+        )
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn account_resend_verification_for_someone_elses_email_is_ineligible() {
+    // Anti-abuse: even a logged-in user must not be able to trigger a
+    // verification email for an address that isn't on their account.
+    let (state, sessions) = test_state();
+    let store = std::sync::Arc::new(InMemoryMagicLinkStore::new());
+    let state = state.with_magic_link_store(store.clone());
+    let cookie = create_test_session_unverified_email(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/account/emails/resend-verification")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("email=victim@example.com&_csrf=test-csrf"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get("location")
+        .expect("redirect location")
+        .to_str()
+        .unwrap();
+    assert_eq!(
+        location,
+        "/settings/account?error=verification_resend_ineligible"
+    );
+
+    // Critically, no email is sent to the victim.
+    let count = store
+        .count_recent(
+            TOKEN_TYPE_EMAIL_VERIFY,
+            "victim@example.com",
+            chrono::Utc::now() - chrono::Duration::minutes(15),
+        )
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn account_resend_verification_rejects_bad_csrf() {
+    let (state, sessions) = test_state();
+    let store = std::sync::Arc::new(InMemoryMagicLinkStore::new());
+    let state = state.with_magic_link_store(store.clone());
+    let cookie = create_test_session_unverified_email(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/account/emails/resend-verification")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("email=test@example.com&_csrf=wrong"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let count = store
+        .count_recent(
+            TOKEN_TYPE_EMAIL_VERIFY,
+            "test@example.com",
+            chrono::Utc::now() - chrono::Duration::minutes(15),
+        )
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}

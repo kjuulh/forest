@@ -1324,6 +1324,35 @@ pub(crate) async fn create_expired_session(sessions: &Arc<InMemorySessionStore>)
 }
 
 /// Create a test session with "member" role (non-admin, for authorization tests).
+/// Test session whose primary email is unverified — used by the
+/// "Try sending again" flow tests on /settings/account.
+pub(crate) async fn create_test_session_unverified_email(
+    sessions: &Arc<InMemorySessionStore>,
+) -> String {
+    let now = Utc::now();
+    let data = SessionData {
+        access_token: "mock-access".into(),
+        refresh_token: "mock-refresh".into(),
+        csrf_token: "test-csrf".into(),
+        needs_username: false,
+        access_expires_at: now + chrono::Duration::hours(1),
+        user: Some(CachedUser {
+            user_id: "user-123".into(),
+            username: "testuser".into(),
+            profile_picture_url: None,
+            emails: vec![UserEmail {
+                email: "test@example.com".into(),
+                verified: false,
+            }],
+            orgs: default_test_orgs(),
+        }),
+        created_at: now,
+        last_seen_at: now,
+    };
+    let session_id = sessions.create(data).await.unwrap();
+    format!("forage_session={}", session_id)
+}
+
 pub(crate) async fn create_test_session_member(sessions: &Arc<InMemorySessionStore>) -> String {
     let now = Utc::now();
     let data = SessionData {
