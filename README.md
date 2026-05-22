@@ -27,7 +27,7 @@ the installer — the first context provisioned becomes the active default:
 
 ```bash
 gh release download --repo understory-io/forest --pattern install.sh -O - \
-  | FOREST_PROFILE='name=understory-prod,server=https://forest.development.understory.sh' bash
+  | FOREST_PROFILE='name=understory-prod,server=https://forest.understory.sh' bash
 ```
 
 The installer also appends the forest shell integration to your shell rc
@@ -58,11 +58,13 @@ If you also want `forest auth login` to default to the browser flow without
 extra configuration, add a `web=` key pointing at forage:
 
 ```bash
-FOREST_PROFILE='name=understory-prod,server=https://forest.development.understory.sh,web=https://forage.development.understory.sh'
+FOREST_PROFILE='name=understory-prod,server=https://forest.understory.sh,web=https://forage.understory.sh'
 ```
 
 When `web=` is omitted the CLI falls back to a `forest. → forage.`
-convention; set it explicitly if your deployment doesn't match that pattern.
+convention — which works for production (`forest.understory.sh` →
+`forage.understory.sh`). Set it explicitly if your deployment doesn't
+match that pattern (e.g. `dev.understory.sh` subdomains).
 
 ## Logging in
 
