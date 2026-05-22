@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/understory-io/forest/compare/v0.1.8...v0.1.9) (2026-05-22)
+
+
+### Bug Fixes
+
+* **forage:** friendlier device-login errors + dark mode + ANSI hyperlink + tighter component header ([#32](https://github.com/understory-io/forest/issues/32)) ([53961de](https://github.com/understory-io/forest/commit/53961de2236643db75eb8c74f7b809bcb754ae49))
+
 ## [0.1.8](https://github.com/understory-io/forest/compare/v0.1.7...v0.1.8) (2026-05-21)
 
 
