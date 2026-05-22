@@ -48,6 +48,16 @@
 .json-pretty .json-punct  { color: #9ca3af; }  /* gray-400 — slightly brighter for legibility */
 .json-pretty .json-raw    { color: #f87171; }  /* red-400 — invalid fallback */
 
+/* ── Always-dark code surface (terminal/IDE aesthetic) ────────────────
+   Same problem .json-pretty solves: the @media dark-mode palette remap
+   inverts `bg-gray-950` to a near-white, breaking deliberately-dark
+   code blocks. Fix once with a literal hex background that escapes the
+   CSS-variable system. Use `class="code-surface"` on the wrapper. */
+.code-surface {
+  background-color: #0a0a0a !important;
+  color: #d1d5db !important;
+}
+
 /* ── Scrollbar-hidden utility for tab navigation ──────────────────────── */
 @utility scrollbar-none {
   -ms-overflow-style: none;

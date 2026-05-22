@@ -10,18 +10,13 @@
         <code class="bg-gray-100 px-2 py-0.5 rounded text-base">forest.cue</code> file,
         push it, and we handle the rest.
     </p>
-    <div class="mt-10 flex items-center justify-center gap-4">
-        <a href="/signup" class="px-6 py-3 bg-gray-900 text-white rounded-md font-medium hover:bg-gray-800">
-            Get started free
-        </a>
-        <a href="/pricing" class="px-6 py-3 border border-gray-300 rounded-md font-medium hover:border-gray-400">
-            View pricing
-        </a>
-    </div>
 </section>
 
 <section class="max-w-4xl mx-auto px-4 py-16">
-    <div class="bg-gray-950 rounded-lg p-6 text-sm font-mono text-gray-300 overflow-x-auto">
+    {# `code-surface` keeps this block dark in both light and dark mode —
+       see static/css/input.css. Without it the @media dark-mode palette
+       remap inverts bg-gray-950 to a near-white. #}
+    <div class="code-surface rounded-lg p-6 text-sm font-mono overflow-x-auto">
         <pre><span class="text-gray-500">// forest.cue</span>
 <span class="text-blue-400">project</span>: {
   <span class="text-green-400">name</span>:         <span class="text-amber-400">"my-api"</span>
@@ -64,41 +59,12 @@
             </p>
         </div>
         <div class="p-6 border border-gray-200 rounded-lg">
-            <h3 class="font-bold text-lg mb-2">Container Deployments</h3>
-            <p class="text-gray-600 text-sm">
-                Push your containers and let Forage handle the runtime. No Kubernetes
-                knowledge needed. Pay only for what you use.
-            </p>
-        </div>
-        <div class="p-6 border border-gray-200 rounded-lg">
             <h3 class="font-bold text-lg mb-2">Type-Safe Infrastructure</h3>
             <p class="text-gray-600 text-sm">
                 CUE gives you typed, validated infrastructure definitions. Catch configuration
                 errors before they reach production.
             </p>
         </div>
-        <div class="p-6 border border-gray-200 rounded-lg">
-            <h3 class="font-bold text-lg mb-2">Team Management</h3>
-            <p class="text-gray-600 text-sm">
-                Organisations, role-based access, and audit logs. Manage who can deploy
-                what, where, and when.
-            </p>
-        </div>
-        <div class="p-6 border border-gray-200 rounded-lg">
-            <h3 class="font-bold text-lg mb-2">Pay As You Go</h3>
-            <p class="text-gray-600 text-sm">
-                Transparent, usage-based pricing. Start free, scale smoothly. No surprise
-                bills, no hidden fees.
-            </p>
-        </div>
     </div>
-</section>
-
-<section class="max-w-4xl mx-auto px-4 py-16 text-center">
-    <h2 class="text-3xl font-bold mb-4">Ready to simplify your infrastructure?</h2>
-    <p class="text-gray-600 mb-8">Join the waitlist and be first to try Forage.</p>
-    <a href="/signup" class="px-6 py-3 bg-gray-900 text-white rounded-md font-medium hover:bg-gray-800">
-        Get started free
-    </a>
 </section>
 {% endblock %}
