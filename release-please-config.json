@@ -1,14 +1,21 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "packages": {
-    "apps/forest/crates/forest": {
-      "release-type": "rust",
+    ".": {
+      "release-type": "simple",
       "package-name": "forest",
       "component": "forest",
       "include-component-in-tag": false,
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "apps/forest/crates/forest/CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "apps/forest/crates/forest/Cargo.toml",
+          "jsonpath": "$.package.version"
+        }
+      ]
     }
   }
 }

@@ -1,21 +1,29 @@
 name: Release Please
 
-# Drives the release flow for the forest CLI (apps/forest/crates/forest).
+# Drives the release flow for the forest CLI.
 #
-# On every push to main, release-please scans the conventional-commit
-# history scoped to commits with `(forest)` in their subject (e.g.
-# `feat(forest): …`, `fix(forest,forage): …`). When there is at least
-# one such commit since the last release, it opens — or updates — a
-# release PR that bumps `apps/forest/Cargo.toml`'s workspace version
-# and appends to `apps/forest/CHANGELOG.md`.
+# release-please-config.json declares ONE package rooted at the repo
+# root (`.`). That means *every* conventional-commit on main —
+# regardless of scope or which path it touched — is considered for a
+# version bump. Previously the package was scoped to
+# `apps/forest/crates/forest`, which meant install-script / CI /
+# README / forage commits silently never triggered a release; that's
+# fixed here by widening the path.
 #
-# Merging that PR causes release-please to create a `v<version>` tag
-# and publish a GitHub release; `release.yml` then takes over to build
-# the cross-platform binaries and update the Homebrew formula.
+# Because `release-type: simple` doesn't know about Cargo.toml, the
+# config uses `extra-files` to bump
+# `apps/forest/crates/forest/Cargo.toml`'s `$.package.version`. The
+# `release.yml` workflow's `cargo update -p forest` step then syncs
+# `apps/forest/Cargo.lock` to match. CHANGELOG stays at
+# `apps/forest/crates/forest/CHANGELOG.md`.
 #
-# The GitHub App token (BREW_APP_ID / BREW_SSH_KEY) is the same one
-# the understory-mcp release flow uses. Its installation must include
-# the `forest` repository — an org-admin one-time setting.
+# Merging the release-please PR creates a `v<version>` tag and
+# publishes a GitHub release; `release.yml` then takes over to build
+# the cross-platform binaries and attach install.sh.
+#
+# The GitHub App token (BREW_APP_ID / BREW_SSH_KEY) authenticates the
+# action. Its installation must include the `forest` repository — an
+# org-admin one-time setting.
 
 on:
   push:
