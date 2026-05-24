@@ -190,11 +190,53 @@ async fn discover_component_dependencies() -> anyhow::Result<Vec<(String, PathBu
     let cwd = std::env::current_dir()?;
 
     for (name, spec) in deps {
-        // Only local path dependencies
+        // Local path deps resolve against the consumer's cwd.
         if let Some(path) = spec.get("path").and_then(|p| p.as_str()) {
             let dep_path = cwd.join(path);
             if dep_path.join("forest.component.cue").exists() {
                 result.push((name.clone(), dep_path));
+            }
+            continue;
+        }
+
+        // Versioned deps live in the shared component cache at
+        // ~/.cache/forest/components/<org>/<name>/<version>/. The cache
+        // is populated by `forest update` (or the deployment/run
+        // resolvers when they auto-materialize). If the cache is
+        // missing forest.component.cue we silently skip — the consumer
+        // will get a clearer error from the downstream code paths
+        // that explicitly attempt to spawn the component.
+        if let Some(version) = spec.get("version").and_then(|v| v.as_str()) {
+            // The dep key is "<org>/<name>"; split it.
+            let Some((org, comp_name)) = name.split_once('/') else {
+                continue;
+            };
+            if let Some(cache_dir) = dirs::cache_dir() {
+                let dep_path = cache_dir
+                    .join("forest")
+                    .join("components")
+                    .join(org)
+                    .join(comp_name)
+                    .join(version);
+
+                // Only emit a typed client for deps that actually have
+                // a callable surface: a Deno runtime (`src/main.ts`),
+                // a binary (descriptor cached at `.forest/component/meta.json`),
+                // or both. Contract-only libraries (e.g. `forest/deployment`)
+                // ship only `*.cue` files and have no `#Spec` to codegen
+                // against — skip silently rather than failing the whole
+                // generate run.
+                let has_deno_runtime = dep_path.join("src").join("main.ts").exists();
+                let has_meta = dep_path
+                    .join(".forest")
+                    .join("component")
+                    .join("meta.json")
+                    .exists();
+                if dep_path.join("forest.component.cue").exists()
+                    && (has_deno_runtime || has_meta)
+                {
+                    result.push((name.clone(), dep_path));
+                }
             }
         }
     }

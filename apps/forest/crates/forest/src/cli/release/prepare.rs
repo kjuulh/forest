@@ -122,10 +122,39 @@ impl PrepareCommand {
                 std::collections::HashMap::new();
             for dep in project.dependencies.get_components() {
                 let component_id = format!("{}/{}", dep.organisation, dep.name);
-                if let crate::models::ComponentSource::Local(path) = &dep.source {
-                    if component_deno::is_deno_component(path) {
-                        if let Some(entrypoint) = component_deno::resolve_entrypoint(path) {
-                            component_map.insert(component_id, (path.clone(), entrypoint));
+                match &dep.source {
+                    crate::models::ComponentSource::Local(path) => {
+                        if component_deno::is_deno_component(path) {
+                            if let Some(entrypoint) = component_deno::resolve_entrypoint(path) {
+                                component_map.insert(component_id, (path.clone(), entrypoint));
+                            }
+                        }
+                    }
+                    crate::models::ComponentSource::Versioned(version) => {
+                        // Versioned deps materialize in the shared cache via
+                        // `forest update`. Resolve to that cache path and
+                        // reuse the same is_deno detection used by Local.
+                        let Some(cache_dir) = dirs::cache_dir() else { continue };
+                        let dep_path = cache_dir
+                            .join("forest")
+                            .join("components")
+                            .join(&dep.organisation)
+                            .join(&dep.name)
+                            .join(version.to_string());
+                        if component_deno::is_deno_component_with_meta(
+                            &dep_path,
+                            Some(&dep.organisation),
+                            Some(&dep.name),
+                            Some(&version.to_string()),
+                        ) {
+                            if let Some(entrypoint) = component_deno::resolve_entrypoint_with_meta(
+                                &dep_path,
+                                Some(&dep.organisation),
+                                Some(&dep.name),
+                                Some(&version.to_string()),
+                            ) {
+                                component_map.insert(component_id, (dep_path, entrypoint));
+                            }
                         }
                     }
                 }
