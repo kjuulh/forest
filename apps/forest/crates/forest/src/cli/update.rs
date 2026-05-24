@@ -4,7 +4,11 @@ use crate::{
     grpc::GrpcClientState,
     lockfile::{LockEntry, LockFile, LockSource},
     models::DependencyType,
-    services::{component_binary, project::ProjectParserState},
+    services::{
+        component_binary,
+        components::{ComponentsServiceState, EnsureCachedOutcome},
+        project::ProjectParserState,
+    },
     state::State,
     version_spec::VersionSpec,
 };
@@ -106,68 +110,126 @@ impl UpdateCommand {
 
                     let resolved_str = resolved.to_string();
 
-                    // Check if we already have this version cached
-                    if let Some(existing_hash) = lockfile.get(
-                        &dep.organisation,
-                        &dep.name,
-                        &resolved_str,
-                        os,
-                        arch,
-                    ) {
-                        // Already locked at this version — check if binary is in cache
-                        let hash =
-                            existing_hash.strip_prefix("sha256:").unwrap_or(existing_hash);
-                        if component_binary::resolve_binary_from_hash(hash).is_some() {
-                            eprintln!(
-                                "  {} {}/{}@{}  up to date",
-                                "✓", dep.organisation, dep.name, resolved_str
-                            );
-                            continue;
-                        }
-                    }
+                    // Component kind drives the download path:
+                    //   - kind=binary → per-platform binary download + lockfile hash
+                    //   - kind=cue / deno / files → stream the file bundle into
+                    //     the cache via the shared ensure_versioned_dep_cached
+                    //     helper; no lockfile hash (immutable version is the lock)
+                    let manifest_raw = client
+                        .get_component_manifest(&dep.organisation, &dep.name, &resolved_str)
+                        .await
+                        .ok();
+                    let is_binary = manifest_raw
+                        .as_deref()
+                        .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok())
+                        .and_then(|v| {
+                            v.get("kind").and_then(|k| k.as_str()).map(|s| s == "binary")
+                        })
+                        .unwrap_or(false);
 
-                    // Download the binary
-                    eprintln!(
-                        "  {} {}/{}@{}  downloading...",
-                        "↓", dep.organisation, dep.name, resolved_str
-                    );
-
-                    let binary = client
-                        .download_component_binary(
+                    if is_binary {
+                        // Check if we already have this version cached
+                        if let Some(existing_hash) = lockfile.get(
                             &dep.organisation,
                             &dep.name,
                             &resolved_str,
                             os,
                             arch,
-                        )
-                        .await
-                        .with_context(|| {
-                            format!(
-                                "failed to download {}/{}@{} ({}/{})",
-                                dep.organisation, dep.name, resolved_str, os, arch
+                        ) {
+                            let hash =
+                                existing_hash.strip_prefix("sha256:").unwrap_or(existing_hash);
+                            if component_binary::resolve_binary_from_hash(hash).is_some() {
+                                eprintln!(
+                                    "  {} {}/{}@{}  up to date",
+                                    "✓", dep.organisation, dep.name, resolved_str
+                                );
+                                continue;
+                            }
+                        }
+
+                        eprintln!(
+                            "  {} {}/{}@{}  downloading...",
+                            "↓", dep.organisation, dep.name, resolved_str
+                        );
+
+                        let binary = client
+                            .download_component_binary(
+                                &dep.organisation,
+                                &dep.name,
+                                &resolved_str,
+                                os,
+                                arch,
                             )
-                        })?;
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "failed to download {}/{}@{} ({}/{})",
+                                    dep.organisation, dep.name, resolved_str, os, arch
+                                )
+                            })?;
 
-                    let (sha256, _cache_path) =
-                        component_binary::store_binary_in_cache(&binary)?;
+                        let (sha256, _cache_path) =
+                            component_binary::store_binary_in_cache(&binary)?;
 
-                    lockfile.insert(LockEntry {
-                        organisation: dep.organisation.clone(),
-                        name: dep.name.clone(),
-                        version: resolved_str.clone(),
-                        source: LockSource::Registry {
-                            os: os.to_string(),
-                            arch: arch.to_string(),
-                            sha256: format!("sha256:{sha256}"),
-                        },
-                    });
+                        lockfile.insert(LockEntry {
+                            organisation: dep.organisation.clone(),
+                            name: dep.name.clone(),
+                            version: resolved_str.clone(),
+                            source: LockSource::Registry {
+                                os: os.to_string(),
+                                arch: arch.to_string(),
+                                sha256: format!("sha256:{sha256}"),
+                            },
+                        });
 
-                    eprintln!(
-                        "  {} {}/{}@{}  updated ({} bytes)",
-                        "✓", dep.organisation, dep.name, resolved_str,
-                        binary.len()
-                    );
-                    updated += 1;
+                        eprintln!(
+                            "  {} {}/{}@{}  updated ({} bytes)",
+                            "✓", dep.organisation, dep.name, resolved_str,
+                            binary.len()
+                        );
+                        updated += 1;
+                    } else {
+                        // Files-based (CUE-only library or Deno component).
+                        let outcome = state
+                            .components_service()
+                            .ensure_versioned_dep_cached(
+                                &dep.organisation,
+                                &dep.name,
+                                &resolved_str,
+                            )
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "fetch files for {}/{}@{}",
+                                    dep.organisation, dep.name, resolved_str
+                                )
+                            })?;
+                        match outcome {
+                            EnsureCachedOutcome::AlreadyCached => {
+                                eprintln!(
+                                    "  {} {}/{}@{}  up to date",
+                                    "✓", dep.organisation, dep.name, resolved_str
+                                );
+                            }
+                            EnsureCachedOutcome::Downloaded => {
+                                eprintln!(
+                                    "  {} {}/{}@{}  fetched (files)",
+                                    "✓", dep.organisation, dep.name, resolved_str
+                                );
+                                updated += 1;
+                            }
+                            EnsureCachedOutcome::BinaryRequiresPlatformDownload => {
+                                // Manifest probe said non-binary but the
+                                // ensure helper disagreed. Race or stale
+                                // manifest cache — skip with a hint instead
+                                // of erroring loudly.
+                                tracing::warn!(
+                                    "manifest probe for {}/{}@{} disagreed with ensure_versioned_dep_cached",
+                                    dep.organisation, dep.name, resolved_str
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }

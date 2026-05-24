@@ -109,8 +109,26 @@ impl PublishCommand {
             return publish_prebuilt(state, &current_dir, organisation, name, version, &doc).await;
         }
 
-        // 2. Check for binary (optional — CUE-only components don't need one)
+        // 2. Check for binary (optional — CUE-only / Deno components don't need one)
         let binary_path = component_binary::resolve_binary(&current_dir, name);
+
+        // Detect Deno components: forest.cue declares `upload.type = "deno"`
+        // *or* the working dir has the Deno shape (deno.json + src/main.ts).
+        // When matched, the publish flow uploads the source tree alongside
+        // CUE so consumers can spawn the component directly from cache,
+        // matching how a local path-dep behaves.
+        let upload_section = component.and_then(|c| c.get("upload"));
+        let upload_type = upload_section
+            .and_then(|u| u.get("type"))
+            .and_then(|v| v.as_str());
+        let upload_source = upload_section
+            .and_then(|u| u.get("source"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("./src");
+
+        let is_deno_component = upload_type == Some("deno")
+            || (current_dir.join("deno.json").exists()
+                && current_dir.join("src").join("main.ts").exists());
 
         let (descriptor, kind) = if let Some(ref bp) = binary_path {
             let desc = if let Some(cached) = component_binary::load_cached_descriptor(&current_dir)
@@ -120,6 +138,18 @@ impl PublishCommand {
                 component_binary::describe_component(bp).await?
             };
             (Some(desc), "binary")
+        } else if is_deno_component {
+            // Deno components carry a descriptor via the local build cache's
+            // meta.json. Load it so the published manifest can advertise
+            // methods + tool facet, matching the binary path.
+            let desc = component_binary::load_cached_descriptor_with_meta(
+                &current_dir,
+                Some(organisation),
+                Some(name),
+                Some(version),
+            )
+            .or_else(|| component_binary::load_cached_descriptor(&current_dir));
+            (desc, "deno")
         } else {
             (None, "cue")
         };
@@ -145,19 +175,24 @@ impl PublishCommand {
                 manifest["tool"] = tool;
             }
 
-            let (os, arch) = component_binary::current_platform();
-            // forest-manifest's validator accepts "darwin", not "macos".
-            // current_platform() emits "macos" for cache key parity, so
-            // translate at the manifest boundary.
-            let manifest_os = if os == "macos" { "darwin" } else { os };
-            let binary_content = tokio::fs::read(binary_path.as_ref().unwrap()).await?;
-            let sha256 = hex::encode(Sha256::digest(&binary_content));
-            manifest["platforms"] = serde_json::json!({
-                format!("{manifest_os}_{arch}"): {
-                    "sha256": sha256,
-                    "size": binary_content.len(),
-                }
-            });
+            // `platforms` is binary-only metadata: per-OS/arch hashes for
+            // the downloader. Deno components run via the source bundle
+            // we upload separately and have no `platforms` map.
+            if let Some(ref bp) = binary_path {
+                let (os, arch) = component_binary::current_platform();
+                // forest-manifest's validator accepts "darwin", not "macos".
+                // current_platform() emits "macos" for cache key parity, so
+                // translate at the manifest boundary.
+                let manifest_os = if os == "macos" { "darwin" } else { os };
+                let binary_content = tokio::fs::read(bp).await?;
+                let sha256 = hex::encode(Sha256::digest(&binary_content));
+                manifest["platforms"] = serde_json::json!({
+                    format!("{manifest_os}_{arch}"): {
+                        "sha256": sha256,
+                        "size": binary_content.len(),
+                    }
+                });
+            }
         }
 
         tracing::info!(
@@ -202,6 +237,37 @@ impl PublishCommand {
             }
         }
 
+        // 6b. Upload Deno source tree (and module / lock / meta).
+        // Consumers' `forest update` already streams every file via
+        // `get_component_files` into the cache, so anything we put here
+        // ends up at ~/.cache/forest/components/<org>/<name>/<version>/.
+        // The `.forest/component/meta.json` path matters: it's the
+        // fallback `read_meta_json()` already checks, so the same
+        // is_deno_component_with_meta()/resolve_entrypoint_with_meta()
+        // helpers work against the cached copy without further changes.
+        if kind == "deno" {
+            let deno_files = collect_deno_files(
+                &current_dir,
+                upload_source,
+                organisation,
+                name,
+                version,
+            )
+            .await?;
+            if !deno_files.is_empty() {
+                tracing::info!(
+                    "uploading {} Deno source file(s) from {upload_source}",
+                    deno_files.len()
+                );
+                for (rel_path, content) in &deno_files {
+                    client
+                        .upload_component_file(&upload_context, rel_path, content)
+                        .await
+                        .with_context(|| format!("upload Deno file: {rel_path}"))?;
+                }
+            }
+        }
+
         // 7. Publish manifest — skipped for CUE-only components. The
         //    server's manifest validator (forest-manifest::parse) only
         //    accepts `kind: "binary"` and `kind: "external"`; a pure CUE
@@ -212,14 +278,22 @@ impl PublishCommand {
         //    forage renders that gracefully (no platforms table, no
         //    install command). Adding a proper `Library` shape is
         //    tracked separately; this keeps SDK publishes unblocked.
-        if kind != "cue" {
+        // The server's manifest validator (forest-manifest::parse) only
+        // accepts `kind: "binary"` and `kind: "external"`. CUE-only and
+        // Deno-source components carry their methods via the uploaded
+        // meta.json (Deno) or are pure schema libraries (CUE) — neither
+        // shape needs the binary/external rule set. Skip publish_manifest
+        // for them; commit_upload still records the version + uploaded
+        // files. Adding a `Library` / `Deno` shape to the manifest
+        // validator is a separate piece of work.
+        if kind == "binary" || kind == "external" {
             tracing::info!("publishing manifest");
             let manifest_json = serde_json::to_string(&manifest)?;
             client
                 .publish_component_manifest(&upload_context, &manifest_json)
                 .await?;
         } else {
-            tracing::info!("CUE-only component — skipping manifest publish");
+            tracing::info!("{kind}-only component — skipping manifest publish");
         }
 
         // 8. Commit
@@ -607,4 +681,107 @@ async fn collect_cue_files(
 
     files.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(files)
+}
+
+/// Collect the Deno runtime + module + meta files that consumers need.
+///
+/// Returns `(relative_path, bytes)` pairs. Paths are POSIX-style with
+/// forward slashes so they round-trip through the registry storage and
+/// re-emerge identically in the consumer cache. The set covers:
+///   - The full `upload.source` tree (default `./src`), recursively.
+///   - `deno.json` (+ optional `deno.lock`, `import_map.json`).
+///   - `cue.mod/module.cue` if present.
+///   - The local-build `meta.json` placed at `.forest/component/meta.json`
+///     so the consumer's existing `read_meta_json()` fallback finds it.
+async fn collect_deno_files(
+    dir: &std::path::Path,
+    upload_source: &str,
+    organisation: &str,
+    name: &str,
+    version: &str,
+) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+
+    // --- 1. upload.source tree (recursive)
+    let source_root = dir.join(upload_source.trim_start_matches("./"));
+    if source_root.exists() {
+        collect_dir_recursive(&source_root, dir, &mut files).await?;
+    }
+
+    // --- 2. deno.json / deno.lock / import_map.json (top-level only)
+    for candidate in ["deno.json", "deno.lock", "import_map.json"] {
+        let p = dir.join(candidate);
+        if p.exists() {
+            let content = tokio::fs::read(&p).await?;
+            files.push((candidate.to_string(), content));
+        }
+    }
+
+    // --- 3. cue.mod/module.cue
+    let module_cue = dir.join("cue.mod").join("module.cue");
+    if module_cue.exists() {
+        let content = tokio::fs::read(&module_cue).await?;
+        files.push(("cue.mod/module.cue".to_string(), content));
+    }
+
+    // --- 4. meta.json from the local build cache
+    if let Some(meta_dir) = component_binary::component_meta_dir(organisation, name, version) {
+        let meta_path = meta_dir.join("meta.json");
+        if meta_path.exists() {
+            let content = tokio::fs::read(&meta_path).await?;
+            // Upload under the same relative path read_meta_json() falls
+            // back to: <component_root>/.forest/component/meta.json
+            files.push((".forest/component/meta.json".to_string(), content));
+        } else {
+            tracing::warn!(
+                "no meta.json found at {} — run `forest build` before `forest publish`",
+                meta_path.display()
+            );
+        }
+    }
+
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(files)
+}
+
+/// Recurse `root`, emitting `(relative_to_base, bytes)` pairs. Skips
+/// dotfiles and common build/scratch dirs to avoid shipping cache junk
+/// (`.forest/`, `target/`, `node_modules/`).
+fn collect_dir_recursive<'a>(
+    root: &'a std::path::Path,
+    base: &'a std::path::Path,
+    out: &'a mut Vec<(String, Vec<u8>)>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>> {
+    Box::pin(async move {
+        let mut entries = tokio::fs::read_dir(root).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            let file_name = entry.file_name();
+            let name_str = file_name.to_string_lossy();
+
+            // Skip hidden + scratch dirs. `.forest/component/meta.json` is
+            // re-added by the caller from the build cache, not the source
+            // tree, so excluding `.forest/` here is intentional.
+            if name_str.starts_with('.')
+                || name_str == "target"
+                || name_str == "node_modules"
+            {
+                continue;
+            }
+
+            let ft = entry.file_type().await?;
+            if ft.is_dir() {
+                collect_dir_recursive(&path, base, out).await?;
+            } else if ft.is_file() {
+                let rel = path
+                    .strip_prefix(base)
+                    .map_err(|e| anyhow::anyhow!("path outside base: {e}"))?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let content = tokio::fs::read(&path).await?;
+                out.push((rel, content));
+            }
+        }
+        Ok(())
+    })
 }

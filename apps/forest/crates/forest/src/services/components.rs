@@ -481,6 +481,98 @@ impl ComponentsService {
         Ok(())
     }
 
+    /// Make sure a versioned dep is materialized in
+    /// `~/.cache/forest/components/<org>/<name>/<version>/`. Used by
+    /// `forest update`, `forest generate` (when walking version deps),
+    /// and the deployment/run resolvers — all three need the cache
+    /// populated to operate, so this is the single ensure-cached
+    /// shim shared across them.
+    ///
+    /// Returns true if a fresh download happened, false if the cache
+    /// was already populated. Binary components are out of scope here:
+    /// those have a parallel `download_binary_component` path that owns
+    /// platform/sha256 bookkeeping. We detect "binary" via the
+    /// component manifest's `kind` field and skip — the caller is
+    /// expected to use the binary path in that case.
+    pub async fn ensure_versioned_dep_cached(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: &str,
+    ) -> anyhow::Result<EnsureCachedOutcome> {
+        let cache_dir = dirs::cache_dir()
+            .context("locate cache dir")?
+            .join("forest")
+            .join("components")
+            .join(organisation)
+            .join(name)
+            .join(version);
+
+        // Already materialized? Presence of forest.component.cue
+        // (always uploaded for v2 components) is our cheap probe.
+        if cache_dir.join("forest.component.cue").exists() {
+            return Ok(EnsureCachedOutcome::AlreadyCached);
+        }
+
+        // Determine kind. Binary deps go through the dedicated path.
+        let manifest_raw = self
+            .grpc
+            .get_component_manifest(organisation, name, version)
+            .await
+            .ok();
+        let is_binary = manifest_raw
+            .as_deref()
+            .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok())
+            .and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(|s| s == "binary"))
+            .unwrap_or(false);
+        if is_binary {
+            return Ok(EnsureCachedOutcome::BinaryRequiresPlatformDownload);
+        }
+
+        // Files-based (kind=cue / kind=deno / kind=files). Look up the
+        // component id, then stream every uploaded file into the cache.
+        // `download_component` already writes via `ComponentCache::add_file`
+        // which puts files at `<cache_dir>/<file_path>` — matching exactly
+        // what the publisher uploaded.
+        let comp = self
+            .grpc
+            .get_component_version(name, organisation, version)
+            .await
+            .context("query component version metadata")?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "component {organisation}/{name}@{version} not found in registry"
+                )
+            })?;
+
+        self.download_component(&comp.id.to_string(), name, organisation, version)
+            .await
+            .with_context(|| {
+                format!("download files for {organisation}/{name}@{version}")
+            })?;
+
+        Ok(EnsureCachedOutcome::Downloaded)
+    }
+}
+
+/// Result of [`ComponentsService::ensure_versioned_dep_cached`].
+///
+/// Callers interpret these as: `AlreadyCached` → no work, `Downloaded` →
+/// we just materialized this version (good time to log a friendly nudge),
+/// `BinaryRequiresPlatformDownload` → caller must invoke the per-platform
+/// binary downloader instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnsureCachedOutcome {
+    AlreadyCached,
+    Downloaded,
+    BinaryRequiresPlatformDownload,
+}
+
+impl ComponentsService {
+    // (continuation of the impl above — split for readability of the new
+    // ensure_versioned_dep_cached helper, since the original impl block
+    // contains a lot of unrelated methods.)
+
     pub async fn get_component_path(&self, component: &CacheComponent) -> anyhow::Result<PathBuf> {
         let path = self.component_cache.get_component_path(component).await?;
 
