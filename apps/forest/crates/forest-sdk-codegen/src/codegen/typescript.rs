@@ -33,7 +33,7 @@ fn emit_imports(out: &mut String) -> CodegenResult<()> {
     writeln!(out, "  type CallContext,")?;
     writeln!(out, "  type MethodDescriptor,")?;
     writeln!(out, "  MethodNotFoundError,")?;
-    writeln!(out, "}} from \"@forest/sdk\";")?;
+    writeln!(out, "}} from \"@rawpotion/forest-sdk\";")?;
     writeln!(out)?;
     Ok(())
 }
@@ -383,7 +383,7 @@ pub fn emit_client(module: &Module, component_id: &str) -> CodegenResult<String>
 
     writeln!(out, "// Generated dependency client for {component_id}. Do not edit.")?;
     writeln!(out)?;
-    writeln!(out, "import {{ callComponent }} from \"@forest/sdk\";")?;
+    writeln!(out, "import {{ callComponent }} from \"@rawpotion/forest-sdk\";")?;
     writeln!(out)?;
 
     // Emit type definitions (shared types like Manifest, Postgres, etc.)
