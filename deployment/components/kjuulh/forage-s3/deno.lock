@@ -1,0 +1,16 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@rawpotion/forest-sdk@0.1": "0.1.13"
+  },
+  "jsr": {
+    "@rawpotion/forest-sdk@0.1.13": {
+      "integrity": "ead4ff13774d58d0c2854e8911dd6279e929854e589528397e4b4de2129bdf74"
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "jsr:@rawpotion/forest-sdk@0.1"
+    ]
+  }
+}

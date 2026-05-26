@@ -1,3 +1,7 @@
 .playwright-mcp/
 *.png
 overview-with-readme.png
+.env
+.env.*
+!.env.example
+.forest/

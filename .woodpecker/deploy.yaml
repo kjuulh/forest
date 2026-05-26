@@ -1,0 +1,132 @@
+# Forest deployment — runs after the multi-arch manifest stage publishes
+# the user-facing image tags. Iterates every project under deployment/
+# and, for each, runs `forest release prepare` once (pinning the image
+# tag to the SHA we just built) then `forest release annotate` to publish
+# the prepared manifests as a single annotated artifact. No human
+# override needed: the CI knows its own commit, so the deployment lands
+# on the matching image.
+#
+# We deliberately do NOT call `forest release create` (which would
+# prepare+annotate+release per environment). Instead we prepare once —
+# `prepare` emits manifests for *every* environment defined in the
+# project's forest.cue (dev + prod) under .forest/deployment — and
+# annotate once. The annotation (without --annotation-only) runs
+# server-side trigger evaluation, so the project's triggers/pipeline pick
+# the artifact up and fire the per-environment releases automatically.
+# That keeps CI environment-agnostic: promotion order and gating live in
+# the server-side triggers, not here.
+#
+# Required woodpecker secrets:
+#   forest_token — token for FOREST_SERVER (forest.i.kjuulh.io)
+#
+# Trigger: only on push to kjuulh/gitea-fork. PRs build images (via
+# ci + manifest) but don't deploy.
+
+when:
+  - event: push
+    branch: kjuulh/gitea-fork
+
+depends_on:
+  - manifest
+
+# Deployment must run inside the homelab network: the CUE registry resolves
+# to 10.0.9.1 and is not reachable from the external ARM runner.
+labels:
+  platform: linux/amd64
+
+variables:
+  - &forest_env
+    FOREST_SERVER: https://forest.i.kjuulh.io
+    CUE_REGISTRY: forest.sh=registry.forest.i.kjuulh.io,registry.cuelang.org
+    RUST_LOG: forest=info,component=info
+    FOREST_TOKEN:
+      from_secret: forest_token
+
+steps:
+  release:
+    image: debian:bookworm-slim
+    environment: *forest_env
+    commands:
+      - apt-get update && apt-get install -y --no-install-recommends curl ca-certificates dpkg unzip
+      # Pull the forest CLI from the fork's public release. Pin to v0.1.13
+      # for the deno-component detection fix; bump in lockstep with the
+      # binary published by release-build.yaml.
+      - FOREST_VERSION="v0.1.13"
+      - CUE_VERSION="v0.15.4"
+      # Lockfile v5 (kjuulh/service/deno.lock) requires deno >=2.4. Pin
+      # to match developer-local (2.7.x) so the cache hits identically.
+      - DENO_VERSION="v2.7.14"
+      - DPKG_ARCH="$(dpkg --print-architecture)"
+      - |
+        case "$DPKG_ARCH" in
+          amd64) FOREST_TARGET="x86_64-unknown-linux-gnu" ; CUE_ARCH="amd64" ; DENO_TARGET="x86_64-unknown-linux-gnu" ;;
+          arm64) FOREST_TARGET="aarch64-unknown-linux-gnu" ; CUE_ARCH="arm64" ; DENO_TARGET="aarch64-unknown-linux-gnu" ;;
+          *) echo "Unsupported arch: $DPKG_ARCH" ; exit 1 ;;
+        esac
+      - mkdir -p .ci-bin
+      - >
+        curl -fsSL
+        "https://src.rawpotion.io/rawpotion/forest/releases/download/$FOREST_VERSION/forest-$FOREST_VERSION-$FOREST_TARGET.tar.gz"
+        | tar xz -C .ci-bin forest
+      - >
+        curl -fsSL
+        "https://github.com/cue-lang/cue/releases/download/$CUE_VERSION/cue_$${CUE_VERSION}_linux_$${CUE_ARCH}.tar.gz"
+        | tar xz -C .ci-bin cue
+      # Deno is needed by `forest release prepare` to invoke the
+      # kjuulh/service component's deno-based prepare hook. Without it
+      # the prepare step errors with "failed to spawn deno".
+      - >
+        curl -fsSL
+        "https://github.com/denoland/deno/releases/download/$DENO_VERSION/deno-$DENO_TARGET.zip"
+        -o /tmp/deno.zip
+      - unzip -o -j /tmp/deno.zip -d .ci-bin && chmod +x .ci-bin/deno
+      - export PATH="$CI_WORKSPACE/.ci-bin:$PATH"
+      - forest --version
+      - deno --version | head -1
+      # The multi-arch tag set published by manifest.yaml includes
+      # rawpotion-<short-sha>, which is what we pin every project to.
+      # Same tag for forage + forest — both apps are built from this
+      # commit in lockstep by ci.yaml.
+      # Block-scalar because `:` followed by a space in an unquoted YAML
+      # scalar terminates the scalar and starts a map.
+      #
+      # Use the full CI_COMMIT_SHA — manifest.yaml publishes both
+      # `:rawpotion-<short>` and `:rawpotion-<full>`, so pinning to the
+      # full SHA works and avoids needing bash-specific substring syntax
+      # (the runner's /bin/sh rejects ${VAR:0:7} as "Bad substitution").
+      #
+      # annotate requires org/project/title explicitly — unlike `release
+      # create` it does not auto-detect them from forest.cue. The org is
+      # constant (rawpotion); the project name is the deployment/projects
+      # subdir name. The CI runner doesn't `git clone` (no .git dir), so
+      # commit info is passed explicitly from woodpecker's CI_* env vars.
+      - |
+        set -e
+        TAG="rawpotion-$$CI_COMMIT_SHA"
+        echo "==> deploying with image tag $$TAG"
+        cd deployment
+        for proj in projects/*/; do
+          PROJECT="$(basename "$$proj")"
+          echo "==> $$PROJECT"
+          ( cd "$$proj"
+            # Prepare once: emits manifests for every env in forest.cue.
+            forest release prepare \
+              --set "kjuulh/service.tag=$$TAG"
+            # Annotate once: publishes the prepared artifact and lets
+            # server-side triggers pick it up (no --annotation-only).
+            forest release annotate \
+              --organisation rawpotion \
+              --project-name "$$PROJECT" \
+              --context-title "$$CI_COMMIT_MESSAGE" \
+              --metadata "image_tag=$$TAG" \
+              --commit-sha "$$CI_COMMIT_SHA" \
+              --commit-branch "$$CI_COMMIT_BRANCH" \
+              --commit-message "$$CI_COMMIT_MESSAGE" \
+              --version "$$CI_COMMIT_SHA" \
+              --repo-url "$$CI_REPO_URL" \
+              --source-type "woodpecker" \
+              --run-url "$$CI_PIPELINE_URL" )
+        done
+
+# Retrigger CI — second build after the sccache integration so we
+# can read the hit rate off the cargo build's `sccache --show-stats`.

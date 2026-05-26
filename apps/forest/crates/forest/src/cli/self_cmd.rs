@@ -3,10 +3,13 @@
 //! org workflow, there is no outer package manager to do this — the
 //! binary has to update itself.
 //!
-//! Implementation matches `scripts/install.sh`: shell out to `gh`
-//! (which the user already has authenticated for repo access) for
-//! both the version check and the artifact download, then atomically
-//! replace the running binary via `install(1)`.
+//! Implementation matches `scripts/install.sh`: fetch the release
+//! metadata and tarball from rawpotion's gitea over plain HTTPS, then
+//! atomically replace the running binary via `install(1)`. The
+//! rawpotion fork ships its own builds (woodpecker CI, multi-arch,
+//! fork-specific patches), so this MUST NOT silently fall back to
+//! upstream understory-io — that would replace the fork binary with
+//! the unpatched upstream build.
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -19,10 +22,39 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::State;
 
-/// GitHub repo the releases live on. Hard-coded because this is the
-/// canonical distribution location — no benefit to making it
-/// configurable.
-const REPO: &str = "understory-io/forest";
+/// Gitea host the rawpotion fork's releases live on. Overridable via
+/// `FOREST_RELEASE_HOST` for staging / testing — same env shape as
+/// install.sh.
+const DEFAULT_RELEASE_HOST: &str = "src.rawpotion.io";
+
+/// Repo path on the gitea host (org/name). Mirrors install.sh's REPO,
+/// kept as a constant rather than configurable because every fork
+/// build ships pointing at its own canonical distribution location.
+const REPO: &str = "rawpotion/forest";
+
+fn release_host() -> String {
+    std::env::var("FOREST_RELEASE_HOST").unwrap_or_else(|_| DEFAULT_RELEASE_HOST.into())
+}
+
+fn api_latest_url() -> String {
+    format!("https://{}/api/v1/repos/{}/releases/latest", release_host(), REPO)
+}
+
+fn release_download_url(tag: &str, asset: &str) -> String {
+    format!(
+        "https://{}/{}/releases/download/{}/{}",
+        release_host(),
+        REPO,
+        tag,
+        asset,
+    )
+}
+
+fn release_page_url(version: &Version) -> String {
+    // Gitea release pages live under /<repo>/releases/tag/<tag>. We
+    // store versions without the leading "v"; tags carry it.
+    format!("https://{}/{}/releases/tag/v{}", release_host(), REPO, version)
+}
 
 /// How long a successful version check is considered fresh before we
 /// hit the network again. 24h keeps the noise low while still
@@ -74,23 +106,32 @@ fn tag_to_version(tag: &str) -> anyhow::Result<Version> {
     Version::parse(stripped).with_context(|| format!("parse version from tag {tag:?}"))
 }
 
-/// Ask `gh` for the repo's "latest" release. Falls back gracefully if
-/// `gh` is missing or unauthenticated — callers must treat this as
-/// best-effort.
+/// Ask gitea for the repo's "latest" release. Callers must treat this
+/// as best-effort: any network / parse failure becomes an error here,
+/// surfaced to the user for explicit operations and silently swallowed
+/// by the background nag.
 async fn fetch_latest_version() -> anyhow::Result<Version> {
-    let output = tokio::process::Command::new("gh")
-        .args([
-            "release", "view", "--repo", REPO, "--json", "tagName", "--jq", ".tagName",
-        ])
-        .output()
+    let url = api_latest_url();
+    let body = reqwest::Client::new()
+        .get(&url)
+        .header("Accept", "application/json")
+        .send()
         .await
-        .context("invoke `gh release view` — is the GitHub CLI installed?")?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("gh release view failed: {}", stderr.trim());
-    }
-    let tag = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    tag_to_version(&tag)
+        .with_context(|| format!("GET {url}"))?
+        .error_for_status()
+        .with_context(|| format!("GET {url}"))?
+        .text()
+        .await
+        .with_context(|| format!("read body of GET {url}"))?;
+
+    // Gitea's release JSON matches GitHub's: { "tag_name": "v0.2.0", ... }.
+    let parsed: serde_json::Value =
+        serde_json::from_str(&body).with_context(|| format!("parse JSON from {url}"))?;
+    let tag = parsed
+        .get("tag_name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("response from {url} has no tag_name"))?;
+    tag_to_version(tag)
 }
 
 async fn print_check_status() -> anyhow::Result<()> {
@@ -147,32 +188,8 @@ async fn perform_update(version: Option<&str>) -> anyhow::Result<()> {
     let tmp = tempfile::tempdir().context("create temp dir for download")?;
 
     eprintln!("==> Downloading {asset}…");
-    // `gh release download` will fail loudly if the tag doesn't exist
-    // or the user lacks repo access. It also writes its own progress
-    // output to stdout, so we don't need to wrap it in a spinner here.
-    let status = tokio::process::Command::new("gh")
-        .args([
-            "release",
-            "download",
-            &target_tag,
-            "--repo",
-            REPO,
-            "--pattern",
-            &asset,
-            "--pattern",
-            &checksum,
-            "--dir",
-        ])
-        .arg(tmp.path())
-        .status()
-        .await
-        .context("invoke `gh release download`")?;
-    if !status.success() {
-        anyhow::bail!(
-            "gh release download failed for {target_tag}/{asset} — \
-             check the tag exists and you have repo access (`gh auth status`)"
-        );
-    }
+    download_release_asset(&target_tag, &asset, &tmp.path().join(&asset)).await?;
+    download_release_asset(&target_tag, &checksum, &tmp.path().join(&checksum)).await?;
 
     eprintln!("==> Verifying checksum…");
     verify_sha256(tmp.path(), &checksum).await?;
@@ -195,6 +212,28 @@ async fn perform_update(version: Option<&str>) -> anyhow::Result<()> {
     replace_binary(&new_binary, &current_exe)?;
 
     eprintln!("==> forest {target_tag} installed");
+    Ok(())
+}
+
+/// Download a single release asset to `dest` via plain HTTPS against
+/// the rawpotion gitea. Fails loudly if the tag/asset is missing so
+/// the user gets an actionable error rather than a half-installed
+/// binary.
+async fn download_release_asset(tag: &str, asset: &str, dest: &Path) -> anyhow::Result<()> {
+    let url = release_download_url(tag, asset);
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .send()
+        .await
+        .with_context(|| format!("GET {url}"))?
+        .error_for_status()
+        .with_context(|| {
+            format!("GET {url} — check that the tag exists at https://{}/{}/releases", release_host(), REPO)
+        })?;
+    let bytes = resp.bytes().await.with_context(|| format!("read body of GET {url}"))?;
+    tokio::fs::write(dest, &bytes)
+        .await
+        .with_context(|| format!("write {}", dest.display()))?;
     Ok(())
 }
 
@@ -374,13 +413,14 @@ pub async fn maybe_print_update_nag() {
     if latest > current {
         // Single line, leading newline so it isn't glued to the
         // command's last bit of output. The second line links to the
-        // GitHub release so curious users can read the changelog
+        // gitea release page so curious users can read the changelog
         // before upgrading — important for `forest`, which sits in
         // the bootstrap path and shouldn't surprise users mid-release.
         eprintln!(
             "\n✨ forest {latest} is available (you have {current}). \
              Run `forest self update` to upgrade.\n   \
-             Release notes: https://github.com/{REPO}/releases/tag/v{latest}"
+             Release notes: {}",
+            release_page_url(&latest)
         );
     }
 }

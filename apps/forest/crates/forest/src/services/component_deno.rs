@@ -66,7 +66,12 @@ pub fn is_deno_component_with_meta(
             return true;
         }
     }
-    path.join("src").join("main.ts").exists() && path.join("src").join("forest-sdk.ts").exists()
+    let has_main = path.join("src").join("main.ts").exists();
+    let has_vendored_sdk = path.join("src").join("forest-sdk.ts").exists();
+    // Modern components use a deno.json import map (`@rawpotion/forest-sdk`) instead of
+    // vendoring the SDK as `src/forest-sdk.ts`. Accept either shape.
+    let has_deno_json = path.join("deno.json").exists() || path.join("deno.jsonc").exists();
+    has_main && (has_vendored_sdk || has_deno_json)
 }
 
 /// Get the entrypoint for a Deno component.

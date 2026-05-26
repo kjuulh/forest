@@ -1,0 +1,64 @@
+# Build + push per-arch docker images for forest and forage on every
+# push to the fork's rolling head. Matrix splits into 4 parallel
+# workflows (forest×{amd64,arm64}, forage×{amd64,arm64}), each routed
+# to a native runner via the built-in `platform` label — no QEMU.
+# The `.woodpecker/manifest.yaml` workflow then fuses the per-arch
+# images into multi-arch manifest lists under the user-facing tags.
+#
+# Required woodpecker secrets:
+#   registry_token       — token with package:write on git.kjuulh.io/kjuulh
+#
+# Required woodpecker server config (admin):
+#   WOODPECKER_PLUGINS_PRIVILEGED=woodpeckerci/plugin-docker-buildx
+#
+# Required woodpecker runners:
+#   one linux/amd64, one linux/arm64 (auto-advertised by each agent).
+
+when:
+  - event: push
+    branch: kjuulh/gitea-fork
+
+matrix:
+  APP:
+    - forest
+    - forage
+  ARCH:
+    - amd64
+    - arm64
+
+labels:
+  platform: linux/${ARCH}
+
+steps:
+  build-and-push:
+    image: woodpeckerci/plugin-docker-buildx:5
+    settings:
+      registry: git.kjuulh.io
+      repo: git.kjuulh.io/kjuulh/${APP}
+      dockerfile: apps/${APP}/Dockerfile
+      context: apps/${APP}
+      username: kjuulh
+      password:
+        from_secret: registry_token
+      build_args:
+        - CARGO_NET_GIT_FETCH_WITH_CLI=true
+        # Point rustc-wrapper at the homelab memcached server so cargo
+        # builds amortize across pipelines. Same endpoint that the
+        # forage-postgresql-controller's Dagger pipeline uses; the
+        # clank-sccache host is on the internal VLAN reachable from
+        # both amd64 and arm64 woodpecker runners.
+        - SCCACHE_MEMCACHED_ENDPOINT=tcp://10.0.10.13:11211
+      # Single platform — routed to the matching agent by the
+      # `platform` label above. No QEMU emulation.
+      platforms: linux/${ARCH}
+      # Per-arch cache. Separate caches per arch avoid cross-arch
+      # pollution and keep each cache focused on what its runner builds.
+      cache_images:
+        - git.kjuulh.io/kjuulh/${APP}:buildcache-${ARCH}
+      # Per-arch tags only. The manifest.yaml workflow consumes these
+      # and emits the user-facing multi-arch tags (latest, rawpotion,
+      # rawpotion-<sha>, etc.).
+      tags:
+        - rawpotion-${ARCH}
+        - rawpotion-${ARCH}-${CI_COMMIT_SHA_SHORT}
+      auto_tag: false

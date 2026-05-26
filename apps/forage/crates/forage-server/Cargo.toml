@@ -30,9 +30,13 @@ opentelemetry.workspace = true
 opentelemetry_sdk.workspace = true
 opentelemetry-otlp.workspace = true
 tracing-opentelemetry.workspace = true
-# Telemetry: traces + logs + metrics over OTLP. `init()` is opt-in via the
-# `OTEL_SERVICE_NAME` env var; absent ⇒ pretty fmt to stdout.
-canopy-otel = { git = "https://github.com/understory-io/canopy-util-rs", version = "0.1.0" }
+# Telemetry was wired through canopy-otel upstream (private github dep
+# at understory-io/canopy-util-rs). Removed on the rawpotion fork — no
+# SSH access to that repo. `optional = true` + a feature gate didn't
+# help: Cargo eagerly resolves git deps to validate the lockfile, so the
+# fetch happens regardless of whether the feature is on. Restore upstream
+# by re-adding this line + the `let _otel = canopy_otel::init()` call in
+# src/main.rs.
 futures-util = "0.3"
 tokio-stream = "0.1"
 reqwest.workspace = true

@@ -1,0 +1,160 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ config.name }}
+  namespace: {{ env }}
+  labels:
+    app.kubernetes.io/name: {{ config.name }}
+    app.kubernetes.io/component: server
+    app.kubernetes.io/managed-by: forest
+    forest.sh/managed: "true"
+    forest.sh/project: "{{ config.name }}"
+spec:
+  replicas: {{ config.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ config.name }}
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ config.name }}
+        app.kubernetes.io/component: server
+    spec:
+      containers:
+        - name: {{ config.name }}
+          image: {{ config.image }}:{{ config.tag }}
+          {%- if config.command %}
+          command:
+          {%- for c in config.command %}
+            - {{ c }}
+          {%- endfor %}
+          {%- endif %}
+          {%- if config.args %}
+          args:
+          {%- for a in config.args %}
+            - {{ a }}
+          {%- endfor %}
+          {%- endif %}
+          ports:
+            - name: {{ config.port_name }}
+              containerPort: {{ config.port }}
+              protocol: TCP
+          env:
+            - name: RUST_LOG
+              value: "{{ config.name }}=debug,info"
+          {%- if config.env_vars %}
+          {%- for key, value in config.env_vars | dictsort %}
+            - name: "{{ key }}"
+              value: "{{ value }}"
+          {%- endfor %}
+          {%- endif %}
+          {%- if config.forage_nats is configured %}
+            # forage-nats-controller writes the NATS server URL into the
+            # creds Secret under both NATS_URL (env-var style) and url —
+            # so apps don't need to hardcode the server URL alongside
+            # the creds file in their env_vars.
+            - name: NATS_CREDS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ config.name }}-nats-nats-creds
+                  key: creds
+            - name: NATS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ config.name }}-nats-nats-creds
+                  key: NATS_URL
+          {%- endif %}
+          {%- if config.forage_s3 is configured %}
+            # forage-s3-controller writes endpoint / region / bucket-name
+            # alongside the access keys, so the app shouldn't need any
+            # of these hardcoded in env_vars.
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ config.name }}-s3-s3-credentials
+                  key: access-key-id
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ config.name }}-s3-s3-credentials
+                  key: secret-access-key
+            - name: S3_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ config.name }}-s3-s3-credentials
+                  key: endpoint
+            - name: S3_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: {{ config.name }}-s3-s3-credentials
+                  key: region
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ config.name }}-s3-s3-credentials
+                  key: bucket-name
+          {%- endif %}
+          envFrom:
+            - secretRef:
+                name: {{ config.name }}-secrets
+          {%- if config.forage_postgresql is configured %}
+            - secretRef:
+                name: {{ config.name }}-db-credentials
+          {%- endif %}
+          {%- if config.health_binary %}
+          livenessProbe:
+            exec:
+              command:
+                - {{ config.health_binary }}
+                - --external-host
+                - "http://{{ config.health_host | default('0.0.0.0') }}:{{ config.port }}"
+                - admin
+                - status
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - {{ config.health_binary }}
+                - --external-host
+                - "http://{{ config.health_host | default('0.0.0.0') }}:{{ config.port }}"
+                - admin
+                - status
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+          {%- endif %}
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ config.name }}
+  namespace: {{ env }}
+  labels:
+    app.kubernetes.io/name: {{ config.name }}
+    app.kubernetes.io/component: server
+    app.kubernetes.io/managed-by: forest
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ config.name }}
+    app.kubernetes.io/component: server
+  ports:
+    - name: {{ config.port_name }}
+      port: {{ config.port }}
+      targetPort: {{ config.port }}
+      protocol: TCP

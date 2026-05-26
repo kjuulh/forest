@@ -14,6 +14,10 @@ use super::{
 /// the local environment. Only `--env` is required.
 ///
 /// Usage: `forest release create --env prod`
+///
+/// With `--skip-commit` the final release step is skipped: the command
+/// only prepares and publishes the annotated artifact, leaving the
+/// server-side triggers/pipeline to pick it up and fire the release.
 #[derive(clap::Parser)]
 pub struct CreateCommand {
     // ── Required ─────────────────────────────────────────────────────
@@ -131,6 +135,12 @@ pub struct CreateCommand {
     /// Use the project's release pipeline instead of deploying directly.
     #[arg(long)]
     pipeline: bool,
+
+    /// Only prepare and annotate; skip the final release step. The
+    /// published annotation is left for the server-side triggers/pipeline
+    /// to pick up and release automatically.
+    #[arg(long = "skip-commit")]
+    skip_commit: bool,
 }
 
 impl CreateCommand {
@@ -200,15 +210,17 @@ impl CreateCommand {
             )
         };
 
+        let total_steps = if self.skip_commit { 2 } else { 3 };
+
         // ── 1. Prepare ───────────────────────────────────────────────
-        tracing::info!("step 1/3: prepare");
+        tracing::info!("step 1/{total_steps}: prepare");
         let prepare = PrepareCommand {
             overrides: self.overrides.clone(),
         };
         prepare.execute(state).await.context("prepare")?;
 
         // ── 2. Annotate (annotation_only — no auto-release) ─────────
-        tracing::info!("step 2/3: annotate");
+        tracing::info!("step 2/{total_steps}: annotate");
 
         // Include --set overrides in annotation metadata for traceability
         let mut metadata = self.metadata.clone();
@@ -249,6 +261,16 @@ impl CreateCommand {
         eprintln!("published artifact: {slug}");
 
         // ── 3. Release ───────────────────────────────────────────────
+        // Skipped with --skip-commit: the annotation is published and the
+        // server-side triggers/pipeline are left to pick it up and fire
+        // the release.
+        if self.skip_commit {
+            tracing::info!(
+                "skipping release step (--skip-commit); annotation left for server-side pickup"
+            );
+            return Ok(());
+        }
+
         tracing::info!("step 3/3: release");
         let commit = CommitCommand {
             slug: Some(slug),

@@ -92,10 +92,22 @@ pub fn build_router(state: AppState) -> Router {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // OTLP traces + logs + metrics when `OTEL_SERVICE_NAME` is set.
-    // Falls back to pretty fmt-only when unset, matching the previous
-    // default. The guard flushes on drop, so hold it until end of main.
-    let _otel = canopy_otel::init();
+    // Initialize the tracing subscriber so `tracing::{info, warn, error, debug}!`
+    // calls actually reach stdout. Upstream did this via canopy-otel; without it,
+    // every log line in the codebase silently disappears — which masks startup
+    // failures like a failed DB migration as "internal error" with no breadcrumb.
+    // `EnvFilter::try_from_default_env()` honors RUST_LOG (e.g. "forage=debug,info").
+    {
+        use tracing_subscriber::EnvFilter;
+        let filter = EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new("forage=info,info"));
+        tracing_subscriber::fmt().with_env_filter(filter).init();
+    }
+    tracing::info!("forage-server starting");
+
+    // Upstream initialized OTLP traces/logs/metrics here via canopy-otel
+    // when `OTEL_SERVICE_NAME` was set. Dropped on the rawpotion fork —
+    // see Cargo.toml comment for restoration steps.
 
     let forest_endpoint =
         std::env::var("FOREST_SERVER_URL").unwrap_or_else(|_| "http://localhost:4040".into());
@@ -280,18 +292,24 @@ async fn main() -> anyhow::Result<()> {
             .with_github_oidc_exchange(std::sync::Arc::new(exchange));
     }
 
-    // NATS JetStream connection (optional, enables durable notification delivery)
+    // NATS_URL is opt-in, but if set the connect must succeed — never
+    // silently fall back to in-process dispatch, which loses notifications.
+    // NATS_CREDS holds the JWT+nkey from the forage-nats-controller secret;
+    // without it the server rejects with "authorization violation".
     let nats_jetstream = if let Ok(nats_url) = std::env::var("NATS_URL") {
-        match async_nats::connect(&nats_url).await {
-            Ok(client) => {
-                tracing::info!("connected to NATS at {nats_url}");
-                Some(async_nats::jetstream::new(client))
+        let opts = match std::env::var("NATS_CREDS") {
+            Ok(creds) if !creds.is_empty() => {
+                async_nats::ConnectOptions::with_credentials(&creds)
+                    .map_err(|e| anyhow::anyhow!("NATS_CREDS invalid: {e}"))?
             }
-            Err(e) => {
-                tracing::error!(error = %e, "failed to connect to NATS — falling back to direct dispatch");
-                None
-            }
-        }
+            _ => return Err(anyhow::anyhow!("NATS_URL set but NATS_CREDS missing/empty")),
+        };
+        let client = opts
+            .connect(&nats_url)
+            .await
+            .map_err(|e| anyhow::anyhow!("NATS connect failed: {e}"))?;
+        tracing::info!("connected to NATS at {nats_url}");
+        Some(async_nats::jetstream::new(client))
     } else {
         None
     };

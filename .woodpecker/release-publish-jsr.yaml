@@ -1,0 +1,42 @@
+# Tag-driven release pipeline — JSR publish stage.
+#
+# Publishes the TypeScript SDK at apps/forest/sdk/typescript to JSR
+# under @rawpotion/forest-sdk. Runs once per `v*` tag, independent of
+# the Rust binary build (no `depends_on` — JSR publish doesn't need
+# the gitea release object).
+#
+# The package version in apps/forest/sdk/typescript/deno.json must
+# match the tag (release-please bumps both together). The publish
+# step verifies this before calling `deno publish` so a stale
+# deno.json fails fast instead of pushing the wrong version to JSR.
+#
+# Required woodpecker secrets:
+#   jsr_token — JSR publishing token from https://jsr.io/account/tokens
+#               with publish rights on the @rawpotion scope.
+
+when:
+  - event: tag
+    ref: refs/tags/v*
+
+labels:
+  platform: linux/amd64
+
+steps:
+  publish:
+    image: denoland/deno:2.1.4
+    environment:
+      JSR_TOKEN:
+        from_secret: jsr_token
+    commands:
+      - cd apps/forest/sdk/typescript
+      # Strip leading `v` from the tag and compare with deno.json. If
+      # they diverge, refuse to publish — the wrong version on JSR is
+      # painful to recover from (yanks aren't deletes).
+      - tag_version="${CI_COMMIT_TAG#v}"
+      - pkg_version=$(deno eval "console.log(JSON.parse(Deno.readTextFileSync('deno.json')).version)")
+      - |
+        if [ "$tag_version" != "$pkg_version" ]; then
+          echo "version mismatch: tag=$tag_version deno.json=$pkg_version"
+          exit 1
+        fi
+      - deno publish --token "$JSR_TOKEN"

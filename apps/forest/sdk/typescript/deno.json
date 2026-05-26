@@ -1,0 +1,9 @@
+{
+  "name": "@rawpotion/forest-sdk",
+  "version": "0.1.14",
+  "license": "MIT",
+  "exports": "./forest-sdk.ts",
+  "publish": {
+    "include": ["forest-sdk.ts", "deno.json", "README.md", "LICENSE"]
+  }
+}

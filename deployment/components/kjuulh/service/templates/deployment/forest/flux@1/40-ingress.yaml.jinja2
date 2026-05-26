@@ -1,0 +1,33 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ config.name }}
+  namespace: {{ env }}
+  labels:
+    app.kubernetes.io/name: {{ config.name }}
+    app.kubernetes.io/managed-by: forest
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    # Bind the router to the `bunny` certResolver Traefik exposes when
+    # forest-infrastructure has traefik.acme enabled. The entrypoint-level
+    # --entrypoints.websecure.http.tls.certResolver default isn't always
+    # honored for kubernetesIngress-derived routers, so we annotate
+    # explicitly to make sure ACME runs for this host.
+    traefik.ingress.kubernetes.io/router.tls.certresolver: bunny
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: {{ config.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ config.name }}
+                port:
+                  number: {{ config.port }}
+  tls:
+    - hosts:
+        - {{ config.host }}

@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "@rawpotion/forest-sdk": "jsr:@rawpotion/forest-sdk@^0.1"
+  }
+}

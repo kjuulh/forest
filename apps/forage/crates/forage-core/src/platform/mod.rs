@@ -527,6 +527,35 @@ pub struct ApprovalDecisionEntry {
     pub comment: Option<String>,
 }
 
+/// A single resource observation reported by an external health agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceHealth {
+    pub kind: String,
+    pub name: String,
+    pub namespace: String,
+    pub status: String,
+    pub message: String,
+    pub properties: std::collections::HashMap<String, String>,
+}
+
+/// Latest health observation for one (destination, environment).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DestinationHealth {
+    pub destination: String,
+    pub environment: String,
+    pub status: String,
+    pub message: String,
+    pub observed_at: String,
+    pub resources: Vec<ResourceHealth>,
+}
+
+/// Aggregated release health across destinations.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReleaseHealth {
+    pub aggregate_status: String,
+    pub destinations: Vec<DestinationHealth>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineStage {
     pub id: String,
@@ -742,6 +771,12 @@ pub trait ForestPlatform: Send + Sync {
         project: Option<&str>,
         include_completed: bool,
     ) -> Result<Vec<ReleaseIntentState>, PlatformError>;
+
+    async fn get_release_health(
+        &self,
+        access_token: &str,
+        release_intent_id: &str,
+    ) -> Result<ReleaseHealth, PlatformError>;
 
     async fn release_artifact(
         &self,

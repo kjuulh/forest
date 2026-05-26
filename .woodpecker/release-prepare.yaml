@@ -1,0 +1,69 @@
+# Tag-driven release pipeline — prepare stage.
+#
+# Runs once per `v*` tag. Generates the release notes via git-cliff,
+# creates the release on src.rawpotion.io (idempotent — reuses an
+# existing release if a previous pipeline ran), and uploads install.sh
+# (which is arch-agnostic).
+#
+# The per-arch binary tarballs are uploaded by release-build.yaml,
+# which `depends_on` this workflow so the release exists before the
+# matrix tries to attach assets.
+#
+# Required woodpecker secrets:
+#   rawpotion_token — gitea token with `write:repository` on
+#                     src.rawpotion.io/rawpotion/forest
+
+when:
+  - event: tag
+    ref: refs/tags/v*
+
+# Any platform — this workflow doesn't compile anything.
+labels:
+  platform: linux/amd64
+
+steps:
+  changelog:
+    image: orhunp/git-cliff:latest
+    commands:
+      # `git-cliff` is the standalone binary. `--strip header` removes
+      # the top-level "# Changelog" line so the body slots cleanly
+      # into the gitea release notes panel.
+      - git-cliff --tag ${CI_COMMIT_TAG} --strip header --unreleased > RELEASE_NOTES.md
+
+  create-release:
+    image: alpine:3.20
+    environment:
+      GITEA_TOKEN:
+        from_secret: rawpotion_token
+    commands:
+      - apk add --no-cache curl jq
+      # Create-or-reuse: GET first, POST only if missing. Makes
+      # pipeline retries safe.
+      - |
+        existing=$(curl -fsS -H "Authorization: token $GITEA_TOKEN" \
+          "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/tags/${CI_COMMIT_TAG}" 2>/dev/null || echo "")
+        if echo "$existing" | jq -e .id >/dev/null 2>&1; then
+          echo "Release for ${CI_COMMIT_TAG} already exists — reusing"
+        else
+          body=$(jq -Rs . < RELEASE_NOTES.md)
+          curl -fsS -X POST \
+            -H "Authorization: token $GITEA_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"${CI_COMMIT_TAG}\",\"name\":\"${CI_COMMIT_TAG}\",\"body\":$body,\"draft\":false,\"prerelease\":false}" \
+            "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases" >/dev/null
+          echo "Created release for ${CI_COMMIT_TAG}"
+        fi
+      # Upload install.sh. Gitea returns 422 if an asset with the
+      # same name already exists (e.g. pipeline retry) — swallow
+      # that and keep going.
+      - |
+        release_id=$(curl -fsS -H "Authorization: token $GITEA_TOKEN" \
+          "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/tags/${CI_COMMIT_TAG}" | jq -r .id)
+        if curl -fsS -X POST \
+            -H "Authorization: token $GITEA_TOKEN" \
+            -F "attachment=@scripts/install.sh" \
+            "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/$release_id/assets?name=install.sh" >/dev/null; then
+          echo "Uploaded install.sh"
+        else
+          echo "install.sh upload skipped (already attached)"
+        fi

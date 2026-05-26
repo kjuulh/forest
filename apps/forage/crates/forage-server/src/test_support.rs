@@ -743,6 +743,14 @@ impl ForestPlatform for MockPlatformClient {
             .unwrap_or(Ok(vec![]))
     }
 
+    async fn get_release_health(
+        &self,
+        _access_token: &str,
+        _release_intent_id: &str,
+    ) -> Result<forage_core::platform::ReleaseHealth, PlatformError> {
+        Ok(forage_core::platform::ReleaseHealth::default())
+    }
+
     async fn release_artifact(
         &self,
         _access_token: &str,

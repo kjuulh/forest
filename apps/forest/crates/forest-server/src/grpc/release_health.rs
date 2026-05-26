@@ -1,7 +1,7 @@
 use forest_grpc_interface::{
-    DestinationHealth, GetReleaseHealthRequest, GetReleaseHealthResponse, HealthStatus,
-    ReleaseHealthEvent, ReportHealthRequest, ReportHealthResponse, WatchReleaseHealthRequest,
-    release_health_service_server::ReleaseHealthService,
+    release_health_service_server::ReleaseHealthService, DestinationHealth, GetReleaseHealthRequest,
+    GetReleaseHealthResponse, HealthObservation, HealthStatus, ReleaseHealthEvent,
+    ReportHealthRequest, ReportHealthResponse, ResourceHealth, WatchReleaseHealthRequest,
 };
 use futures::StreamExt;
 use uuid::Uuid;
@@ -23,6 +23,40 @@ fn status_string_to_proto(s: &str) -> i32 {
         "MISSING" => HealthStatus::Missing as i32,
         _ => HealthStatus::Unspecified as i32,
     }
+}
+
+fn observation_from_json(obs: &serde_json::Value) -> Option<HealthObservation> {
+    let resources = obs
+        .get("resources")
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|r| ResourceHealth {
+                    kind: r.get("kind").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    name: r.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    namespace: r.get("namespace").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    status: status_string_to_proto(r.get("status").and_then(|v| v.as_str()).unwrap_or("UNSPECIFIED")),
+                    message: r.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    properties: r
+                        .get("properties")
+                        .and_then(|p| p.as_object())
+                        .map(|m| {
+                            m.iter()
+                                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Some(HealthObservation {
+        resources,
+        observed_at: obs.get("observed_at").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        status: status_string_to_proto(obs.get("status").and_then(|v| v.as_str()).unwrap_or("UNSPECIFIED")),
+        message: obs.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+    })
 }
 
 fn proto_status_to_string(status: i32) -> &'static str {
@@ -143,13 +177,11 @@ impl ReleaseHealthService for ReleaseHealthServer {
 
         let destinations = rows
             .into_iter()
-            .map(|row| {
-                DestinationHealth {
-                    destination: row.destination_name,
-                    environment: row.environment,
-                    latest_observation: None, // Full observation is in DB as JSON; proto reconstruction TODO
-                    status: status_string_to_proto(&row.status),
-                }
+            .map(|row| DestinationHealth {
+                destination: row.destination_name,
+                environment: row.environment,
+                latest_observation: observation_from_json(&row.observation),
+                status: status_string_to_proto(&row.status),
             })
             .collect();
 

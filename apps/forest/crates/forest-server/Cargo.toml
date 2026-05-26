@@ -71,9 +71,13 @@ rust-s3 = { version = "0.35", default-features = false, features = ["tokio-rustl
 tar = "0.4"
 zip = "2"
 
-# Telemetry: traces + logs + metrics over OTLP. `init()` is opt-in via the
-# `OTEL_SERVICE_NAME` env var; absent ⇒ pretty fmt to stdout (same as today).
-canopy-otel = { git = "https://github.com/understory-io/canopy-util-rs", version = "0.1.0" }
+# Telemetry was wired through canopy-otel upstream (private github dep
+# at understory-io/canopy-util-rs). Removed on the rawpotion fork — no
+# SSH access to that repo. `optional = true` + a feature gate didn't
+# help: Cargo eagerly resolves git deps to validate the lockfile, so the
+# fetch happens regardless of whether the feature is on. Restore upstream
+# by re-adding this line + the `let _otel = canopy_otel::init()` call in
+# forage-server/src/main.rs.
 
 [dev-dependencies]
 tempfile = "3"

@@ -1324,6 +1324,24 @@ async fn artifact_detail(
         .map(|ri| ri.release_intent_id.clone())
         .unwrap_or_default();
     let is_release_author = false;
+
+    // Fetch release health for the latest intent. Best-effort: a missing or
+    // unreachable forest server shouldn't break the artifact page.
+    let release_health = if !release_intent_id_str.is_empty() {
+        match state
+            .platform_client
+            .get_release_health(&session.access_token, &release_intent_id_str)
+            .await
+        {
+            Ok(h) => Some(h),
+            Err(e) => {
+                tracing::warn!(release_intent_id = %release_intent_id_str, error = %e, "get_release_health failed");
+                None
+            }
+        }
+    } else {
+        None
+    };
     if let Some(ri) = latest_intent {
         {
             let mut seen = std::collections::BTreeSet::new();
@@ -1482,6 +1500,24 @@ async fn artifact_detail(
                 has_release_intents => release_intents.iter().any(|ri| ri.artifact_id == artifact.artifact_id),
                 artifact_spec => if artifact_spec.is_empty() { None::<String> } else { Some(artifact_spec) },
                 policy_evaluations => policy_evaluations,
+                release_health => release_health.as_ref().map(|h| context! {
+                    aggregate_status => &h.aggregate_status,
+                    destinations => h.destinations.iter().map(|d| context! {
+                        destination => &d.destination,
+                        environment => &d.environment,
+                        status => &d.status,
+                        message => &d.message,
+                        observed_at => &d.observed_at,
+                        resources => d.resources.iter().map(|r| context! {
+                            kind => &r.kind,
+                            name => &r.name,
+                            namespace => &r.namespace,
+                            status => &r.status,
+                            message => &r.message,
+                            properties => &r.properties,
+                        }).collect::<Vec<_>>(),
+                    }).collect::<Vec<_>>(),
+                }),
                 release_intent_id => &release_intent_id_str,
                 is_release_author => is_release_author,
                 is_admin => is_admin,

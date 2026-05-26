@@ -25,6 +25,7 @@ use forage_grpc::trigger_service_client::TriggerServiceClient;
 use forage_grpc::destination_service_client::DestinationServiceClient;
 use forage_grpc::environment_service_client::EnvironmentServiceClient;
 use forage_grpc::organisation_service_client::OrganisationServiceClient;
+use forage_grpc::release_health_service_client::ReleaseHealthServiceClient;
 use forage_grpc::release_service_client::ReleaseServiceClient;
 use forage_grpc::users_service_client::UsersServiceClient;
 use tonic::metadata::MetadataValue;
@@ -92,6 +93,10 @@ impl GrpcForestClient {
 
     pub(crate) fn release_client(&self) -> ReleaseServiceClient<Channel> {
         ReleaseServiceClient::new(self.channel.clone())
+    }
+
+    fn release_health_client(&self) -> ReleaseHealthServiceClient<Channel> {
+        ReleaseHealthServiceClient::new(self.channel.clone())
     }
 
     fn env_client(&self) -> EnvironmentServiceClient<Channel> {
@@ -193,6 +198,19 @@ fn map_status(status: tonic::Status) -> AuthError {
         }
         _ => AuthError::Other(status.message().into()),
     }
+}
+
+fn health_status_to_string(status: i32) -> String {
+    use forage_grpc::HealthStatus;
+    match HealthStatus::try_from(status) {
+        Ok(HealthStatus::Healthy) => "HEALTHY",
+        Ok(HealthStatus::Progressing) => "PROGRESSING",
+        Ok(HealthStatus::Degraded) => "DEGRADED",
+        Ok(HealthStatus::Unhealthy) => "UNHEALTHY",
+        Ok(HealthStatus::Missing) => "MISSING",
+        _ => "UNSPECIFIED",
+    }
+    .to_string()
 }
 
 fn convert_user(u: forage_grpc::User) -> User {
@@ -2010,6 +2028,74 @@ impl ForestPlatform for GrpcForestClient {
                     .collect(),
             })
             .collect())
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn get_release_health(
+        &self,
+        access_token: &str,
+        release_intent_id: &str,
+    ) -> Result<forage_core::platform::ReleaseHealth, PlatformError> {
+        let req = bearer_request(
+            access_token,
+            forage_grpc::GetReleaseHealthRequest {
+                release_intent_id: release_intent_id.into(),
+            },
+        )
+        .map_err(|e| PlatformError::Other(e.to_string()))?;
+
+        let resp = self
+            .release_health_client()
+            .get_release_health(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+
+        let destinations = resp
+            .destinations
+            .into_iter()
+            .map(|d| {
+                let (status_str, observed_at, message, resources) = match d.latest_observation {
+                    Some(obs) => (
+                        health_status_to_string(obs.status),
+                        obs.observed_at,
+                        obs.message,
+                        obs.resources
+                            .into_iter()
+                            .map(|r| forage_core::platform::ResourceHealth {
+                                kind: r.kind,
+                                name: r.name,
+                                namespace: r.namespace,
+                                status: health_status_to_string(r.status),
+                                message: r.message,
+                                properties: r.properties,
+                            })
+                            .collect(),
+                    ),
+                    // Server doesn't always populate latest_observation; fall
+                    // back to the destination-level rollup status.
+                    None => (
+                        health_status_to_string(d.status),
+                        String::new(),
+                        String::new(),
+                        Vec::new(),
+                    ),
+                };
+                forage_core::platform::DestinationHealth {
+                    destination: d.destination,
+                    environment: d.environment,
+                    status: status_str,
+                    message,
+                    observed_at,
+                    resources,
+                }
+            })
+            .collect();
+
+        Ok(forage_core::platform::ReleaseHealth {
+            aggregate_status: health_status_to_string(resp.aggregate_status),
+            destinations,
+        })
     }
 
     #[tracing::instrument(skip_all)]
