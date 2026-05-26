@@ -10,11 +10,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     clang mold \
-    git ssh \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git config --global url."ssh://git@github.com".insteadOf https://github.com && \
-    mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
+# sccache amortizes rustc compile across CI runs. When
+# SCCACHE_MEMCACHED_ENDPOINT is set (passed from .woodpecker/ci.yaml)
+# rustc invocations are cached in the homelab memcached server; when
+# empty (e.g. local docker build) sccache falls back to its disk cache,
+# which is per-image and effectively a no-op but harmless.
+#
+# The memcached host lives on the internal VLAN and isn't always
+# reachable (PR builds on foreign runners, the cache host being down,
+# etc). sccache would otherwise fail the whole build when it can't
+# reach its backend, so the build step below probes the endpoint first
+# and, if unreachable, drops RUSTC_WRAPPER so cargo compiles normally
+# without caching instead of erroring out.
+ARG SCCACHE_VERSION=0.9.1
+ARG SCCACHE_MEMCACHED_ENDPOINT=
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+      amd64) SCCACHE_TARGET=x86_64-unknown-linux-musl ;; \
+      arm64) SCCACHE_TARGET=aarch64-unknown-linux-musl ;; \
+      *) echo "unsupported TARGETARCH: $TARGETARCH" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-${SCCACHE_TARGET}.tar.gz" \
+      | tar xz -C /tmp && \
+    install -m 0755 "/tmp/sccache-v${SCCACHE_VERSION}-${SCCACHE_TARGET}/sccache" /usr/local/bin/sccache && \
+    sccache --version
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_MEMCACHED_ENDPOINT=$SCCACHE_MEMCACHED_ENDPOINT
 
 RUN mkdir -p /usr/local/cargo && \
     printf '[target.x86_64-unknown-linux-gnu]\nlinker = "clang"\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' \
@@ -24,7 +47,23 @@ ENV SQLX_OFFLINE=true
 
 COPY . .
 
-RUN --mount=type=ssh cargo build --release --bin forest-server
+# Probe the sccache backend before building. If SCCACHE_MEMCACHED_ENDPOINT
+# is set but the host can't be reached, unset the wrapper so cargo builds
+# without caching rather than failing. An empty endpoint (local build)
+# keeps sccache on its harmless disk cache.
+RUN set -e; \
+    if [ -n "$SCCACHE_MEMCACHED_ENDPOINT" ]; then \
+      hostport="${SCCACHE_MEMCACHED_ENDPOINT#tcp://}"; \
+      host="${hostport%%:*}"; port="${hostport##*:}"; \
+      if timeout 5 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null; then \
+        echo "sccache: memcached reachable at $host:$port — caching enabled"; \
+      else \
+        echo "sccache: memcached unreachable at $host:$port — building without rustc cache"; \
+        unset RUSTC_WRAPPER SCCACHE_MEMCACHED_ENDPOINT; \
+      fi; \
+    fi; \
+    cargo build --release --bin forest-server; \
+    if [ -n "${RUSTC_WRAPPER:-}" ]; then sccache --show-stats; fi
 
 FROM debian:13-slim AS production
 

@@ -47,3 +47,20 @@ When adding a new aggregate:
   targets' cached queries, which breaks `SQLX_OFFLINE=true cargo test`.
 - After adding/changing migrations: `sqlx migrate run --source crates/forest-server/migrations`
 - Proto codegen: `buf generate`
+
+## Release
+
+Releases are tag-driven (`v*` tags fire `.woodpecker/release-prepare.yaml` +
+`release-build.yaml` + `release-publish-jsr.yaml`). A release commit must
+bump **both** version strings — they're checked against the tag during
+publish-jsr:
+
+- `apps/forest/crates/forest/Cargo.toml` — the CLI binary version
+- `apps/forest/sdk/typescript/deno.json` — the `@rawpotion/forest-sdk`
+  jsr package version
+
+If only one is bumped, `release-publish-jsr.yaml` aborts with
+`version mismatch: tag=X deno.json=Y`. After bumping, run
+`cd apps/forest && cargo update -p forest` to sync `Cargo.lock` and
+commit both files plus the lock together. The release commit subject
+convention is `chore(release): vX.Y.Z`.

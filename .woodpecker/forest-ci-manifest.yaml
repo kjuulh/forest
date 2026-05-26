@@ -1,0 +1,27 @@
+# Fuse the per-arch forest-ci images (built by forest-ci-image.yaml)
+# into multi-arch manifest lists under the user-facing tags. Mirrors
+# manifest.yaml but for the forest-ci plugin image's own tag set.
+
+when:
+  - event: push
+    branch: kjuulh/gitea-fork
+
+depends_on:
+  - forest-ci-image
+
+steps:
+  merge:
+    image: docker:27-cli
+    environment:
+      REGISTRY_TOKEN:
+        from_secret: registry_token
+    commands:
+      - echo "$REGISTRY_TOKEN" | docker login git.kjuulh.io -u kjuulh --password-stdin
+      - >
+        docker buildx imagetools create
+        -t git.kjuulh.io/kjuulh/forest-ci:latest
+        -t git.kjuulh.io/kjuulh/forest-ci:rawpotion
+        -t git.kjuulh.io/kjuulh/forest-ci:rawpotion-${CI_COMMIT_SHA_SHORT}
+        -t git.kjuulh.io/kjuulh/forest-ci:rawpotion-${CI_COMMIT_SHA}
+        git.kjuulh.io/kjuulh/forest-ci:rawpotion-amd64-${CI_COMMIT_SHA_SHORT}
+        git.kjuulh.io/kjuulh/forest-ci:rawpotion-arm64-${CI_COMMIT_SHA_SHORT}

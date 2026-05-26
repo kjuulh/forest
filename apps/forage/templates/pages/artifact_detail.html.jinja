@@ -443,6 +443,60 @@
     </div>
     {% endif %}
 
+    {# ── Runtime health (from external health agents) ────────────── #}
+    {% if release_health and release_health.destinations | length > 0 %}
+    {% set h_agg = release_health.aggregate_status %}
+    <div class="mb-8">
+        <div class="flex items-baseline justify-between mb-3">
+            <h2 class="text-sm font-semibold text-gray-900">Runtime health</h2>
+            <span class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full {% if h_agg == 'HEALTHY' %}bg-green-100 text-green-800{% elif h_agg == 'PROGRESSING' %}bg-yellow-100 text-yellow-800{% elif h_agg == 'DEGRADED' %}bg-orange-100 text-orange-800{% elif h_agg == 'UNHEALTHY' or h_agg == 'MISSING' %}bg-red-100 text-red-800{% else %}bg-gray-100 text-gray-700{% endif %}">
+                <span class="w-1.5 h-1.5 rounded-full {% if h_agg == 'HEALTHY' %}bg-green-500{% elif h_agg == 'PROGRESSING' %}bg-yellow-500 animate-pulse{% elif h_agg == 'DEGRADED' %}bg-orange-500{% elif h_agg == 'UNHEALTHY' or h_agg == 'MISSING' %}bg-red-500{% else %}bg-gray-400{% endif %}"></span>
+                {{ h_agg | title }}
+            </span>
+        </div>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+            {% for d in release_health.destinations %}
+            <div class="px-4 py-3 text-sm">
+                <div class="flex items-center gap-3">
+                    {# Status dot #}
+                    <span class="w-2.5 h-2.5 rounded-full shrink-0 {% if d.status == 'HEALTHY' %}bg-green-500{% elif d.status == 'PROGRESSING' %}bg-yellow-500 animate-pulse{% elif d.status == 'DEGRADED' %}bg-orange-500{% elif d.status == 'UNHEALTHY' or d.status == 'MISSING' %}bg-red-500{% else %}bg-gray-400{% endif %}"></span>
+
+                    {# Environment badge #}
+                    <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full {% if 'prod' in d.environment and 'preprod' not in d.environment %}bg-pink-100 text-pink-800{% elif 'preprod' in d.environment or 'pre-prod' in d.environment %}bg-orange-100 text-orange-800{% elif 'stag' in d.environment %}bg-yellow-100 text-yellow-800{% elif 'dev' in d.environment %}bg-violet-100 text-violet-800{% else %}bg-gray-100 text-gray-700{% endif %}">
+                        {{ d.environment }}
+                    </span>
+
+                    <span class="text-gray-700">{{ d.destination }}</span>
+
+                    <span class="text-xs {% if d.status == 'HEALTHY' %}text-green-600{% elif d.status == 'PROGRESSING' %}text-yellow-600{% elif d.status == 'DEGRADED' %}text-orange-600{% elif d.status == 'UNHEALTHY' or d.status == 'MISSING' %}text-red-600{% else %}text-gray-500{% endif %}">{{ d.status | title }}</span>
+
+                    {% if d.message %}
+                    <span class="text-xs text-gray-500 truncate" title="{{ d.message }}">{{ d.message }}</span>
+                    {% endif %}
+
+                    {% if d.observed_at %}
+                    <time class="text-xs text-gray-400 ml-auto tabular-nums" title="{{ d.observed_at }}">{{ ts(d.observed_at) }}</time>
+                    {% endif %}
+                </div>
+
+                {% if d.resources | length > 0 %}
+                <ul class="mt-2 ml-5 space-y-1">
+                    {% for r in d.resources %}
+                    <li class="flex items-center gap-2 text-xs text-gray-600">
+                        <span class="w-1.5 h-1.5 rounded-full shrink-0 {% if r.status == 'HEALTHY' %}bg-green-500{% elif r.status == 'PROGRESSING' %}bg-yellow-500{% elif r.status == 'DEGRADED' %}bg-orange-500{% elif r.status == 'UNHEALTHY' or r.status == 'MISSING' %}bg-red-500{% else %}bg-gray-400{% endif %}"></span>
+                        <span class="font-mono">{{ r.kind }}/{{ r.name }}</span>
+                        {% if r.namespace and r.namespace != 'flux-system' %}<span class="text-gray-400">({{ r.namespace }})</span>{% endif %}
+                        {% if r.message %}<span class="text-gray-500">— {{ r.message }}</span>{% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     {# ── Logs ──────────────────────────────────────────────────── #}
     {% if has_release_intents %}
     <div class="mb-8">

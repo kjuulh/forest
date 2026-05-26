@@ -3,24 +3,35 @@
 Codify your development workflows; CI, deployments, component sharing as
 [CUE](https://cuelang.org/) manifests, then share them across your team.
 
+> **rawpotion fork.** This is a personal mirror of
+> [understory-io/forest](https://github.com/understory-io/forest) hosted on
+> [src.rawpotion.io](https://src.rawpotion.io/rawpotion/forest) with
+> Woodpecker CI and rawpotion-specific release artifacts. Container images
+> publish to `git.kjuulh.io/kjuulh/<app>`.
+
 ## Install
 
-*Prerequisites*
-
-- `gh` GitHub cli
 - `cue` Cuelang (yaml and golang had a baby)
 
 To install forest run the below command, it will install forest as a cli, and set your current profile to run against the production instance of forest.
 
+Public releases on src.rawpotion.io, plain `curl`, no auth tooling required.
+
 ```bash
-gh release download --repo understory-io/forest --pattern install.sh -O - \
-  | FOREST_PROFILE='name=understory-prod,server=https://api.forest.understory.sh' bash
+curl -fsSL https://src.rawpotion.io/rawpotion/forest/raw/branch/kjuulh/gitea-fork/scripts/install.sh | bash
 ```
 
+
+To pin to a specific version, pass it to both the download (so the script
+itself comes from that release) and to the install script (so it grabs
+the matching tarball). `bash -s --` forwards positional args when the
+script comes in via stdin:
 Next you need to add it to `.zshrc` to get full cli support
 
+
 ```bash
-echo 'eval "$(forest shell zsh)"' >> ~/.zshrc
+curl -fsSL https://src.rawpotion.io/rawpotion/forest/releases/download/v0.1.13/install.sh \
+  | bash -s -- v0.1.13
 ```
 
 Optionally run `forest shell install` to put forest's global tools on your
@@ -102,6 +113,10 @@ Useful knobs:
 
 bash and fish work the same way via `forest shell bash` / `forest shell fish`.
 
+The fork ships **linux-x86_64 and linux-aarch64** binaries. macOS users can
+build from source (`cargo build --release -p forest` from `apps/forest`) or
+install from the upstream [understory-io release](https://github.com/understory-io/forest/releases).
+
 ## Logging in
 
 Either create an account or sign in, both can be done entirely in the terminal if wanted
@@ -122,79 +137,24 @@ exists (cached 24h; suppress with `FOREST_NO_UPDATE_CHECK=1` or `CI=true`).
 ## What's here
 
 - [`apps/forest/`](apps/forest/) — the `forest` CLI and supporting libraries
-- [`apps/forage/`](apps/forage/) — the managed web UI ([forest.understory.sh](https://forest.understory.sh)). Directory name remains `forage` for now; the crate hasn't been renamed.
+- [`apps/forage/`](apps/forage/) — the managed web UI
 
-## Deploying forest and forage
+## Release flow (fork)
 
-Pushes to `main` build `ghcr.io/understory-io/{forest,forage}:latest` and then
-force a new deployment of the matching ECS services in **both** platform
-accounts — `platform-dev` (`618060699933`) and `platform-prod`
-(`462774209206`), `eu-west-1`. Both jobs live in
-[`.github/workflows/ci.yaml`](.github/workflows/ci.yaml); the deploy job waits
-for both image builds, so the two services never roll onto mismatched images.
+Releases are tag-driven. release-please is gone; the fork uses
+[git-cliff](https://git-cliff.org/) for changelog/release-notes generation
+(see [`cliff.toml`](cliff.toml)) and a single Woodpecker pipeline.
 
-Both accounts pin `:latest`, and this job is the only thing that moves it, so
-deploying both is what keeps them in step. dev was manual until DATA-668 and
-drifted far enough that tightening a health check against a prod-verified image
-took dev out of rotation — the images were simply older there.
-
-```sh
-aws ecs update-service \
-  --cluster infrastructure-platform \
-  --service forest \
-  --force-new-deployment \
-  --region eu-west-1
-aws ecs wait services-stable \
-  --cluster infrastructure-platform \
-  --services forest \
-  --region eu-west-1
+```bash
+# 1. Bump apps/forest/crates/forest/Cargo.toml $.package.version
+# 2. Commit, tag, push
+git commit -am "chore(release): v0.2.0"
+git tag v0.2.0
+git push origin main --tags
 ```
 
-The task definitions pin `:latest`, so nothing registers a new task definition
-— which is why the deploy identity needs neither `ecs:RegisterTaskDefinition`
-nor `iam:PassRole`.
-
-### Credentials
-
-CI authenticates as the `platform-deployment` IAM user, whose *only* permission
-is `sts:AssumeRole` on the `ecs-deployer` role. That role is scoped to
-`ecs:UpdateService` / `DescribeServices` / `ListTasks` / `DescribeTasks` on the
-`infrastructure-platform` cluster's services and nothing else. Both are defined
-in [`infrastructure-platform/ecs-deploy.tf`](https://github.com/understory-io/infrastructure-platform/blob/dev/ecs-deploy.tf),
-mirroring `infrastructure-data`.
-
-| Name | Kind | Source |
-|---|---|---|
-| `HB_GITHUB_SSH_KEY` | secret (org) | Existing deploy key for private Rust git deps during the Docker build |
-| `PLATFORM_DEPLOYMENT_AWS_ACCESS_KEY_ID` | secret | `production/ecs-deployer/credentials` in platform-**prod** Secrets Manager |
-| `PLATFORM_DEPLOYMENT_AWS_SECRET_ACCESS_KEY` | secret | same secret, `aws_secret_access_key` field |
-| `PLATFORM_DEPLOYMENT_ROLE_ARN` | variable | `arn:aws:iam::462774209206:role/ecs-deployer` |
-| `PLATFORM_DEV_DEPLOYMENT_AWS_ACCESS_KEY_ID` | secret | `development/ecs-deployer/credentials` in platform-**dev** Secrets Manager |
-| `PLATFORM_DEV_DEPLOYMENT_AWS_SECRET_ACCESS_KEY` | secret | same secret, `aws_secret_access_key` field |
-| `PLATFORM_DEV_DEPLOYMENT_ROLE_ARN` | variable | `arn:aws:iam::618060699933:role/ecs-deployer` |
-
-The prod pair is unprefixed because it predates the dev one. The workflow passes
-secret *names* through the matrix rather than renaming live credentials.
-
-Populate them only after the `infrastructure-platform` apply lands. Read the
-values straight out of Secrets Manager and pipe them in — never print, paste
-into a PR comment, or commit them:
-
-```sh
-creds=$(aws secretsmanager get-secret-value \
-  --profile understory-platform-prod --region eu-west-1 \
-  --secret-id production/ecs-deployer/credentials \
-  --query SecretString --output text)
-
-jq -r .aws_access_key_id     <<<"$creds" | gh secret set PLATFORM_DEPLOYMENT_AWS_ACCESS_KEY_ID     --repo understory-io/forest
-jq -r .aws_secret_access_key <<<"$creds" | gh secret set PLATFORM_DEPLOYMENT_AWS_SECRET_ACCESS_KEY --repo understory-io/forest
-jq -r .role_arn              <<<"$creds" | gh variable set PLATFORM_DEPLOYMENT_ROLE_ARN            --repo understory-io/forest
-unset creds
-```
-
-Rotating is the same three commands after a `terraform taint
-aws_iam_access_key.ecs_deployer` + apply.
-
-Swap `--profile understory-platform-prod` / `production/…` for
-`understory-platform-dev` / `development/…` and the `PLATFORM_DEV_` names to
-rotate the dev pair.
+The `.woodpecker/release-prepare.yaml` + `release-build.yaml` workflows
+trigger on `v*` tags. `release-prepare` generates release notes from
+conventional commits and creates the release on src.rawpotion.io via the
+gitea API. `release-build` then runs a matrix on native amd64 and arm64
+runners (no QEMU) and attaches the per-arch tarballs.

@@ -16,6 +16,10 @@ use super::{
 /// the local environment. Only `--env` is required.
 ///
 /// Usage: `forest release create --env prod`
+///
+/// With `--skip-commit` the final release step is skipped: the command
+/// only prepares and publishes the annotated artifact, leaving the
+/// server-side triggers/pipeline to pick it up and fire the release.
 #[derive(clap::Parser)]
 pub struct CreateCommand {
     // ── Required ─────────────────────────────────────────────────────
@@ -307,6 +311,16 @@ impl CreateCommand {
         }
 
         // ── 3. Release ───────────────────────────────────────────────
+        // Skipped with --skip-commit: the annotation is published and the
+        // server-side triggers/pipeline are left to pick it up and fire
+        // the release.
+        if self.skip_commit {
+            tracing::info!(
+                "skipping release step (--skip-commit); annotation left for server-side pickup"
+            );
+            return Ok(());
+        }
+
         tracing::info!("step 3/3: release");
         let commit = CommitCommand {
             slug: Some(slug),

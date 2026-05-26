@@ -1,17 +1,9 @@
 #!/usr/bin/env bash
-# install.sh — install the forest CLI from a private GitHub release.
+# install.sh — install the forest CLI from a public gitea release.
 #
-# The understory-io/forest repository is private, so unauthenticated
-# downloads return 404. This script wraps `gh release download` so
-# end users can use the GitHub CLI's existing auth (which they need
-# for day-to-day repo access anyway) instead of standing up a token
-# in $HOMEBREW_GITHUB_API_TOKEN or similar.
-#
-# ── Prereqs ───────────────────────────────────────────────────────
-#   gh CLI installed and authenticated:
-#       gh auth login                # one-time
-#       gh auth status               # verify
-#   The signed-in user must have read access to understory-io/forest.
+# The rawpotion fork hosts releases publicly at src.rawpotion.io, so
+# this script uses plain `curl` against the gitea release URL — no
+# `gh`, `tea`, or auth tooling required on the end-user side.
 #
 # ── Usage ─────────────────────────────────────────────────────────
 #   ./install.sh                     # install latest release (to ~/.local/bin)
@@ -23,15 +15,15 @@
 # when HOME is unset. Override with PREFIX=… either way.
 #
 # ── Bootstrap ─────────────────────────────────────────────────────
-#   gh release download --repo understory-io/forest --pattern install.sh -O - | bash
+#   curl -fsSL https://src.rawpotion.io/rawpotion/forest/releases/latest/download/install.sh | bash
 #
-# Or the two-step form if you want to inspect the script first:
-#   gh release download --repo understory-io/forest --pattern install.sh
-#   bash install.sh
+# Or pin to a version:
+#   curl -fsSL https://src.rawpotion.io/rawpotion/forest/releases/download/v0.1.9/install.sh | bash -s -- v0.1.9
 
 set -euo pipefail
 
-REPO="understory-io/forest"
+HOST="https://src.rawpotion.io"
+REPO="rawpotion/forest"
 BIN="forest"
 VERSION="${1:-}"
 
@@ -50,19 +42,19 @@ PREFIX="${PREFIX:-$(default_prefix)}"
 
 err() { echo "install.sh: $*" >&2; exit 1; }
 
-command -v gh >/dev/null 2>&1 \
-  || err "gh CLI not found. Install from https://cli.github.com/ and run 'gh auth login'."
-
-gh auth status >/dev/null 2>&1 \
-  || err "gh CLI is not authenticated. Run 'gh auth login' first."
+command -v curl >/dev/null 2>&1 \
+  || err "curl not found. Install curl and re-run."
 
 # ── Resolve target tag ────────────────────────────────────────────
-# Empty -> latest release on the repo. `gh release view` follows the
-# repo's notion of "latest" (not strictly highest semver — release
-# marked as latest by GH, which release-please always sets).
+# Empty -> latest. Gitea exposes /releases/latest as a 302 redirect
+# to the actual tag; follow it and read the Location header to grab
+# the tag name without parsing JSON.
 if [ -z "$VERSION" ]; then
-    VERSION=$(gh release view --repo "$REPO" --json tagName --jq '.tagName') \
-        || err "Failed to resolve latest release. Check repo access."
+    latest_url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+        "$HOST/$REPO/releases/latest") \
+        || err "Failed to resolve latest release. Check $HOST/$REPO is reachable."
+    VERSION="${latest_url##*/}"
+    [ -n "$VERSION" ] || err "Could not parse latest release tag from $latest_url."
 fi
 
 # ── Detect platform ───────────────────────────────────────────────
@@ -70,21 +62,15 @@ uname_s=$(uname -s)
 uname_m=$(uname -m)
 
 case "$uname_s" in
-    Darwin)
-        case "$uname_m" in
-            arm64|aarch64) target="aarch64-apple-darwin" ;;
-            *) err "Unsupported macOS architecture: $uname_m (only Apple silicon ships today)." ;;
-        esac
-        ;;
     Linux)
         case "$uname_m" in
-            x86_64|amd64) target="x86_64-unknown-linux-gnu" ;;
-            aarch64|arm64) target="aarch64-unknown-linux-gnu" ;;
-            *) err "Unsupported Linux architecture: $uname_m." ;;
+            x86_64|amd64)   target="x86_64-unknown-linux-gnu" ;;
+            aarch64|arm64)  target="aarch64-unknown-linux-gnu" ;;
+            *) err "Unsupported linux arch: $uname_m. The rawpotion fork ships x86_64 and aarch64 — build from source for other arches (see README)." ;;
         esac
         ;;
     *)
-        err "Unsupported OS: $uname_s. forest ships for macOS and Linux only."
+        err "Unsupported OS: $uname_s. The rawpotion fork ships linux-x86_64 and linux-aarch64 only — build from source (see README)."
         ;;
 esac
 
@@ -97,12 +83,14 @@ echo "==> Installing $BIN $VERSION ($target) to $PREFIX/bin"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-gh release download "$VERSION" \
-    --repo "$REPO" \
-    --pattern "$asset" \
-    --pattern "$checksum" \
-    --dir "$tmp" \
-    || err "Failed to download $asset from $REPO. Check the tag exists and you have access."
+dl() {
+    local name="$1"
+    curl -fsSL --retry 3 -o "$tmp/$name" \
+        "$HOST/$REPO/releases/download/$VERSION/$name" \
+        || err "Failed to download $name from $HOST/$REPO. Check the tag exists."
+}
+dl "$asset"
+dl "$checksum"
 
 # ── Verify checksum ───────────────────────────────────────────────
 # The sha256 file's path-form was generated server-side relative to
