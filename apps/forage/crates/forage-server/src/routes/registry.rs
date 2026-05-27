@@ -71,7 +71,7 @@ fn require_registry(state: &AppState) -> Result<&dyn forage_core::registry::Fore
 /// Build the (description, metadata) pair the project + component
 /// templates need for the header and About sidebar. Project description
 /// wins; the component manifest description is the fallback. See spec
-/// 009 §"Forage UI".
+/// 009 §"Forest UI".
 fn project_overview_ctx(
     project: Option<&forage_core::platform::Project>,
     component_description: Option<&str>,
@@ -168,7 +168,7 @@ async fn components_search(
         .render(
             "pages/components.html.jinja",
             context! {
-                title => "Components - Forage",
+                title => "Components - Forest",
                 description => "Discover and share reusable forest components.",
                 components => components,
                 query => &query,
@@ -279,7 +279,7 @@ async fn component_detail(
         .render(
             "pages/component_detail.html.jinja",
             context! {
-                title => format!("{org}/{name} - Components - Forage"),
+                title => format!("{org}/{name} - Components - Forest"),
                 description => &detail.summary.description,
                 summary => &detail.summary,
                 versions => &detail.versions,
@@ -361,7 +361,7 @@ async fn component_version_detail(
         .render(
             "pages/component_detail.html.jinja",
             context! {
-                title => format!("{org}/{name}@{version} - Components - Forage"),
+                title => format!("{org}/{name}@{version} - Components - Forest"),
                 description => &detail.summary.description,
                 summary => &detail.summary,
                 versions => &detail.versions,
@@ -413,7 +413,7 @@ async fn org_components(
         .render(
             "pages/org_components.html.jinja",
             context! {
-                title => format!("{org} - Components - Forage"),
+                title => format!("{org} - Components - Forest"),
                 description => format!("Components in {org}"),
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -472,7 +472,7 @@ async fn project_components(
         .render(
             "pages/project_components.html.jinja",
             context! {
-                title => format!("Components - {project} - {org} - Forage"),
+                title => format!("Components - {project} - {org} - Forest"),
                 description => format!("Published components for {project}"),
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,

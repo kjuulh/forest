@@ -778,7 +778,7 @@ async fn account_page_renders_error_banner_on_conflict_query() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body_str = String::from_utf8_lossy(&body);
     assert!(
-        body_str.contains("already linked to another Forage user"),
+        body_str.contains("already linked to another Forest user"),
         "expected cross-user conflict banner"
     );
 }

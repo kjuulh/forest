@@ -165,7 +165,7 @@ impl ForestAuth for MockForestClient {
         let b = self.behavior.lock().unwrap();
         b.setup_mfa_result.clone().unwrap_or(Ok(MfaSetup {
             mfa_id: "mfa-mock-1".into(),
-            provisioning_uri: "otpauth://totp/Forage:testuser?secret=JBSWY3DPEHPK3PXP&issuer=Forage".into(),
+            provisioning_uri: "otpauth://totp/Forest:testuser?secret=JBSWY3DPEHPK3PXP&issuer=Forest".into(),
             secret: "JBSWY3DPEHPK3PXP".into(),
         }))
     }

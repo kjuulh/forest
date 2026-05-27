@@ -244,7 +244,7 @@ async fn dashboard(
             .render(
                 "pages/onboarding.html.jinja",
                 context! {
-                    title => "Get Started - Forage",
+                    title => "Get Started - Forest",
                     description => "Create your first organisation",
                     user => context! { username => session.user.username },
                     csrf_token => &session.csrf_token,
@@ -307,8 +307,8 @@ async fn dashboard(
         .render(
             "pages/dashboard.html.jinja",
             context! {
-                title => "Dashboard - Forage",
-                description => "Your Forage dashboard",
+                title => "Dashboard - Forest",
+                description => "Your Forest dashboard",
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
                 current_org => orgs.first().map(|o| &o.name),
@@ -587,7 +587,7 @@ async fn org_settings(
         .render(
             "pages/org_settings.html.jinja",
             context! {
-                title => format!("{org} - Settings - Forage"),
+                title => format!("{org} - Settings - Forest"),
                 description => format!("Settings for {org}"),
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -637,7 +637,7 @@ async fn notifications_page(
         .render(
             "pages/notifications.html.jinja",
             context! {
-                title => "Notifications - Forage",
+                title => "Notifications - Forest",
                 description => "Your release activity",
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -681,7 +681,7 @@ async fn create_org_submit(
             .render(
                 "pages/onboarding.html.jinja",
                 context! {
-                    title => "Get Started - Forage",
+                    title => "Get Started - Forest",
                     description => "Create your first organisation",
                     user => context! { username => session.user.username },
                     csrf_token => &session.csrf_token,
@@ -724,7 +724,7 @@ async fn create_org_submit(
                 .render(
                     "pages/onboarding.html.jinja",
                     context! {
-                        title => "Get Started - Forage",
+                        title => "Get Started - Forest",
                         description => "Create your first organisation",
                         user => context! { username => session.user.username },
                         csrf_token => &session.csrf_token,
@@ -762,7 +762,7 @@ async fn projects_list(
         .render(
             "pages/projects.html.jinja",
             context! {
-                title => format!("{org} - Projects - Forage"),
+                title => format!("{org} - Projects - Forest"),
                 description => format!("Projects in {org}"),
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -932,7 +932,7 @@ async fn project_detail(
             .unwrap_or_default()
     };
     // Description: project-level wins, component manifest as fallback.
-    // See spec 009 §"Forage UI".
+    // See spec 009 §"Forest UI".
     let project_description = project_info
         .as_ref()
         .map(|p| p.description.clone())
@@ -963,7 +963,7 @@ async fn project_detail(
         .render(
             "pages/project_detail.html.jinja",
             context! {
-                title => format!("{project} - {org} - Forage"),
+                title => format!("{project} - {org} - Forest"),
                 description => format!("Project {project} in {org}"),
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -1095,7 +1095,7 @@ async fn project_releases(
         .render(
             "pages/project_releases.html.jinja",
             context! {
-                title => format!("Releases - {project} - {org} - Forage"),
+                title => format!("Releases - {project} - {org} - Forest"),
                 description => format!("Releases performed for {project} in {org}"),
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -1359,7 +1359,7 @@ async fn artifact_detail(
         .render(
             "pages/artifact_detail.html.jinja",
             context! {
-                title => format!("{} - {} - {} - Forage", artifact.context.title, project, org),
+                title => format!("{} - {} - {} - Forest", artifact.context.title, project, org),
                 description => artifact.context.description,
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -1606,7 +1606,7 @@ async fn usage(
         .render(
             "pages/usage.html.jinja",
             context! {
-                title => format!("Usage - {org} - Forage"),
+                title => format!("Usage - {org} - Forest"),
                 description => format!("Usage and plan for {org}"),
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -1709,7 +1709,7 @@ async fn user_profile(
         .render(
             "pages/user_profile.html.jinja",
             context! {
-                title => format!("{} - Forage", profile.username),
+                title => format!("{} - Forest", profile.username),
                 description => format!("Profile for {}", profile.username),
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -3022,7 +3022,7 @@ async fn releases_page(
         .render(
             "pages/releases.html.jinja",
             context! {
-                title => format!("Releases - {org} - Forage"),
+                title => format!("Releases - {org} - Forest"),
                 description => format!("Deployment pipeline for {org}"),
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -3150,7 +3150,7 @@ async fn destinations_page(
         .render(
             "pages/destinations.html.jinja",
             context! {
-                title => format!("Destinations - {org} - Forage"),
+                title => format!("Destinations - {org} - Forest"),
                 description => format!("Deployment destinations for {org}"),
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -3425,7 +3425,7 @@ async fn destination_detail(
         .render(
             "pages/destination_detail.html.jinja",
             context! {
-                title => format!("{} - Destinations - {} - Forage", dest_name, org),
+                title => format!("{} - Destinations - {} - Forest", dest_name, org),
                 description => format!("Destination {} in {}", dest_name, org),
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -3525,7 +3525,7 @@ async fn members_page(
         .render(
             "pages/members.html.jinja",
             context! {
-                title => format!("Members - {org} - Forage"),
+                title => format!("Members - {org} - Forest"),
                 description => format!("Members of {org}"),
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -5441,7 +5441,7 @@ async fn compute_page(
         .render(
             "pages/compute.html.jinja",
             context! {
-                title => format!("Compute - {} - Forage", org),
+                title => format!("Compute - {} - Forest", org),
                 description => "Managed compute instances",
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
@@ -5522,7 +5522,7 @@ async fn rollout_detail_page(
         .render(
             "pages/rollout_detail.html.jinja",
             context! {
-                title => format!("Rollout {} - Forage", rollout.apply_id),
+                title => format!("Rollout {} - Forest", rollout.apply_id),
                 description => "Rollout details",
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
