@@ -25,7 +25,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         print(f"  [{now}] Webhook received on {self.path}")
 
         # Print signature if present
-        sig = self.headers.get("X-Forage-Signature")
+        sig = self.headers.get("X-Forest-Signature")
         if sig:
             print(f"  Signature: {sig}")
 

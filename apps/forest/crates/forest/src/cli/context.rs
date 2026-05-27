@@ -36,7 +36,7 @@ enum Commands {
     SetServer(SetServerCommand),
     /// Update (or clear with `--clear`) a context's web URL — where
     /// `forest auth login --web` opens the browser. Falls back to the
-    /// `forest. → forage.` convention when unset.
+    /// "strip leading `api.`" convention when unset.
     SetWebUrl(SetWebUrlCommand),
     /// Install-time provisioning. Idempotent — re-running with the
     /// same name updates the server. Used by `install.sh` to seed a
@@ -277,12 +277,12 @@ pub struct ProvisionCommand {
     /// validation rules as other context names.
     #[arg(long)]
     name: String,
-    /// Forest server URL (e.g. `https://forest.understory.sh`).
+    /// Forest server URL (e.g. `https://api.forest.understory.sh`).
     #[arg(long)]
     server: String,
-    /// Optional forage web URL. When omitted, the CLI falls back to a
-    /// `forest. → forage.` convention. Pass-through from FOREST_PROFILE
-    /// `web=` key.
+    /// Optional web UI URL. When omitted, the CLI falls back to a
+    /// "strip leading `api.`" convention. Pass-through from
+    /// FOREST_PROFILE `web=` key.
     #[arg(long = "web-url")]
     web_url: Option<String>,
 }

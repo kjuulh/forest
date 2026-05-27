@@ -9,7 +9,7 @@ To install forest run the below command, it will install forest as a cli, and se
 
 ```bash
 gh release download --repo understory-io/forest --pattern install.sh -O - \
-  | FOREST_PROFILE='name=understory-prod,server=https://forest.understory.sh' bash
+  | FOREST_PROFILE='name=understory-prod,server=https://api.forest.understory.sh' bash
 ```
 
 
@@ -42,4 +42,4 @@ exists (cached 24h; suppress with `FOREST_NO_UPDATE_CHECK=1` or `CI=true`).
 ## What's here
 
 - [`apps/forest/`](apps/forest/) — the `forest` CLI and supporting libraries
-- [`apps/forage/`](apps/forage/) — the managed web UI ([forage.understory.sh](https://forage.understory.sh))
+- [`apps/forage/`](apps/forage/) — the managed web UI ([forest.understory.sh](https://forest.understory.sh)). Directory name remains `forage` for now; the crate hasn't been renamed.

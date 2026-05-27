@@ -33,8 +33,8 @@ pub async fn run(state: &State) -> anyhow::Result<()> {
     let web_url = entry.resolve_web_url().ok_or_else(|| {
         anyhow::anyhow!(
             "context '{}' has no web URL set and the server URL ({}) \
-             doesn't follow the forest. → forage. convention. \
-             Run `forest context set-web-url {} <forage-url>` or pass \
+             doesn't have a leading `api.` label. \
+             Run `forest context set-web-url {} <web-url>` or pass \
              FOREST_WEB_URL.",
             entry.name,
             entry.server,

@@ -44,7 +44,7 @@ async fn webhook_handler(
 ) -> impl IntoResponse {
     let sig = req
         .headers()
-        .get("x-forage-signature")
+        .get("x-forest-signature")
         .map(|v| v.to_str().unwrap_or("").to_string());
     let content_type = req
         .headers()
@@ -182,7 +182,7 @@ async fn dispatcher_delivers_webhook_to_http_server() {
 
     let d = &deliveries[0];
     assert_eq!(d.content_type.as_deref(), Some("application/json"));
-    assert_eq!(d.user_agent.as_deref(), Some("Forage/1.0"));
+    assert_eq!(d.user_agent.as_deref(), Some("Forest/1.0"));
     assert!(d.signature.is_none(), "no secret = no signature");
 
     // Parse and verify the payload

@@ -137,11 +137,11 @@ impl NotificationDispatcher {
                     .http
                     .post(url)
                     .header("Content-Type", "application/json")
-                    .header("User-Agent", "Forage/1.0");
+                    .header("User-Agent", "Forest/1.0");
 
                 if let Some(secret) = secret {
                     let sig = sign_payload(&body, secret);
-                    req = req.header("X-Forage-Signature", sig);
+                    req = req.header("X-Forest-Signature", sig);
                 }
 
                 for (k, v) in headers {
