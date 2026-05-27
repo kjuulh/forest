@@ -38,7 +38,7 @@ async fn webhook_handler(
 ) -> impl IntoResponse {
     let sig = req
         .headers()
-        .get("x-forage-signature")
+        .get("x-forest-signature")
         .map(|v| v.to_str().unwrap_or("").to_string());
 
     let bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024)

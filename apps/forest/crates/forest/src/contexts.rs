@@ -24,11 +24,11 @@ const DEFAULT_SERVER: &str = "http://localhost:4040";
 
 /// Derive a `CUE_REGISTRY` value from a Forest server URL.
 ///
-/// The convention across deployments has been:
+/// The convention across deployments is:
 ///
-///   server   `https://forest.understory.sh`
+///   server   `https://api.forest.understory.sh`
 ///   →
-///   CUE_REGISTRY = `forest.sh=registry.forest.understory.sh,registry.cuelang.org`
+///   CUE_REGISTRY = `forest.sh=registry.api.forest.understory.sh,registry.cuelang.org`
 ///
 /// i.e. the `forest.sh` CUE module namespace points at
 /// `registry.<server-host>`, with the public CUE registry kept as a
@@ -74,10 +74,11 @@ pub struct ContextEntry {
     /// reserved for follow-up CLI polish.
     #[serde(default)]
     pub default_organisation: Option<String>,
-    /// Optional public-facing forage URL (no trailing slash), used by
+    /// Optional public-facing web UI URL (no trailing slash), used by
     /// `forest auth login --web` to know where to send the browser. See
     /// TASKS/022-device-login.md §1.3. When `None`, the CLI falls back
-    /// to `FOREST_WEB_URL`, then a `forest. → forage.` convention.
+    /// to `FOREST_WEB_URL`, then a "strip leading `api.`" convention
+    /// (`api.forest.x` → `forest.x`).
     #[serde(default)]
     pub web_url: Option<String>,
 }
@@ -97,9 +98,9 @@ impl ContextEntry {
     /// documented in TASKS/022-device-login.md §1.3:
     ///   1. explicit `web_url` field
     ///   2. `FOREST_WEB_URL` env var (per-invocation override)
-    ///   3. convention: replace first label `forest` → `forage`,
-    ///      `https://` enforced. Localhost-by-port maps to forage's
-    ///      default dev port (3000).
+    ///   3. convention: strip leading `api.` label from the host,
+    ///      `https://` enforced. Localhost-by-port maps to the web
+    ///      UI's default dev port (3000).
     ///   4. `None` when no rule applies.
     pub fn resolve_web_url(&self) -> Option<String> {
         if let Some(url) = self.web_url.as_ref().filter(|s| !s.is_empty()) {
@@ -114,12 +115,14 @@ impl ContextEntry {
     }
 }
 
-/// Convention: `https://forest.dev.foo` → `https://forage.dev.foo`,
-/// `http://localhost:4040` → `http://localhost:3000` (forage's dev port,
-/// per `apps/forage/crates/forage-server/src/main.rs:81`).
+/// Convention: `https://api.forest.dev.foo` → `https://forest.dev.foo`,
+/// `http://localhost:4040` → `http://localhost:3000` (web UI's dev
+/// port, per `apps/forage/crates/forage-server/src/main.rs:81`).
 /// Returns None for shapes we can't safely derive (raw IPs, server URLs
-/// that don't start with `forest.`, etc.) — callers should surface a
-/// clear "configure web_url" error rather than guess.
+/// without a leading `api.` label, etc.) — callers should surface a
+/// clear "configure web_url" error rather than guess. Pre-rename
+/// contexts pointing at `forest.understory.sh` (no `api.` prefix) land
+/// here and surface that error cleanly instead of silently misrouting.
 fn derive_web_url_from_server(server: &str) -> Option<String> {
     // Manual parse — avoids pulling in the `url` crate just for this.
     // We accept `<scheme>://<host>[:<port>][/<rest>]` and ignore the rest.
@@ -128,8 +131,8 @@ fn derive_web_url_from_server(server: &str) -> Option<String> {
         return None;
     }
     let authority = rest.split('/').next()?;
-    // Strip port if present — the convention maps forest's gRPC port
-    // (e.g. 4040) to forage's HTTP port (3000), not the same number.
+    // Strip port if present — the convention maps the API's gRPC port
+    // (e.g. 4040) to the web UI's HTTP port (3000), not the same number.
     let host = authority.split(':').next()?;
 
     // Localhost special case.
@@ -137,10 +140,10 @@ fn derive_web_url_from_server(server: &str) -> Option<String> {
         return Some(format!("{scheme}://{host}:3000"));
     }
 
-    // Generic case: first label must be "forest"; rewrite to "forage"
-    // and force https (forage in production is HTTPS-only).
-    let rest_of_host = host.strip_prefix("forest.")?;
-    Some(format!("https://forage.{rest_of_host}"))
+    // Generic case: first label must be "api"; strip it and force
+    // https (the web UI in production is HTTPS-only).
+    let rest_of_host = host.strip_prefix("api.")?;
+    Some(format!("https://{rest_of_host}"))
 }
 
 fn now_iso8601() -> String {
@@ -616,11 +619,20 @@ mod tests {
     }
 
     #[test]
-    fn resolve_web_url_derives_from_forest_subdomain() {
-        let e = ContextEntry::new("p", "https://forest.dev.understory.sh");
+    fn resolve_web_url_derives_from_api_prefix() {
+        let e = ContextEntry::new("p", "https://api.forest.dev.understory.sh");
         assert_eq!(
             e.resolve_web_url().as_deref(),
-            Some("https://forage.dev.understory.sh")
+            Some("https://forest.dev.understory.sh")
+        );
+    }
+
+    #[test]
+    fn resolve_web_url_derives_production_api_to_bare_forest() {
+        let e = ContextEntry::new("p", "https://api.forest.understory.sh");
+        assert_eq!(
+            e.resolve_web_url().as_deref(),
+            Some("https://forest.understory.sh")
         );
     }
 
@@ -634,16 +646,24 @@ mod tests {
     }
 
     #[test]
-    fn resolve_web_url_returns_none_for_unguessable_host() {
-        // A raw IP or a non-`forest.` hostname has no convention; the CLI
-        // must surface a clear error rather than silently guess.
+    fn resolve_web_url_returns_none_when_api_prefix_missing() {
+        // Hosts without a leading `api.` label have no convention; the
+        // CLI must surface a clear error rather than silently guess.
+        // Stale pre-rename contexts pointing at `forest.understory.sh`
+        // land here.
+        let e = ContextEntry::new("p", "https://forest.understory.sh");
+        assert_eq!(e.resolve_web_url(), None);
+    }
+
+    #[test]
+    fn resolve_web_url_returns_none_for_raw_ip() {
         let e = ContextEntry::new("p", "https://10.0.0.1:4040");
         assert_eq!(e.resolve_web_url(), None);
     }
 
     #[test]
     fn resolve_web_url_returns_none_for_non_http_scheme() {
-        let e = ContextEntry::new("p", "grpc://forest.example.com");
+        let e = ContextEntry::new("p", "grpc://api.forest.example.com");
         assert_eq!(e.resolve_web_url(), None);
     }
 
@@ -716,10 +736,10 @@ mod tests {
         assert!(!s.contexts_file().exists());
 
         let entry = s
-            .provision("understory-prod", "https://forest.understory.sh")
+            .provision("understory-prod", "https://api.forest.understory.sh")
             .unwrap();
         assert_eq!(entry.name, "understory-prod");
-        assert_eq!(entry.server, "https://forest.understory.sh");
+        assert_eq!(entry.server, "https://api.forest.understory.sh");
 
         // The provisioned context is the only one AND is active —
         // the bootstrap default never got created.
@@ -737,7 +757,7 @@ mod tests {
         let _ = s.load_or_bootstrap().unwrap();
         assert_eq!(s.active().unwrap().name, "default");
 
-        s.provision("understory-prod", "https://forest.understory.sh")
+        s.provision("understory-prod", "https://api.forest.understory.sh")
             .unwrap();
 
         let file = s.list().unwrap();
@@ -765,24 +785,24 @@ mod tests {
     #[test]
     fn derive_cue_registry_pulls_host_and_prepends_registry() {
         assert_eq!(
-            derive_cue_registry("https://forest.understory.sh"),
-            Some("forest.sh=registry.forest.understory.sh,registry.cuelang.org".into())
+            derive_cue_registry("https://api.forest.understory.sh"),
+            Some("forest.sh=registry.api.forest.understory.sh,registry.cuelang.org".into())
         );
     }
 
     #[test]
     fn derive_cue_registry_handles_port_and_path() {
         assert_eq!(
-            derive_cue_registry("https://forest.example.com:4040/api"),
-            Some("forest.sh=registry.forest.example.com,registry.cuelang.org".into())
+            derive_cue_registry("https://api.forest.example.com:4040/api"),
+            Some("forest.sh=registry.api.forest.example.com,registry.cuelang.org".into())
         );
     }
 
     #[test]
     fn derive_cue_registry_tolerates_missing_scheme() {
         assert_eq!(
-            derive_cue_registry("forest.example.com"),
-            Some("forest.sh=registry.forest.example.com,registry.cuelang.org".into())
+            derive_cue_registry("api.forest.example.com"),
+            Some("forest.sh=registry.api.forest.example.com,registry.cuelang.org".into())
         );
     }
 

@@ -23,11 +23,11 @@ async fn landing_page_contains_expected_content() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    assert!(html.contains("Forage - The Platform for Forest"));
+    assert!(html.contains("Forest - your developer platform"));
     assert!(html.contains("forest.cue"));
     assert!(html.contains("Component Registry"));
     assert!(html.contains("Managed Deployments"));
-    assert!(html.contains("Container Deployments"));
+    assert!(html.contains("Type-Safe Infrastructure"));
 }
 
 #[tokio::test]

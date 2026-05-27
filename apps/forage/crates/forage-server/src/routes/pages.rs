@@ -24,7 +24,7 @@ async fn landing(
     let html = state
         .templates
         .render("pages/landing.html.jinja", context! {
-            title => "Forage - The Platform for Forest",
+            title => "Forest - your developer platform",
             description => "Push a forest.cue manifest, get production infrastructure.",
             is_landing => true,
         })

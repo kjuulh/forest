@@ -28,7 +28,7 @@
         <ul class="text-sm text-gray-600 space-y-1.5">
             <li class="flex items-start gap-2">
                 <span class="text-gray-400 mt-0.5">1.</span>
-                <span>Forage sends a <code class="text-xs bg-gray-200 px-1 py-0.5 rounded">POST</code> request with a JSON payload to your URL</span>
+                <span>Forest sends a <code class="text-xs bg-gray-200 px-1 py-0.5 rounded">POST</code> request with a JSON payload to your URL</span>
             </li>
             <li class="flex items-start gap-2">
                 <span class="text-gray-400 mt-0.5">2.</span>
@@ -36,7 +36,7 @@
             </li>
             <li class="flex items-start gap-2">
                 <span class="text-gray-400 mt-0.5">3.</span>
-                <span>Optional HMAC-SHA256 signing via <code class="text-xs bg-gray-200 px-1 py-0.5 rounded">X-Forage-Signature</code> header</span>
+                <span>Optional HMAC-SHA256 signing via <code class="text-xs bg-gray-200 px-1 py-0.5 rounded">X-Forest-Signature</code> header</span>
             </li>
             <li class="flex items-start gap-2">
                 <span class="text-gray-400 mt-0.5">4.</span>
@@ -67,7 +67,7 @@
             <label for="secret" class="block text-sm font-medium text-gray-700 mb-1">Secret <span class="font-normal text-gray-400">(optional)</span></label>
             <input type="text" id="secret" name="secret" placeholder="whsec_..."
                    class="w-full px-3 py-2 text-sm font-mono border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent">
-            <p class="text-xs text-gray-400 mt-1">Used to compute <code class="bg-gray-200 px-1 py-0.5 rounded">X-Forage-Signature</code> (HMAC-SHA256) so you can verify payloads are from Forage</p>
+            <p class="text-xs text-gray-400 mt-1">Used to compute <code class="bg-gray-200 px-1 py-0.5 rounded">X-Forest-Signature</code> (HMAC-SHA256) so you can verify payloads are from Forest</p>
         </div>
 
         <div class="pt-2">
