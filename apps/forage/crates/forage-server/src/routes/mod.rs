@@ -42,7 +42,7 @@ fn error_page_detail(
     let html = state.templates.render(
         "pages/error.html.jinja",
         context! {
-            title => format!("{} - Forage", heading),
+            title => format!("{} - Forest", heading),
             description => message,
             status => status.as_u16(),
             heading => heading,

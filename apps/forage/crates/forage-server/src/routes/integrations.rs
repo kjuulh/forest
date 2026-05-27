@@ -190,7 +190,7 @@ async fn list_integrations(
         .render(
             "pages/integrations.html.jinja",
             context! {
-                title => format!("Integrations - {} - Forage", org),
+                title => format!("Integrations - {} - Forest", org),
                 description => "Manage notification integrations",
                 user => context! {
                     username => &session.user.username,
@@ -226,7 +226,7 @@ async fn install_webhook_page(
         .render(
             "pages/install_webhook.html.jinja",
             context! {
-                title => format!("Install Webhook - {} - Forage", org),
+                title => format!("Install Webhook - {} - Forest", org),
                 description => "Set up a webhook integration",
                 user => context! {
                     username => &session.user.username,
@@ -313,7 +313,7 @@ async fn create_webhook(
         .render(
             "pages/integration_installed.html.jinja",
             context! {
-                title => format!("{} installed - Forage", created.name),
+                title => format!("{} installed - Forest", created.name),
                 description => "Integration installed successfully",
                 user => context! {
                     username => &session.user.username,
@@ -418,7 +418,7 @@ async fn integration_detail(
         .render(
             "pages/integration_detail.html.jinja",
             context! {
-                title => format!("{} - Integrations - Forage", integration.name),
+                title => format!("{} - Integrations - Forest", integration.name),
                 description => "Integration settings",
                 user => context! {
                     username => &session.user.username,
@@ -572,7 +572,7 @@ async fn test_integration(
     let test_event = NotificationEvent {
         id: format!("test-{}", uuid::Uuid::new_v4()),
         notification_type: "release_succeeded".into(),
-        title: "Test notification from Forage".into(),
+        title: "Test notification from Forest".into(),
         body: "This is a test notification to verify your integration is working.".into(),
         organisation: org.clone(),
         project: "test-project".into(),
@@ -587,7 +587,7 @@ async fn test_integration(
             source_user_id: session.user.user_id.clone(),
             commit_sha: "abc1234".into(),
             commit_branch: "main".into(),
-            context_title: "Test notification from Forage".into(),
+            context_title: "Test notification from Forest".into(),
             context_web: String::new(),
             destination_count: 1,
             error_message: None,
@@ -633,7 +633,7 @@ async fn install_slack_page(
         .render(
             "pages/install_slack.html.jinja",
             context! {
-                title => format!("Install Slack - {} - Forage", org),
+                title => format!("Install Slack - {} - Forest", org),
                 description => "Set up a Slack integration",
                 user => context! {
                     username => &session.user.username,
@@ -725,7 +725,7 @@ async fn create_slack(
         .render(
             "pages/integration_installed.html.jinja",
             context! {
-                title => format!("{} installed - Forage", created.name),
+                title => format!("{} installed - Forest", created.name),
                 description => "Integration installed successfully",
                 user => context! {
                     username => &session.user.username,
@@ -986,7 +986,7 @@ async fn slack_oauth_callback(
             .render(
                 "pages/integration_installed.html.jinja",
                 context! {
-                    title => format!("{} installed - Forage", created.name),
+                    title => format!("{} installed - Forest", created.name),
                     description => "Integration installed successfully",
                     user => context! {
                         username => &session.user.username,

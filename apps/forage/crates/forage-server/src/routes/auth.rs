@@ -265,8 +265,9 @@ fn render_signup(
         .render(
             "pages/signup.html.jinja",
             context! {
-                title => "Sign Up - Forage",
-                description => "Create your Forage account",
+                title => "Sign Up - Forest",
+                description => "Create your Forest account",
+                is_auth_page => true,
                 username => username,
                 email => email,
                 error => error,
@@ -421,8 +422,9 @@ async fn login_submit(
                 .render(
                     "pages/mfa_challenge.html.jinja",
                     context! {
-                        title => "Two-factor authentication - Forage",
+                        title => "Two-factor authentication - Forest",
                         description => "Enter your authenticator code to continue",
+                        is_auth_page => true,
                         error => None::<String>,
                     },
                 )
@@ -504,8 +506,9 @@ async fn login_mfa_submit(
                 .render(
                     "pages/mfa_challenge.html.jinja",
                     context! {
-                        title => "Two-factor authentication - Forage",
+                        title => "Two-factor authentication - Forest",
                         description => "Enter your authenticator code to continue",
+                        is_auth_page => true,
                         error => Some("Invalid or expired code. Please try again."),
                     },
                 )
@@ -522,8 +525,9 @@ async fn login_mfa_submit(
                 .render(
                     "pages/mfa_challenge.html.jinja",
                     context! {
-                        title => "Two-factor authentication - Forage",
+                        title => "Two-factor authentication - Forest",
                         description => "Enter your authenticator code to continue",
+                        is_auth_page => true,
                         error => Some(e.to_string()),
                     },
                 )
@@ -599,8 +603,9 @@ fn render_login(
         .render(
             "pages/login.html.jinja",
             context! {
-                title => "Sign In - Forage",
-                description => "Sign in to your Forage account",
+                title => "Sign In - Forest",
+                description => "Sign in to your Forest account",
+                is_auth_page => true,
                 identifier => identifier,
                 error => error,
                 has_google_oauth => state.google_oauth_config.is_some(),
@@ -652,7 +657,7 @@ async fn tokens_page(
         .render(
             "pages/tokens.html.jinja",
             context! {
-                title => "API Tokens - Forage",
+                title => "API Tokens - Forest",
                 description => "Manage your personal access tokens",
                 user => context! { username => session.user.username },
                 current_org => session.user.orgs.first().map(|o| &o.name),
@@ -715,7 +720,7 @@ async fn create_token_submit(
         .render(
             "pages/tokens.html.jinja",
             context! {
-                title => "API Tokens - Forage",
+                title => "API Tokens - Forest",
                 description => "Manage your personal access tokens",
                 user => context! { username => session.user.username },
                 current_org => session.user.orgs.first().map(|o| &o.name),
@@ -838,10 +843,10 @@ fn error_message(error: Option<&str>) -> Option<&'static str> {
         "access_denied_github" => Some("GitHub authorisation was cancelled."),
         "access_denied_google" => Some("Google authorisation was cancelled."),
         "already_linked_other_github" => {
-            Some("This GitHub account is already linked to another Forage user.")
+            Some("This GitHub account is already linked to another Forest user.")
         }
         "already_linked_other_google" => {
-            Some("This Google account is already linked to another Forage user.")
+            Some("This Google account is already linked to another Forest user.")
         }
         "already_linked_github" => {
             Some("You already have a GitHub account linked. Disconnect it first to switch.")
@@ -879,7 +884,7 @@ fn render_account(
         .render(
             "pages/account.html.jinja",
             context! {
-                title => "Account Settings - Forage",
+                title => "Account Settings - Forest",
                 description => "Manage your account settings",
                 user => context! {
                     username => &session.user.username,
@@ -1241,7 +1246,7 @@ async fn mfa_setup_start(
         .render(
             "pages/mfa_setup.html.jinja",
             context! {
-                title => "Set up two-factor authentication - Forage",
+                title => "Set up two-factor authentication - Forest",
                 description => "Scan the QR code with your authenticator app",
                 user => context! { username => &session.user.username },
                 current_org => session.user.orgs.first().map(|o| &o.name),
@@ -2283,8 +2288,9 @@ fn render_complete_profile(
         .render(
             "pages/complete_profile.html.jinja",
             context! {
-                title => "Choose Username - Forage",
+                title => "Choose Username - Forest",
                 description => "Pick a username for your new account",
+                is_auth_page => true,
                 csrf_token => csrf_token,
                 username => username,
                 error => error,
@@ -2411,15 +2417,15 @@ async fn magic_link_request(
     if let Some(ref js) = state.email_jetstream {
         let envelope = forage_core::integrations::email::EmailEnvelope {
             to: form.email.clone(),
-            subject: "Sign in to Forage".into(),
+            subject: "Sign in to Forest".into(),
             body_html: format!(
-                "<p>Click the link below to sign in to Forage:</p>\
-                 <p><a href=\"{verify_url}\">Sign in to Forage</a></p>\
+                "<p>Click the link below to sign in to Forest:</p>\
+                 <p><a href=\"{verify_url}\">Sign in to Forest</a></p>\
                  <p>This link expires in 15 minutes.</p>\
                  <p>If you didn't request this, you can safely ignore this email.</p>"
             ),
             body_text: format!(
-                "Sign in to Forage\n\n\
+                "Sign in to Forest\n\n\
                  Click this link to sign in: {verify_url}\n\n\
                  This link expires in 15 minutes.\n\
                  If you didn't request this, you can safely ignore this email."
@@ -2607,7 +2613,7 @@ fn render_magic_link_form(
         .render(
             "pages/magic_link.html.jinja",
             context! {
-                title => "Sign in with Email - Forage",
+                title => "Sign in with Email - Forest",
                 description => "Get a magic link sent to your email",
                 email => email,
                 error => error,
@@ -2632,7 +2638,7 @@ fn render_magic_link_sent(state: &AppState, email: &str) -> Result<Response, Res
         .render(
             "pages/magic_link_sent.html.jinja",
             context! {
-                title => "Check Your Email - Forage",
+                title => "Check Your Email - Forest",
                 description => "Magic link sent",
                 email => email,
             },
@@ -2917,15 +2923,15 @@ async fn enqueue_verification_email(state: &AppState, email: &str) -> anyhow::Re
     if let Some(ref js) = state.email_jetstream {
         let envelope = forage_core::integrations::email::EmailEnvelope {
             to: email.to_string(),
-            subject: "Verify your email for Forage".into(),
+            subject: "Verify your email for Forest".into(),
             body_html: format!(
-                "<p>Click the link below to verify your email for Forage:</p>\
+                "<p>Click the link below to verify your email for Forest:</p>\
                  <p><a href=\"{verify_url}\">Verify your email</a></p>\
                  <p>This link expires in 15 minutes.</p>\
                  <p>If you didn't request this, you can safely ignore this email.</p>"
             ),
             body_text: format!(
-                "Verify your email for Forage\n\n\
+                "Verify your email for Forest\n\n\
                  Click this link to verify your email: {verify_url}\n\n\
                  This link expires in 15 minutes.\n\
                  If you didn't request this, you can safely ignore this email."
@@ -2960,7 +2966,7 @@ fn render_verify_email_check_inbox(
         .render(
             "pages/verify_email_check_inbox.html.jinja",
             context! {
-                title => "Verify your email - Forage",
+                title => "Verify your email - Forest",
                 description => "Check your inbox for a verification link",
                 email => email,
             },
@@ -2986,7 +2992,7 @@ async fn verify_email_redeem(
             &state,
             StatusCode::SERVICE_UNAVAILABLE,
             "Verification unavailable",
-            "Email verification is not configured on this Forage instance.",
+            "Email verification is not configured on this Forest instance.",
         )
     })?;
 
@@ -3029,7 +3035,7 @@ async fn verify_email_redeem(
         .render(
             "pages/verify_email_success.html.jinja",
             context! {
-                title => "Email verified - Forage",
+                title => "Email verified - Forest",
                 description => "Your email has been verified",
                 email => email,
             },
@@ -3058,7 +3064,7 @@ fn render_verify_email_failed(state: &AppState) -> Response {
     match state.templates.render(
         "pages/verify_email_failed.html.jinja",
         context! {
-            title => "Verification link expired - Forage",
+            title => "Verification link expired - Forest",
             description => "Verification link expired or already used",
         },
     ) {
@@ -3082,7 +3088,7 @@ async fn verify_email_resend_page(State(state): State<AppState>) -> Result<Respo
         .render(
             "pages/verify_email_resend.html.jinja",
             context! {
-                title => "Resend verification email - Forage",
+                title => "Resend verification email - Forest",
                 description => "Send a new verification link",
                 email => "",
                 error => None::<String>,
@@ -3120,7 +3126,7 @@ async fn verify_email_resend_submit(
 // ─── Account-level OAuth account linking (GitHub / Google) ──────────
 //
 // These routes let a signed-in user explicitly link an external OAuth
-// identity to their Forage account. Distinct from `/auth/<provider>`,
+// identity to their Forest account. Distinct from `/auth/<provider>`,
 // which mints a session. The two share the provider's authorize URL
 // and callback; dispatch happens via the `forage_oauth_link_user`
 // cookie set here. See `specs/features/010-account-integrations.md`.
@@ -3252,7 +3258,7 @@ struct ProviderDisconnectForm {
 }
 
 /// POST /settings/account/github/disconnect — unlink the user's GitHub
-/// identity from their Forage account.
+/// identity from their Forest account.
 async fn github_link_disconnect(
     State(state): State<AppState>,
     session: Session,
@@ -3268,7 +3274,7 @@ async fn github_link_disconnect(
 }
 
 /// POST /settings/account/google/disconnect — unlink the user's Google
-/// identity from their Forage account.
+/// identity from their Forest account.
 async fn google_link_disconnect(
     State(state): State<AppState>,
     session: Session,

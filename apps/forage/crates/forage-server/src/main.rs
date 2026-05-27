@@ -51,7 +51,7 @@ async fn fallback_404(State(state): State<AppState>) -> Response {
     let html = state.templates.render(
         "pages/error.html.jinja",
         context! {
-            title => "Not Found - Forage",
+            title => "Not Found - Forest",
             description => "The page you're looking for doesn't exist.",
             status => 404u16,
             heading => "Page not found",
@@ -178,7 +178,7 @@ async fn main() -> anyhow::Result<()> {
 
     let forest_client = Arc::new(forest_client);
 
-    // Public URL of this Forage instance (used for OAuth redirect URIs, etc.)
+    // Public URL of this Forest instance (used for OAuth redirect URIs, etc.)
     let forage_host = std::env::var("FORAGE_HOST")
         .unwrap_or_else(|_| format!("http://localhost:{port}"));
 
@@ -214,7 +214,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Google OAuth config (optional, enables "Continue with Google" button)
-    // Forage handles the full OIDC exchange — needs both client_id and client_secret.
+    // Forest handles the full OIDC exchange — needs both client_id and client_secret.
     if let (Some(client_id), Some(client_secret)) = (
         env_var_nonempty("GOOGLE_CLIENT_ID"),
         env_var_nonempty("GOOGLE_CLIENT_SECRET"),
