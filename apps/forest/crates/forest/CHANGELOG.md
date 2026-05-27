@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.10](https://github.com/understory-io/forest/compare/v0.1.9...v0.1.10) (2026-05-22)
+
+
+### Features
+
+* **install:** default to ~/.local/bin; auto-add to PATH ([#39](https://github.com/understory-io/forest/issues/39)) ([bcb36c0](https://github.com/understory-io/forest/commit/bcb36c04d7656195e4e19b66066923d88cc860f9))
+* reduce readme ([9da3d88](https://github.com/understory-io/forest/commit/9da3d88d97f3f6f00fca6c3977538efc0f9d26c4))
+
+
+### Bug Fixes
+
+* **forage:** /device — drop dark: variants that fight the palette remap ([#44](https://github.com/understory-io/forest/issues/44)) ([441e720](https://github.com/understory-io/forest/commit/441e720c88458da1de6397ef1935ccb345202f14))
+* **forage:** landing-page polish — dark code block + drop 3 cards & CTAs ([#42](https://github.com/understory-io/forest/issues/42)) ([2a36721](https://github.com/understory-io/forest/commit/2a36721d0800d0c95c426b4a0ff44b8ab4a5c936))
+
 ## [0.1.9](https://github.com/understory-io/forest/compare/v0.1.8...v0.1.9) (2026-05-22)
 
 
