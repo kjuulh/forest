@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/understory-io/forest/compare/v0.1.10...v0.1.11) (2026-05-27)
+
+
+### Features
+
+* rename Forage UI to Forest; move API to api.forest.understory.sh ([#45](https://github.com/understory-io/forest/issues/45)) ([06e584f](https://github.com/understory-io/forest/commit/06e584f9db6c9c5ae1c036bd6db0903015593e8f))
+
 ## [0.1.10](https://github.com/understory-io/forest/compare/v0.1.9...v0.1.10) (2026-05-22)
 
 
