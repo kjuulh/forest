@@ -17,6 +17,7 @@ use forest_models::Destination;
 use http::StatusCode;
 use notmad::{Component, ComponentInfo, MadError};
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpListener,
@@ -63,25 +64,44 @@ fn resolve_terraform_exe() -> String {
 
 #[derive(Clone)]
 pub struct TerraformStateStore {
-    // TODO: move to some kind of database
-    states: Arc<Mutex<BTreeMap<String, Option<String>>>>,
+    // State blobs and per-state-id locks live in postgres so they survive
+    // forest-server restarts. Each successful tofu apply appends a new
+    // `terraform_states` row; `get()` returns the latest. Locks live in
+    // `terraform_state_locks` and are released on unlock or by admin
+    // DELETE if a runner crashes mid-apply.
+    //
+    // The per-state-id basic-auth secret stays in memory — it's
+    // regenerated on demand, only matters within a single forest-server
+    // process lifetime, and any in-flight tofu session is killed when
+    // forest restarts anyway.
+    db: PgPool,
     users: Arc<Mutex<BTreeMap<String, String>>>,
-    locks: Arc<Mutex<BTreeMap<String, Mutex<Option<String>>>>>,
 
     pub external_url: String,
 }
 
 impl TerraformStateStore {
     pub async fn get(&self, project_id: &str) -> anyhow::Result<Option<String>> {
-        let states = self.states.lock().await;
-
         tracing::debug!(project_id, "get state");
 
-        Ok(states.get(project_id).cloned().flatten())
+        let row = sqlx::query_scalar!(
+            r#"
+                SELECT content
+                FROM terraform_states
+                WHERE state_id = $1
+                ORDER BY id DESC
+                LIMIT 1
+            "#,
+            project_id,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("read terraform state")?;
+
+        Ok(row)
     }
 
     pub async fn add(&self, project_id: &str, lock_id: &str, state: &str) -> anyhow::Result<()> {
-        let mut states = self.states.lock().await;
         if let Some(lock) = self.get_lock(project_id).await?
             && lock == lock_id
         {
@@ -91,7 +111,17 @@ impl TerraformStateStore {
 
         tracing::debug!(project_id, "saving state");
 
-        states.insert(project_id.into(), Some(state.to_string()));
+        sqlx::query!(
+            r#"
+                INSERT INTO terraform_states (state_id, content)
+                VALUES ($1, $2)
+            "#,
+            project_id,
+            state,
+        )
+        .execute(&self.db)
+        .await
+        .context("write terraform state")?;
 
         Ok(())
     }
@@ -121,37 +151,54 @@ impl TerraformStateStore {
     }
 
     async fn get_lock(&self, project_id: &str) -> anyhow::Result<Option<String>> {
-        let locks = self.locks.lock().await;
-        if let Some(project_handle) = locks.get(project_id)
-            && let Some(project) = project_handle.lock().await.as_ref()
-        {
-            return Ok(Some(project.clone()));
-        }
+        let row = sqlx::query_scalar!(
+            r#"SELECT lock_id FROM terraform_state_locks WHERE state_id = $1"#,
+            project_id,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("read terraform state lock")?;
 
-        Ok(None)
+        Ok(row)
     }
 
     async fn attempt_lock(&self, project_id: String, lock_id: &str) -> anyhow::Result<LockState> {
-        let mut locks = self.locks.lock().await;
+        let mut tx = self.db.begin().await.context("begin lock tx")?;
 
-        let project_lock = locks
-            .entry(project_id.to_string())
-            .or_insert_with(Mutex::default);
+        let existing: Option<String> = sqlx::query_scalar!(
+            r#"
+                SELECT lock_id
+                FROM terraform_state_locks
+                WHERE state_id = $1
+                FOR UPDATE
+            "#,
+            project_id,
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .context("select state lock for update")?;
 
-        let mut project_handle = project_lock.lock().await;
-
-        if let Some(project_handle) = project_handle.as_ref() {
-            // Same lock is held
-            if project_handle == lock_id {
-                return Ok(LockState::Held);
+        let outcome = match existing.as_deref() {
+            Some(holder) if holder == lock_id => LockState::Held,
+            Some(_) => LockState::Wait,
+            None => {
+                sqlx::query!(
+                    r#"
+                        INSERT INTO terraform_state_locks (state_id, lock_id)
+                        VALUES ($1, $2)
+                    "#,
+                    project_id,
+                    lock_id,
+                )
+                .execute(&mut *tx)
+                .await
+                .context("insert state lock")?;
+                LockState::Held
             }
+        };
 
-            return Ok(LockState::Wait);
-        }
-
-        *project_handle = Some(lock_id.to_string());
-
-        Ok(LockState::Held)
+        tx.commit().await.context("commit lock tx")?;
+        Ok(outcome)
     }
 
     async fn attempt_unlock(
@@ -159,19 +206,38 @@ impl TerraformStateStore {
         project_id: String,
         lock_id: &str,
     ) -> anyhow::Result<UnlockState> {
-        let locks = self.locks.lock().await;
+        let deleted = sqlx::query!(
+            r#"
+                DELETE FROM terraform_state_locks
+                WHERE state_id = $1 AND lock_id = $2
+            "#,
+            project_id,
+            lock_id,
+        )
+        .execute(&self.db)
+        .await
+        .context("delete state lock")?
+        .rows_affected();
 
-        let Some(project_lock) = locks.get(&project_id) else {
-            return Ok(UnlockState::Available);
-        };
-
-        let mut project_handle = project_lock.lock().await;
-
-        if let Some(_handle) = project_handle.take_if(|handle| handle == lock_id) {
+        if deleted > 0 {
             return Ok(UnlockState::Available);
         }
 
-        Ok(UnlockState::NotOwnedLock)
+        // Either no lock exists (already unlocked) or another holder owns it.
+        let held_by_other = sqlx::query_scalar!(
+            r#"SELECT 1 FROM terraform_state_locks WHERE state_id = $1"#,
+            project_id,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("check state lock holder")?
+        .is_some();
+
+        if held_by_other {
+            Ok(UnlockState::NotOwnedLock)
+        } else {
+            Ok(UnlockState::Available)
+        }
     }
 }
 
@@ -193,9 +259,8 @@ impl TerraformStateStoreState for State {
         static ONCE: OnceLock<TerraformStateStore> = OnceLock::new();
 
         ONCE.get_or_init(|| TerraformStateStore {
-            states: Arc::default(),
+            db: self.db.clone(),
             users: Arc::default(),
-            locks: Arc::default(),
 
             external_url: self.config.terraform_external_host.clone(),
         })

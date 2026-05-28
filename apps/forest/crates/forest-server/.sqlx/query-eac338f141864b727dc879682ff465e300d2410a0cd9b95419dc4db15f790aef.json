@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                DELETE FROM terraform_state_locks\n                WHERE state_id = $1 AND lock_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eac338f141864b727dc879682ff465e300d2410a0cd9b95419dc4db15f790aef"
+}

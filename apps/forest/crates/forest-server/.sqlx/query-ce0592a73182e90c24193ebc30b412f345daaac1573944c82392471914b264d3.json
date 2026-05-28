@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT verification_source FROM user_emails WHERE email = $1",
+  "query": "SELECT lock_id FROM terraform_state_locks WHERE state_id = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "verification_source",
+        "name": "lock_id",
         "type_info": "Text"
       }
     ],
@@ -18,5 +18,5 @@
       false
     ]
   },
-  "hash": "8e0a8750d2fc07f749f5ae713394fb279c5240978095b9151dbbf6ba777392d4"
+  "hash": "ce0592a73182e90c24193ebc30b412f345daaac1573944c82392471914b264d3"
 }
