@@ -1,17 +1,26 @@
 {# Banner shown on the dashboard when the user is eligible to auto-join one
    or more orgs via verified email domain (DATA-252). Renders nothing if
-   `join_offers` is missing or empty. #}
+   `join_offers` is missing or empty.
+
+   Color choice: only the Tailwind shades that the dark-mode @media block
+   in static/css/input.css remaps adapt to dark themes. For neutrals
+   that's the full gray scale; for accents only -100 / -600 / -700 / -800
+   are remapped. `bg-blue-50` / `border-blue-200` stay light in dark mode
+   and look broken — so we lean on the neutral gray surface (which
+   matches the rest of the app's card chrome) and use the primary
+   `bg-gray-900` button style. #}
 {% if join_offers %}
 {% for offer in join_offers %}
-<div class="mb-4 p-4 rounded-lg border border-blue-200 bg-blue-50 flex items-center justify-between">
-    <div class="text-sm text-gray-800">
-        <strong>{{ offer.organisation_name }}</strong> allows anyone with a
-        verified <span class="font-mono">@{{ offer.matched_domain }}</span>
+<div class="mb-4 p-4 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-between gap-4">
+    <div class="text-sm text-gray-700">
+        <strong class="text-gray-900">{{ offer.organisation_name }}</strong>
+        allows anyone with a verified
+        <span class="font-mono text-gray-900">@{{ offer.matched_domain }}</span>
         address to join.
     </div>
-    <form method="POST" action="/join-offers/{{ offer.organisation_id }}/accept">
+    <form method="POST" action="/join-offers/{{ offer.organisation_id }}/accept" class="shrink-0">
         <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-        <button type="submit" class="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+        <button type="submit" class="px-3 py-1.5 text-sm font-medium bg-gray-900 text-white rounded-md hover:bg-gray-800">
             Join
         </button>
     </form>
