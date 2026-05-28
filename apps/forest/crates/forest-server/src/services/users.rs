@@ -498,9 +498,36 @@ impl UserService {
     }
 
     pub async fn unlink_oauth_provider(&self, user_id: Uuid, provider: &str) -> anyhow::Result<()> {
-        self.repo
-            .delete_identity_by_provider(self.db(), user_id, provider)
+        // Block disconnect when it would leave the account with no usable
+        // sign-in method. A user can sign in if they either have a password
+        // (`provider_native_credentials` row) or at least one identity row
+        // for a provider other than the one being unlinked. Magic links are
+        // one-time tokens, not a persistent credential, so they don't count.
+        //
+        // Check and delete in a single transaction so a concurrent unlink
+        // for a different provider can't pull the rug between check and
+        // delete.
+        let mut tx = self.repo.begin().await?;
+
+        let has_password = self
+            .repo
+            .user_has_native_credential(tx.as_executor(), user_id)
             .await?;
+        if !has_password {
+            let has_other_identity = self
+                .repo
+                .user_has_identity_other_than(tx.as_executor(), user_id, provider)
+                .await?;
+            if !has_other_identity {
+                return Err(UserServiceError::LastAuthMethod.into());
+            }
+        }
+
+        self.repo
+            .delete_identity_by_provider(tx.as_executor(), user_id, provider)
+            .await?;
+
+        tx.commit().await?;
         Ok(())
     }
 
@@ -693,6 +720,19 @@ impl UserService {
             .await
             .map_err(|e| anyhow::anyhow!(e))
     }
+}
+
+// ─── Errors ──────────────────────────────────────────────────────────
+
+/// Typed user-service errors. Carried through `anyhow::Error` and downcast
+/// at the gRPC boundary to map to the appropriate `tonic::Status`.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum UserServiceError {
+    /// Returned by `unlink_oauth_provider` when unlinking would leave the
+    /// user with no remaining sign-in method (no password and no other
+    /// linked identity). Message is the stable error code used by callers.
+    #[error("last_auth_method")]
+    LastAuthMethod,
 }
 
 // ─── Return types ────────────────────────────────────────────────────

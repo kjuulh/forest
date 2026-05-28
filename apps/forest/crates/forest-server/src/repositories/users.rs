@@ -530,6 +530,37 @@ impl UserRepository {
         Ok(())
     }
 
+    /// Does this user have at least one *external* identity row for a
+    /// provider other than the one given? Used by `unlink_oauth_provider`
+    /// to block disconnect when it would strip the last sign-in method.
+    ///
+    /// `native` rows are excluded — they're a denormalized marker created
+    /// alongside `provider_native_credentials` and don't grant any login
+    /// path on their own. The password check is `user_has_native_credential`.
+    pub async fn user_has_identity_other_than(
+        &self,
+        db: impl PgExecutor<'_>,
+        user_id: Uuid,
+        provider: &str,
+    ) -> anyhow::Result<bool> {
+        let exists = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM identities
+                WHERE user_id = $1
+                  AND provider <> $2
+                  AND provider <> 'native'
+            ) AS "exists!"
+            "#,
+            user_id,
+            provider,
+        )
+        .fetch_one(db)
+        .await?;
+
+        Ok(exists)
+    }
+
     pub async fn delete_identity_by_provider(
         &self,
         db: impl PgExecutor<'_>,
@@ -571,6 +602,27 @@ impl UserRepository {
         .await?;
 
         Ok(())
+    }
+
+    /// Cheap existence check used by `unlink_oauth_provider` to decide
+    /// whether a user can still sign in with a password after the unlink.
+    pub async fn user_has_native_credential(
+        &self,
+        db: impl PgExecutor<'_>,
+        user_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        let exists = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM provider_native_credentials WHERE user_id = $1
+            ) AS "exists!"
+            "#,
+            user_id,
+        )
+        .fetch_one(db)
+        .await?;
+
+        Ok(exists)
     }
 
     pub async fn get_native_credential(

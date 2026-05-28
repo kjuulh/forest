@@ -186,7 +186,7 @@
     {% if has_github_oauth or has_google_oauth or has_slack_oauth or linked_accounts %}
     <div class="mb-12">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Linked accounts</h2>
-        <p class="text-sm text-gray-500 mb-4">Link external identities so we can map your work to your account. Disconnecting an account used to sign in will not log you out, but you will need another way in next time.</p>
+        <p class="text-sm text-gray-500 mb-4">Link external identities so we can map your work to your account. Disconnecting a sign-in provider won't log you out of this session. If it's the only way you sign in, we'll block the disconnect — set a password or link another provider first.</p>
 
         {% if linked_accounts %}
         <div class="space-y-2 mb-4">
@@ -230,10 +230,9 @@
                 </form>
                 {% else %}
                 <form method="POST" action="/settings/account/{{ acc.provider }}/disconnect"
-                      onsubmit="return confirm('Disconnect this {{ acc.provider_display }} account? If it is your only sign-in method, you will need another way to log in next time.');">
+                      onsubmit="return confirm('Disconnect this {{ acc.provider_display }} account?');">
                     <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-                    <button type="submit" class="text-xs text-red-600 hover:text-red-800"
-                            title="You will need this account to sign back in if it is your only sign-in method.">Disconnect</button>
+                    <button type="submit" class="text-xs text-red-600 hover:text-red-800">Disconnect</button>
                 </form>
                 {% endif %}
             </div>

@@ -1,5 +1,6 @@
 use crate::native_credentials::PasswordValidationError;
 use crate::repositories::error::DbError;
+use crate::services::users::UserServiceError;
 
 /// Converts an `anyhow::Error` from the service layer into the appropriate
 /// `tonic::Status`. Database constraint errors (carried as `DbError` inside
@@ -25,6 +26,17 @@ pub fn to_status(err: anyhow::Error) -> tonic::Status {
     // instead of "internal error".
     if let Some(pwd_err) = err.downcast_ref::<PasswordValidationError>() {
         return tonic::Status::invalid_argument(pwd_err.to_string());
+    }
+
+    // Typed user-service preconditions. The error's `to_string()` is the
+    // stable wire code (e.g. "last_auth_method") that callers — including
+    // Forage's account-page error banner — branch on.
+    if let Some(svc_err) = err.downcast_ref::<UserServiceError>() {
+        return match svc_err {
+            UserServiceError::LastAuthMethod => {
+                tonic::Status::failed_precondition(svc_err.to_string())
+            }
+        };
     }
 
     // Log the full error chain for debugging, return a safe message.
