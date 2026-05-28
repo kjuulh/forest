@@ -1,0 +1,20 @@
+{# Banner shown on the dashboard when the user is eligible to auto-join one
+   or more orgs via verified email domain (DATA-252). Renders nothing if
+   `join_offers` is missing or empty. #}
+{% if join_offers %}
+{% for offer in join_offers %}
+<div class="mb-4 p-4 rounded-lg border border-blue-200 bg-blue-50 flex items-center justify-between">
+    <div class="text-sm text-gray-800">
+        <strong>{{ offer.organisation_name }}</strong> allows anyone with a
+        verified <span class="font-mono">@{{ offer.matched_domain }}</span>
+        address to join.
+    </div>
+    <form method="POST" action="/join-offers/{{ offer.organisation_id }}/accept">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <button type="submit" class="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">
+            Join
+        </button>
+    </form>
+</div>
+{% endfor %}
+{% endif %}

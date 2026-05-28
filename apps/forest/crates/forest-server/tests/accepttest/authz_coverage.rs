@@ -62,6 +62,13 @@ const EXEMPT: &[(&str, &str)] = &[
     ("organisations.rs::add_member", "scoped via organisation_id in request — handler must enforce"),
     ("organisations.rs::remove_member", "scoped via organisation_id in request — handler must enforce"),
     ("organisations.rs::update_member_role", "scoped via organisation_id in request — handler must enforce"),
+    // DATA-252 — auto-invite. Both RPCs are self-scoped: the user_id is
+    // taken from AppClaims, the org_id in the request is only used to
+    // filter results that are already constrained by that user_id. The
+    // accept_join_offer path re-validates eligibility inside the service
+    // tx, so a forged org_id grants no access.
+    ("organisations.rs::list_join_offers", "self-scoped via AppClaims.user_id"),
+    ("organisations.rs::accept_join_offer", "self-scoped via AppClaims.user_id; service re-checks eligibility"),
 
     // ─── NotificationService ─────────────────────────────────────────
     // Notifications are entirely user-self-scoped; the handler module
@@ -95,6 +102,12 @@ const EXEMPT: &[(&str, &str)] = &[
     // handler if no actor is present.
     ("registry.rs::search_components", "public browse + optional actor for private filter"),
     ("registry.rs::get_component_detail", "public component detail + optional actor"),
+    // Pre-existing drift caught by this DATA-252 PR: the public-only RPCs
+    // introduced by PR #48 were never added to EXEMPT. Same shape as
+    // search_components — anonymous-allowed, public-by-name.
+    ("registry.rs::search_public_components", "public browse (public-only RPC, no actor required)"),
+    ("registry.rs::get_public_component_detail", "public detail (public-only RPC, no actor required)"),
+    ("registry.rs::get_public_component_manifest", "public manifest (public-only RPC, no actor required)"),
 
     // ─── DestinationService ─────────────────────────────────────────
     ("destinations.rs::list_destination_types", "static metadata, no org context"),

@@ -59,6 +59,9 @@ pub struct State {
     pub drop_queue: DropQueue,
     pub event_store: EventStore,
     pub object_store: crate::object_store::ObjectStore,
+    /// DNS resolver for org-domain ownership verification (DATA-252).
+    /// Production: `HickoryResolver`. Tests inject `MockDnsResolver`.
+    pub dns_resolver: std::sync::Arc<dyn crate::dns::DnsResolver>,
 
     pub config: Config,
 }
@@ -139,12 +142,58 @@ impl State {
         let object_store = crate::object_store::ObjectStore::from_env()
             .context("failed to initialize S3 object store")?;
 
+        let dns_resolver: std::sync::Arc<dyn crate::dns::DnsResolver> = std::sync::Arc::new(
+            crate::dns::HickoryResolver::from_system().context("failed to initialize DNS resolver")?,
+        );
+
         Ok(Self {
             db: pool,
             nats,
             drop_queue: DropQueue::new(),
             event_store,
             object_store,
+            dns_resolver,
+            config,
+        })
+    }
+
+    /// Construct a State with a caller-provided DNS resolver — used by
+    /// acceptance tests to swap in a `MockDnsResolver`. Skips the system
+    /// DNS init that `new()` performs (CI runners may lack a usable
+    /// `/etc/resolv.conf`).
+    pub async fn new_with_dns(
+        config: Config,
+        dns_resolver: std::sync::Arc<dyn crate::dns::DnsResolver>,
+    ) -> anyhow::Result<Self> {
+        let pool = sqlx::PgPool::connect(
+            &std::env::var("DATABASE_URL").context("failed to find DATABASE_URL in env")?,
+        )
+        .await?;
+
+        sqlx::migrate!("./migrations/")
+            .set_locking(false)
+            .run(&pool)
+            .await?;
+
+        let event_store = EventStore::new(pool.clone());
+        event_store.migrate().await.context("event store migration")?;
+
+        let nats_url =
+            std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+        let nats = connect_nats(&nats_url)
+            .await
+            .context("failed to connect to NATS")?;
+
+        let object_store = crate::object_store::ObjectStore::from_env()
+            .context("failed to initialize S3 object store")?;
+
+        Ok(Self {
+            db: pool,
+            nats,
+            drop_queue: DropQueue::new(),
+            event_store,
+            object_store,
+            dns_resolver,
             config,
         })
     }

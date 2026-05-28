@@ -78,10 +78,16 @@ impl UserService {
 
     /// Create a user from an OAuth provider — no password, email is marked
     /// verified at creation because the provider already vouched for it.
+    ///
+    /// `provider` is the protobuf-format provider name as stored in the
+    /// `identities` table (e.g. "oauth_provider_github"). For
+    /// `verification_source` we use the short form ("oauth_github") via
+    /// [`oauth_verification_source`].
     pub async fn register_oauth_user(
         &self,
         username: &str,
         email: &str,
+        provider: &str,
     ) -> anyhow::Result<RegisteredUser> {
         let mut tx = self.repo.begin().await?;
 
@@ -90,8 +96,9 @@ impl UserService {
             .repo
             .create_user(tx.as_executor(), user_id, username)
             .await?;
+        let source = oauth_verification_source(provider);
         self.repo
-            .add_user_email_with_verified(tx.as_executor(), user_id, email, true)
+            .add_user_email_with_verified(tx.as_executor(), user_id, email, true, &source)
             .await?;
 
         tx.commit().await?;
@@ -494,6 +501,17 @@ impl UserService {
                 provider_data,
             )
             .await?;
+
+        // If the linked OAuth identity vouches for an email that's already
+        // verified on the user, promote its verification_source from
+        // magic_link to oauth_<provider>. The provider has just attested
+        // ownership — strictly stronger than a magic-link click.
+        if let Some(email) = provider_email {
+            let new_source = oauth_verification_source(provider);
+            self.repo
+                .upgrade_email_verification_source(self.db(), user_id, email, &new_source)
+                .await?;
+        }
         Ok(())
     }
 
@@ -733,6 +751,47 @@ pub enum UserServiceError {
     /// linked identity). Message is the stable error code used by callers.
     #[error("last_auth_method")]
     LastAuthMethod,
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────
+
+/// Derive the `verification_source` string for an OAuth-vouched email
+/// from the protobuf-format provider name stored in `identities.provider`.
+///
+/// The protobuf enum name comes through the gRPC layer as
+/// `"oauth_provider_github"` / `"oauth_provider_google"` — we strip the
+/// `oauth_provider_` prefix to land on the cleaner `"oauth_github"` /
+/// `"oauth_google"` form documented in the migration. Unknown providers
+/// fall back to `"oauth_<provider>"` verbatim rather than silently
+/// dropping information.
+pub fn oauth_verification_source(provider: &str) -> String {
+    let short = provider.strip_prefix("oauth_provider_").unwrap_or(provider);
+    format!("oauth_{short}")
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::oauth_verification_source;
+
+    #[test]
+    fn strips_protobuf_enum_prefix() {
+        assert_eq!(
+            oauth_verification_source("oauth_provider_github"),
+            "oauth_github"
+        );
+        assert_eq!(
+            oauth_verification_source("oauth_provider_google"),
+            "oauth_google"
+        );
+    }
+
+    #[test]
+    fn unknown_provider_kept_verbatim() {
+        assert_eq!(
+            oauth_verification_source("custom_idp"),
+            "oauth_custom_idp"
+        );
+    }
 }
 
 // ─── Return types ────────────────────────────────────────────────────

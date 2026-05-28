@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT organisation_id, domain, policy, dns_verification_token,\n                   dns_verified_at, created_at, created_by\n            FROM organisation_allowed_domains\n            WHERE organisation_id = $1 AND domain = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "organisation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "domain",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "policy",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "dns_verification_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "dns_verified_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "35a609c04cce768582759d4b48a13c671389ab0b2676b83482bb14e034c715ee"
+}

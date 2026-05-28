@@ -2126,6 +2126,144 @@ pub struct ListMembersResponse {
     #[prost(int32, tag="3")]
     pub total_count: i32,
 }
+// -- Allowed domain auto-invite (DATA-252) ------------------------------------
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AllowedDomain {
+    #[prost(string, tag="1")]
+    pub domain: ::prost::alloc::string::String,
+    /// 'auto_invite_any_verified' | 'manual_only' | 'auto_join_oauth' (v1.1).
+    #[prost(string, tag="2")]
+    pub policy: ::prost::alloc::string::String,
+    /// Surfaced to admins for v1.1 DNS TXT verification ("set TXT _forest-verify
+    /// = <token>"). v1 generates and stores but does not validate.
+    #[prost(string, tag="3")]
+    pub dns_verification_token: ::prost::alloc::string::String,
+    /// Null until DNS TXT proven. v1 ignores; v1.1 will gate auto_join_oauth.
+    #[prost(message, optional, tag="4")]
+    pub dns_verified_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(message, optional, tag="5")]
+    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(string, tag="6")]
+    pub created_by_user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddAllowedDomainRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub domain: ::prost::alloc::string::String,
+    /// Optional; defaults server-side to 'auto_invite_any_verified'.
+    #[prost(string, tag="3")]
+    pub policy: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddAllowedDomainResponse {
+    #[prost(message, optional, tag="1")]
+    pub domain: ::core::option::Option<AllowedDomain>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListAllowedDomainsRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListAllowedDomainsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub domains: ::prost::alloc::vec::Vec<AllowedDomain>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveAllowedDomainRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub domain: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveAllowedDomainResponse {
+    #[prost(bool, tag="1")]
+    pub removed: bool,
+}
+/// Trigger a DNS TXT lookup at `_forest-verify.<domain>` and flip the row
+/// to verified if the configured token is present (DATA-252).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VerifyAllowedDomainRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub domain: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VerifyAllowedDomainResponse {
+    #[prost(enumeration="verify_allowed_domain_response::Status", tag="1")]
+    pub status: i32,
+}
+/// Nested message and enum types in `VerifyAllowedDomainResponse`.
+pub mod verify_allowed_domain_response {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum Status {
+        Unspecified = 0,
+        /// freshly verified by this call
+        Verified = 1,
+        /// was already verified; no-op
+        AlreadyVerified = 2,
+        /// DNS resolved but no matching TXT was found
+        Missing = 3,
+    }
+    impl Status {
+        /// String value of the enum field names used in the ProtoBuf definition.
+        ///
+        /// The values are not transformed in any way and thus are considered stable
+        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+        pub fn as_str_name(&self) -> &'static str {
+            match self {
+                Self::Unspecified => "STATUS_UNSPECIFIED",
+                Self::Verified => "VERIFIED",
+                Self::AlreadyVerified => "ALREADY_VERIFIED",
+                Self::Missing => "MISSING",
+            }
+        }
+        /// Creates an enum from field names used in the ProtoBuf definition.
+        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+            match value {
+                "STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+                "VERIFIED" => Some(Self::Verified),
+                "ALREADY_VERIFIED" => Some(Self::AlreadyVerified),
+                "MISSING" => Some(Self::Missing),
+                _ => None,
+            }
+        }
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct JoinOffer {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub organisation_name: ::prost::alloc::string::String,
+    /// The user's email domain that matched the allowlist row.
+    #[prost(string, tag="3")]
+    pub matched_domain: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListJoinOffersRequest {
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListJoinOffersResponse {
+    #[prost(message, repeated, tag="1")]
+    pub offers: ::prost::alloc::vec::Vec<JoinOffer>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AcceptJoinOfferRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AcceptJoinOfferResponse {
+    #[prost(message, optional, tag="1")]
+    pub member: ::core::option::Option<OrganisationMember>,
+}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnnotateReleaseRequest {
     #[prost(string, tag="1")]

@@ -92,6 +92,67 @@ message ListMembersResponse {
   int32 total_count = 3;
 }
 
+// -- Allowed domain auto-invite (DATA-252) ------------------------------------
+
+message AllowedDomain {
+  string domain = 1;
+  // 'auto_invite_any_verified' | 'manual_only' | 'auto_join_oauth' (v1.1).
+  string policy = 2;
+  // Surfaced to admins for v1.1 DNS TXT verification ("set TXT _forest-verify
+  // = <token>"). v1 generates and stores but does not validate.
+  string dns_verification_token = 3;
+  // Null until DNS TXT proven. v1 ignores; v1.1 will gate auto_join_oauth.
+  google.protobuf.Timestamp dns_verified_at = 4;
+  google.protobuf.Timestamp created_at = 5;
+  string created_by_user_id = 6;
+}
+
+message AddAllowedDomainRequest {
+  string organisation_id = 1;
+  string domain = 2;
+  // Optional; defaults server-side to 'auto_invite_any_verified'.
+  string policy = 3;
+}
+message AddAllowedDomainResponse { AllowedDomain domain = 1; }
+
+message ListAllowedDomainsRequest  { string organisation_id = 1; }
+message ListAllowedDomainsResponse { repeated AllowedDomain domains = 1; }
+
+message RemoveAllowedDomainRequest {
+  string organisation_id = 1;
+  string domain = 2;
+}
+message RemoveAllowedDomainResponse { bool removed = 1; }
+
+// Trigger a DNS TXT lookup at `_forest-verify.<domain>` and flip the row
+// to verified if the configured token is present (DATA-252).
+message VerifyAllowedDomainRequest {
+  string organisation_id = 1;
+  string domain = 2;
+}
+message VerifyAllowedDomainResponse {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    VERIFIED = 1;          // freshly verified by this call
+    ALREADY_VERIFIED = 2;  // was already verified; no-op
+    MISSING = 3;           // DNS resolved but no matching TXT was found
+  }
+  Status status = 1;
+}
+
+message JoinOffer {
+  string organisation_id = 1;
+  string organisation_name = 2;
+  // The user's email domain that matched the allowlist row.
+  string matched_domain = 3;
+}
+
+message ListJoinOffersRequest  {}
+message ListJoinOffersResponse { repeated JoinOffer offers = 1; }
+
+message AcceptJoinOfferRequest  { string organisation_id = 1; }
+message AcceptJoinOfferResponse { OrganisationMember member = 1; }
+
 service OrganisationService {
   rpc CreateOrganisation(CreateOrganisationRequest) returns (CreateOrganisationResponse);
   rpc GetOrganisation(GetOrganisationRequest) returns (GetOrganisationResponse);
@@ -101,4 +162,14 @@ service OrganisationService {
   rpc RemoveMember(RemoveMemberRequest) returns (RemoveMemberResponse);
   rpc UpdateMemberRole(UpdateMemberRoleRequest) returns (UpdateMemberRoleResponse);
   rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
+
+  // Admin: manage the per-org auto-invite allowlist.
+  rpc AddAllowedDomain(AddAllowedDomainRequest) returns (AddAllowedDomainResponse);
+  rpc ListAllowedDomains(ListAllowedDomainsRequest) returns (ListAllowedDomainsResponse);
+  rpc RemoveAllowedDomain(RemoveAllowedDomainRequest) returns (RemoveAllowedDomainResponse);
+  rpc VerifyAllowedDomain(VerifyAllowedDomainRequest) returns (VerifyAllowedDomainResponse);
+
+  // User: see and accept auto-invite join offers.
+  rpc ListJoinOffers(ListJoinOffersRequest) returns (ListJoinOffersResponse);
+  rpc AcceptJoinOffer(AcceptJoinOfferRequest) returns (AcceptJoinOfferResponse);
 }

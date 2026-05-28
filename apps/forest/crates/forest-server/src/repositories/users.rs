@@ -320,7 +320,7 @@ impl UserRepository {
         user_id: Uuid,
         email: &str,
     ) -> Result<UserEmailRow, DbError> {
-        self.add_user_email_with_verified(db, user_id, email, false)
+        self.add_user_email_with_verified(db, user_id, email, false, "magic_link")
             .await
     }
 
@@ -330,17 +330,19 @@ impl UserRepository {
         user_id: Uuid,
         email: &str,
         verified: bool,
+        verification_source: &str,
     ) -> Result<UserEmailRow, DbError> {
         let row = sqlx::query_as!(
             UserEmailRow,
             r#"
-            INSERT INTO user_emails (user_id, email, verified)
-            VALUES ($1, $2, $3)
+            INSERT INTO user_emails (user_id, email, verified, verification_source)
+            VALUES ($1, $2, $3, $4)
             RETURNING user_id, email, verified, created_at, updated_at
             "#,
             user_id,
             email,
             verified,
+            verification_source,
         )
         .fetch_one(db)
         .await?;
@@ -407,6 +409,37 @@ impl UserRepository {
         .await?;
 
         Ok(row)
+    }
+
+    /// Upgrade a user's email verification_source to a stronger value
+    /// (OAuth) — used when an OAuth identity is linked whose email matches
+    /// an already-verified row. No-op if the email doesn't exist. The
+    /// caller is expected to only invoke this on rows it's promoting from
+    /// 'magic_link'; the WHERE filters the upgrade direction to be safe.
+    pub async fn upgrade_email_verification_source(
+        &self,
+        db: impl PgExecutor<'_>,
+        user_id: Uuid,
+        email: &str,
+        new_source: &str,
+    ) -> Result<(), DbError> {
+        sqlx::query!(
+            r#"
+            UPDATE user_emails
+            SET verification_source = $3, updated_at = now()
+            WHERE user_id = $1
+              AND email = $2
+              AND verified = TRUE
+              AND verification_source = 'magic_link'
+            "#,
+            user_id,
+            email,
+            new_source,
+        )
+        .execute(db)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn verify_user_email(

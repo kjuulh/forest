@@ -25,4 +25,5 @@ pub mod release_pipeline;
 pub mod release_token_registry;
 pub mod users;
 pub mod registration_policy;
+pub mod domain_policy;
 pub mod release_health;

@@ -76,6 +76,16 @@ pub(crate) struct MockPlatformBehavior {
     pub get_notification_preferences_result: Option<Result<Vec<NotificationPreference>, PlatformError>>,
     pub set_notification_preference_result: Option<Result<(), PlatformError>>,
     pub list_destination_types_result: Option<Result<Vec<DestinationTypeInfo>, PlatformError>>,
+    // DATA-252 — allowed-domain auto-invite.
+    pub list_allowed_domains_result:
+        Option<Result<Vec<forage_core::platform::AllowedDomain>, PlatformError>>,
+    pub add_allowed_domain_result:
+        Option<Result<forage_core::platform::AllowedDomain, PlatformError>>,
+    pub remove_allowed_domain_result: Option<Result<bool, PlatformError>>,
+    pub verify_allowed_domain_result:
+        Option<Result<forage_core::platform::VerifyDomainOutcome, PlatformError>>,
+    pub list_join_offers_result: Option<Result<Vec<forage_core::platform::JoinOffer>, PlatformError>>,
+    pub accept_join_offer_result: Option<Result<OrgMember, PlatformError>>,
 }
 
 pub(crate) fn ok_tokens() -> AuthTokens {
@@ -1014,6 +1024,80 @@ impl ForestPlatform for MockPlatformClient {
         })
     }
 
+    // -- Auto-invite (DATA-252) -----------------------------------------------
+
+    async fn list_allowed_domains(
+        &self,
+        _access_token: &str,
+        _organisation_id: &str,
+    ) -> Result<Vec<forage_core::platform::AllowedDomain>, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.list_allowed_domains_result.clone().unwrap_or(Ok(vec![]))
+    }
+
+    async fn add_allowed_domain(
+        &self,
+        _access_token: &str,
+        _organisation_id: &str,
+        domain: &str,
+    ) -> Result<forage_core::platform::AllowedDomain, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.add_allowed_domain_result.clone().unwrap_or_else(|| {
+            Ok(forage_core::platform::AllowedDomain {
+                domain: domain.to_lowercase(),
+                policy: "auto_invite_any_verified".into(),
+                dns_verified: false,
+                dns_verification_token: "mock-token".into(),
+                created_at: None,
+            })
+        })
+    }
+
+    async fn remove_allowed_domain(
+        &self,
+        _access_token: &str,
+        _organisation_id: &str,
+        _domain: &str,
+    ) -> Result<bool, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.remove_allowed_domain_result.clone().unwrap_or(Ok(true))
+    }
+
+    async fn verify_allowed_domain(
+        &self,
+        _access_token: &str,
+        _organisation_id: &str,
+        _domain: &str,
+    ) -> Result<forage_core::platform::VerifyDomainOutcome, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.verify_allowed_domain_result
+            .clone()
+            .unwrap_or(Ok(forage_core::platform::VerifyDomainOutcome::Verified))
+    }
+
+    async fn list_join_offers(
+        &self,
+        _access_token: &str,
+    ) -> Result<Vec<forage_core::platform::JoinOffer>, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.list_join_offers_result.clone().unwrap_or(Ok(vec![]))
+    }
+
+    async fn accept_join_offer(
+        &self,
+        _access_token: &str,
+        _organisation_id: &str,
+    ) -> Result<OrgMember, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.accept_join_offer_result.clone().unwrap_or_else(|| {
+            Ok(OrgMember {
+                user_id: "user-123".into(),
+                username: "joiner".into(),
+                role: "member".into(),
+                joined_at: None,
+            })
+        })
+    }
 }
 
 pub(crate) fn make_templates() -> TemplateEngine {

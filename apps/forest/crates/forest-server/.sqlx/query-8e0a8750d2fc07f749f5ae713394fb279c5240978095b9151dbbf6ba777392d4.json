@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT verification_source FROM user_emails WHERE email = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "verification_source",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8e0a8750d2fc07f749f5ae713394fb279c5240978095b9151dbbf6ba777392d4"
+}

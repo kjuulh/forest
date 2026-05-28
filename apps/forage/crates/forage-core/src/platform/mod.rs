@@ -243,6 +243,35 @@ pub struct OrgMember {
     pub joined_at: Option<String>,
 }
 
+/// One row from an org's auto-invite allowlist (DATA-252).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AllowedDomain {
+    pub domain: String,
+    /// 'auto_invite_any_verified' | 'manual_only' | (v1.1) 'auto_join_oauth'.
+    pub policy: String,
+    pub dns_verified: bool,
+    /// Token to publish as the TXT record at `_forest-verify.<domain>`
+    /// so the server can confirm DNS ownership.
+    pub dns_verification_token: String,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VerifyDomainOutcome {
+    Verified,
+    AlreadyVerified,
+    Missing,
+}
+
+/// One auto-invite join offer surfaced to a user with a matching verified
+/// email. Accepting it makes them an org member (DATA-252).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinOffer {
+    pub organisation_id: String,
+    pub organisation_name: String,
+    pub matched_domain: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Environment {
     pub id: String,
@@ -522,6 +551,15 @@ pub enum PlatformError {
 
     #[error("service unavailable: {0}")]
     Unavailable(String),
+
+    #[error("{0}")]
+    InvalidArgument(String),
+
+    #[error("{0}")]
+    AlreadyExists(String),
+
+    #[error("{0}")]
+    PermissionDenied(String),
 
     #[error("{0}")]
     Other(String),
@@ -860,6 +898,46 @@ pub trait ForestPlatform: Send + Sync {
         release_intent_id: &str,
         stage_id: &str,
     ) -> Result<PlanOutput, PlatformError>;
+
+    // -- Auto-invite by verified email domain (DATA-252) ----------------------
+
+    async fn list_allowed_domains(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+    ) -> Result<Vec<AllowedDomain>, PlatformError>;
+
+    async fn add_allowed_domain(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        domain: &str,
+    ) -> Result<AllowedDomain, PlatformError>;
+
+    async fn remove_allowed_domain(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        domain: &str,
+    ) -> Result<bool, PlatformError>;
+
+    async fn verify_allowed_domain(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        domain: &str,
+    ) -> Result<VerifyDomainOutcome, PlatformError>;
+
+    async fn list_join_offers(
+        &self,
+        access_token: &str,
+    ) -> Result<Vec<JoinOffer>, PlatformError>;
+
+    async fn accept_join_offer(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+    ) -> Result<OrgMember, PlatformError>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
