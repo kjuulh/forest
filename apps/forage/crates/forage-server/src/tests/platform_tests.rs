@@ -1889,3 +1889,185 @@ async fn fresh_project_overview_renders_get_started_panel() {
     // And the typical Components/Releases section headers are absent.
     assert!(!html.contains("<h2 class=\"text-lg font-bold\">Components</h2>"));
 }
+
+// ─── Nav preserves org context (DATA-248) ───────────────────────────
+//
+// The top-level nav previously linked the "forest" logo and the org-level
+// "Overview" tab to the global `/dashboard`, which silently dropped the
+// org the user was inside. These tests pin the org-scoped behaviour so
+// the bug doesn't regress.
+
+/// Extract the substring between `<nav` and `</nav>` so assertions don't
+/// accidentally match links inside the page body (where `/dashboard`
+/// might appear legitimately, e.g. in marketing copy).
+fn extract_nav(html: &str) -> &str {
+    let start = html.find("<nav").expect("nav tag");
+    let end_rel = html[start..].find("</nav>").expect("end nav tag");
+    &html[start..start + end_rel]
+}
+
+#[tokio::test]
+async fn nav_logo_links_to_org_when_inside_org() {
+    let (state, sessions) = test_state();
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    let nav = extract_nav(&html);
+    assert!(
+        nav.contains(r#"href="/orgs/testorg/projects""#),
+        "expected org-scoped link in nav, got: {nav}"
+    );
+    assert!(
+        !nav.contains(r#"href="/dashboard""#),
+        "nav must not link to global /dashboard while inside an org: {nav}"
+    );
+}
+
+#[tokio::test]
+async fn nav_logo_links_to_dashboard_when_no_org_context() {
+    let (state, sessions) = test_state();
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    // The dashboard page has no org in the URL — the logo should fall
+    // back to /dashboard there. (`current_org` is still set in context
+    // via the first-org fallback, so the nav links into that org, but
+    // the page exists outside any org route — which is the only place
+    // the global dashboard is the right target.)
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/dashboard")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    let nav = extract_nav(&html);
+    // Logo + Projects tab both land on the user's first org's project
+    // list — that's the "I'm inside testorg" anchor the rest of the nav
+    // already uses.
+    assert!(nav.contains(r#"href="/orgs/testorg/projects""#));
+}
+
+#[tokio::test]
+async fn nav_has_no_overview_tab_inside_org() {
+    // The Overview tab was the primary DATA-248 offender — it linked to
+    // /dashboard from inside an org. The fix drops it entirely (Projects
+    // is the org root) rather than duplicating the Projects destination.
+    let (state, sessions) = test_state();
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    let nav = extract_nav(&html);
+    // The org-level tab strip must not contain any link whose visible
+    // label is "Overview" — collapse whitespace before matching so a
+    // future re-indent doesn't silently break the test.
+    let collapsed: String = nav.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        !collapsed.contains(">Overview<"),
+        "Overview tab should be absent inside org context: {collapsed}"
+    );
+}
+
+#[tokio::test]
+async fn nav_bell_links_to_org_scoped_notifications() {
+    let (state, sessions) = test_state();
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    let nav = extract_nav(&html);
+    assert!(
+        nav.contains(r#"href="/orgs/testorg/notifications""#),
+        "bell should link to org-scoped notifications: {nav}"
+    );
+}
+
+#[tokio::test]
+async fn org_notifications_route_returns_200() {
+    let (state, sessions) = test_state();
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/notifications")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn org_notifications_non_member_returns_403() {
+    let (state, sessions) = test_state();
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/unknown-org/notifications")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
