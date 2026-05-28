@@ -1,5 +1,6 @@
 pub mod linked;
 pub mod magic_link;
+pub mod oauth_state;
 mod validation;
 
 pub use linked::{

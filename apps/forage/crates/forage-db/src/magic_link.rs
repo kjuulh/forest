@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use forage_core::auth::magic_link::{MagicLinkError, MagicLinkStore};
+use forage_core::auth::magic_link::{ConsumedMagicLink, MagicLinkError, MagicLinkStore};
 use sqlx::PgPool;
 
 pub struct PgMagicLinkStore {
@@ -20,14 +20,17 @@ impl MagicLinkStore for PgMagicLinkStore {
         token_hash: &str,
         email: &str,
         expires_at: DateTime<Utc>,
+        return_to: Option<&str>,
     ) -> Result<(), MagicLinkError> {
         sqlx::query(
-            "INSERT INTO magic_link_tokens (token_hash, token_type, email, expires_at) VALUES ($1, $2, $3, $4)",
+            "INSERT INTO magic_link_tokens (token_hash, token_type, email, expires_at, return_to) \
+             VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(token_hash)
         .bind(token_type)
         .bind(email)
         .bind(expires_at)
+        .bind(return_to)
         .execute(&self.pool)
         .await
         .map_err(|e| MagicLinkError::Store(e.to_string()))?;
@@ -38,20 +41,21 @@ impl MagicLinkStore for PgMagicLinkStore {
         &self,
         token_type: &str,
         token_hash: &str,
-    ) -> Result<Option<String>, MagicLinkError> {
-        // Atomic: delete the row and return its email if not expired and
-        // the token_type matches. Cross-type redemption is impossible.
-        let row: Option<(String,)> = sqlx::query_as(
+    ) -> Result<Option<ConsumedMagicLink>, MagicLinkError> {
+        // Atomic: delete the row and return its email + return_to if not
+        // expired and the token_type matches. Cross-type redemption is
+        // impossible.
+        let row: Option<(String, Option<String>)> = sqlx::query_as(
             "DELETE FROM magic_link_tokens \
              WHERE token_hash = $1 AND token_type = $2 AND expires_at > NOW() \
-             RETURNING email",
+             RETURNING email, return_to",
         )
         .bind(token_hash)
         .bind(token_type)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| MagicLinkError::Store(e.to_string()))?;
-        Ok(row.map(|r| r.0))
+        Ok(row.map(|(email, return_to)| ConsumedMagicLink { email, return_to }))
     }
 
     async fn count_recent(

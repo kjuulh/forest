@@ -12,6 +12,9 @@
     {% endif %}
 
     <form method="POST" action="/login/mfa" class="space-y-4">
+        {% if return_to is defined and return_to %}
+        <input type="hidden" name="return_to" value="{{ return_to }}">
+        {% endif %}
         <div>
             <label for="code" class="block text-sm font-medium mb-1">Authentication code</label>
             <input

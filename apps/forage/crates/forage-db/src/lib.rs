@@ -1,10 +1,12 @@
 mod integrations;
 mod magic_link;
+mod oauth_state;
 mod profile_pictures;
 mod sessions;
 
 pub use integrations::PgIntegrationStore;
 pub use magic_link::PgMagicLinkStore;
+pub use oauth_state::PgOAuthStateStore;
 pub use profile_pictures::{PgProfilePictureStore, ProfilePicture};
 pub use sessions::PgSessionStore;
 pub use sqlx::PgPool;

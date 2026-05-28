@@ -101,12 +101,14 @@ pub fn router() -> Router<AppState> {
 async fn signup_page(
     State(state): State<AppState>,
     maybe: MaybeSession,
+    Query(params): Query<ReturnToParams>,
 ) -> Result<Response, axum::http::StatusCode> {
+    let rt = auth::safe_return_to(params.return_to.as_deref());
     if maybe.session.is_some() {
-        return Ok(Redirect::to("/dashboard").into_response());
+        return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
     }
 
-    render_signup(&state, "", "", "", None)
+    render_signup(&state, "", "", "", None, rt)
 }
 
 #[derive(Deserialize)]
@@ -115,6 +117,8 @@ struct SignupForm {
     email: String,
     password: String,
     password_confirm: String,
+    #[serde(default)]
+    return_to: Option<String>,
 }
 
 async fn signup_submit(
@@ -122,19 +126,21 @@ async fn signup_submit(
     maybe: MaybeSession,
     Form(form): Form<SignupForm>,
 ) -> Result<Response, axum::http::StatusCode> {
+    let rt_owned = form.return_to.clone();
+    let rt = auth::safe_return_to(rt_owned.as_deref());
     if maybe.session.is_some() {
-        return Ok(Redirect::to("/dashboard").into_response());
+        return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
     }
 
     // Validate
     if let Err(e) = validate_username(&form.username) {
-        return render_signup(&state, &form.username, &form.email, "", Some(e.0));
+        return render_signup(&state, &form.username, &form.email, "", Some(e.0), rt);
     }
     if let Err(e) = validate_email(&form.email) {
-        return render_signup(&state, &form.username, &form.email, "", Some(e.0));
+        return render_signup(&state, &form.username, &form.email, "", Some(e.0), rt);
     }
     if let Err(e) = validate_password(&form.password) {
-        return render_signup(&state, &form.username, &form.email, "", Some(e.0));
+        return render_signup(&state, &form.username, &form.email, "", Some(e.0), rt);
     }
     if form.password != form.password_confirm {
         return render_signup(
@@ -143,6 +149,7 @@ async fn signup_submit(
             &form.email,
             "",
             Some("Passwords do not match".into()),
+            rt,
         );
     }
 
@@ -155,7 +162,10 @@ async fn signup_submit(
         Ok(RegisterResult::VerificationRequired) => {
             // Forest withheld tokens. Drive the verification email and
             // show the "check your inbox" page. No session created.
-            if let Err(e) = enqueue_verification_email(&state, &form.email).await {
+            // Pass return_to so a device-login flow survives the
+            // email-verify detour and gets back to /device after the
+            // user signs in.
+            if let Err(e) = enqueue_verification_email(&state, &form.email, rt).await {
                 tracing::error!(error = %e, "failed to enqueue verification email after signup");
             }
             render_verify_email_check_inbox(&state, &form.email)
@@ -215,7 +225,8 @@ async fn signup_submit(
             match state.sessions.create(session_data).await {
                 Ok(session_id) => {
                     let cookie = auth::session_cookie(&session_id, true);
-                    Ok((cookie, Redirect::to("/dashboard")).into_response())
+                    let dest = rt.unwrap_or("/dashboard");
+                    Ok((cookie, Redirect::to(dest)).into_response())
                 }
                 Err(_) => render_signup(
                     &state,
@@ -223,6 +234,7 @@ async fn signup_submit(
                     &form.email,
                     "",
                     Some("Internal error. Please try again.".into()),
+                    rt,
                 ),
             }
         }
@@ -232,6 +244,7 @@ async fn signup_submit(
             &form.email,
             "",
             Some("Username or email already registered".into()),
+            rt,
         ),
         Err(forage_core::auth::AuthError::Unavailable(msg)) => {
             tracing::error!("forest-server unavailable: {msg}");
@@ -241,6 +254,7 @@ async fn signup_submit(
                 &form.email,
                 "",
                 Some("Service temporarily unavailable. Please try again.".into()),
+                rt,
             )
         }
         Err(e) => render_signup(
@@ -249,6 +263,7 @@ async fn signup_submit(
             &form.email,
             "",
             Some(e.to_string()),
+            rt,
         ),
     }
 }
@@ -259,6 +274,7 @@ fn render_signup(
     email: &str,
     _password: &str,
     error: Option<String>,
+    return_to: Option<&str>,
 ) -> Result<Response, axum::http::StatusCode> {
     let html = state
         .templates
@@ -274,6 +290,7 @@ fn render_signup(
                 has_google_oauth => state.google_oauth_config.is_some(),
                 has_github_oauth => state.github_oauth_config.is_some(),
                 has_magic_link => state.magic_link_store.is_some(),
+                return_to => return_to,
             },
         )
         .map_err(|e| {
@@ -296,11 +313,12 @@ async fn login_page(
     maybe: MaybeSession,
     Query(params): Query<ReturnToParams>,
 ) -> Result<Response, axum::http::StatusCode> {
+    let rt = auth::safe_return_to(params.return_to.as_deref());
     if maybe.session.is_some() {
-        return Ok(Redirect::to("/dashboard").into_response());
+        return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
     }
 
-    render_login(&state, "", None, params.return_to.as_deref())
+    render_login(&state, "", None, rt)
 }
 
 #[derive(Deserialize)]
@@ -319,10 +337,10 @@ async fn login_submit(
     Form(form): Form<LoginForm>,
 ) -> Result<Response, axum::http::StatusCode> {
     let return_to = form.return_to.clone();
-    let rt = return_to.as_deref();
+    let rt = auth::safe_return_to(return_to.as_deref());
 
     if maybe.session.is_some() {
-        return Ok(Redirect::to("/dashboard").into_response());
+        return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
     }
 
     if form.identifier.is_empty() || form.password.is_empty() {
@@ -394,10 +412,7 @@ async fn login_submit(
             match state.sessions.create(session_data).await {
                 Ok(session_id) => {
                     let cookie = auth::session_cookie(&session_id, remember);
-                    let dest = return_to
-                        .as_deref()
-                        .filter(|p| p.starts_with('/') && !p.starts_with("//"))
-                        .unwrap_or("/dashboard");
+                    let dest = rt.unwrap_or("/dashboard");
                     Ok((cookie, Redirect::to(dest)).into_response())
                 }
                 Err(_) => render_login(
@@ -426,6 +441,7 @@ async fn login_submit(
                         description => "Enter your authenticator code to continue",
                         is_auth_page => true,
                         error => None::<String>,
+                        return_to => rt,
                     },
                 )
                 .map_err(|e| {
@@ -446,7 +462,7 @@ async fn login_submit(
             // limit handles the rest).
             let email_for_resend = form.identifier.clone();
             if email_for_resend.contains('@') {
-                if let Err(e) = enqueue_verification_email(&state, &email_for_resend).await {
+                if let Err(e) = enqueue_verification_email(&state, &email_for_resend, rt).await {
                     tracing::warn!(error = %e, "failed to enqueue verification email on login block");
                 }
             }
@@ -476,6 +492,8 @@ async fn login_submit(
 #[derive(Deserialize)]
 struct MfaForm {
     code: String,
+    #[serde(default)]
+    return_to: Option<String>,
 }
 
 async fn login_mfa_submit(
@@ -485,6 +503,8 @@ async fn login_mfa_submit(
 ) -> Result<Response, axum::http::StatusCode> {
     use axum::http::header::SET_COOKIE;
     use axum::http::HeaderValue;
+
+    let rt = auth::safe_return_to(form.return_to.as_deref());
 
     let mfa_token = jar
         .get("forage_mfa_session")
@@ -510,6 +530,7 @@ async fn login_mfa_submit(
                         description => "Enter your authenticator code to continue",
                         is_auth_page => true,
                         error => Some("Invalid or expired code. Please try again."),
+                        return_to => rt,
                     },
                 )
                 .map_err(|e| {
@@ -529,6 +550,7 @@ async fn login_mfa_submit(
                         description => "Enter your authenticator code to continue",
                         is_auth_page => true,
                         error => Some(e.to_string()),
+                        return_to => rt,
                     },
                 )
                 .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -582,7 +604,8 @@ async fn login_mfa_submit(
             let session_cookie = auth::session_cookie(&session_id, true);
             // Clear the MFA session cookie
             let clear_mfa = "forage_mfa_session=; HttpOnly; SameSite=Lax; Path=/login; Max-Age=0";
-            let mut response = (session_cookie, Redirect::to("/dashboard")).into_response();
+            let dest = rt.unwrap_or("/dashboard");
+            let mut response = (session_cookie, Redirect::to(dest)).into_response();
             if let Ok(val) = HeaderValue::from_str(clear_mfa) {
                 response.headers_mut().append(SET_COOKIE, val);
             }
@@ -1093,7 +1116,7 @@ async fn add_email_submit(
             // forest signaled it.
             if result.email_verification_required {
                 if let Err(e) =
-                    enqueue_verification_email(&state, &result.email.email).await
+                    enqueue_verification_email(&state, &result.email.email, None).await
                 {
                     tracing::warn!(error = %e, "failed to enqueue verification email on add_email");
                 }
@@ -1202,7 +1225,7 @@ async fn resend_verification_submit(
         .into_response());
     }
 
-    if let Err(e) = enqueue_verification_email(&state, &form.email).await {
+    if let Err(e) = enqueue_verification_email(&state, &form.email, None).await {
         tracing::warn!(
             error = %e,
             user_id = %session.user.user_id,
@@ -1630,17 +1653,92 @@ fn generate_oauth_state() -> String {
     generate_csrf_token()
 }
 
+/// Pick the post-auth destination for a freshly-minted session.
+///
+/// New (OAuth/magic-link) users must pick a username via
+/// `/auth/complete-profile`; we forward `return_to` through that step so
+/// the original intent survives. Returning users go straight to
+/// `return_to` (validated) or `/dashboard` as fallback.
+fn post_auth_dest(is_new_user: bool, return_to: Option<&str>) -> String {
+    if is_new_user {
+        match return_to {
+            Some(rt) => format!(
+                "/auth/complete-profile?return_to={}",
+                urlencoding::encode(rt)
+            ),
+            None => "/auth/complete-profile".to_string(),
+        }
+    } else {
+        return_to.unwrap_or("/dashboard").to_string()
+    }
+}
+
+/// Lifetime for OAuth/MFA flow state rows. Matches the cookie Max-Age
+/// used by the state-anchor cookies (10 min).
+const OAUTH_FLOW_TTL_SECS: i64 = 600;
+
+/// Write a row to the OAuth state store, if one is configured. No-op
+/// without a store (the cookie-based CSRF anchor still works; we just
+/// lose the per-flow `return_to`).
+async fn persist_oauth_flow(
+    state: &AppState,
+    provider: &str,
+    oauth_state: &str,
+    return_to: Option<&str>,
+) -> Result<(), Response> {
+    let Some(store) = state.oauth_state_store.as_ref() else {
+        return Ok(());
+    };
+    let expires_at = chrono::Utc::now() + chrono::Duration::seconds(OAUTH_FLOW_TTL_SECS);
+    store
+        .create(provider, oauth_state, return_to, expires_at)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, provider, "failed to persist OAuth flow state");
+            error_page(
+                state,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Login unavailable",
+                "Could not start the sign-in flow. Please try again.",
+            )
+        })
+}
+
+/// Read-and-delete the OAuth flow row. Returns the previously-stored
+/// `return_to` (validated via [`auth::safe_return_to`]) or `None` if no
+/// store is wired, the row is missing/expired, or the value isn't safe.
+async fn consume_oauth_flow_return_to(
+    state: &AppState,
+    provider: &str,
+    oauth_state: &str,
+) -> Option<String> {
+    let store = state.oauth_state_store.as_ref()?;
+    match store.consume(provider, oauth_state).await {
+        Ok(Some(flow)) => flow
+            .return_to
+            .filter(|r| auth::safe_return_to(Some(r)).is_some()),
+        Ok(None) => None,
+        Err(e) => {
+            tracing::warn!(error = %e, provider, "OAuth flow state consume failed");
+            None
+        }
+    }
+}
+
 /// GET /auth/google — redirect to Google's consent screen.
 async fn google_oauth_start(
     State(state): State<AppState>,
     maybe: MaybeSession,
+    Query(rt_params): Query<ReturnToParams>,
 ) -> Result<Response, Response> {
+    let rt = auth::safe_return_to(rt_params.return_to.as_deref());
     if maybe.session.is_some() {
         // Logged-in user hit the bare login route. Clear any stale link
         // cookie *before* bouncing — otherwise an abandoned link flow's
         // cookie lingers until expiry and could mis-dispatch a later
         // login callback.
-        return Ok(redirect_clearing_link_cookie("/dashboard", "google"));
+        let dest = rt.unwrap_or("/dashboard");
+        return Ok(redirect_clearing_link_cookie(dest, "google"));
     }
 
     let config = state.google_oauth_config.as_ref().ok_or_else(|| {
@@ -1654,6 +1752,17 @@ async fn google_oauth_start(
 
     let oauth_state = generate_oauth_state();
     let redirect_uri = format!("{}/auth/google/callback", config.redirect_host);
+
+    // Persist per-flow return_to keyed by the OAuth state. The cookie
+    // below anchors the flow to this browser; the store is what keeps
+    // return_to safe from cross-tab cookie overwrite.
+    persist_oauth_flow(
+        &state,
+        forage_core::auth::oauth_state::PROVIDER_GOOGLE,
+        &oauth_state,
+        rt,
+    )
+    .await?;
 
     let auth_url = format!(
         "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}&access_type=offline",
@@ -1738,6 +1847,16 @@ async fn google_oauth_callback(
         }
     }
 
+    // Read-and-delete the per-flow return_to keyed by the OAuth state.
+    // Single-use — must happen at most once per callback irrespective of
+    // which branch we take below.
+    let return_to = consume_oauth_flow_return_to(
+        &state,
+        forage_core::auth::oauth_state::PROVIDER_GOOGLE,
+        received_state,
+    )
+    .await;
+
     // ── 2. Dispatch link-vs-login. ────────────────────────────────────
     let link_cookie_user_id = jar
         .get(LINK_PURPOSE_COOKIE)
@@ -1759,7 +1878,8 @@ async fn google_oauth_callback(
     }
 
     if maybe.session.is_some() && !is_link_flow {
-        return Ok(Redirect::to("/dashboard").into_response());
+        let dest = return_to.as_deref().unwrap_or("/dashboard");
+        return Ok(Redirect::to(dest).into_response());
     }
 
     // Handle denial from Google.
@@ -1914,13 +2034,8 @@ async fn google_oauth_callback(
     clear_cookie.make_removal();
     jar = jar.add(clear_cookie);
 
-    let redirect_to = if result.is_new_user {
-        "/auth/complete-profile"
-    } else {
-        "/dashboard"
-    };
-
-    Ok((jar, Redirect::to(redirect_to)).into_response())
+    let redirect_to = post_auth_dest(result.is_new_user, return_to.as_deref());
+    Ok((jar, Redirect::to(&redirect_to)).into_response())
 }
 
 // ─── GitHub OAuth ───────────────────────────────────────────────────
@@ -1929,9 +2044,12 @@ async fn google_oauth_callback(
 async fn github_oauth_start(
     State(state): State<AppState>,
     maybe: MaybeSession,
+    Query(rt_params): Query<ReturnToParams>,
 ) -> Result<Response, Response> {
+    let rt = auth::safe_return_to(rt_params.return_to.as_deref());
     if maybe.session.is_some() {
-        return Ok(redirect_clearing_link_cookie("/dashboard", "github"));
+        let dest = rt.unwrap_or("/dashboard");
+        return Ok(redirect_clearing_link_cookie(dest, "github"));
     }
 
     let config = state.github_oauth_config.as_ref().ok_or_else(|| {
@@ -1945,6 +2063,14 @@ async fn github_oauth_start(
 
     let oauth_state = generate_oauth_state();
     let redirect_uri = format!("{}/auth/github/callback", config.redirect_host);
+
+    persist_oauth_flow(
+        &state,
+        forage_core::auth::oauth_state::PROVIDER_GITHUB,
+        &oauth_state,
+        rt,
+    )
+    .await?;
 
     let auth_url = format!(
         "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope={}&state={}",
@@ -2014,6 +2140,14 @@ async fn github_oauth_callback(
         }
     }
 
+    // Single-use read of the per-flow return_to (see google_oauth_callback).
+    let return_to = consume_oauth_flow_return_to(
+        &state,
+        forage_core::auth::oauth_state::PROVIDER_GITHUB,
+        received_state,
+    )
+    .await;
+
     let link_cookie_user_id = jar
         .get(LINK_PURPOSE_COOKIE)
         .map(|c| c.value().to_string());
@@ -2036,7 +2170,8 @@ async fn github_oauth_callback(
     }
 
     if maybe.session.is_some() && !is_link_flow {
-        return Ok(Redirect::to("/dashboard").into_response());
+        let dest = return_to.as_deref().unwrap_or("/dashboard");
+        return Ok(Redirect::to(dest).into_response());
     }
 
     if query.error.is_some() {
@@ -2188,13 +2323,8 @@ async fn github_oauth_callback(
     clear_cookie.make_removal();
     jar = jar.add(clear_cookie);
 
-    let redirect_to = if result.is_new_user {
-        "/auth/complete-profile"
-    } else {
-        "/dashboard"
-    };
-
-    Ok((jar, Redirect::to(redirect_to)).into_response())
+    let redirect_to = post_auth_dest(result.is_new_user, return_to.as_deref());
+    Ok((jar, Redirect::to(&redirect_to)).into_response())
 }
 
 // ─── Complete Profile (username selection for OAuth users) ──────────
@@ -2202,18 +2332,22 @@ async fn github_oauth_callback(
 async fn complete_profile_page(
     State(state): State<AppState>,
     session: Session,
+    Query(params): Query<ReturnToParams>,
 ) -> Result<Response, Response> {
+    let rt = auth::safe_return_to(params.return_to.as_deref());
     if !session.needs_username {
-        return Ok(Redirect::to("/dashboard").into_response());
+        return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
     }
 
-    render_complete_profile(&state, &session.csrf_token, "", None)
+    render_complete_profile(&state, &session.csrf_token, "", None, rt)
 }
 
 #[derive(Deserialize)]
 struct CompleteProfileForm {
     _csrf: String,
     username: String,
+    #[serde(default)]
+    return_to: Option<String>,
 }
 
 async fn complete_profile_submit(
@@ -2221,8 +2355,9 @@ async fn complete_profile_submit(
     session: Session,
     Form(form): Form<CompleteProfileForm>,
 ) -> Result<Response, Response> {
+    let rt = auth::safe_return_to(form.return_to.as_deref());
     if !session.needs_username {
-        return Ok(Redirect::to("/dashboard").into_response());
+        return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
     }
 
     // Validate CSRF.
@@ -2237,7 +2372,7 @@ async fn complete_profile_submit(
 
     // Validate username.
     if let Err(e) = validate_username(&form.username) {
-        return render_complete_profile(&state, &session.csrf_token, &form.username, Some(e.0));
+        return render_complete_profile(&state, &session.csrf_token, &form.username, Some(e.0), rt);
     }
 
     // Update username on forest-server.
@@ -2252,6 +2387,7 @@ async fn complete_profile_submit(
                     &session.csrf_token,
                     &form.username,
                     Some("Username is already taken.".into()),
+                    rt,
                 )
                 .unwrap_err()
             }
@@ -2278,7 +2414,8 @@ async fn complete_profile_submit(
         .await
         .map_err(|e| internal_error(&state, "update session after username", &e))?;
 
-    Ok(Redirect::to("/dashboard").into_response())
+    let dest = rt.unwrap_or("/dashboard");
+    Ok(Redirect::to(dest).into_response())
 }
 
 fn render_complete_profile(
@@ -2286,6 +2423,7 @@ fn render_complete_profile(
     csrf_token: &str,
     username: &str,
     error: Option<String>,
+    return_to: Option<&str>,
 ) -> Result<Response, Response> {
     let html = state
         .templates
@@ -2298,6 +2436,7 @@ fn render_complete_profile(
                 csrf_token => csrf_token,
                 username => username,
                 error => error,
+                return_to => return_to,
             },
         )
         .map_err(|e| {
@@ -2318,15 +2457,19 @@ fn render_complete_profile(
 #[derive(Deserialize)]
 struct MagicLinkForm {
     email: String,
+    #[serde(default)]
+    return_to: Option<String>,
 }
 
 /// GET /auth/magic-link — show the magic link email form.
 async fn magic_link_page(
     State(state): State<AppState>,
     maybe: MaybeSession,
+    Query(rt_params): Query<ReturnToParams>,
 ) -> Result<Response, Response> {
+    let rt = auth::safe_return_to(rt_params.return_to.as_deref());
     if maybe.session.is_some() {
-        return Ok(Redirect::to("/dashboard").into_response());
+        return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
     }
 
     if state.magic_link_store.is_none() {
@@ -2338,7 +2481,7 @@ async fn magic_link_page(
         ));
     }
 
-    render_magic_link_form(&state, "", None)
+    render_magic_link_form(&state, "", None, rt)
 }
 
 /// POST /auth/magic-link — send a magic link email.
@@ -2347,8 +2490,9 @@ async fn magic_link_request(
     maybe: MaybeSession,
     Form(form): Form<MagicLinkForm>,
 ) -> Result<Response, Response> {
+    let rt = auth::safe_return_to(form.return_to.as_deref());
     if maybe.session.is_some() {
-        return Ok(Redirect::to("/dashboard").into_response());
+        return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
     }
 
     let store = state.magic_link_store.as_ref().ok_or_else(|| {
@@ -2362,7 +2506,7 @@ async fn magic_link_request(
 
     // Validate email.
     if let Err(e) = validate_email(&form.email) {
-        return render_magic_link_form(&state, &form.email, Some(e.0));
+        return render_magic_link_form(&state, &form.email, Some(e.0), rt);
     }
 
     // Rate limit: max 3 per 15 minutes per email.
@@ -2398,6 +2542,7 @@ async fn magic_link_request(
             &token_hash,
             &form.email,
             expires_at,
+            rt,
         )
         .await
         .map_err(|e| {
@@ -2495,7 +2640,7 @@ async fn magic_link_verify(
 
     let token_hash = forage_core::auth::magic_link::hash_magic_link_token(raw_token);
 
-    let email = store
+    let consumed = store
         .verify_and_consume(
             forage_core::auth::magic_link::TOKEN_TYPE_MAGIC_LINK,
             &token_hash,
@@ -2518,6 +2663,11 @@ async fn magic_link_verify(
                 "This magic link has expired or has already been used. Please request a new one.",
             )
         })?;
+
+    let email = consumed.email;
+    let return_to = consumed
+        .return_to
+        .filter(|r| auth::safe_return_to(Some(r)).is_some());
 
     // Call Forest to find-or-create user by email identity.
     let result = state
@@ -2598,19 +2748,16 @@ async fn magic_link_verify(
 
     let jar = auth::session_cookie(&session_id, true);
 
-    let redirect_to = if result.is_new_user {
-        "/auth/complete-profile"
-    } else {
-        "/dashboard"
-    };
+    let redirect_to = post_auth_dest(result.is_new_user, return_to.as_deref());
 
-    Ok((jar, Redirect::to(redirect_to)).into_response())
+    Ok((jar, Redirect::to(&redirect_to)).into_response())
 }
 
 fn render_magic_link_form(
     state: &AppState,
     email: &str,
     error: Option<String>,
+    return_to: Option<&str>,
 ) -> Result<Response, Response> {
     let html = state
         .templates
@@ -2621,6 +2768,7 @@ fn render_magic_link_form(
                 description => "Get a magic link sent to your email",
                 email => email,
                 error => error,
+                return_to => return_to,
             },
         )
         .map_err(|e| {
@@ -2886,7 +3034,11 @@ async fn serve_avatar(
 
 // ─── Email verification (signup + add_email) ─────────────────────────
 
-async fn enqueue_verification_email(state: &AppState, email: &str) -> anyhow::Result<()> {
+async fn enqueue_verification_email(
+    state: &AppState,
+    email: &str,
+    return_to: Option<&str>,
+) -> anyhow::Result<()> {
     let store = state
         .magic_link_store
         .as_ref()
@@ -2915,6 +3067,7 @@ async fn enqueue_verification_email(state: &AppState, email: &str) -> anyhow::Re
             &token_hash,
             email,
             expires_at,
+            return_to,
         )
         .await?;
 
@@ -3007,7 +3160,7 @@ async fn verify_email_redeem(
 
     let token_hash = forage_core::auth::magic_link::hash_magic_link_token(raw_token);
 
-    let email = store
+    let consumed = store
         .verify_and_consume(
             forage_core::auth::magic_link::TOKEN_TYPE_EMAIL_VERIFY,
             &token_hash,
@@ -3023,15 +3176,35 @@ async fn verify_email_redeem(
             )
         })?;
 
-    let Some(email) = email else {
+    let Some((email, stored_return_to)) = consumed.map(|c| (c.email, c.return_to)) else {
         return Ok(render_verify_email_failed(&state));
     };
+    // Validate the stored value at consume time too (defence in depth —
+    // the row could outlive a policy change to `safe_return_to`).
+    let return_to = stored_return_to
+        .as_deref()
+        .and_then(|r| auth::safe_return_to(Some(r)))
+        .map(|r| r.to_string());
 
     if let Err(e) = state.forest_client.confirm_email_verification(&email).await {
         tracing::error!(error = %e, email = %email, "confirm_email_verification failed");
         // Token is already consumed (single-use absolute). User must
         // request a new one via /auth/verify-email/resend.
         return Ok(render_verify_email_failed(&state));
+    }
+
+    // If a return_to was carried from the original signup/login attempt,
+    // smooth out the journey: send the (still-unauthenticated) user to
+    // /login with that return_to preserved, so post-login they land on
+    // the pending intent (e.g. /device?user_code=…). Without this, the
+    // user lands on a success page and has to re-discover their entry
+    // point manually — that's the workaround DATA-251 calls out.
+    if let Some(rt) = return_to {
+        return Ok(Redirect::to(&format!(
+            "/login?return_to={}",
+            urlencoding::encode(&rt)
+        ))
+        .into_response());
     }
 
     let html = state
@@ -3121,7 +3294,7 @@ async fn verify_email_resend_submit(
         tracing::info!(email = %form.email, "verify-email resend skipped: invalid email");
         return render_verify_email_check_inbox(&state, &form.email).map_err(|s| s.into_response());
     }
-    if let Err(e) = enqueue_verification_email(&state, &form.email).await {
+    if let Err(e) = enqueue_verification_email(&state, &form.email, None).await {
         tracing::warn!(error = %e, "verify-email resend enqueue failed");
     }
     render_verify_email_check_inbox(&state, &form.email).map_err(|s| s.into_response())

@@ -540,3 +540,186 @@ async fn github_callback_with_empty_state_cookie_returns_403() {
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
+
+// ─── return_to round-trip through the OAuth state store (DATA-251) ──
+
+/// Drive the full Google sign-in flow end-to-end:
+///   start with `?return_to=/device?user_code=…` → persists state row →
+///   callback consumes the row → final redirect points at the original
+///   intent, not `/dashboard`.
+#[tokio::test]
+async fn google_oauth_flow_round_trips_return_to() {
+    let (state, _sessions) = test_state_with_google_oauth();
+    let app = build_router(state);
+
+    // 1. Start the flow with a return_to. We can't observe the random
+    //    state token directly, so we pull it back from the Set-Cookie
+    //    header (the cookie value IS the state token).
+    let start_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/auth/google?return_to=%2Fdevice%3Fuser_code%3DABCD-EFGH")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(start_response.status(), StatusCode::FOUND);
+    let state_cookie = start_response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .find_map(|v| {
+            let s = v.to_str().ok()?;
+            s.strip_prefix("forage_oauth_state=")
+                .and_then(|rest| rest.split(';').next())
+        })
+        .expect("forage_oauth_state cookie")
+        .to_string();
+
+    // 2. Hit the callback with the same state — same browser would replay
+    //    the cookie. The state-store row is keyed by the state token, so
+    //    the return_to we stored at step 1 should now drive the redirect.
+    let callback_response = app
+        .oneshot(
+            Request::builder()
+                .uri(&format!(
+                    "/auth/google/callback?code=test-code&state={}",
+                    state_cookie
+                ))
+                .header(
+                    "cookie",
+                    format!("forage_oauth_state={state_cookie}"),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(callback_response.status(), StatusCode::SEE_OTHER);
+    let location = callback_response
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert_eq!(
+        location, "/device?user_code=ABCD-EFGH",
+        "OAuth flow must honour the return_to stored at start"
+    );
+}
+
+/// New-OAuth-user case: the redirect must forward return_to through the
+/// /auth/complete-profile step so the device approval still happens
+/// after the user picks a username.
+#[tokio::test]
+async fn google_oauth_new_user_forwards_return_to_through_complete_profile() {
+    let mock = MockForestClient::with_behavior(MockBehavior {
+        oauth_login_result: Some(Ok(OAuthLoginResult {
+            user: ok_user(),
+            tokens: ok_tokens(),
+            is_new_user: true,
+        })),
+        ..Default::default()
+    });
+    let (state, _sessions) = test_state_with(mock, MockPlatformClient::new());
+    let state = state
+        .with_google_oauth_config(crate::state::GoogleOAuthConfig {
+            client_id: "test-google-client-id".into(),
+            client_secret: "test-google-client-secret".into(),
+            redirect_host: "http://localhost:3000".into(),
+        })
+        .with_google_oidc_exchange(std::sync::Arc::new(MockOidcExchange::new()));
+    let app = build_router(state);
+
+    let start_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/auth/google?return_to=%2Fdevice%3Fuser_code%3DZZZZ-YYYY")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let state_cookie = start_response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .find_map(|v| {
+            let s = v.to_str().ok()?;
+            s.strip_prefix("forage_oauth_state=")
+                .and_then(|rest| rest.split(';').next())
+        })
+        .expect("forage_oauth_state cookie")
+        .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(&format!(
+                    "/auth/google/callback?code=test-code&state={state_cookie}"
+                ))
+                .header("cookie", format!("forage_oauth_state={state_cookie}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(
+        location.starts_with("/auth/complete-profile?return_to="),
+        "new OAuth user must land on complete-profile carrying return_to, got: {location}"
+    );
+    assert!(
+        location.contains("ZZZZ-YYYY"),
+        "user_code must survive into the complete-profile query: {location}"
+    );
+}
+
+/// After a new OAuth user picks a username, the complete-profile submit
+/// must redirect to the carried-through `return_to`, not /dashboard.
+/// Closes the second half of the new-user device-login chain.
+#[tokio::test]
+async fn complete_profile_submit_honours_return_to() {
+    let (state, sessions) = test_state_with_google_oauth();
+    let cookie = create_test_session_needs_username(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/complete-profile")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    "_csrf=test-csrf&username=alice\
+                     &return_to=%2Fdevice%3Fuser_code%3DABCD-EFGH",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert_eq!(
+        location, "/device?user_code=ABCD-EFGH",
+        "complete-profile submit must honour return_to from the form"
+    );
+}
