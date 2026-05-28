@@ -1849,10 +1849,14 @@ async fn deployments_url_303s_to_releases() {
     assert_eq!(location, "/orgs/testorg/projects/my-api/releases");
 }
 
-/// E14 — fresh project with no published versions and no README renders the
-/// centered Get-started panel — not a wall of empty section cards.
+/// E14 — fresh project with no published versions, no README, and no releases
+/// renders the centered Get-started panel — not a wall of empty section cards.
 #[tokio::test]
 async fn fresh_project_overview_renders_get_started_panel() {
+    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
+        list_artifacts_result: Some(Ok(vec![])),
+        ..Default::default()
+    });
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         // No detail → comp_versions empty, readme empty.
         get_component_detail_result: Some(Err(forage_core::platform::PlatformError::NotFound(
@@ -1860,11 +1864,8 @@ async fn fresh_project_overview_renders_get_started_panel() {
         ))),
         ..Default::default()
     });
-    let (state, sessions) = test_state_with_registry(
-        MockForestClient::new(),
-        MockPlatformClient::new(),
-        registry,
-    );
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), platform, registry);
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
@@ -1888,6 +1889,187 @@ async fn fresh_project_overview_renders_get_started_panel() {
     assert!(html.contains("Publish your first version"));
     // And the typical Components/Releases section headers are absent.
     assert!(!html.contains("<h2 class=\"text-lg font-bold\">Components</h2>"));
+    assert!(!html.contains("Recent releases"));
+}
+
+/// DATA-254 — project with releases but no components must still show the
+/// release swimlane on the Overview, not fall through to the Get-started panel.
+#[tokio::test]
+async fn project_overview_with_releases_only_shows_swimlane() {
+    // Default platform mock returns a single artifact → timeline is non-empty.
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        get_component_detail_result: Some(Err(forage_core::platform::PlatformError::NotFound(
+            "no component yet".into(),
+        ))),
+        ..Default::default()
+    });
+    let (state, sessions) = test_state_with_registry(
+        MockForestClient::new(),
+        MockPlatformClient::new(),
+        registry,
+    );
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects/my-api")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    // Swimlane is present.
+    assert!(html.contains("Recent releases"));
+    assert!(html.contains("<release-timeline"));
+    // Get-started panel must NOT render — there are releases.
+    assert!(!html.contains("Publish your first version"));
+}
+
+/// DATA-254 — project with components but no releases renders the Overview
+/// (sidebar Components block visible), not the Get-started panel.
+#[tokio::test]
+async fn project_overview_with_components_only_renders_overview() {
+    use forage_core::registry::{
+        ComponentDetail, ComponentSummary, ComponentVersionInfo, ToolShape,
+    };
+    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
+        list_artifacts_result: Some(Ok(vec![])),
+        ..Default::default()
+    });
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        get_component_detail_result: Some(Ok(ComponentDetail {
+            summary: ComponentSummary {
+                organisation: "testorg".into(),
+                name: "my-api".into(),
+                latest_version: "1.0.0".into(),
+                kind: "binary".into(),
+                description: "a component".into(),
+                created_at: String::new(),
+                updated_at: String::new(),
+                version_count: 1,
+                contracts: vec![],
+                visibility: "public".into(),
+                shape: ToolShape::Component,
+                tool: None,
+                methods: vec![],
+                upstream_host: String::new(),
+            },
+            versions: vec![ComponentVersionInfo {
+                version: "1.0.0".into(),
+                protocol_version: "1".into(),
+                kind: "binary".into(),
+                platforms: vec![],
+            }],
+            readme: String::new(),
+            manifest_json: String::new(),
+            owners: vec![],
+        })),
+        ..Default::default()
+    });
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), platform, registry);
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects/my-api")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    // Sidebar Components block is present (component version listed).
+    assert!(html.contains("v1.0.0"));
+    // Get-started panel must NOT render — there are components.
+    assert!(!html.contains("Publish your first version"));
+    // No release swimlane since there are no releases.
+    assert!(!html.contains("Recent releases"));
+}
+
+/// DATA-254 — project with both releases and components renders the full
+/// Overview: swimlane plus sidebar Components.
+#[tokio::test]
+async fn project_overview_with_releases_and_components_renders_both() {
+    use forage_core::registry::{
+        ComponentDetail, ComponentSummary, ComponentVersionInfo, ToolShape,
+    };
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        get_component_detail_result: Some(Ok(ComponentDetail {
+            summary: ComponentSummary {
+                organisation: "testorg".into(),
+                name: "my-api".into(),
+                latest_version: "1.0.0".into(),
+                kind: "binary".into(),
+                description: "a component".into(),
+                created_at: String::new(),
+                updated_at: String::new(),
+                version_count: 1,
+                contracts: vec![],
+                visibility: "public".into(),
+                shape: ToolShape::Component,
+                tool: None,
+                methods: vec![],
+                upstream_host: String::new(),
+            },
+            versions: vec![ComponentVersionInfo {
+                version: "1.0.0".into(),
+                protocol_version: "1".into(),
+                kind: "binary".into(),
+                platforms: vec![],
+            }],
+            readme: String::new(),
+            manifest_json: String::new(),
+            owners: vec![],
+        })),
+        ..Default::default()
+    });
+    // Default platform mock returns a single artifact → timeline non-empty.
+    let (state, sessions) = test_state_with_registry(
+        MockForestClient::new(),
+        MockPlatformClient::new(),
+        registry,
+    );
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects/my-api")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(html.contains("Recent releases"));
+    assert!(html.contains("<release-timeline"));
+    assert!(html.contains("v1.0.0"));
+    assert!(!html.contains("Publish your first version"));
 }
 
 // ─── Nav preserves org context (DATA-248) ───────────────────────────
