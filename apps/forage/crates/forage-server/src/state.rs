@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::forest_client::GrpcForestClient;
 use crate::templates::TemplateEngine;
 use forage_core::auth::magic_link::MagicLinkStore;
+use forage_core::auth::oauth_state::OAuthStateStore;
 use forage_core::auth::{ForestAuth, OidcExchange};
 use forage_core::compute::ComputeScheduler;
 use forage_core::integrations::IntegrationStore;
@@ -49,6 +50,7 @@ pub struct AppState {
     pub github_oauth_config: Option<GitHubOAuthConfig>,
     pub github_oidc_exchange: Option<Arc<dyn OidcExchange>>,
     pub magic_link_store: Option<Arc<dyn MagicLinkStore>>,
+    pub oauth_state_store: Option<Arc<dyn OAuthStateStore>>,
     pub email_jetstream: Option<async_nats::jetstream::Context>,
     pub forage_host: String,
     pub compute_scheduler: Option<Arc<dyn ComputeScheduler>>,
@@ -77,6 +79,7 @@ impl AppState {
             github_oauth_config: None,
             github_oidc_exchange: None,
             magic_link_store: None,
+            oauth_state_store: None,
             email_jetstream: None,
             forage_host: String::new(),
             compute_scheduler: None,
@@ -123,6 +126,11 @@ impl AppState {
 
     pub fn with_magic_link_store(mut self, store: Arc<dyn MagicLinkStore>) -> Self {
         self.magic_link_store = Some(store);
+        self
+    }
+
+    pub fn with_oauth_state_store(mut self, store: Arc<dyn OAuthStateStore>) -> Self {
+        self.oauth_state_store = Some(store);
         self
     }
 

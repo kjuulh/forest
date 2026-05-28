@@ -106,7 +106,7 @@ async fn verify_email_redeem_valid_token_calls_forest_and_renders_success() {
     let (raw, hash) = generate_magic_link_token();
     let expires = chrono::Utc::now() + chrono::Duration::minutes(15);
     store
-        .store_token(TOKEN_TYPE_EMAIL_VERIFY, &hash, "kasper@understory.io", expires)
+        .store_token(TOKEN_TYPE_EMAIL_VERIFY, &hash, "kasper@understory.io", expires, None)
         .await
         .unwrap();
 
@@ -168,6 +168,7 @@ async fn verify_email_redeem_expired_token_renders_failed() {
             &hash,
             "test@example.com",
             chrono::Utc::now() - chrono::Duration::seconds(1),
+            None,
         )
         .await
         .unwrap();
@@ -197,7 +198,7 @@ async fn verify_email_redeem_cross_type_token_is_rejected() {
     let (raw, hash) = generate_magic_link_token();
     let expires = chrono::Utc::now() + chrono::Duration::minutes(15);
     store
-        .store_token(TOKEN_TYPE_MAGIC_LINK, &hash, "test@example.com", expires)
+        .store_token(TOKEN_TYPE_MAGIC_LINK, &hash, "test@example.com", expires, None)
         .await
         .unwrap();
 
@@ -222,7 +223,7 @@ async fn verify_email_redeem_cross_type_token_is_rejected() {
         .verify_and_consume(TOKEN_TYPE_MAGIC_LINK, &hash)
         .await
         .unwrap();
-    assert_eq!(still_there, Some("test@example.com".into()));
+    assert_eq!(still_there.map(|c| c.email), Some("test@example.com".into()));
 }
 
 #[tokio::test]
@@ -498,3 +499,61 @@ async fn account_resend_verification_rejects_bad_csrf() {
         .unwrap();
     assert_eq!(count, 0);
 }
+
+// ─── DATA-251: verify-email carries return_to to /login ──────────────
+
+/// When a sign-up with `return_to=/device?…` requires email verification,
+/// the verification email's token is stored with `return_to`. Clicking
+/// the link must consume the token and redirect to `/login?return_to=…`
+/// instead of rendering the success page, so the user lands on the
+/// device-approval screen once they sign in.
+#[tokio::test]
+async fn verify_email_redeem_with_return_to_redirects_to_login() {
+    let store = std::sync::Arc::new(InMemoryMagicLinkStore::new());
+    let (raw, hash) = generate_magic_link_token();
+    let expires = chrono::Utc::now() + chrono::Duration::minutes(15);
+    store
+        .store_token(
+            TOKEN_TYPE_EMAIL_VERIFY,
+            &hash,
+            "kasper@understory.io",
+            expires,
+            Some("/device?user_code=ABCD-EFGH"),
+        )
+        .await
+        .unwrap();
+
+    let (state, _sessions) = test_state();
+    let state = state.with_magic_link_store(store);
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(&format!(
+                    "/auth/verify-email?token={}",
+                    urlencoding::encode(&raw)
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(
+        location.starts_with("/login?return_to="),
+        "expected /login redirect with return_to, got: {location}"
+    );
+    assert!(
+        location.contains("ABCD-EFGH"),
+        "user_code must survive into the login redirect: {location}"
+    );
+}
+

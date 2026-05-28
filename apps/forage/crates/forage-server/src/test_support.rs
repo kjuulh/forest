@@ -1040,7 +1040,10 @@ pub(crate) fn test_state_with(
         Arc::new(mock),
         Arc::new(platform),
         sessions.clone(),
-    );
+    )
+    .with_oauth_state_store(Arc::new(
+        forage_core::auth::oauth_state::InMemoryOAuthStateStore::new(),
+    ));
     (state, sessions)
 }
 

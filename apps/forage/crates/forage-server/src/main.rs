@@ -115,10 +115,11 @@ async fn main() -> anyhow::Result<()> {
     let mut mad = notmad::Mad::builder();
 
     // Session store + integration store: PostgreSQL if DATABASE_URL is set
-    let (sessions, integration_store, magic_link_store): (
+    let (sessions, integration_store, magic_link_store, oauth_state_store): (
         Arc<dyn SessionStore>,
         Option<Arc<dyn forage_core::integrations::IntegrationStore>>,
         Option<Arc<dyn forage_core::auth::magic_link::MagicLinkStore>>,
+        Option<Arc<dyn forage_core::auth::oauth_state::OAuthStateStore>>,
     );
     let state_profile_pictures: Option<Arc<forage_db::PgProfilePictureStore>>;
 
@@ -142,6 +143,8 @@ async fn main() -> anyhow::Result<()> {
         ));
         let pg_magic_link =
             Arc::new(forage_db::PgMagicLinkStore::new(pool.clone()));
+        let pg_oauth_state =
+            Arc::new(forage_db::PgOAuthStateStore::new(pool.clone()));
         let pg_profile_pictures =
             Arc::new(forage_db::PgProfilePictureStore::new(pool));
 
@@ -156,6 +159,9 @@ async fn main() -> anyhow::Result<()> {
             Some(pg_integrations as Arc<dyn forage_core::integrations::IntegrationStore>);
         magic_link_store =
             Some(pg_magic_link as Arc<dyn forage_core::auth::magic_link::MagicLinkStore>);
+        oauth_state_store = Some(
+            pg_oauth_state as Arc<dyn forage_core::auth::oauth_state::OAuthStateStore>,
+        );
         state_profile_pictures = Some(pg_profile_pictures);
     } else {
         let session_dir = std::env::var("SESSION_DIR").unwrap_or_else(|_| "target/sessions".into());
@@ -173,6 +179,9 @@ async fn main() -> anyhow::Result<()> {
         sessions = file_store as Arc<dyn SessionStore>;
         integration_store = None;
         magic_link_store = None;
+        oauth_state_store = Some(Arc::new(
+            forage_core::auth::oauth_state::InMemoryOAuthStateStore::new(),
+        ));
         state_profile_pictures = None;
     };
 
@@ -317,6 +326,10 @@ async fn main() -> anyhow::Result<()> {
                 "FOREST_SERVICE_ACCOUNT_API_KEY not set — notification listener disabled"
             );
         }
+    }
+
+    if let Some(store) = oauth_state_store {
+        state = state.with_oauth_state_store(store);
     }
 
     // Magic link store + email consumer

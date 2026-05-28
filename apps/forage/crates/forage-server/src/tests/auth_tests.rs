@@ -490,3 +490,178 @@ async fn logout_with_invalid_csrf_returns_403() {
     // Session should NOT be destroyed
     assert_eq!(sessions.session_count(), 1);
 }
+
+// ─── return_to redirect contract (DATA-251) ──────────────────────────
+
+#[tokio::test]
+async fn signup_page_with_return_to_renders_hidden_field() {
+    let response = test_app()
+        .oneshot(
+            Request::builder()
+                .uri("/signup?return_to=%2Fdevice%3Fuser_code%3DABCD-EFGH")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        html.contains(r#"<input type="hidden" name="return_to""#),
+        "signup form must carry return_to as a hidden field"
+    );
+    assert!(
+        html.contains("ABCD-EFGH"),
+        "user_code must be preserved in the rendered form"
+    );
+}
+
+#[tokio::test]
+async fn signup_submit_honours_return_to() {
+    let response = test_app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/signup")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    "username=testuser&email=test@example.com&password=SecurePass123\
+                     &password_confirm=SecurePass123\
+                     &return_to=%2Fdevice%3Fuser_code%3DABCD-EFGH",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::SEE_OTHER,
+        "successful signup must redirect (303), got {:?}",
+        response.status()
+    );
+    let location = response
+        .headers()
+        .get("location")
+        .expect("location header")
+        .to_str()
+        .unwrap();
+    assert_eq!(location, "/device?user_code=ABCD-EFGH");
+}
+
+#[tokio::test]
+async fn signup_submit_rejects_external_return_to_falls_back_to_dashboard() {
+    let response = test_app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/signup")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    "username=testuser&email=test@example.com&password=SecurePass123\
+                     &password_confirm=SecurePass123\
+                     &return_to=https%3A%2F%2Fevil.com%2Fphish",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get("location")
+        .expect("location header")
+        .to_str()
+        .unwrap();
+    assert_eq!(
+        location, "/dashboard",
+        "external URLs must be ignored, not followed"
+    );
+}
+
+#[tokio::test]
+async fn login_page_create_one_link_carries_return_to() {
+    let response = test_app()
+        .oneshot(
+            Request::builder()
+                .uri("/login?return_to=%2Fdevice%3Fuser_code%3DABCD-EFGH")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        html.contains(r#"href="/signup?return_to="#),
+        "login template's /signup link must carry return_to"
+    );
+}
+
+/// XSS guard: a return_to that survives `safe_return_to` (must start
+/// with `/`) but contains HTML-special characters must be escaped when
+/// rendered into the signup form's hidden field. Without MiniJinja
+/// autoescape on this would be a stored XSS — `/foo"><script>...` would
+/// break out of the value attribute.
+#[tokio::test]
+async fn signup_form_escapes_hostile_return_to() {
+    let raw = r#"/foo"><script>alert(1)</script><input value=""#;
+    let encoded = urlencoding::encode(raw).into_owned();
+    let response = test_app()
+        .oneshot(
+            Request::builder()
+                .uri(&format!("/signup?return_to={encoded}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        !html.contains("<script>alert(1)</script>"),
+        "return_to was not escaped — XSS possible in the hidden field"
+    );
+}
+
+/// POST /login/mfa with the challenge cookie + a return_to hidden field
+/// must land the user on the carried path, not /dashboard. Covers the
+/// MFA leg of the device-login flow.
+#[tokio::test]
+async fn login_mfa_submit_honours_return_to() {
+    let response = test_app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/login/mfa")
+                .header("cookie", "forage_mfa_session=test-mfa-token")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    "code=123456&return_to=%2Fdevice%3Fuser_code%3DMFAQ-2025",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert_eq!(
+        location, "/device?user_code=MFAQ-2025",
+        "MFA submit must honour return_to from the hidden form field"
+    );
+}
+
+

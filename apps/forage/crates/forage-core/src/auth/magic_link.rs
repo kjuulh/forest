@@ -16,6 +16,14 @@ pub enum MagicLinkError {
     Store(String),
 }
 
+/// What `verify_and_consume` returns: the email tied to the token, plus
+/// any `return_to` intent that was stored alongside it at issue time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsumedMagicLink {
+    pub email: String,
+    pub return_to: Option<String>,
+}
+
 /// Trait for token persistence shared by the magic-link login flow and
 /// the email-verification flow. The `token_type` discriminator
 /// segregates the two address-spaces; consumers cannot redeem a
@@ -23,22 +31,26 @@ pub enum MagicLinkError {
 #[async_trait::async_trait]
 pub trait MagicLinkStore: Send + Sync {
     /// Store a hashed token with its associated email and expiry, scoped
-    /// to a specific `token_type`.
+    /// to a specific `token_type`. `return_to` is an opaque application
+    /// intent recovered at verify time — used by the device-login flow
+    /// to land the user on `/device?user_code=…` after sign-in.
     async fn store_token(
         &self,
         token_type: &str,
         token_hash: &str,
         email: &str,
         expires_at: DateTime<Utc>,
+        return_to: Option<&str>,
     ) -> Result<(), MagicLinkError>;
 
-    /// Verify and consume a token atomically. Returns the email if a
-    /// non-expired (token_type, token_hash) pair existed, None otherwise.
+    /// Verify and consume a token atomically. Returns the row's email
+    /// plus return_to if a non-expired (token_type, token_hash) pair
+    /// existed, None otherwise.
     async fn verify_and_consume(
         &self,
         token_type: &str,
         token_hash: &str,
-    ) -> Result<Option<String>, MagicLinkError>;
+    ) -> Result<Option<ConsumedMagicLink>, MagicLinkError>;
 
     /// Count tokens of the given type created for this email since the
     /// given time (for per-type rate limiting).
@@ -107,6 +119,7 @@ struct StoredToken {
     email: String,
     expires_at: DateTime<Utc>,
     created_at: DateTime<Utc>,
+    return_to: Option<String>,
 }
 
 /// In-memory implementation for development and tests. Keys by
@@ -131,6 +144,7 @@ impl MagicLinkStore for InMemoryMagicLinkStore {
         token_hash: &str,
         email: &str,
         expires_at: DateTime<Utc>,
+        return_to: Option<&str>,
     ) -> Result<(), MagicLinkError> {
         let mut tokens = self.tokens.lock().unwrap();
         tokens.insert(
@@ -140,6 +154,7 @@ impl MagicLinkStore for InMemoryMagicLinkStore {
                 email: email.to_string(),
                 expires_at,
                 created_at: Utc::now(),
+                return_to: return_to.map(|s| s.to_string()),
             },
         );
         Ok(())
@@ -149,11 +164,14 @@ impl MagicLinkStore for InMemoryMagicLinkStore {
         &self,
         token_type: &str,
         token_hash: &str,
-    ) -> Result<Option<String>, MagicLinkError> {
+    ) -> Result<Option<ConsumedMagicLink>, MagicLinkError> {
         let mut tokens = self.tokens.lock().unwrap();
         if let Some(token) = tokens.remove(&(token_type.to_string(), token_hash.to_string())) {
             if token.expires_at > Utc::now() {
-                return Ok(Some(token.email));
+                return Ok(Some(ConsumedMagicLink {
+                    email: token.email,
+                    return_to: token.return_to,
+                }));
             }
         }
         Ok(None)
@@ -207,24 +225,60 @@ mod tests {
         let expires = Utc::now() + chrono::Duration::minutes(15);
 
         store
-            .store_token(TOKEN_TYPE_MAGIC_LINK, &hash, "test@example.com", expires)
+            .store_token(TOKEN_TYPE_MAGIC_LINK, &hash, "test@example.com", expires, None)
             .await
             .unwrap();
 
         // First consume succeeds
-        let email = store
+        let consumed = store
             .verify_and_consume(TOKEN_TYPE_MAGIC_LINK, &hash)
             .await
             .unwrap();
-        assert_eq!(email, Some("test@example.com".into()));
+        assert_eq!(
+            consumed,
+            Some(ConsumedMagicLink {
+                email: "test@example.com".into(),
+                return_to: None,
+            })
+        );
 
         // Second consume fails (single-use)
-        let email = store
+        let consumed = store
             .verify_and_consume(TOKEN_TYPE_MAGIC_LINK, &hash)
             .await
             .unwrap();
-        assert_eq!(email, None);
+        assert_eq!(consumed, None);
         let _ = raw;
+    }
+
+    #[tokio::test]
+    async fn store_round_trips_return_to() {
+        let store = InMemoryMagicLinkStore::new();
+        let (_, hash) = generate_magic_link_token();
+        let expires = Utc::now() + chrono::Duration::minutes(15);
+
+        store
+            .store_token(
+                TOKEN_TYPE_MAGIC_LINK,
+                &hash,
+                "test@example.com",
+                expires,
+                Some("/device?user_code=ABCD-EFGH"),
+            )
+            .await
+            .unwrap();
+
+        let consumed = store
+            .verify_and_consume(TOKEN_TYPE_MAGIC_LINK, &hash)
+            .await
+            .unwrap();
+        assert_eq!(
+            consumed,
+            Some(ConsumedMagicLink {
+                email: "test@example.com".into(),
+                return_to: Some("/device?user_code=ABCD-EFGH".into()),
+            })
+        );
     }
 
     #[tokio::test]
@@ -234,15 +288,15 @@ mod tests {
         let expired = Utc::now() - chrono::Duration::seconds(1);
 
         store
-            .store_token(TOKEN_TYPE_MAGIC_LINK, &hash, "test@example.com", expired)
+            .store_token(TOKEN_TYPE_MAGIC_LINK, &hash, "test@example.com", expired, None)
             .await
             .unwrap();
 
-        let email = store
+        let consumed = store
             .verify_and_consume(TOKEN_TYPE_MAGIC_LINK, &hash)
             .await
             .unwrap();
-        assert_eq!(email, None);
+        assert_eq!(consumed, None);
     }
 
     #[tokio::test]
@@ -254,14 +308,14 @@ mod tests {
         for _ in 0..3 {
             let (_, hash) = generate_magic_link_token();
             store
-                .store_token(TOKEN_TYPE_MAGIC_LINK, &hash, "test@example.com", expires)
+                .store_token(TOKEN_TYPE_MAGIC_LINK, &hash, "test@example.com", expires, None)
                 .await
                 .unwrap();
         }
         for _ in 0..2 {
             let (_, hash) = generate_magic_link_token();
             store
-                .store_token(TOKEN_TYPE_EMAIL_VERIFY, &hash, "test@example.com", expires)
+                .store_token(TOKEN_TYPE_EMAIL_VERIFY, &hash, "test@example.com", expires, None)
                 .await
                 .unwrap();
         }
@@ -297,21 +351,27 @@ mod tests {
 
         // Store as magic-link, attempt to redeem as email-verify.
         store
-            .store_token(TOKEN_TYPE_MAGIC_LINK, &hash, "test@example.com", expires)
+            .store_token(TOKEN_TYPE_MAGIC_LINK, &hash, "test@example.com", expires, None)
             .await
             .unwrap();
 
-        let email = store
+        let consumed = store
             .verify_and_consume(TOKEN_TYPE_EMAIL_VERIFY, &hash)
             .await
             .unwrap();
-        assert_eq!(email, None, "cross-type redemption must fail");
+        assert_eq!(consumed, None, "cross-type redemption must fail");
 
         // Original type still works.
-        let email = store
+        let consumed = store
             .verify_and_consume(TOKEN_TYPE_MAGIC_LINK, &hash)
             .await
             .unwrap();
-        assert_eq!(email, Some("test@example.com".into()));
+        assert_eq!(
+            consumed,
+            Some(ConsumedMagicLink {
+                email: "test@example.com".into(),
+                return_to: None,
+            })
+        );
     }
 }

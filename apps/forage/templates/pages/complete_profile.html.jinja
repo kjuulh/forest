@@ -13,6 +13,9 @@
 
     <form method="POST" action="/auth/complete-profile" class="space-y-4">
         <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        {% if return_to is defined and return_to %}
+        <input type="hidden" name="return_to" value="{{ return_to }}">
+        {% endif %}
 
         <div>
             <label for="username" class="block text-sm font-medium mb-1">Username</label>

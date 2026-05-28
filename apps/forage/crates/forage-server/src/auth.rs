@@ -28,6 +28,25 @@ pub struct Session {
     pub session_data: forage_core::session::SessionData,
 }
 
+/// Validate a `return_to` path as safe to redirect to.
+///
+/// Accepts only same-origin absolute paths. Rejects:
+///   - empty / `None`
+///   - anything not starting with `/`
+///   - protocol-relative URLs (`//evil.com`) and `/\evil`
+///   - absolute URLs (`https://…`) — these don't start with `/`, caught above
+pub fn safe_return_to(raw: Option<&str>) -> Option<&str> {
+    let p = raw?;
+    if p.len() < 2 || !p.starts_with('/') {
+        return None;
+    }
+    let second = p.as_bytes()[1];
+    if second == b'/' || second == b'\\' {
+        return None;
+    }
+    Some(p)
+}
+
 /// Build a /login redirect that preserves the original URL as a return_to parameter.
 fn login_redirect(uri: &axum::http::Uri) -> axum::response::Redirect {
     let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
@@ -234,4 +253,34 @@ pub fn clear_session_cookie() -> CookieJar {
     cookie.make_removal();
 
     CookieJar::new().add(cookie)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_return_to_accepts_normal_paths() {
+        assert_eq!(safe_return_to(Some("/device")), Some("/device"));
+        assert_eq!(
+            safe_return_to(Some("/device?user_code=ABCD-EFGH")),
+            Some("/device?user_code=ABCD-EFGH")
+        );
+        assert_eq!(
+            safe_return_to(Some("/orgs/foo/settings")),
+            Some("/orgs/foo/settings")
+        );
+    }
+
+    #[test]
+    fn safe_return_to_rejects_unsafe_inputs() {
+        assert_eq!(safe_return_to(None), None);
+        assert_eq!(safe_return_to(Some("")), None);
+        assert_eq!(safe_return_to(Some("/")), None);
+        assert_eq!(safe_return_to(Some("device")), None);
+        assert_eq!(safe_return_to(Some("https://evil.com")), None);
+        assert_eq!(safe_return_to(Some("javascript:alert(1)")), None);
+        assert_eq!(safe_return_to(Some("//evil.com/path")), None);
+        assert_eq!(safe_return_to(Some("/\\evil.com")), None);
+    }
 }
