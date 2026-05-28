@@ -1152,9 +1152,19 @@ pub(crate) fn test_state_with_both_oauth() -> (AppState, Arc<InMemorySessionStor
 #[derive(Default)]
 pub(crate) struct MockRegistryBehavior {
     pub search_components_result: Option<Result<ComponentSearchResult, PlatformError>>,
+    /// Result returned by `search_public_components`. When `None`, falls
+    /// back to `search_components_result` so existing tests that set up
+    /// public catalog fixtures don't have to change.
+    pub search_public_components_result: Option<Result<ComponentSearchResult, PlatformError>>,
     pub get_component_detail_result: Option<Result<ComponentDetail, PlatformError>>,
+    /// Result for `get_public_component_detail`. Falls back to
+    /// `get_component_detail_result` when `None`.
+    pub get_public_component_detail_result: Option<Result<ComponentDetail, PlatformError>>,
     pub list_component_versions_result: Option<Result<Vec<ComponentVersionInfo>, PlatformError>>,
     pub get_component_manifest_result: Option<Result<String, PlatformError>>,
+    /// Result for `get_public_component_manifest`. Falls back to
+    /// `get_component_manifest_result` when `None`.
+    pub get_public_component_manifest_result: Option<Result<String, PlatformError>>,
     pub list_org_tools_result: Option<Result<Vec<ToolSummary>, PlatformError>>,
 }
 
@@ -1193,6 +1203,23 @@ impl ForestRegistry for MockRegistryClient {
         }))
     }
 
+    async fn search_public_components(
+        &self,
+        _query: &str,
+        _organisation: Option<&str>,
+        _page: i32,
+        _page_size: i32,
+    ) -> Result<ComponentSearchResult, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.search_public_components_result
+            .clone()
+            .or_else(|| b.search_components_result.clone())
+            .unwrap_or(Ok(ComponentSearchResult {
+                components: vec![],
+                total_count: 0,
+            }))
+    }
+
     async fn get_component_detail(
         &self,
         _access_token: &str,
@@ -1203,6 +1230,18 @@ impl ForestRegistry for MockRegistryClient {
         b.get_component_detail_result.clone().unwrap_or(Err(
             PlatformError::NotFound("component not found".into()),
         ))
+    }
+
+    async fn get_public_component_detail(
+        &self,
+        _organisation: &str,
+        _name: &str,
+    ) -> Result<ComponentDetail, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.get_public_component_detail_result
+            .clone()
+            .or_else(|| b.get_component_detail_result.clone())
+            .unwrap_or(Err(PlatformError::NotFound("component not found".into())))
     }
 
     async fn list_component_versions(
@@ -1224,6 +1263,19 @@ impl ForestRegistry for MockRegistryClient {
     ) -> Result<String, PlatformError> {
         let b = self.behavior.lock().unwrap();
         b.get_component_manifest_result.clone().unwrap_or(Ok(String::new()))
+    }
+
+    async fn get_public_component_manifest(
+        &self,
+        _organisation: &str,
+        _name: &str,
+        _version: &str,
+    ) -> Result<String, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.get_public_component_manifest_result
+            .clone()
+            .or_else(|| b.get_component_manifest_result.clone())
+            .unwrap_or(Ok(String::new()))
     }
 
     async fn list_org_tools(

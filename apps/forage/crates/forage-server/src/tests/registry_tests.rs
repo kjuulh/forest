@@ -184,6 +184,128 @@ async fn components_search_with_query() {
     assert!(html.contains("No components found"));
 }
 
+// ── Public surface only ever calls the public RPC ─────────────
+//
+// The risk we're protecting against: an anonymous visitor reaching
+// /components or /components/{org}/{name} and seeing private
+// components because forage previously fell back to a service-account
+// token. The fix routes these surfaces through *_public_components
+// RPCs which the backend hard-filters to visibility='public'. These
+// tests assert the route really calls the public variant: we configure
+// the public mock with an empty result and the legacy mock with a
+// private fixture; if the route accidentally hits the legacy method,
+// the private fixture leaks into the rendered HTML.
+
+#[tokio::test]
+async fn components_search_anonymous_uses_public_rpc_only() {
+    let private = ComponentSummary {
+        visibility: "private".into(),
+        ..sample_summary()
+    };
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        // The legacy authed RPC must NEVER be called from the /components
+        // surface — if it is, the private fixture would leak through.
+        search_components_result: Some(Ok(ComponentSearchResult {
+            components: vec![private],
+            total_count: 1,
+        })),
+        // The public RPC returns the empty result the user should see.
+        search_public_components_result: Some(Ok(ComponentSearchResult {
+            components: vec![],
+            total_count: 0,
+        })),
+        ..Default::default()
+    });
+    let (state, _) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/components")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    // Private fixture must not appear.
+    assert!(
+        !html.contains("testorg/deployment"),
+        "private component leaked into anonymous /components: {html}",
+    );
+    assert!(html.contains("No components published yet"));
+}
+
+#[tokio::test]
+async fn component_detail_returns_404_when_backend_says_private() {
+    // Simulate the backend's NotFound response for a private component
+    // — `get_public_component_detail` returns NotFound by contract for
+    // any project that isn't visibility='public'.
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        get_public_component_detail_result: Some(Err(PlatformError::NotFound(
+            "not public".into(),
+        ))),
+        // Even if the authed RPC would happily return the detail, the
+        // public surface must not call it.
+        get_component_detail_result: Some(Ok(sample_detail())),
+        ..Default::default()
+    });
+    let (state, _) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/components/testorg/deployment")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn component_version_detail_returns_404_when_backend_says_private() {
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        get_public_component_detail_result: Some(Err(PlatformError::NotFound(
+            "not public".into(),
+        ))),
+        get_public_component_manifest_result: Some(Err(PlatformError::NotFound(
+            "not public".into(),
+        ))),
+        get_component_detail_result: Some(Ok(sample_detail())),
+        get_component_manifest_result: Some(Ok(
+            r#"{"name":"deployment","version":"1.1.0"}"#.into(),
+        )),
+        ..Default::default()
+    });
+    let (state, _) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/components/testorg/deployment/1.1.0")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
 // ── Component detail ───────────────────────────────────────────
 
 #[tokio::test]

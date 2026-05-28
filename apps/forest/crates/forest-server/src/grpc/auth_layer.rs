@@ -175,6 +175,13 @@ fn auth_mode(path: &str) -> AuthMode {
         // server look dead. The health namespace exposes only liveness, so
         // it's safe to leave open.
         "/grpc.health.v1.Health/",
+        // Public registry endpoints — by design these never read the
+        // caller's identity and always filter to public components, so
+        // skipping token handling closes off any chance of escalating a
+        // misconfigured caller token into private reads.
+        "/forest.v1.RegistryService/SearchPublicComponents",
+        "/forest.v1.RegistryService/GetPublicComponentDetail",
+        "/forest.v1.RegistryService/GetPublicComponentManifest",
     ];
     let optional = [
         // Registry discovery endpoints allow anonymous browsing of public components,

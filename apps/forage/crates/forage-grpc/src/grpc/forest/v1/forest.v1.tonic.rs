@@ -9286,6 +9286,93 @@ pub mod registry_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        pub async fn search_public_components(
+            &mut self,
+            request: impl tonic::IntoRequest<super::SearchPublicComponentsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::SearchPublicComponentsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.RegistryService/SearchPublicComponents",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.RegistryService",
+                        "SearchPublicComponents",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_public_component_detail(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetPublicComponentDetailRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetPublicComponentDetailResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.RegistryService/GetPublicComponentDetail",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.RegistryService",
+                        "GetPublicComponentDetail",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_public_component_manifest(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetPublicComponentManifestRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetPublicComponentManifestResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.RegistryService/GetPublicComponentManifest",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.RegistryService",
+                        "GetPublicComponentManifest",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         pub async fn list_org_tools(
             &mut self,
             request: impl tonic::IntoRequest<super::ListOrgToolsRequest>,
@@ -9436,6 +9523,27 @@ pub mod registry_service_server {
             request: tonic::Request<super::GetComponentDetailRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetComponentDetailResponse>,
+            tonic::Status,
+        >;
+        async fn search_public_components(
+            &self,
+            request: tonic::Request<super::SearchPublicComponentsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::SearchPublicComponentsResponse>,
+            tonic::Status,
+        >;
+        async fn get_public_component_detail(
+            &self,
+            request: tonic::Request<super::GetPublicComponentDetailRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetPublicComponentDetailResponse>,
+            tonic::Status,
+        >;
+        async fn get_public_component_manifest(
+            &self,
+            request: tonic::Request<super::GetPublicComponentManifestRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetPublicComponentManifestResponse>,
             tonic::Status,
         >;
         /// Server streaming response type for the ListOrgTools method.
@@ -10169,6 +10277,158 @@ pub mod registry_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetComponentDetailSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.RegistryService/SearchPublicComponents" => {
+                    #[allow(non_camel_case_types)]
+                    struct SearchPublicComponentsSvc<T: RegistryService>(pub Arc<T>);
+                    impl<
+                        T: RegistryService,
+                    > tonic::server::UnaryService<super::SearchPublicComponentsRequest>
+                    for SearchPublicComponentsSvc<T> {
+                        type Response = super::SearchPublicComponentsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::SearchPublicComponentsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as RegistryService>::search_public_components(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = SearchPublicComponentsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.RegistryService/GetPublicComponentDetail" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetPublicComponentDetailSvc<T: RegistryService>(pub Arc<T>);
+                    impl<
+                        T: RegistryService,
+                    > tonic::server::UnaryService<super::GetPublicComponentDetailRequest>
+                    for GetPublicComponentDetailSvc<T> {
+                        type Response = super::GetPublicComponentDetailResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::GetPublicComponentDetailRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as RegistryService>::get_public_component_detail(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetPublicComponentDetailSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.RegistryService/GetPublicComponentManifest" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetPublicComponentManifestSvc<T: RegistryService>(pub Arc<T>);
+                    impl<
+                        T: RegistryService,
+                    > tonic::server::UnaryService<
+                        super::GetPublicComponentManifestRequest,
+                    > for GetPublicComponentManifestSvc<T> {
+                        type Response = super::GetPublicComponentManifestResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                super::GetPublicComponentManifestRequest,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as RegistryService>::get_public_component_manifest(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetPublicComponentManifestSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

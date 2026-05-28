@@ -3469,6 +3469,67 @@ pub struct GetComponentDetailResponse {
     #[prost(string, repeated, tag="5")]
     pub owners: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
+/// SearchPublicComponents — same shape as SearchComponents, but the server
+/// always restricts to projects with visibility = 'public'. No auth token
+/// is read; if the caller is authenticated they still only see public
+/// components on this RPC.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SearchPublicComponentsRequest {
+    #[prost(string, tag="1")]
+    pub query: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(int32, tag="3")]
+    pub page: i32,
+    #[prost(int32, tag="4")]
+    pub page_size: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SearchPublicComponentsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub components: ::prost::alloc::vec::Vec<ComponentSummary>,
+    #[prost(int32, tag="2")]
+    pub total_count: i32,
+}
+/// GetPublicComponentDetail — public-only detail. Returns NOT_FOUND for
+/// any component whose project is private (or for which no project row
+/// exists, since visibility defaults to private).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetPublicComponentDetailRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetPublicComponentDetailResponse {
+    #[prost(message, optional, tag="1")]
+    pub summary: ::core::option::Option<ComponentSummary>,
+    #[prost(message, repeated, tag="2")]
+    pub versions: ::prost::alloc::vec::Vec<ComponentVersionInfo>,
+    #[prost(string, tag="3")]
+    pub readme: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub manifest_json: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="5")]
+    pub owners: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+/// GetPublicComponentManifest — public-only manifest fetch for a specific
+/// version. NOT_FOUND if the owning project isn't public.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetPublicComponentManifestRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub version: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetPublicComponentManifestResponse {
+    #[prost(string, tag="1")]
+    pub manifest_json: ::prost::alloc::string::String,
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ToolFacet {
     #[prost(string, tag="1")]
