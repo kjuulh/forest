@@ -24,6 +24,10 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/dashboard", get(dashboard))
         .route("/notifications", get(notifications_page))
+        .route(
+            "/orgs/{org}/notifications",
+            get(org_notifications_page),
+        )
         .route("/orgs", post(create_org_submit))
         .route("/orgs/{org}/projects", get(projects_list))
         .route("/orgs/{org}/projects/{project}", get(project_detail))
@@ -616,6 +620,30 @@ async fn notifications_page(
     session: Session,
     Query(query): Query<NotificationsQuery>,
 ) -> Result<Response, Response> {
+    let orgs = &session.user.orgs;
+    let current_org = orgs.first().map(|o| o.name.clone());
+    render_notifications(state, session, query, current_org).await
+}
+
+// Org-scoped variant: same notifications list, but `current_org` comes
+// from the URL so the nav chrome keeps the user anchored in the org they
+// arrived from. DATA-248.
+async fn org_notifications_page(
+    State(state): State<AppState>,
+    session: Session,
+    Path(org): Path<String>,
+    Query(query): Query<NotificationsQuery>,
+) -> Result<Response, Response> {
+    require_org_membership(&state, &session.user.orgs, &org)?;
+    render_notifications(state, session, query, Some(org)).await
+}
+
+async fn render_notifications(
+    state: AppState,
+    session: Session,
+    query: NotificationsQuery,
+    current_org: Option<String>,
+) -> Result<Response, Response> {
     let releases = fetch_notifications(&state, &session).await;
     let release_values = notifications_to_values(releases);
 
@@ -641,7 +669,7 @@ async fn notifications_page(
                 description => "Your release activity",
                 user => context! { username => session.user.username },
                 csrf_token => &session.csrf_token,
-                current_org => orgs.first().map(|o| &o.name),
+                current_org => current_org,
                 orgs => orgs_context(orgs),
                 releases => release_values,
                 active_tab => "notifications",

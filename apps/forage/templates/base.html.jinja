@@ -23,7 +23,7 @@
         {# Top bar: breadcrumb + user actions #}
         <div class="max-w-6xl mx-auto px-4 pb-3 flex items-center justify-between">
             <div class="flex items-center gap-2 text-sm min-w-0">
-                <a href="/dashboard" class="text-lg font-bold tracking-tight shrink-0">forage</a>
+                <a href="{% if current_org is defined and current_org %}/orgs/{{ current_org }}/projects{% else %}/dashboard{% endif %}" class="text-lg font-bold tracking-tight shrink-0">forage</a>
                 {% if current_org is defined and current_org %}
                 <span class="text-gray-300">/</span>
                 {% if orgs is defined and orgs | length > 1 %}
@@ -62,7 +62,7 @@
             </div>
             {# Right-side actions #}
             <div class="flex items-center gap-3 shrink-0">
-                <a href="/notifications" class="text-gray-400 hover:text-gray-900 relative" title="Notifications">
+                <a href="{% if current_org is defined and current_org %}/orgs/{{ current_org }}/notifications{% else %}/notifications{% endif %}" class="text-gray-400 hover:text-gray-900 relative" title="Notifications">
                     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
                     </svg>
@@ -118,8 +118,10 @@
                 <a href="/orgs/{{ current_org }}/projects/{{ project_name }}/components" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'project_components' %} text-gray-900 border-gray-900{% endif %}">Components</a>
                 <a href="/orgs/{{ current_org }}/projects/{{ project_name }}/releases" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'project_releases' %} text-gray-900 border-gray-900{% endif %}">Releases</a>
                 {% elif current_org is defined and current_org %}
-                {# ── Org-level tabs ─────────────────────────────────── #}
-                <a href="/dashboard" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'dashboard' %} text-gray-900 border-gray-900{% endif %}">Overview</a>
+                {# ── Org-level tabs ───────────────────────────────────
+                   No separate Overview tab — Projects is the org root.
+                   Previously Overview linked to `/dashboard`, which
+                   silently dropped the org context on click (DATA-248). #}
                 <a href="/orgs/{{ current_org }}/projects" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'projects' %} text-gray-900 border-gray-900{% endif %}">Projects</a>
                 {# Org-scoped components view — `/orgs/{org}/components`.
                    While in an org context, the Components tab shows that
