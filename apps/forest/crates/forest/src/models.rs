@@ -39,6 +39,7 @@ pub mod release_annotation {
 
     use crate::models::{context::ArtifactContext, reference::Reference, source::Source};
 
+    #[derive(Clone)]
     pub struct ReleaseAnnotation {
         pub id: Uuid,
         pub artifact_id: Uuid,
@@ -51,6 +52,7 @@ pub mod release_annotation {
         pub created_at: DateTime<Utc>,
     }
 
+    #[derive(Clone)]
     pub struct ReleaseDestination {
         pub name: String,
         pub environment: String,

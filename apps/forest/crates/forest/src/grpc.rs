@@ -1207,6 +1207,37 @@ impl GrpcClient {
             .context("release annotation")
     }
 
+    /// Same as `get_release_annotation_by_slug` but also returns the
+    /// artifact's owning project (org + project). The CLI's annotation
+    /// model intentionally drops the project info, but `release show`
+    /// needs it to scope subsequent intent-state lookups.
+    pub async fn get_release_annotation_with_project_by_slug(
+        &self,
+        slug: &str,
+    ) -> anyhow::Result<(ReleaseAnnotation, crate::models::project::Project)> {
+        let mut client = self.release_client().await?;
+
+        let resp = client
+            .get_artifact_by_slug(GetArtifactBySlugRequest { slug: slug.into() })
+            .await
+            .map_err(grpc_err)
+            .context("get artifact by slug")?;
+
+        let artifact = resp
+            .into_inner()
+            .artifact
+            .ok_or_else(|| anyhow::anyhow!("artifact could not be found"))?;
+
+        let project = artifact
+            .project
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("artifact missing project"))?;
+
+        let annotation: ReleaseAnnotation = artifact.try_into().context("release annotation")?;
+
+        Ok((annotation, project.into()))
+    }
+
     pub async fn get_release_annotations_by_project(
         &self,
         organisation: &str,
@@ -1587,6 +1618,77 @@ impl GrpcClient {
             .context("get destination states (grpc)")?;
 
         Ok(resp.into_inner())
+    }
+
+    pub async fn get_plan_output(
+        &self,
+        release_intent_id: Uuid,
+        stage_id: &str,
+    ) -> anyhow::Result<forest_grpc_interface::GetPlanOutputResponse> {
+        let mut client = self.release_client().await?;
+        let resp = client
+            .get_plan_output(forest_grpc_interface::GetPlanOutputRequest {
+                release_intent_id: release_intent_id.to_string(),
+                stage_id: stage_id.to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("get plan output (grpc)")?;
+        Ok(resp.into_inner())
+    }
+
+    /// Same WaitRelease stream as `wait_release`, but routes every event
+    /// through `on_event` instead of printing directly. Used by
+    /// `forest release show` so it can render history into structured
+    /// per-destination sections (and respect `--format json`).
+    pub async fn wait_release_with<F>(
+        &self,
+        release_intent_id: Uuid,
+        mut on_event: F,
+    ) -> anyhow::Result<WaitReleaseResult>
+    where
+        F: FnMut(&forest_grpc_interface::WaitReleaseEvent),
+    {
+        use futures::StreamExt;
+
+        let mut client = self.release_client().await?;
+
+        let response = client
+            .wait_release(forest_grpc_interface::WaitReleaseRequest {
+                release_intent_id: release_intent_id.to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("wait_release (grpc)")?;
+
+        let mut stream = response.into_inner();
+        let mut final_statuses: HashMap<String, forest_models::ReleaseStatus> = HashMap::new();
+
+        while let Some(event) = stream.next().await {
+            let event = event.map_err(grpc_err).context("stream error")?;
+
+            if let Some(forest_grpc_interface::wait_release_event::Event::StatusUpdate(status)) =
+                &event.event
+            {
+                let release_status: forest_models::ReleaseStatus = status
+                    .status
+                    .parse()
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                final_statuses.insert(status.destination.clone(), release_status);
+            }
+
+            on_event(&event);
+        }
+
+        let destinations: Vec<WaitReleaseDestinationResult> = final_statuses
+            .into_iter()
+            .map(|(dest, status)| WaitReleaseDestinationResult {
+                destination: dest,
+                status,
+            })
+            .collect();
+
+        Ok(WaitReleaseResult { destinations })
     }
 
     pub async fn get_release_intent_states(
