@@ -2850,6 +2850,93 @@ impl ForestRegistry for GrpcForestClient {
     }
 
     #[tracing::instrument(skip_all)]
+    async fn search_public_components(
+        &self,
+        query: &str,
+        organisation: Option<&str>,
+        page: i32,
+        page_size: i32,
+    ) -> Result<ComponentSearchResult, PlatformError> {
+        // No bearer header — the server marks this RPC as AuthMode::None
+        // and would ignore one anyway. Anything we attach here would
+        // amount to handing the service-account key to anonymous traffic.
+        let req = Request::new(forage_grpc::SearchPublicComponentsRequest {
+            query: query.into(),
+            organisation: organisation.unwrap_or_default().into(),
+            page: ui_page_to_proto(page),
+            page_size,
+        });
+        let resp = self
+            .registry_client()
+            .search_public_components(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        Ok(ComponentSearchResult {
+            total_count: resp.total_count,
+            components: resp
+                .components
+                .into_iter()
+                .map(convert_component_summary)
+                .collect(),
+        })
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn get_public_component_detail(
+        &self,
+        organisation: &str,
+        name: &str,
+    ) -> Result<ComponentDetail, PlatformError> {
+        let req = Request::new(forage_grpc::GetPublicComponentDetailRequest {
+            organisation: organisation.into(),
+            name: name.into(),
+        });
+        let resp = self
+            .registry_client()
+            .get_public_component_detail(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        let summary = resp
+            .summary
+            .map(convert_component_summary)
+            .ok_or_else(|| PlatformError::Other("missing component summary".into()))?;
+        Ok(ComponentDetail {
+            summary,
+            versions: resp
+                .versions
+                .into_iter()
+                .map(convert_component_version_info)
+                .collect(),
+            readme: resp.readme,
+            manifest_json: resp.manifest_json,
+            owners: resp.owners,
+        })
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn get_public_component_manifest(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: &str,
+    ) -> Result<String, PlatformError> {
+        let req = Request::new(forage_grpc::GetPublicComponentManifestRequest {
+            organisation: organisation.into(),
+            name: name.into(),
+            version: version.into(),
+        });
+        let resp = self
+            .registry_client()
+            .get_public_component_manifest(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        Ok(resp.manifest_json)
+    }
+
+    #[tracing::instrument(skip_all)]
     async fn list_org_tools(
         &self,
         access_token: &str,

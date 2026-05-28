@@ -135,10 +135,30 @@ pub trait ForestRegistry: Send + Sync {
         page_size: i32,
     ) -> Result<ComponentSearchResult, PlatformError>;
 
+    /// Public catalog search. Calls `SearchPublicComponents`, which
+    /// always restricts to projects with `visibility = 'public'` and
+    /// never reads any access token. Use for the unauthenticated
+    /// `/components` surface.
+    async fn search_public_components(
+        &self,
+        query: &str,
+        organisation: Option<&str>,
+        page: i32,
+        page_size: i32,
+    ) -> Result<ComponentSearchResult, PlatformError>;
+
     /// Get full component detail (summary, versions, readme, manifest, owners).
     async fn get_component_detail(
         &self,
         access_token: &str,
+        organisation: &str,
+        name: &str,
+    ) -> Result<ComponentDetail, PlatformError>;
+
+    /// Public-only detail. Returns `NotFound` for any component whose
+    /// project is private. Calls `GetPublicComponentDetail`.
+    async fn get_public_component_detail(
+        &self,
         organisation: &str,
         name: &str,
     ) -> Result<ComponentDetail, PlatformError>;
@@ -155,6 +175,15 @@ pub trait ForestRegistry: Send + Sync {
     async fn get_component_manifest(
         &self,
         access_token: &str,
+        organisation: &str,
+        name: &str,
+        version: &str,
+    ) -> Result<String, PlatformError>;
+
+    /// Public-only manifest fetch. Returns `NotFound` when the owning
+    /// project is private. Calls `GetPublicComponentManifest`.
+    async fn get_public_component_manifest(
+        &self,
         organisation: &str,
         name: &str,
         version: &str,

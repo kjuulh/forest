@@ -23,6 +23,17 @@ service RegistryService {
   rpc SearchComponents(SearchComponentsRequest) returns (SearchComponentsResponse) {}
   rpc GetComponentDetail(GetComponentDetailRequest) returns (GetComponentDetailResponse) {}
 
+  // Public (unauthenticated) variants. These RPCs never read the caller's
+  // identity — they always filter to components whose project visibility
+  // is `public`. The catalog UI (`/components` on forage) calls these so
+  // anonymous traffic cannot, by construction, reach private components
+  // even when a misconfigured service-account token would otherwise let
+  // it through. Authenticated org-scoped browsing keeps using
+  // SearchComponents / GetComponentDetail / GetComponentManifest.
+  rpc SearchPublicComponents(SearchPublicComponentsRequest) returns (SearchPublicComponentsResponse) {}
+  rpc GetPublicComponentDetail(GetPublicComponentDetailRequest) returns (GetPublicComponentDetailResponse) {}
+  rpc GetPublicComponentManifest(GetPublicComponentManifestRequest) returns (GetPublicComponentManifestResponse) {}
+
   // --- Global-tools (TASKS/018-global-tools.md §1a.2c) ---
   // Stream the tool-y components published under `organisation` (shape ∈
   // {hybrid_component, tool_binary, tool_external}). Used by `forest global
@@ -214,6 +225,47 @@ message GetComponentDetailResponse {
   string readme = 3;              // README content (if available)
   string manifest_json = 4;       // latest version manifest
   repeated string owners = 5;     // org members who can publish
+}
+
+// SearchPublicComponents — same shape as SearchComponents, but the server
+// always restricts to projects with visibility = 'public'. No auth token
+// is read; if the caller is authenticated they still only see public
+// components on this RPC.
+message SearchPublicComponentsRequest {
+  string query = 1;
+  string organisation = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+message SearchPublicComponentsResponse {
+  repeated ComponentSummary components = 1;
+  int32 total_count = 2;
+}
+
+// GetPublicComponentDetail — public-only detail. Returns NOT_FOUND for
+// any component whose project is private (or for which no project row
+// exists, since visibility defaults to private).
+message GetPublicComponentDetailRequest {
+  string organisation = 1;
+  string name = 2;
+}
+message GetPublicComponentDetailResponse {
+  ComponentSummary summary = 1;
+  repeated ComponentVersionInfo versions = 2;
+  string readme = 3;
+  string manifest_json = 4;
+  repeated string owners = 5;
+}
+
+// GetPublicComponentManifest — public-only manifest fetch for a specific
+// version. NOT_FOUND if the owning project isn't public.
+message GetPublicComponentManifestRequest {
+  string organisation = 1;
+  string name = 2;
+  string version = 3;
+}
+message GetPublicComponentManifestResponse {
+  string manifest_json = 1;
 }
 
 // --- Global-tools (TASKS/018-global-tools.md §1a.2c, §1a.2e) ---

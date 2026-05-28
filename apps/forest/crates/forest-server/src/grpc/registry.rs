@@ -538,6 +538,136 @@ impl RegistryService for RegistryServer {
 
         Ok(tonic::Response::new(detail))
     }
+
+    // --- Public (unauthenticated) registry RPCs ---
+    //
+    // These never read the caller's identity. They always pass
+    // `see_all=false, member_orgs=[]` to the component service (search)
+    // or check `visibility = 'public'` explicitly (detail / manifest).
+    // The auth middleware in `auth_layer.rs` marks them as `AuthMode::None`
+    // so even an attached bearer token is ignored — by construction a
+    // misconfigured forage cannot escalate a service-account key into
+    // cross-org read access via these endpoints.
+
+    async fn search_public_components(
+        &self,
+        request: tonic::Request<SearchPublicComponentsRequest>,
+    ) -> std::result::Result<tonic::Response<SearchPublicComponentsResponse>, tonic::Status> {
+        let req = request.into_inner();
+
+        let page = req.page.max(0) as i64;
+        let page_size = req.page_size.clamp(1, 100) as i64;
+        let offset = page * page_size;
+
+        let (rows, total_count) = self
+            .state
+            .component_service()
+            .search_components(
+                &req.query,
+                &req.organisation,
+                page_size,
+                offset,
+                /* see_all = */ false,
+                /* member_orgs = */ &[],
+            )
+            .await
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        Ok(tonic::Response::new(SearchPublicComponentsResponse {
+            components: rows,
+            total_count,
+        }))
+    }
+
+    async fn get_public_component_detail(
+        &self,
+        request: tonic::Request<GetPublicComponentDetailRequest>,
+    ) -> std::result::Result<tonic::Response<GetPublicComponentDetailResponse>, tonic::Status> {
+        let req = request.into_inner();
+
+        let is_public = is_public_project(&self.state.db, &req.organisation, &req.name).await?;
+        if !is_public {
+            return Err(tonic::Status::not_found(format!(
+                "component not found: {}/{}",
+                req.organisation, req.name
+            )));
+        }
+
+        let detail = self
+            .state
+            .component_service()
+            .get_component_detail(&req.organisation, &req.name)
+            .await
+            .map_err(|e| tonic::Status::internal(e.to_string()))?
+            .ok_or_else(|| {
+                tonic::Status::not_found(format!(
+                    "component not found: {}/{}",
+                    req.organisation, req.name
+                ))
+            })?;
+
+        Ok(tonic::Response::new(GetPublicComponentDetailResponse {
+            summary: detail.summary,
+            versions: detail.versions,
+            readme: detail.readme,
+            manifest_json: detail.manifest_json,
+            owners: detail.owners,
+        }))
+    }
+
+    async fn get_public_component_manifest(
+        &self,
+        request: tonic::Request<GetPublicComponentManifestRequest>,
+    ) -> std::result::Result<tonic::Response<GetPublicComponentManifestResponse>, tonic::Status> {
+        let req = request.into_inner();
+
+        let is_public = is_public_project(&self.state.db, &req.organisation, &req.name).await?;
+        if !is_public {
+            return Err(tonic::Status::not_found(format!(
+                "manifest not found for {}/{}@{}",
+                req.organisation, req.name, req.version
+            )));
+        }
+
+        let manifest_json = self
+            .state
+            .component_service()
+            .get_manifest(&req.organisation, &req.name, &req.version)
+            .await
+            .map_err(|e| tonic::Status::internal(e.to_string()))?
+            .ok_or_else(|| {
+                tonic::Status::not_found(format!(
+                    "manifest not found for {}/{}@{}",
+                    req.organisation, req.name, req.version
+                ))
+            })?;
+
+        Ok(tonic::Response::new(GetPublicComponentManifestResponse {
+            manifest_json,
+        }))
+    }
+}
+
+/// Shared helper for the public RPCs. Returns `true` only when a row in
+/// `projects` exists with `visibility = 'public'`. A missing project row
+/// is treated as private (matches the default behaviour in
+/// `search_components` and `get_component_detail`).
+async fn is_public_project(
+    db: &sqlx::PgPool,
+    organisation: &str,
+    name: &str,
+) -> Result<bool, tonic::Status> {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(
+            SELECT 1 FROM projects p
+            WHERE p.organisation = $1 AND p.project = $2 AND p.visibility = 'public'
+        )",
+    )
+    .bind(organisation)
+    .bind(name)
+    .fetch_one(db)
+    .await
+    .map_err(|e| tonic::Status::internal(e.to_string()))
 }
 
 /// Maximum binary upload size: 500 MB.

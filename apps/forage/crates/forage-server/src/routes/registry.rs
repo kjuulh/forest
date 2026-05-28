@@ -43,17 +43,6 @@ struct SearchParams {
     page: Option<i32>,
 }
 
-/// Resolve an access token: prefer user session, fall back to service account key, or empty (public).
-fn resolve_token(maybe_session: &MaybeSession, state: &AppState) -> String {
-    if let Some(ref session) = maybe_session.session {
-        return session.access_token.clone();
-    }
-    state
-        .service_account_key
-        .clone()
-        .unwrap_or_default()
-}
-
 fn require_registry(state: &AppState) -> Result<&dyn forage_core::registry::ForestRegistry, Response> {
     state
         .registry_client
@@ -131,13 +120,18 @@ fn maybe_user_context(
 }
 
 /// GET /components — public search/browse.
+///
+/// Always calls `search_public_components`, which the backend filters to
+/// `visibility = 'public'` regardless of the caller. Logged-in users
+/// still see their nav chrome (user menu, org list) but the result set
+/// is the public catalog — private org components live under
+/// `/orgs/{org}/components`, which requires session + org membership.
 async fn components_search(
     State(state): State<AppState>,
     maybe_session: MaybeSession,
     Query(params): Query<SearchParams>,
 ) -> Result<Response, Response> {
     let registry = require_registry(&state)?;
-    let token = resolve_token(&maybe_session, &state);
 
     let query = params.q.unwrap_or_default();
     let filter_org = params.org.unwrap_or_default();
@@ -145,8 +139,7 @@ async fn components_search(
     let page_size = 20;
 
     let results = registry
-        .search_components(
-            &token,
+        .search_public_components(
             &query,
             if filter_org.is_empty() {
                 None
@@ -157,7 +150,7 @@ async fn components_search(
             page_size,
         )
         .await
-        .map_err(|e| internal_error(&state, "search_components", &e))?;
+        .map_err(|e| internal_error(&state, "search_public_components", &e))?;
 
     let components = dedup_components(results.components);
     let total_pages = ((results.total_count as f64) / (page_size as f64)).ceil() as i32;
@@ -226,12 +219,29 @@ async fn component_detail(
     }
 
     let registry = require_registry(&state)?;
-    let token = resolve_token(&maybe_session, &state);
 
-    let (detail_res, project_res) = tokio::join!(
-        registry.get_component_detail(&token, &org, &name),
-        state.platform_client.get_project(&token, &org, &name),
-    );
+    // Public-only detail. The backend returns NotFound for any component
+    // whose project is private, so this surface can never expose private
+    // metadata regardless of who is browsing. About-sidebar enrichment
+    // (`get_project`) only runs for sessioned users using their own
+    // access token — anonymous visitors just don't get the About block.
+    let (detail_res, project_info) = match maybe_session.session {
+        Some(ref session) => {
+            let (d, p) = tokio::join!(
+                registry.get_public_component_detail(&org, &name),
+                state.platform_client.get_project(&session.access_token, &org, &name),
+            );
+            let project_info = match p {
+                Ok(info) => info,
+                Err(e) => {
+                    tracing::warn!("component_detail: get_project failed: {e:#}");
+                    None
+                }
+            };
+            (d, project_info)
+        }
+        None => (registry.get_public_component_detail(&org, &name).await, None),
+    };
 
     let detail = detail_res.map_err(|e| match e {
         forage_core::platform::PlatformError::NotFound(_) => error_page(
@@ -240,18 +250,8 @@ async fn component_detail(
             "Component not found",
             &format!("The component {org}/{name} does not exist."),
         ),
-        other => internal_error(&state, "get_component_detail", &other),
+        other => internal_error(&state, "get_public_component_detail", &other),
     })?;
-    // get_project is best-effort: a missing project (component without
-    // a matching project row) still renders the component page; the
-    // About sidebar block just stays hidden in that case.
-    let project_info = match project_res {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!("component_detail: get_project failed: {e:#}");
-            None
-        }
-    };
 
     let readme_html = if detail.readme.is_empty() {
         String::new()
@@ -303,19 +303,43 @@ async fn component_detail(
 }
 
 /// GET /components/{org}/{name}/{version} — version-specific detail.
+///
+/// Same public-only contract as [`component_detail`]: the registry RPCs
+/// hit here (`get_public_component_detail`, `get_public_component_manifest`)
+/// return NotFound for private components by construction. About-sidebar
+/// enrichment uses the user's own session token; anonymous visitors skip
+/// it.
 async fn component_version_detail(
     State(state): State<AppState>,
     maybe_session: MaybeSession,
     Path((org, name, version)): Path<(String, String, String)>,
 ) -> Result<Response, Response> {
     let registry = require_registry(&state)?;
-    let token = resolve_token(&maybe_session, &state);
 
-    let (detail_res, manifest_res, project_res) = tokio::join!(
-        registry.get_component_detail(&token, &org, &name),
-        registry.get_component_manifest(&token, &org, &name, &version),
-        state.platform_client.get_project(&token, &org, &name),
-    );
+    let (detail_res, manifest_res, project_info) = match maybe_session.session {
+        Some(ref session) => {
+            let (d, m, p) = tokio::join!(
+                registry.get_public_component_detail(&org, &name),
+                registry.get_public_component_manifest(&org, &name, &version),
+                state.platform_client.get_project(&session.access_token, &org, &name),
+            );
+            let project_info = match p {
+                Ok(info) => info,
+                Err(e) => {
+                    tracing::warn!("component_version_detail: get_project failed: {e:#}");
+                    None
+                }
+            };
+            (d, m, project_info)
+        }
+        None => {
+            let (d, m) = tokio::join!(
+                registry.get_public_component_detail(&org, &name),
+                registry.get_public_component_manifest(&org, &name, &version),
+            );
+            (d, m, None)
+        }
+    };
 
     let detail = detail_res.map_err(|e| match e {
         forage_core::platform::PlatformError::NotFound(_) => error_page(
@@ -324,17 +348,10 @@ async fn component_version_detail(
             "Component not found",
             &format!("The component {org}/{name} does not exist."),
         ),
-        other => internal_error(&state, "get_component_detail", &other),
+        other => internal_error(&state, "get_public_component_detail", &other),
     })?;
-    let project_info = match project_res {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!("component_version_detail: get_project failed: {e:#}");
-            None
-        }
-    };
 
-    let manifest_json = warn_default("get_component_manifest", manifest_res);
+    let manifest_json = warn_default("get_public_component_manifest", manifest_res);
     let manifest_html = if manifest_json.is_empty() {
         String::new()
     } else {
