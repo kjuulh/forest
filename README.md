@@ -5,6 +5,11 @@ Codify your development workflows; CI, deployments, component sharing as
 
 ## Install
 
+*Prerequisites*
+
+- `gh` GitHub cli
+- `cue` Cuelang (yaml and golang had a baby)
+
 To install forest run the below command, it will install forest as a cli, and set your current profile to run against the production instance of forest.
 
 ```bash
@@ -12,14 +17,10 @@ gh release download --repo understory-io/forest --pattern install.sh -O - \
   | FOREST_PROFILE='name=understory-prod,server=https://api.forest.understory.sh' bash
 ```
 
-
-To pin to a specific version, pass it to both the download (so the script
-itself comes from that release) and to the install script (so it grabs
-the matching tarball). `bash -s --` forwards positional args when the
-script comes in via stdin:
+Next you need to add it to `.zshrc` to get full cli support
 
 ```bash
-gh release download v0.1.7 --repo understory-io/forest --pattern install.sh -O - | bash -s -- v0.1.7
+echo 'eval "$(forest shell zsh)"' >> ~/.zshrc
 ```
 
 ## Logging in
