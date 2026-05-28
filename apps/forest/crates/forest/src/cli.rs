@@ -89,24 +89,31 @@ enum Commands {
 
     // ── Project commands ──
     /// Run a project or component command (e.g., forest run status)
+    #[command(aliases = ["r"])]
     Run(RunCommand),
     /// Prepare, annotate, and execute releases
     Release(Box<ReleaseCommand>),
 
     // ── Resource management ──
     /// Manage projects
+    #[command(visible_aliases = ["projects", "proj"], aliases = ["p"])]
     Project(ProjectCommand),
     /// Manage deployment destinations
+    #[command(visible_aliases = ["destinations", "dest"], aliases = ["d"])]
     Destination(DestinationCommand),
     /// Manage environments (dev, staging, prod)
+    #[command(visible_aliases = ["environments", "env"], aliases = ["e"])]
     Environment(EnvironmentCommand),
     /// Manage organisations and members
+    #[command(visible_aliases = ["organisations", "org", "orgs"], aliases = ["o"])]
     Organisation(OrganisationCommand),
     /// Manage and listen for notifications
+    #[command(visible_aliases = ["notification", "notif"], aliases = ["n"])]
     Notifications(NotificationsCommand),
 
     // ── Component registry ──
     /// Browse and manage components (list, init)
+    #[command(visible_aliases = ["component", "comp"], aliases = ["c"])]
     Components(ComponentsCommand),
 
     /// Show comprehensive documentation and manpages
@@ -119,6 +126,7 @@ enum Commands {
     /// Authenticate and manage credentials
     Auth(AuthCommand),
     /// Manage named server+auth profiles (like kubectl context)
+    #[command(visible_aliases = ["contexts", "ctx"])]
     Context(ContextCommand),
     /// Helper commands for authoring tool manifests.
     Tool(ToolCommand),
