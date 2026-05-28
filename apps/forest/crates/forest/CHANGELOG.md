@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.1.12](https://github.com/understory-io/forest/compare/v0.1.11...v0.1.12) (2026-05-28)
+
+
+### Features
+
+* **auth:** block SSO disconnect when it would leave no sign-in method ([#52](https://github.com/understory-io/forest/issues/52)) ([dc4d08a](https://github.com/understory-io/forest/commit/dc4d08ac48f2495d222764dac54969afe823d8ce))
+* **cli:** forest release show — release detail view with logs (DATA-259) ([#58](https://github.com/understory-io/forest/issues/58)) ([a900947](https://github.com/understory-io/forest/commit/a90094713cd68a2f361fef9be4e4875916275a7b))
+* **forest,forage:** DATA-252 auto-invite members by DNS-verified email domain ([#54](https://github.com/understory-io/forest/issues/54)) ([020ee60](https://github.com/understory-io/forest/commit/020ee605d57c836fd84cda8974ad7bcb4a8cd8dd))
+* **forest:** add terminal shortcuts for common subcommands ([#50](https://github.com/understory-io/forest/issues/50)) ([e13469a](https://github.com/understory-io/forest/commit/e13469a4dc15a115212b516ca5af658aec48dde2))
+* update readme ([fa76504](https://github.com/understory-io/forest/commit/fa76504e6f0fe5cf18adacd8701d7680e6cf04b2))
+
+
+### Bug Fixes
+
+* **forage:** preserve device-login intent through sign-in / sign-up (DATA-251) ([#53](https://github.com/understory-io/forest/issues/53)) ([3cec587](https://github.com/understory-io/forest/commit/3cec5876af15d694552d60fcfa71b1325d56dac9))
+* **forage:** preserve org context when navigating nav items ([#51](https://github.com/understory-io/forest/issues/51)) ([6cd7230](https://github.com/understory-io/forest/commit/6cd723027c2af78b201493b9b3513b21a0e8b7eb))
+* **forage:** restyle auto-invite banner so it renders in dark mode ([#56](https://github.com/understory-io/forest/issues/56)) ([78ac685](https://github.com/understory-io/forest/commit/78ac6856a77feebf801f7f418be1235da76d84b3))
+* **forage:** scope /components catalog to public-only via dedicated RPCs ([#48](https://github.com/understory-io/forest/issues/48)) ([2f496be](https://github.com/understory-io/forest/commit/2f496be2f03fdcd647545436dff2c32788f02670))
+* **forage:** show auto-invite banner on the no-orgs onboarding page ([#55](https://github.com/understory-io/forest/issues/55)) ([3372c47](https://github.com/understory-io/forest/commit/3372c472e7a84d75f661578b26df030a2de4d971))
+* **forage:** show release swimlane when project has no components ([#57](https://github.com/understory-io/forest/issues/57)) ([2931807](https://github.com/understory-io/forest/commit/29318070c2988079a06b721a8f46b94990b6ae49))
+
 ## [0.1.11](https://github.com/understory-io/forest/compare/v0.1.10...v0.1.11) (2026-05-27)
 
 
