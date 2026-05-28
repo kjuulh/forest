@@ -7,7 +7,7 @@ use axum_extra::extract::Form;
 use chrono::Datelike;
 use forage_core::platform::{
     validate_slug, CreatePolicyInput, CreateReleasePipelineInput, CreateTriggerInput,
-    PipelineStage, PolicyConfig, UpdatePolicyInput, UpdateReleasePipelineInput,
+    PipelineStage, PlatformError, PolicyConfig, UpdatePolicyInput, UpdateReleasePipelineInput,
     UpdateTriggerInput,
 };
 use forage_core::session::CachedOrg;
@@ -86,6 +86,19 @@ pub fn router() -> Router<AppState> {
             "/orgs/{org}/settings/members/{user_id}/remove",
             post(remove_member_submit),
         )
+        .route(
+            "/orgs/{org}/settings/access",
+            get(access_page).post(add_allowed_domain_submit),
+        )
+        .route(
+            "/orgs/{org}/settings/access/remove",
+            post(remove_allowed_domain_submit),
+        )
+        .route(
+            "/orgs/{org}/settings/access/verify",
+            post(verify_allowed_domain_submit),
+        )
+        .route("/join-offers/{org_id}/accept", post(accept_join_offer_submit))
         .route(
             "/orgs/{org}/projects/{project}/deploy",
             post(deploy_release),
@@ -306,6 +319,13 @@ async fn dashboard(
         }
     }
 
+    // Auto-invite offers — surfaced as a banner if any are present (DATA-252).
+    // Soft-fail: a failure here shouldn't break the dashboard.
+    let join_offers = warn_default(
+        "dashboard: list_join_offers",
+        state.platform_client.list_join_offers(&session.access_token).await,
+    );
+
     let html = state
         .templates
         .render(
@@ -320,6 +340,11 @@ async fn dashboard(
                 projects => first_org_projects,
                 recent_activity => recent_activity,
                 active_tab => "dashboard",
+                join_offers => join_offers.iter().map(|o| context! {
+                    organisation_id => &o.organisation_id,
+                    organisation_name => &o.organisation_name,
+                    matched_domain => &o.matched_domain,
+                }).collect::<Vec<_>>(),
             },
         )
         .map_err(|e| {
@@ -5581,6 +5606,261 @@ async fn regions_api() -> impl IntoResponse {
         .collect();
 
     Json(regions)
+}
+
+// ─── Auto-invite by verified email domain (DATA-252) ────────────────────
+
+#[derive(Deserialize)]
+struct AccessFormSubmit {
+    domain: String,
+    _csrf: String,
+}
+
+#[derive(Deserialize)]
+struct RemoveAccessFormSubmit {
+    domain: String,
+    _csrf: String,
+}
+
+async fn access_page(
+    State(state): State<AppState>,
+    session: Session,
+    Path(org): Path<String>,
+) -> Result<Response, Response> {
+    access_page_inner(state, session, org, AccessPageFlash::None).await
+}
+
+/// Inline flash for re-renders from the access page's POST handlers.
+/// Adding/removing/verifying domains stay on the same page (instead of
+/// a flat error_page) so the user gets context.
+enum AccessPageFlash {
+    None,
+    Error(String),
+    Info(String),
+}
+
+/// Shared renderer for the access page so POST handlers can re-render
+/// inline with a flash message instead of a flat error_page.
+async fn access_page_inner(
+    state: AppState,
+    session: Session,
+    org: String,
+    flash: AccessPageFlash,
+) -> Result<Response, Response> {
+    let orgs = &session.user.orgs;
+    let current_org = require_org_membership(&state, orgs, &org)?;
+    let is_admin = current_org.role == "owner" || current_org.role == "admin";
+
+    let domains = state
+        .platform_client
+        .list_allowed_domains(&session.access_token, &current_org.organisation_id)
+        .await
+        .map_err(|e| internal_error(&state, "list_allowed_domains", &e))?;
+
+    let (flash_error, flash_info) = match flash {
+        AccessPageFlash::None => (None, None),
+        AccessPageFlash::Error(m) => (Some(m), None),
+        AccessPageFlash::Info(m) => (None, Some(m)),
+    };
+
+    let html = state
+        .templates
+        .render(
+            "pages/org_access.html.jinja",
+            context! {
+                title => format!("Access - {org} - Forest"),
+                description => format!("Auto-invite allowed domains for {org}"),
+                user => context! { username => session.user.username },
+                csrf_token => &session.csrf_token,
+                current_org => &org,
+                orgs => orgs_context(orgs),
+                org_name => &org,
+                is_admin => is_admin,
+                active_tab => "settings",
+                flash_error => flash_error,
+                flash_info => flash_info,
+                domains => domains.iter().map(|d| context! {
+                    domain => &d.domain,
+                    policy => &d.policy,
+                    dns_verified => d.dns_verified,
+                    dns_verification_token => &d.dns_verification_token,
+                    created_at => &d.created_at,
+                }).collect::<Vec<_>>(),
+            },
+        )
+        .map_err(|e| internal_error(&state, "template error", &e))?;
+
+    Ok(Html(html).into_response())
+}
+
+async fn add_allowed_domain_submit(
+    State(state): State<AppState>,
+    session: Session,
+    Path(org): Path<String>,
+    Form(form): Form<AccessFormSubmit>,
+) -> Result<Response, Response> {
+    let orgs = &session.user.orgs;
+    let current_org = require_org_membership(&state, orgs, &org)?;
+    require_admin(&state, current_org)?;
+
+    if !auth::validate_csrf(&session, &form._csrf) {
+        return Err(error_page(
+            &state,
+            StatusCode::FORBIDDEN,
+            "Invalid request",
+            "CSRF validation failed. Please try again.",
+        ));
+    }
+
+    let org_id = current_org.organisation_id.clone();
+    let result = state
+        .platform_client
+        .add_allowed_domain(&session.access_token, &org_id, &form.domain)
+        .await;
+
+    match result {
+        Ok(_) => Ok(Redirect::to(&format!("/orgs/{org}/settings/access")).into_response()),
+        Err(PlatformError::InvalidArgument(msg))
+        | Err(PlatformError::AlreadyExists(msg))
+        | Err(PlatformError::PermissionDenied(msg)) => {
+            // Re-render with the validation error inline.
+            access_page_inner(state, session, org, AccessPageFlash::Error(msg)).await
+        }
+        Err(e) => Err(internal_error(&state, "add_allowed_domain", &e)),
+    }
+}
+
+async fn remove_allowed_domain_submit(
+    State(state): State<AppState>,
+    session: Session,
+    Path(org): Path<String>,
+    Form(form): Form<RemoveAccessFormSubmit>,
+) -> Result<Response, Response> {
+    let orgs = &session.user.orgs;
+    let current_org = require_org_membership(&state, orgs, &org)?;
+    require_admin(&state, current_org)?;
+
+    if !auth::validate_csrf(&session, &form._csrf) {
+        return Err(error_page(
+            &state,
+            StatusCode::FORBIDDEN,
+            "Invalid request",
+            "CSRF validation failed. Please try again.",
+        ));
+    }
+
+    state
+        .platform_client
+        .remove_allowed_domain(
+            &session.access_token,
+            &current_org.organisation_id,
+            &form.domain,
+        )
+        .await
+        .map_err(|e| internal_error(&state, "remove_allowed_domain", &e))?;
+
+    Ok(Redirect::to(&format!("/orgs/{org}/settings/access")).into_response())
+}
+
+async fn verify_allowed_domain_submit(
+    State(state): State<AppState>,
+    session: Session,
+    Path(org): Path<String>,
+    Form(form): Form<RemoveAccessFormSubmit>,
+) -> Result<Response, Response> {
+    let orgs = &session.user.orgs;
+    let current_org = require_org_membership(&state, orgs, &org)?;
+    require_admin(&state, current_org)?;
+
+    if !auth::validate_csrf(&session, &form._csrf) {
+        return Err(error_page(
+            &state,
+            StatusCode::FORBIDDEN,
+            "Invalid request",
+            "CSRF validation failed. Please try again.",
+        ));
+    }
+
+    let result = state
+        .platform_client
+        .verify_allowed_domain(
+            &session.access_token,
+            &current_org.organisation_id,
+            &form.domain,
+        )
+        .await;
+
+    let flash = match result {
+        Ok(forage_core::platform::VerifyDomainOutcome::Verified) => AccessPageFlash::Info(
+            format!("Verified ownership of {}.", form.domain),
+        ),
+        Ok(forage_core::platform::VerifyDomainOutcome::AlreadyVerified) => {
+            AccessPageFlash::Info(format!("{} was already verified.", form.domain))
+        }
+        Ok(forage_core::platform::VerifyDomainOutcome::Missing) => AccessPageFlash::Error(format!(
+            "DNS TXT record at _forest-verify.{} not found yet. Add it and try \
+             again — propagation can take a few minutes.",
+            form.domain
+        )),
+        Err(PlatformError::Unavailable(msg)) => AccessPageFlash::Error(format!(
+            "DNS lookup is currently unavailable ({msg}). Try again shortly."
+        )),
+        Err(PlatformError::InvalidArgument(msg))
+        | Err(PlatformError::PermissionDenied(msg))
+        | Err(PlatformError::AlreadyExists(msg))
+        | Err(PlatformError::NotFound(msg)) => AccessPageFlash::Error(msg),
+        Err(e) => return Err(internal_error(&state, "verify_allowed_domain", &e)),
+    };
+
+    access_page_inner(state, session, org, flash).await
+}
+
+#[derive(Deserialize)]
+struct AcceptOfferForm {
+    _csrf: String,
+}
+
+async fn accept_join_offer_submit(
+    State(state): State<AppState>,
+    session: Session,
+    Path(org_id): Path<String>,
+    Form(form): Form<AcceptOfferForm>,
+) -> Result<Response, Response> {
+    if !auth::validate_csrf(&session, &form._csrf) {
+        return Err(error_page(
+            &state,
+            StatusCode::FORBIDDEN,
+            "Invalid request",
+            "CSRF validation failed. Please try again.",
+        ));
+    }
+
+    let member = state
+        .platform_client
+        .accept_join_offer(&session.access_token, &org_id)
+        .await
+        .map_err(|e| match e {
+            // The auto-invite server-side check failed (e.g. domain removed
+            // since the banner loaded). Bounce them back to the dashboard
+            // with a flat error rather than a 500.
+            PlatformError::PermissionDenied(msg) => error_page(
+                &state,
+                StatusCode::FORBIDDEN,
+                "Not eligible",
+                &msg,
+            ),
+            other => internal_error(&state, "accept_join_offer", &other),
+        })?;
+
+    tracing::info!(
+        organisation_id = %org_id,
+        user_id = %member.user_id,
+        "auto_invite.accepted_via_forage"
+    );
+
+    // The user's cached org list is now stale; bouncing to dashboard
+    // forces a refresh via the existing session-refresh middleware.
+    Ok(Redirect::to("/").into_response())
 }
 
 #[cfg(test)]

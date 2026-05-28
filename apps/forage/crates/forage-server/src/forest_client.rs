@@ -3,12 +3,14 @@ use forage_core::auth::{
     PersonalAccessToken, RegisterResult, User, UserEmail, UserProfile,
 };
 use forage_core::platform::{
-    ApprovalDecisionEntry, ApprovalState, Artifact, ArtifactContext, ArtifactDestination,
-    ArtifactRef, ArtifactSource, CreatePolicyInput, CreateReleasePipelineInput, CreateTriggerInput,
-    Destination, DestinationType, DestinationTypeInfo, Environment, ForestPlatform,
-    MetadataFieldDef, NotificationPreference, Organisation, OrgMember, PipelineStage,
-    PipelineStageConfig, PlanOutput, PlatformError, Policy, PolicyConfig, PolicyEvaluation,
-    ReleasePipeline, Trigger, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
+    AllowedDomain, ApprovalDecisionEntry, ApprovalState, Artifact, ArtifactContext,
+    ArtifactDestination, ArtifactRef, ArtifactSource, CreatePolicyInput,
+    CreateReleasePipelineInput, CreateTriggerInput, Destination, DestinationType,
+    DestinationTypeInfo, Environment, ForestPlatform, JoinOffer, MetadataFieldDef,
+    NotificationPreference, Organisation, OrgMember, PipelineStage, PipelineStageConfig,
+    PlanOutput, PlatformError, Policy, PolicyConfig, PolicyEvaluation, ReleasePipeline,
+    Trigger, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
+    VerifyDomainOutcome,
 };
 use forage_core::registry::{
     ComponentDetail, ComponentSearchResult, ComponentSummary, ComponentVersionInfo, ForestRegistry,
@@ -1363,10 +1365,15 @@ fn map_platform_status(status: tonic::Status) -> PlatformError {
     match status.code() {
         tonic::Code::Unauthenticated => PlatformError::NotAuthenticated,
         tonic::Code::PermissionDenied => {
-            PlatformError::Other(status.message().into())
+            PlatformError::PermissionDenied(status.message().into())
         }
         tonic::Code::NotFound => PlatformError::NotFound(status.message().into()),
         tonic::Code::Unavailable => PlatformError::Unavailable(status.message().into()),
+        tonic::Code::InvalidArgument => PlatformError::InvalidArgument(status.message().into()),
+        tonic::Code::AlreadyExists => PlatformError::AlreadyExists(status.message().into()),
+        // Unimplemented surfaces in v1 when admin picks policy=auto_join_oauth
+        // (DATA-252) — treat as user-fixable, not a 500.
+        tonic::Code::Unimplemented => PlatformError::InvalidArgument(status.message().into()),
         _ => PlatformError::Other(status.message().into()),
     }
 }
@@ -2688,6 +2695,173 @@ impl ForestPlatform for GrpcForestClient {
         })
     }
 
+    // -- Auto-invite by verified email domain (DATA-252) ----------------------
+
+    #[tracing::instrument(skip_all)]
+    async fn list_allowed_domains(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+    ) -> Result<Vec<AllowedDomain>, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::ListAllowedDomainsRequest {
+                organisation_id: organisation_id.into(),
+            },
+        )?;
+        let resp = self
+            .org_client()
+            .list_allowed_domains(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        Ok(resp.domains.into_iter().map(convert_allowed_domain).collect())
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn add_allowed_domain(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        domain: &str,
+    ) -> Result<AllowedDomain, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::AddAllowedDomainRequest {
+                organisation_id: organisation_id.into(),
+                domain: domain.into(),
+                policy: String::new(),
+            },
+        )?;
+        let resp = self
+            .org_client()
+            .add_allowed_domain(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        let domain = resp
+            .domain
+            .ok_or_else(|| PlatformError::Other("no domain in response".into()))?;
+        Ok(convert_allowed_domain(domain))
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn remove_allowed_domain(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        domain: &str,
+    ) -> Result<bool, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::RemoveAllowedDomainRequest {
+                organisation_id: organisation_id.into(),
+                domain: domain.into(),
+            },
+        )?;
+        let resp = self
+            .org_client()
+            .remove_allowed_domain(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        Ok(resp.removed)
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn verify_allowed_domain(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        domain: &str,
+    ) -> Result<VerifyDomainOutcome, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::VerifyAllowedDomainRequest {
+                organisation_id: organisation_id.into(),
+                domain: domain.into(),
+            },
+        )?;
+        let resp = self
+            .org_client()
+            .verify_allowed_domain(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        use forage_grpc::verify_allowed_domain_response::Status;
+        match Status::try_from(resp.status).unwrap_or(Status::Unspecified) {
+            Status::Verified => Ok(VerifyDomainOutcome::Verified),
+            Status::AlreadyVerified => Ok(VerifyDomainOutcome::AlreadyVerified),
+            Status::Missing => Ok(VerifyDomainOutcome::Missing),
+            Status::Unspecified => Err(PlatformError::Other(
+                "unexpected verify-domain status from forest".into(),
+            )),
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn list_join_offers(
+        &self,
+        access_token: &str,
+    ) -> Result<Vec<JoinOffer>, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::ListJoinOffersRequest {},
+        )?;
+        let resp = self
+            .org_client()
+            .list_join_offers(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        Ok(resp
+            .offers
+            .into_iter()
+            .map(|o| JoinOffer {
+                organisation_id: o.organisation_id,
+                organisation_name: o.organisation_name,
+                matched_domain: o.matched_domain,
+            })
+            .collect())
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn accept_join_offer(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+    ) -> Result<OrgMember, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::AcceptJoinOfferRequest {
+                organisation_id: organisation_id.into(),
+            },
+        )?;
+        let resp = self
+            .org_client()
+            .accept_join_offer(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        let member = resp
+            .member
+            .ok_or_else(|| PlatformError::Other("no member in response".into()))?;
+        Ok(convert_member(member))
+    }
+}
+
+fn convert_allowed_domain(d: forage_grpc::AllowedDomain) -> AllowedDomain {
+    AllowedDomain {
+        domain: d.domain,
+        policy: d.policy,
+        dns_verified: d.dns_verified_at.is_some(),
+        dns_verification_token: d.dns_verification_token,
+        created_at: d.created_at.map(|t| {
+            chrono::DateTime::from_timestamp(t.seconds, t.nanos as u32)
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_default()
+        }),
+    }
 }
 
 fn convert_policy_evaluation(e: forage_grpc::PolicyEvaluation) -> PolicyEvaluation {

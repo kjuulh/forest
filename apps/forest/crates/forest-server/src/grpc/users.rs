@@ -720,7 +720,7 @@ impl UsersService for UsersServer {
             let placeholder_username = format!("user-{}", Uuid::now_v7().simple());
             let registered = self
                 .service()
-                .register_oauth_user(&placeholder_username, &req.provider_email)
+                .register_oauth_user(&placeholder_username, &req.provider_email, &provider_str)
                 .await
                 .map_err(error::to_status)?;
 

@@ -13,3 +13,4 @@ mod magic_link_tests;
 mod oauth_tests;
 mod registry_tests;
 mod webhook_delivery_tests;
+mod auto_join_tests;

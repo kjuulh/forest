@@ -14,6 +14,11 @@ use tonic::transport::Channel;
 pub struct Fixture {
     pub channel: Channel,
     pub db: sqlx::PgPool,
+    /// Mock DNS resolver injected at startup so tests can preload TXT
+    /// records (`fixture.dns.set_txt(name, value)`) without performing
+    /// real network lookups. Used by the org-allowed-domain verification
+    /// flow (DATA-252).
+    pub dns: std::sync::Arc<forest_server::dns::MockDnsResolver>,
 }
 
 impl Fixture {
@@ -82,7 +87,11 @@ fn bring_up(config: forest_server::Config) -> Fixture {
             .with_test_writer()
             .try_init();
 
-        let state = forest_server::State::new(config)
+        // Inject a mock DNS resolver — tests must not perform real
+        // network DNS lookups, and HickoryResolver::from_system() also
+        // requires a usable /etc/resolv.conf which CI may not have.
+        let mock_dns = std::sync::Arc::new(forest_server::dns::MockDnsResolver::new());
+        let state = forest_server::State::new_with_dns(config, mock_dns.clone())
             .await
             .expect("failed to create state (is DATABASE_URL or TEST_DATABASE_URL set?)");
 
@@ -135,7 +144,7 @@ fn bring_up(config: forest_server::Config) -> Fixture {
             .await
             .expect("connect to grpc server");
 
-        Fixture { channel, db }
+        Fixture { channel, db, dns: mock_dns }
     }))
 }
 

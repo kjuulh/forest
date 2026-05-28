@@ -8,6 +8,7 @@ mod servehttp;
 pub mod services;
 
 mod checks;
+pub mod dns;
 
 mod native_credentials;
 

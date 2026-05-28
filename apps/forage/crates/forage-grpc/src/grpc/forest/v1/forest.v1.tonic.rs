@@ -5917,6 +5917,179 @@ pub mod organisation_service_client {
                 .insert(GrpcMethod::new("forest.v1.OrganisationService", "ListMembers"));
             self.inner.unary(req, path, codec).await
         }
+        /** Admin: manage the per-org auto-invite allowlist.
+*/
+        pub async fn add_allowed_domain(
+            &mut self,
+            request: impl tonic::IntoRequest<super::AddAllowedDomainRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AddAllowedDomainResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/AddAllowedDomain",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("forest.v1.OrganisationService", "AddAllowedDomain"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
+        pub async fn list_allowed_domains(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListAllowedDomainsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListAllowedDomainsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/ListAllowedDomains",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.OrganisationService",
+                        "ListAllowedDomains",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
+        pub async fn remove_allowed_domain(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RemoveAllowedDomainRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RemoveAllowedDomainResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/RemoveAllowedDomain",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.OrganisationService",
+                        "RemoveAllowedDomain",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
+        pub async fn verify_allowed_domain(
+            &mut self,
+            request: impl tonic::IntoRequest<super::VerifyAllowedDomainRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::VerifyAllowedDomainResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/VerifyAllowedDomain",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "forest.v1.OrganisationService",
+                        "VerifyAllowedDomain",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /** User: see and accept auto-invite join offers.
+*/
+        pub async fn list_join_offers(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListJoinOffersRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListJoinOffersResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/ListJoinOffers",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("forest.v1.OrganisationService", "ListJoinOffers"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        ///
+        pub async fn accept_join_offer(
+            &mut self,
+            request: impl tonic::IntoRequest<super::AcceptJoinOfferRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AcceptJoinOfferResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.OrganisationService/AcceptJoinOffer",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("forest.v1.OrganisationService", "AcceptJoinOffer"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -5994,6 +6167,56 @@ pub mod organisation_service_server {
             request: tonic::Request<super::ListMembersRequest>,
         ) -> std::result::Result<
             tonic::Response<super::ListMembersResponse>,
+            tonic::Status,
+        >;
+        /** Admin: manage the per-org auto-invite allowlist.
+*/
+        async fn add_allowed_domain(
+            &self,
+            request: tonic::Request<super::AddAllowedDomainRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AddAllowedDomainResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn list_allowed_domains(
+            &self,
+            request: tonic::Request<super::ListAllowedDomainsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListAllowedDomainsResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn remove_allowed_domain(
+            &self,
+            request: tonic::Request<super::RemoveAllowedDomainRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RemoveAllowedDomainResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn verify_allowed_domain(
+            &self,
+            request: tonic::Request<super::VerifyAllowedDomainRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::VerifyAllowedDomainResponse>,
+            tonic::Status,
+        >;
+        /** User: see and accept auto-invite join offers.
+*/
+        async fn list_join_offers(
+            &self,
+            request: tonic::Request<super::ListJoinOffersRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListJoinOffersResponse>,
+            tonic::Status,
+        >;
+        ///
+        async fn accept_join_offer(
+            &self,
+            request: tonic::Request<super::AcceptJoinOfferRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AcceptJoinOfferResponse>,
             tonic::Status,
         >;
     }
@@ -6442,6 +6665,300 @@ pub mod organisation_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = ListMembersSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/AddAllowedDomain" => {
+                    #[allow(non_camel_case_types)]
+                    struct AddAllowedDomainSvc<T: OrganisationService>(pub Arc<T>);
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<super::AddAllowedDomainRequest>
+                    for AddAllowedDomainSvc<T> {
+                        type Response = super::AddAllowedDomainResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::AddAllowedDomainRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::add_allowed_domain(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = AddAllowedDomainSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/ListAllowedDomains" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListAllowedDomainsSvc<T: OrganisationService>(pub Arc<T>);
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<super::ListAllowedDomainsRequest>
+                    for ListAllowedDomainsSvc<T> {
+                        type Response = super::ListAllowedDomainsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListAllowedDomainsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::list_allowed_domains(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListAllowedDomainsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/RemoveAllowedDomain" => {
+                    #[allow(non_camel_case_types)]
+                    struct RemoveAllowedDomainSvc<T: OrganisationService>(pub Arc<T>);
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<super::RemoveAllowedDomainRequest>
+                    for RemoveAllowedDomainSvc<T> {
+                        type Response = super::RemoveAllowedDomainResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RemoveAllowedDomainRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::remove_allowed_domain(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = RemoveAllowedDomainSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/VerifyAllowedDomain" => {
+                    #[allow(non_camel_case_types)]
+                    struct VerifyAllowedDomainSvc<T: OrganisationService>(pub Arc<T>);
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<super::VerifyAllowedDomainRequest>
+                    for VerifyAllowedDomainSvc<T> {
+                        type Response = super::VerifyAllowedDomainResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::VerifyAllowedDomainRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::verify_allowed_domain(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = VerifyAllowedDomainSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/ListJoinOffers" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListJoinOffersSvc<T: OrganisationService>(pub Arc<T>);
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<super::ListJoinOffersRequest>
+                    for ListJoinOffersSvc<T> {
+                        type Response = super::ListJoinOffersResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListJoinOffersRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::list_join_offers(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListJoinOffersSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.OrganisationService/AcceptJoinOffer" => {
+                    #[allow(non_camel_case_types)]
+                    struct AcceptJoinOfferSvc<T: OrganisationService>(pub Arc<T>);
+                    impl<
+                        T: OrganisationService,
+                    > tonic::server::UnaryService<super::AcceptJoinOfferRequest>
+                    for AcceptJoinOfferSvc<T> {
+                        type Response = super::AcceptJoinOfferResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::AcceptJoinOfferRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as OrganisationService>::accept_join_offer(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = AcceptJoinOfferSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

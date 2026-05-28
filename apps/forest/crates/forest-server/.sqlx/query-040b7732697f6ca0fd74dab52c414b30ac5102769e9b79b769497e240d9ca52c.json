@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE user_emails\n            SET verification_source = $3, updated_at = now()\n            WHERE user_id = $1\n              AND email = $2\n              AND verified = TRUE\n              AND verification_source = 'magic_link'\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "040b7732697f6ca0fd74dab52c414b30ac5102769e9b79b769497e240d9ca52c"
+}

@@ -47,6 +47,9 @@ sqlx = { version = "0.8.6", features = [
 serde_json = "1.0.145"
 petname = "2.0.2"
 regex = "1.12.2"
+# DNS TXT lookups for org-domain ownership verification (DATA-252).
+# Pure Rust resolver — no native deps required.
+hickory-resolver = { version = "0.24", default-features = false, features = ["tokio-runtime", "system-config"] }
 indexmap = "2"
 chrono = "0.4"
 tokio-stream = "0.1"

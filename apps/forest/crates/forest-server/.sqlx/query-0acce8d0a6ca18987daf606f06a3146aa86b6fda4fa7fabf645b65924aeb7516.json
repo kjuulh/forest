@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT o.id   AS organisation_id,\n                   o.name AS organisation_name,\n                   oad.domain AS matched_domain\n            FROM organisation_allowed_domains oad\n            JOIN organisations o ON o.id = oad.organisation_id\n            JOIN user_emails ue\n              ON LOWER(substring(ue.email from '@([^@]+)$')) = oad.domain\n            WHERE ue.user_id = $1\n              AND oad.organisation_id = $2\n              AND ue.verified = TRUE\n              AND oad.policy <> 'manual_only'\n              AND oad.dns_verified_at IS NOT NULL\n              AND NOT EXISTS (\n                  SELECT 1 FROM organisation_members om\n                  WHERE om.organisation_id = oad.organisation_id\n                    AND om.user_id = $1\n              )\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "organisation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "organisation_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "matched_domain",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0acce8d0a6ca18987daf606f06a3146aa86b6fda4fa7fabf645b65924aeb7516"
+}

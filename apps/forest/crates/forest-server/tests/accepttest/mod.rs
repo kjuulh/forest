@@ -1,6 +1,7 @@
 mod fixtures;
 mod authz_coverage;
 mod authz_flow;
+mod auto_join_flow;
 mod component_flow;
 mod device_login;
 mod email_verification;
