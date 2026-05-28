@@ -536,6 +536,45 @@ async fn google_disconnect_with_valid_csrf_calls_unlink() {
 }
 
 #[tokio::test]
+async fn github_disconnect_redirects_with_banner_when_last_auth_method() {
+    // Forest refuses to strip the only sign-in method. The handler must
+    // surface that as a redirect to the account page with the banner code
+    // `last_auth_method` — not a 500 — so the user sees a clear next step.
+    let behavior = MockBehavior {
+        unlink_oauth_provider_result: Some(Err(AuthError::LastAuthMethod)),
+        ..Default::default()
+    };
+    let mock = MockForestClient::with_behavior(behavior);
+    let (state, sessions) = test_state_with(mock, MockPlatformClient::new());
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/account/github/disconnect")
+                .header("cookie", cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("_csrf=test-csrf"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        response.status().is_redirection(),
+        "expected redirect, got {}",
+        response.status()
+    );
+    let location = response.headers().get("location").unwrap().to_str().unwrap();
+    assert_eq!(
+        location, "/settings/account?error=last_auth_method",
+        "must redirect with the banner code so error_message() can render it"
+    );
+}
+
+#[tokio::test]
 async fn disconnect_unauthenticated_redirects_to_login() {
     let (state, _sessions) = test_state();
     let app = build_router(state);

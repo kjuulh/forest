@@ -89,6 +89,13 @@ pub enum AuthError {
     #[error("not found")]
     NotFound,
 
+    /// Unlink would leave the account with no remaining sign-in method.
+    /// Surfaced by `unlink_oauth_provider` when the user has no password
+    /// and no other linked provider. Mapped from Forest's gRPC
+    /// `FailedPrecondition("last_auth_method")`.
+    #[error("cannot disconnect the only remaining sign-in method")]
+    LastAuthMethod,
+
     #[error("{0}")]
     Other(String),
 }

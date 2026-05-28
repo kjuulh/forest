@@ -169,6 +169,14 @@ fn map_status(status: tonic::Status) -> AuthError {
         tonic::Code::PermissionDenied => AuthError::PermissionDenied(status.message().into()),
         tonic::Code::Unavailable => AuthError::Unavailable(status.message().into()),
         tonic::Code::NotFound => AuthError::NotFound,
+        // `FailedPrecondition` carries a wire-stable code in the message
+        // for callers to branch on. Currently used by:
+        //   - `last_auth_method` from `UnlinkOAuthProvider` (DATA-247)
+        //   - `email_not_verified` from `Login` (handled inline above)
+        // Unrecognised precondition codes fall through to `Other`.
+        tonic::Code::FailedPrecondition if status.message() == "last_auth_method" => {
+            AuthError::LastAuthMethod
+        }
         _ => AuthError::Other(status.message().into()),
     }
 }

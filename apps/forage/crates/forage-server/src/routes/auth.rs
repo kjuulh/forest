@@ -856,6 +856,10 @@ fn error_message(error: Option<&str>) -> Option<&'static str> {
         }
         "link_failed_github" => Some("Linking your GitHub account failed. Please try again."),
         "link_failed_google" => Some("Linking your Google account failed. Please try again."),
+        "last_auth_method" => Some(
+            "You can't disconnect your only sign-in method. \
+             Set a password or link another provider first.",
+        ),
         "verification_resend_ineligible" => {
             Some("That email isn't eligible for verification right now.")
         }
@@ -3319,6 +3323,12 @@ async fn disconnect_oauth_provider(
                 ),
                 forage_core::auth::AuthError::NotAuthenticated
                 | forage_core::auth::AuthError::InvalidCredentials => Redirect::to("/login").into_response(),
+                // Forest refused to strip the last sign-in method. Send
+                // the user back to the account page with a banner —
+                // `error_message()` renders the human-readable string.
+                forage_core::auth::AuthError::LastAuthMethod => {
+                    Redirect::to("/settings/account?error=last_auth_method").into_response()
+                }
                 _ => error_page(
                     state,
                     StatusCode::INTERNAL_SERVER_ERROR,
