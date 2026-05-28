@@ -9,7 +9,7 @@
 #}
 
 {% set is_tool = summary and (summary.shape == "hybrid" or summary.shape == "tool_binary" or summary.shape == "tool_external") %}
-{% set show_get_started = not comp_versions and not readme_html %}
+{% set show_get_started = not comp_versions and not readme_html and not project_has_timeline %}
 
 {% block content %}
 {# Layout: a 3-track grid (`1fr | 48rem | 1fr`) on xl+ screens keeps the
