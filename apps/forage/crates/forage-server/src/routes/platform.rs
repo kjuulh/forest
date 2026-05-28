@@ -255,7 +255,15 @@ async fn dashboard(
     let orgs = &session.user.orgs;
 
     if orgs.is_empty() {
-        // No orgs: show onboarding with create org form
+        // No orgs: show onboarding with create org form. Still fetch
+        // join offers — a brand-new user whose verified email matches an
+        // org's allowlist is exactly the audience auto-invite is for
+        // (DATA-252).
+        let join_offers = warn_default(
+            "onboarding: list_join_offers",
+            state.platform_client.list_join_offers(&session.access_token).await,
+        );
+
         let html = state
             .templates
             .render(
@@ -266,6 +274,11 @@ async fn dashboard(
                     user => context! { username => session.user.username },
                     csrf_token => &session.csrf_token,
                     active_tab => "dashboard",
+                    join_offers => join_offers.iter().map(|o| context! {
+                        organisation_id => &o.organisation_id,
+                        organisation_name => &o.organisation_name,
+                        matched_domain => &o.matched_domain,
+                    }).collect::<Vec<_>>(),
                 },
             )
             .map_err(|e| {

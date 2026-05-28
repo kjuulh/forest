@@ -366,6 +366,53 @@ async fn remove_domain_redirects_back() {
 // ─── User: join offers banner on dashboard ───────────────────────────────
 
 #[tokio::test]
+async fn onboarding_dashboard_no_orgs_shows_join_offer_banner() {
+    // Regression: a brand-new user with no orgs but a verified email at
+    // a DNS-verified allowlist domain must still see the auto-invite
+    // banner. The dashboard handler used to take the no-orgs onboarding
+    // branch and skip the banner entirely (DATA-252 manual smoke caught
+    // this).
+    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
+        list_orgs_result: Some(Ok(vec![])),
+        list_join_offers_result: Some(Ok(vec![JoinOffer {
+            organisation_id: "org-acme".into(),
+            organisation_name: "Acme Corp".into(),
+            matched_domain: "acme.example".into(),
+        }])),
+        ..Default::default()
+    });
+    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
+    let cookie = create_test_session_no_orgs(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/dashboard")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_to_string(response.into_body()).await;
+    assert!(
+        html.contains("Welcome to Forest"),
+        "onboarding page should still render"
+    );
+    assert!(
+        html.contains("Acme Corp"),
+        "join-offer banner should appear above the create-org form"
+    );
+    assert!(
+        html.contains("/join-offers/org-acme/accept"),
+        "Join button should POST to the accept route"
+    );
+}
+
+#[tokio::test]
 async fn dashboard_shows_join_offer_banner() {
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
         list_join_offers_result: Some(Ok(vec![JoinOffer {
