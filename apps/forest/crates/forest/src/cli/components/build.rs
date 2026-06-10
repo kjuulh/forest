@@ -439,20 +439,22 @@ async fn build_rust(
         .arg("unstable-options");
 
     cmd.stdout(std::io::stdout());
-    cmd.stderr(std::io::stderr());
+    // TASKS/031: capture stderr so we can pattern-match it for actionable
+    // hints on failure. We still tee it to the user's terminal in real time
+    // so build output isn't blocked behind the full child exit.
+    cmd.stderr(std::process::Stdio::piped());
 
     let mut proc = cmd.spawn()?;
+    let captured_stderr = if let Some(stderr) = proc.stderr.take() {
+        Some(tee_stderr(stderr).await?)
+    } else {
+        None
+    };
     let exit = proc.wait().await?;
 
     if !exit.success() {
-        eprintln!();
-        eprintln!("hint: if the error mentions the target may not be installed, run:");
-        eprintln!();
-        eprintln!("  rustup target add --toolchain nightly {triple}");
-        eprintln!();
-        eprintln!("hint: for cross-compilation you may also need the appropriate");
-        eprintln!("      linker and sysroot configured in .cargo/config.toml");
-        eprintln!();
+        let stderr_text = captured_stderr.as_deref().unwrap_or("");
+        emit_rust_build_hints(stderr_text, triple);
         anyhow::bail!(
             "failed to build rust component for {}/{}",
             target.os,
@@ -461,6 +463,165 @@ async fn build_rust(
     }
 
     Ok(())
+}
+
+/// Drain a child's stderr to our own stderr line by line while accumulating
+/// the full text. Returns once EOF is reached. Used so we can match cargo's
+/// error output for actionable hints (TASKS/031) without losing the live
+/// streaming behaviour users expect from cargo.
+async fn tee_stderr(
+    stderr: tokio::process::ChildStderr,
+) -> anyhow::Result<String> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let mut reader = BufReader::new(stderr).lines();
+    let mut buffer = String::new();
+    let mut user_stderr = tokio::io::stderr();
+    while let Some(line) = reader.next_line().await? {
+        buffer.push_str(&line);
+        buffer.push('\n');
+        user_stderr.write_all(line.as_bytes()).await?;
+        user_stderr.write_all(b"\n").await?;
+    }
+    user_stderr.flush().await?;
+    Ok(buffer)
+}
+
+/// Pattern-driven build hints. Each rule matches a substring of cargo's
+/// stderr and emits a targeted hint. Multiple matching rules ALL fire so
+/// users get every relevant pointer. If no rule matches, no hint is emitted —
+/// silence beats a misleading default (TASKS/031, items #3 + #9).
+struct HintRule {
+    pattern: &'static str,
+    hint: &'static str,
+}
+
+const BUILD_HINT_RULES: &[HintRule] = &[
+    HintRule {
+        pattern: "no bin target named",
+        hint: "hint: forest invokes `cargo build --bin <component-name>` for Rust\n      \
+               components. The cargo [[bin]] name (or implicit package.name when no\n      \
+               [[bin]] is declared) must match forest.component.name. Rename one\n      \
+               so they agree.",
+    },
+    HintRule {
+        pattern: "linker `cc` not found",
+        hint: "hint: install a C linker (Xcode Command Line Tools on macOS,\n      \
+               `build-essential` on Debian/Ubuntu).",
+    },
+    HintRule {
+        pattern: "linker `link.exe` not found",
+        hint: "hint: install MSVC build tools on Windows (rustup-init suggests this).",
+    },
+    HintRule {
+        pattern: "could not find native static library",
+        hint: "hint: a system library required by a Rust dependency is missing.\n      \
+               Check the failing crate's README for required system packages.",
+    },
+    HintRule {
+        pattern: "may not be installed",
+        hint: "hint: the target toolchain is missing. Run:\n  rustup target add --toolchain nightly <triple>",
+    },
+    HintRule {
+        pattern: "the target may not be installed",
+        hint: "hint: the target toolchain is missing. Run:\n  rustup target add --toolchain nightly <triple>",
+    },
+    HintRule {
+        pattern: "wasm32",
+        hint: "hint: for wasm32 builds you may need the wasm32 target installed\n      \
+               and `wasm-ld` on PATH.",
+    },
+];
+
+fn emit_rust_build_hints(stderr: &str, triple: &str) {
+    let mut emitted_any = false;
+    for rule in BUILD_HINT_RULES {
+        if stderr.contains(rule.pattern) {
+            if !emitted_any {
+                eprintln!();
+                emitted_any = true;
+            }
+            // Substitute the placeholder for the actual triple where applicable.
+            eprintln!("{}", rule.hint.replace("<triple>", triple));
+        }
+    }
+    if emitted_any {
+        eprintln!();
+    }
+}
+
+#[cfg(test)]
+mod build_hint_tests {
+    use super::*;
+
+    fn capture_hints(stderr: &str, triple: &str) -> String {
+        // Re-run the matching logic and accumulate into a string, since the
+        // production code writes to the real stderr. Mirror the iteration
+        // order and substitution exactly.
+        let mut out = String::new();
+        for rule in BUILD_HINT_RULES {
+            if stderr.contains(rule.pattern) {
+                out.push_str(&rule.hint.replace("<triple>", triple));
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn no_bin_target_triggers_name_alignment_hint() {
+        let stderr = "error: no bin target named `canopy-data-cli` in default-run packages\n\
+                      available bin targets: data";
+        let hints = capture_hints(stderr, "aarch64-apple-darwin");
+        assert!(
+            hints.contains("must match forest.component.name"),
+            "expected name-alignment hint, got: {hints}"
+        );
+        // Critical regression guard: the misleading cross-compile hint must
+        // NOT show up for this category of error.
+        assert!(
+            !hints.contains("rustup target add"),
+            "no_bin_target must not trigger the cross-compile hint, got: {hints}"
+        );
+    }
+
+    #[test]
+    fn missing_linker_triggers_install_hint() {
+        let stderr = "error: linker `cc` not found";
+        let hints = capture_hints(stderr, "x86_64-unknown-linux-gnu");
+        assert!(hints.contains("Xcode Command Line Tools"));
+    }
+
+    #[test]
+    fn missing_target_triggers_rustup_hint_with_substituted_triple() {
+        let stderr = "error: the target may not be installed";
+        let hints = capture_hints(stderr, "wasm32-unknown-unknown");
+        assert!(hints.contains("rustup target add --toolchain nightly wasm32-unknown-unknown"));
+    }
+
+    #[test]
+    fn unrelated_error_produces_no_hint() {
+        let stderr = "error[E0599]: no method named `foo` found";
+        let hints = capture_hints(stderr, "aarch64-apple-darwin");
+        assert!(hints.is_empty(), "expected no hints, got: {hints}");
+    }
+
+    #[test]
+    fn empty_stderr_produces_no_hint() {
+        let hints = capture_hints("", "aarch64-apple-darwin");
+        assert!(hints.is_empty());
+    }
+
+    #[test]
+    fn multiple_matching_rules_all_fire() {
+        // Synthetic case: stderr contains both a linker error and a target
+        // error. We want BOTH hints, not just the first matching one.
+        let stderr = "error: linker `cc` not found\n\
+                      error: the target may not be installed";
+        let hints = capture_hints(stderr, "aarch64-apple-darwin");
+        assert!(hints.contains("Xcode Command Line Tools"));
+        assert!(hints.contains("rustup target add"));
+    }
 }
 
 async fn build_golang(

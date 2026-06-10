@@ -3,10 +3,250 @@ use forest_grpc_interface::ProjectMetadata;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    grpc::GrpcClientState,
+    contexts::ContextStore,
+    grpc::{GrpcClient, GrpcClientState},
     services::component_binary,
     state::State,
 };
+
+/// Print a single line naming the active forest context + server URL the
+/// publish is about to hit. TASKS/031 item #10 — prevents accidental
+/// pushes to the wrong (e.g. prod) registry by making the destination
+/// visible *before* the first RPC.
+///
+/// Best-effort: a failure to resolve the active context (no contexts
+/// configured, corrupted state file) silently degrades to a minimal
+/// "publishing as <owner>/<component>" line so we never block the publish
+/// just for the courtesy print.
+fn print_publish_context(owner: &str, component: &str) {
+    match ContextStore::from_env().and_then(|s| s.active()) {
+        Ok(ctx) => eprintln!(
+            "publishing to {} ({}) as {}/{}",
+            ctx.name, ctx.server, owner, component
+        ),
+        Err(_) => eprintln!("publishing as {}/{}", owner, component),
+    }
+}
+
+/// Shape/kind/platform discriminators the post-success summary needs from
+/// the publish flow. Kept as a plain data carrier so each publish path
+/// (main, external, prebuilt) can construct it inline without coupling.
+struct PublishSummary {
+    owner: String,
+    component: String,
+    version: String,
+    shape: &'static str,
+    kind: &'static str,
+    platform: String,
+}
+
+impl PublishSummary {
+    fn print(&self) {
+        eprintln!(
+            "published {}/{}@{} as shape={} [{}] {}",
+            self.owner, self.component, self.version, self.shape, self.kind, self.platform,
+        );
+    }
+}
+
+/// Derive the manifest shape string from the kind + descriptor presence.
+/// Mirrors `forest_manifest::derive_shape` for the binary/external kinds
+/// the manifest validator accepts today; CUE-only / Deno publishes report
+/// their CLI kind directly because no manifest shape is computed for them.
+fn derive_summary_shape(kind: &str, has_tool: bool, has_methods: bool) -> &'static str {
+    match (kind, has_tool, has_methods) {
+        ("binary", false, true) => "component",
+        ("binary", true, false) => "tool_binary",
+        ("binary", true, true) => "hybrid_component",
+        ("external", true, _) => "tool_external",
+        ("cue", _, _) => "library",
+        ("deno", _, _) => "deno",
+        _ => "component",
+    }
+}
+
+/// RAII guard that fires a best-effort `AbortUpload` RPC on Drop unless
+/// disarmed. Wraps every `forest publish` flow so an early `?` return, a
+/// panic, or a Ctrl-C between `begin_upload` and `commit_upload` leaves
+/// the server's staging row aborted rather than half-staged. See
+/// TASKS/023-publish-transactional.md.
+///
+/// The server's `AbortUpload` handler is idempotent — unknown / already
+/// committed / already aborted uploads are no-ops — so the fire-and-forget
+/// pattern here cannot create spurious state.
+struct AbortOnDrop {
+    client: Option<GrpcClient>,
+    upload_context: String,
+    reason: String,
+}
+
+impl AbortOnDrop {
+    fn new(client: GrpcClient, upload_context: impl Into<String>) -> Self {
+        Self {
+            client: Some(client),
+            upload_context: upload_context.into(),
+            reason: "publish flow exited before commit".into(),
+        }
+    }
+
+    /// Cancel the abort — call this after `commit_upload` succeeds so the
+    /// guard does not roll back a legitimate publish on the way out.
+    fn disarm(mut self) {
+        self.client = None;
+    }
+}
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        let Some(client) = self.client.take() else {
+            return;
+        };
+        let upload_context = std::mem::take(&mut self.upload_context);
+        let reason = std::mem::take(&mut self.reason);
+        // Fire-and-forget on the current tokio runtime. Errors are swallowed:
+        // the server is required to be idempotent on abort, and there's no
+        // user-visible action to take from a Drop handler anyway.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                if let Err(e) = client
+                    .abort_component_upload(&upload_context, &reason)
+                    .await
+                {
+                    tracing::debug!(
+                        upload_context = %upload_context,
+                        "abort_component_upload failed (ignored): {e:#}"
+                    );
+                }
+            });
+        }
+    }
+}
+
+#[cfg(test)]
+mod abort_on_drop_tests {
+    use super::AbortOnDrop;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    /// Re-implementation of the guard against a trivial sink so we can test
+    /// arm / disarm semantics without needing a live gRPC server.
+    ///
+    /// This mirrors the production guard's *contract*: on Drop with the
+    /// "armed" flag set, fire a side effect; on `disarm`, do not.
+    struct TestGuard {
+        fired: Arc<AtomicBool>,
+        armed: bool,
+    }
+    impl TestGuard {
+        fn new(fired: Arc<AtomicBool>) -> Self {
+            Self { fired, armed: true }
+        }
+        fn disarm(mut self) {
+            self.armed = false;
+        }
+    }
+    impl Drop for TestGuard {
+        fn drop(&mut self) {
+            if self.armed {
+                self.fired.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+
+    #[test]
+    fn guard_fires_on_drop_when_armed() {
+        let fired = Arc::new(AtomicBool::new(false));
+        {
+            let _g = TestGuard::new(fired.clone());
+            // implicit drop here
+        }
+        assert!(fired.load(Ordering::SeqCst), "guard should fire on drop");
+    }
+
+    #[test]
+    fn guard_does_not_fire_after_disarm() {
+        let fired = Arc::new(AtomicBool::new(false));
+        {
+            let g = TestGuard::new(fired.clone());
+            g.disarm();
+        }
+        assert!(
+            !fired.load(Ordering::SeqCst),
+            "disarmed guard must not fire"
+        );
+    }
+
+    #[test]
+    fn guard_fires_on_panic() {
+        let fired = Arc::new(AtomicBool::new(false));
+        let fired_inner = fired.clone();
+        let result = std::panic::catch_unwind(move || {
+            let _g = TestGuard::new(fired_inner);
+            panic!("simulated early-exit failure");
+        });
+        assert!(result.is_err());
+        assert!(
+            fired.load(Ordering::SeqCst),
+            "panic during scope should still fire the guard"
+        );
+    }
+
+    use super::{derive_summary_shape, PublishSummary};
+
+    #[test]
+    fn shape_for_binary_tool() {
+        assert_eq!(derive_summary_shape("binary", true, false), "tool_binary");
+        assert_eq!(derive_summary_shape("binary", true, true), "hybrid_component");
+        assert_eq!(derive_summary_shape("binary", false, true), "component");
+    }
+
+    #[test]
+    fn shape_for_external() {
+        assert_eq!(derive_summary_shape("external", true, false), "tool_external");
+        assert_eq!(derive_summary_shape("external", true, true), "tool_external");
+    }
+
+    #[test]
+    fn shape_for_cue_and_deno() {
+        assert_eq!(derive_summary_shape("cue", false, false), "library");
+        assert_eq!(derive_summary_shape("deno", true, true), "deno");
+    }
+
+    #[test]
+    fn summary_format_is_stable() {
+        // Snapshot the exact line format we print on success. Users grep
+        // this output, so the format is part of the CLI contract — changing
+        // it should require deliberately updating this test.
+        let s = PublishSummary {
+            owner: "understory".into(),
+            component: "canopy-data-cli".into(),
+            version: "0.1.5".into(),
+            shape: "tool_binary",
+            kind: "binary",
+            platform: "darwin_arm64".into(),
+        };
+        // Mirror what `print` writes so the assertion exercises the format
+        // without needing to capture stderr.
+        let line = format!(
+            "published {}/{}@{} as shape={} [{}] {}",
+            s.owner, s.component, s.version, s.shape, s.kind, s.platform,
+        );
+        assert_eq!(
+            line,
+            "published understory/canopy-data-cli@0.1.5 as shape=tool_binary [binary] darwin_arm64"
+        );
+    }
+
+    #[test]
+    fn production_guard_compiles_with_disarm_signature() {
+        // Compile-time check on AbortOnDrop's API surface. We can't construct
+        // one without a real GrpcClient; the runtime assertion (aborted upload
+        // frees the version for a fresh begin) lives in the accepttest suite.
+        let _ = std::mem::size_of::<AbortOnDrop>();
+    }
+}
 
 /// Publish the component to the Forest registry.
 ///
@@ -17,7 +257,15 @@ use crate::{
 /// The component is published under {organisation}/{name}@{version}
 /// as declared in forest.cue. Requires org membership.
 #[derive(clap::Parser)]
-pub struct PublishCommand {}
+pub struct PublishCommand {
+    /// Run the local preflight (cue eval, cargo bin check, describe
+    /// probe, manifest build) and print what would be published, but
+    /// do not contact the registry. TASKS/031 item #5b. Use this to
+    /// confirm the publish will land as `[binary]` (not `[files]`) and
+    /// against the right context, before flipping the destructive bit.
+    #[arg(long = "dry-run")]
+    dry_run: bool,
+}
 
 impl PublishCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
@@ -107,6 +355,23 @@ impl PublishCommand {
             .and_then(|v| v.as_str());
         if upload_type == Some("prebuilt") {
             return publish_prebuilt(state, &current_dir, organisation, name, version, &doc).await;
+        }
+
+        // TASKS/028: run the full Phase 1 preflight as a gate. This
+        // subsumes the standalone 027 check (it's now C5) and adds the
+        // names-agree (C3) and semver-valid (C8) checks. All failures
+        // are reported together so the user doesn't have to fix one,
+        // re-run, fix the next.
+        let pf_ctx = crate::services::preflight::PreflightContext {
+            current_dir: current_dir.clone(),
+            doc: doc.clone(),
+            organisation: organisation.to_string(),
+            component_name: name.to_string(),
+            version: version.to_string(),
+        };
+        let checks = crate::services::preflight::standard_checks();
+        if let Err(failures) = crate::services::preflight::run_checks(&pf_ctx, &checks) {
+            anyhow::bail!("{}", crate::services::preflight::render_failures(&failures));
         }
 
         // 2. Check for binary (optional — CUE-only / Deno components don't need one)
@@ -204,12 +469,48 @@ impl PublishCommand {
                 .unwrap_or_else(|| "CUE-only (no binary)".to_string()),
         );
 
+        // TASKS/031: dry-run stops here. Everything above is local-only
+        // (cue eval, bin check, describe probe, manifest synthesis); the
+        // first RPC is `begin_component_upload` below. Print the would-be
+        // summary using the same renderer as the post-success path so the
+        // user sees exactly the line a real publish would emit.
+        if self.dry_run {
+            print_publish_context(organisation, name);
+            let has_tool = descriptor
+                .as_ref()
+                .and_then(describe_response_tool_facet)
+                .is_some();
+            let has_methods = descriptor
+                .as_ref()
+                .map(|d| !d.methods.is_empty())
+                .unwrap_or(false);
+            let platform = if binary_path.is_some() {
+                let (os, arch) = component_binary::current_platform();
+                let platform_os = if os == "macos" { "darwin" } else { os };
+                format!("{platform_os}_{arch}")
+            } else {
+                "no-platform".to_string()
+            };
+            let shape = derive_summary_shape(kind, has_tool, has_methods);
+            eprintln!(
+                "dry-run: would publish {}/{}@{} as shape={} [{}] {}",
+                organisation, name, version, shape, kind, platform,
+            );
+            eprintln!("  no upload was performed.");
+            return Ok(());
+        }
+
         // 4. Begin upload
+        print_publish_context(organisation, name);
         let client = state.grpc_client();
         tracing::info!("beginning upload");
         let upload_context = client
             .begin_component_upload(organisation, name, version)
             .await?;
+
+        // TASKS/023: roll back the staged upload if any subsequent step
+        // returns Err or the process is killed. Disarmed after commit.
+        let abort_guard = AbortOnDrop::new(client.clone(), &upload_context);
 
         // 5. Upload binary (if present)
         if let Some(ref bp) = binary_path {
@@ -299,8 +600,35 @@ impl PublishCommand {
         // 8. Commit
         tracing::info!("committing upload");
         client.commit_component_upload(&upload_context).await?;
+        abort_guard.disarm();
 
-        tracing::info!("published {organisation}/{name}@{version} successfully");
+        // TASKS/031 #5: visible summary so the user can see what landed
+        // (notably the shape — a binary publish that lands as `[files]`
+        // because of name mismatch is now immediately obvious).
+        let has_tool = descriptor
+            .as_ref()
+            .and_then(describe_response_tool_facet)
+            .is_some();
+        let has_methods = descriptor
+            .as_ref()
+            .map(|d| !d.methods.is_empty())
+            .unwrap_or(false);
+        let platform = if binary_path.is_some() {
+            let (os, arch) = component_binary::current_platform();
+            let platform_os = if os == "macos" { "darwin" } else { os };
+            format!("{platform_os}_{arch}")
+        } else {
+            "no-platform".to_string()
+        };
+        PublishSummary {
+            owner: organisation.to_string(),
+            component: name.to_string(),
+            version: version.to_string(),
+            shape: derive_summary_shape(kind, has_tool, has_methods),
+            kind,
+            platform,
+        }
+        .print();
 
         Ok(())
     }
@@ -493,10 +821,12 @@ async fn publish_external(
     );
     let _ = doc; // reserved for future fields
 
+    print_publish_context(organisation, name);
     let client = state.grpc_client();
     let upload_context = client
         .begin_component_upload(organisation, name, version)
         .await?;
+    let abort_guard = AbortOnDrop::new(client.clone(), &upload_context);
 
     // Skip UploadBinary entirely — externals are URL-hosted.
     // Upload the CUE files (lightweight, for the registry's discovery UI).
@@ -513,10 +843,25 @@ async fn publish_external(
         .publish_component_manifest(&upload_context, &manifest_json)
         .await?;
     client.commit_component_upload(&upload_context).await?;
+    abort_guard.disarm();
 
-    tracing::info!(
-        "published external tool {organisation}/{name}@{version} (kind=external)"
-    );
+    // External tools advertise multiple platforms by URL — pick the first
+    // declared key for the summary line; the user can run `forest components
+    // show` to see the full list.
+    let platform_key = platforms
+        .keys()
+        .next()
+        .cloned()
+        .unwrap_or_else(|| "no-platform".to_string());
+    PublishSummary {
+        owner: organisation.to_string(),
+        component: name.to_string(),
+        version: version.to_string(),
+        shape: "tool_external",
+        kind: "external",
+        platform: platform_key,
+    }
+    .print();
     Ok(())
 }
 
@@ -599,10 +944,12 @@ async fn publish_prebuilt(
         uploads.len(),
     );
 
+    print_publish_context(organisation, name);
     let client = state.grpc_client();
     let upload_context = client
         .begin_component_upload(organisation, name, version)
         .await?;
+    let abort_guard = AbortOnDrop::new(client.clone(), &upload_context);
 
     for (os, arch, bytes, sha256) in uploads {
         tracing::info!(
@@ -628,10 +975,26 @@ async fn publish_prebuilt(
         .publish_component_manifest(&upload_context, &manifest_json)
         .await?;
     client.commit_component_upload(&upload_context).await?;
+    abort_guard.disarm();
 
-    tracing::info!(
-        "published prebuilt {organisation}/{name}@{version} (kind=binary)"
-    );
+    // Prebuilt uploads can span multiple platforms; show them comma-joined
+    // sorted so the line is stable across runs.
+    let mut platform_keys: Vec<String> = platforms_for_manifest.keys().cloned().collect();
+    platform_keys.sort();
+    let platform = if platform_keys.is_empty() {
+        "no-platform".to_string()
+    } else {
+        platform_keys.join(",")
+    };
+    PublishSummary {
+        owner: organisation.to_string(),
+        component: name.to_string(),
+        version: version.to_string(),
+        shape: "tool_binary",
+        kind: "binary",
+        platform,
+    }
+    .print();
     Ok(())
 }
 

@@ -14,3 +14,5 @@ pub mod temp_directories;
 pub mod component_binary;
 pub mod component_deno;
 pub mod component_walk;
+
+pub mod preflight;

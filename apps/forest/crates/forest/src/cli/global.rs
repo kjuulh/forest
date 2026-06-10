@@ -447,6 +447,12 @@ impl RunCommand {
 #[derive(Args)]
 pub struct WhichCommand {
     tool: String,
+    /// Print only the bare cached artifact path (back-compat for scripts
+    /// that grep this output). Without this flag, the output also
+    /// includes the resolved `<org>/<name>@<version>` qualifier and the
+    /// shim path. TASKS/031 item #11.
+    #[arg(long = "script")]
+    script: bool,
 }
 
 impl WhichCommand {
@@ -456,7 +462,27 @@ impl WhichCommand {
             ResolvedRef::Qualified { qref, version } => (qref, version),
         };
         let p = svc.resolve_to_cached_path(&qref, &version).await?;
-        println!("{}", p.display());
+
+        if self.script {
+            // Script mode: bare path on stdout, nothing else.
+            println!("{}", p.display());
+        } else {
+            // Rich mode: name@version → path, plus shim line for context.
+            println!(
+                "{}/{}@{} → {}",
+                qref.organisation,
+                qref.name,
+                version,
+                p.display()
+            );
+            // Best-effort: show the shim path if we can guess it from
+            // the requested tool name (which is also the shim name for
+            // the common case where the user invoked the shim by name).
+            let shim_path = svc.shim_path(&self.tool);
+            if shim_path.exists() {
+                println!("  shim:     {}", shim_path.display());
+            }
+        }
         Ok(())
     }
 }

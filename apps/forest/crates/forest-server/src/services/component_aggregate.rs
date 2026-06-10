@@ -320,21 +320,175 @@ impl ComponentService {
         Ok(())
     }
 
+    /// Unpublish a previously-published version (TASKS/025).
+    ///
+    /// Atomically:
+    /// - emits `VersionUnpublished` on the aggregate (audit trail);
+    /// - deletes the version's row from the `components` projection so
+    ///   subsequent `forest components show` / `forest global add` etc.
+    ///   behave as if the version had never been published.
+    ///
+    /// The manifest blob and uploaded artifacts remain in object storage
+    /// for now — a future GC sweep can reclaim them; the resolver no
+    /// longer points at them after this method returns.
+    ///
+    /// Returns `Ok(true)` when a new event was recorded, `Ok(false)` on
+    /// idempotent no-op (version was already Unpublished).
+    pub async fn unpublish_version(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: &str,
+        actor: &str,
+        reason: Option<&str>,
+    ) -> anyhow::Result<bool> {
+        let key = component::stream_key(organisation, name);
+        let mut root = self
+            .event_store
+            .load_or_default::<ComponentAggregate>(&key)
+            .await?;
+
+        // Truncate reason at 1024 chars per the proto contract.
+        let reason = reason.map(|r| {
+            if r.len() > 1024 {
+                r[..1024].to_string()
+            } else {
+                r.to_string()
+            }
+        });
+
+        let recorded = ComponentAggregate::unpublish_version(
+            &mut root,
+            version,
+            actor,
+            reason.as_deref(),
+        )?;
+
+        if !recorded {
+            // No-op: nothing changed on the aggregate, nothing to persist.
+            return Ok(false);
+        }
+
+        let org = organisation.to_string();
+        let name_owned = name.to_string();
+        let version_owned = version.to_string();
+
+        self.event_store
+            .save_with(&mut root, move |_events, tx| {
+                Box::pin(async move {
+                    // Delete the projection row so read paths skip it.
+                    // The aggregate retains the events for audit / replay.
+                    sqlx::query(
+                        "DELETE FROM components
+                         WHERE organisation = $1 AND name = $2 AND version = $3",
+                    )
+                    .bind(&org)
+                    .bind(&name_owned)
+                    .bind(&version_owned)
+                    .execute(&mut **tx)
+                    .await
+                    .context("delete unpublished component projection")?;
+                    Ok(())
+                })
+            })
+            .await?;
+
+        Ok(true)
+    }
+
+    /// Explicitly abort an in-flight upload (TASKS/023).
+    ///
+    /// The CLI's `AbortOnDrop` guard calls this on early return / panic, so
+    /// the next `begin_upload` for the same version doesn't have to rely on
+    /// the supersede path. Idempotent — aborting an unknown / committed /
+    /// already-aborted upload is a no-op success.
+    ///
+    /// Projections updated atomically:
+    /// - `component_staging` status set to 'aborted' (best-effort row touch)
+    pub async fn abort_upload(&self, upload_id: Uuid, reason: &str) -> anyhow::Result<()> {
+        let info = match self.resolve_upload(upload_id).await {
+            Ok(i) => i,
+            // Unknown upload — already cleaned up or never existed. Idempotent.
+            Err(_) => return Ok(()),
+        };
+
+        let key = component::stream_key(&info.organisation, &info.name);
+        let mut root = self
+            .event_store
+            .load_or_default::<ComponentAggregate>(&key)
+            .await?;
+
+        // Cap reason at 256 chars; longer strings are truncated silently
+        // (the proto comment promises this; tests cover the boundary).
+        let reason = if reason.len() > 256 {
+            &reason[..256]
+        } else {
+            reason
+        };
+
+        ComponentAggregate::abort_upload(&mut root, upload_id, reason)?;
+
+        // If the aggregate command was a no-op (no event recorded), skip the
+        // save_with path entirely — there's nothing to persist.
+        if root.pending_count() == 0 {
+            return Ok(());
+        }
+
+        self.event_store
+            .save_with(&mut root, move |_events, tx| {
+                Box::pin(async move {
+                    sqlx::query(
+                        "UPDATE component_staging SET status = 'aborted', updated = now()
+                         WHERE id = $1 AND status = 'staged'",
+                    )
+                    .bind(upload_id)
+                    .execute(&mut **tx)
+                    .await
+                    .context("mark staging row aborted")?;
+                    Ok(())
+                })
+            })
+            .await?;
+
+        Ok(())
+    }
+
     /// Commit (publish) an upload.
     ///
     /// Projections updated atomically:
     /// - `components` row upserted
     /// - `component_staging` status set to 'committed'
+    ///
+    /// TASKS/023: refuses to commit a binary-shaped upload when no manifest
+    /// has been recorded against this upload's aggregate. This closes the
+    /// ghost-version path where `_meta/describe` (or any other manifest
+    /// build step) fails after `begin_upload` + binary upload but before
+    /// `publish_manifest`. CUE-only / Deno publishes have no manifest
+    /// validator today and are exempt.
     pub async fn commit_upload(&self, upload_id: Uuid) -> anyhow::Result<()> {
         let info = self.resolve_upload(upload_id).await?;
         let key = component::stream_key(&info.organisation, &info.name);
+
+        // Pre-flight: did any binary artifact land for this upload? If so,
+        // a manifest is mandatory before commit. Reading from the projection
+        // outside the save_with closure is fine — artifacts are append-only
+        // and the worst race (someone uploads an artifact between this read
+        // and the commit) only relaxes the check in our favour.
+        let has_binary_artifacts: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM component_artifacts WHERE component_id = $1)",
+        )
+        .bind(upload_id)
+        .fetch_one(&self.db)
+        .await
+        .unwrap_or(false);
 
         let mut root = self
             .event_store
             .load_or_default::<ComponentAggregate>(&key)
             .await?;
 
-        let version = ComponentAggregate::publish_version(&mut root, upload_id)?;
+        let version =
+            ComponentAggregate::publish_version(&mut root, upload_id, has_binary_artifacts)?;
 
         let org = info.organisation;
         let name = info.name;
@@ -670,12 +824,17 @@ impl ComponentService {
     /// upgrade path (the `components` row gets `shape` updated by
     /// `commit_upload`, which we leave alone here — `publish_manifest` only
     /// touches `component_manifests`).
+    ///
+    /// TASKS/023: also records a `ManifestRecorded` aggregate event so that
+    /// `publish_version` can require manifest presence as a precondition.
+    /// The event lands atomically with the projection writes via
+    /// `EventStore::save_with`.
     pub async fn publish_manifest(
         &self,
         upload_id: Uuid,
         manifest_json: &str,
     ) -> anyhow::Result<()> {
-        let _info = self.resolve_upload(upload_id).await?;
+        let info = self.resolve_upload(upload_id).await?;
 
         // §1a.2 rule 5: payload size cap (64 KiB) — defence against
         // malicious manifests; the parser is fast but the JSON could
@@ -691,40 +850,50 @@ impl ComponentService {
         // §1a.2 rules 1–4, 7: structural validation + shape derivation.
         let parsed = forest_manifest::parse(manifest_json)
             .map_err(|e| anyhow::anyhow!("invalid manifest: {e:?}"))?;
-        let shape = shape_to_str(parsed.shape);
+        let shape = shape_to_str(parsed.shape).to_string();
 
-        let mut tx = self
-            .db
-            .begin()
-            .await
-            .context("begin tx for publish_manifest")?;
+        let key = component::stream_key(&info.organisation, &info.name);
+        let mut root = self
+            .event_store
+            .load_or_default::<ComponentAggregate>(&key)
+            .await?;
 
-        sqlx::query(
-            "INSERT INTO component_manifests (component_id, version, manifest_json)
-             SELECT $1, cs.version, $2::jsonb
-             FROM component_staging cs WHERE cs.id = $1
-             ON CONFLICT (component_id, version)
-             DO UPDATE SET manifest_json = $2::jsonb, created_at = now()",
-        )
-        .bind(upload_id)
-        .bind(manifest_json)
-        .execute(&mut *tx)
-        .await
-        .context("publish manifest")?;
+        ComponentAggregate::record_manifest(&mut root, upload_id)?;
 
-        // Stash the shape on `component_staging` so `commit_upload` can
-        // promote it onto the `components` row in the same transaction
-        // as the upload finalization.
-        sqlx::query(
-            "UPDATE component_staging SET shape = $1 WHERE id = $2",
-        )
-        .bind(shape)
-        .bind(upload_id)
-        .execute(&mut *tx)
-        .await
-        .context("update staging shape")?;
+        let manifest_json = manifest_json.to_string();
 
-        tx.commit().await.context("commit publish_manifest tx")?;
+        self.event_store
+            .save_with(&mut root, move |_events, tx| {
+                Box::pin(async move {
+                    sqlx::query(
+                        "INSERT INTO component_manifests (component_id, version, manifest_json)
+                         SELECT $1, cs.version, $2::jsonb
+                         FROM component_staging cs WHERE cs.id = $1
+                         ON CONFLICT (component_id, version)
+                         DO UPDATE SET manifest_json = $2::jsonb, created_at = now()",
+                    )
+                    .bind(upload_id)
+                    .bind(&manifest_json)
+                    .execute(&mut **tx)
+                    .await
+                    .context("publish manifest")?;
+
+                    // Stash the shape on `component_staging` so `commit_upload` can
+                    // promote it onto the `components` row in the same transaction
+                    // as the upload finalization.
+                    sqlx::query(
+                        "UPDATE component_staging SET shape = $1 WHERE id = $2",
+                    )
+                    .bind(&shape)
+                    .bind(upload_id)
+                    .execute(&mut **tx)
+                    .await
+                    .context("update staging shape")?;
+
+                    Ok(())
+                })
+            })
+            .await?;
 
         Ok(())
     }

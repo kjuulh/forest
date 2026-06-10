@@ -17,6 +17,49 @@ pub struct ValidateCommand {}
 
 impl ValidateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        // TASKS/028: run the publish-readiness preflight first. Until
+        // this was added, `forest validate` reported "Validated 0
+        // component(s)" on projects whose names disagreed across files —
+        // a silent pass through real configuration errors. Preflight
+        // failures stop validation here; if you can't publish, the
+        // dependency-config check is moot.
+        let current_dir = std::env::current_dir()?;
+        // build_context re-evaluates cue, which is the same work the
+        // dependency-config validation below relies on the project
+        // parser to have already done. The duplicate eval is cheap and
+        // keeps preflight standalone-runnable.
+        match crate::services::preflight::build_context(&current_dir).await {
+            Ok(ctx) => {
+                let checks = crate::services::preflight::standard_checks();
+                match crate::services::preflight::run_checks(&ctx, &checks) {
+                    Ok(()) => {
+                        eprintln!(
+                            "Preflight: {} check(s) passed for {}/{}",
+                            checks.len(),
+                            ctx.organisation,
+                            ctx.component_name,
+                        );
+                    }
+                    Err(failures) => {
+                        eprint!(
+                            "{}",
+                            crate::services::preflight::render_failures(&failures)
+                        );
+                        anyhow::bail!("preflight failed");
+                    }
+                }
+            }
+            Err(e) => {
+                // If we can't even build the context (e.g. there's no
+                // forest.cue here), fall through to the dependency-config
+                // path which has its own diagnostics. Don't bail — the
+                // user may be invoking `validate` from a non-project dir
+                // intentionally, in which case the dep path is the only
+                // useful work to do.
+                tracing::debug!("preflight context unavailable: {e:#}");
+            }
+        }
+
         let project = state.project_parser().get_project().await?;
 
         // Derive available contracts from dependencies

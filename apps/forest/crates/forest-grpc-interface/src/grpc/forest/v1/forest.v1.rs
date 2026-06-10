@@ -3374,6 +3374,18 @@ pub struct CommitUploadRequest {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CommitUploadResponse {
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AbortUploadRequest {
+    #[prost(string, tag="1")]
+    pub upload_context: ::prost::alloc::string::String,
+    /// Optional free-form reason recorded in the aggregate event for audit.
+    /// Truncated server-side at 256 chars.
+    #[prost(string, tag="2")]
+    pub reason: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AbortUploadResponse {
+}
 /// Get component files
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetComponentFilesRequest {
@@ -3515,6 +3527,26 @@ pub struct ComponentVersionInfo {
     /// e.g., \["linux_amd64", "darwin_arm64"\]
     #[prost(string, repeated, tag="4")]
     pub platforms: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UnpublishVersionRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub version: ::prost::alloc::string::String,
+    /// Optional free-form reason recorded in the aggregate event for audit.
+    /// Truncated server-side at 1024 chars.
+    #[prost(string, tag="4")]
+    pub reason: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UnpublishVersionResponse {
+    /// True if a new event was recorded; false if this was an idempotent
+    /// no-op (version was already unpublished).
+    #[prost(bool, tag="1")]
+    pub unpublished: bool,
 }
 // --- Registry UI / discovery ---
 

@@ -356,6 +356,140 @@ const COMPONENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12
 /// Timeout for `_meta/describe` (should be fast).
 const DESCRIBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Sentinels for "binary doesn't implement `_meta/describe` as a subcommand."
+/// Matched case-insensitively against the binary's stderr after a non-zero
+/// exit. Covers clap (Rust), cobra (Go), and a generic fallback.
+/// See TASKS/026-publish-describe-error.md.
+const SUBCOMMAND_MISSING_SENTINELS: &[&str] = &[
+    "unrecognized subcommand",
+    "unrecognised subcommand",
+    "unknown command",
+    "no such subcommand",
+];
+
+/// Returns `true` iff `stderr` looks like a CLI framework's
+/// "this subcommand isn't registered" complaint, as opposed to any other
+/// runtime failure (segfault, permission denied, panic, etc.).
+fn is_missing_subcommand(stderr: &str) -> bool {
+    let lower = stderr.to_ascii_lowercase();
+    SUBCOMMAND_MISSING_SENTINELS
+        .iter()
+        .any(|sentinel| lower.contains(sentinel))
+}
+
+/// Structured failure modes for `_meta/describe` probing. Each variant
+/// renders distinct, actionable user-facing text via [`std::fmt::Display`].
+/// See TASKS/026-publish-describe-error.md for the rationale.
+#[derive(Debug)]
+pub enum DescribeError {
+    /// The binary exited non-zero with stderr matching a known "subcommand
+    /// not found" pattern. Means the binary doesn't implement the describe
+    /// contract — the user should either ship it as a plain binary or add
+    /// the subcommand. This is the dominant failure mode for first-time
+    /// publishers (see the publish debrief, 2026-06-10).
+    MissingSubcommand { bin: std::path::PathBuf },
+    /// The binary exited 0 but stdout isn't valid JSON matching the
+    /// descriptor shape. The binary "implements" `_meta/describe` but
+    /// emits the wrong payload.
+    MalformedDescriptor {
+        bin: std::path::PathBuf,
+        parse_error: serde_json::Error,
+        stdout_prefix: String,
+    },
+    /// Binary exited non-zero for a reason that isn't "subcommand not found":
+    /// permission denied, panic, segfault, missing shared library, etc.
+    ProbeFailed {
+        bin: std::path::PathBuf,
+        stderr: String,
+    },
+    /// Probe took longer than [`DESCRIBE_TIMEOUT`]. Likely an interactive
+    /// prompt or an infinite loop — both are bugs in the binary.
+    Timeout {
+        bin: std::path::PathBuf,
+        after: std::time::Duration,
+    },
+    /// Failed to spawn the binary at all (typically `NotFound`).
+    SpawnFailed {
+        bin: std::path::PathBuf,
+        source: std::io::Error,
+    },
+}
+
+impl std::fmt::Display for DescribeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DescribeError::MissingSubcommand { bin } => write!(
+                f,
+                "the built binary at {bin} does not implement the `_meta/describe` subcommand.\n\n\
+                 forest publish probes every binary with `<binary> _meta/describe`. The subcommand\n\
+                 must print a JSON descriptor on stdout. Your binary returned `unrecognized subcommand`\n\
+                 instead.\n\n\
+                 You have two options:\n\n  \
+                 (a) Ship this as a PLAIN BINARY, not a tool-binary.\n      \
+                 In your forest.component.cue, remove the `#Tool` facet (or set\n      \
+                 `kind: \"binary\"` without a `#Tool` block). Plain binaries skip the\n      \
+                 describe probe entirely and are invoked directly via their shim.\n      \
+                 Choose this if your tool doesn't need argv passthrough, structured\n      \
+                 methods, or programmatic discovery.\n\n  \
+                 (b) Implement `_meta/describe` to opt in to TOOL_BINARY features.\n      \
+                 Add a subcommand to your CLI that prints, on stdout, JSON of the form:\n        \
+                 {{\n          \"protocol_version\": \"1\",\n          \"tool\": {{\n            \
+                 \"name\": \"<shim-name>\",\n            \"description\": \"<one-line>\"\n          \
+                 }},\n          \"methods\": [ /* optional */ ]\n        }}\n      \
+                 Choose this if you want methods routing, manifest enrichment, or\n      \
+                 forest-managed argv conventions.",
+                bin = bin.display(),
+            ),
+            DescribeError::MalformedDescriptor {
+                bin,
+                parse_error,
+                stdout_prefix,
+            } => write!(
+                f,
+                "the built binary at {bin} ran `_meta/describe` but emitted invalid JSON.\n\n\
+                 parse error: {parse_error}\n\n\
+                 stdout (first {n} bytes):\n{stdout}\n\n\
+                 The descriptor must be a single JSON object on stdout. See\n\
+                 TASKS/026-publish-describe-error.md for the expected schema.",
+                bin = bin.display(),
+                n = stdout_prefix.len(),
+                stdout = stdout_prefix,
+            ),
+            DescribeError::ProbeFailed { bin, stderr } => write!(
+                f,
+                "failed to probe `_meta/describe` on {bin}\n\nstderr:\n{stderr}\n\n\
+                 This is not the \"subcommand not found\" case — your binary returned a\n\
+                 different error. Run the probe manually to debug:\n\n  {bin} _meta/describe",
+                bin = bin.display(),
+                stderr = stderr,
+            ),
+            DescribeError::Timeout { bin, after } => write!(
+                f,
+                "component {bin} timed out after {after:?} on _meta/describe.\n\n\
+                 The describe subcommand must return promptly (no interactive prompts,\n\
+                 no network I/O). Run the probe manually to debug:\n\n  {bin} _meta/describe",
+                bin = bin.display(),
+            ),
+            DescribeError::SpawnFailed { bin, source } => write!(
+                f,
+                "failed to spawn component {bin}: {source}\n\n\
+                 Did `forest build` succeed? The expected artifact path is shown above.",
+                bin = bin.display(),
+            ),
+        }
+    }
+}
+
+impl std::error::Error for DescribeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            DescribeError::MalformedDescriptor { parse_error, .. } => Some(parse_error),
+            DescribeError::SpawnFailed { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
 /// Discover available methods by running `_meta/describe` on the component binary.
 pub async fn describe_component(
     binary_path: &Path,
@@ -368,27 +502,133 @@ pub async fn describe_component(
             .output(),
     )
     .await
-    .map_err(|_| anyhow::anyhow!(
-        "component {} timed out after {:?} on _meta/describe",
-        binary_path.display(),
-        DESCRIBE_TIMEOUT,
-    ))?
-    .map_err(|e| anyhow::anyhow!(
-        "failed to spawn component {}: {e}",
-        binary_path.display(),
-    ))?;
+    .map_err(|_| DescribeError::Timeout {
+        bin: binary_path.into(),
+        after: DESCRIBE_TIMEOUT,
+    })?
+    .map_err(|e| DescribeError::SpawnFailed {
+        bin: binary_path.into(),
+        source: e,
+    })?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!(
-            "failed to describe component {}: {}",
-            binary_path.display(),
-            stderr
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let err = if is_missing_subcommand(&stderr) {
+            DescribeError::MissingSubcommand {
+                bin: binary_path.into(),
+            }
+        } else {
+            DescribeError::ProbeFailed {
+                bin: binary_path.into(),
+                stderr,
+            }
+        };
+        return Err(err.into());
+    }
+
+    // Even on a zero exit, the stdout may not be the descriptor we expect.
+    // Return a typed MalformedDescriptor so the user sees the parse failure
+    // alongside the stdout that produced it.
+    let descriptor: forest_sdk::ComponentDescriptor = serde_json::from_slice(&output.stdout)
+        .map_err(|e| {
+            const PREFIX_LEN: usize = 1024;
+            let stdout_prefix = String::from_utf8_lossy(
+                &output.stdout[..output.stdout.len().min(PREFIX_LEN)],
+            )
+            .into_owned();
+            DescribeError::MalformedDescriptor {
+                bin: binary_path.into(),
+                parse_error: e,
+                stdout_prefix,
+            }
+        })?;
+    Ok(descriptor)
+}
+
+#[cfg(test)]
+mod describe_error_tests {
+    use super::*;
+
+    #[test]
+    fn detects_clap_unrecognized_subcommand() {
+        let stderr = "error: unrecognized subcommand '_meta/describe'\n\nUsage: foo [COMMAND]";
+        assert!(is_missing_subcommand(stderr));
+    }
+
+    #[test]
+    fn detects_cobra_unknown_command() {
+        let stderr = "Error: unknown command \"_meta/describe\" for \"foo\"\nRun 'foo --help' ...";
+        assert!(is_missing_subcommand(stderr));
+    }
+
+    #[test]
+    fn detects_generic_no_such_subcommand() {
+        let stderr = "ERROR: no such subcommand: _meta/describe";
+        assert!(is_missing_subcommand(stderr));
+    }
+
+    #[test]
+    fn case_insensitive_match() {
+        assert!(is_missing_subcommand("UNRECOGNIZED SUBCOMMAND"));
+        assert!(is_missing_subcommand("Unknown Command"));
+    }
+
+    #[test]
+    fn rejects_unrelated_errors() {
+        assert!(!is_missing_subcommand("permission denied"));
+        assert!(!is_missing_subcommand("out of memory"));
+        assert!(!is_missing_subcommand("panic: runtime error"));
+        assert!(!is_missing_subcommand("Segmentation fault"));
+        assert!(!is_missing_subcommand("dyld: Library not loaded"));
+        assert!(!is_missing_subcommand(""));
+    }
+
+    #[test]
+    fn missing_subcommand_error_text_mentions_both_options() {
+        let err = DescribeError::MissingSubcommand {
+            bin: std::path::PathBuf::from("/tmp/widget"),
+        };
+        let rendered = format!("{err}");
+        assert!(
+            rendered.contains("PLAIN BINARY"),
+            "expected option (a) in: {rendered}"
+        );
+        assert!(
+            rendered.contains("Implement `_meta/describe`"),
+            "expected option (b) in: {rendered}"
+        );
+        assert!(
+            rendered.contains("/tmp/widget"),
+            "expected the binary path in: {rendered}"
         );
     }
 
-    let descriptor: forest_sdk::ComponentDescriptor = serde_json::from_slice(&output.stdout)?;
-    Ok(descriptor)
+    #[test]
+    fn malformed_descriptor_error_includes_parse_message_and_stdout_prefix() {
+        let parse_error = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let err = DescribeError::MalformedDescriptor {
+            bin: std::path::PathBuf::from("/tmp/widget"),
+            parse_error,
+            stdout_prefix: "garbage out".into(),
+        };
+        let rendered = format!("{err}");
+        assert!(rendered.contains("invalid JSON"));
+        assert!(rendered.contains("garbage out"));
+    }
+
+    #[test]
+    fn probe_failed_distinguishes_from_missing_subcommand() {
+        let err = DescribeError::ProbeFailed {
+            bin: std::path::PathBuf::from("/tmp/widget"),
+            stderr: "Segmentation fault".into(),
+        };
+        let rendered = format!("{err}");
+        assert!(rendered.contains("Segmentation fault"));
+        assert!(
+            !rendered.contains("PLAIN BINARY"),
+            "ProbeFailed should not suggest the plain-binary option"
+        );
+    }
 }
 
 /// Invoke a component binary method with a spec, input, and context payload.

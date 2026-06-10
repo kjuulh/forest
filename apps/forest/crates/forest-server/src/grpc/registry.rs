@@ -129,6 +129,76 @@ impl RegistryService for RegistryServer {
         Ok(tonic::Response::new(UploadFileResponse {}))
     }
 
+    async fn unpublish_version(
+        &self,
+        request: tonic::Request<UnpublishVersionRequest>,
+    ) -> std::result::Result<tonic::Response<UnpublishVersionResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
+        let request = request.into_inner();
+        // TASKS/025: org member is sufficient — by symmetry with publish,
+        // anyone who can publish can unpublish. Admin-only escalation
+        // would create asymmetry that locks publishers out of cleaning
+        // their own mistakes.
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &request.organisation,
+            OrgRole::Member,
+        )
+        .await?;
+
+        let reason = if request.reason.is_empty() {
+            None
+        } else {
+            Some(request.reason.as_str())
+        };
+
+        let unpublished = self
+            .state
+            .component_service()
+            .unpublish_version(
+                &request.organisation,
+                &request.name,
+                &request.version,
+                &format!("{:?}", actor),
+                reason,
+            )
+            .await
+            .inspect_err(|e| tracing::warn!("failed to unpublish version: {e:#}"))
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+        Ok(tonic::Response::new(UnpublishVersionResponse {
+            unpublished,
+        }))
+    }
+
+    async fn abort_upload(
+        &self,
+        request: tonic::Request<AbortUploadRequest>,
+    ) -> std::result::Result<tonic::Response<AbortUploadResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
+        let request = request.into_inner();
+
+        let upload_id: Uuid = request
+            .upload_context
+            .parse()
+            .context("invalid upload_context UUID")
+            .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
+
+        // Tolerate unknown uploads: skip auth on no-op so client retries are
+        // safe even after server-side GC. If the upload exists, auth must pass.
+        if let Ok(()) = authorize_upload(&self.state, &actor, upload_id).await {
+            self.state
+                .component_service()
+                .abort_upload(upload_id, &request.reason)
+                .await
+                .inspect_err(|e| tracing::warn!("failed to abort upload: {e:#}"))
+                .map_err(|e| tonic::Status::internal(e.to_string()))?;
+        }
+
+        Ok(tonic::Response::new(AbortUploadResponse {}))
+    }
+
     async fn commit_upload(
         &self,
         request: tonic::Request<CommitUploadRequest>,

@@ -9599,6 +9599,30 @@ pub mod registry_service_client {
                 .insert(GrpcMethod::new("forest.v1.RegistryService", "CommitUpload"));
             self.inner.unary(req, path, codec).await
         }
+        pub async fn abort_upload(
+            &mut self,
+            request: impl tonic::IntoRequest<super::AbortUploadRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AbortUploadResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.RegistryService/AbortUpload",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("forest.v1.RegistryService", "AbortUpload"));
+            self.inner.unary(req, path, codec).await
+        }
         pub async fn get_component_files(
             &mut self,
             request: impl tonic::IntoRequest<super::GetComponentFilesRequest>,
@@ -9748,6 +9772,32 @@ pub mod registry_service_client {
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new("forest.v1.RegistryService", "ListComponentVersions"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn unpublish_version(
+            &mut self,
+            request: impl tonic::IntoRequest<super::UnpublishVersionRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UnpublishVersionResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.RegistryService/UnpublishVersion",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("forest.v1.RegistryService", "UnpublishVersion"),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -9971,6 +10021,13 @@ pub mod registry_service_server {
             tonic::Response<super::CommitUploadResponse>,
             tonic::Status,
         >;
+        async fn abort_upload(
+            &self,
+            request: tonic::Request<super::AbortUploadRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AbortUploadResponse>,
+            tonic::Status,
+        >;
         /// Server streaming response type for the GetComponentFiles method.
         type GetComponentFilesStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<
@@ -10026,6 +10083,13 @@ pub mod registry_service_server {
             request: tonic::Request<super::ListComponentVersionsRequest>,
         ) -> std::result::Result<
             tonic::Response<super::ListComponentVersionsResponse>,
+            tonic::Status,
+        >;
+        async fn unpublish_version(
+            &self,
+            request: tonic::Request<super::UnpublishVersionRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UnpublishVersionResponse>,
             tonic::Status,
         >;
         async fn search_components(
@@ -10428,6 +10492,51 @@ pub mod registry_service_server {
                     };
                     Box::pin(fut)
                 }
+                "/forest.v1.RegistryService/AbortUpload" => {
+                    #[allow(non_camel_case_types)]
+                    struct AbortUploadSvc<T: RegistryService>(pub Arc<T>);
+                    impl<
+                        T: RegistryService,
+                    > tonic::server::UnaryService<super::AbortUploadRequest>
+                    for AbortUploadSvc<T> {
+                        type Response = super::AbortUploadResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::AbortUploadRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as RegistryService>::abort_upload(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = AbortUploadSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
                 "/forest.v1.RegistryService/GetComponentFiles" => {
                     #[allow(non_camel_case_types)]
                     struct GetComponentFilesSvc<T: RegistryService>(pub Arc<T>);
@@ -10699,6 +10808,52 @@ pub mod registry_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = ListComponentVersionsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.RegistryService/UnpublishVersion" => {
+                    #[allow(non_camel_case_types)]
+                    struct UnpublishVersionSvc<T: RegistryService>(pub Arc<T>);
+                    impl<
+                        T: RegistryService,
+                    > tonic::server::UnaryService<super::UnpublishVersionRequest>
+                    for UnpublishVersionSvc<T> {
+                        type Response = super::UnpublishVersionResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::UnpublishVersionRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as RegistryService>::unpublish_version(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = UnpublishVersionSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

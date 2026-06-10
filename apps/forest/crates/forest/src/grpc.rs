@@ -443,6 +443,55 @@ impl GrpcClient {
         Ok(())
     }
 
+    /// Unpublish a previously-published version (TASKS/025). Returns
+    /// `true` if a new event was recorded; `false` on idempotent no-op
+    /// (version was already unpublished). The CLI uses this to drive
+    /// `forest admin unpublish` and to differentiate the success message
+    /// from the "nothing to do" path.
+    pub async fn unpublish_component_version(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: &str,
+        reason: &str,
+    ) -> anyhow::Result<bool> {
+        let mut client = self.registry_client().await?;
+
+        let res = client
+            .unpublish_version(UnpublishVersionRequest {
+                organisation: organisation.into(),
+                name: name.into(),
+                version: version.into(),
+                reason: reason.into(),
+            })
+            .await
+            .map_err(grpc_err)?;
+
+        Ok(res.into_inner().unpublished)
+    }
+
+    /// Best-effort abort of an in-flight upload (TASKS/023). Called by
+    /// `AbortOnDrop` when the CLI publish flow exits before commit. The
+    /// server is required to treat unknown / already-committed / already-
+    /// aborted uploads as no-op success, so this is safe to invoke any time.
+    pub async fn abort_component_upload(
+        &self,
+        upload_context: &str,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        let mut client = self.registry_client().await?;
+
+        client
+            .abort_upload(AbortUploadRequest {
+                upload_context: upload_context.into(),
+                reason: reason.into(),
+            })
+            .await
+            .map_err(grpc_err)?;
+
+        Ok(())
+    }
+
     pub async fn begin_artifact_upload(&self) -> anyhow::Result<UploadFileHandle> {
         let mut client = self.artifact_client().await?;
 

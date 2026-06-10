@@ -10,6 +10,11 @@ service RegistryService {
   rpc BeginUpload(BeginUploadRequest) returns (BeginUploadResponse) {}
   rpc UploadFile(UploadFileRequest) returns (UploadFileResponse) {}
   rpc CommitUpload(CommitUploadRequest) returns (CommitUploadResponse) {}
+  // TASKS/023: explicit abort of an in-flight upload. The client SHOULD call
+  // this when its publish flow fails between BeginUpload and CommitUpload,
+  // so the server can release the staged upload immediately rather than
+  // waiting for the supersede path on the next BeginUpload.
+  rpc AbortUpload(AbortUploadRequest) returns (AbortUploadResponse) {}
   rpc GetComponentFiles(GetComponentFilesRequest) returns (stream GetComponentFilesResponse) {}
 
   // --- v2: binary components ---
@@ -18,6 +23,12 @@ service RegistryService {
   rpc PublishManifest(PublishManifestRequest) returns (PublishManifestResponse) {}
   rpc GetComponentManifest(GetComponentManifestRequest) returns (GetComponentManifestResponse) {}
   rpc ListComponentVersions(ListComponentVersionsRequest) returns (ListComponentVersionsResponse) {}
+
+  // TASKS/025: remove a previously-published version. Authenticated org
+  // members only. Idempotent — unpublishing an already-unpublished or
+  // never-existed version is a no-op success. Re-publishing the same
+  // version after unpublish is allowed and behaves like a first publish.
+  rpc UnpublishVersion(UnpublishVersionRequest) returns (UnpublishVersionResponse) {}
 
   // --- Registry UI / discovery ---
   rpc SearchComponents(SearchComponentsRequest) returns (SearchComponentsResponse) {}
@@ -91,6 +102,14 @@ message CommitUploadRequest {
   string upload_context = 1;
 }
 message CommitUploadResponse {}
+
+message AbortUploadRequest {
+  string upload_context = 1;
+  // Optional free-form reason recorded in the aggregate event for audit.
+  // Truncated server-side at 256 chars.
+  string reason = 2;
+}
+message AbortUploadResponse {}
 
 // Get component files
 message GetComponentFilesRequest {
@@ -177,6 +196,20 @@ message ComponentVersionInfo {
   string protocol_version = 2;
   string kind = 3; // "binary" or "files"
   repeated string platforms = 4; // e.g., ["linux_amd64", "darwin_arm64"]
+}
+
+message UnpublishVersionRequest {
+  string organisation = 1;
+  string name = 2;
+  string version = 3;
+  // Optional free-form reason recorded in the aggregate event for audit.
+  // Truncated server-side at 1024 chars.
+  string reason = 4;
+}
+message UnpublishVersionResponse {
+  // True if a new event was recorded; false if this was an idempotent
+  // no-op (version was already unpublished).
+  bool unpublished = 1;
 }
 
 // --- Registry UI / discovery ---
