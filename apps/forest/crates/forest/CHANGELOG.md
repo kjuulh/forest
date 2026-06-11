@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.13](https://github.com/understory-io/forest/compare/v0.1.12...v0.1.13) (2026-06-11)
+
+
+### Features
+
+* **forage:** GitHub-style single-URL permission model for component pages ([#62](https://github.com/understory-io/forest/issues/62)) ([a1ecfe6](https://github.com/understory-io/forest/commit/a1ecfe65f8b700206713a22fec2cd4207dc0f7ee))
+* **forest-server:** DATA-255 persist terraform state in postgres ([#59](https://github.com/understory-io/forest/issues/59)) ([d475cb9](https://github.com/understory-io/forest/commit/d475cb94624b2e5041da2380342f248824d525a5))
+* harden forest publish — transactional, agnostic, observable ([#61](https://github.com/understory-io/forest/issues/61)) ([a4e59bc](https://github.com/understory-io/forest/commit/a4e59bc22c3e9acb8785d572a462ebd55eb312a9))
+
 ## [0.1.12](https://github.com/understory-io/forest/compare/v0.1.11...v0.1.12) (2026-05-28)
 
 
