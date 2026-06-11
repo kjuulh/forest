@@ -243,17 +243,29 @@ async fn components_search_anonymous_uses_public_rpc_only() {
     assert!(html.contains("No components published yet"));
 }
 
+// ── /components/{org}/{name} — GitHub-style permission model ────
+//
+// Same URL whether the component is public or private. The handler
+// uses the authenticated RPC when a session exists (so org members
+// see their own private components) and falls back to the public RPC
+// otherwise (anonymous viewers see only public components). Permission
+// gating lives in the backend's authenticated RPC — it returns
+// PermissionDenied / NotFound when the session lacks access.
+//
+// This mirrors github.com/<org>/<repo>: signed-in users with access
+// see private repos at the same URL public ones use.
+
 #[tokio::test]
-async fn component_detail_returns_404_when_backend_says_private() {
-    // Simulate the backend's NotFound response for a private component
-    // — `get_public_component_detail` returns NotFound by contract for
-    // any project that isn't visibility='public'.
+async fn component_detail_anonymous_404_on_private() {
+    // No session → only the public RPC is consulted, which returns
+    // NotFound for a private component. We don't peek at the authed
+    // RPC because no token is available.
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         get_public_component_detail_result: Some(Err(PlatformError::NotFound(
             "not public".into(),
         ))),
-        // Even if the authed RPC would happily return the detail, the
-        // public surface must not call it.
+        // Authed result here is "would have worked" — we're asserting
+        // we DON'T reach it from an anonymous request.
         get_component_detail_result: Some(Ok(sample_detail())),
         ..Default::default()
     });
@@ -275,7 +287,70 @@ async fn component_detail_returns_404_when_backend_says_private() {
 }
 
 #[tokio::test]
-async fn component_version_detail_returns_404_when_backend_says_private() {
+async fn component_detail_sessioned_200_for_private_when_has_access() {
+    // Sessioned org member viewing a private component. Public RPC
+    // returns NotFound (visibility != public), but the authenticated
+    // RPC succeeds because the session has access. The page renders.
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        get_public_component_detail_result: Some(Err(PlatformError::NotFound(
+            "not public".into(),
+        ))),
+        get_component_detail_result: Some(Ok(sample_detail())),
+        ..Default::default()
+    });
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+    let cookie = create_test_session(&sessions).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/components/testorg/deployment")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn component_detail_sessioned_404_when_no_access() {
+    // Sessioned but the user has no access to this private component.
+    // Both RPCs return NotFound. The page 404s — same UX as anonymous.
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        get_public_component_detail_result: Some(Err(PlatformError::NotFound(
+            "not public".into(),
+        ))),
+        get_component_detail_result: Some(Err(PlatformError::NotFound(
+            "no access".into(),
+        ))),
+        ..Default::default()
+    });
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+    let cookie = create_test_session(&sessions).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/components/testorg/deployment")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn component_version_detail_anonymous_404_on_private() {
     let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
         get_public_component_detail_result: Some(Err(PlatformError::NotFound(
             "not public".into(),
@@ -297,6 +372,75 @@ async fn component_version_detail_returns_404_when_backend_says_private() {
         .oneshot(
             Request::builder()
                 .uri("/components/testorg/deployment/1.1.0")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn component_version_detail_sessioned_200_for_private_when_has_access() {
+    // The fix this PR is built around: a signed-in org member clicking
+    // through to a private component's version page from their project's
+    // Components tab MUST see the page, not a 404.
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        get_public_component_detail_result: Some(Err(PlatformError::NotFound(
+            "not public".into(),
+        ))),
+        get_public_component_manifest_result: Some(Err(PlatformError::NotFound(
+            "not public".into(),
+        ))),
+        get_component_detail_result: Some(Ok(sample_detail())),
+        get_component_manifest_result: Some(Ok(
+            r#"{"name":"deployment","version":"1.1.0"}"#.into(),
+        )),
+        ..Default::default()
+    });
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+    let cookie = create_test_session(&sessions).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/components/testorg/deployment/1.1.0")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn component_version_detail_sessioned_404_when_no_access() {
+    let registry = MockRegistryClient::with_behavior(MockRegistryBehavior {
+        get_public_component_detail_result: Some(Err(PlatformError::NotFound(
+            "not public".into(),
+        ))),
+        get_public_component_manifest_result: Some(Err(PlatformError::NotFound(
+            "not public".into(),
+        ))),
+        get_component_detail_result: Some(Err(PlatformError::NotFound("no access".into()))),
+        get_component_manifest_result: Some(Err(PlatformError::NotFound("no access".into()))),
+        ..Default::default()
+    });
+    let (state, sessions) =
+        test_state_with_registry(MockForestClient::new(), MockPlatformClient::new(), registry);
+    let app = crate::build_router(state);
+    let cookie = create_test_session(&sessions).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/components/testorg/deployment/1.1.0")
+                .header("cookie", &cookie)
                 .body(Body::empty())
                 .unwrap(),
         )

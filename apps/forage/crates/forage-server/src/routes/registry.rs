@@ -220,15 +220,19 @@ async fn component_detail(
 
     let registry = require_registry(&state)?;
 
-    // Public-only detail. The backend returns NotFound for any component
-    // whose project is private, so this surface can never expose private
-    // metadata regardless of who is browsing. About-sidebar enrichment
-    // (`get_project`) only runs for sessioned users using their own
-    // access token — anonymous visitors just don't get the About block.
+    // GitHub-style single-URL permission model: same `/components/<org>/<name>`
+    // serves both public and private components, gated by the session's
+    // org membership. Sessioned viewers reach the authenticated RPC
+    // (`get_component_detail`) which returns the component when the user
+    // has access. Anonymous viewers reach `get_public_component_detail`
+    // which only returns public components. Either RPC returning NotFound
+    // means "you can't see this here" — 404 is the same UX whether the
+    // component doesn't exist or the viewer simply lacks access (matching
+    // GitHub's repo behaviour).
     let (detail_res, project_info) = match maybe_session.session {
         Some(ref session) => {
             let (d, p) = tokio::join!(
-                registry.get_public_component_detail(&org, &name),
+                registry.get_component_detail(&session.access_token, &org, &name),
                 state.platform_client.get_project(&session.access_token, &org, &name),
             );
             let project_info = match p {
@@ -248,9 +252,9 @@ async fn component_detail(
             &state,
             StatusCode::NOT_FOUND,
             "Component not found",
-            &format!("The component {org}/{name} does not exist."),
+            &format!("The component {org}/{name} does not exist or you don't have access."),
         ),
-        other => internal_error(&state, "get_public_component_detail", &other),
+        other => internal_error(&state, "get_component_detail", &other),
     })?;
 
     let readme_html = if detail.readme.is_empty() {
@@ -304,11 +308,12 @@ async fn component_detail(
 
 /// GET /components/{org}/{name}/{version} — version-specific detail.
 ///
-/// Same public-only contract as [`component_detail`]: the registry RPCs
-/// hit here (`get_public_component_detail`, `get_public_component_manifest`)
-/// return NotFound for private components by construction. About-sidebar
-/// enrichment uses the user's own session token; anonymous visitors skip
-/// it.
+/// GitHub-style single-URL permission model: serves both public and
+/// private versions at the same path, gated by session. Sessioned
+/// viewers go through the authenticated RPC (`get_component_detail` +
+/// `get_component_manifest`); anonymous viewers reach the public
+/// variants. Either source returning NotFound surfaces as a 404 — same
+/// UX whether the version doesn't exist or the viewer lacks access.
 async fn component_version_detail(
     State(state): State<AppState>,
     maybe_session: MaybeSession,
@@ -319,8 +324,8 @@ async fn component_version_detail(
     let (detail_res, manifest_res, project_info) = match maybe_session.session {
         Some(ref session) => {
             let (d, m, p) = tokio::join!(
-                registry.get_public_component_detail(&org, &name),
-                registry.get_public_component_manifest(&org, &name, &version),
+                registry.get_component_detail(&session.access_token, &org, &name),
+                registry.get_component_manifest(&session.access_token, &org, &name, &version),
                 state.platform_client.get_project(&session.access_token, &org, &name),
             );
             let project_info = match p {
@@ -346,9 +351,9 @@ async fn component_version_detail(
             &state,
             StatusCode::NOT_FOUND,
             "Component not found",
-            &format!("The component {org}/{name} does not exist."),
+            &format!("The component {org}/{name} does not exist or you don't have access."),
         ),
-        other => internal_error(&state, "get_public_component_detail", &other),
+        other => internal_error(&state, "get_component_detail", &other),
     })?;
 
     let manifest_json = warn_default("get_public_component_manifest", manifest_res);
