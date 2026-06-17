@@ -56,7 +56,7 @@ mkdir -p /tmp/sdk/cue.mod
 cat > /tmp/sdk/cue.mod/module.cue << EOF
 module: "forest.sh/${ORG}/sdk@v0"
 language: {
-	version: "v0.15.4"
+	version: "v0.16.1"
 }
 source: {
 	kind: "self"
@@ -185,7 +185,7 @@ mkdir -p /tmp/cue-test/cue.mod
 cat > /tmp/cue-test/cue.mod/module.cue << EOF
 module: "test.example/verify@v0"
 language: {
-	version: "v0.15.4"
+	version: "v0.16.1"
 }
 deps: {
 	"forest.sh/${ORG}/sdk@v0": {
@@ -239,7 +239,7 @@ mkdir -p "$PROJECT_DIR/cue.mod"
 cat > "$PROJECT_DIR/cue.mod/module.cue" << EOF
 module: "forest.sh/${ORG}/my-project@v0"
 language: {
-	version: "v0.15.4"
+	version: "v0.16.1"
 }
 deps: {
 	"forest.sh/${ORG}/sdk@v0": {
@@ -330,7 +330,7 @@ mkdir -p "$COMP_DIR/.forest/component"
 cat > "$COMP_DIR/cue.mod/module.cue" << EOF
 module: "forest.sh/${ORG}/e2e-deployer@v0"
 language: {
-	version: "v0.15.4"
+	version: "v0.16.1"
 }
 deps: {
 	"forest.sh/${ORG}/sdk@v0": {
@@ -446,7 +446,7 @@ cd "$PROJECT_DIR"
 cat > "$PROJECT_DIR/cue.mod/module.cue" << EOF
 module: "forest.sh/${ORG}/my-project@v0"
 language: {
-	version: "v0.15.4"
+	version: "v0.16.1"
 }
 deps: {
 	"forest.sh/${ORG}/sdk@v0": {

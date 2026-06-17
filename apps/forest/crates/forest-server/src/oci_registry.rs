@@ -174,7 +174,7 @@ pub async fn publish_cue_module(
     // Create a zip archive of the CUE files (CUE modules use zip, not tar)
     // CUE expects the zip to contain cue.mod/module.cue inside it.
     let module_cue_in_zip = format!(
-        "module: \"forest.sh/{organisation}/{name}@v0\"\nlanguage: {{\n\tversion: \"v0.15.4\"\n}}\nsource: {{\n\tkind: \"self\"\n}}\n"
+        "module: \"forest.sh/{organisation}/{name}@v0\"\nlanguage: {{\n\tversion: \"v0.16.1\"\n}}\nsource: {{\n\tkind: \"self\"\n}}\n"
     );
     let mut zip_data = Vec::new();
     {
@@ -209,7 +209,7 @@ pub async fn publish_cue_module(
 
     // Store the cue.mod/module.cue as a separate blob (CUE optimization for fast dep resolution)
     let module_cue_content = format!(
-        "module: \"forest.sh/{organisation}/{name}@v0\"\nlanguage: {{\n\tversion: \"v0.15.4\"\n}}\nsource: {{\n\tkind: \"self\"\n}}\n"
+        "module: \"forest.sh/{organisation}/{name}@v0\"\nlanguage: {{\n\tversion: \"v0.16.1\"\n}}\nsource: {{\n\tkind: \"self\"\n}}\n"
     );
     let module_cue_bytes = module_cue_content.as_bytes();
     let module_cue_digest = format!("sha256:{}", hex::encode(Sha256::digest(module_cue_bytes)));

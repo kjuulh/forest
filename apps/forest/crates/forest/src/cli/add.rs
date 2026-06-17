@@ -91,7 +91,7 @@ impl AddCommand {
             tokio::fs::create_dir_all(&cue_mod_dir).await?;
             let module_content = format!(
                 "module: \"forest.sh/{project_org}/{project_name}@v0\"\n\
-                 language: {{\n\tversion: \"v0.15.4\"\n}}\n\
+                 language: {{\n\tversion: \"v0.16.1\"\n}}\n\
                  source: {{\n\tkind: \"self\"\n}}\n\
                  deps: {{\n}}\n"
             );

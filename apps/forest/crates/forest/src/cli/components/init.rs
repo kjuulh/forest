@@ -50,7 +50,7 @@ impl InitCommand {
             &format!(
                 r#"module: "forest.sh/{org}/{name}@v0"
 language: {{
-	version: "v0.15.4"
+	version: "v0.16.1"
 }}
 source: {{
 	kind: "self"
