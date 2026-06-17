@@ -395,6 +395,17 @@ pub fn render_user_config(cfg: &UserConfig) -> String {
             if let Some(shim) = &dep.shim_name {
                 out.push_str(&format!("\t\t\tshim_name: {}\n", cue_string(shim)));
             }
+            if !dep.env.is_empty() {
+                out.push_str("\t\t\tenv: {\n");
+                for (ek, ev) in &dep.env {
+                    out.push_str(&format!(
+                        "\t\t\t\t{}: {}\n",
+                        cue_string(ek),
+                        cue_string(ev)
+                    ));
+                }
+                out.push_str("\t\t\t}\n");
+            }
             out.push_str("\t\t}\n");
         }
         out.push_str("\t}\n");
@@ -636,6 +647,7 @@ impl GlobalService {
             Dependency {
                 version: resolved_version.clone(),
                 shim_name: as_shim_name.map(str::to_string),
+                env: Default::default(),
             },
         );
         self.save_user_config(&cfg).await?;
@@ -1330,6 +1342,9 @@ mod tests {
             Dependency {
                 version: "14.1.1".into(),
                 shim_name: Some("rg".into()),
+                env: [("FUNGUS_SERVER".to_string(), "https://prod".to_string())]
+                    .into_iter()
+                    .collect(),
             },
         );
         cfg.org_catalog.insert(
@@ -1345,6 +1360,8 @@ mod tests {
         assert!(text.contains("\"cuteorg/ripgrep\""));
         assert!(text.contains("version: \"14.1.1\""));
         assert!(text.contains("shim_name: \"rg\""));
+        assert!(text.contains("env: {"));
+        assert!(text.contains("\"FUNGUS_SERVER\": \"https://prod\""));
         assert!(text.contains("org_catalog"));
         assert!(text.contains("banned: [\"forest-greet\"]"));
     }

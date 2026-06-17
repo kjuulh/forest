@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::global::names::{NameError, validate_tool_name};
+use crate::global::names::{NameError, validate_env_name, validate_env_value, validate_tool_name};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UserConfig {
@@ -27,6 +27,10 @@ pub struct Dependency {
     /// Optional client-side shim alias. If `None`, the shim name comes from
     /// the component manifest's `tool.name`.
     pub shim_name: Option<String>,
+    /// Per-tool local env override (TASKS/023 §B5). Hand-edited in
+    /// `forest.cue` — not settable via the CLI. Overrides the component's
+    /// declared `include.env` defaults, but the ambient shell env still wins.
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +54,10 @@ pub enum UserConfigError {
     InvalidVersion(String),
     InvalidShimName(NameError),
     InvalidAliasName(NameError),
+    /// A per-tool `env` key is not a valid POSIX env name. Carries the key.
+    InvalidEnvName(String),
+    /// A per-tool `env` value is invalid (contains NUL). Carries the key.
+    InvalidEnvValue(String),
 }
 
 /// Parse the JSON form of `~/.config/forest/forest.cue` (i.e. the output of
@@ -127,7 +135,15 @@ pub fn parse(json: &str) -> Result<UserConfig, UserConfigError> {
                         ));
                     }
                 };
-                out.insert(k.clone(), Dependency { version, shim_name });
+                let env = parse_dep_env(dep_obj.get("env"))?;
+                out.insert(
+                    k.clone(),
+                    Dependency {
+                        version,
+                        shim_name,
+                        env,
+                    },
+                );
             }
             out
         }
@@ -206,6 +222,30 @@ pub fn parse(json: &str) -> Result<UserConfig, UserConfigError> {
         dependencies,
         org_catalog,
     })
+}
+
+/// Parse a per-tool dependency `env` override (TASKS/023 §B5). Missing/null ⇒
+/// empty. Object of string→string; keys must be POSIX env names, values NUL-free.
+fn parse_dep_env(
+    value: Option<&serde_json::Value>,
+) -> Result<BTreeMap<String, String>, UserConfigError> {
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(BTreeMap::new()),
+        Some(serde_json::Value::Object(map)) => {
+            let mut out = BTreeMap::new();
+            for (k, v) in map {
+                validate_env_name(k).map_err(|_| UserConfigError::InvalidEnvName(k.clone()))?;
+                let val = v.as_str().ok_or_else(|| {
+                    UserConfigError::InvalidJson(format!("env value for {k:?} must be a string"))
+                })?;
+                validate_env_value(val)
+                    .map_err(|_| UserConfigError::InvalidEnvValue(k.clone()))?;
+                out.insert(k.clone(), val.to_string());
+            }
+            Ok(out)
+        }
+        Some(_) => Err(UserConfigError::InvalidJson("env must be an object".into())),
+    }
 }
 
 fn is_qualified_dep_key(s: &str) -> bool {
@@ -299,6 +339,38 @@ mod tests {
         let c = parse(json).unwrap();
         let dep = c.dependencies.get("cuteorg/ripgrep").unwrap();
         assert_eq!(dep.shim_name.as_deref(), Some("rg"));
+    }
+
+    #[test]
+    fn parses_dependency_with_env_override() {
+        let json = r#"{
+            "config": {
+                "dependencies": {
+                    "understory/fungus": {
+                        "version": "0.1.9",
+                        "env": {"FUNGUS_SERVER": "http://localhost:8080"}
+                    }
+                }
+            }
+        }"#;
+        let c = parse(json).unwrap();
+        let dep = c.dependencies.get("understory/fungus").unwrap();
+        assert_eq!(dep.env.get("FUNGUS_SERVER").unwrap(), "http://localhost:8080");
+    }
+
+    #[test]
+    fn dependency_env_defaults_empty() {
+        let json = r#"{"config": {"dependencies": {"o/n": {"version": "0.1.0"}}}}"#;
+        assert!(parse(json).unwrap().dependencies.get("o/n").unwrap().env.is_empty());
+    }
+
+    #[test]
+    fn rejects_invalid_dependency_env_name() {
+        let json = r#"{
+            "config": {"dependencies": {"o/n": {"version": "0.1.0", "env": {"1BAD": "x"}}}}
+        }"#;
+        let err = parse(json).unwrap_err();
+        assert_eq!(err, UserConfigError::InvalidEnvName("1BAD".to_string()));
     }
 
     #[test]
