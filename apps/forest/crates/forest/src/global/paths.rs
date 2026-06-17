@@ -87,6 +87,26 @@ impl GlobalPaths {
         let hex = sha.strip_prefix("sha256:").unwrap_or(sha);
         self.binary_cache_dir().join(hex)
     }
+
+    /// Per-(org, name, version) directory for the `include` block shipped
+    /// beside a tool's binary (TASKS/023). Keyed by version — not by binary
+    /// sha — so it loads on the offline warm path and never collides when two
+    /// versions dedupe to the same binary. Future include members (e.g. files)
+    /// live as siblings in this dir.
+    pub fn tool_include_dir(&self, org: &str, name: &str, version: &str) -> PathBuf {
+        self.cache_dir
+            .join("components")
+            .join("include")
+            .join(org)
+            .join(name)
+            .join(version)
+    }
+
+    /// The cached `env` map for a tool version (TASKS/023). JSON object of
+    /// string→string written on cold fetch, read on every run.
+    pub fn tool_include_env_file(&self, org: &str, name: &str, version: &str) -> PathBuf {
+        self.tool_include_dir(org, name, version).join("env.json")
+    }
 }
 
 fn xdg_config_home() -> anyhow::Result<PathBuf> {

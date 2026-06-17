@@ -186,6 +186,22 @@ impl GlobalService {
         let manifest = self
             .fetch_manifest(&qref.organisation, &qref.name, version)
             .await?;
+
+        // Persist the manifest's `include.env` beside the binary (keyed by
+        // version) so later offline warm-path runs can inject it without a
+        // manifest fetch (TASKS/023 §B4). Best-effort: a cache-write failure
+        // must not block running the tool.
+        if let Err(e) = self
+            .write_tool_include_env(qref, version, &manifest.include.env)
+            .await
+        {
+            tracing::debug!(
+                tool = %format!("{}/{}", qref.organisation, qref.name),
+                version,
+                "failed to cache include env (ignored): {e:#}"
+            );
+        }
+
         let user_config = self.load_user_config().await.unwrap_or_default();
 
         let plan = resolver::plan(&user_config, &lockfile, &manifest, qref, version, host);
@@ -292,9 +308,64 @@ impl GlobalService {
 
         Ok(cached_path)
     }
+
+    /// Write a tool version's `include.env` to the cache, beside the binary
+    /// (TASKS/023 §B4). Thin wrapper over [`write_include_env`].
+    pub async fn write_tool_include_env(
+        &self,
+        qref: &QualifiedRef,
+        version: &str,
+        env: &std::collections::BTreeMap<String, String>,
+    ) -> Result<()> {
+        write_include_env(&self.paths, qref, version, env).await
+    }
+
+    /// Load a tool version's cached `include.env` (TASKS/023 §B4/B6). Thin
+    /// wrapper over [`read_include_env`].
+    pub async fn load_tool_include_env(
+        &self,
+        qref: &QualifiedRef,
+        version: &str,
+    ) -> Result<std::collections::BTreeMap<String, String>> {
+        read_include_env(&self.paths, qref, version).await
+    }
 }
 
 // --- helpers --------------------------------------------------------------
+
+/// Write a tool version's `include.env` beside its binary (TASKS/023 §B4),
+/// keyed by (org, name, version). Empty map ⇒ remove any stale file so an
+/// absent file unambiguously means "no defaults".
+async fn write_include_env(
+    paths: &GlobalPaths,
+    qref: &QualifiedRef,
+    version: &str,
+    env: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    let file = paths.tool_include_env_file(&qref.organisation, &qref.name, version);
+    if env.is_empty() {
+        remove_if_present(&file).await?;
+        return Ok(());
+    }
+    ensure_dir(&paths.tool_include_dir(&qref.organisation, &qref.name, version)).await?;
+    let json = serde_json::to_vec(env).context("serialise include env")?;
+    atomic_write(&file, &json).await?;
+    Ok(())
+}
+
+/// Read a tool version's cached `include.env`. Absent file ⇒ empty map (tool
+/// cached before this feature, or no declared defaults).
+async fn read_include_env(
+    paths: &GlobalPaths,
+    qref: &QualifiedRef,
+    version: &str,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    let file = paths.tool_include_env_file(&qref.organisation, &qref.name, version);
+    match read_optional(&file).await? {
+        None => Ok(std::collections::BTreeMap::new()),
+        Some(s) => serde_json::from_str(&s).context("parse cached include env"),
+    }
+}
 
 /// Render a UserConfig to its CUE text form. Stable key order.
 ///
@@ -1168,6 +1239,56 @@ pub fn parse_qualified_ref_from_shim(body: &str) -> Option<QualifiedRef> {
 mod tests {
     use super::*;
     use crate::global::user_config::OrgCatalog;
+
+    fn tmp_paths() -> (tempfile::TempDir, GlobalPaths) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let paths = GlobalPaths::with_roots(
+            root.join("cfg"),
+            root.join("state"),
+            root.join("cache"),
+        );
+        (dir, paths)
+    }
+
+    #[tokio::test]
+    async fn include_env_round_trips_through_cache() {
+        let (_d, paths) = tmp_paths();
+        let qref = QualifiedRef::new("understory", "fungus");
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("FUNGUS_SERVER".to_string(), "https://prod".to_string());
+        write_include_env(&paths, &qref, "0.1.9", &env).await.unwrap();
+        let got = read_include_env(&paths, &qref, "0.1.9").await.unwrap();
+        assert_eq!(got, env);
+    }
+
+    #[tokio::test]
+    async fn missing_include_env_reads_empty() {
+        let (_d, paths) = tmp_paths();
+        let qref = QualifiedRef::new("understory", "fungus");
+        let got = read_include_env(&paths, &qref, "9.9.9").await.unwrap();
+        assert!(got.is_empty());
+    }
+
+    #[tokio::test]
+    async fn empty_include_env_removes_stale_file() {
+        let (_d, paths) = tmp_paths();
+        let qref = QualifiedRef::new("understory", "fungus");
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("A".to_string(), "1".to_string());
+        write_include_env(&paths, &qref, "1.0.0", &env).await.unwrap();
+        // Re-publish with no env ⇒ the cached file is cleared.
+        write_include_env(&paths, &qref, "1.0.0", &Default::default())
+            .await
+            .unwrap();
+        assert!(
+            read_include_env(&paths, &qref, "1.0.0")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!paths.tool_include_env_file("understory", "fungus", "1.0.0").exists());
+    }
 
     #[test]
     fn parses_qualified_ref_from_canonical_shim_body() {
