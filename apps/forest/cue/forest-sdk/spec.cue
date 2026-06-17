@@ -60,6 +60,27 @@ package sdk
 	// Artifacts shipped alongside the published binary and materialised into
 	// the local cache when the tool is fetched. See TASKS/023-global-tool-env.md.
 	include?: #ForestInclude
+
+	// External tools this component shells out to at runtime (e.g. a build
+	// component that invokes `cargo`). Forest verifies each is on PATH before
+	// dispatching to the component and fails up front with an actionable
+	// diagnostic, rather than letting the missing binary blow up mid-run.
+	// DATA-312.
+	requires?: #ForestRequires
+}
+
+// `requires` — the component's runtime tool contract. Forest checks these are
+// present on PATH before invoking the component.
+#ForestRequires: {
+	tools?: [...#ForestRequiredTool]
+}
+
+#ForestRequiredTool: {
+	// Binary expected on PATH, e.g. "cargo", "go", "docker".
+	name: string & =~"^[a-zA-Z][a-zA-Z0-9._-]*$"
+
+	// Optional install hint shown when the tool is missing.
+	hint?: string
 }
 
 // `include` — things shipped beside the binary. Forward-looking container;

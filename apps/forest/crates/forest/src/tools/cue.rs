@@ -20,6 +20,8 @@ use std::io::{IsTerminal, Write};
 
 use tokio::sync::OnceCell;
 
+use crate::tools::which::binary_on_path;
+
 static ENSURED: OnceCell<Result<(), String>> = OnceCell::const_new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -154,29 +156,6 @@ fn gather_env() -> Env {
 
 fn env_set(key: &str) -> bool {
     std::env::var(key).map(|v| !v.is_empty()).unwrap_or(false)
-}
-
-/// Walk `PATH` and check for an executable file with the given name. No
-/// subprocess — sub-millisecond on a warm fs.
-fn binary_on_path(name: &str) -> bool {
-    let Some(path_var) = std::env::var_os("PATH") else {
-        return false;
-    };
-    std::env::split_paths(&path_var).any(|dir| is_executable(&dir.join(name)))
-}
-
-#[cfg(unix)]
-fn is_executable(path: &std::path::Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    match std::fs::metadata(path) {
-        Ok(meta) => meta.is_file() && (meta.permissions().mode() & 0o111) != 0,
-        Err(_) => false,
-    }
-}
-
-#[cfg(not(unix))]
-fn is_executable(path: &std::path::Path) -> bool {
-    path.is_file()
 }
 
 async fn prompt_and_install_brew() -> anyhow::Result<()> {
@@ -354,34 +333,4 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn binary_on_path_finds_executable_and_rejects_non_executable() {
-        let dir = std::env::temp_dir().join(format!("forest-cue-probe-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let exe = dir.join("fakebin");
-        let nonexe = dir.join("fakelib");
-        std::fs::write(&exe, "#!/bin/sh\n").unwrap();
-        std::fs::write(&nonexe, "data").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::set_permissions(&nonexe, std::fs::Permissions::from_mode(0o644)).unwrap();
-
-        let orig = std::env::var_os("PATH");
-        // SAFETY: not thread-safe with concurrent PATH readers; no other
-        // test in this module reads PATH at the same time.
-        unsafe {
-            std::env::set_var("PATH", &dir);
-        }
-        assert!(binary_on_path("fakebin"));
-        assert!(!binary_on_path("fakelib"));
-        assert!(!binary_on_path("does-not-exist-anywhere"));
-        unsafe {
-            match orig {
-                Some(v) => std::env::set_var("PATH", v),
-                None => std::env::remove_var("PATH"),
-            }
-        }
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 }

@@ -218,6 +218,63 @@ fn field_for_check(id: &str) -> Option<&'static str> {
 }
 
 // ============================================================
+// Missing required tools
+// ============================================================
+
+/// One missing tool, rendered as a related sub-diagnostic. The tool name is the
+/// diagnostic code; the install hint (if declared) is the help.
+#[derive(Debug, Error)]
+#[error("`{name}` is not installed or not on PATH")]
+pub struct MissingTool {
+    name: String,
+    hint: Option<String>,
+}
+
+impl Diagnostic for MissingTool {
+    fn code<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
+        Some(Box::new(self.name.clone()))
+    }
+
+    fn help<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
+        self.hint
+            .as_ref()
+            .map(|h| Box::new(h.clone()) as Box<dyn std::fmt::Display + 'a>)
+    }
+}
+
+/// Aggregate "required tools are missing" diagnostic — one related entry per
+/// missing tool. Raised before dispatching to a component that declared
+/// `requires.tools`, so the user sees the full list up front instead of a
+/// mid-run spawn failure. DATA-312.
+#[derive(Debug, Error, Diagnostic)]
+#[error("`{component}` needs {} tool{} that {} not installed", tools.len(), if tools.len() == 1 { "" } else { "s" }, if tools.len() == 1 { "is" } else { "are" })]
+#[diagnostic(
+    code(forest::requires::tools),
+    help("Install the tool(s) below, then re-run.")
+)]
+pub struct MissingTools {
+    component: String,
+    #[related]
+    tools: Vec<MissingTool>,
+}
+
+impl MissingTools {
+    /// Build from the component name and the tools that failed the PATH check.
+    pub fn new(component: impl Into<String>, missing: Vec<crate::tools::which::RequiredTool>) -> Self {
+        Self {
+            component: component.into(),
+            tools: missing
+                .into_iter()
+                .map(|t| MissingTool {
+                    name: t.name,
+                    hint: t.hint,
+                })
+                .collect(),
+        }
+    }
+}
+
+// ============================================================
 // Source-mapping helpers
 // ============================================================
 
@@ -346,5 +403,25 @@ mod tests {
         assert!(rendered.contains("not valid semver"), "rendered: {rendered}");
         assert!(rendered.contains("Use MAJOR.MINOR.PATCH."), "rendered: {rendered}");
         assert!(rendered.contains("version: \"latest\""), "rendered: {rendered}");
+    }
+
+    #[test]
+    fn missing_tools_renders_each_tool_with_hint() {
+        let missing = vec![
+            crate::tools::which::RequiredTool {
+                name: "cargo".into(),
+                hint: Some("Install Rust via https://rustup.rs".into()),
+            },
+            crate::tools::which::RequiredTool {
+                name: "docker".into(),
+                hint: None,
+            },
+        ];
+        let diag = MissingTools::new("forest-contrib/build-rust", missing);
+        let rendered = render(&diag);
+        assert!(rendered.contains("build-rust"), "rendered: {rendered}");
+        assert!(rendered.contains("cargo"), "rendered: {rendered}");
+        assert!(rendered.contains("docker"), "rendered: {rendered}");
+        assert!(rendered.contains("rustup.rs"), "rendered: {rendered}");
     }
 }

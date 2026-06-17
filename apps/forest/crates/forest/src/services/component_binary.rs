@@ -714,6 +714,82 @@ pub async fn invoke_component_with_context(
     Ok(result)
 }
 
+/// Invoke a component method in *passthrough* mode (DATA-312).
+///
+/// Differs from [`invoke_component_with_context`] in two ways that matter for
+/// build/publish components wrapping long-running toolchains:
+///
+///   * **stderr is inherited**, so the child's live output (cargo/go/docker
+///     progress) streams straight to the user's terminal instead of being
+///     buffered and replayed only on failure.
+///   * **no timeout** — a release build can legitimately run for many minutes,
+///     well past [`COMPONENT_TIMEOUT`].
+///
+/// stdin still carries the `{spec,input,context}` payload, and stdout is still
+/// captured and parsed as the component's JSON summary (empty stdout → `Null`).
+/// Contract for components invoked this way: human-facing progress to stderr,
+/// a single JSON result object to stdout.
+pub async fn invoke_component_passthrough(
+    binary_path: &Path,
+    method: &str,
+    spec_json: &serde_json::Value,
+    input_json: &serde_json::Value,
+    context: Option<&forest_sdk::CallContext>,
+) -> anyhow::Result<serde_json::Value> {
+    use tokio::io::AsyncWriteExt;
+
+    let mut payload = serde_json::json!({
+        "spec": spec_json,
+        "input": input_json,
+    });
+    if let Some(ctx) = context {
+        payload["context"] = serde_json::to_value(ctx)?;
+    }
+
+    let mut child = tokio::process::Command::new(binary_path)
+        .arg(method)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        // Inherit stderr: stream the toolchain's output live.
+        .stderr(std::process::Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| {
+            anyhow::anyhow!("failed to spawn component {}: {e}", binary_path.display())
+        })?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let payload_bytes = serde_json::to_vec(&payload)?;
+        stdin.write_all(&payload_bytes).await?;
+        drop(stdin); // close stdin to signal EOF
+    }
+
+    // No timeout — build tooling can run arbitrarily long. The child's stderr
+    // is already streaming to the terminal, so the user sees progress.
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|e| anyhow::anyhow!("command '{method}' failed to execute: {e}"))?;
+
+    if !output.status.success() {
+        // stderr was inherited (already shown to the user), so we only need to
+        // report the exit. Callers wrap this as a miette diagnostic.
+        anyhow::bail!(
+            "component command '{method}' failed (exit {})",
+            output.status.code().unwrap_or(-1)
+        );
+    }
+
+    // The JSON summary on stdout is optional — a component may emit nothing.
+    if output.stdout.iter().all(u8::is_ascii_whitespace) {
+        return Ok(serde_json::Value::Null);
+    }
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| {
+        anyhow::anyhow!("component '{method}' produced an invalid JSON summary: {e}")
+    })?;
+    Ok(result)
+}
+
 pub fn current_platform() -> (&'static str, &'static str) {
     let os = if cfg!(target_os = "linux") {
         "linux"
