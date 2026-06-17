@@ -56,6 +56,19 @@ package sdk
 	// upstream URLs. Mutually exclusive with `upload` at publish time
 	// (see TASKS/018-global-tools.md §1a.2b).
 	external?: #ForestExternal
+
+	// Artifacts shipped alongside the published binary and materialised into
+	// the local cache when the tool is fetched. See TASKS/023-global-tool-env.md.
+	include?: #ForestInclude
+}
+
+// `include` — things shipped beside the binary. Forward-looking container;
+// `env` is the only member today (future: files, …). TASKS/023.
+#ForestInclude: {
+	// Default environment variables, auto-applied as defaults when the tool
+	// runs (the ambient shell environment always wins). Keys are POSIX env
+	// names; values are plain strings.
+	env?: {[=~"^[A-Za-z_][A-Za-z0-9_]*$"]: string}
 }
 
 #ForestComponentUpload: {
