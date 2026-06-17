@@ -861,19 +861,25 @@ impl ComponentService {
         ComponentAggregate::record_manifest(&mut root, upload_id)?;
 
         let manifest_json = manifest_json.to_string();
+        // Content identity for immutability (TASKS/024). Canonical hash of the
+        // manifest; the manifest embeds binary shas, so this pins binaries too.
+        // Stored alongside the manifest now; enforcement is wired separately.
+        let manifest_hash = forest_manifest::hash::manifest_hash(&manifest_json)
+            .map_err(|e| anyhow::anyhow!("hashing manifest: {e:?}"))?;
 
         self.event_store
             .save_with(&mut root, move |_events, tx| {
                 Box::pin(async move {
                     sqlx::query(
-                        "INSERT INTO component_manifests (component_id, version, manifest_json)
-                         SELECT $1, cs.version, $2::jsonb
+                        "INSERT INTO component_manifests (component_id, version, manifest_json, manifest_hash)
+                         SELECT $1, cs.version, $2::jsonb, $3
                          FROM component_staging cs WHERE cs.id = $1
                          ON CONFLICT (component_id, version)
-                         DO UPDATE SET manifest_json = $2::jsonb, created_at = now()",
+                         DO UPDATE SET manifest_json = $2::jsonb, manifest_hash = $3, created_at = now()",
                     )
                     .bind(upload_id)
                     .bind(&manifest_json)
+                    .bind(&manifest_hash)
                     .execute(&mut **tx)
                     .await
                     .context("publish manifest")?;
