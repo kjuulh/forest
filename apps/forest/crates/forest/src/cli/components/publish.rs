@@ -292,7 +292,9 @@ impl PublishCommand {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("failed to parse component CUE: {stderr}");
+            return Err(crate::diagnostics::report(
+                crate::diagnostics::CueEvalError::from_cue_stderr(&current_dir, &stderr),
+            ));
         }
 
         let doc: serde_json::Value = serde_json::from_slice(&output.stdout)?;
@@ -371,7 +373,10 @@ impl PublishCommand {
         };
         let checks = crate::services::preflight::standard_checks();
         if let Err(failures) = crate::services::preflight::run_checks(&pf_ctx, &checks) {
-            anyhow::bail!("{}", crate::services::preflight::render_failures(&failures));
+            let manifest = crate::diagnostics::CueManifestSource::load(&current_dir);
+            return Err(crate::diagnostics::report(
+                crate::diagnostics::PublishPreflightFailed::new(&failures, manifest.as_ref()),
+            ));
         }
 
         // 2. Check for binary (optional — CUE-only / Deno components don't need one)

@@ -21,6 +21,7 @@ forest-sdk.workspace = true
 forest-sdk-codegen.workspace = true
 
 anyhow.workspace = true
+miette.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

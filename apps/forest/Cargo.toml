@@ -31,6 +31,7 @@ forest-sdk-codegen = { path = "crates/forest-sdk-codegen" }
 forest-event-store = { path = "crates/forest-event-store" }
 
 anyhow = { version = "1" }
+miette = { version = "7", features = ["fancy"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.145"

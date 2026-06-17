@@ -16,6 +16,7 @@ mod user_state;
 
 mod contexts;
 mod contracts;
+mod diagnostics;
 mod features;
 mod global;
 mod lockfile;
@@ -29,7 +30,7 @@ mod tools;
 mod forest_context;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> std::process::ExitCode {
     dotenvy::dotenv().ok();
 
     // All tracing output (DEBUG/INFO/WARN/ERROR) goes to stderr so it never
@@ -43,7 +44,16 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    cli::execute().await?;
+    // Print errors ourselves (Debug form, same as anyhow's default Termination)
+    // rather than returning a Result from `main`. The build/publish path
+    // (DATA-312) renders miette diagnostics into the error string at the leaf;
+    // letting Rust's default `Error: {:?}` Termination prefix glue itself onto
+    // a multi-line graphical report would mangle it. A plain `eprintln!` keeps
+    // both pre-rendered reports and ordinary anyhow chains intact.
+    if let Err(err) = cli::execute().await {
+        eprintln!("{err:?}");
+        return std::process::ExitCode::FAILURE;
+    }
 
-    Ok(())
+    std::process::ExitCode::SUCCESS
 }
