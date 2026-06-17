@@ -435,9 +435,34 @@ impl RunCommand {
 
         let path = svc.resolve_to_cached_path(&qref, &version).await?;
 
-        // Exec.
+        // Resolve the default env to inject (TASKS/023): component-declared
+        // defaults (cached beside the binary) < per-tool local override
+        // (forest.cue) < ambient shell env (always wins).
+        let component_env = svc
+            .load_tool_include_env(&qref, &version)
+            .await
+            .unwrap_or_default();
+        let local_env = svc
+            .load_user_config()
+            .await
+            .unwrap_or_default()
+            .dependencies
+            .get(&format!("{}/{}", qref.organisation, qref.name))
+            .map(|d| d.env.clone())
+            .unwrap_or_default();
+        let ambient: std::collections::BTreeSet<String> = std::env::vars_os()
+            .filter_map(|(k, _)| k.into_string().ok())
+            .collect();
+        let injected =
+            crate::global::env::resolve_injection(&component_env, &local_env, &ambient);
+
+        // Exec. We inherit the parent environment and only *add* the keys not
+        // already present, so an exported ambient value is never overwritten.
         use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new(&path).args(&self.args).exec();
+        let mut cmd = std::process::Command::new(&path);
+        cmd.args(&self.args);
+        cmd.envs(&injected);
+        let err = cmd.exec();
         anyhow::bail!("failed to exec {}: {err}", path.display());
     }
 }
