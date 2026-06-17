@@ -460,6 +460,13 @@ impl PublishCommand {
             }
         }
 
+        // `include` (TASKS/023): default env shipped beside the binary. Read
+        // straight from the CUE doc (a regular field, present in `cue export`)
+        // and attach to the manifest — independent of kind/describe.
+        if let Some(include) = include_manifest_value(&doc)? {
+            manifest["include"] = include;
+        }
+
         tracing::info!(
             "manifest: kind={}, {}",
             kind,
@@ -743,6 +750,61 @@ fn describe_response_tool_facet(
     })
 }
 
+/// Extract the `include` block (TASKS/023) from the CUE project doc, ready to
+/// attach to the manifest. `include` is a plain CUE field, so it appears in
+/// `cue export` output directly (no `cue eval -e` needed). Validates env
+/// names/values for a friendly publish-time error and warns on secret-ish keys.
+/// Returns `None` when there is no `include` block.
+fn include_manifest_value(
+    doc: &serde_json::Value,
+) -> anyhow::Result<Option<serde_json::Value>> {
+    let include = match doc.pointer("/forest/component/include") {
+        Some(v) if !v.is_null() => v,
+        _ => return Ok(None),
+    };
+    let obj = include
+        .as_object()
+        .context("forest.component.include must be an object")?;
+
+    if let Some(env) = obj.get("env").filter(|v| !v.is_null()) {
+        let env_obj = env
+            .as_object()
+            .context("forest.component.include.env must be a map of string to string")?;
+        for (key, value) in env_obj {
+            forest_manifest::names::validate_env_name(key).map_err(|e| {
+                anyhow::anyhow!("include.env key {key:?} is not a valid env name: {e:?}")
+            })?;
+            let val = value
+                .as_str()
+                .with_context(|| format!("include.env.{key} must be a string"))?;
+            forest_manifest::names::validate_env_value(val).map_err(|e| {
+                anyhow::anyhow!("include.env.{key} has an invalid value: {e:?}")
+            })?;
+            if looks_secret(key) {
+                eprintln!(
+                    "warning: include.env.{key} looks like a secret — `include.env` is \
+                     plain text in the published manifest and visible on the component \
+                     page; it is not a secrets mechanism."
+                );
+            }
+        }
+    }
+
+    Ok(Some(include.clone()))
+}
+
+/// Heuristic: does this env key name look like it carries a secret? Advisory
+/// only (TASKS/023 E8/Q4) — never blocks the publish.
+fn looks_secret(key: &str) -> bool {
+    let u = key.to_ascii_uppercase();
+    u == "PASSWORD"
+        || u.ends_with("_SECRET")
+        || u.ends_with("_TOKEN")
+        || u.ends_with("_KEY")
+        || u.ends_with("_PASS")
+        || u.ends_with("_PASSWORD")
+}
+
 /// External-manifest publishing path. Skips the binary build/upload entirely
 /// and submits only the manifest (kind=external). See §1a.2b.
 async fn publish_external(
@@ -806,7 +868,7 @@ async fn publish_external(
     // explicitly to extract its concrete JSON form.
     let tool_facet = eval_tool_facet(current_dir).await?;
 
-    let manifest = serde_json::json!({
+    let mut manifest = serde_json::json!({
         "name": name,
         "organisation": organisation,
         "version": version,
@@ -814,12 +876,14 @@ async fn publish_external(
         "tool": tool_facet,
         "platforms": platforms,
     });
+    if let Some(include) = include_manifest_value(doc)? {
+        manifest["include"] = include;
+    }
 
     tracing::info!(
         "publishing external manifest: {organisation}/{name}@{version} ({} platforms)",
         platforms.len()
     );
-    let _ = doc; // reserved for future fields
 
     print_publish_context(organisation, name);
     let client = state.grpc_client();
@@ -927,7 +991,7 @@ async fn publish_prebuilt(
         anyhow::bail!("prebuilt block declared no platforms");
     }
 
-    let manifest = serde_json::json!({
+    let mut manifest = serde_json::json!({
         "name": name,
         "organisation": organisation,
         "version": version,
@@ -938,6 +1002,9 @@ async fn publish_prebuilt(
         "capabilities": { "methods": [] },
         "platforms": platforms_for_manifest,
     });
+    if let Some(include) = include_manifest_value(doc)? {
+        manifest["include"] = include;
+    }
 
     tracing::info!(
         "publishing prebuilt component {organisation}/{name}@{version} ({} platforms)",
@@ -1147,4 +1214,50 @@ fn collect_dir_recursive<'a>(
         }
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod include_tests {
+    use super::*;
+
+    fn doc_with_include(include: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({ "forest": { "component": { "include": include } } })
+    }
+
+    #[test]
+    fn no_include_returns_none() {
+        let doc = serde_json::json!({ "forest": { "component": {} } });
+        assert!(include_manifest_value(&doc).unwrap().is_none());
+    }
+
+    #[test]
+    fn valid_env_is_passed_through() {
+        let doc = doc_with_include(serde_json::json!({
+            "env": { "FUNGUS_SERVER": "https://prod" }
+        }));
+        let out = include_manifest_value(&doc).unwrap().unwrap();
+        assert_eq!(out["env"]["FUNGUS_SERVER"], "https://prod");
+    }
+
+    #[test]
+    fn invalid_env_name_errors() {
+        let doc = doc_with_include(serde_json::json!({ "env": { "1BAD": "x" } }));
+        assert!(include_manifest_value(&doc).is_err());
+    }
+
+    #[test]
+    fn non_string_env_value_errors() {
+        let doc = doc_with_include(serde_json::json!({ "env": { "FOO": 5 } }));
+        assert!(include_manifest_value(&doc).is_err());
+    }
+
+    #[test]
+    fn secret_name_heuristic() {
+        assert!(looks_secret("FUNGUS_TOKEN"));
+        assert!(looks_secret("api_secret"));
+        assert!(looks_secret("PASSWORD"));
+        assert!(looks_secret("AWS_SECRET_ACCESS_KEY"));
+        assert!(!looks_secret("FUNGUS_SERVER"));
+        assert!(!looks_secret("RUST_LOG"));
+    }
 }
