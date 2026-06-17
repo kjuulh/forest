@@ -12,9 +12,11 @@
 //!   - [`names`] — tool/shim name validation.
 //!   - [`shim`] — shim script generation.
 //!   - [`lockfile`] — strict-mode global lockfile parser/serialiser.
+//!   - [`env`] — resolution of env vars to inject when running a tool.
 //!
 //! Effectful shell modules will be added as implementation progresses.
 
+pub mod env;
 pub mod eval;
 pub mod extract;
 pub mod lockfile;
