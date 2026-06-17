@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.16](https://github.com/understory-io/forest/compare/v0.1.15...v0.1.16) (2026-06-17)
+
+
+### Features
+
+* **forage:** show include{env} defaults on the component page ([557a5b8](https://github.com/understory-io/forest/commit/557a5b8d662be2dbe6b5d7430d78eebbaa23c32c))
+* **server:** store canonical manifest_hash on publish (+ backfill) ([#82](https://github.com/understory-io/forest/issues/82)) ([e9b55a5](https://github.com/understory-io/forest/commit/e9b55a52d8a5095dac26230b5a61486b6cd1a43d))
+
 ## [0.1.15](https://github.com/understory-io/forest/compare/v0.1.14...v0.1.15) (2026-06-17)
 
 
