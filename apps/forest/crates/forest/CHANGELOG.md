@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.15](https://github.com/understory-io/forest/compare/v0.1.14...v0.1.15) (2026-06-17)
+
+
+### Features
+
+* **cli:** show include{env} defaults in components show ([aa99de4](https://github.com/understory-io/forest/commit/aa99de422c868a9654c2626491b6b21306fb167f))
+* **global:** cache include{env} beside the binary on cold fetch ([3a7b98f](https://github.com/understory-io/forest/commit/3a7b98f82aba0636da08ab9b16a0757e64018c00))
+* **global:** inject include{env} defaults when running a tool ([119d59a](https://github.com/understory-io/forest/commit/119d59ac7eb4c56885fc9c8e1395088eb3d0f833))
+* **global:** per-tool env override in user config (forest.cue) ([37881dc](https://github.com/understory-io/forest/commit/37881dc326ead1d501475f016b83843b09a2aa1b))
+* **global:** pure resolve_injection for tool env precedence ([492187c](https://github.com/understory-io/forest/commit/492187c904f0d2b3938fbfa85ee4862326ad2ccf))
+* **manifest:** parse include{env} block with name/value validators ([8b2c46f](https://github.com/understory-io/forest/commit/8b2c46f4153220dd044cdaf6f5b52478469521f1))
+* **manifest:** pure cores for version immutability (groundwork) ([0afc819](https://github.com/understory-io/forest/commit/0afc81939a750467209ade4d3beea302261c4012))
+* **publish:** emit include{env} into the component manifest ([de89613](https://github.com/understory-io/forest/commit/de89613a8c84ef18a13e590110661881f36ff327))
+* **sdk:** #ForestInclude with env on #ForestComponent (CUE) ([40eb43f](https://github.com/understory-io/forest/commit/40eb43f8a855dfcb7c1767698ffe04e8969da14a))
+
 ## [0.1.14](https://github.com/understory-io/forest/compare/v0.1.13...v0.1.14) (2026-06-17)
 
 
