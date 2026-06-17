@@ -1446,10 +1446,12 @@ version = "0.1.0"
 name = "forest-manifest"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "pretty_assertions",
  "proptest",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
 ]
 
 [[package]]

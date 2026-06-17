@@ -12,6 +12,8 @@
 
 use std::collections::BTreeMap;
 
+pub mod decision;
+pub mod hash;
 pub mod names;
 
 use names::{
