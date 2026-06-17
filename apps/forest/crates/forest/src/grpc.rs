@@ -12,6 +12,7 @@ use forest_grpc_interface::{
     get_component_files_response::Msg,
     get_projects_request::Query,
     notification_service_client::NotificationServiceClient,
+    o_auth_apps_service_client::OAuthAppsServiceClient,
     organisation_service_client::OrganisationServiceClient,
     registry_service_client::RegistryServiceClient,
     release_pipeline_service_client::ReleasePipelineServiceClient,
@@ -84,6 +85,7 @@ pub struct GrpcClient {
     release_client: OnceCell<ReleaseServiceClient<AuthMiddleware<Channel>>>,
     destination_client: OnceCell<DestinationServiceClient<AuthMiddleware<Channel>>>,
     organisation_client: OnceCell<OrganisationServiceClient<AuthMiddleware<Channel>>>,
+    oauth_apps_client: OnceCell<OAuthAppsServiceClient<AuthMiddleware<Channel>>>,
     users_client: OnceCell<UsersServiceClient<Channel>>,
     auth_users_client: OnceCell<UsersServiceClient<AuthMiddleware<Channel>>>,
     notification_client: OnceCell<NotificationServiceClient<AuthMiddleware<Channel>>>,
@@ -688,6 +690,108 @@ impl GrpcClient {
             .await?;
 
         Ok(client.clone())
+    }
+
+    async fn oauth_apps_client(
+        &self,
+    ) -> anyhow::Result<OAuthAppsServiceClient<AuthMiddleware<Channel>>> {
+        let client = self
+            .oauth_apps_client
+            .get_or_try_init(move || async move {
+                let channel = self.auth_channel(self.channel().await?);
+                Ok::<_, anyhow::Error>(OAuthAppsServiceClient::new(channel))
+            })
+            .await?;
+
+        Ok(client.clone())
+    }
+
+    pub async fn create_oauth_app(
+        &self,
+        organisation_id: &str,
+        name: &str,
+        description: &str,
+        homepage_url: &str,
+        redirect_uris: Vec<String>,
+        scopes: Vec<String>,
+    ) -> anyhow::Result<CreateOAuthAppResponse> {
+        let mut client = self.oauth_apps_client().await?;
+        let resp = client
+            .create_o_auth_app(CreateOAuthAppRequest {
+                organisation_id: organisation_id.into(),
+                name: name.into(),
+                description: description.into(),
+                homepage_url: homepage_url.into(),
+                redirect_uris,
+                scopes,
+            })
+            .await
+            .map_err(grpc_err)
+            .context("create oauth app")?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn list_oauth_apps(&self, organisation_id: &str) -> anyhow::Result<Vec<OAuthApp>> {
+        let mut client = self.oauth_apps_client().await?;
+        let resp = client
+            .list_o_auth_apps(ListOAuthAppsRequest {
+                organisation_id: organisation_id.into(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("list oauth apps")?;
+        Ok(resp.into_inner().apps)
+    }
+
+    pub async fn get_oauth_app(
+        &self,
+        organisation_id: &str,
+        app_id: &str,
+    ) -> anyhow::Result<Option<OAuthApp>> {
+        let mut client = self.oauth_apps_client().await?;
+        let resp = client
+            .get_o_auth_app(GetOAuthAppRequest {
+                organisation_id: organisation_id.into(),
+                app_id: app_id.into(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("get oauth app")?;
+        Ok(resp.into_inner().app)
+    }
+
+    pub async fn rotate_oauth_app_secret(
+        &self,
+        organisation_id: &str,
+        app_id: &str,
+    ) -> anyhow::Result<RotateOAuthAppSecretResponse> {
+        let mut client = self.oauth_apps_client().await?;
+        let resp = client
+            .rotate_o_auth_app_secret(RotateOAuthAppSecretRequest {
+                organisation_id: organisation_id.into(),
+                app_id: app_id.into(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("rotate oauth app secret")?;
+        Ok(resp.into_inner())
+    }
+
+    pub async fn delete_oauth_app(
+        &self,
+        organisation_id: &str,
+        app_id: &str,
+    ) -> anyhow::Result<()> {
+        let mut client = self.oauth_apps_client().await?;
+        client
+            .delete_o_auth_app(DeleteOAuthAppRequest {
+                organisation_id: organisation_id.into(),
+                app_id: app_id.into(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("delete oauth app")?;
+        Ok(())
     }
 
     // ── Organisations ───────────────────────────────────────────────
@@ -2631,6 +2735,7 @@ impl GrpcClientState for State {
                 release_client: OnceCell::const_new(),
                 destination_client: OnceCell::const_new(),
                 organisation_client: OnceCell::const_new(),
+                oauth_apps_client: OnceCell::const_new(),
                 users_client: OnceCell::const_new(),
                 auth_users_client: OnceCell::const_new(),
                 notification_client: OnceCell::const_new(),

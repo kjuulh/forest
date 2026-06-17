@@ -1,6 +1,7 @@
 mod create;
 mod get;
 mod member;
+mod oauth_app;
 mod search;
 
 use crate::state::State;
@@ -22,6 +23,9 @@ enum Commands {
     Search(search::SearchCommand),
     /// Manage organisation members
     Member(member::MemberCommand),
+    /// Manage OAuth applications ("Sign in with Forest")
+    #[command(alias = "oauth-apps", alias = "oauth")]
+    OauthApp(oauth_app::OAuthAppCommand),
 }
 
 impl OrganisationCommand {
@@ -30,6 +34,7 @@ impl OrganisationCommand {
             Commands::Create(_) => true,
             Commands::Show(_) | Commands::Search(_) => false,
             Commands::Member(c) => c.is_mutation(),
+            Commands::OauthApp(c) => c.is_mutation(),
         }
     }
 
@@ -42,6 +47,7 @@ impl OrganisationCommand {
             Commands::Show(cmd) => cmd.execute(state, &format).await,
             Commands::Search(cmd) => cmd.execute(state, &format).await,
             Commands::Member(cmd) => cmd.execute(state, &format).await,
+            Commands::OauthApp(cmd) => cmd.execute(state, &format).await,
         }
     }
 }
