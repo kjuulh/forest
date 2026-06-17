@@ -23,6 +23,7 @@ version = "0.1.0"
 
 [workspace.dependencies]
 forest-models = { path = "crates/forest-models" }
+forest-build-core = { path = "crates/forest-build-core" }
 forest-grpc-interface = { path = "crates/forest-grpc-interface" }
 forest-manifest = { path = "crates/forest-manifest" }
 forest-runner = { path = "crates/forest-runner" }
