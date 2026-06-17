@@ -153,6 +153,32 @@
             </div>
             {% endif %}
 
+            {# ── Default environment (include.env) ─────────────────────── #}
+            {% if manifest and manifest.include and manifest.include.env %}
+            <div class="mb-8">
+                <h2 class="text-lg font-bold mb-3">Default environment</h2>
+                <p class="text-sm text-gray-600 mb-3">Shipped with the tool and applied as defaults when run via <code class="text-xs bg-gray-100 px-1 rounded">forest global run</code>. A value you export in your own shell always wins.</p>
+                <div class="border border-gray-200 rounded-lg overflow-hidden">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                            <tr>
+                                <th class="px-4 py-2 text-left font-medium">Variable</th>
+                                <th class="px-4 py-2 text-left font-medium">Default</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            {% for key, value in manifest.include.env | items %}
+                            <tr>
+                                <td class="px-4 py-2.5 font-mono text-xs">{{ key }}</td>
+                                <td class="px-4 py-2.5 font-mono text-xs text-gray-600 break-all">{{ value }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+
             {# ── Releases — GitHub-style cards ─────────────────────────── #}
             <div id="releases" class="mb-8">
                 <h2 class="text-lg font-bold mb-4">Releases</h2>

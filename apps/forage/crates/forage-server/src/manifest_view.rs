@@ -34,6 +34,20 @@ pub struct ManifestView {
     pub binary_in_archive: Option<String>,
     #[serde(default)]
     pub archive_sha256: Option<String>,
+
+    /// `include` block (TASKS/023): artifacts shipped beside the binary.
+    /// Today this is `env` — default environment variables applied when the
+    /// tool runs (the developer's own shell values always win).
+    #[serde(default)]
+    pub include: IncludeView,
+}
+
+/// The `include` block, structured for UI rendering.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct IncludeView {
+    /// Default environment variables (name → value).
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
 }
 
 /// Per-platform metadata extracted from the manifest's `platforms` map.
@@ -61,6 +75,7 @@ impl ManifestView {
             && self.url.is_none()
             && self.archive.is_none()
             && self.binary_in_archive.is_none()
+            && self.include.env.is_empty()
     }
 
     /// Render a sha256 in a compact human form: `5df1c9…ec945` (first 6 +
@@ -116,6 +131,29 @@ mod tests {
         // Methods absent → empty vec (forward-compat: this is a tool_binary
         // with no methods, which is exactly the shape spec).
         assert!(m.methods.is_empty());
+    }
+
+    #[test]
+    fn parse_include_env() {
+        let json = r#"{
+            "kind": "binary",
+            "tool": {"name": "fungus", "argv_passthrough": true},
+            "include": {"env": {"FUNGUS_SERVER": "https://fungus.understory.sh"}},
+            "platforms": {"darwin_arm64": {"sha256": "abc", "size": 1}}
+        }"#;
+        let m = ManifestView::parse(json).unwrap();
+        assert_eq!(
+            m.include.env.get("FUNGUS_SERVER").map(String::as_str),
+            Some("https://fungus.understory.sh")
+        );
+        assert!(!m.is_empty());
+    }
+
+    #[test]
+    fn manifest_without_include_has_empty_env() {
+        let json = r#"{"kind": "binary", "platforms": {}}"#;
+        let m = ManifestView::parse(json).unwrap();
+        assert!(m.include.env.is_empty());
     }
 
     #[test]
