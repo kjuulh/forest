@@ -1,6 +1,7 @@
 mod account_link_tests;
 mod account_tests;
 mod auth_tests;
+mod developer_tests;
 mod device_tests;
 mod integration_tests;
 mod nats_tests;
@@ -10,6 +11,8 @@ mod slack_tests;
 mod token_tests;
 mod email_verification_tests;
 mod magic_link_tests;
+mod oauth_e2e_tests;
+mod oauth_flow_tests;
 mod oauth_tests;
 mod registry_tests;
 mod webhook_delivery_tests;

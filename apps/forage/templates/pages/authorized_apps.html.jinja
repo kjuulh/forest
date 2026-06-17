@@ -1,0 +1,36 @@
+{% extends "base.html.jinja" %}
+
+{% block content %}
+<section class="app-container pt-12">
+    <div class="mb-8">
+        <h1 class="text-2xl font-bold">Authorized applications</h1>
+        <p class="text-sm text-gray-500 mt-1">Third-party apps you've granted access to your Forest account.</p>
+    </div>
+
+    {% if grants | length > 0 %}
+    <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+        {% for grant in grants %}
+        <div class="flex items-center justify-between px-5 py-4">
+            <div>
+                <div class="font-medium text-gray-900">{{ grant.name }}</div>
+                <div class="flex gap-1 mt-1">
+                    {% for scope in grant.scopes %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">{{ scope }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+            <form method="POST" action="/settings/authorized-apps/{{ grant.app_id }}/revoke"
+                  onsubmit="return confirm('Revoke access for {{ grant.name }}? It will no longer be able to act on your behalf.');">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <button type="submit" class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-red-700 border border-red-300 rounded-md hover:bg-red-50">Revoke</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center border border-dashed border-gray-200 rounded-lg py-16">
+        <p class="text-sm text-gray-500">You haven't authorized any applications.</p>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

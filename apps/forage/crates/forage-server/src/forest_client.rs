@@ -5,8 +5,9 @@ use forage_core::auth::{
 use forage_core::platform::{
     AllowedDomain, ApprovalDecisionEntry, ApprovalState, Artifact, ArtifactContext,
     ArtifactDestination, ArtifactRef, ArtifactSource, CreatePolicyInput,
-    CreateReleasePipelineInput, CreateTriggerInput, Destination, DestinationType,
-    DestinationTypeInfo, Environment, ForestPlatform, JoinOffer, MetadataFieldDef,
+    CreateReleasePipelineInput, CreateTriggerInput, CreatedOAuthApp, Destination, DestinationType,
+    DestinationTypeInfo, Environment, ForestOAuthApps, ForestPlatform, JoinOffer, MetadataFieldDef,
+    OAuthApp, OAuthClientInfo, OAuthFlowError, OAuthGrant, OAuthIssuedTokens, OAuthUserinfo,
     NotificationPreference, Organisation, OrgMember, PipelineStage, PipelineStageConfig,
     PlanOutput, PlatformError, Policy, PolicyConfig, PolicyEvaluation, ReleasePipeline,
     Trigger, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
@@ -70,6 +71,12 @@ impl GrpcForestClient {
 
     fn org_client(&self) -> OrganisationServiceClient<Channel> {
         OrganisationServiceClient::new(self.channel.clone())
+    }
+
+    fn oauth_apps_client(
+        &self,
+    ) -> forage_grpc::o_auth_apps_service_client::OAuthAppsServiceClient<Channel> {
+        forage_grpc::o_auth_apps_service_client::OAuthAppsServiceClient::new(self.channel.clone())
     }
 
     pub(crate) fn artifact_client(
@@ -3226,6 +3233,503 @@ fn convert_component_version_info(v: forage_grpc::ComponentVersionInfo) -> Compo
 /// translation, page=1 produced offset=20 server-side and hid the first page.
 fn ui_page_to_proto(ui_page: i32) -> i32 {
     ui_page.saturating_sub(1).max(0)
+}
+
+// ─── OAuth applications ──────────────────────────────────────────────
+
+fn convert_oauth_app(app: forage_grpc::OAuthApp) -> OAuthApp {
+    OAuthApp {
+        app_id: app.app_id,
+        organisation_id: app.organisation_id,
+        name: app.name,
+        description: app.description,
+        homepage_url: app.homepage_url,
+        client_id: app.client_id,
+        redirect_uris: app.redirect_uris,
+        scopes: app.scopes,
+        created_by: app.created_by,
+        created_at: app
+            .created_at
+            .map(|t| t.seconds.to_string())
+            .unwrap_or_default(),
+        updated_at: app
+            .updated_at
+            .map(|t| t.seconds.to_string())
+            .unwrap_or_default(),
+    }
+}
+
+#[async_trait::async_trait]
+impl ForestOAuthApps for GrpcForestClient {
+    #[tracing::instrument(skip_all)]
+    async fn create_oauth_app(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        name: &str,
+        description: &str,
+        homepage_url: &str,
+        redirect_uris: &[String],
+        scopes: &[String],
+    ) -> Result<CreatedOAuthApp, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::CreateOAuthAppRequest {
+                organisation_id: organisation_id.into(),
+                name: name.into(),
+                description: description.into(),
+                homepage_url: homepage_url.into(),
+                redirect_uris: redirect_uris.to_vec(),
+                scopes: scopes.to_vec(),
+            },
+        )?;
+
+        let resp = self
+            .oauth_apps_client()
+            .create_o_auth_app(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+
+        let app = resp
+            .app
+            .ok_or_else(|| PlatformError::Other("no app in response".into()))?;
+        Ok(CreatedOAuthApp {
+            app: convert_oauth_app(app),
+            client_secret: resp.client_secret,
+        })
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn list_oauth_apps(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+    ) -> Result<Vec<OAuthApp>, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::ListOAuthAppsRequest {
+                organisation_id: organisation_id.into(),
+            },
+        )?;
+
+        let resp = self
+            .oauth_apps_client()
+            .list_o_auth_apps(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+
+        Ok(resp.apps.into_iter().map(convert_oauth_app).collect())
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn get_oauth_app(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        app_id: &str,
+    ) -> Result<OAuthApp, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::GetOAuthAppRequest {
+                organisation_id: organisation_id.into(),
+                app_id: app_id.into(),
+            },
+        )?;
+
+        let resp = self
+            .oauth_apps_client()
+            .get_o_auth_app(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+
+        resp.app
+            .map(convert_oauth_app)
+            .ok_or_else(|| PlatformError::NotFound("oauth app not found".into()))
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn update_oauth_app(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        app_id: &str,
+        name: &str,
+        description: &str,
+        homepage_url: &str,
+        redirect_uris: &[String],
+        scopes: &[String],
+    ) -> Result<OAuthApp, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::UpdateOAuthAppRequest {
+                organisation_id: organisation_id.into(),
+                app_id: app_id.into(),
+                name: name.into(),
+                description: description.into(),
+                homepage_url: homepage_url.into(),
+                redirect_uris: redirect_uris.to_vec(),
+                scopes: scopes.to_vec(),
+            },
+        )?;
+
+        let resp = self
+            .oauth_apps_client()
+            .update_o_auth_app(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+
+        resp.app
+            .map(convert_oauth_app)
+            .ok_or_else(|| PlatformError::Other("no app in response".into()))
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn rotate_oauth_app_secret(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        app_id: &str,
+    ) -> Result<CreatedOAuthApp, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::RotateOAuthAppSecretRequest {
+                organisation_id: organisation_id.into(),
+                app_id: app_id.into(),
+            },
+        )?;
+
+        let resp = self
+            .oauth_apps_client()
+            .rotate_o_auth_app_secret(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+
+        let app = resp
+            .app
+            .ok_or_else(|| PlatformError::Other("no app in response".into()))?;
+        Ok(CreatedOAuthApp {
+            app: convert_oauth_app(app),
+            client_secret: resp.client_secret,
+        })
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn delete_oauth_app(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        app_id: &str,
+    ) -> Result<(), PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::DeleteOAuthAppRequest {
+                organisation_id: organisation_id.into(),
+                app_id: app_id.into(),
+            },
+        )?;
+
+        self.oauth_apps_client()
+            .delete_o_auth_app(req)
+            .await
+            .map_err(map_platform_status)?;
+        Ok(())
+    }
+
+    // ── Authorization server (service-account authenticated) ──────────
+
+    async fn lookup_oauth_client(
+        &self,
+        client_id: &str,
+    ) -> Result<Option<OAuthClientInfo>, PlatformError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| PlatformError::Other("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::LookupOAuthClientRequest {
+                client_id: client_id.into(),
+            },
+        )
+        .map_err(PlatformError::Other)?;
+
+        match self.oauth_apps_client().lookup_o_auth_client(req).await {
+            Ok(resp) => {
+                let r = resp.into_inner();
+                Ok(Some(OAuthClientInfo {
+                    app_id: r.app_id,
+                    organisation_id: r.organisation_id,
+                    name: r.name,
+                    description: r.description,
+                    homepage_url: r.homepage_url,
+                    redirect_uris: r.redirect_uris,
+                    scopes: r.scopes,
+                }))
+            }
+            Err(status) if status.code() == tonic::Code::NotFound => Ok(None),
+            Err(status) => Err(map_platform_status(status)),
+        }
+    }
+
+    async fn create_oauth_authorization_code(
+        &self,
+        client_id: &str,
+        user_id: &str,
+        redirect_uri: &str,
+        scopes: &[String],
+        code_challenge: Option<&str>,
+        code_challenge_method: Option<&str>,
+        nonce: Option<&str>,
+    ) -> Result<String, OAuthFlowError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| OAuthFlowError::ServerError("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::CreateOAuthAuthorizationCodeRequest {
+                client_id: client_id.into(),
+                user_id: user_id.into(),
+                redirect_uri: redirect_uri.into(),
+                scopes: scopes.to_vec(),
+                code_challenge: code_challenge.unwrap_or_default().into(),
+                code_challenge_method: code_challenge_method.unwrap_or_default().into(),
+                nonce: nonce.unwrap_or_default().into(),
+            },
+        )
+        .map_err(OAuthFlowError::ServerError)?;
+
+        let resp = self
+            .oauth_apps_client()
+            .create_o_auth_authorization_code(req)
+            .await
+            .map_err(map_oauth_flow_status)?;
+        Ok(resp.into_inner().code)
+    }
+
+    async fn exchange_oauth_code(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        code: &str,
+        redirect_uri: &str,
+        code_verifier: Option<&str>,
+    ) -> Result<OAuthIssuedTokens, OAuthFlowError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| OAuthFlowError::ServerError("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::ExchangeOAuthCodeRequest {
+                client_id: client_id.into(),
+                client_secret: client_secret.into(),
+                code: code.into(),
+                redirect_uri: redirect_uri.into(),
+                code_verifier: code_verifier.unwrap_or_default().into(),
+            },
+        )
+        .map_err(OAuthFlowError::ServerError)?;
+
+        let resp = self
+            .oauth_apps_client()
+            .exchange_o_auth_code(req)
+            .await
+            .map_err(map_oauth_flow_status)?
+            .into_inner();
+        let tokens = resp
+            .tokens
+            .ok_or_else(|| OAuthFlowError::ServerError("no tokens in response".into()))?;
+        Ok(OAuthIssuedTokens {
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token,
+            token_type: tokens.token_type,
+            expires_in_seconds: tokens.expires_in_seconds,
+            scopes: tokens.scopes,
+            id_token: if tokens.id_token.is_empty() { None } else { Some(tokens.id_token) },
+        })
+    }
+
+    async fn oauth_userinfo(&self, access_token: &str) -> Result<OAuthUserinfo, OAuthFlowError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| OAuthFlowError::ServerError("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::GetOAuthUserinfoRequest {
+                access_token: access_token.into(),
+            },
+        )
+        .map_err(OAuthFlowError::ServerError)?;
+
+        let resp = self
+            .oauth_apps_client()
+            .get_o_auth_userinfo(req)
+            .await
+            .map_err(map_oauth_flow_status)?
+            .into_inner();
+        let u = resp
+            .userinfo
+            .ok_or_else(|| OAuthFlowError::ServerError("no userinfo in response".into()))?;
+        Ok(OAuthUserinfo {
+            sub: u.sub,
+            username: opt(u.username),
+            profile_picture_url: opt(u.profile_picture_url),
+            email: opt(u.email),
+            emails: u.emails,
+            scopes: u.scopes,
+        })
+    }
+
+    async fn refresh_oauth_token(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        refresh_token: &str,
+    ) -> Result<OAuthIssuedTokens, OAuthFlowError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| OAuthFlowError::ServerError("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::RefreshOAuthTokenRequest {
+                client_id: client_id.into(),
+                client_secret: client_secret.into(),
+                refresh_token: refresh_token.into(),
+            },
+        )
+        .map_err(OAuthFlowError::ServerError)?;
+
+        let resp = self
+            .oauth_apps_client()
+            .refresh_o_auth_token(req)
+            .await
+            .map_err(map_oauth_flow_status)?
+            .into_inner();
+        let tokens = resp
+            .tokens
+            .ok_or_else(|| OAuthFlowError::ServerError("no tokens in response".into()))?;
+        Ok(OAuthIssuedTokens {
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token,
+            token_type: tokens.token_type,
+            expires_in_seconds: tokens.expires_in_seconds,
+            scopes: tokens.scopes,
+            id_token: if tokens.id_token.is_empty() { None } else { Some(tokens.id_token) },
+        })
+    }
+
+    async fn revoke_oauth_grant(
+        &self,
+        user_id: &str,
+        app_id: &str,
+    ) -> Result<u32, PlatformError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| PlatformError::Other("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::RevokeOAuthGrantRequest {
+                user_id: user_id.into(),
+                app_id: app_id.into(),
+            },
+        )
+        .map_err(PlatformError::Other)?;
+
+        let resp = self
+            .oauth_apps_client()
+            .revoke_o_auth_grant(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        Ok(resp.revoked_count)
+    }
+
+    async fn list_oauth_grants(&self, user_id: &str) -> Result<Vec<OAuthGrant>, PlatformError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| PlatformError::Other("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::ListOAuthGrantsRequest {
+                user_id: user_id.into(),
+            },
+        )
+        .map_err(PlatformError::Other)?;
+
+        let resp = self
+            .oauth_apps_client()
+            .list_o_auth_grants(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        Ok(resp
+            .grants
+            .into_iter()
+            .map(|g| OAuthGrant {
+                app_id: g.app_id,
+                name: g.name,
+                scopes: g.scopes,
+                authorized_at: g
+                    .authorized_at
+                    .map(|t| t.seconds.to_string())
+                    .unwrap_or_default(),
+            })
+            .collect())
+    }
+
+    async fn get_oauth_consent(
+        &self,
+        client_id: &str,
+        user_id: &str,
+    ) -> Result<Vec<String>, PlatformError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| PlatformError::Other("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::GetOAuthConsentRequest {
+                client_id: client_id.into(),
+                user_id: user_id.into(),
+            },
+        )
+        .map_err(PlatformError::Other)?;
+
+        let resp = self
+            .oauth_apps_client()
+            .get_o_auth_consent(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        Ok(resp.scopes)
+    }
+}
+
+/// Treat an empty proto string field as absent.
+fn opt(s: String) -> Option<String> {
+    if s.is_empty() { None } else { Some(s) }
+}
+
+/// Map a forest gRPC status to an OAuth flow error. forest-server sets the
+/// status *message* to the RFC 6749 error code for these endpoints.
+fn map_oauth_flow_status(status: tonic::Status) -> OAuthFlowError {
+    match (status.code(), status.message()) {
+        (tonic::Code::Unauthenticated, _) => OAuthFlowError::InvalidClient,
+        (tonic::Code::FailedPrecondition, _) => OAuthFlowError::InvalidGrant,
+        (tonic::Code::InvalidArgument, "invalid_scope") => OAuthFlowError::InvalidScope,
+        (tonic::Code::InvalidArgument, msg) => OAuthFlowError::InvalidRequest(msg.to_string()),
+        (_, msg) => OAuthFlowError::ServerError(msg.to_string()),
+    }
 }
 
 #[cfg(test)]

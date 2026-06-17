@@ -48,7 +48,7 @@ pub fn safe_return_to(raw: Option<&str>) -> Option<&str> {
 }
 
 /// Build a /login redirect that preserves the original URL as a return_to parameter.
-fn login_redirect(uri: &axum::http::Uri) -> axum::response::Redirect {
+pub(crate) fn login_redirect(uri: &axum::http::Uri) -> axum::response::Redirect {
     let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
     if path == "/" || path == "/dashboard" || path.starts_with("/login") || path.starts_with("/signup") {
         axum::response::Redirect::to("/login")

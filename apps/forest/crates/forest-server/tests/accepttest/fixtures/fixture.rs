@@ -4,6 +4,7 @@ use std::sync::{LazyLock, OnceLock};
 use forest_grpc_interface::artifact_service_client::ArtifactServiceClient;
 use forest_grpc_interface::destination_service_client::DestinationServiceClient;
 use forest_grpc_interface::environment_service_client::EnvironmentServiceClient;
+use forest_grpc_interface::o_auth_apps_service_client::OAuthAppsServiceClient;
 use forest_grpc_interface::organisation_service_client::OrganisationServiceClient;
 use forest_grpc_interface::registry_service_client::RegistryServiceClient;
 use forest_grpc_interface::release_service_client::ReleaseServiceClient;
@@ -36,6 +37,10 @@ impl Fixture {
 
     pub fn organisations(&self) -> OrganisationServiceClient<Channel> {
         OrganisationServiceClient::new(self.channel.clone())
+    }
+
+    pub fn oauth_apps(&self) -> OAuthAppsServiceClient<Channel> {
+        OAuthAppsServiceClient::new(self.channel.clone())
     }
 
     pub fn destinations(&self) -> DestinationServiceClient<Channel> {

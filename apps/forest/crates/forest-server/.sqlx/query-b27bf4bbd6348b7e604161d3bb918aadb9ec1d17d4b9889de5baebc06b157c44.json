@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM oauth_access_tokens\n            WHERE COALESCE(refresh_expires_at, expires_at) < now()\n               OR (revoked_at IS NOT NULL AND revoked_at < now() - interval '7 days')\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "b27bf4bbd6348b7e604161d3bb918aadb9ec1d17d4b9889de5baebc06b157c44"
+}

@@ -1,0 +1,46 @@
+{% extends "base.html.jinja" %}
+{% from "components/settings_sidebar.html.jinja" import settings_layout %}
+
+{% block content %}
+{% call settings_layout(current_org, "developers") %}
+    <div class="mb-8 flex items-start justify-between gap-4">
+        <div>
+            <h2 class="text-lg font-bold">Developer settings</h2>
+            <p class="text-sm text-gray-500 mt-1">OAuth applications let other apps offer "Sign in with Forest" on behalf of your organisation.</p>
+        </div>
+        <a href="/orgs/{{ current_org }}/settings/developers/new" class="shrink-0 inline-flex items-center px-3 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-800">New OAuth app</a>
+    </div>
+
+    {% if error is defined and error %}
+    <div class="mb-6 px-4 py-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">{{ error }}</div>
+    {% endif %}
+
+    {% if apps | length > 0 %}
+    <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+        {% for app in apps %}
+        <a href="/orgs/{{ current_org }}/settings/developers/{{ app.app_id }}" class="flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors first:rounded-t-lg last:rounded-b-lg">
+            <div>
+                <div class="font-medium text-gray-900">{{ app.name }}</div>
+                <div class="text-sm text-gray-500 mt-0.5 font-mono">{{ app.client_id }}</div>
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="hidden sm:flex gap-1">
+                    {% for scope in app.scopes %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">{{ scope }}</span>
+                    {% endfor %}
+                </div>
+                <span class="text-gray-400">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+                </span>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center border border-dashed border-gray-200 rounded-lg py-16">
+        <p class="text-sm text-gray-500">No OAuth applications yet.</p>
+        <a href="/orgs/{{ current_org }}/settings/developers/new" class="inline-block mt-3 text-sm font-medium text-gray-900 underline">Register your first app</a>
+    </div>
+    {% endif %}
+{% endcall %}
+{% endblock %}

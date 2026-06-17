@@ -77,6 +77,7 @@ canopy-otel = { git = "https://github.com/understory-io/canopy-util-rs", version
 [dev-dependencies]
 tempfile = "3"
 tokio-stream = "0.1"
+proptest = "1.11"
 uuid = { version = "1.7.0", features = ["v7"] }
 sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio", "uuid", "tls-rustls"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

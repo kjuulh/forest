@@ -1,0 +1,102 @@
+{% extends "base.html.jinja" %}
+{% from "components/settings_sidebar.html.jinja" import settings_layout %}
+
+{% block content %}
+{% call settings_layout(current_org, "developers") %}
+    <div class="mb-8">
+        <a href="/orgs/{{ current_org }}/settings/developers" class="text-sm text-gray-500 hover:text-gray-900">&larr; Developer settings</a>
+        <h2 class="text-lg font-bold mt-2">{{ app.name }}</h2>
+    </div>
+
+    {% if error is defined and error %}
+    <div class="mb-6 px-4 py-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">{{ error }}</div>
+    {% endif %}
+
+    {% if client_secret %}
+    <div class="mb-8 px-4 py-4 bg-green-50 border border-green-200 rounded-lg">
+        <p class="text-sm font-medium text-green-800">Client secret created</p>
+        <p class="text-xs text-green-700 mt-1 mb-3">Copy it now &mdash; for security, you won't be able to see it again. If you lose it, rotate to generate a new one.</p>
+        <code class="block w-full px-3 py-2 text-sm font-mono bg-white border border-green-200 rounded select-all break-all">{{ client_secret }}</code>
+    </div>
+    {% endif %}
+
+    {# ── Credentials ──────────────────────────────────────────────── #}
+    <div class="mb-8 max-w-xl">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Client ID</label>
+        <code class="block w-full px-3 py-2 text-sm font-mono bg-gray-50 border border-gray-200 rounded select-all break-all">{{ app.client_id }}</code>
+    </div>
+
+    {# ── Edit form ────────────────────────────────────────────────── #}
+    <form method="POST" action="/orgs/{{ current_org }}/settings/developers/{{ app.app_id }}" class="space-y-6 max-w-xl">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="name">Application name</label>
+            <input id="name" name="name" type="text" required maxlength="100" value="{{ app.name }}"
+                   class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="description">Description</label>
+            <input id="description" name="description" type="text" value="{{ app.description }}"
+                   class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="homepage_url">Homepage URL</label>
+            <input id="homepage_url" name="homepage_url" type="url" value="{{ app.homepage_url }}"
+                   class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="redirect_uris">Redirect URIs</label>
+            <p class="text-xs text-gray-500 mb-1">One per line.</p>
+            <textarea id="redirect_uris" name="redirect_uris" rows="3" required
+                      class="w-full px-3 py-2 text-sm font-mono border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">{{ app.redirect_uris | join("\n") }}</textarea>
+        </div>
+
+        <fieldset>
+            <legend class="block text-sm font-medium text-gray-700 mb-1">Scopes</legend>
+            <label class="flex items-start gap-2 mb-2">
+                <input type="checkbox" name="scope_openid" class="mt-0.5" {% if "openid" in app.scopes %}checked{% endif %}>
+                <span class="text-sm"><span class="font-mono">openid</span> &mdash; OpenID Connect sign-in (issues an ID token)</span>
+            </label>
+            <label class="flex items-start gap-2 mb-2">
+                <input type="checkbox" name="scope_profile" class="mt-0.5" {% if "profile" in app.scopes %}checked{% endif %}>
+                <span class="text-sm"><span class="font-mono">profile</span> &mdash; username, user ID and avatar</span>
+            </label>
+            <label class="flex items-start gap-2">
+                <input type="checkbox" name="scope_email" class="mt-0.5" {% if "email" in app.scopes %}checked{% endif %}>
+                <span class="text-sm"><span class="font-mono">email</span> &mdash; verified email addresses</span>
+            </label>
+        </fieldset>
+
+        <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-800">Save changes</button>
+    </form>
+
+    {# ── Danger zone ──────────────────────────────────────────────── #}
+    <div class="mt-12 pt-8 border-t border-gray-200 max-w-xl space-y-4">
+        <div class="flex items-center justify-between gap-4">
+            <div>
+                <p class="text-sm font-medium text-gray-900">Rotate client secret</p>
+                <p class="text-xs text-gray-500">Invalidates the current secret and generates a new one.</p>
+            </div>
+            <form method="POST" action="/orgs/{{ current_org }}/settings/developers/{{ app.app_id }}/rotate">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">Rotate secret</button>
+            </form>
+        </div>
+        <div class="flex items-center justify-between gap-4">
+            <div>
+                <p class="text-sm font-medium text-red-700">Delete this application</p>
+                <p class="text-xs text-gray-500">Revokes all tokens issued by this app. This cannot be undone.</p>
+            </div>
+            <form method="POST" action="/orgs/{{ current_org }}/settings/developers/{{ app.app_id }}/delete"
+                  onsubmit="return confirm('Delete this OAuth application? All issued tokens will stop working.');">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-medium text-red-700 border border-red-300 rounded-md hover:bg-red-50">Delete</button>
+            </form>
+        </div>
+    </div>
+{% endcall %}
+{% endblock %}

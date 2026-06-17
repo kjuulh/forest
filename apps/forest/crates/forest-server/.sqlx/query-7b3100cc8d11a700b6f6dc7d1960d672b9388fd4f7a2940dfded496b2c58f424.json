@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT a.id AS app_id, a.name AS name, t.scopes AS scopes, t.created_at AS created_at\n            FROM oauth_access_tokens t\n            JOIN oauth_apps a ON a.id = t.app_id\n            WHERE t.user_id = $1 AND t.revoked_at IS NULL AND t.expires_at > now()\n            ORDER BY t.created_at ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "app_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "scopes",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7b3100cc8d11a700b6f6dc7d1960d672b9388fd4f7a2940dfded496b2c58f424"
+}

@@ -5,9 +5,10 @@ use chrono::Utc;
 use forage_core::auth::{self, LoginResult, MfaSetup, *};
 use forage_core::platform::{
     Artifact, ArtifactContext, CreatePolicyInput, CreateReleasePipelineInput, CreateTriggerInput,
-    Destination, DestinationTypeInfo, Environment, ForestPlatform, NotificationPreference,
-    Organisation, OrgMember, PlatformError, Policy, ReleasePipeline, Trigger, UpdatePolicyInput,
-    UpdateReleasePipelineInput, UpdateTriggerInput,
+    CreatedOAuthApp, Destination, DestinationTypeInfo, Environment, ForestOAuthApps, ForestPlatform,
+    NotificationPreference, OAuthApp, OAuthClientInfo, OAuthFlowError, OAuthIssuedTokens,
+    OAuthGrant, OAuthUserinfo, Organisation, OrgMember, PlatformError, Policy, ReleasePipeline,
+    Trigger, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
 };
 use forage_core::registry::{
     ComponentDetail, ComponentSearchResult, ComponentVersionInfo, ForestRegistry, ToolSummary,
@@ -1145,6 +1146,400 @@ pub(crate) fn test_state_with_integrations(
     )
     .with_integration_store(integrations.clone());
     (state, sessions, integrations)
+}
+
+// ─── Mock OAuth-apps client ──────────────────────────────────────────
+
+/// In-memory implementation of [`ForestOAuthApps`] that behaves like the real
+/// forest-server store (create → list → get → update → rotate → delete) so
+/// route tests can exercise the full lifecycle. Optionally forced into an
+/// error to test the failure paths.
+pub(crate) struct MockOAuthAppsClient {
+    apps: Mutex<Vec<OAuthApp>>,
+    counter: Mutex<u32>,
+    forced_error: Option<PlatformError>,
+    /// Issued authorization codes → (user_id, scopes, redirect_uri).
+    codes: Mutex<std::collections::HashMap<String, (String, Vec<String>, String)>>,
+    /// Remembered consent: client_id → consented scopes.
+    consents: Mutex<std::collections::HashMap<String, Vec<String>>>,
+}
+
+impl MockOAuthAppsClient {
+    pub(crate) fn new() -> Self {
+        Self {
+            apps: Mutex::new(Vec::new()),
+            counter: Mutex::new(0),
+            forced_error: None,
+            codes: Mutex::new(std::collections::HashMap::new()),
+            consents: Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    pub(crate) fn with_error(err: PlatformError) -> Self {
+        Self {
+            apps: Mutex::new(Vec::new()),
+            counter: Mutex::new(0),
+            forced_error: Some(err),
+            codes: Mutex::new(std::collections::HashMap::new()),
+            consents: Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// Seed a prior consent (for remembered-consent auto-approve tests).
+    pub(crate) fn seed_consent(&self, client_id: &str, scopes: Vec<String>) {
+        self.consents
+            .lock()
+            .unwrap()
+            .insert(client_id.into(), scopes);
+    }
+
+    /// Seed an app directly (for OAuth-flow route tests that don't go through
+    /// the create handler).
+    pub(crate) fn seed_app(&self, client_id: &str, redirect_uris: Vec<String>, scopes: Vec<String>) {
+        let mut counter = self.counter.lock().unwrap();
+        *counter += 1;
+        let id = format!("app-{}", *counter);
+        self.apps.lock().unwrap().push(OAuthApp {
+            app_id: id,
+            organisation_id: "org-1".into(),
+            name: "Seeded App".into(),
+            description: String::new(),
+            homepage_url: String::new(),
+            client_id: client_id.into(),
+            redirect_uris,
+            scopes,
+            created_by: "user-1".into(),
+            created_at: "0".into(),
+            updated_at: "0".into(),
+        });
+    }
+}
+
+#[async_trait::async_trait]
+impl ForestOAuthApps for MockOAuthAppsClient {
+    async fn create_oauth_app(
+        &self,
+        _access_token: &str,
+        organisation_id: &str,
+        name: &str,
+        description: &str,
+        homepage_url: &str,
+        redirect_uris: &[String],
+        scopes: &[String],
+    ) -> Result<CreatedOAuthApp, PlatformError> {
+        if let Some(err) = &self.forced_error {
+            return Err(err.clone());
+        }
+        let mut counter = self.counter.lock().unwrap();
+        *counter += 1;
+        let id = format!("app-{}", *counter);
+        let app = OAuthApp {
+            app_id: id.clone(),
+            organisation_id: organisation_id.into(),
+            name: name.into(),
+            description: description.into(),
+            homepage_url: homepage_url.into(),
+            client_id: format!("forest_oa_{id}"),
+            redirect_uris: redirect_uris.to_vec(),
+            scopes: scopes.to_vec(),
+            created_by: "user-1".into(),
+            created_at: "0".into(),
+            updated_at: "0".into(),
+        };
+        self.apps.lock().unwrap().push(app.clone());
+        Ok(CreatedOAuthApp {
+            app,
+            client_secret: format!("forest_oas_secret_{id}"),
+        })
+    }
+
+    async fn list_oauth_apps(
+        &self,
+        _access_token: &str,
+        organisation_id: &str,
+    ) -> Result<Vec<OAuthApp>, PlatformError> {
+        if let Some(err) = &self.forced_error {
+            return Err(err.clone());
+        }
+        Ok(self
+            .apps
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|a| a.organisation_id == organisation_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn get_oauth_app(
+        &self,
+        _access_token: &str,
+        organisation_id: &str,
+        app_id: &str,
+    ) -> Result<OAuthApp, PlatformError> {
+        if let Some(err) = &self.forced_error {
+            return Err(err.clone());
+        }
+        self.apps
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|a| a.organisation_id == organisation_id && a.app_id == app_id)
+            .cloned()
+            .ok_or_else(|| PlatformError::NotFound("oauth app not found".into()))
+    }
+
+    async fn update_oauth_app(
+        &self,
+        _access_token: &str,
+        organisation_id: &str,
+        app_id: &str,
+        name: &str,
+        description: &str,
+        homepage_url: &str,
+        redirect_uris: &[String],
+        scopes: &[String],
+    ) -> Result<OAuthApp, PlatformError> {
+        if let Some(err) = &self.forced_error {
+            return Err(err.clone());
+        }
+        let mut apps = self.apps.lock().unwrap();
+        let app = apps
+            .iter_mut()
+            .find(|a| a.organisation_id == organisation_id && a.app_id == app_id)
+            .ok_or_else(|| PlatformError::NotFound("oauth app not found".into()))?;
+        app.name = name.into();
+        app.description = description.into();
+        app.homepage_url = homepage_url.into();
+        app.redirect_uris = redirect_uris.to_vec();
+        app.scopes = scopes.to_vec();
+        Ok(app.clone())
+    }
+
+    async fn rotate_oauth_app_secret(
+        &self,
+        _access_token: &str,
+        organisation_id: &str,
+        app_id: &str,
+    ) -> Result<CreatedOAuthApp, PlatformError> {
+        if let Some(err) = &self.forced_error {
+            return Err(err.clone());
+        }
+        let apps = self.apps.lock().unwrap();
+        let app = apps
+            .iter()
+            .find(|a| a.organisation_id == organisation_id && a.app_id == app_id)
+            .cloned()
+            .ok_or_else(|| PlatformError::NotFound("oauth app not found".into()))?;
+        Ok(CreatedOAuthApp {
+            client_secret: format!("forest_oas_rotated_{}", app.app_id),
+            app,
+        })
+    }
+
+    async fn delete_oauth_app(
+        &self,
+        _access_token: &str,
+        organisation_id: &str,
+        app_id: &str,
+    ) -> Result<(), PlatformError> {
+        if let Some(err) = &self.forced_error {
+            return Err(err.clone());
+        }
+        let mut apps = self.apps.lock().unwrap();
+        let before = apps.len();
+        apps.retain(|a| !(a.organisation_id == organisation_id && a.app_id == app_id));
+        if apps.len() == before {
+            return Err(PlatformError::NotFound("oauth app not found".into()));
+        }
+        Ok(())
+    }
+
+    async fn lookup_oauth_client(
+        &self,
+        client_id: &str,
+    ) -> Result<Option<OAuthClientInfo>, PlatformError> {
+        if let Some(err) = &self.forced_error {
+            return Err(err.clone());
+        }
+        Ok(self
+            .apps
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|a| a.client_id == client_id)
+            .map(|a| OAuthClientInfo {
+                app_id: a.app_id.clone(),
+                organisation_id: a.organisation_id.clone(),
+                name: a.name.clone(),
+                description: a.description.clone(),
+                homepage_url: a.homepage_url.clone(),
+                redirect_uris: a.redirect_uris.clone(),
+                scopes: a.scopes.clone(),
+            }))
+    }
+
+    async fn create_oauth_authorization_code(
+        &self,
+        client_id: &str,
+        user_id: &str,
+        redirect_uri: &str,
+        scopes: &[String],
+        _code_challenge: Option<&str>,
+        _code_challenge_method: Option<&str>,
+        _nonce: Option<&str>,
+    ) -> Result<String, OAuthFlowError> {
+        let apps = self.apps.lock().unwrap();
+        let app = apps
+            .iter()
+            .find(|a| a.client_id == client_id)
+            .ok_or(OAuthFlowError::InvalidClient)?;
+        if !app.redirect_uris.iter().any(|u| u == redirect_uri) {
+            return Err(OAuthFlowError::InvalidRequest("redirect_uri".into()));
+        }
+        for s in scopes {
+            if !app.scopes.contains(s) {
+                return Err(OAuthFlowError::InvalidScope);
+            }
+        }
+        drop(apps);
+        let mut counter = self.counter.lock().unwrap();
+        *counter += 1;
+        let code = format!("code-{}", *counter);
+        self.codes.lock().unwrap().insert(
+            code.clone(),
+            (user_id.into(), scopes.to_vec(), redirect_uri.into()),
+        );
+        // Mirror forest: approving records (unions) consent.
+        let mut consents = self.consents.lock().unwrap();
+        let entry = consents.entry(client_id.into()).or_default();
+        for s in scopes {
+            if !entry.contains(s) {
+                entry.push(s.clone());
+            }
+        }
+        Ok(code)
+    }
+
+    async fn exchange_oauth_code(
+        &self,
+        _client_id: &str,
+        _client_secret: &str,
+        code: &str,
+        redirect_uri: &str,
+        _code_verifier: Option<&str>,
+    ) -> Result<OAuthIssuedTokens, OAuthFlowError> {
+        // Single-use: remove on exchange.
+        let entry = self.codes.lock().unwrap().remove(code);
+        let (_user, scopes, stored_redirect) = entry.ok_or(OAuthFlowError::InvalidGrant)?;
+        if stored_redirect != redirect_uri {
+            return Err(OAuthFlowError::InvalidGrant);
+        }
+        let id_token = scopes
+            .iter()
+            .any(|s| s == "openid")
+            .then(|| "mock.id.token".to_string());
+        Ok(OAuthIssuedTokens {
+            access_token: "forest_oat_mocktoken".into(),
+            refresh_token: "forest_ort_mocktoken".into(),
+            token_type: "bearer".into(),
+            expires_in_seconds: 8 * 3600,
+            scopes,
+            id_token,
+        })
+    }
+
+    async fn refresh_oauth_token(
+        &self,
+        _client_id: &str,
+        _client_secret: &str,
+        refresh_token: &str,
+    ) -> Result<OAuthIssuedTokens, OAuthFlowError> {
+        if refresh_token != "forest_ort_mocktoken" {
+            return Err(OAuthFlowError::InvalidGrant);
+        }
+        Ok(OAuthIssuedTokens {
+            access_token: "forest_oat_refreshed".into(),
+            refresh_token: "forest_ort_refreshed".into(),
+            token_type: "bearer".into(),
+            expires_in_seconds: 8 * 3600,
+            scopes: vec!["profile".into()],
+            id_token: None,
+        })
+    }
+
+    async fn revoke_oauth_grant(&self, _user_id: &str, _app_id: &str) -> Result<u32, PlatformError> {
+        if let Some(err) = &self.forced_error {
+            return Err(err.clone());
+        }
+        Ok(1)
+    }
+
+    async fn list_oauth_grants(&self, _user_id: &str) -> Result<Vec<OAuthGrant>, PlatformError> {
+        if let Some(err) = &self.forced_error {
+            return Err(err.clone());
+        }
+        // Report the seeded apps as grants (route tests only need shape).
+        Ok(self
+            .apps
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|a| OAuthGrant {
+                app_id: a.app_id.clone(),
+                name: a.name.clone(),
+                scopes: a.scopes.clone(),
+                authorized_at: "0".into(),
+            })
+            .collect())
+    }
+
+    async fn get_oauth_consent(
+        &self,
+        client_id: &str,
+        _user_id: &str,
+    ) -> Result<Vec<String>, PlatformError> {
+        if let Some(err) = &self.forced_error {
+            return Err(err.clone());
+        }
+        Ok(self
+            .consents
+            .lock()
+            .unwrap()
+            .get(client_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn oauth_userinfo(&self, access_token: &str) -> Result<OAuthUserinfo, OAuthFlowError> {
+        if access_token != "forest_oat_mocktoken" {
+            return Err(OAuthFlowError::InvalidGrant);
+        }
+        // Mocked claims for the test user; gating mirrors the real service —
+        // here we always grant profile + email for the canned token.
+        Ok(OAuthUserinfo {
+            sub: "user-1".into(),
+            username: Some("testuser".into()),
+            profile_picture_url: None,
+            email: Some("test@example.com".into()),
+            emails: vec!["test@example.com".into()],
+            scopes: vec!["profile".into(), "email".into()],
+        })
+    }
+}
+
+pub(crate) fn test_state_with_oauth_apps(
+    oauth: Arc<MockOAuthAppsClient>,
+) -> (AppState, Arc<InMemorySessionStore>) {
+    let sessions = Arc::new(InMemorySessionStore::new());
+    let state = AppState::new(
+        make_templates(),
+        Arc::new(MockForestClient::new()),
+        Arc::new(MockPlatformClient::new()),
+        sessions.clone(),
+    )
+    .with_oauth_apps_client(oauth);
+    (state, sessions)
 }
 
 /// Mock OIDC exchange that returns a fixed identity.

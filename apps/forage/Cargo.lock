@@ -1183,6 +1183,7 @@ dependencies = [
  "async-trait",
  "axum",
  "axum-extra",
+ "base64 0.22.1",
  "canopy-otel",
  "chrono",
  "forage-core",

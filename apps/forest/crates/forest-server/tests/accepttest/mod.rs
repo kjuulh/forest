@@ -6,6 +6,8 @@ mod component_flow;
 mod device_login;
 mod email_verification;
 mod global_tools_flow;
+mod oauth_apps;
+mod oauth_flow;
 mod oauth_unlink;
 mod registration_domain;
 mod release_flow;

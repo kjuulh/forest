@@ -955,6 +955,215 @@ pub struct PlanDestinationOutput {
     pub status: String,
 }
 
+// ─── OAuth applications ("Sign in with Forest") ──────────────────────
+
+/// Public view of an organisation-owned OAuth application. Never carries the
+/// client_secret — that is only present on [`CreatedOAuthApp`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OAuthApp {
+    pub app_id: String,
+    pub organisation_id: String,
+    pub name: String,
+    pub description: String,
+    pub homepage_url: String,
+    pub client_id: String,
+    pub redirect_uris: Vec<String>,
+    pub scopes: Vec<String>,
+    pub created_by: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// An app together with its freshly-minted raw client_secret. Returned only
+/// from create / rotate; the secret is shown to the org once and never again.
+#[derive(Debug, Clone)]
+pub struct CreatedOAuthApp {
+    pub app: OAuthApp,
+    pub client_secret: String,
+}
+
+/// Public client metadata for rendering the consent screen at /oauth/authorize.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthClientInfo {
+    pub app_id: String,
+    pub organisation_id: String,
+    pub name: String,
+    pub description: String,
+    pub homepage_url: String,
+    pub redirect_uris: Vec<String>,
+    pub scopes: Vec<String>,
+}
+
+/// Tokens returned from a successful code exchange at /oauth/token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthIssuedTokens {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub token_type: String,
+    pub expires_in_seconds: i64,
+    pub scopes: Vec<String>,
+    /// OIDC id_token (present only when the `openid` scope was granted).
+    pub id_token: Option<String>,
+}
+
+/// A user's authorization of an OAuth app, for the "authorized apps" page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthGrant {
+    pub app_id: String,
+    pub name: String,
+    pub scopes: Vec<String>,
+    pub authorized_at: String,
+}
+
+/// User claims resolved from an OAuth access token, gated by granted scopes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthUserinfo {
+    pub sub: String,
+    pub username: Option<String>,
+    pub profile_picture_url: Option<String>,
+    pub email: Option<String>,
+    pub emails: Vec<String>,
+    pub scopes: Vec<String>,
+}
+
+/// RFC 6749 §5.2 error conditions for the token / authorization endpoints,
+/// so Forage can emit the correct OAuth error response. Distinct from
+/// [`PlatformError`] because the OAuth error *code* is part of the contract.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum OAuthFlowError {
+    #[error("invalid_client")]
+    InvalidClient,
+    #[error("invalid_grant")]
+    InvalidGrant,
+    #[error("invalid_scope")]
+    InvalidScope,
+    #[error("invalid_request: {0}")]
+    InvalidRequest(String),
+    #[error("server_error: {0}")]
+    ServerError(String),
+}
+
+/// Org-owned OAuth-app management, delegated to forest-server. Kept separate
+/// from [`ForestPlatform`] so it can be wired (and mocked) independently.
+#[async_trait::async_trait]
+pub trait ForestOAuthApps: Send + Sync {
+    #[allow(clippy::too_many_arguments)]
+    async fn create_oauth_app(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        name: &str,
+        description: &str,
+        homepage_url: &str,
+        redirect_uris: &[String],
+        scopes: &[String],
+    ) -> Result<CreatedOAuthApp, PlatformError>;
+
+    async fn list_oauth_apps(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+    ) -> Result<Vec<OAuthApp>, PlatformError>;
+
+    async fn get_oauth_app(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        app_id: &str,
+    ) -> Result<OAuthApp, PlatformError>;
+
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
+    async fn update_oauth_app(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        app_id: &str,
+        name: &str,
+        description: &str,
+        homepage_url: &str,
+        redirect_uris: &[String],
+        scopes: &[String],
+    ) -> Result<OAuthApp, PlatformError>;
+
+    async fn rotate_oauth_app_secret(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        app_id: &str,
+    ) -> Result<CreatedOAuthApp, PlatformError>;
+
+    async fn delete_oauth_app(
+        &self,
+        access_token: &str,
+        organisation_id: &str,
+        app_id: &str,
+    ) -> Result<(), PlatformError>;
+
+    // ── Authorization server (Forage authenticates as a service account) ──
+
+    /// Public client metadata for the consent screen. `None` if no such client.
+    async fn lookup_oauth_client(
+        &self,
+        client_id: &str,
+    ) -> Result<Option<OAuthClientInfo>, PlatformError>;
+
+    /// Mint a single-use authorization code after the user consents. Returns
+    /// the raw code.
+    #[allow(clippy::too_many_arguments)]
+    async fn create_oauth_authorization_code(
+        &self,
+        client_id: &str,
+        user_id: &str,
+        redirect_uri: &str,
+        scopes: &[String],
+        code_challenge: Option<&str>,
+        code_challenge_method: Option<&str>,
+        nonce: Option<&str>,
+    ) -> Result<String, OAuthFlowError>;
+
+    /// Exchange an authorization code for tokens at the token endpoint.
+    async fn exchange_oauth_code(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        code: &str,
+        redirect_uri: &str,
+        code_verifier: Option<&str>,
+    ) -> Result<OAuthIssuedTokens, OAuthFlowError>;
+
+    /// Resolve an access token to user claims at the userinfo endpoint.
+    async fn oauth_userinfo(&self, access_token: &str) -> Result<OAuthUserinfo, OAuthFlowError>;
+
+    /// Exchange a refresh token for a fresh token pair (with rotation).
+    async fn refresh_oauth_token(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        refresh_token: &str,
+    ) -> Result<OAuthIssuedTokens, OAuthFlowError>;
+
+    /// Revoke a user's grant for an app. Returns the number of tokens revoked.
+    async fn revoke_oauth_grant(
+        &self,
+        user_id: &str,
+        app_id: &str,
+    ) -> Result<u32, PlatformError>;
+
+    /// List the apps a user has authorized (one entry per app).
+    async fn list_oauth_grants(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<OAuthGrant>, PlatformError>;
+
+    /// Scopes the user has previously consented to for a client (empty = none).
+    async fn get_oauth_consent(
+        &self,
+        client_id: &str,
+        user_id: &str,
+    ) -> Result<Vec<String>, PlatformError>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

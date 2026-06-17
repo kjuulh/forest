@@ -1342,7 +1342,7 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "forest"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1544,6 +1544,7 @@ dependencies = [
  "notmad",
  "noworkers",
  "petname",
+ "proptest",
  "prost",
  "prost-types",
  "rand 0.10.1",

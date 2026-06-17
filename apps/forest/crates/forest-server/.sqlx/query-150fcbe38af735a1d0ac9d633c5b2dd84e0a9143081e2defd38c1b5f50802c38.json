@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE oauth_access_tokens\n            SET revoked_at = now()\n            WHERE refresh_hash = $1 AND app_id = $2 AND revoked_at IS NULL\n              AND (refresh_expires_at IS NULL OR refresh_expires_at > now())\n            RETURNING app_id, user_id, scopes\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "app_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scopes",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "150fcbe38af735a1d0ac9d633c5b2dd84e0a9143081e2defd38c1b5f50802c38"
+}

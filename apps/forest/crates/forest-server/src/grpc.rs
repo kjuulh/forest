@@ -10,6 +10,7 @@ use forest_grpc_interface::{
     event_service_server::EventServiceServer,
     event_subscription_service_server::EventSubscriptionServiceServer,
     notification_service_server::NotificationServiceServer,
+    o_auth_apps_service_server::OAuthAppsServiceServer,
     organisation_service_server::OrganisationServiceServer,
     registry_service_server::RegistryServiceServer,
     release_pipeline_service_server::ReleasePipelineServiceServer,
@@ -46,6 +47,7 @@ mod release_pipelines;
 mod environments;
 mod error;
 mod notifications;
+mod oauth_apps;
 mod organisations;
 mod registry;
 mod release;
@@ -91,6 +93,9 @@ impl GrpcServer {
                 state: self.state.clone(),
             }))
             .add_service(OrganisationServiceServer::new(OrganisationsServer {
+                state: self.state.clone(),
+            }))
+            .add_service(OAuthAppsServiceServer::new(oauth_apps::OAuthAppsServer {
                 state: self.state.clone(),
             }))
             .add_service(AppServiceServer::new(apps::AppsServer {

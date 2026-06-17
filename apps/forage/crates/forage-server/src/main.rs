@@ -199,6 +199,7 @@ async fn main() -> anyhow::Result<()> {
     )
     .with_grpc_client(forest_client.clone())
     .with_registry_client(forest_client.clone())
+    .with_oauth_apps_client(forest_client.clone())
     .with_forage_host(forage_host.clone());
 
     if let Some(key) = forest_client.service_account_key() {

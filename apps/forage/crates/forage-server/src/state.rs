@@ -7,7 +7,7 @@ use forage_core::auth::oauth_state::OAuthStateStore;
 use forage_core::auth::{ForestAuth, OidcExchange};
 use forage_core::compute::ComputeScheduler;
 use forage_core::integrations::IntegrationStore;
-use forage_core::platform::ForestPlatform;
+use forage_core::platform::{ForestOAuthApps, ForestPlatform};
 use forage_core::registry::ForestRegistry;
 use forage_core::session::SessionStore;
 use forage_db::PgProfilePictureStore;
@@ -56,6 +56,7 @@ pub struct AppState {
     pub compute_scheduler: Option<Arc<dyn ComputeScheduler>>,
     pub profile_picture_store: Option<Arc<PgProfilePictureStore>>,
     pub registry_client: Option<Arc<dyn ForestRegistry>>,
+    pub oauth_apps_client: Option<Arc<dyn ForestOAuthApps>>,
     pub service_account_key: Option<String>,
 }
 
@@ -85,6 +86,7 @@ impl AppState {
             compute_scheduler: None,
             profile_picture_store: None,
             registry_client: None,
+            oauth_apps_client: None,
             service_account_key: None,
         }
     }
@@ -156,6 +158,11 @@ impl AppState {
 
     pub fn with_registry_client(mut self, client: Arc<dyn ForestRegistry>) -> Self {
         self.registry_client = Some(client);
+        self
+    }
+
+    pub fn with_oauth_apps_client(mut self, client: Arc<dyn ForestOAuthApps>) -> Self {
+        self.oauth_apps_client = Some(client);
         self
     }
 

@@ -39,6 +39,12 @@ pub fn to_status(err: anyhow::Error) -> tonic::Status {
         };
     }
 
+    // OAuth-app validation failures are user-actionable (invalid redirect
+    // URI, unknown scope, bad name). Surface the message to the caller.
+    if let Some(oauth_err) = err.downcast_ref::<crate::services::oauth_apps::OAuthAppError>() {
+        return tonic::Status::invalid_argument(oauth_err.to_string());
+    }
+
     // Log the full error chain for debugging, return a safe message.
     tracing::warn!("service error: {err:#}");
     tonic::Status::internal("internal error")

@@ -18,6 +18,7 @@ pub mod release_logs_registry;
 pub mod release_registry;
 
 pub mod notification_registry;
+pub mod oauth_apps;
 pub mod organisations;
 pub mod release_event_store;
 pub mod release_finalizer;

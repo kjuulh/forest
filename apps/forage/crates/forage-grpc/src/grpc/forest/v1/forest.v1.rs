@@ -1986,6 +1986,321 @@ impl NotificationChannel {
         }
     }
 }
+/// Opaque bearer tokens issued to an OAuth app on a user's behalf.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OAuthTokens {
+    #[prost(string, tag="1")]
+    pub access_token: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub refresh_token: ::prost::alloc::string::String,
+    /// always "bearer"
+    #[prost(string, tag="3")]
+    pub token_type: ::prost::alloc::string::String,
+    /// access-token lifetime
+    #[prost(int64, tag="4")]
+    pub expires_in_seconds: i64,
+    /// granted scopes
+    #[prost(string, repeated, tag="5")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// OIDC id_token (JWT, HS256 signed with the client_secret). Present only when
+    /// the `openid` scope was granted; empty otherwise.
+    #[prost(string, tag="6")]
+    pub id_token: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LookupOAuthClientRequest {
+    #[prost(string, tag="1")]
+    pub client_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LookupOAuthClientResponse {
+    #[prost(string, tag="1")]
+    pub app_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub description: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
+    pub homepage_url: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="6")]
+    pub redirect_uris: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="7")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateOAuthAuthorizationCodeRequest {
+    #[prost(string, tag="1")]
+    pub client_id: ::prost::alloc::string::String,
+    /// the consenting user (resolved by Forage's session)
+    #[prost(string, tag="2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub redirect_uri: ::prost::alloc::string::String,
+    /// consented scopes (subset of app scopes)
+    #[prost(string, repeated, tag="4")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// PKCE (optional)
+    #[prost(string, tag="5")]
+    pub code_challenge: ::prost::alloc::string::String,
+    /// "S256" | "plain" (optional)
+    #[prost(string, tag="6")]
+    pub code_challenge_method: ::prost::alloc::string::String,
+    /// OIDC nonce (optional) — echoed into the id_token
+    #[prost(string, tag="7")]
+    pub nonce: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateOAuthAuthorizationCodeResponse {
+    /// raw single-use code
+    #[prost(string, tag="1")]
+    pub code: ::prost::alloc::string::String,
+    #[prost(int64, tag="2")]
+    pub expires_in_seconds: i64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExchangeOAuthCodeRequest {
+    #[prost(string, tag="1")]
+    pub client_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub client_secret: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub code: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub redirect_uri: ::prost::alloc::string::String,
+    /// PKCE (optional)
+    #[prost(string, tag="5")]
+    pub code_verifier: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExchangeOAuthCodeResponse {
+    #[prost(message, optional, tag="1")]
+    pub tokens: ::core::option::Option<OAuthTokens>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOAuthUserinfoRequest {
+    /// raw OAuth access token presented by the client
+    #[prost(string, tag="1")]
+    pub access_token: ::prost::alloc::string::String,
+}
+/// User claims, populated according to the token's granted scopes. `sub` is
+/// always present; profile/email fields only when the corresponding scope is
+/// granted.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OAuthUserinfo {
+    /// user_id (always present)
+    #[prost(string, tag="1")]
+    pub sub: ::prost::alloc::string::String,
+    /// scope: profile
+    #[prost(string, tag="2")]
+    pub username: ::prost::alloc::string::String,
+    /// scope: profile
+    #[prost(string, tag="3")]
+    pub profile_picture_url: ::prost::alloc::string::String,
+    /// scope: email (primary verified address)
+    #[prost(string, tag="4")]
+    pub email: ::prost::alloc::string::String,
+    /// scope: email (all verified addresses)
+    #[prost(string, repeated, tag="5")]
+    pub emails: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// granted scopes
+    #[prost(string, repeated, tag="6")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOAuthUserinfoResponse {
+    #[prost(message, optional, tag="1")]
+    pub userinfo: ::core::option::Option<OAuthUserinfo>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RefreshOAuthTokenRequest {
+    #[prost(string, tag="1")]
+    pub client_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub client_secret: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub refresh_token: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RefreshOAuthTokenResponse {
+    #[prost(message, optional, tag="1")]
+    pub tokens: ::core::option::Option<OAuthTokens>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RevokeOAuthGrantRequest {
+    /// resolved by Forage's session (the consenting user)
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub app_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RevokeOAuthGrantResponse {
+    #[prost(uint32, tag="1")]
+    pub revoked_count: u32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListOAuthGrantsRequest {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+}
+/// A single authorized application from the resource owner's perspective.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OAuthGrant {
+    #[prost(string, tag="1")]
+    pub app_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    /// union of granted scopes across live tokens
+    #[prost(string, repeated, tag="3")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// earliest live token
+    #[prost(message, optional, tag="4")]
+    pub authorized_at: ::core::option::Option<::prost_types::Timestamp>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListOAuthGrantsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub grants: ::prost::alloc::vec::Vec<OAuthGrant>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOAuthConsentRequest {
+    #[prost(string, tag="1")]
+    pub client_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOAuthConsentResponse {
+    /// Scopes the user has already consented to for this client (empty = none).
+    #[prost(string, repeated, tag="1")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+/// Public-safe representation of an OAuth application. Never carries the
+/// client_secret (that is only present in Create/Rotate responses).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OAuthApp {
+    /// UUID
+    #[prost(string, tag="1")]
+    pub app_id: ::prost::alloc::string::String,
+    /// UUID of the owning org
+    #[prost(string, tag="2")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub description: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
+    pub homepage_url: ::prost::alloc::string::String,
+    /// public client identifier
+    #[prost(string, tag="6")]
+    pub client_id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="7")]
+    pub redirect_uris: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// scopes this app is permitted to request
+    #[prost(string, repeated, tag="8")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// UUID of the creating user
+    #[prost(string, tag="9")]
+    pub created_by: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="10")]
+    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(message, optional, tag="11")]
+    pub updated_at: ::core::option::Option<::prost_types::Timestamp>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateOAuthAppRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub description: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub homepage_url: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="5")]
+    pub redirect_uris: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="6")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateOAuthAppResponse {
+    #[prost(message, optional, tag="1")]
+    pub app: ::core::option::Option<OAuthApp>,
+    /// The raw client_secret, only returned on creation.
+    #[prost(string, tag="2")]
+    pub client_secret: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListOAuthAppsRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListOAuthAppsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub apps: ::prost::alloc::vec::Vec<OAuthApp>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOAuthAppRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub app_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOAuthAppResponse {
+    #[prost(message, optional, tag="1")]
+    pub app: ::core::option::Option<OAuthApp>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateOAuthAppRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub app_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub description: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
+    pub homepage_url: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="6")]
+    pub redirect_uris: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="7")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateOAuthAppResponse {
+    #[prost(message, optional, tag="1")]
+    pub app: ::core::option::Option<OAuthApp>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RotateOAuthAppSecretRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub app_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RotateOAuthAppSecretResponse {
+    #[prost(message, optional, tag="1")]
+    pub app: ::core::option::Option<OAuthApp>,
+    /// The new raw client_secret, only returned on rotation.
+    #[prost(string, tag="2")]
+    pub client_secret: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteOAuthAppRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub app_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteOAuthAppResponse {
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Organisation {
     #[prost(string, tag="1")]
@@ -3374,6 +3689,18 @@ pub struct CommitUploadRequest {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CommitUploadResponse {
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AbortUploadRequest {
+    #[prost(string, tag="1")]
+    pub upload_context: ::prost::alloc::string::String,
+    /// Optional free-form reason recorded in the aggregate event for audit.
+    /// Truncated server-side at 256 chars.
+    #[prost(string, tag="2")]
+    pub reason: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AbortUploadResponse {
+}
 /// Get component files
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetComponentFilesRequest {
@@ -3515,6 +3842,26 @@ pub struct ComponentVersionInfo {
     /// e.g., \["linux_amd64", "darwin_arm64"\]
     #[prost(string, repeated, tag="4")]
     pub platforms: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UnpublishVersionRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub version: ::prost::alloc::string::String,
+    /// Optional free-form reason recorded in the aggregate event for audit.
+    /// Truncated server-side at 1024 chars.
+    #[prost(string, tag="4")]
+    pub reason: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UnpublishVersionResponse {
+    /// True if a new event was recorded; false if this was an idempotent
+    /// no-op (version was already unpublished).
+    #[prost(bool, tag="1")]
+    pub unpublished: bool,
 }
 // --- Registry UI / discovery ---
 

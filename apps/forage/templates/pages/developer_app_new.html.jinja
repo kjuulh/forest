@@ -1,0 +1,67 @@
+{% extends "base.html.jinja" %}
+{% from "components/settings_sidebar.html.jinja" import settings_layout %}
+
+{% block content %}
+{% call settings_layout(current_org, "developers") %}
+    <div class="mb-8">
+        <a href="/orgs/{{ current_org }}/settings/developers" class="text-sm text-gray-500 hover:text-gray-900">&larr; Developer settings</a>
+        <h2 class="text-lg font-bold mt-2">Register OAuth application</h2>
+        <p class="text-sm text-gray-500 mt-1">Forest will issue a client ID and secret once the app is created.</p>
+    </div>
+
+    {% if error is defined and error %}
+    <div class="mb-6 px-4 py-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">{{ error }}</div>
+    {% endif %}
+
+    <form method="POST" action="/orgs/{{ current_org }}/settings/developers" class="space-y-6 max-w-xl">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="name">Application name</label>
+            <input id="name" name="name" type="text" required maxlength="100" placeholder="My Integration"
+                   class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="description">Description <span class="text-gray-400 font-normal">(optional)</span></label>
+            <input id="description" name="description" type="text" placeholder="What does this app do?"
+                   class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="homepage_url">Homepage URL <span class="text-gray-400 font-normal">(optional)</span></label>
+            <input id="homepage_url" name="homepage_url" type="url" placeholder="https://app.example.com"
+                   class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900">
+        </div>
+
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="redirect_uris">Redirect URIs</label>
+            <p class="text-xs text-gray-500 mb-1">One per line. Must be <code>https://</code> (or <code>http://localhost</code> for development).</p>
+            <textarea id="redirect_uris" name="redirect_uris" rows="3" required placeholder="https://app.example.com/auth/callback"
+                      class="w-full px-3 py-2 text-sm font-mono border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-900"></textarea>
+        </div>
+
+        <fieldset>
+            <legend class="block text-sm font-medium text-gray-700 mb-1">Scopes</legend>
+            <p class="text-xs text-gray-500 mb-2">What the app may request access to.</p>
+            <label class="flex items-start gap-2 mb-2">
+                <input type="checkbox" name="scope_openid" class="mt-0.5">
+                <span class="text-sm"><span class="font-mono">openid</span> &mdash; OpenID Connect sign-in (issues an ID token)</span>
+            </label>
+            <label class="flex items-start gap-2 mb-2">
+                <input type="checkbox" name="scope_profile" checked class="mt-0.5">
+                <span class="text-sm"><span class="font-mono">profile</span> &mdash; username, user ID and avatar</span>
+            </label>
+            <label class="flex items-start gap-2">
+                <input type="checkbox" name="scope_email" class="mt-0.5">
+                <span class="text-sm"><span class="font-mono">email</span> &mdash; verified email addresses</span>
+            </label>
+        </fieldset>
+
+        <div class="flex items-center gap-3">
+            <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-800">Create application</button>
+            <a href="/orgs/{{ current_org }}/settings/developers" class="text-sm text-gray-500 hover:text-gray-900">Cancel</a>
+        </div>
+    </form>
+{% endcall %}
+{% endblock %}
