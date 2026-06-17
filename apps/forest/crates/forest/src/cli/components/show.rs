@@ -87,6 +87,15 @@ impl ShowCommand {
         if !summary.methods.is_empty() {
             println!("  methods:   {}", summary.methods.join(", "));
         }
+        // Default env shipped with the tool (TASKS/023 `include.env`). Read
+        // from the manifest, which the server returns verbatim.
+        let env_defaults = include_env_from_manifest(&detail.manifest_json);
+        if !env_defaults.is_empty() {
+            println!("  env defaults:");
+            for (k, val) in &env_defaults {
+                println!("    - {k}={val}");
+            }
+        }
         if !summary.contracts.is_empty() {
             println!("  contracts: {}", summary.contracts.join(", "));
         }
@@ -125,6 +134,24 @@ impl ShowCommand {
     }
 }
 
+/// Extract `include.env` (TASKS/023) from a manifest JSON blob as sorted
+/// key→value pairs. Empty for any missing/malformed input — the server
+/// returns the manifest verbatim, so this is the same data the JSON output
+/// surfaces under `manifest_json`.
+fn include_env_from_manifest(manifest_json: &str) -> std::collections::BTreeMap<String, String> {
+    serde_json::from_str::<serde_json::Value>(manifest_json)
+        .ok()
+        .as_ref()
+        .and_then(|v| v.pointer("/include/env"))
+        .and_then(|e| e.as_object())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn shape_label(shape: i32) -> &'static str {
     use forest_grpc_interface::ComponentShape;
     match ComponentShape::try_from(shape) {
@@ -133,5 +160,28 @@ fn shape_label(shape: i32) -> &'static str {
         Ok(ComponentShape::ToolBinary) => "tool_binary",
         Ok(ComponentShape::ToolExternal) => "tool_external",
         _ => "unspecified",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::include_env_from_manifest;
+
+    #[test]
+    fn extracts_include_env() {
+        let m = r#"{"kind":"binary","include":{"env":{"FUNGUS_SERVER":"https://fungus.understory.sh"}}}"#;
+        let env = include_env_from_manifest(m);
+        assert_eq!(env.get("FUNGUS_SERVER").map(String::as_str), Some("https://fungus.understory.sh"));
+    }
+
+    #[test]
+    fn empty_when_no_include() {
+        assert!(include_env_from_manifest(r#"{"kind":"binary"}"#).is_empty());
+    }
+
+    #[test]
+    fn empty_on_garbage() {
+        assert!(include_env_from_manifest("not json").is_empty());
+        assert!(include_env_from_manifest("").is_empty());
     }
 }
