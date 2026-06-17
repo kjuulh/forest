@@ -55,6 +55,51 @@ pub fn validate_tool_name(name: &str) -> Result<(), NameError> {
     Ok(())
 }
 
+// --- Environment variable names / values ------------------------------------
+//
+// Default env vars shipped in a component's `include` block (TASKS/023). The
+// name rule is the conventional POSIX env-name regex `^[A-Za-z_][A-Za-z0-9_]*$`;
+// values may contain anything except a NUL byte (the one byte `Command::env`
+// cannot carry on Unix). These are the single source of truth — the manifest
+// parser and the user-config parser both call them.
+
+/// Reasons an env-var name can fail validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnvNameError {
+    Empty,
+    BadFirstChar { ch: char },
+    BadChar { ch: char, position: usize },
+}
+
+/// Reasons an env-var value can fail validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnvValueError {
+    ContainsNul { position: usize },
+}
+
+/// Validate an env-var name against `^[A-Za-z_][A-Za-z0-9_]*$`.
+pub fn validate_env_name(name: &str) -> Result<(), EnvNameError> {
+    let mut chars = name.chars().enumerate();
+    let (_, first) = chars.next().ok_or(EnvNameError::Empty)?;
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return Err(EnvNameError::BadFirstChar { ch: first });
+    }
+    for (position, ch) in chars {
+        if !(ch.is_ascii_alphanumeric() || ch == '_') {
+            return Err(EnvNameError::BadChar { ch, position });
+        }
+    }
+    Ok(())
+}
+
+/// Validate an env-var value: anything but a NUL byte is allowed.
+pub fn validate_env_value(value: &str) -> Result<(), EnvValueError> {
+    match value.find('\0') {
+        Some(position) => Err(EnvValueError::ContainsNul { position }),
+        None => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,6 +261,71 @@ mod tests {
                 NameError::BadFirstChar { .. } | NameError::ContainsDotDot,
             );
             prop_assert!(ok_variant, "got {:?} for {:?}", err, s);
+        }
+    }
+
+    // --- Env name / value validation ---
+
+    #[test]
+    fn env_name_accepts_conventional_names() {
+        validate_env_name("FUNGUS_SERVER").unwrap();
+        validate_env_name("_private").unwrap();
+        validate_env_name("RUST_LOG").unwrap();
+        validate_env_name("X").unwrap();
+        validate_env_name("a1_b2").unwrap();
+    }
+
+    #[test]
+    fn env_name_rejects_empty() {
+        assert_eq!(validate_env_name(""), Err(EnvNameError::Empty));
+    }
+
+    #[test]
+    fn env_name_rejects_leading_digit() {
+        assert_eq!(
+            validate_env_name("1FOO"),
+            Err(EnvNameError::BadFirstChar { ch: '1' })
+        );
+    }
+
+    #[test]
+    fn env_name_rejects_hyphen_and_dot() {
+        assert_eq!(
+            validate_env_name("FOO-BAR"),
+            Err(EnvNameError::BadChar { ch: '-', position: 3 })
+        );
+        assert_eq!(
+            validate_env_name("FOO.BAR"),
+            Err(EnvNameError::BadChar { ch: '.', position: 3 })
+        );
+    }
+
+    #[test]
+    fn env_value_allows_anything_but_nul() {
+        validate_env_value("").unwrap();
+        validate_env_value("https://fungus.understory.sh").unwrap();
+        validate_env_value("multi\nline = value with spaces / é").unwrap();
+    }
+
+    #[test]
+    fn env_value_rejects_nul() {
+        assert_eq!(
+            validate_env_value("ab\0cd"),
+            Err(EnvValueError::ContainsNul { position: 2 })
+        );
+    }
+
+    proptest! {
+        /// Names matching the POSIX regex are always accepted.
+        #[test]
+        fn env_name_accepts_regex(s in r"[A-Za-z_][A-Za-z0-9_]{0,32}") {
+            prop_assert!(validate_env_name(&s).is_ok(), "expected accept for {s:?}");
+        }
+
+        /// Any string free of NUL is a valid value.
+        #[test]
+        fn env_value_accepts_non_nul(s in r"[^\x00]{0,64}") {
+            prop_assert!(validate_env_value(&s).is_ok());
         }
     }
 }

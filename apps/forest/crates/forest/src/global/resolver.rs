@@ -208,6 +208,7 @@ mod tests {
             }),
             methods: vec![],
             platforms,
+            include: Default::default(),
             shape: ComponentShape::ToolBinary,
         }
     }
@@ -231,6 +232,7 @@ mod tests {
             }),
             methods: vec![],
             platforms,
+            include: Default::default(),
             shape: ComponentShape::ToolExternal,
         }
     }
@@ -243,6 +245,7 @@ mod tests {
             tool: None,
             methods: vec!["status".into()],
             platforms,
+            include: Default::default(),
             shape: ComponentShape::Component,
         }
     }

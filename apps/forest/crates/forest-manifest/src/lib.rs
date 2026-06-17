@@ -14,7 +14,10 @@ use std::collections::BTreeMap;
 
 pub mod names;
 
-use names::{NameError, validate_tool_name};
+use names::{
+    EnvNameError, EnvValueError, NameError, validate_env_name, validate_env_value,
+    validate_tool_name,
+};
 
 // --- Public types ---------------------------------------------------------
 
@@ -23,11 +26,25 @@ pub struct Manifest {
     pub kind: ManifestKind,
     pub tool: Option<ToolFacet>,
     pub methods: Vec<String>,
+    /// Artifacts shipped alongside the binary (TASKS/023). Forward-looking
+    /// container — only `env` is populated today. Defaults to empty when the
+    /// manifest carries no `include` block.
+    pub include: Include,
     pub platforms: BTreeMap<PlatformKey, Platform>,
     /// Derived from `(kind, tool, methods)` at parse time. Always consistent
     /// with the other fields; consumers should rely on `shape` rather than
     /// re-deriving.
     pub shape: ComponentShape,
+}
+
+/// The `include` block: things shipped beside the binary and materialised into
+/// the local cache when the tool is fetched (TASKS/023). Forward-compatible —
+/// future members (e.g. `files`) slot in here.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Include {
+    /// Default environment variables, applied as defaults at run time (the
+    /// ambient shell environment always wins).
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +120,10 @@ pub enum ManifestError {
     /// External manifests have no describe protocol, hence no methods.
     ExternalCannotDeclareMethods,
     InvalidToolName(NameError),
+    /// `include.env` key is not a valid POSIX env name. Carries the offending key.
+    InvalidEnvName(String),
+    /// `include.env` value is invalid (contains NUL). Carries the offending key.
+    InvalidEnvValue(String),
     InvalidArgvPassthrough,
     InvalidPlatformKey(String),
     UnsupportedOs(String),
@@ -164,6 +185,9 @@ pub fn parse(json: &str) -> Result<Manifest, ManifestError> {
         }
     };
 
+    // --- include (TASKS/023) ------------------------------------------
+    let include = parse_include(obj.get("include"))?;
+
     // --- shape derivation runs BEFORE platform parsing so we catch
     //     "wrong shape" before "wrong sha". §1a.2e.
     let shape = derive_shape(kind, tool.is_some(), !methods.is_empty())?;
@@ -187,9 +211,49 @@ pub fn parse(json: &str) -> Result<Manifest, ManifestError> {
         kind,
         tool,
         methods,
+        include,
         platforms,
         shape,
     })
+}
+
+/// Parse the optional top-level `include` block. Missing/null ⇒ empty.
+/// Unknown members are ignored (forward-compat); only `env` is read today.
+fn parse_include(v: Option<&serde_json::Value>) -> Result<Include, ManifestError> {
+    let obj = match v {
+        None | Some(serde_json::Value::Null) => return Ok(Include::default()),
+        Some(serde_json::Value::Object(o)) => o,
+        Some(_) => {
+            return Err(ManifestError::InvalidJson("include must be an object".into()));
+        }
+    };
+
+    let env = match obj.get("env") {
+        None | Some(serde_json::Value::Null) => BTreeMap::new(),
+        Some(serde_json::Value::Object(map)) => {
+            let mut out = BTreeMap::new();
+            for (k, v) in map {
+                validate_env_name(k).map_err(|_: EnvNameError| {
+                    ManifestError::InvalidEnvName(k.clone())
+                })?;
+                let val = v.as_str().ok_or_else(|| {
+                    ManifestError::InvalidJson("include.env values must be strings".into())
+                })?;
+                validate_env_value(val).map_err(|_: EnvValueError| {
+                    ManifestError::InvalidEnvValue(k.clone())
+                })?;
+                out.insert(k.clone(), val.to_string());
+            }
+            out
+        }
+        Some(_) => {
+            return Err(ManifestError::InvalidJson(
+                "include.env must be an object".into(),
+            ));
+        }
+    };
+
+    Ok(Include { env })
 }
 
 /// Pure derivation of the shape from the three discriminator inputs.
@@ -513,6 +577,126 @@ mod tests {
             m.tool.as_ref().unwrap().description.as_deref(),
             Some("Friendly greeting")
         );
+    }
+
+    // --- include { env } (TASKS/023) ---------------------------------------
+
+    #[test]
+    fn parses_tool_binary_with_include_env() {
+        let json = r#"{
+            "kind": "binary",
+            "tool": {"name": "fungus", "argv_passthrough": true},
+            "include": {"env": {"FUNGUS_SERVER": "https://fungus.understory.sh"}},
+            "platforms": {
+                "darwin_arm64": {"sha256": "4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c"}
+            }
+        }"#;
+        let m = parse(json).unwrap();
+        assert_eq!(
+            m.include.env.get("FUNGUS_SERVER").map(String::as_str),
+            Some("https://fungus.understory.sh")
+        );
+    }
+
+    #[test]
+    fn manifest_without_include_has_empty_env() {
+        // Pre-feature manifests stay valid; include defaults to empty.
+        let json = r#"{
+            "kind": "binary",
+            "tool": {"name": "hello", "argv_passthrough": true},
+            "platforms": {
+                "linux_amd64": {"sha256": "4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c"}
+            }
+        }"#;
+        let m = parse(json).unwrap();
+        assert!(m.include.env.is_empty());
+    }
+
+    #[test]
+    fn empty_include_object_is_ok() {
+        let json = r#"{
+            "kind": "binary",
+            "tool": {"name": "hello", "argv_passthrough": true},
+            "include": {},
+            "platforms": {
+                "linux_amd64": {"sha256": "4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c"}
+            }
+        }"#;
+        assert!(parse(json).unwrap().include.env.is_empty());
+    }
+
+    #[test]
+    fn rejects_invalid_env_name() {
+        let json = r#"{
+            "kind": "binary",
+            "tool": {"name": "hello", "argv_passthrough": true},
+            "include": {"env": {"1BAD": "x"}},
+            "platforms": {
+                "linux_amd64": {"sha256": "4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c"}
+            }
+        }"#;
+        let err = parse(json).unwrap_err();
+        assert_eq!(err, ManifestError::InvalidEnvName("1BAD".to_string()));
+    }
+
+    #[test]
+    fn rejects_env_value_with_nul() {
+        // Build the JSON via serde so the NUL byte is escaped to `\u0000`;
+        // serde decodes it back to a real NUL, which our value validator rejects.
+        let json = serde_json::json!({
+            "kind": "binary",
+            "tool": {"name": "hello", "argv_passthrough": true},
+            "include": {"env": {"FOO": "a\u{0000}b"}},
+            "platforms": {
+                "linux_amd64": {"sha256": "4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c"}
+            }
+        })
+        .to_string();
+        let err = parse(&json).unwrap_err();
+        assert_eq!(err, ManifestError::InvalidEnvValue("FOO".to_string()));
+    }
+
+    #[test]
+    fn rejects_env_value_not_string() {
+        let json = r#"{
+            "kind": "binary",
+            "tool": {"name": "hello", "argv_passthrough": true},
+            "include": {"env": {"FOO": 5}},
+            "platforms": {
+                "linux_amd64": {"sha256": "4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c"}
+            }
+        }"#;
+        let err = parse(json).unwrap_err();
+        assert!(matches!(err, ManifestError::InvalidJson(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn rejects_include_not_object() {
+        let json = r#"{
+            "kind": "binary",
+            "tool": {"name": "hello", "argv_passthrough": true},
+            "include": "nope",
+            "platforms": {
+                "linux_amd64": {"sha256": "4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c"}
+            }
+        }"#;
+        let err = parse(json).unwrap_err();
+        assert!(matches!(err, ManifestError::InvalidJson(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn ignores_unknown_include_members() {
+        // Forward-compat: a future `files` member is ignored by today's parser.
+        let json = r#"{
+            "kind": "binary",
+            "tool": {"name": "hello", "argv_passthrough": true},
+            "include": {"env": {"FOO": "bar"}, "files": [{"path": "x"}]},
+            "platforms": {
+                "linux_amd64": {"sha256": "4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c"}
+            }
+        }"#;
+        let m = parse(json).unwrap();
+        assert_eq!(m.include.env.get("FOO").map(String::as_str), Some("bar"));
     }
 
     #[test]
