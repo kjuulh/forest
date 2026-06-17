@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.14](https://github.com/understory-io/forest/compare/v0.1.13...v0.1.14) (2026-06-17)
+
+
+### Features
+
+* **cli:** forest organisation oauth-app commands ([#65](https://github.com/understory-io/forest/issues/65)) ([4771843](https://github.com/understory-io/forest/commit/4771843cb50c59b7180764f23880cfce1ede80d2))
+* **oauth:** OAuth 2.0 + OIDC applications ("Sign in with Forest") ([#63](https://github.com/understory-io/forest/issues/63)) ([51dc589](https://github.com/understory-io/forest/commit/51dc589486c527320315feebcc8f3746b5a533db))
+
 ## [0.1.13](https://github.com/understory-io/forest/compare/v0.1.12...v0.1.13) (2026-06-11)
 
 
