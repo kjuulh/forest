@@ -3,7 +3,7 @@ FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y curl ca-certificates git && rm -rf /var/lib/apt/lists/*
 
 # Install CUE
-RUN curl -fsSL https://github.com/cue-lang/cue/releases/download/v0.16.0/cue_v0.16.0_linux_amd64.tar.gz \
+RUN curl -fsSL https://github.com/cue-lang/cue/releases/download/v0.16.1/cue_v0.16.1_linux_amd64.tar.gz \
     | tar -xz -C /usr/local/bin cue
 
 # Binaries are pre-built on host and copied in

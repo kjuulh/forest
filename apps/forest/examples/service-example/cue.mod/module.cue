@@ -1,6 +1,6 @@
 module: "forest.sh/rawpotion/service-example@v0"
 language: {
-	version: "v0.15.4"
+	version: "v0.16.1"
 }
 deps: {
 	"forest.sh/forest/sdk@v0": {

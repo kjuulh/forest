@@ -1,6 +1,6 @@
 module: "forest.sh/forest-contrib/deno-terraform-service@v0"
 language: {
-	version: "v0.15.4"
+	version: "v0.16.1"
 }
 source: {
 	kind: "self"
