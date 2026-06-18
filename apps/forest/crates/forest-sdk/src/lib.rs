@@ -52,6 +52,31 @@ pub trait ComponentService<S>: Send + Sync {
     fn template_config(&self) -> TemplateConfig {
         TemplateConfig::default()
     }
+
+    /// Names of methods that Forest should invoke in *passthrough* mode —
+    /// live child stdio and no execution timeout — for long-running toolchain
+    /// work like `cargo build`. Default: none. DATA-312.
+    fn streaming_methods(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// External binaries this component shells out to at runtime (e.g. a build
+    /// component needs `cargo`). Forest verifies each is on PATH before
+    /// dispatching and fails up front with an actionable diagnostic. Default:
+    /// none. DATA-312.
+    fn requires(&self) -> Vec<RequiredTool> {
+        Vec::new()
+    }
+}
+
+/// A binary a component requires on PATH at runtime, surfaced via
+/// `_meta/describe` so Forest can verify it before dispatching. Mirrors the
+/// CUE `#ForestRequiredTool`. DATA-312.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RequiredTool {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 pub struct MethodDescriptor {
@@ -89,6 +114,11 @@ pub struct ComponentDescriptor {
     /// installable via `forest global …` (TASKS/018-global-tools.md §1a.1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<ToolFacet>,
+    /// External binaries this component requires on PATH (DATA-312). Empty for
+    /// components that declare none; deserialises as empty from older
+    /// descriptors that predate the field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<RequiredTool>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -99,6 +129,10 @@ pub struct MethodInfo {
     pub topic: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Invoke this method in passthrough mode (live stdio, no timeout).
+    /// DATA-312. Defaults false for backward compatibility.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub streaming: bool,
 }
 
 /// Tool facet returned by `_meta/describe` for components that double as CLI tools.
@@ -219,10 +253,12 @@ async fn run_once_async<S: serde::de::DeserializeOwned, CS: ComponentService<S>>
 }
 
 fn build_descriptor<S, CS: ComponentService<S>>(service: &CS) -> ComponentDescriptor {
+    let streaming = service.streaming_methods();
     let methods = service
         .methods()
         .into_iter()
         .map(|m| MethodInfo {
+            streaming: streaming.contains(&m.name),
             name: m.name,
             kind: match &m.kind {
                 MethodKind::Command => "command".to_string(),
@@ -240,6 +276,7 @@ fn build_descriptor<S, CS: ComponentService<S>>(service: &CS) -> ComponentDescri
         protocol_version: PROTOCOL_VERSION.to_string(),
         methods,
         tool: None,
+        requires: service.requires(),
     }
 }
 

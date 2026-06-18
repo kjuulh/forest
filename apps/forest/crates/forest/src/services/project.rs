@@ -107,6 +107,12 @@ impl ProjectParser {
                                             binary_path: binary_path.clone(),
                                             method: method.name.clone(),
                                             description: method.description.clone(),
+                                            // DATA-312: carry the streaming flag (per-method)
+                                            // and tool requirements (component-level) so the
+                                            // dispatcher can pick passthrough mode and verify
+                                            // tools up front.
+                                            streaming: method.streaming,
+                                            requires: descriptor.requires.clone(),
                                         },
                                     );
                                     registered += 1;

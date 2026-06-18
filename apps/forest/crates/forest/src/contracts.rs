@@ -187,15 +187,18 @@ mod tests {
                     kind: "hook".into(),
                     topic: Some("forest/deployment".into()),
                     description: None,
+                    streaming: false,
                 },
                 forest_sdk::MethodInfo {
                     name: "hooks/custom/something".into(),
                     kind: "hook".into(),
                     topic: Some("custom/something".into()),
                     description: None,
+                    streaming: false,
                 },
             ],
             tool: None,
+            requires: vec![],
         };
 
         let contracts = component_contracts(&descriptor);

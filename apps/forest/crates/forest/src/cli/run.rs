@@ -554,8 +554,31 @@ impl CliRun {
             crate::models::Command::ComponentBinary {
                 binary_path,
                 method,
+                streaming,
+                requires,
                 ..
             } => {
+                // DATA-312: verify the component's declared tools are on PATH
+                // before dispatching, so a missing `cargo`/`docker` fails up
+                // front with an actionable diagnostic instead of mid-run.
+                let missing = crate::tools::which::missing_tools(
+                    &requires
+                        .iter()
+                        .map(|t| crate::tools::which::RequiredTool {
+                            name: t.name.clone(),
+                            hint: t.hint.clone(),
+                        })
+                        .collect::<Vec<_>>(),
+                );
+                if !missing.is_empty() {
+                    let label = command_name
+                        .to_component()
+                        .unwrap_or_else(|| command_name.command_name().to_string());
+                    return Err(crate::diagnostics::report(
+                        crate::diagnostics::MissingTools::new(label, missing),
+                    ));
+                }
+
                 let spec_json = if let Some(comp_ref) = command_name.to_component_reference() {
                     build_spec_json(project, &comp_ref)
                 } else {
@@ -569,14 +592,27 @@ impl CliRun {
                     ..Default::default()
                 };
 
-                let result = component_binary::invoke_component_with_context(
-                    binary_path,
-                    method,
-                    &spec_json,
-                    &input_json,
-                    Some(&call_context),
-                )
-                .await?;
+                // Streaming methods (e.g. a build component driving cargo) use
+                // passthrough mode: live child stdio, no timeout. DATA-312.
+                let result = if *streaming {
+                    component_binary::invoke_component_passthrough(
+                        binary_path,
+                        method,
+                        &spec_json,
+                        &input_json,
+                        Some(&call_context),
+                    )
+                    .await?
+                } else {
+                    component_binary::invoke_component_with_context(
+                        binary_path,
+                        method,
+                        &spec_json,
+                        &input_json,
+                        Some(&call_context),
+                    )
+                    .await?
+                };
 
                 if !result.is_null() {
                     println!("{}", serde_json::to_string_pretty(&result)?);

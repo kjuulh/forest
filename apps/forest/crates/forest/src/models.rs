@@ -391,6 +391,12 @@ pub enum Command {
         method: String,
         /// Human-readable description from the CUE spec.
         description: Option<String>,
+        /// Invoke in passthrough mode (live stdio, no timeout) — set for
+        /// streaming methods like a build component's `commands/build`. DATA-312.
+        streaming: bool,
+        /// External binaries the component declared it needs on PATH; verified
+        /// before dispatch. DATA-312.
+        requires: Vec<forest_sdk::RequiredTool>,
     },
     /// A Deno/TypeScript component invocation.
     ComponentDeno {
