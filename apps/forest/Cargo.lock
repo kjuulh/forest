@@ -479,6 +479,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "build-rust-example"
+version = "0.1.0"
+dependencies = [
+ "forest-sdk",
+ "serde_json",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1471,6 +1479,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "tempfile",
  "tokio",
  "tracing",
 ]

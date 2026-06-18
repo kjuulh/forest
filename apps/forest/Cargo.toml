@@ -14,6 +14,7 @@ members = [
   "components/forest-contrib/build-rust/crates/build-rust",
   "components/forest-contrib/build-go/crates/build-go",
   "components/forest-contrib/build-docker/crates/build-docker",
+  "examples/build-rust-example/crates/build-rust-example",
   # "examples/rust-service-component/crates/rust-service",  # legacy v1 example — needs update
   "examples/rust-podinfo",
   "examples/service-example",
