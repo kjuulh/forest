@@ -1169,7 +1169,7 @@ async fn collect_deno_files(
             files.push((".forest/component/meta.json".to_string(), content));
         } else {
             tracing::warn!(
-                "no meta.json found at {} — run `forest build` before `forest publish`",
+                "no meta.json found at {} — run `forest run build` before `forest publish`",
                 meta_path.display()
             );
         }

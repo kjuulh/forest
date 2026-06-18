@@ -265,7 +265,7 @@ fn main() {
         eprintln!("Next steps:");
         eprintln!("  cd {}", output_dir.display());
         eprintln!("  forest generate --output crates/{name}/src/");
-        eprintln!("  forest build");
+        eprintln!("  forest run build");
         eprintln!("  forest publish");
 
         Ok(())

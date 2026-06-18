@@ -211,7 +211,7 @@ impl PreflightCheck for C6BinaryArtifactExists {
                      for `{}` was found",
                     ctx.component_name
                 ),
-                hint: "Run your build first (e.g. `forest build`, or your build tool \
+                hint: "Run your build first (e.g. `forest run build`, or your build tool \
                        directly). The artifact must land where forest looks for it: a \
                        file named after the component, executable, on the current \
                        platform. Forest is build-tool agnostic — whatever you use \

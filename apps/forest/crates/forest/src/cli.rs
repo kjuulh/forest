@@ -15,7 +15,6 @@ use tool::ToolCommand;
 
 use crate::{
     cli::{
-        components::build::BuildCommand,
         components::generate::GenerateCommand,
         components::publish::PublishCommand,
         destination::DestinationCommand, environment::EnvironmentCommand,
@@ -76,8 +75,8 @@ enum Commands {
     Add(add::AddCommand),
 
     // ── Component lifecycle (like cargo build/publish) ──
-    /// Build the component binary for all configured platforms
-    Build(BuildCommand),
+    // `forest build` was removed in DATA-312: building is now a depended-on
+    // component (`forest-contrib/build-*`) invoked via `forest run build`.
     /// Generate type-safe code from CUE component spec (forest.component.cue)
     Generate(GenerateCommand),
     /// Publish component to the registry (binary + CUE spec + manifest)
@@ -273,7 +272,6 @@ fn is_server_mutation(command: &Commands) -> bool {
         // Local-only or read-only.
         Commands::Init(_)
         | Commands::Add(_)
-        | Commands::Build(_)
         | Commands::Generate(_)
         | Commands::Validate(_)
         | Commands::Update(_)
@@ -353,7 +351,6 @@ impl CommandHandler {
         let result = match command {
             Commands::Init(cmd) => cmd.execute(state).await,
             Commands::Add(cmd) => cmd.execute(state).await,
-            Commands::Build(cmd) => cmd.execute(state).await,
             Commands::Generate(cmd) => cmd.execute(state).await,
             Commands::Publish(cmd) => cmd.execute(state).await,
             Commands::Validate(cmd) => cmd.execute(state).await,

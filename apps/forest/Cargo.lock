@@ -1407,7 +1407,6 @@ dependencies = [
  "dotenvy",
  "drop-queue",
  "flate2",
- "forest-build-core",
  "forest-grpc-interface",
  "forest-manifest",
  "forest-models",

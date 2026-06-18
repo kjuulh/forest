@@ -14,7 +14,6 @@ license = "MIT"
 version = "0.1.16"
 
 [dependencies]
-forest-build-core.workspace = true
 forest-grpc-interface.workspace = true
 forest-manifest.workspace = true
 forest-models.workspace = true

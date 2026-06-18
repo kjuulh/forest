@@ -113,6 +113,21 @@ fn resolve_meta_for_sync(
 
 /// Find a locally-built binary for a component (Cargo workspace or standalone).
 fn find_local_binary(component_dir: &Path, binary_name: &str) -> Option<PathBuf> {
+    // DATA-312: the build component (`forest run build`) writes artifacts to
+    // `.forest/component/output/<os>/<arch>/<name>`. Prefer that — it's the
+    // deterministic, toolchain-agnostic location, independent of cargo's
+    // per-triple `target/<triple>/release` layout (which a plain
+    // `target/release` probe misses for cross/explicit-target builds).
+    let (os, arch) = current_platform();
+    let forest_artifact = component_dir
+        .join(".forest/component/output")
+        .join(os)
+        .join(arch)
+        .join(binary_name);
+    if forest_artifact.is_file() {
+        return Some(forest_artifact);
+    }
+
     // Walk up to find workspace root with target/debug/{name}
     let mut dir = component_dir.to_path_buf();
     loop {
@@ -473,7 +488,7 @@ impl std::fmt::Display for DescribeError {
             DescribeError::SpawnFailed { bin, source } => write!(
                 f,
                 "failed to spawn component {bin}: {source}\n\n\
-                 Did `forest build` succeed? The expected artifact path is shown above.",
+                 Did `forest run build` succeed? The expected artifact path is shown above.",
                 bin = bin.display(),
             ),
         }
