@@ -6,6 +6,8 @@ description = "Toolchain build logic (cargo/go/docker) shared by forest's build 
 license = "MIT"
 
 [dependencies]
+forest-sdk.workspace = true
+
 anyhow.workspace = true
 tokio.workspace = true
 serde.workspace = true

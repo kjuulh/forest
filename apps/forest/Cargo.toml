@@ -11,6 +11,9 @@ members = [
   "components/forest-contrib/gitea-create-repo/crates/gitea-create-repo",
   "components/forest-contrib/init/crates/init",
   "components/forest-contrib/git-init/crates/git-init",
+  "components/forest-contrib/build-rust/crates/build-rust",
+  "components/forest-contrib/build-go/crates/build-go",
+  "components/forest-contrib/build-docker/crates/build-docker",
   # "examples/rust-service-component/crates/rust-service",  # legacy v1 example — needs update
   "examples/rust-podinfo",
   "examples/service-example",

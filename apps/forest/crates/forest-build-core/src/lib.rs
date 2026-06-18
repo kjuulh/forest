@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use sha2::{Digest, Sha256};
 
+pub mod component;
+pub mod manifest;
+
 /// The toolchains a build component can drive. One component per variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Toolchain {
@@ -44,6 +47,71 @@ pub struct BuiltArtifact {
     pub path: PathBuf,
     pub sha256: String,
     pub size: u64,
+}
+
+/// The JSON summary a build component returns on success.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BuildSummary {
+    pub name: String,
+    pub version: String,
+    pub artifacts: Vec<BuiltArtifact>,
+}
+
+/// End-to-end build for a build component: read the project manifest from
+/// `work_dir`, resolve targets, compile each, write `checksums.sha256`, and
+/// return a summary. Artifacts land in `<work_dir>/.forest/component/output`
+/// and the cargo target dir — forest's publish/run paths pick them up from
+/// there (this crate intentionally does NOT touch forest's component cache or
+/// meta.json). DATA-312.
+pub async fn run_build(toolchain: Toolchain, work_dir: &Path) -> anyhow::Result<BuildSummary> {
+    let req = manifest::read_build_request(toolchain, work_dir).await?;
+
+    let targets = resolve_targets(&req.architectures, toolchain)?;
+    if targets.is_empty() {
+        anyhow::bail!("no build targets resolved from architectures");
+    }
+
+    tracing::info!(
+        "building {} target(s) for component '{}'",
+        targets.len(),
+        req.name,
+    );
+
+    for target in &targets {
+        tracing::info!("building {}/{} ...", target.os, target.arch);
+        build_target(
+            toolchain,
+            &req.name,
+            &req.version,
+            &req.source,
+            &req.out_base,
+            target,
+        )
+        .await?;
+    }
+
+    generate_checksums(&req.name, &targets, &req.out_base)?;
+
+    let mut artifacts = Vec::new();
+    for target in &targets {
+        let path =
+            output_dir(&req.out_base, &target.os, &target.arch)?.join(output_filename(&req.name, target));
+        let bytes = std::fs::read(&path)
+            .with_context(|| format!("read built artifact {}", path.display()))?;
+        artifacts.push(BuiltArtifact {
+            os: target.os.clone(),
+            arch: target.arch.clone(),
+            sha256: hex::encode(Sha256::digest(&bytes)),
+            size: bytes.len() as u64,
+            path,
+        });
+    }
+
+    Ok(BuildSummary {
+        name: req.name,
+        version: req.version,
+        artifacts,
+    })
 }
 
 fn rust_target_triple(os: &str, arch: &str) -> anyhow::Result<String> {

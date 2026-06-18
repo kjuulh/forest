@@ -1,0 +1,8 @@
+[package]
+name = "build-rust"
+edition = "2024"
+version.workspace = true
+publish = false
+
+[dependencies]
+forest-build-core.workspace = true

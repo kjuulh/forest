@@ -458,6 +458,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "build-docker"
+version = "0.1.0"
+dependencies = [
+ "forest-build-core",
+]
+
+[[package]]
+name = "build-go"
+version = "0.1.0"
+dependencies = [
+ "forest-build-core",
+]
+
+[[package]]
+name = "build-rust"
+version = "0.1.0"
+dependencies = [
+ "forest-build-core",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1446,6 +1467,7 @@ name = "forest-build-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "forest-sdk",
  "hex",
  "serde",
  "serde_json",
