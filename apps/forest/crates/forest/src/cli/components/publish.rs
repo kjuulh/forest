@@ -268,6 +268,13 @@ pub struct PublishCommand {
 }
 
 impl PublishCommand {
+    /// Construct a non-dry-run publish for programmatic use. Used by the
+    /// hidden `forest bootstrap` command, which publishes many components by
+    /// switching the working directory between them. DATA-312.
+    pub fn for_bootstrap() -> Self {
+        Self { dry_run: false }
+    }
+
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         // 1. Parse the component's CUE files to get metadata
         let mut cue_args = vec!["export".to_string(), "--out".to_string(), "json".to_string()];

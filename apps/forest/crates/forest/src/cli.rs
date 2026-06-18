@@ -1,4 +1,5 @@
 use admin::AdminCommand;
+use bootstrap::BootstrapCommand;
 use auth::AuthCommand;
 use clap::{Parser, Subcommand};
 use components::ComponentsCommand;
@@ -27,6 +28,7 @@ use crate::{
 mod add;
 mod admin;
 mod auth;
+mod bootstrap;
 mod components;
 mod context;
 mod destination;
@@ -140,6 +142,10 @@ enum Commands {
     /// Manage temporary directories
     #[command(hide = true)]
     Tmp(TmpCommand),
+
+    /// Publish all in-repo workspace components in dependency order (dev helper)
+    #[command(hide = true)]
+    Bootstrap(BootstrapCommand),
 
     /// Update the forest CLI itself (`self update` / `self check`)
     #[command(name = "self")]
@@ -260,8 +266,9 @@ fn maybe_print_context_banner(cli: &Command) {
 /// stay quiet.
 fn is_server_mutation(command: &Commands) -> bool {
     match command {
-        // Always mutates: pushes an artifact, drives a release.
-        Commands::Publish(_) | Commands::Release(_) => true,
+        // Always mutates: pushes an artifact, drives a release, publishes
+        // every workspace component.
+        Commands::Publish(_) | Commands::Release(_) | Commands::Bootstrap(_) => true,
         // Subcommand-mixed: drill in to skip read-only variants.
         Commands::Auth(cmd) => cmd.is_mutation(),
         Commands::Project(cmd) => cmd.is_mutation(),
@@ -372,6 +379,7 @@ impl CommandHandler {
             Commands::Global(cmd) => cmd.execute(state).await,
             Commands::Shell(cmd) => cmd.execute(state).await,
             Commands::Tmp(cmd) => cmd.execute(state).await,
+            Commands::Bootstrap(cmd) => cmd.execute(state).await,
             Commands::Self_(cmd) => cmd.execute(state).await,
         };
 
