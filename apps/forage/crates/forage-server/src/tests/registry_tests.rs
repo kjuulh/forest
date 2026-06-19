@@ -34,12 +34,14 @@ fn sample_versions() -> Vec<ComponentVersionInfo> {
             protocol_version: "1".into(),
             kind: "binary".into(),
             platforms: vec!["linux_amd64".into(), "darwin_arm64".into()],
+            created_at: "2026-01-02T00:00:00Z".into(),
         },
         ComponentVersionInfo {
             version: "1.1.0".into(),
             protocol_version: "1".into(),
             kind: "binary".into(),
             platforms: vec!["linux_amd64".into()],
+            created_at: "2026-01-01T00:00:00Z".into(),
         },
     ]
 }
@@ -485,6 +487,12 @@ async fn component_detail_returns_200_with_readme() {
     assert!(html.contains("linux_amd64"));
     assert!(html.contains("alice"));
     assert!(html.contains("forest components add"));
+    // Each release shows when it was published (DATA-312).
+    assert!(html.contains("published"));
+    assert!(
+        html.contains("2026-01-02T00:00:00Z"),
+        "expected the publish timestamp in the release card"
+    );
 }
 
 #[tokio::test]
@@ -1133,6 +1141,7 @@ fn sample_tool_detail(shape: ToolShape) -> ComponentDetail {
             protocol_version: "1".into(),
             kind: "binary".into(),
             platforms: vec!["linux_amd64".into()],
+            created_at: "2026-01-01T00:00:00Z".into(),
         }],
         readme: String::new(),
         manifest_json: r#"{"kind":"binary","tool":{"name":"forest-hello","argv_passthrough":true}}"#

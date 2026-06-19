@@ -3224,6 +3224,7 @@ fn convert_component_version_info(v: forage_grpc::ComponentVersionInfo) -> Compo
         protocol_version: v.protocol_version,
         kind: v.kind,
         platforms: v.platforms,
+        created_at: v.created_at,
     }
 }
 

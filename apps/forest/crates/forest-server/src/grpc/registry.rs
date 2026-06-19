@@ -462,6 +462,7 @@ impl RegistryService for RegistryServer {
                     protocol_version: v.protocol_version,
                     kind: v.kind,
                     platforms: v.platforms,
+                    created_at: v.created_at,
                 })
                 .collect(),
         }))

@@ -101,6 +101,9 @@ pub struct ComponentVersionInfo {
     pub protocol_version: String,
     pub kind: String,
     pub platforms: Vec<String>,
+    /// RFC 3339 timestamp of when this version was published. Empty if the
+    /// upstream registry didn't report one (older servers).
+    pub created_at: String,
 }
 
 /// Full component detail (like a crates.io crate page).

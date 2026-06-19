@@ -46,6 +46,9 @@ pub struct ComponentVersionInfo {
     pub protocol_version: String,
     pub kind: String,
     pub platforms: Vec<String>,
+    /// RFC 3339 timestamp of when this version was published (the `created`
+    /// column, set at commit time).
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone)]
@@ -934,7 +937,7 @@ impl ComponentService {
         name: &str,
     ) -> anyhow::Result<Vec<ComponentVersionInfo>> {
         let rows = sqlx::query(
-            "SELECT c.version, c.kind,
+            "SELECT c.version, c.kind, c.created,
                     COALESCE(
                         (SELECT json_agg(ca.os || '_' || ca.arch)
                          FROM component_artifacts ca
@@ -970,6 +973,9 @@ impl ComponentService {
                 protocol_version: row.get("protocol_version"),
                 kind: row.get("kind"),
                 platforms,
+                created_at: row
+                    .get::<chrono::DateTime<chrono::Utc>, _>("created")
+                    .to_rfc3339(),
             });
         }
 
@@ -1392,6 +1398,7 @@ impl ComponentService {
                 protocol_version: v.protocol_version,
                 kind: v.kind,
                 platforms: v.platforms,
+                created_at: v.created_at,
             })
             .collect();
 

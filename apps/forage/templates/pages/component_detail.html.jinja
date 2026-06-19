@@ -200,6 +200,9 @@
                                 {% endfor %}
                             </div>
                         </div>
+                        {% if v.created_at %}
+                        <div class="mt-1 text-xs text-gray-400">published {{ ts(v.created_at) }}</div>
+                        {% endif %}
                     </div>
                     {% endfor %}
                 </div>

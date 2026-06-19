@@ -196,6 +196,7 @@ message ComponentVersionInfo {
   string protocol_version = 2;
   string kind = 3; // "binary" or "files"
   repeated string platforms = 4; // e.g., ["linux_amd64", "darwin_arm64"]
+  string created_at = 5;        // ISO 8601 — when this version was published
 }
 
 message UnpublishVersionRequest {
