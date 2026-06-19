@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.3](https://github.com/understory-io/forest/compare/v0.2.2...v0.2.3) (2026-06-19)
+
+
+### Features
+
+* **forest:** interactive terminal UI foundation + warn-only logging ([#104](https://github.com/understory-io/forest/issues/104)) ([2c82fc6](https://github.com/understory-io/forest/commit/2c82fc63a65db5cdec3afec91fa22ef38731e8ee))
+* **forest:** progress bars on component upload/download (DATA-312) ([#107](https://github.com/understory-io/forest/issues/107)) ([a879dde](https://github.com/understory-io/forest/commit/a879dde68ab2658b11ca97c2c606cf1160dee2ca))
+
+
+### Bug Fixes
+
+* **forest:** translate macOS→darwin for binary downloads in `forest update` ([#105](https://github.com/understory-io/forest/issues/105)) ([9a7eeaa](https://github.com/understory-io/forest/commit/9a7eeaa0db3320ba65762a9a51f1e238cef9bc74))
+
 ## [0.2.2](https://github.com/understory-io/forest/compare/v0.2.1...v0.2.2) (2026-06-19)
 
 
