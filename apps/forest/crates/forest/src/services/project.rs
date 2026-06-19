@@ -7,8 +7,7 @@ use crate::{
     component_cache::models::{CacheComponent, CacheComponentCommand, CacheComponentSource},
     models::{CommandName, CommandSource, DependencyType, Project, ProjectValue},
     services::{
-        component_binary,
-        component_deno,
+        component_binary, component_deno,
         components::{ComponentsService, ComponentsServiceState},
         temp_directories::{TempDirectories, TempDirectoriesState},
     },
@@ -42,7 +41,8 @@ impl ProjectParser {
             if !project.has_component_usage(&component.organisation, &component.name) {
                 tracing::trace!(
                     "skipping CLI command registration for {}/{} (no usage block)",
-                    component.organisation, component.name,
+                    component.organisation,
+                    component.name,
                 );
                 continue;
             }
@@ -61,29 +61,29 @@ impl ProjectParser {
 
                     if let Some(ref binary_path) = binary_path {
                         // v2 component: try cached descriptor first, then _meta/describe
-                        let descriptor_result =
-                            if let Some(cached) = component_binary::load_cached_descriptor_with_meta(
+                        let descriptor_result = if let Some(cached) =
+                            component_binary::load_cached_descriptor_with_meta(
                                 path,
                                 Some(&component.organisation),
                                 Some(&component.name),
                                 Some(&component.version.to_string()),
                             ) {
-                                tracing::debug!(
-                                    "using cached descriptor for {}/{}",
-                                    component.organisation,
-                                    component.name,
-                                );
-                                Ok(cached)
-                            } else {
-                                component_binary::describe_component(&binary_path).await
-                            };
+                            tracing::debug!(
+                                "using cached descriptor for {}/{}",
+                                component.organisation,
+                                component.name,
+                            );
+                            Ok(cached)
+                        } else {
+                            component_binary::describe_component(&binary_path).await
+                        };
                         match descriptor_result {
                             Ok(descriptor) => {
                                 let source = CommandSource::Local(
                                     path.canonicalize().context("get absolute path")?,
                                 );
                                 let mut registered = 0;
-                        for method in &descriptor.methods {
+                                for method in &descriptor.methods {
                                     // Only register "commands/*" for `forest run`.
                                     // Hooks are invoked by forest release prepare, not `forest run`.
                                     if !method.name.starts_with("commands/") {
@@ -140,26 +140,27 @@ impl ProjectParser {
                             Some(&component.name),
                             Some(&component.version.to_string()),
                         ) {
-                            let descriptor_result =
-                                if let Some(cached) = component_deno::load_cached_descriptor_with_meta(
+                            let descriptor_result = if let Some(cached) =
+                                component_deno::load_cached_descriptor_with_meta(
                                     path,
                                     Some(&component.organisation),
                                     Some(&component.name),
                                     Some(&component.version.to_string()),
                                 ) {
-                                    tracing::debug!(
-                                        "using cached descriptor for deno component {}/{}",
-                                        component.organisation,
-                                        component.name,
-                                    );
-                                    Ok(cached)
-                                } else {
-                                    component_deno::describe_deno_component(path, &entrypoint).await
-                                };
+                                tracing::debug!(
+                                    "using cached descriptor for deno component {}/{}",
+                                    component.organisation,
+                                    component.name,
+                                );
+                                Ok(cached)
+                            } else {
+                                component_deno::describe_deno_component(path, &entrypoint).await
+                            };
 
                             match descriptor_result {
                                 Ok(descriptor) => {
-                                    let component_dir = path.canonicalize().context("get absolute path")?;
+                                    let component_dir =
+                                        path.canonicalize().context("get absolute path")?;
                                     let source = CommandSource::Local(component_dir.clone());
                                     let mut registered = 0;
                                     for method in &descriptor.methods {
@@ -206,7 +207,7 @@ impl ProjectParser {
                     } else {
                         // Template-only component (no binary, no deno) — participates in
                         // release prepare via templates, but has no `forest run` commands.
-                        tracing::info!(
+                        tracing::debug!(
                             "template-only component {}/{} (no binary, templates only)",
                             component.organisation,
                             component.name,
@@ -271,7 +272,9 @@ impl ProjectParser {
 
                 if dep.organisation == component.organisation && dep.name == component.name {
                     match &dep.dependency_type {
-                        DependencyType::Versioned(version) if *version == component.version.to_string() => {
+                        DependencyType::Versioned(version)
+                            if *version == component.version.to_string() =>
+                        {
                             tracing::trace!(
                                 name = dep.name,
                                 organisation = dep.organisation,
@@ -345,10 +348,7 @@ impl ProjectParser {
             // 1. Transform cue into toml
             let output = crate::tools::cue::output(|| {
                 let mut cmd = tokio::process::Command::new("cue");
-                cmd.arg("export")
-                    .arg(&file_path)
-                    .arg("--out")
-                    .arg("toml");
+                cmd.arg("export").arg(&file_path).arg("--out").arg("toml");
 
                 // Pass CUE_REGISTRY if set (enables module imports from OCI registry)
                 if let Ok(registry) = std::env::var("CUE_REGISTRY") {
@@ -362,7 +362,11 @@ impl ProjectParser {
                 std::string::String::from_utf8(output.stderr).context("interpret stderr")?;
 
             if !output.status.success() {
-                anyhow::bail!("failed to evaluate {}: {}", file_path.display(), stderr.trim());
+                anyhow::bail!(
+                    "failed to evaluate {}: {}",
+                    file_path.display(),
+                    stderr.trim()
+                );
             }
 
             let output = std::string::String::from_utf8(output.stdout)
@@ -397,10 +401,7 @@ impl ProjectParser {
             // 1. Transform cue into toml
             let output = crate::tools::cue::output(|| {
                 let mut cmd = tokio::process::Command::new("cue");
-                cmd.arg("export")
-                    .arg(&file_path)
-                    .arg("--out")
-                    .arg("toml");
+                cmd.arg("export").arg(&file_path).arg("--out").arg("toml");
                 cmd
             })
             .await?;
