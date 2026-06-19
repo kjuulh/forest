@@ -113,8 +113,8 @@ pub async fn read_build_request(
 /// the ambient `CUE_REGISTRY` (forest sets it before spawning the component).
 async fn export_cue(work_dir: &Path) -> anyhow::Result<serde_json::Value> {
     let mut cue_files = Vec::new();
-    for entry in std::fs::read_dir(work_dir)
-        .with_context(|| format!("reading {}", work_dir.display()))?
+    for entry in
+        std::fs::read_dir(work_dir).with_context(|| format!("reading {}", work_dir.display()))?
     {
         let entry = entry?;
         if entry.path().extension().and_then(|e| e.to_str()) == Some("cue") {

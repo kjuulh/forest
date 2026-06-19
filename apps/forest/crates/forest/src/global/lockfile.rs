@@ -95,14 +95,7 @@ impl GlobalLockFile {
     }
 
     /// Look up the sha256 for a `(org, name, version, os, arch)` tuple.
-    pub fn get(
-        &self,
-        org: &str,
-        name: &str,
-        version: &str,
-        os: &str,
-        arch: &str,
-    ) -> Option<&str> {
+    pub fn get(&self, org: &str, name: &str, version: &str, os: &str, arch: &str) -> Option<&str> {
         let key = format!("{org}/{name}@{version} {os}/{arch}");
         self.entries.get(&key).map(|e| e.sha256.as_str())
     }
@@ -205,10 +198,7 @@ mod tests {
     #[test]
     fn to_line_format_matches_spec() {
         let e = sample_entry("ripgrep", "14.1.1", "linux", "amd64", "abc");
-        assert_eq!(
-            e.to_line(),
-            "cuteorg/ripgrep@14.1.1 linux/amd64 sha256:abc"
-        );
+        assert_eq!(e.to_line(), "cuteorg/ripgrep@14.1.1 linux/amd64 sha256:abc");
     }
 
     #[test]
@@ -274,8 +264,7 @@ cuteorg/rg@14.1.1 linux/amd64 sha256:abc
 
     #[test]
     fn parse_rejects_missing_platform_separator() {
-        let err =
-            GlobalLockFile::parse("cuteorg/rg@14.1.1 linuxamd64 sha256:abc\n").unwrap_err();
+        let err = GlobalLockFile::parse("cuteorg/rg@14.1.1 linuxamd64 sha256:abc\n").unwrap_err();
         let is_malformed = matches!(err, LockError::Malformed { line_number: 1, .. });
         assert!(is_malformed, "got {err:?}");
     }

@@ -47,8 +47,8 @@ impl UpdateCommand {
         };
 
         let stages = if let Some(path) = &self.stages_file {
-            let json = std::fs::read_to_string(path)
-                .context(format!("read stages file: {path}"))?;
+            let json =
+                std::fs::read_to_string(path).context(format!("read stages file: {path}"))?;
             Some(parse_stages_from_json(&json)?)
         } else if let Some(json) = &self.stages_json {
             Some(parse_stages_from_json(json)?)
@@ -58,17 +58,15 @@ impl UpdateCommand {
 
         let pipeline = state
             .grpc_client()
-            .update_release_pipeline(
-                &organisation,
-                &project,
-                &name,
-                self.enabled,
-                stages,
-            )
+            .update_release_pipeline(&organisation, &project, &name, self.enabled, stages)
             .await
             .context("update release pipeline")?;
 
-        let status = if pipeline.enabled { "enabled" } else { "disabled" };
+        let status = if pipeline.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        };
         eprintln!("Updated release pipeline '{}' ({})", pipeline.name, status);
 
         Ok(())

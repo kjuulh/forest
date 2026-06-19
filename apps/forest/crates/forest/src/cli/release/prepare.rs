@@ -134,7 +134,9 @@ impl PrepareCommand {
                         // Versioned deps materialize in the shared cache via
                         // `forest update`. Resolve to that cache path and
                         // reuse the same is_deno detection used by Local.
-                        let Some(cache_dir) = dirs::cache_dir() else { continue };
+                        let Some(cache_dir) = dirs::cache_dir() else {
+                            continue;
+                        };
                         let dep_path = cache_dir
                             .join("forest")
                             .join("components")
@@ -164,38 +166,48 @@ impl PrepareCommand {
             let project_name = project.name.clone();
             let project_org = project.organisation.clone();
 
-            let resolver: component_deno::ComponentCallResolver = Box::new(move |component_id, method, spec, input, call_context| {
-                let component_map = Arc::clone(&component_map);
-                let project_path = project_path.clone();
-                let project_name = project_name.clone();
-                let project_org = project_org.clone();
+            let resolver: component_deno::ComponentCallResolver =
+                Box::new(move |component_id, method, spec, input, call_context| {
+                    let component_map = Arc::clone(&component_map);
+                    let project_path = project_path.clone();
+                    let project_name = project_name.clone();
+                    let project_org = project_org.clone();
 
-                Box::pin(async move {
-                    let (component_dir, entrypoint) = component_map
-                        .get(&component_id)
-                        .ok_or_else(|| anyhow::anyhow!("unknown component: {component_id}"))?;
+                    Box::pin(async move {
+                        let (component_dir, entrypoint) = component_map
+                            .get(&component_id)
+                            .ok_or_else(|| anyhow::anyhow!("unknown component: {component_id}"))?;
 
-                    // Use forwarded context if available, adding project defaults
-                    let ctx = match call_context {
-                        Some(mut ctx) => {
-                            ctx.project = ctx.project.or(Some(project_name));
-                            ctx.organisation = ctx.organisation.or(project_org);
-                            ctx.work_dir = ctx.work_dir.or(Some(project_path.to_string_lossy().to_string()));
-                            ctx
-                        }
-                        None => forest_sdk::CallContext {
-                            project: Some(project_name),
-                            organisation: project_org,
-                            work_dir: Some(project_path.to_string_lossy().to_string()),
-                            ..Default::default()
-                        },
-                    };
+                        // Use forwarded context if available, adding project defaults
+                        let ctx = match call_context {
+                            Some(mut ctx) => {
+                                ctx.project = ctx.project.or(Some(project_name));
+                                ctx.organisation = ctx.organisation.or(project_org);
+                                ctx.work_dir = ctx
+                                    .work_dir
+                                    .or(Some(project_path.to_string_lossy().to_string()));
+                                ctx
+                            }
+                            None => forest_sdk::CallContext {
+                                project: Some(project_name),
+                                organisation: project_org,
+                                work_dir: Some(project_path.to_string_lossy().to_string()),
+                                ..Default::default()
+                            },
+                        };
 
-                    component_deno::invoke_deno_component(
-                        component_dir, entrypoint, &method, &spec, &input, Some(&ctx), None,
-                    ).await
-                })
-            });
+                        component_deno::invoke_deno_component(
+                            component_dir,
+                            entrypoint,
+                            &method,
+                            &spec,
+                            &input,
+                            Some(&ctx),
+                            None,
+                        )
+                        .await
+                    })
+                });
             resolver
         };
 
@@ -217,7 +229,8 @@ impl PrepareCommand {
             let Some(component) = &deployment_item.component else {
                 anyhow::bail!(
                     "deployment item for {}/{} has no component reference",
-                    deployment_item.env, deployment_item.destination
+                    deployment_item.env,
+                    deployment_item.destination
                 );
             };
 
@@ -231,16 +244,14 @@ impl PrepareCommand {
                 crate::models::ComponentSource::Versioned(version) => {
                     let cache_dir = state
                         .component_cache()
-                        .versioned_component_dir(
-                            &component.organisation,
-                            &component.name,
-                            version,
-                        )
+                        .versioned_component_dir(&component.organisation, &component.name, version)
                         .await?;
                     if !cache_dir.exists() {
                         anyhow::bail!(
                             "component {}/{}@{} is not in the cache; run `forest deps` to download it first",
-                            component.organisation, component.name, version,
+                            component.organisation,
+                            component.name,
+                            version,
                         );
                     }
                     cache_dir
@@ -263,8 +274,12 @@ impl PrepareCommand {
 
             if template_dir.exists() {
                 // Get template config from the component binary (skip, rename, extra vars)
-                let template_config = if let Some(ref bp) = component_binary::resolve_binary(component_path, &component.name) {
-                    component_binary::get_template_config(bp).await.unwrap_or_default()
+                let template_config = if let Some(ref bp) =
+                    component_binary::resolve_binary(component_path, &component.name)
+                {
+                    component_binary::get_template_config(bp)
+                        .await
+                        .unwrap_or_default()
                 } else {
                     forest_sdk::TemplateConfig::default()
                 };
@@ -322,33 +337,57 @@ impl PrepareCommand {
                     ..Default::default()
                 };
 
-                if let Some(binary_path) = component_binary::resolve_binary(component_path, &component.name) {
-                    tracing::info!("invoking deployment prepare hook on {}/{}", component.organisation, component.name);
-                    Some(component_binary::invoke_component_with_context(
-                        &binary_path,
-                        "hooks/forest/deployment/prepare",
-                        &spec_json,
-                        &empty_input,
-                        Some(&call_context),
-                    ).await.with_context(|| format!(
-                        "deployment prepare hook failed for {}/{}",
-                        component.organisation, component.name
-                    ))?)
-                } else if crate::services::component_deno::is_deno_component(component_path) {
-                    if let Some(entrypoint) = crate::services::component_deno::resolve_entrypoint(component_path) {
-                        tracing::info!("invoking deno deployment prepare hook on {}/{}", component.organisation, component.name);
-                        Some(crate::services::component_deno::invoke_deno_component(
-                            component_path,
-                            &entrypoint,
+                if let Some(binary_path) =
+                    component_binary::resolve_binary(component_path, &component.name)
+                {
+                    tracing::info!(
+                        "invoking deployment prepare hook on {}/{}",
+                        component.organisation,
+                        component.name
+                    );
+                    Some(
+                        component_binary::invoke_component_with_context(
+                            &binary_path,
                             "hooks/forest/deployment/prepare",
                             &spec_json,
                             &empty_input,
                             Some(&call_context),
-                            Some(&call_resolver),
-                        ).await.with_context(|| format!(
-                            "deno deployment prepare hook failed for {}/{}",
-                            component.organisation, component.name
-                        ))?)
+                        )
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "deployment prepare hook failed for {}/{}",
+                                component.organisation, component.name
+                            )
+                        })?,
+                    )
+                } else if crate::services::component_deno::is_deno_component(component_path) {
+                    if let Some(entrypoint) =
+                        crate::services::component_deno::resolve_entrypoint(component_path)
+                    {
+                        tracing::info!(
+                            "invoking deno deployment prepare hook on {}/{}",
+                            component.organisation,
+                            component.name
+                        );
+                        Some(
+                            crate::services::component_deno::invoke_deno_component(
+                                component_path,
+                                &entrypoint,
+                                "hooks/forest/deployment/prepare",
+                                &spec_json,
+                                &empty_input,
+                                Some(&call_context),
+                                Some(&call_resolver),
+                            )
+                            .await
+                            .with_context(|| {
+                                format!(
+                                    "deno deployment prepare hook failed for {}/{}",
+                                    component.organisation, component.name
+                                )
+                            })?,
+                        )
                     } else {
                         None
                     }
@@ -362,11 +401,16 @@ impl PrepareCommand {
             if let Some(result) = hook_result {
                 if let Some(manifests) = result.get("manifests").and_then(|v| v.as_array()) {
                     for manifest in manifests {
-                        let obj = manifest.as_object()
+                        let obj = manifest
+                            .as_object()
                             .context("manifest must be an object with name and content")?;
-                        let name = obj.get("name").and_then(|n| n.as_str())
+                        let name = obj
+                            .get("name")
+                            .and_then(|n| n.as_str())
                             .context("manifest.name is required")?;
-                        let content = obj.get("content").and_then(|c| c.as_str())
+                        let content = obj
+                            .get("content")
+                            .and_then(|c| c.as_str())
                             .context("manifest.content is required")?;
 
                         let file_path = output_path.join(name);

@@ -24,17 +24,18 @@ pub struct AddCommand {
 impl AddCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         // Parse component reference: "org/name" or "org/name@version"
-        let (org_name, explicit_version) = if let Some((name, version)) = self.component.split_once('@') {
-            (name.to_string(), Some(version.to_string()))
-        } else {
-            (self.component.clone(), None)
-        };
+        let (org_name, explicit_version) =
+            if let Some((name, version)) = self.component.split_once('@') {
+                (name.to_string(), Some(version.to_string()))
+            } else {
+                (self.component.clone(), None)
+            };
 
-        let (organisation, name) = org_name
-            .split_once('/')
-            .ok_or_else(|| anyhow::anyhow!(
+        let (organisation, name) = org_name.split_once('/').ok_or_else(|| {
+            anyhow::anyhow!(
                 "component must be in org/name format (e.g., forest-contrib/kubernetes-service)"
-            ))?;
+            )
+        })?;
 
         // Determine the dependency value
         let dep_value = if let Some(path) = &self.path {
@@ -50,9 +51,9 @@ impl AddCommand {
                     .get_component(name, organisation)
                     .await
                     .context("failed to query registry")?
-                    .ok_or_else(|| anyhow::anyhow!(
-                        "component {organisation}/{name} not found in registry"
-                    ))?;
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("component {organisation}/{name} not found in registry")
+                    })?;
                 component.version
             };
             format!("version: \"{}\"", version)
@@ -83,10 +84,10 @@ impl AddCommand {
 
         if !module_cue.exists() {
             // Read project name from forest.cue for the module path
-            let project_name = extract_project_name(&new_content)
-                .unwrap_or_else(|| "my-project".to_string());
-            let project_org = extract_project_org(&new_content)
-                .unwrap_or_else(|| "my-org".to_string());
+            let project_name =
+                extract_project_name(&new_content).unwrap_or_else(|| "my-project".to_string());
+            let project_org =
+                extract_project_org(&new_content).unwrap_or_else(|| "my-org".to_string());
 
             tokio::fs::create_dir_all(&cue_mod_dir).await?;
             let module_content = format!(
@@ -117,7 +118,10 @@ impl AddCommand {
         }
 
         let dep_display = if self.path.is_some() {
-            format!("{organisation}/{name} (local: {})", self.path.as_ref().unwrap())
+            format!(
+                "{organisation}/{name} (local: {})",
+                self.path.as_ref().unwrap()
+            )
         } else {
             format!("{organisation}/{name} ({dep_value})")
         };
@@ -126,8 +130,10 @@ impl AddCommand {
         eprintln!();
         if self.path.is_none() {
             eprintln!("You can now import the component's types in your CUE files:");
-            eprintln!("  import k8s \"forest.sh/{organisation}/{name}@v0:{pkg}\"",
-                pkg = name.replace('-', "_"));
+            eprintln!(
+                "  import k8s \"forest.sh/{organisation}/{name}@v0:{pkg}\"",
+                pkg = name.replace('-', "_")
+            );
         }
 
         Ok(())
@@ -197,9 +203,7 @@ fn insert_dependency(content: &str, dep_key: &str, dep_value: &str) -> anyhow::R
     }
 
     // No dependencies block found — append one
-    let dep_block = format!(
-        "\ndependencies: {{\n\t{dep_key}: {dep_value}\n}}\n"
-    );
+    let dep_block = format!("\ndependencies: {{\n\t{dep_key}: {dep_value}\n}}\n");
     Ok(format!("{content}{dep_block}"))
 }
 

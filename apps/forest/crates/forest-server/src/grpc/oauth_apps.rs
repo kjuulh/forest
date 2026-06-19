@@ -320,7 +320,9 @@ impl OAuthAppsService for OAuthAppsServer {
             .await
             .map_err(error::to_status)? as u32;
 
-        Ok(tonic::Response::new(RevokeOAuthGrantResponse { revoked_count }))
+        Ok(tonic::Response::new(RevokeOAuthGrantResponse {
+            revoked_count,
+        }))
     }
 
     async fn get_o_auth_consent(
@@ -466,9 +468,7 @@ fn to_proto(app: OAuthApp) -> forest_grpc_interface::OAuthApp {
     }
 }
 
-fn to_proto_tokens(
-    tokens: crate::services::oauth_apps::IssuedTokens,
-) -> OAuthTokens {
+fn to_proto_tokens(tokens: crate::services::oauth_apps::IssuedTokens) -> OAuthTokens {
     OAuthTokens {
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,

@@ -118,8 +118,8 @@ impl PolicyConfig {
                 Ok(PolicyConfig::BranchRestriction(c))
             }
             "approval" => {
-                let c: ApprovalConfig = serde_json::from_value(config.clone())
-                    .context("parse approval config")?;
+                let c: ApprovalConfig =
+                    serde_json::from_value(config.clone()).context("parse approval config")?;
                 Ok(PolicyConfig::Approval(c))
             }
             other => anyhow::bail!("unknown policy type: {other}"),
@@ -205,7 +205,10 @@ impl PolicyRegistry {
         }
 
         let (policy_type, config_json) = match params.config {
-            Some(ref c) => (Some(c.policy_type().as_str().to_string()), Some(c.to_json()?)),
+            Some(ref c) => (
+                Some(c.policy_type().as_str().to_string()),
+                Some(c.to_json()?),
+            ),
             None => (None, None),
         };
 
@@ -296,9 +299,7 @@ impl PolicyRegistry {
                     if c.target_environment != target_environment {
                         continue;
                     }
-                    let eval = self
-                        .check_soak_time(project_id, c, &policy.name)
-                        .await?;
+                    let eval = self.check_soak_time(project_id, c, &policy.name).await?;
                     evaluations.push(eval);
                 }
                 PolicyConfig::BranchRestriction(ref c) => {
@@ -312,7 +313,9 @@ impl PolicyRegistry {
                     if c.target_environment != target_environment {
                         continue;
                     }
-                    let eval = self.check_approval(&policy.id, c, &policy.name, release_intent_id).await?;
+                    let eval = self
+                        .check_approval(&policy.id, c, &policy.name, release_intent_id)
+                        .await?;
                     evaluations.push(eval);
                 }
             }
@@ -343,8 +346,7 @@ impl PolicyRegistry {
                 if c.branch_pattern.is_empty() {
                     anyhow::bail!("branch_pattern is required for branch_restriction policy");
                 }
-                Regex::new(&c.branch_pattern)
-                    .context("invalid regex for branch_pattern")?;
+                Regex::new(&c.branch_pattern).context("invalid regex for branch_pattern")?;
             }
             PolicyConfig::Approval(c) => {
                 if c.target_environment.is_empty() {
@@ -532,9 +534,15 @@ impl PolicyRegistry {
 
         let passed = approved_count >= config.required_approvals as i64;
         let reason = if passed {
-            format!("approval satisfied: {}/{}", approved_count, config.required_approvals)
+            format!(
+                "approval satisfied: {}/{}",
+                approved_count, config.required_approvals
+            )
         } else {
-            format!("awaiting approval: {}/{}", approved_count, config.required_approvals)
+            format!(
+                "awaiting approval: {}/{}",
+                approved_count, config.required_approvals
+            )
         };
 
         Ok(PolicyEvaluation {
@@ -545,13 +553,16 @@ impl PolicyRegistry {
             approval_state: Some(ApprovalStateInfo {
                 required_approvals: config.required_approvals,
                 current_approvals: approved_count as i32,
-                decisions: decisions.iter().map(|d| ApprovalDecisionInfo {
-                    user_id: d.user_id.to_string(),
-                    username: d.username.clone(),
-                    decision: d.decision.clone(),
-                    decided_at: d.created_at.to_rfc3339(),
-                    comment: d.comment.clone(),
-                }).collect(),
+                decisions: decisions
+                    .iter()
+                    .map(|d| ApprovalDecisionInfo {
+                        user_id: d.user_id.to_string(),
+                        username: d.username.clone(),
+                        decision: d.decision.clone(),
+                        decided_at: d.created_at.to_rfc3339(),
+                        comment: d.comment.clone(),
+                    })
+                    .collect(),
             }),
         })
     }
@@ -585,7 +596,10 @@ impl PolicyRegistry {
         Ok(())
     }
 
-    pub async fn get_intent_actor_id(&self, release_intent_id: &Uuid) -> anyhow::Result<Option<Uuid>> {
+    pub async fn get_intent_actor_id(
+        &self,
+        release_intent_id: &Uuid,
+    ) -> anyhow::Result<Option<Uuid>> {
         let row = sqlx::query_scalar!(
             "SELECT actor_id FROM release_intents WHERE id = $1",
             release_intent_id,
@@ -639,13 +653,16 @@ impl PolicyRegistry {
         Ok(ApprovalStateInfo {
             required_approvals,
             current_approvals,
-            decisions: rows.into_iter().map(|r| ApprovalDecisionInfo {
-                user_id: r.user_id.to_string(),
-                username: r.username,
-                decision: r.decision,
-                decided_at: r.created_at.to_rfc3339(),
-                comment: r.comment,
-            }).collect(),
+            decisions: rows
+                .into_iter()
+                .map(|r| ApprovalDecisionInfo {
+                    user_id: r.user_id.to_string(),
+                    username: r.username,
+                    decision: r.decision,
+                    decided_at: r.created_at.to_rfc3339(),
+                    comment: r.comment,
+                })
+                .collect(),
         })
     }
 }

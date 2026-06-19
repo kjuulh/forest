@@ -1,9 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Context;
-use forest_grpc_interface::{
-    DestinationInfo, ReleaseArtifactStore, ReleaseMode, WorkAssignment,
-};
+use forest_grpc_interface::{DestinationInfo, ReleaseArtifactStore, ReleaseMode, WorkAssignment};
 use forest_models::ReleaseStatus;
 use futures::StreamExt;
 use notmad::{Component, ComponentInfo, MadError};
@@ -22,12 +20,12 @@ use crate::{
     services::{
         destination_registry::{DestinationRegistry, DestinationRegistryState},
         notification_registry::{NotificationRegistry, NotificationRegistryState},
+        policy::{PolicyRegistry, PolicyRegistryState, PolicyType},
         release_event_store::{
             EventPayload, ReleaseEventStore, ReleaseEventStoreState, ReleaseEventType,
         },
         release_finalizer,
         release_logs_registry::{ReleaseLogsRegistry, ReleaseLogsRegistryState},
-        policy::{PolicyRegistry, PolicyRegistryState, PolicyType},
         release_registry::{ReleaseItem, ReleaseRegistry, ReleaseRegistryState},
         release_token_registry::{
             ReleaseTokenRegistry, ReleaseTokenRegistryState, ReleaseTokenScope,
@@ -95,7 +93,11 @@ impl SchedulerInner {
     async fn handle_release(&self, release_id: Uuid) -> anyhow::Result<()> {
         tracing::debug!(%release_id, "scheduler picked up release");
 
-        let release_state = match self.release_event_store.get_release_state(&release_id).await {
+        let release_state = match self
+            .release_event_store
+            .get_release_state(&release_id)
+            .await
+        {
             Ok(s) => s,
             Err(e) => {
                 tracing::debug!(%release_id, "release not found or already processed: {e:#}");
@@ -121,12 +123,7 @@ impl SchedulerInner {
         // the scheduler only handles soak_time deferral.
         let evaluations = self
             .policy_registry
-            .evaluate_for_environment(
-                &release_state.project_id,
-                &dest.environment,
-                None,
-                None,
-            )
+            .evaluate_for_environment(&release_state.project_id, &dest.environment, None, None)
             .await
             .unwrap_or_default();
 
@@ -226,10 +223,7 @@ impl SchedulerInner {
                 let project_id = release_state.project_id.to_string();
                 let state_id = TerraformStateStore::state_id_for(&dest.environment, &project_id);
                 let (id, password) = self.tf_state.urls(state_id).await;
-                let url = format!(
-                    "{}/{id}",
-                    self.tf_state.external_url.trim_end_matches('/')
-                );
+                let url = format!("{}/{id}", self.tf_state.external_url.trim_end_matches('/'));
                 Some(ReleaseArtifactStore {
                     id,
                     url,
@@ -335,7 +329,12 @@ impl SchedulerInner {
         // Transition ASSIGNED -> RUNNING
         tracing::debug!(%release_id, "transitioning to RUNNING (in-process)");
         self.release_event_store
-            .emit_event(release_id, ReleaseEventType::Started, EventPayload::default(), None)
+            .emit_event(
+                release_id,
+                ReleaseEventType::Started,
+                EventPayload::default(),
+                None,
+            )
             .await?;
 
         let dest_svc = self

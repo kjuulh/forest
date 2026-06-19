@@ -4,9 +4,7 @@ use uuid::Uuid;
 use crate::{
     State,
     repositories::organisations::{OrganisationRepository, OrganisationRepositoryState},
-    services::domain_policy::{
-        self, AllowedDomainError, AllowedDomainPolicy, PolicyParseError,
-    },
+    services::domain_policy::{self, AllowedDomainError, AllowedDomainPolicy, PolicyParseError},
 };
 
 pub struct OrganisationService {
@@ -25,10 +23,7 @@ impl OrganisationService {
     ) -> anyhow::Result<CreatedOrganisation> {
         let id = Uuid::now_v7();
 
-        let org = self
-            .repo
-            .create_organisation(self.db(), id, name)
-            .await?;
+        let org = self.repo.create_organisation(self.db(), id, name).await?;
 
         // Add the creator as an admin member automatically
         self.repo
@@ -95,11 +90,7 @@ impl OrganisationService {
 
     // -- Member management --------------------------------------------------------
 
-    async fn require_admin(
-        &self,
-        organisation_id: Uuid,
-        requester_id: Uuid,
-    ) -> anyhow::Result<()> {
+    async fn require_admin(&self, organisation_id: Uuid, requester_id: Uuid) -> anyhow::Result<()> {
         let member = self
             .repo
             .get_member(self.db(), organisation_id, requester_id)
@@ -243,7 +234,8 @@ impl OrganisationService {
             return Err(AllowedDomainServiceError::PolicyNotYetSupported);
         }
 
-        self.require_admin_typed(organisation_id, requester_id).await?;
+        self.require_admin_typed(organisation_id, requester_id)
+            .await?;
 
         let canonical = domain_policy::normalize_domain(raw_domain)?;
         let token = generate_dns_verification_token();
@@ -281,7 +273,10 @@ impl OrganisationService {
         &self,
         organisation_id: Uuid,
     ) -> anyhow::Result<Vec<AllowedDomainInfo>> {
-        let rows = self.repo.list_allowed_domains(self.db(), organisation_id).await?;
+        let rows = self
+            .repo
+            .list_allowed_domains(self.db(), organisation_id)
+            .await?;
         Ok(rows.into_iter().map(row_to_allowed_domain_info).collect())
     }
 
@@ -291,7 +286,8 @@ impl OrganisationService {
         raw_domain: &str,
         requester_id: Uuid,
     ) -> Result<bool, AllowedDomainServiceError> {
-        self.require_admin_typed(organisation_id, requester_id).await?;
+        self.require_admin_typed(organisation_id, requester_id)
+            .await?;
 
         // Normalize so "@Understory.IO" matches what's stored.
         let canonical = domain_policy::normalize_domain(raw_domain)?;
@@ -381,10 +377,7 @@ impl OrganisationService {
         Ok(VerifyAllowedDomainOutcome::Verified)
     }
 
-    pub async fn list_join_offers(
-        &self,
-        user_id: Uuid,
-    ) -> anyhow::Result<Vec<JoinOffer>> {
+    pub async fn list_join_offers(&self, user_id: Uuid) -> anyhow::Result<Vec<JoinOffer>> {
         let rows = self.repo.list_join_offers(self.db(), user_id).await?;
         Ok(rows
             .into_iter()
@@ -627,8 +620,7 @@ pub enum AcceptJoinOfferError {
 fn row_to_allowed_domain_info(
     row: crate::repositories::organisations::AllowedDomainRow,
 ) -> AllowedDomainInfo {
-    let policy = AllowedDomainPolicy::parse(&row.policy)
-        .unwrap_or(AllowedDomainPolicy::ManualOnly);
+    let policy = AllowedDomainPolicy::parse(&row.policy).unwrap_or(AllowedDomainPolicy::ManualOnly);
     AllowedDomainInfo {
         domain: row.domain,
         policy,

@@ -54,7 +54,10 @@ impl InProcessBackend {
         }
     }
 
-    pub fn with_release_identity(mut self, identity: forest_runner::backend::ReleaseIdentity) -> Self {
+    pub fn with_release_identity(
+        mut self,
+        identity: forest_runner::backend::ReleaseIdentity,
+    ) -> Self {
         self.release_identity = Some(identity);
         self
     }

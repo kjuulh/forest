@@ -1,7 +1,7 @@
 use anyhow::Context;
 use forest_grpc_interface::{
-    pipeline_stage, release_pipeline_service_server::ReleasePipelineService,
-    DeployStageConfig, PipelineStage, PlanStageConfig, WaitStageConfig, *,
+    DeployStageConfig, PipelineStage, PlanStageConfig, WaitStageConfig, pipeline_stage,
+    release_pipeline_service_server::ReleasePipelineService, *,
 };
 use tonic::Response;
 
@@ -9,8 +9,8 @@ use crate::{
     grpc::{artifacts::GrpcErrorExt, authorize},
     services::{
         release_pipeline::{
-            CreatePipelineParams, PipelineStages, ReleasePipelineRegistryState,
-            StageConfig, StageDefinition, UpdatePipelineParams,
+            CreatePipelineParams, PipelineStages, ReleasePipelineRegistryState, StageConfig,
+            StageDefinition, UpdatePipelineParams,
         },
         release_registry::ReleaseRegistryState,
     },
@@ -38,12 +38,13 @@ fn stages_to_proto(stages: &PipelineStages) -> Vec<PipelineStage> {
                         duration_seconds: *duration_seconds,
                     }))
                 }
-                StageConfig::Plan { environment, auto_approve } => {
-                    Some(pipeline_stage::Config::Plan(PlanStageConfig {
-                        environment: environment.clone(),
-                        auto_approve: *auto_approve,
-                    }))
-                }
+                StageConfig::Plan {
+                    environment,
+                    auto_approve,
+                } => Some(pipeline_stage::Config::Plan(PlanStageConfig {
+                    environment: environment.clone(),
+                    auto_approve: *auto_approve,
+                })),
             };
 
             PipelineStage {
@@ -73,7 +74,10 @@ fn stages_from_proto(proto_stages: Vec<PipelineStage>) -> anyhow::Result<Pipelin
                 environment: c.environment,
                 auto_approve: c.auto_approve,
             },
-            None => anyhow::bail!("stage '{}' is missing a config (deploy, wait, or plan)", ps.id),
+            None => anyhow::bail!(
+                "stage '{}' is missing a config (deploy, wait, or plan)",
+                ps.id
+            ),
         };
 
         let def = StageDefinition {

@@ -155,11 +155,7 @@ impl AppAggregateService {
             .load_or_default::<AppAggregate>(&key)
             .await?;
 
-        let token_id = AppAggregate::create_token(
-            &mut root,
-            name.to_string(),
-            expires_at,
-        )?;
+        let token_id = AppAggregate::create_token(&mut root, name.to_string(), expires_at)?;
 
         // Generate raw token and hash — hash goes in projection, raw is returned once
         let mut raw_bytes = [0u8; 32];
@@ -200,14 +196,12 @@ impl AppAggregateService {
 
     pub async fn revoke_token(&self, token_id: Uuid) -> anyhow::Result<()> {
         // Look up app_id from the token
-        let app_id: Uuid = sqlx::query_scalar!(
-            "SELECT app_id FROM app_tokens WHERE id = $1",
-            token_id,
-        )
-        .fetch_optional(&self.db)
-        .await
-        .context("lookup token")?
-        .context("token not found")?;
+        let app_id: Uuid =
+            sqlx::query_scalar!("SELECT app_id FROM app_tokens WHERE id = $1", token_id,)
+                .fetch_optional(&self.db)
+                .await
+                .context("lookup token")?
+                .context("token not found")?;
 
         let app = self.get_app(app_id).await?.context("app not found")?;
         let key = app::stream_key(&app.organisation_id, &app.name);

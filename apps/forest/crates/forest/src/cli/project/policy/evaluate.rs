@@ -43,7 +43,10 @@ impl EvaluateCommand {
             .context("evaluate policies")?;
 
         if resp.evaluations.is_empty() {
-            eprintln!("No policies apply to environment '{}'", self.target_environment);
+            eprintln!(
+                "No policies apply to environment '{}'",
+                self.target_environment
+            );
             return Ok(());
         }
 

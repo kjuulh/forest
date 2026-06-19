@@ -81,10 +81,7 @@ impl ReleaseReaper {
             .await?;
 
         for release in stuck {
-            let msg = format!(
-                "release timed out (was {} for too long)",
-                release.status
-            );
+            let msg = format!("release timed out (was {} for too long)", release.status);
             tracing::warn!(
                 release_id = %release.release_id,
                 status = %release.status,

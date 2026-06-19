@@ -38,9 +38,7 @@ impl CommandHandler for Commands {
 fn render_template(input: &InitInput, work_dir: &str) -> anyhow::Result<Vec<String>> {
     let files: Vec<(&str, String)> = match input.template.as_str() {
         "rust-cli" => rust_cli_template(input),
-        other => anyhow::bail!(
-            "unknown template: {other:?} (only 'rust-cli' is supported in v0)"
-        ),
+        other => anyhow::bail!("unknown template: {other:?} (only 'rust-cli' is supported in v0)"),
     };
 
     let mut written = Vec::with_capacity(files.len());

@@ -36,7 +36,11 @@ fn emit_type_defs(out: &mut String, type_defs: &[TypeDef]) -> CodegenResult<()> 
             TypeDefKind::Struct(struct_def) => emit_struct(out, &td.name, struct_def)?,
             TypeDefKind::Map(inner) => {
                 let inner_type = type_ref_to_rust(inner);
-                writeln!(out, "pub type {} = std::collections::BTreeMap<String, {}>;", td.name, inner_type)?;
+                writeln!(
+                    out,
+                    "pub type {} = std::collections::BTreeMap<String, {}>;",
+                    td.name, inner_type
+                )?;
                 writeln!(out)?;
             }
         }
@@ -461,7 +465,10 @@ fn emit_router(out: &mut String, module: &Module) -> CodegenResult<()> {
                     "                serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)"
                 )?;
             } else {
-                writeln!(out, "                self.{field}.{snake}(spec, input).await?;")?;
+                writeln!(
+                    out,
+                    "                self.{field}.{snake}(spec, input).await?;"
+                )?;
                 writeln!(out, "                Ok(serde_json::Value::Null)")?;
             }
             writeln!(out, "            }}")?;

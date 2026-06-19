@@ -54,8 +54,8 @@ impl UpdateCommand {
                 DependencyType::Local(path) => {
                     // Record path dep in lock file (like Cargo does).
                     // The version is read from the component's CUE config.
-                    let version = read_local_component_version(path)
-                        .unwrap_or_else(|| "0.0.0".to_string());
+                    let version =
+                        read_local_component_version(path).unwrap_or_else(|| "0.0.0".to_string());
 
                     let path_str = path.to_string_lossy().to_string();
 
@@ -86,7 +86,8 @@ impl UpdateCommand {
                         Err(e) => {
                             tracing::warn!(
                                 "failed to list versions for {}/{}: {e}",
-                                dep.organisation, dep.name
+                                dep.organisation,
+                                dep.name
                             );
                             continue;
                         }
@@ -123,21 +124,20 @@ impl UpdateCommand {
                         .as_deref()
                         .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok())
                         .and_then(|v| {
-                            v.get("kind").and_then(|k| k.as_str()).map(|s| s == "binary")
+                            v.get("kind")
+                                .and_then(|k| k.as_str())
+                                .map(|s| s == "binary")
                         })
                         .unwrap_or(false);
 
                     if is_binary {
                         // Check if we already have this version cached
-                        if let Some(existing_hash) = lockfile.get(
-                            &dep.organisation,
-                            &dep.name,
-                            &resolved_str,
-                            os,
-                            arch,
-                        ) {
-                            let hash =
-                                existing_hash.strip_prefix("sha256:").unwrap_or(existing_hash);
+                        if let Some(existing_hash) =
+                            lockfile.get(&dep.organisation, &dep.name, &resolved_str, os, arch)
+                        {
+                            let hash = existing_hash
+                                .strip_prefix("sha256:")
+                                .unwrap_or(existing_hash);
                             if component_binary::resolve_binary_from_hash(hash).is_some() {
                                 eprintln!(
                                     "  {} {}/{}@{}  up to date",
@@ -184,7 +184,10 @@ impl UpdateCommand {
 
                         eprintln!(
                             "  {} {}/{}@{}  updated ({} bytes)",
-                            "✓", dep.organisation, dep.name, resolved_str,
+                            "✓",
+                            dep.organisation,
+                            dep.name,
+                            resolved_str,
                             binary.len()
                         );
                         updated += 1;
@@ -225,7 +228,9 @@ impl UpdateCommand {
                                 // of erroring loudly.
                                 tracing::warn!(
                                     "manifest probe for {}/{}@{} disagreed with ensure_versioned_dep_cached",
-                                    dep.organisation, dep.name, resolved_str
+                                    dep.organisation,
+                                    dep.name,
+                                    resolved_str
                                 );
                             }
                         }

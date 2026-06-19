@@ -123,9 +123,18 @@ impl Aggregate for PolicyAggregate {
 pub fn validate_policy_config(policy_type: &str, config: &serde_json::Value) -> anyhow::Result<()> {
     match policy_type {
         "soak_time" => {
-            let source = config.get("source_environment").and_then(|v| v.as_str()).unwrap_or("");
-            let target = config.get("target_environment").and_then(|v| v.as_str()).unwrap_or("");
-            let duration = config.get("duration_seconds").and_then(|v| v.as_i64()).unwrap_or(0);
+            let source = config
+                .get("source_environment")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let target = config
+                .get("target_environment")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let duration = config
+                .get("duration_seconds")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
             if source.is_empty() {
                 bail!("source_environment is required for soak_time policy");
             }
@@ -137,19 +146,32 @@ pub fn validate_policy_config(policy_type: &str, config: &serde_json::Value) -> 
             }
         }
         "branch_restriction" => {
-            let target = config.get("target_environment").and_then(|v| v.as_str()).unwrap_or("");
-            let pattern = config.get("branch_pattern").and_then(|v| v.as_str()).unwrap_or("");
+            let target = config
+                .get("target_environment")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let pattern = config
+                .get("branch_pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if target.is_empty() {
                 bail!("target_environment is required for branch_restriction policy");
             }
             if pattern.is_empty() {
                 bail!("branch_pattern is required for branch_restriction policy");
             }
-            Regex::new(pattern).map_err(|e| anyhow::anyhow!("invalid regex for branch_pattern: {e}"))?;
+            Regex::new(pattern)
+                .map_err(|e| anyhow::anyhow!("invalid regex for branch_pattern: {e}"))?;
         }
         "approval" => {
-            let target = config.get("target_environment").and_then(|v| v.as_str()).unwrap_or("");
-            let required = config.get("required_approvals").and_then(|v| v.as_i64()).unwrap_or(0);
+            let target = config
+                .get("target_environment")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let required = config
+                .get("required_approvals")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
             if target.is_empty() {
                 bail!("target_environment is required for approval policy");
             }
@@ -224,10 +246,7 @@ impl PolicyAggregate {
         Ok(())
     }
 
-    pub fn toggle_enabled(
-        root: &mut AggregateRoot<Self>,
-        enabled: bool,
-    ) -> anyhow::Result<()> {
+    pub fn toggle_enabled(root: &mut AggregateRoot<Self>, enabled: bool) -> anyhow::Result<()> {
         match root.state.status {
             PolicyStatus::NonExistent => bail!("policy does not exist"),
             PolicyStatus::Deleted => bail!("policy has been deleted"),
@@ -452,7 +471,12 @@ mod tests {
         let mut root = new_root();
         PolicyAggregate::create(&mut root, default_params()).unwrap();
         PolicyAggregate::delete(&mut root).unwrap();
-        assert!(PolicyAggregate::delete(&mut root).unwrap_err().to_string().contains("already deleted"));
+        assert!(
+            PolicyAggregate::delete(&mut root)
+                .unwrap_err()
+                .to_string()
+                .contains("already deleted")
+        );
     }
 
     // ----------------------------------------------------------

@@ -34,7 +34,10 @@ async fn create_org(fixture: &Fixture, token: &str) -> (String, String) {
     let name = format!("org-{}", uuid::Uuid::now_v7());
     fixture
         .organisations()
-        .create_organisation(authed(token, CreateOrganisationRequest { name: name.clone() }))
+        .create_organisation(authed(
+            token,
+            CreateOrganisationRequest { name: name.clone() },
+        ))
         .await
         .expect("create org");
 

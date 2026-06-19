@@ -38,15 +38,15 @@ async fn register_user(fixture: &crate::accepttest::fixtures::Fixture) -> String
 }
 
 /// Create an organisation and return its name.
-async fn create_org(
-    fixture: &crate::accepttest::fixtures::Fixture,
-    token: &str,
-) -> String {
+async fn create_org(fixture: &crate::accepttest::fixtures::Fixture, token: &str) -> String {
     let mut org_client = fixture.organisations();
     let name = format!("org-{}", uuid::Uuid::now_v7());
 
     org_client
-        .create_organisation(authed_request(token, CreateOrganisationRequest { name: name.clone() }))
+        .create_organisation(authed_request(
+            token,
+            CreateOrganisationRequest { name: name.clone() },
+        ))
         .await
         .expect("create org");
 
@@ -79,7 +79,10 @@ async fn setup_org_with_destination(
     let mut metadata = std::collections::HashMap::new();
     metadata.insert("cluster_name".into(), "test".into());
     metadata.insert("namespace".into(), "test".into());
-    metadata.insert("local_path".into(), format!("/tmp/authz-test-{}", uuid::Uuid::now_v7()));
+    metadata.insert(
+        "local_path".into(),
+        format!("/tmp/authz-test-{}", uuid::Uuid::now_v7()),
+    );
 
     fixture
         .destinations()
@@ -369,8 +372,8 @@ async fn user_cannot_release_to_other_orgs_destination() {
                     organisation: org_a.clone(),
                     project: "proj-a".into(),
                     readme: String::new(),
-                        description: String::new(),
-                        metadata: Some(Default::default()),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
                 metadata: Default::default(),
                 source: Some(Source {
@@ -441,8 +444,8 @@ async fn user_cannot_list_triggers_in_other_org() {
                     organisation: org_a,
                     project: "proj-triggers".into(),
                     readme: String::new(),
-                        description: String::new(),
-                        metadata: Some(Default::default()),
+                    description: String::new(),
+                    metadata: Some(Default::default()),
                 }),
             },
         ))

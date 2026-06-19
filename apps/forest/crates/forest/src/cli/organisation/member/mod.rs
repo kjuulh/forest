@@ -72,10 +72,7 @@ impl fmt::Display for OrgChoice {
 
 /// Fetches the user's organisations (optionally filtered by role) and presents
 /// an interactive select prompt. Returns the selected organisation ID.
-pub(crate) async fn prompt_org_select(
-    state: &State,
-    role_filter: &str,
-) -> anyhow::Result<String> {
+pub(crate) async fn prompt_org_select(state: &State, role_filter: &str) -> anyhow::Result<String> {
     let resp = state
         .grpc_client()
         .list_my_organisations(role_filter)
@@ -186,8 +183,7 @@ impl UserSearchAutocomplete {
         let query = input.to_string();
 
         let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(client.list_users(20, "", Some(query)))
+            tokio::runtime::Handle::current().block_on(client.list_users(20, "", Some(query)))
         });
 
         if let Ok(resp) = result {
@@ -201,7 +197,6 @@ impl UserSearchAutocomplete {
         self.last_query = input.to_string();
         self.last_fetch = Instant::now();
     }
-
 }
 
 impl inquire::Autocomplete for UserSearchAutocomplete {

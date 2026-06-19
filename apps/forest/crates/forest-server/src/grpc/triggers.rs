@@ -6,9 +6,9 @@ use crate::{
     domains::trigger::{TriggerPatterns, TriggerTargets},
     grpc::{artifacts::GrpcErrorExt, authorize},
     services::{
-        trigger_aggregate::{TriggerAggregateServiceState, TriggerRecord},
         event_bus::{EventBusState, EventPayload},
         release_registry::ReleaseRegistryState,
+        trigger_aggregate::{TriggerAggregateServiceState, TriggerRecord},
     },
     state::State,
 };

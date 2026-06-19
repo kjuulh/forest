@@ -61,8 +61,7 @@ impl GlobalService {
         // `cue eval` produces the package's top-level value. The schema
         // wraps everything in `config: sdk.#UserConfig`, so the emitted
         // JSON looks like `{"config": {...}}`.
-        let cfg = parse_user_config(&json)
-            .map_err(|e| anyhow!("parsing forest.cue: {e:?}"))?;
+        let cfg = parse_user_config(&json).map_err(|e| anyhow!("parsing forest.cue: {e:?}"))?;
         Ok(cfg)
     }
 
@@ -98,8 +97,8 @@ impl GlobalService {
             Some(t) => t,
             None => return Ok(GlobalLockFile::default()),
         };
-        let lock = GlobalLockFile::parse(&text)
-            .map_err(|e| anyhow!("parsing global lockfile: {e:?}"))?;
+        let lock =
+            GlobalLockFile::parse(&text).map_err(|e| anyhow!("parsing global lockfile: {e:?}"))?;
         Ok(lock)
     }
 
@@ -121,9 +120,7 @@ impl GlobalService {
             .grpc
             .get_component_manifest(organisation, name, version)
             .await
-            .with_context(|| {
-                format!("fetching manifest for {organisation}/{name}@{version}")
-            })?;
+            .with_context(|| format!("fetching manifest for {organisation}/{name}@{version}"))?;
         // Pre-spec manifests omit `kind` — synthesize a `kind: "binary"`
         // when missing so the parser can succeed for legacy components.
         let raw = ensure_kind_field(&raw);
@@ -164,8 +161,7 @@ impl GlobalService {
         qref: &QualifiedRef,
         version: &str,
     ) -> Result<PathBuf> {
-        let host = platform::current()
-            .ok_or_else(|| anyhow!("unsupported host platform"))?;
+        let host = platform::current().ok_or_else(|| anyhow!("unsupported host platform"))?;
         let lockfile = self.load_lockfile().await.unwrap_or_default();
 
         // Warm-path shortcut: cache hit on lockfile pin → never touch network.
@@ -216,9 +212,7 @@ impl GlobalService {
             }) => {
                 let available_s = available
                     .iter()
-                    .map(|p| {
-                        format!("{}/{}", platform::os_str(p.os), platform::arch_str(p.arch))
-                    })
+                    .map(|p| format!("{}/{}", platform::os_str(p.os), platform::arch_str(p.arch)))
                     .collect::<Vec<_>>()
                     .join(", ");
                 anyhow::bail!(
@@ -248,20 +242,22 @@ impl GlobalService {
             p
         } else {
             let bytes = match fetch {
-                FetchPlan::Registry => {
-                    self.grpc
-                        .download_component_binary(
-                            &qref.organisation,
-                            &qref.name,
-                            version,
-                            platform::os_str(host.os),
-                            platform::arch_str(host.arch),
+                FetchPlan::Registry => self
+                    .grpc
+                    .download_component_binary(
+                        &qref.organisation,
+                        &qref.name,
+                        version,
+                        platform::os_str(host.os),
+                        platform::arch_str(host.arch),
+                    )
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "downloading {}/{}@{}",
+                            qref.organisation, qref.name, version
                         )
-                        .await
-                        .with_context(|| {
-                            format!("downloading {}/{}@{}", qref.organisation, qref.name, version)
-                        })?
-                }
+                    })?,
                 FetchPlan::Url {
                     url,
                     archive,
@@ -388,21 +384,14 @@ pub fn render_user_config(cfg: &UserConfig) -> String {
         out.push_str("\tdependencies: {\n");
         for (k, dep) in &cfg.dependencies {
             out.push_str(&format!("\t\t{}: {{\n", cue_string(k)));
-            out.push_str(&format!(
-                "\t\t\tversion: {}\n",
-                cue_string(&dep.version)
-            ));
+            out.push_str(&format!("\t\t\tversion: {}\n", cue_string(&dep.version)));
             if let Some(shim) = &dep.shim_name {
                 out.push_str(&format!("\t\t\tshim_name: {}\n", cue_string(shim)));
             }
             if !dep.env.is_empty() {
                 out.push_str("\t\t\tenv: {\n");
                 for (ek, ev) in &dep.env {
-                    out.push_str(&format!(
-                        "\t\t\t\t{}: {}\n",
-                        cue_string(ek),
-                        cue_string(ev)
-                    ));
+                    out.push_str(&format!("\t\t\t\t{}: {}\n", cue_string(ek), cue_string(ev)));
                 }
                 out.push_str("\t\t\t}\n");
             }
@@ -428,22 +417,14 @@ pub fn render_user_config(cfg: &UserConfig) -> String {
             if !cat.pins.is_empty() {
                 out.push_str("\t\t\tpins: {\n");
                 for (k, v) in &cat.pins {
-                    out.push_str(&format!(
-                        "\t\t\t\t{}: {}\n",
-                        cue_string(k),
-                        cue_string(v)
-                    ));
+                    out.push_str(&format!("\t\t\t\t{}: {}\n", cue_string(k), cue_string(v)));
                 }
                 out.push_str("\t\t\t}\n");
             }
             if !cat.aliases.is_empty() {
                 out.push_str("\t\t\taliases: {\n");
                 for (k, v) in &cat.aliases {
-                    out.push_str(&format!(
-                        "\t\t\t\t{}: {}\n",
-                        cue_string(k),
-                        cue_string(v)
-                    ));
+                    out.push_str(&format!("\t\t\t\t{}: {}\n", cue_string(k), cue_string(v)));
                 }
                 out.push_str("\t\t\t}\n");
             }
@@ -540,8 +521,8 @@ fn extract_from_archive(
                 entries.push((path, buf));
             }
             let names: Vec<String> = entries.iter().map(|(p, _)| p.clone()).collect();
-            let idx = extract::select(&names, target)
-                .map_err(|e| anyhow!("select {target}: {e:?}"))?;
+            let idx =
+                extract::select(&names, target).map_err(|e| anyhow!("select {target}: {e:?}"))?;
             Ok(entries.swap_remove(idx).1)
         }
         Archive::Zip => {
@@ -560,8 +541,8 @@ fn extract_from_archive(
                 entries.push((name, buf));
             }
             let names: Vec<String> = entries.iter().map(|(p, _)| p.clone()).collect();
-            let idx = extract::select(&names, target)
-                .map_err(|e| anyhow!("select {target}: {e:?}"))?;
+            let idx =
+                extract::select(&names, target).map_err(|e| anyhow!("select {target}: {e:?}"))?;
             Ok(entries.swap_remove(idx).1)
         }
         other => anyhow::bail!("archive format {:?} not yet wired", other),
@@ -876,11 +857,7 @@ impl GlobalService {
                 if cfg.dependencies.contains_key(&per_tool_key) {
                     continue;
                 }
-                let shim_name = cat
-                    .aliases
-                    .get(&tool.name)
-                    .cloned()
-                    .unwrap_or(tool.name);
+                let shim_name = cat.aliases.get(&tool.name).cloned().unwrap_or(tool.name);
                 expected.insert(
                     shim_name,
                     QualifiedRef::new(&entry.organisation, &entry.name),
@@ -989,11 +966,7 @@ impl GlobalService {
 
     /// `forest global unpin <org>/<tool>` — drop a per-tool pin inside a
     /// catalogue subscription. The tool tracks `latest` again on next update.
-    pub async fn unpin_catalogue_tool(
-        &self,
-        organisation: &str,
-        tool_name: &str,
-    ) -> Result<()> {
+    pub async fn unpin_catalogue_tool(&self, organisation: &str, tool_name: &str) -> Result<()> {
         let mut cfg = self.load_user_config().await?;
         let cat = cfg
             .org_catalog
@@ -1005,11 +978,7 @@ impl GlobalService {
     }
 
     /// `forest global remove <org>/<name>` — removes dep entry + shim.
-    pub async fn remove_dependency(
-        &self,
-        organisation: &str,
-        name: &str,
-    ) -> Result<()> {
+    pub async fn remove_dependency(&self, organisation: &str, name: &str) -> Result<()> {
         let mut cfg = self.load_user_config().await?;
         let key = format!("{organisation}/{name}");
         let removed = cfg.dependencies.remove(&key);
@@ -1034,16 +1003,16 @@ impl GlobalService {
 
     /// Walk the shims directory and resolve a bare name (Q7.a).
     /// Returns `(organisation, name)` from the shim body.
-    pub async fn resolve_bare_name(
-        &self,
-        bare: &str,
-    ) -> Result<QualifiedRef> {
+    pub async fn resolve_bare_name(&self, bare: &str) -> Result<QualifiedRef> {
         let shim = self.shim_path(bare);
         let body = read_optional(&shim)
             .await?
             .ok_or_else(|| anyhow!("tool '{bare}' is not installed"))?;
         parse_qualified_ref_from_shim(&body).ok_or_else(|| {
-            anyhow!("shim {} is not a forest shim (no qualified ref in body)", shim.display())
+            anyhow!(
+                "shim {} is not a forest shim (no qualified ref in body)",
+                shim.display()
+            )
         })
     }
 
@@ -1066,12 +1035,10 @@ impl GlobalService {
             let (org, name) = key
                 .split_once('/')
                 .ok_or_else(|| anyhow!("malformed dep key {key}"))?;
-            let shim_name = dep
-                .shim_name
-                .clone()
-                .unwrap_or_else(|| name.to_string());
-            let status =
-                self.status_for(host, &lock, org, name, &dep.version).await?;
+            let shim_name = dep.shim_name.clone().unwrap_or_else(|| name.to_string());
+            let status = self
+                .status_for(host, &lock, org, name, &dep.version)
+                .await?;
             out.insert(
                 shim_name.clone(),
                 ListedTool {
@@ -1112,8 +1079,11 @@ impl GlobalService {
                     .get(&tool.name)
                     .cloned()
                     .unwrap_or_else(|| tool.name.clone());
-                let pinned_version =
-                    cat.pins.get(&tool.name).cloned().unwrap_or(entry.latest_version);
+                let pinned_version = cat
+                    .pins
+                    .get(&tool.name)
+                    .cloned()
+                    .unwrap_or(entry.latest_version);
 
                 let source = if banned {
                     ToolSource::CatalogBanned { org: org.clone() }
@@ -1139,7 +1109,10 @@ impl GlobalService {
 
                 // Per-tool pin wins; don't overwrite a Pin entry with a
                 // Catalog entry of the same shim name.
-                if matches!(out.get(&shim_name).map(|t| &t.source), Some(ToolSource::Pin)) {
+                if matches!(
+                    out.get(&shim_name).map(|t| &t.source),
+                    Some(ToolSource::Pin)
+                ) {
                     continue;
                 }
                 out.insert(
@@ -1255,11 +1228,8 @@ mod tests {
     fn tmp_paths() -> (tempfile::TempDir, GlobalPaths) {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let paths = GlobalPaths::with_roots(
-            root.join("cfg"),
-            root.join("state"),
-            root.join("cache"),
-        );
+        let paths =
+            GlobalPaths::with_roots(root.join("cfg"), root.join("state"), root.join("cache"));
         (dir, paths)
     }
 
@@ -1269,7 +1239,9 @@ mod tests {
         let qref = QualifiedRef::new("understory", "fungus");
         let mut env = std::collections::BTreeMap::new();
         env.insert("FUNGUS_SERVER".to_string(), "https://prod".to_string());
-        write_include_env(&paths, &qref, "0.1.9", &env).await.unwrap();
+        write_include_env(&paths, &qref, "0.1.9", &env)
+            .await
+            .unwrap();
         let got = read_include_env(&paths, &qref, "0.1.9").await.unwrap();
         assert_eq!(got, env);
     }
@@ -1288,7 +1260,9 @@ mod tests {
         let qref = QualifiedRef::new("understory", "fungus");
         let mut env = std::collections::BTreeMap::new();
         env.insert("A".to_string(), "1".to_string());
-        write_include_env(&paths, &qref, "1.0.0", &env).await.unwrap();
+        write_include_env(&paths, &qref, "1.0.0", &env)
+            .await
+            .unwrap();
         // Re-publish with no env ⇒ the cached file is cleared.
         write_include_env(&paths, &qref, "1.0.0", &Default::default())
             .await
@@ -1299,7 +1273,11 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert!(!paths.tool_include_env_file("understory", "fungus", "1.0.0").exists());
+        assert!(
+            !paths
+                .tool_include_env_file("understory", "fungus", "1.0.0")
+                .exists()
+        );
     }
 
     #[test]

@@ -20,9 +20,9 @@ mod diagnostics;
 mod features;
 mod global;
 mod lockfile;
-mod version_spec;
 mod models;
 mod project_artifacts;
+mod version_spec;
 
 mod otel;
 mod tools;

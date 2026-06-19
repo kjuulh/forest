@@ -1,10 +1,7 @@
 use list::ListCommand;
 use show::ShowCommand;
 
-use crate::{
-    cli::components::init::InitCommand,
-    state::State,
-};
+use crate::{cli::components::init::InitCommand, state::State};
 
 pub(crate) mod generate;
 pub(crate) mod init;

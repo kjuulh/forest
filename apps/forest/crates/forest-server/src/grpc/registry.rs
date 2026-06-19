@@ -1,16 +1,14 @@
 use std::pin::Pin;
 
 use anyhow::Context;
-use futures::{Stream, StreamExt};
 use forest_grpc_interface::{registry_service_server::RegistryService, *};
+use futures::{Stream, StreamExt};
 use uuid::Uuid;
 
 use crate::{
     actor::Actor,
     grpc::authorize::{self, OrgRole},
-    services::component_aggregate::{
-        ComponentServiceState, ComponentVersion, FileStream,
-    },
+    services::component_aggregate::{ComponentServiceState, ComponentVersion, FileStream},
     state::State,
 };
 
@@ -47,7 +45,13 @@ impl RegistryService for RegistryServer {
         tracing::info!("get component");
         let actor = authorize::extract_actor(&request)?;
         let request = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &request.organisation, OrgRole::Member).await?;
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &request.organisation,
+            OrgRole::Member,
+        )
+        .await?;
 
         let component = self
             .state
@@ -68,7 +72,8 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<GetComponentVersionResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member).await?;
+        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
+            .await?;
 
         let component = self
             .state
@@ -89,7 +94,13 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<BeginUploadResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let request = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &request.organisation, OrgRole::Member).await?;
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &request.organisation,
+            OrgRole::Member,
+        )
+        .await?;
 
         let upload_id = self
             .state
@@ -277,7 +288,7 @@ impl RegistryService for RegistryServer {
             _ => {
                 return Err(tonic::Status::invalid_argument(
                     "first message must be metadata",
-                ))
+                ));
             }
         };
 
@@ -305,7 +316,7 @@ impl RegistryService for RegistryServer {
                 _ => {
                     return Err(tonic::Status::invalid_argument(
                         "expected chunk after metadata",
-                    ))
+                    ));
                 }
             }
         }
@@ -346,12 +357,19 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<Self::DownloadBinaryStream>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member).await?;
+        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
+            .await?;
 
         let binary_content = self
             .state
             .component_service()
-            .download_binary(&req.organisation, &req.name, &req.version, &req.os, &req.arch)
+            .download_binary(
+                &req.organisation,
+                &req.name,
+                &req.version,
+                &req.os,
+                &req.arch,
+            )
             .await
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
@@ -399,7 +417,8 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<GetComponentManifestResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member).await?;
+        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
+            .await?;
 
         let manifest_json = self
             .state
@@ -425,7 +444,8 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<ListComponentVersionsResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member).await?;
+        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
+            .await?;
 
         let versions = self
             .state
@@ -449,9 +469,8 @@ impl RegistryService for RegistryServer {
 
     // --- Global-tools (TASKS/018-global-tools.md §1a.2c) ---
 
-    type ListOrgToolsStream = Pin<
-        Box<dyn Stream<Item = std::result::Result<OrgToolEntry, tonic::Status>> + Send>,
-    >;
+    type ListOrgToolsStream =
+        Pin<Box<dyn Stream<Item = std::result::Result<OrgToolEntry, tonic::Status>> + Send>>;
 
     async fn list_org_tools(
         &self,
@@ -459,13 +478,8 @@ impl RegistryService for RegistryServer {
     ) -> std::result::Result<tonic::Response<Self::ListOrgToolsStream>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        authorize::require_org_access(
-            &self.state.db,
-            &actor,
-            &req.organisation,
-            OrgRole::Member,
-        )
-        .await?;
+        authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
+            .await?;
 
         let rows = self
             .state
@@ -507,28 +521,24 @@ impl RegistryService for RegistryServer {
         // - User: public projects + private projects from their orgs
         // - App: public projects + their org's private projects
         let member_orgs = match &actor {
-            None => vec![], // anonymous
+            None => vec![],                               // anonymous
             Some(Actor::ServiceAccount { .. }) => vec![], // sees all via public_only=false
-            Some(Actor::User { user_id }) => {
-                sqlx::query_scalar::<_, String>(
-                    "SELECT o.name FROM organisations o
+            Some(Actor::User { user_id }) => sqlx::query_scalar::<_, String>(
+                "SELECT o.name FROM organisations o
                      JOIN organisation_members om ON om.organisation_id = o.id
                      WHERE om.user_id = $1",
-                )
-                .bind(user_id)
-                .fetch_all(&self.state.db)
-                .await
-                .unwrap_or_default()
-            }
-            Some(Actor::App { organisation_id, .. }) => {
-                sqlx::query_scalar::<_, String>(
-                    "SELECT name FROM organisations WHERE id = $1",
-                )
+            )
+            .bind(user_id)
+            .fetch_all(&self.state.db)
+            .await
+            .unwrap_or_default(),
+            Some(Actor::App {
+                organisation_id, ..
+            }) => sqlx::query_scalar::<_, String>("SELECT name FROM organisations WHERE id = $1")
                 .bind(organisation_id)
                 .fetch_all(&self.state.db)
                 .await
-                .unwrap_or_default()
-            }
+                .unwrap_or_default(),
         };
         let see_all = matches!(&actor, Some(Actor::ServiceAccount { .. }));
 
@@ -539,7 +549,14 @@ impl RegistryService for RegistryServer {
         let (rows, total_count) = self
             .state
             .component_service()
-            .search_components(&req.query, &req.organisation, page_size, offset, see_all, &member_orgs)
+            .search_components(
+                &req.query,
+                &req.organisation,
+                page_size,
+                offset,
+                see_all,
+                &member_orgs,
+            )
             .await
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
@@ -688,7 +705,8 @@ impl RegistryService for RegistryServer {
     async fn get_public_component_manifest(
         &self,
         request: tonic::Request<GetPublicComponentManifestRequest>,
-    ) -> std::result::Result<tonic::Response<GetPublicComponentManifestResponse>, tonic::Status> {
+    ) -> std::result::Result<tonic::Response<GetPublicComponentManifestResponse>, tonic::Status>
+    {
         let req = request.into_inner();
 
         let is_public = is_public_project(&self.state.db, &req.organisation, &req.name).await?;
@@ -768,14 +786,12 @@ async fn authorize_component(
     actor: &crate::actor::Actor,
     component_id: Uuid,
 ) -> Result<(), tonic::Status> {
-    let org: String = sqlx::query_scalar(
-        "SELECT organisation FROM components WHERE id = $1",
-    )
-    .bind(component_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| tonic::Status::internal(format!("failed to resolve component: {e}")))?
-    .ok_or_else(|| tonic::Status::not_found("component not found"))?;
+    let org: String = sqlx::query_scalar("SELECT organisation FROM components WHERE id = $1")
+        .bind(component_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| tonic::Status::internal(format!("failed to resolve component: {e}")))?
+        .ok_or_else(|| tonic::Status::not_found("component not found"))?;
 
     authorize::require_org_access(&state.db, actor, &org, OrgRole::Member).await?;
     Ok(())

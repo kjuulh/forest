@@ -46,10 +46,7 @@ pub async fn select_project(state: &State, organisation: &str) -> anyhow::Result
         .context("failed to list projects")?;
 
     if projects.is_empty() {
-        anyhow::bail!(
-            "no projects found for organisation '{}'",
-            organisation
-        );
+        anyhow::bail!("no projects found for organisation '{}'", organisation);
     }
 
     if projects.len() == 1 {

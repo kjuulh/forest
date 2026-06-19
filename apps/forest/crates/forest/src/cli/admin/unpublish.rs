@@ -43,16 +43,12 @@ struct VersionRef {
 }
 
 fn parse_reference(s: &str) -> anyhow::Result<VersionRef> {
-    let (qualified, version) = s.rsplit_once('@').with_context(|| {
-        format!(
-            "invalid reference `{s}`: expected `<org>/<name>@<version>`"
-        )
-    })?;
-    let (organisation, name) = qualified.split_once('/').with_context(|| {
-        format!(
-            "invalid reference `{s}`: expected `<org>/<name>@<version>`"
-        )
-    })?;
+    let (qualified, version) = s
+        .rsplit_once('@')
+        .with_context(|| format!("invalid reference `{s}`: expected `<org>/<name>@<version>`"))?;
+    let (organisation, name) = qualified
+        .split_once('/')
+        .with_context(|| format!("invalid reference `{s}`: expected `<org>/<name>@<version>`"))?;
     if organisation.is_empty() || name.is_empty() || version.is_empty() {
         anyhow::bail!(
             "invalid reference `{s}`: organisation, name, and version must all be non-empty"
@@ -72,9 +68,7 @@ impl UnpublishCommand {
         // Safety gate: a non-interactive stdin (CI / pipe) MUST pass --yes
         // so destructive ops can't be triggered by accident.
         if !self.yes && !std::io::stdin().is_terminal() {
-            anyhow::bail!(
-                "refusing to unpublish without --yes (stdin is not a TTY)"
-            );
+            anyhow::bail!("refusing to unpublish without --yes (stdin is not a TTY)");
         }
 
         // TTY confirmation flow.
@@ -110,10 +104,7 @@ impl UnpublishCommand {
             .await?;
 
         if recorded {
-            eprintln!(
-                "unpublished {}/{}@{}",
-                r.organisation, r.name, r.version
-            );
+            eprintln!("unpublished {}/{}@{}", r.organisation, r.name, r.version);
             if let Some(reason) = &self.reason {
                 eprintln!("  reason: {reason}");
             }
@@ -158,13 +149,19 @@ mod tests {
     #[test]
     fn rejects_missing_at() {
         let err = parse_reference("understory/widget").unwrap_err();
-        assert!(err.to_string().contains("expected `<org>/<name>@<version>`"));
+        assert!(
+            err.to_string()
+                .contains("expected `<org>/<name>@<version>`")
+        );
     }
 
     #[test]
     fn rejects_missing_slash() {
         let err = parse_reference("widget@1.0.0").unwrap_err();
-        assert!(err.to_string().contains("expected `<org>/<name>@<version>`"));
+        assert!(
+            err.to_string()
+                .contains("expected `<org>/<name>@<version>`")
+        );
     }
 
     #[test]

@@ -26,13 +26,7 @@ pub const DEFAULT_MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
 pub const DEFAULT_MAX_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
 
 /// Directory names that are always excluded, regardless of config.
-const DEFAULT_EXCLUDE_DIRS: &[&str] = &[
-    ".git",
-    "target",
-    "node_modules",
-    ".idea",
-    ".vscode",
-];
+const DEFAULT_EXCLUDE_DIRS: &[&str] = &[".git", "target", "node_modules", ".idea", ".vscode"];
 
 /// Filename patterns that are always excluded, regardless of config.
 /// Matched against the basename only.
@@ -128,8 +122,14 @@ pub struct WalkResult {
 pub fn component_walk(root: &Path, config: &WalkConfig) -> Result<WalkResult, WalkError> {
     let default_basename_globs = build_glob_set(DEFAULT_EXCLUDE_FILE_GLOBS, "default-file")?;
     let default_path_globs = build_glob_set(DEFAULT_EXCLUDE_PATH_GLOBS, "default-path")?;
-    let forestignore_globs =
-        build_glob_set(&config.forestignore.iter().map(String::as_str).collect::<Vec<_>>(), "forestignore")?;
+    let forestignore_globs = build_glob_set(
+        &config
+            .forestignore
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        "forestignore",
+    )?;
     let allowlist_globs = match &config.allowlist {
         Some(patterns) => Some(build_glob_set(
             &patterns.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -174,12 +174,12 @@ pub fn component_walk(root: &Path, config: &WalkConfig) -> Result<WalkResult, Wa
 
         // Default excludes (non-overridable). Check first so they
         // short-circuit the rest.
-        if let Some(reason) = matches_default_exclude(
-            &rel_path,
-            &default_basename_globs,
-            &default_path_globs,
-        ) {
-            result.skipped.push((rel_path, SkipReason::DefaultExclude(reason)));
+        if let Some(reason) =
+            matches_default_exclude(&rel_path, &default_basename_globs, &default_path_globs)
+        {
+            result
+                .skipped
+                .push((rel_path, SkipReason::DefaultExclude(reason)));
             continue;
         }
 
@@ -327,7 +327,10 @@ mod tests {
     fn deep_template_paths_are_included_with_forward_slashes() {
         let tmp = make_tree(&[
             ("forest.cue", b"package x"),
-            ("templates/deployment/forest/terraform@1/main.tf", b"resource"),
+            (
+                "templates/deployment/forest/terraform@1/main.tf",
+                b"resource",
+            ),
             ("templates/deployment/forest/terraform@1/data.tf", b"data"),
             ("README.md", b"hi"),
         ]);
@@ -354,7 +357,10 @@ mod tests {
         let r1 = component_walk(tmp.path(), &WalkConfig::default()).unwrap();
         let r2 = component_walk(tmp.path(), &WalkConfig::default()).unwrap();
         assert_eq!(rel_paths(&r1), rel_paths(&r2));
-        assert_eq!(rel_paths(&r1), vec!["README.md", "a/a.cue", "a/b.cue", "z.cue"]);
+        assert_eq!(
+            rel_paths(&r1),
+            vec!["README.md", "a/a.cue", "a/b.cue", "z.cue"]
+        );
     }
 
     #[test]
@@ -448,10 +454,7 @@ mod tests {
         // the forestignore parser would normally treat it as a
         // re-include, but we apply default excludes *first*. The
         // file is gone before forestignore even gets a vote.
-        let tmp = make_tree(&[
-            ("forest.cue", b"x"),
-            ("target/dist/keepme", b"data"),
-        ]);
+        let tmp = make_tree(&[("forest.cue", b"x"), ("target/dist/keepme", b"data")]);
         let cfg = WalkConfig {
             forestignore: vec!["!target/dist/**".into()],
             ..Default::default()
@@ -514,17 +517,18 @@ mod tests {
 
     #[test]
     fn per_file_cap_errors_with_path() {
-        let tmp = make_tree(&[
-            ("forest.cue", b"x"),
-            ("big.bin", &[0u8; 1024]),
-        ]);
+        let tmp = make_tree(&[("forest.cue", b"x"), ("big.bin", &[0u8; 1024])]);
         let cfg = WalkConfig {
             max_file_bytes: 100,
             ..Default::default()
         };
         let err = component_walk(tmp.path(), &cfg).unwrap_err();
         match err {
-            WalkError::FileTooLarge { ref path, size, cap } => {
+            WalkError::FileTooLarge {
+                ref path,
+                size,
+                cap,
+            } => {
                 assert_eq!(path, "big.bin");
                 assert_eq!(size, 1024);
                 assert_eq!(cap, 100);
@@ -546,15 +550,15 @@ mod tests {
             ..Default::default()
         };
         let err = component_walk(tmp.path(), &cfg).unwrap_err();
-        assert!(matches!(err, WalkError::TotalTooLarge { .. }), "got {err:?}");
+        assert!(
+            matches!(err, WalkError::TotalTooLarge { .. }),
+            "got {err:?}"
+        );
     }
 
     #[test]
     fn binary_path_is_skipped() {
-        let tmp = make_tree(&[
-            ("forest.cue", b"x"),
-            ("ecs-service", b"binary blob"),
-        ]);
+        let tmp = make_tree(&[("forest.cue", b"x"), ("ecs-service", b"binary blob")]);
         let cfg = WalkConfig {
             binary_path: Some(tmp.path().join("ecs-service")),
             ..Default::default()
@@ -575,7 +579,8 @@ mod tests {
         fs::write(tmp.path().join("forest.cue"), b"x").unwrap();
         fs::write(tmp.path().join("real.txt"), b"real").unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink(tmp.path().join("real.txt"), tmp.path().join("link.txt")).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("real.txt"), tmp.path().join("link.txt"))
+            .unwrap();
 
         let result = component_walk(tmp.path(), &WalkConfig::default()).unwrap();
 

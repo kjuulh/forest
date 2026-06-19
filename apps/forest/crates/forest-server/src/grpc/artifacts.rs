@@ -1,6 +1,6 @@
 use anyhow::Context;
-use futures::StreamExt;
 use forest_grpc_interface::{artifact_service_server::ArtifactService, *};
+use futures::StreamExt;
 use tonic::Response;
 
 use crate::{
@@ -54,7 +54,11 @@ impl ArtifactService for ArtifactServer {
             .transpose()
             .inspect_err(|e| tracing::warn!("had error: {}", e))?
         {
-            tracing::info!("uploading file: file_name: {} (category: {})", msg.file_name, msg.category);
+            tracing::info!(
+                "uploading file: file_name: {} (category: {})",
+                msg.file_name,
+                msg.category
+            );
 
             let upload_staging_id: StagingArtifactID = msg
                 .upload_id

@@ -315,22 +315,30 @@ mod tests {
     #[test]
     fn parse_yes_no_accepts_yes_variants() {
         for input in ["y\n", "Y\n", "yes\n", "YES\n", "Yes\n", "  y  \n"] {
-            assert!(parse_yes_no_default_yes(input), "expected YES for {input:?}");
+            assert!(
+                parse_yes_no_default_yes(input),
+                "expected YES for {input:?}"
+            );
         }
     }
 
     #[test]
     fn parse_yes_no_defaults_yes_on_empty() {
         for input in ["\n", "", "   \n", "\t\n"] {
-            assert!(parse_yes_no_default_yes(input), "expected default-YES for {input:?}");
+            assert!(
+                parse_yes_no_default_yes(input),
+                "expected default-YES for {input:?}"
+            );
         }
     }
 
     #[test]
     fn parse_yes_no_rejects_no_variants() {
         for input in ["n\n", "N\n", "no\n", "NO\n", "nope\n", "garbage\n", "0\n"] {
-            assert!(!parse_yes_no_default_yes(input), "expected NO for {input:?}");
+            assert!(
+                !parse_yes_no_default_yes(input),
+                "expected NO for {input:?}"
+            );
         }
     }
-
 }

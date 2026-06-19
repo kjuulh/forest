@@ -45,9 +45,7 @@ impl CommandHandler for Commands {
 fn do_create(input: GiteaCreateRepoInput) -> Result<GiteaCreateRepoOutput, forest_sdk::Error> {
     let token = std::fs::read_to_string(&input.token_path)
         .map_err(|e| {
-            forest_sdk::Error::Handler(
-                format!("read token from {}: {e}", input.token_path).into(),
-            )
+            forest_sdk::Error::Handler(format!("read token from {}: {e}", input.token_path).into())
         })?
         .trim()
         .to_string();
@@ -91,9 +89,9 @@ fn do_create(input: GiteaCreateRepoInput) -> Result<GiteaCreateRepoOutput, fores
         .send_json(&body);
 
     let parsed: serde_json::Value = match resp {
-        Ok(r) => r.into_json().map_err(|e| {
-            forest_sdk::Error::Handler(format!("parse Gitea response: {e}").into())
-        })?,
+        Ok(r) => r
+            .into_json()
+            .map_err(|e| forest_sdk::Error::Handler(format!("parse Gitea response: {e}").into()))?,
         Err(ureq::Error::Status(code, r)) => {
             // Surface Gitea's error body verbatim so workflow authors
             // see "repository already exists" / "auth failed" / etc.
@@ -123,12 +121,9 @@ fn do_create(input: GiteaCreateRepoInput) -> Result<GiteaCreateRepoOutput, fores
     };
 
     Ok(GiteaCreateRepoOutput {
-        id: parsed
-            .get("id")
-            .and_then(|x| x.as_i64())
-            .ok_or_else(|| {
-                forest_sdk::Error::Handler("Gitea response missing integer field 'id'".into())
-            })?,
+        id: parsed.get("id").and_then(|x| x.as_i64()).ok_or_else(|| {
+            forest_sdk::Error::Handler("Gitea response missing integer field 'id'".into())
+        })?,
         clone_url: pick_str(&parsed, "clone_url")?,
         ssh_url: pick_str(&parsed, "ssh_url")?,
         html_url: pick_str(&parsed, "html_url")?,

@@ -27,7 +27,11 @@ struct Cli {
     all: bool,
 
     /// Destinations to enable (can be repeated or comma-separated): flux
-    #[arg(long = "destination", env = "FOREST_DESTINATIONS", value_delimiter = ',')]
+    #[arg(
+        long = "destination",
+        env = "FOREST_DESTINATIONS",
+        value_delimiter = ','
+    )]
     destinations: Vec<String>,
 }
 
@@ -65,10 +69,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Collect capabilities from all registered destinations
-    let capabilities: Vec<_> = destinations
-        .iter()
-        .flat_map(|d| d.capabilities())
-        .collect();
+    let capabilities: Vec<_> = destinations.iter().flat_map(|d| d.capabilities()).collect();
 
     tracing::info!(
         runner_id = %cli.runner_id,
@@ -89,10 +90,7 @@ async fn main() -> anyhow::Result<()> {
         executor,
     );
 
-    notmad::Mad::builder()
-        .add(runner_service)
-        .run()
-        .await?;
+    notmad::Mad::builder().add(runner_service).run().await?;
 
     Ok(())
 }

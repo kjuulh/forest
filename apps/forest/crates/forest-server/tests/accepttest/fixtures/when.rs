@@ -58,46 +58,41 @@ impl WhenReleaseFlow for When<ReleaseFlowData> {
             (data.auth_token.clone(), data.release_intent_id.clone())
         };
 
-        let terminal_status = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            async {
-                loop {
-                    let resp = release_client
-                        .wait_release(authed_request(
-                            &token,
-                            WaitReleaseRequest {
-                                release_intent_id: release_intent_id.clone(),
-                            },
-                        ))
-                        .await;
+        let terminal_status = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                let resp = release_client
+                    .wait_release(authed_request(
+                        &token,
+                        WaitReleaseRequest {
+                            release_intent_id: release_intent_id.clone(),
+                        },
+                    ))
+                    .await;
 
-                    match resp {
-                        Ok(stream) => {
-                            let mut stream = stream.into_inner();
-                            while let Some(event) =
-                                stream.message().await.expect("stream message")
+                match resp {
+                    Ok(stream) => {
+                        let mut stream = stream.into_inner();
+                        while let Some(event) = stream.message().await.expect("stream message") {
+                            if let Some(wait_release_event::Event::StatusUpdate(update)) =
+                                event.event
                             {
-                                if let Some(wait_release_event::Event::StatusUpdate(update)) =
-                                    event.event
-                                {
-                                    let status = update.status.as_str();
-                                    if matches!(
-                                        status,
-                                        "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT"
-                                    ) {
-                                        return update.status;
-                                    }
+                                let status = update.status.as_str();
+                                if matches!(
+                                    status,
+                                    "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT"
+                                ) {
+                                    return update.status;
                                 }
                             }
-                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                         }
-                        Err(_) => {
-                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+                    Err(_) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     }
                 }
-            },
-        )
+            }
+        })
         .await?;
 
         self.data_mut().terminal_status = terminal_status;

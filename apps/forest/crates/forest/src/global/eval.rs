@@ -12,8 +12,7 @@
 /// `${VAR:-default}` form means "use $XDG_CACHE_HOME if it's set and non-empty,
 /// otherwise fall back to $HOME/.cache" — matching the XDG Base Directory spec
 /// and Forest's runtime `xdg_cache_home()` resolver in `global::paths`.
-pub const SHIM_DIR_LITERAL: &str =
-    "${XDG_CACHE_HOME:-$HOME/.cache}/forest/global/shims";
+pub const SHIM_DIR_LITERAL: &str = "${XDG_CACHE_HOME:-$HOME/.cache}/forest/global/shims";
 
 /// Render the zsh eval script. Byte-stable; same input always yields
 /// byte-identical output.

@@ -125,10 +125,7 @@ impl PreflightCheck for C3NamesAgree {
         "C3"
     }
     fn run(&self, ctx: &PreflightContext) -> Result<(), CheckFailure> {
-        let project_name = ctx
-            .doc
-            .pointer("/project/name")
-            .and_then(|v| v.as_str());
+        let project_name = ctx.doc.pointer("/project/name").and_then(|v| v.as_str());
         let component_name = ctx
             .doc
             .pointer("/forest/component/name")
@@ -137,9 +134,7 @@ impl PreflightCheck for C3NamesAgree {
         match (project_name, component_name) {
             (Some(p), Some(c)) if p != c => Err(CheckFailure {
                 id: "C3",
-                message: format!(
-                    "project.name (`{p}`) and forest.component.name (`{c}`) disagree"
-                ),
+                message: format!("project.name (`{p}`) and forest.component.name (`{c}`) disagree"),
                 hint: "Set them to the same value. The convention is one project = one \
                        component; if you genuinely need them different, this check is the \
                        wrong abstraction — file a follow-up."
@@ -198,11 +193,8 @@ impl PreflightCheck for C6BinaryArtifactExists {
         // The project promised a binary. resolve_binary applies the
         // same path-search logic the publish flow uses; if it can't
         // find one, neither will the publish step.
-        if crate::services::component_binary::resolve_binary(
-            &ctx.current_dir,
-            &ctx.component_name,
-        )
-        .is_none()
+        if crate::services::component_binary::resolve_binary(&ctx.current_dir, &ctx.component_name)
+            .is_none()
         {
             return Err(CheckFailure {
                 id: "C6",
@@ -256,7 +248,11 @@ impl PreflightCheck for C8SemverValid {
 /// The cue invocation mirrors what publish does today verbatim, so any
 /// project that publishes successfully can also be preflighted.
 pub async fn build_context(current_dir: &Path) -> anyhow::Result<PreflightContext> {
-    let mut cue_args = vec!["export".to_string(), "--out".to_string(), "json".to_string()];
+    let mut cue_args = vec![
+        "export".to_string(),
+        "--out".to_string(),
+        "json".to_string(),
+    ];
     let mut entries = tokio::fs::read_dir(current_dir).await?;
     while let Some(entry) = entries.next_entry().await? {
         if entry.path().extension().and_then(|e| e.to_str()) == Some("cue") {
@@ -285,7 +281,10 @@ pub async fn build_context(current_dir: &Path) -> anyhow::Result<PreflightContex
         .pointer("/forest/component")
         .cloned()
         .unwrap_or(serde_json::Value::Null);
-    let project = doc.pointer("/project").cloned().unwrap_or(serde_json::Value::Null);
+    let project = doc
+        .pointer("/project")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
 
     let component_name = component
         .get("name")
@@ -460,7 +459,12 @@ mod tests {
     #[test]
     fn c8_accepts_prerelease_and_build_metadata() {
         let doc = serde_json::json!({});
-        for v in &["1.0.0-alpha", "1.0.0-alpha.1", "1.0.0+build.123", "1.0.0-rc.1+build.5"] {
+        for v in &[
+            "1.0.0-alpha",
+            "1.0.0-alpha.1",
+            "1.0.0+build.123",
+            "1.0.0-rc.1+build.5",
+        ] {
             assert!(C8SemverValid.run(&ctx_with(doc.clone(), v)).is_ok(), "{v}");
         }
     }
@@ -526,10 +530,8 @@ mod tests {
 
     #[test]
     fn runner_returns_ok_when_all_pass() {
-        let checks: Vec<Box<dyn PreflightCheck>> = vec![
-            Box::new(AlwaysPass("A")),
-            Box::new(AlwaysPass("B")),
-        ];
+        let checks: Vec<Box<dyn PreflightCheck>> =
+            vec![Box::new(AlwaysPass("A")), Box::new(AlwaysPass("B"))];
         assert!(run_checks(&empty_ctx(), &checks).is_ok());
     }
 
@@ -570,7 +572,10 @@ mod tests {
             hint: "y".into(),
         }];
         let rendered = render_failures(&failures);
-        assert!(rendered.contains("1 issue)"), "expected '1 issue)' in: {rendered}");
+        assert!(
+            rendered.contains("1 issue)"),
+            "expected '1 issue)' in: {rendered}"
+        );
         assert!(!rendered.contains("1 issues"));
     }
 

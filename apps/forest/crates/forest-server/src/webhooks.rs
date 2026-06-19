@@ -70,24 +70,25 @@ async fn handle_flux_notification(
     body: axum::body::Bytes,
 ) -> impl IntoResponse {
     // 1. Look up destination by (org, name) to get webhook_secret from metadata
-    let dest = match lookup_destination_with_secret(&state.db, &organisation, &destination_name).await {
-        Ok(Some(dest)) => dest,
-        Ok(None) => {
-            tracing::warn!(
-                destination = %destination_name,
-                "flux webhook: destination not found"
-            );
-            return StatusCode::NOT_FOUND;
-        }
-        Err(e) => {
-            tracing::error!(
-                destination = %destination_name,
-                error = %e,
-                "flux webhook: failed to look up destination"
-            );
-            return StatusCode::INTERNAL_SERVER_ERROR;
-        }
-    };
+    let dest =
+        match lookup_destination_with_secret(&state.db, &organisation, &destination_name).await {
+            Ok(Some(dest)) => dest,
+            Ok(None) => {
+                tracing::warn!(
+                    destination = %destination_name,
+                    "flux webhook: destination not found"
+                );
+                return StatusCode::NOT_FOUND;
+            }
+            Err(e) => {
+                tracing::error!(
+                    destination = %destination_name,
+                    error = %e,
+                    "flux webhook: failed to look up destination"
+                );
+                return StatusCode::INTERNAL_SERVER_ERROR;
+            }
+        };
 
     let Some(webhook_secret) = &dest.webhook_secret else {
         tracing::warn!(
@@ -246,7 +247,10 @@ async fn lookup_destination_with_secret(
 
     Ok(Some(DestinationWithSecret {
         destination_id: id,
-        webhook_secret: metadata.get("webhook_secret").cloned().filter(|s| !s.is_empty()),
+        webhook_secret: metadata
+            .get("webhook_secret")
+            .cloned()
+            .filter(|s| !s.is_empty()),
     }))
 }
 

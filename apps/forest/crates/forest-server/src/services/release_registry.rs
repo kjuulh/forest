@@ -386,8 +386,8 @@ impl ReleaseRegistry {
     ) -> anyhow::Result<CreatedReleaseIntent> {
         use crate::services::release_pipeline::{PipelineStages, init_stage_states};
 
-        let stages: PipelineStages = serde_json::from_value(pipeline_rec.stages)
-            .context("parse pipeline stages")?;
+        let stages: PipelineStages =
+            serde_json::from_value(pipeline_rec.stages).context("parse pipeline stages")?;
 
         let stage_states = init_stage_states(&stages);
         let stages_json = serde_json::to_value(&stages)?;
@@ -652,11 +652,7 @@ impl ReleaseRegistry {
         Ok(recs.into_iter().map(|r| r.project.into()).collect())
     }
 
-    pub async fn create_project(
-        &self,
-        organisation: &str,
-        project: &str,
-    ) -> anyhow::Result<Uuid> {
+    pub async fn create_project(&self, organisation: &str, project: &str) -> anyhow::Result<Uuid> {
         let rec = sqlx::query!(
             "
             INSERT INTO projects (organisation, project)
@@ -897,11 +893,7 @@ impl ReleaseRegistry {
         })
     }
 
-    pub async fn get_project_id(
-        &self,
-        organisation: &str,
-        project: &str,
-    ) -> anyhow::Result<Uuid> {
+    pub async fn get_project_id(&self, organisation: &str, project: &str) -> anyhow::Result<Uuid> {
         let rec = sqlx::query!(
             "SELECT id FROM projects WHERE organisation = $1 AND project = $2",
             organisation,
@@ -926,10 +918,7 @@ impl ReleaseRegistry {
         Ok((rec.organisation, rec.project))
     }
 
-    pub async fn get_project_id_from_artifact(
-        &self,
-        artifact_id: &Uuid,
-    ) -> anyhow::Result<Uuid> {
+    pub async fn get_project_id_from_artifact(&self, artifact_id: &Uuid) -> anyhow::Result<Uuid> {
         let rec = sqlx::query_scalar!(
             r#"SELECT project_id as "project_id!" FROM annotations WHERE artifact_id = $1"#,
             artifact_id
@@ -1219,7 +1208,6 @@ pub struct CreatedRelease {
     pub destination: String,
     pub environment: String,
 }
-
 
 pub struct ReleaseIntentSummary {
     pub release_intent_id: Uuid,

@@ -243,9 +243,7 @@ async fn check_org_access(
                 tracing::error!("authz: failed to check membership: {e}");
                 tonic::Status::internal("failed to check membership")
             })?
-            .ok_or_else(|| {
-                tonic::Status::permission_denied("not a member of this organisation")
-            })?;
+            .ok_or_else(|| tonic::Status::permission_denied("not a member of this organisation"))?;
 
             if let OrgRole::Admin = required_role
                 && member != "admin"
@@ -332,11 +330,7 @@ mod typed_gate_tests {
     fn user_self_or_sa_denies_app_actor() {
         // Apps are org-scoped; users.rs operations are not their concern.
         let target = Uuid::now_v7();
-        assert!(
-            app()
-                .require_user_self_or_service_account(target)
-                .is_err()
-        );
+        assert!(app().require_user_self_or_service_account(target).is_err());
     }
 
     #[test]

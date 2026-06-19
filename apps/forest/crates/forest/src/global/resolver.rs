@@ -53,9 +53,7 @@ pub enum PlanError {
     /// The manifest is a pure COMPONENT — no tool facet, no shim, no `forest
     /// global *` install path. `forest run <command>` is the only valid
     /// invocation for that shape.
-    ShapeNotInstallable {
-        shape: ComponentShape,
-    },
+    ShapeNotInstallable { shape: ComponentShape },
 }
 
 /// Plan an invocation.
@@ -93,9 +91,7 @@ pub fn plan(
     // 2. Shape must be installable as a shim/tool.
     let installable = matches!(
         manifest.shape,
-        ComponentShape::ToolBinary
-            | ComponentShape::HybridComponent
-            | ComponentShape::ToolExternal
+        ComponentShape::ToolBinary | ComponentShape::HybridComponent | ComponentShape::ToolExternal
     );
     if !installable {
         return Plan::Error(PlanError::ShapeNotInstallable {
@@ -155,9 +151,7 @@ fn platform_arch_str(arch: crate::global::manifest::Arch) -> &'static str {
 mod tests {
     use super::*;
     use crate::global::lockfile::GlobalLockEntry;
-    use crate::global::manifest::{
-        Arch, ManifestKind, Os, Platform, PlatformKey, ToolFacet,
-    };
+    use crate::global::manifest::{Arch, ManifestKind, Os, Platform, PlatformKey, ToolFacet};
     use std::collections::BTreeMap;
 
     fn linux_amd64() -> PlatformKey {
@@ -217,11 +211,7 @@ mod tests {
         let mut platforms = BTreeMap::new();
         platforms.insert(
             linux_amd64(),
-            external_platform_targz(
-                sha_linux,
-                "https://github.com/example/x.tar.gz",
-                "x/x",
-            ),
+            external_platform_targz(sha_linux, "https://github.com/example/x.tar.gz", "x/x"),
         );
         Manifest {
             kind: ManifestKind::External,
@@ -449,10 +439,7 @@ mod tests {
             "0.0.0",
             linux_amd64(),
         );
-        let is_error = matches!(
-            p,
-            Plan::Error(PlanError::PlatformNotAvailable { .. })
-        );
+        let is_error = matches!(p, Plan::Error(PlanError::PlatformNotAvailable { .. }));
         assert!(is_error);
     }
 }

@@ -19,10 +19,7 @@ impl ListenCommand {
         let client = state.grpc_client();
 
         let mut stream = client
-            .listen_notifications(
-                self.organisation.as_deref(),
-                self.project.as_deref(),
-            )
+            .listen_notifications(self.organisation.as_deref(), self.project.as_deref())
             .await?;
 
         eprintln!("Listening for notifications...\n");

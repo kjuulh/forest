@@ -160,7 +160,10 @@ impl ArtifactStagingRegistry {
             );
             match self.object_store.get(&s3_key).await {
                 Ok(content) => {
-                    result.push((PathBuf::from(r.file_name), String::from_utf8_lossy(&content).to_string()));
+                    result.push((
+                        PathBuf::from(r.file_name),
+                        String::from_utf8_lossy(&content).to_string(),
+                    ));
                 }
                 Err(_) => {
                     // Fallback to DB for legacy data
@@ -183,10 +186,7 @@ impl ArtifactStagingRegistry {
         Ok(result)
     }
 
-    pub async fn get_spec_files(
-        &self,
-        id: &uuid::Uuid,
-    ) -> anyhow::Result<Vec<(PathBuf, String)>> {
+    pub async fn get_spec_files(&self, id: &uuid::Uuid) -> anyhow::Result<Vec<(PathBuf, String)>> {
         let rec = sqlx::query!("SELECT artifact_id FROM artifacts WHERE id = $1", id)
             .fetch_one(&self.db)
             .await
@@ -212,7 +212,10 @@ impl ArtifactStagingRegistry {
             );
             match self.object_store.get(&s3_key).await {
                 Ok(content) => {
-                    result.push((PathBuf::from(r.file_name), String::from_utf8_lossy(&content).to_string()));
+                    result.push((
+                        PathBuf::from(r.file_name),
+                        String::from_utf8_lossy(&content).to_string(),
+                    ));
                 }
                 Err(_) => {
                     // Fallback to DB for legacy data
@@ -240,10 +243,13 @@ impl ArtifactStagingRegistry {
         artifact_id: &uuid::Uuid,
         category: Option<&str>,
     ) -> anyhow::Result<Vec<ArtifactFileEntry>> {
-        let rec = sqlx::query!("SELECT artifact_id FROM artifacts WHERE id = $1", artifact_id)
-            .fetch_one(&self.db)
-            .await
-            .context("get artifact id")?;
+        let rec = sqlx::query!(
+            "SELECT artifact_id FROM artifacts WHERE id = $1",
+            artifact_id
+        )
+        .fetch_one(&self.db)
+        .await
+        .context("get artifact id")?;
         let staging_id = rec.artifact_id;
 
         // Get metadata from DB, content from S3
@@ -278,7 +284,8 @@ impl ArtifactStagingRegistry {
                         "SELECT blob.content FROM artifact_files file
                          JOIN blob_storage blob ON file.file_content = blob.id
                          WHERE file.artifact_staging_id = $1 AND file.file_name = $2",
-                        staging_id, r.file_name
+                        staging_id,
+                        r.file_name
                     )
                     .fetch_optional(&self.db)
                     .await?

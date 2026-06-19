@@ -105,10 +105,8 @@ impl CommitCommand {
                 }
 
                 // Build a map: artifact_id -> list of dest display entries
-                let mut dest_by_artifact: std::collections::HashMap<
-                    String,
-                    Vec<DestDisplay>,
-                > = std::collections::HashMap::new();
+                let mut dest_by_artifact: std::collections::HashMap<String, Vec<DestDisplay>> =
+                    std::collections::HashMap::new();
                 for intent in &intent_states.release_intents {
                     for step in &intent.steps {
                         let is_current = current_per_dest
@@ -224,11 +222,8 @@ impl CommitCommand {
             if self.no_health {
                 return Ok(());
             }
-            self.watch_health(
-                &grpc,
-                release_result.release_intent_id,
-            )
-            .await;
+            self.watch_health(&grpc, release_result.release_intent_id)
+                .await;
         } else {
             tracing::info!("release staged for {artifact_id}");
         }
@@ -240,11 +235,7 @@ impl CommitCommand {
 impl CommitCommand {
     /// Watch health updates for a release intent after deployment completes.
     /// Streams health events for up to 60 seconds or until all destinations are healthy.
-    async fn watch_health(
-        &self,
-        grpc: &crate::grpc::GrpcClient,
-        release_intent_id: uuid::Uuid,
-    ) {
+    async fn watch_health(&self, grpc: &crate::grpc::GrpcClient, release_intent_id: uuid::Uuid) {
         let mut client = match grpc.health_client().await {
             Ok(c) => c,
             Err(_) => return, // Health service not available, skip silently

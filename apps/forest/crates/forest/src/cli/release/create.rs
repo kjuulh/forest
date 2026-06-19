@@ -1,13 +1,11 @@
 use anyhow::Context;
 
 use crate::{
-    services::project::ProjectParserState,
-    state::State,
-    user_state::UserStateLoaderState,
+    services::project::ProjectParserState, state::State, user_state::UserStateLoaderState,
 };
 
 use super::{
-    annotate::{self, git_output, AnnotateParams},
+    annotate::{self, AnnotateParams, git_output},
     commit::CommitCommand,
     prepare::PrepareCommand,
 };
@@ -21,13 +19,11 @@ use super::{
 #[derive(clap::Parser)]
 pub struct CreateCommand {
     // ── Required ─────────────────────────────────────────────────────
-
     /// Target environment to release to.
     #[arg(long, short = 'e', alias = "env")]
     environment: String,
 
     // ── Optional overrides ───────────────────────────────────────────
-
     /// Release title. Defaults to the latest git commit subject.
     #[arg(long)]
     title: Option<String>,
@@ -135,17 +131,14 @@ impl CreateCommand {
         // ── Resolve project identity from forest.cue ─────────────────
         let (detected_org, detected_project) = detect_project(state).await?;
 
-        let organisation = self
-            .organisation
-            .clone()
-            .or(detected_org)
-            .context("organisation not found: set project.organisation in forest.cue or pass --organisation")?;
+        let organisation = self.organisation.clone().or(detected_org).context(
+            "organisation not found: set project.organisation in forest.cue or pass --organisation",
+        )?;
 
-        let project_name = self
-            .project
-            .clone()
-            .or(detected_project)
-            .context("project name not found: set project.name in forest.cue or pass --project")?;
+        let project_name =
+            self.project.clone().or(detected_project).context(
+                "project name not found: set project.name in forest.cue or pass --project",
+            )?;
 
         // ── Resolve git context ──────────────────────────────────────
         let git = GitInfo::detect().await;
@@ -156,11 +149,10 @@ impl CreateCommand {
             );
         }
 
-        let commit_sha = self
-            .commit_sha
-            .clone()
-            .or(git.sha.clone())
-            .context("commit sha not found: are you in a git repository? or pass --commit-sha")?;
+        let commit_sha =
+            self.commit_sha.clone().or(git.sha.clone()).context(
+                "commit sha not found: are you in a git repository? or pass --commit-sha",
+            )?;
 
         let commit_branch = self.commit_branch.clone().or(git.branch.clone());
         let commit_message = self.commit_message.clone().or(git.message.clone());
@@ -174,10 +166,7 @@ impl CreateCommand {
         });
         let description = self.description.clone().or(git.body.clone());
 
-        let source_type = self
-            .source_type
-            .clone()
-            .or(Some("local".to_string()));
+        let source_type = self.source_type.clone().or(Some("local".to_string()));
 
         // ── Resolve author info ──────────────────────────────────────
         // Prefer explicit flags, then local auth state, then git config.
@@ -261,11 +250,10 @@ impl CreateCommand {
 
 /// Reads organisation and project name from the forest.cue/toml project file.
 async fn detect_project(state: &State) -> anyhow::Result<(Option<String>, Option<String>)> {
-    let project = state
-        .project_parser()
-        .get_project()
-        .await
-        .context("could not parse project file — is there a valid forest.cue in this directory?")?;
+    let project =
+        state.project_parser().get_project().await.context(
+            "could not parse project file — is there a valid forest.cue in this directory?",
+        )?;
 
     Ok((project.organisation.clone(), Some(project.name.clone())))
 }

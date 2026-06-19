@@ -22,11 +22,11 @@ pub mod destination_services;
 pub mod destinations;
 
 pub mod grpc;
+pub mod intent_coordinator;
 pub mod oauth_reaper;
 pub mod release_reaper;
 pub mod runner_manager;
 pub mod scheduler;
-pub mod intent_coordinator;
 mod temp_dir;
 
 pub mod object_store;

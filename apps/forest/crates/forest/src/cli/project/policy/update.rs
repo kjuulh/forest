@@ -1,5 +1,5 @@
 use anyhow::Context;
-use forest_grpc_interface::{update_policy_request, BranchRestrictionConfig, SoakTimeConfig};
+use forest_grpc_interface::{BranchRestrictionConfig, SoakTimeConfig, update_policy_request};
 
 use crate::{cli::prompts, grpc::GrpcClientState, state::State};
 

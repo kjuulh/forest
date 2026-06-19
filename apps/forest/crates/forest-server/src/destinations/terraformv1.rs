@@ -601,9 +601,13 @@ impl TerraformV1Destination {
         for (path, content) in files {
             let path = temp_dir.join(path);
             if let Some(parent) = path.parent() {
-                tokio::fs::create_dir_all(parent).await.context("create dir")?;
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .context("create dir")?;
             }
-            let mut file = tokio::fs::File::create_new(path).await.context("create file")?;
+            let mut file = tokio::fs::File::create_new(path)
+                .await
+                .context("create file")?;
             file.write_all(content.as_bytes()).await.context("write")?;
             file.flush().await.context("flush")?;
         }
@@ -622,7 +626,9 @@ impl TerraformV1Destination {
             }
             let entry_name = env_dir_entry.file_name().to_string_lossy().to_string();
             if let Ok(re) = regex::Regex::new(&entry_name) {
-                if !re.is_match(&destination.name) { continue; }
+                if !re.is_match(&destination.name) {
+                    continue;
+                }
             } else if entry_name != destination.name {
                 continue;
             }
@@ -631,7 +637,10 @@ impl TerraformV1Destination {
             let dir = env_dir
                 .join(&entry_name)
                 .join(&destination.destination_type.organisation)
-                .join(format!("{}@{}", destination.destination_type.name, destination.destination_type.version));
+                .join(format!(
+                    "{}@{}",
+                    destination.destination_type.name, destination.destination_type.version
+                ));
 
             // init
             self.run_command(logger, destination, &dir, &tf_envs, &["init"])
@@ -710,7 +719,9 @@ impl TerraformV1Destination {
                     tracing::debug!("terraform@1: {}", line);
                     logger.log_stdout(&line);
                     let mut buf = captured.lock().await;
-                    if !buf.is_empty() { buf.push('\n'); }
+                    if !buf.is_empty() {
+                        buf.push('\n');
+                    }
                     buf.push_str(&line);
                 }
             });
@@ -839,8 +850,8 @@ impl DestinationEdge for TerraformV1Destination {
             forest_models::MetadataFieldSchema {
                 name: "tf_workspace".into(),
                 label: "Terraform Workspace".into(),
-                description: "Terraform workspace name. Defaults to the environment name when unset."
-                    .into(),
+                description:
+                    "Terraform workspace name. Defaults to the environment name when unset.".into(),
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
@@ -889,7 +900,8 @@ impl DestinationEdge for TerraformV1Destination {
         release: &ReleaseItem,
         destination: &Destination,
     ) -> anyhow::Result<Option<String>> {
-        let output = self.run_capture(logger, release, destination)
+        let output = self
+            .run_capture(logger, release, destination)
             .await
             .context("terraform plan failed")?;
 
@@ -915,10 +927,14 @@ mod tests {
         // Single test to avoid env-var races between parallel cases.
         let prev = std::env::var("TERRAFORM_EXE").ok();
 
-        unsafe { std::env::set_var("TERRAFORM_EXE", "my-custom-tf"); }
+        unsafe {
+            std::env::set_var("TERRAFORM_EXE", "my-custom-tf");
+        }
         assert_eq!(resolve_terraform_exe(), "my-custom-tf");
 
-        unsafe { std::env::set_var("TERRAFORM_EXE", ""); }
+        unsafe {
+            std::env::set_var("TERRAFORM_EXE", "");
+        }
         // Empty env falls through to PATH search (or "terraform" fallback);
         // never returns the empty string.
         assert!(!resolve_terraform_exe().is_empty());

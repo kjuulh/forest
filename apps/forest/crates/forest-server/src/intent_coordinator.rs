@@ -7,12 +7,12 @@ use notmad::{Component, ComponentInfo, MadError};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::State;
 use crate::services::release_event_store::{check_approval_policies, check_soak_time_policies};
 use crate::services::release_pipeline::{
     ApprovalStatus, PipelineStages, StageConfig, StageState, StageStates, StageStatus,
     find_ready_stages, has_failed_dependency, init_stage_states, is_pipeline_complete,
 };
-use crate::State;
 
 /// The IntentCoordinator is the single saga orchestrator for pipeline release intents.
 ///
@@ -205,9 +205,7 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
         match &stage_def.config {
             StageConfig::Deploy { .. } => {
                 let stage_releases = releases_by_stage.get(stage_id);
-                let releases: &[ReleaseRow] = stage_releases
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
+                let releases: &[ReleaseRow] = stage_releases.map(|v| v.as_slice()).unwrap_or(&[]);
 
                 if releases.is_empty() {
                     continue; // No releases yet (shouldn't happen for ACTIVE deploy)
@@ -248,29 +246,28 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
             StageConfig::Wait { .. } => {
                 // Check if wait_until has passed
                 if let Some(ref wait_until_str) = current.wait_until
-                    && let Ok(wait_until) = chrono::DateTime::parse_from_rfc3339(wait_until_str) {
-                        let wait_until_utc = wait_until.with_timezone(&chrono::Utc);
-                        if wait_until_utc <= now {
-                            let mut updated = current.clone();
-                            updated.status = StageStatus::Succeeded;
-                            updated.completed_at = Some(now_str.clone());
-                            stage_states.insert(stage_id.clone(), updated);
-                            changed = true;
-                        } else {
-                            // Track earliest timer for next_evaluate_at
-                            earliest_timer = Some(match earliest_timer {
-                                Some(existing) => existing.min(wait_until_utc),
-                                None => wait_until_utc,
-                            });
-                        }
+                    && let Ok(wait_until) = chrono::DateTime::parse_from_rfc3339(wait_until_str)
+                {
+                    let wait_until_utc = wait_until.with_timezone(&chrono::Utc);
+                    if wait_until_utc <= now {
+                        let mut updated = current.clone();
+                        updated.status = StageStatus::Succeeded;
+                        updated.completed_at = Some(now_str.clone());
+                        stage_states.insert(stage_id.clone(), updated);
+                        changed = true;
+                    } else {
+                        // Track earliest timer for next_evaluate_at
+                        earliest_timer = Some(match earliest_timer {
+                            Some(existing) => existing.min(wait_until_utc),
+                            None => wait_until_utc,
+                        });
                     }
+                }
             }
             StageConfig::Plan { auto_approve, .. } => {
                 // Plan stages work like deploy stages but with an approval gate
                 let stage_releases = releases_by_stage.get(stage_id);
-                let releases: &[ReleaseRow] = stage_releases
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
+                let releases: &[ReleaseRow] = stage_releases.map(|v| v.as_slice()).unwrap_or(&[]);
 
                 if releases.is_empty() {
                     // ACTIVE plan stage with no child releases — this can happen if
@@ -388,8 +385,13 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
         match &stage_def.config {
             StageConfig::Deploy { environment } => {
                 // Check soak_time policies inside the transaction
-                let soak_blocked =
-                    check_soak_time_policies(&mut tx, &intent.project_id, &intent.artifact, environment).await?;
+                let soak_blocked = check_soak_time_policies(
+                    &mut tx,
+                    &intent.project_id,
+                    &intent.artifact,
+                    environment,
+                )
+                .await?;
 
                 if let Some(reason) = soak_blocked {
                     tracing::debug!(
@@ -408,7 +410,8 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 }
 
                 let approval_blocked =
-                    check_approval_policies(&mut tx, &intent.project_id, intent_id, environment).await?;
+                    check_approval_policies(&mut tx, &intent.project_id, intent_id, environment)
+                        .await?;
                 if let Some(reason) = approval_blocked {
                     tracing::debug!(%intent_id, stage_id, environment, "coordinator: deploy stage blocked by approval — {reason}");
                     continue;
@@ -536,8 +539,13 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
             }
             StageConfig::Plan { environment, .. } => {
                 // Plan stages work like deploy but create releases in plan mode
-                let soak_blocked =
-                    check_soak_time_policies(&mut tx, &intent.project_id, &intent.artifact, environment).await?;
+                let soak_blocked = check_soak_time_policies(
+                    &mut tx,
+                    &intent.project_id,
+                    &intent.artifact,
+                    environment,
+                )
+                .await?;
 
                 if let Some(reason) = soak_blocked {
                     tracing::debug!(
@@ -793,10 +801,7 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
         // without waiting for the 5s sweep.
         let _ = state
             .nats
-            .publish(
-                "forest.intent.evaluate",
-                intent_id.to_string().into(),
-            )
+            .publish("forest.intent.evaluate", intent_id.to_string().into())
             .await;
     } else if let Some(timer) = earliest_timer {
         // No progress but we have a pending timer (wait stage or soak_time retry).
@@ -809,10 +814,7 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
             tokio::time::sleep(delay).await;
             let _ = state
                 .nats
-                .publish(
-                    "forest.intent.evaluate",
-                    intent_id.to_string().into(),
-                )
+                .publish("forest.intent.evaluate", intent_id.to_string().into())
                 .await;
         });
     }

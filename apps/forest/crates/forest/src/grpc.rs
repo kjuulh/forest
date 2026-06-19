@@ -3,20 +3,16 @@ use std::{collections::HashMap, path::Path, sync::OnceLock};
 use anyhow::Context;
 use forest_grpc_interface::{
     artifact_service_client::ArtifactServiceClient,
-    policy_service_client::PolicyServiceClient,
-    trigger_service_client::TriggerServiceClient,
     destination_service_client::DestinationServiceClient,
-    environment_service_client::EnvironmentServiceClient,
-    event_service_client::EventServiceClient,
+    environment_service_client::EnvironmentServiceClient, event_service_client::EventServiceClient,
     event_subscription_service_client::EventSubscriptionServiceClient,
-    get_component_files_response::Msg,
-    get_projects_request::Query,
+    get_component_files_response::Msg, get_projects_request::Query,
     notification_service_client::NotificationServiceClient,
     o_auth_apps_service_client::OAuthAppsServiceClient,
     organisation_service_client::OrganisationServiceClient,
-    registry_service_client::RegistryServiceClient,
+    policy_service_client::PolicyServiceClient, registry_service_client::RegistryServiceClient,
     release_pipeline_service_client::ReleasePipelineServiceClient,
-    release_service_client::ReleaseServiceClient,
+    release_service_client::ReleaseServiceClient, trigger_service_client::TriggerServiceClient,
     users_service_client::UsersServiceClient, *,
 };
 use forest_models::{Destination, DestinationType, OrganisationName, ProjectName};
@@ -59,16 +55,12 @@ fn grpc_err(status: tonic::Status) -> anyhow::Error {
     // No message body — synthesise something useful from the code.
     let code = status.code();
     let hint: &str = match code {
-        tonic::Code::Unauthenticated => {
-            "unauthenticated — run `forest auth login` and try again"
-        }
+        tonic::Code::Unauthenticated => "unauthenticated — run `forest auth login` and try again",
         tonic::Code::PermissionDenied => {
             "permission denied — your account may not be a member of this organisation"
         }
         tonic::Code::NotFound => "not found",
-        tonic::Code::Unavailable => {
-            "registry unavailable — is the forest server running?"
-        }
+        tonic::Code::Unavailable => "registry unavailable — is the forest server running?",
         _ => "(no message body)",
     };
     anyhow::anyhow!("gRPC {code:?}: {hint}")
@@ -92,8 +84,7 @@ pub struct GrpcClient {
     environment_client: OnceCell<EnvironmentServiceClient<AuthMiddleware<Channel>>>,
     trigger_client: OnceCell<TriggerServiceClient<AuthMiddleware<Channel>>>,
     policy_client: OnceCell<PolicyServiceClient<AuthMiddleware<Channel>>>,
-    release_pipeline_client:
-        OnceCell<ReleasePipelineServiceClient<AuthMiddleware<Channel>>>,
+    release_pipeline_client: OnceCell<ReleasePipelineServiceClient<AuthMiddleware<Channel>>>,
     event_client: OnceCell<EventServiceClient<AuthMiddleware<Channel>>>,
 }
 
@@ -239,23 +230,21 @@ impl GrpcClient {
         // Stream: first message is metadata, subsequent messages are chunks
         let chunk_size = 1024 * 1024; // 1MB chunks
         let mut messages = vec![UploadBinaryRequest {
-            msg: Some(
-                forest_grpc_interface::upload_binary_request::Msg::Metadata(
-                    UploadBinaryMetadata {
-                        upload_context: upload_context.into(),
-                        os: os.into(),
-                        arch: arch.into(),
-                        sha256: sha256.into(),
-                    },
-                ),
-            ),
+            msg: Some(forest_grpc_interface::upload_binary_request::Msg::Metadata(
+                UploadBinaryMetadata {
+                    upload_context: upload_context.into(),
+                    os: os.into(),
+                    arch: arch.into(),
+                    sha256: sha256.into(),
+                },
+            )),
         }];
 
         for chunk in binary_content.chunks(chunk_size) {
             messages.push(UploadBinaryRequest {
-                msg: Some(
-                    forest_grpc_interface::upload_binary_request::Msg::Chunk(chunk.to_vec()),
-                ),
+                msg: Some(forest_grpc_interface::upload_binary_request::Msg::Chunk(
+                    chunk.to_vec(),
+                )),
             });
         }
 
@@ -307,10 +296,7 @@ impl GrpcClient {
 
     /// Stream the tool catalogue for an organisation (§1a.2c).
     /// Each entry has shape ∈ {HYBRID, TOOL_BINARY, TOOL_EXTERNAL}.
-    pub async fn list_org_tools(
-        &self,
-        organisation: &str,
-    ) -> anyhow::Result<Vec<OrgToolEntry>> {
+    pub async fn list_org_tools(&self, organisation: &str) -> anyhow::Result<Vec<OrgToolEntry>> {
         let mut client = self.registry_client().await?;
         let mut stream = client
             .list_org_tools(ListOrgToolsRequest {
@@ -431,7 +417,6 @@ impl GrpcClient {
         Ok(res.into_inner())
     }
 
-
     pub async fn commit_component_upload(&self, upload_context: &str) -> anyhow::Result<()> {
         let mut client = self.registry_client().await?;
 
@@ -533,7 +518,11 @@ impl GrpcClient {
         destination: &str,
         category: &str,
     ) -> anyhow::Result<()> {
-        tracing::info!("uploading file: {} (category: {})", handle.staging_id, category);
+        tracing::info!(
+            "uploading file: {} (category: {})",
+            handle.staging_id,
+            category
+        );
 
         handle
             .tx
@@ -617,9 +606,17 @@ impl GrpcClient {
 
     pub async fn health_client(
         &self,
-    ) -> anyhow::Result<forest_grpc_interface::release_health_service_client::ReleaseHealthServiceClient<AuthMiddleware<Channel>>> {
+    ) -> anyhow::Result<
+        forest_grpc_interface::release_health_service_client::ReleaseHealthServiceClient<
+            AuthMiddleware<Channel>,
+        >,
+    > {
         let channel = self.auth_channel(self.channel().await?);
-        Ok(forest_grpc_interface::release_health_service_client::ReleaseHealthServiceClient::new(channel))
+        Ok(
+            forest_grpc_interface::release_health_service_client::ReleaseHealthServiceClient::new(
+                channel,
+            ),
+        )
     }
 
     async fn registry_client(
@@ -802,9 +799,7 @@ impl GrpcClient {
     ) -> anyhow::Result<CreateOrganisationResponse> {
         let mut client = self.organisation_client().await?;
         let resp = client
-            .create_organisation(CreateOrganisationRequest {
-                name: name.into(),
-            })
+            .create_organisation(CreateOrganisationRequest { name: name.into() })
             .await
             .map_err(grpc_err)
             .context("create organisation")?;
@@ -851,9 +846,7 @@ impl GrpcClient {
     ) -> anyhow::Result<ListMyOrganisationsResponse> {
         let mut client = self.organisation_client().await?;
         let resp = client
-            .list_my_organisations(ListMyOrganisationsRequest {
-                role: role.into(),
-            })
+            .list_my_organisations(ListMyOrganisationsRequest { role: role.into() })
             .await
             .map_err(grpc_err)
             .context("list my organisations")?;
@@ -1066,10 +1059,7 @@ impl GrpcClient {
         Ok(resp.into_inner())
     }
 
-    pub async fn refresh_token(
-        &self,
-        refresh_token: &str,
-    ) -> anyhow::Result<RefreshTokenResponse> {
+    pub async fn refresh_token(&self, refresh_token: &str) -> anyhow::Result<RefreshTokenResponse> {
         let mut client = self.users_client().await?;
         let resp = client
             .refresh_token(RefreshTokenRequest {
@@ -1527,7 +1517,8 @@ impl GrpcClient {
                         _ => "•",
                     };
 
-                    eprintln!("  {icon} stage {}: {}({}) [{}]",
+                    eprintln!(
+                        "  {icon} stage {}: {}({}) [{}]",
                         stage.stage_id,
                         stage.stage_type,
                         stage.started_at.as_deref().unwrap_or(""),
@@ -1581,9 +1572,7 @@ impl GrpcClient {
         let mut client = self.release_client().await?;
 
         let response = client
-            .get_projects(GetProjectsRequest {
-                query: Some(query),
-            })
+            .get_projects(GetProjectsRequest { query: Some(query) })
             .await
             .map_err(grpc_err)
             .context("get projects (grpc)")?;
@@ -1592,11 +1581,7 @@ impl GrpcClient {
         Ok(resp.projects.into_iter().map(|r| r.into()).collect())
     }
 
-    pub async fn create_project(
-        &self,
-        organisation: &str,
-        project: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn create_project(&self, organisation: &str, project: &str) -> anyhow::Result<()> {
         let mut client = self.release_client().await?;
 
         client
@@ -1735,11 +1720,7 @@ impl GrpcClient {
         Ok(())
     }
 
-    pub async fn delete_destination(
-        &self,
-        organisation: &str,
-        name: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn delete_destination(&self, organisation: &str, name: &str) -> anyhow::Result<()> {
         self.destination_client()
             .await?
             .delete_destination(DeleteDestinationRequest {
@@ -1852,13 +1833,11 @@ impl GrpcClient {
     ) -> anyhow::Result<forest_grpc_interface::GetReleaseIntentStatesResponse> {
         let mut client = self.release_client().await?;
         let resp = client
-            .get_release_intent_states(
-                forest_grpc_interface::GetReleaseIntentStatesRequest {
-                    organisation: organisation.to_string(),
-                    project: project.map(|p| p.to_string()),
-                    include_completed,
-                },
-            )
+            .get_release_intent_states(forest_grpc_interface::GetReleaseIntentStatesRequest {
+                organisation: organisation.to_string(),
+                project: project.map(|p| p.to_string()),
+                include_completed,
+            })
             .await
             .map_err(grpc_err)
             .context("get release intent states (grpc)")?;
@@ -1868,10 +1847,7 @@ impl GrpcClient {
 
     // ── Environments ─────────────────────────────────────────────────
 
-    pub async fn list_environments(
-        &self,
-        organisation: &str,
-    ) -> anyhow::Result<Vec<Environment>> {
+    pub async fn list_environments(&self, organisation: &str) -> anyhow::Result<Vec<Environment>> {
         let mut client = self.environment_client().await?;
         let resp = client
             .list_environments(ListEnvironmentsRequest {
@@ -1957,9 +1933,7 @@ impl GrpcClient {
     pub async fn delete_environment(&self, id: &str) -> anyhow::Result<()> {
         self.environment_client()
             .await?
-            .delete_environment(DeleteEnvironmentRequest {
-                id: id.to_string(),
-            })
+            .delete_environment(DeleteEnvironmentRequest { id: id.to_string() })
             .await
             .map_err(grpc_err)
             .context("delete environment (grpc)")?;
@@ -2125,9 +2099,7 @@ impl GrpcClient {
 
     // ── Policies ─────────────────────────────────────────────────────
 
-    async fn policy_client(
-        &self,
-    ) -> anyhow::Result<PolicyServiceClient<AuthMiddleware<Channel>>> {
+    async fn policy_client(&self) -> anyhow::Result<PolicyServiceClient<AuthMiddleware<Channel>>> {
         let client = self
             .policy_client
             .get_or_try_init(move || async move {
@@ -2487,9 +2459,7 @@ impl GrpcClient {
 
     // ── Events ────────────────────────────────────────────────────────
 
-    async fn event_client(
-        &self,
-    ) -> anyhow::Result<EventServiceClient<AuthMiddleware<Channel>>> {
+    async fn event_client(&self) -> anyhow::Result<EventServiceClient<AuthMiddleware<Channel>>> {
         let client = self
             .event_client
             .get_or_try_init(move || async move {
@@ -2706,11 +2676,7 @@ impl GrpcClientState for State {
             // Server URL resolution (TASKS/019-context.md §1.3):
             //   1. --forest-server / FOREST_SERVER (explicit override)
             //   2. The resolved context's server URL.
-            let host = if let Some(s) = self
-                .config
-                .forest_server
-                .clone()
-                .filter(|s| !s.is_empty())
+            let host = if let Some(s) = self.config.forest_server.clone().filter(|s| !s.is_empty())
             {
                 s
             } else {
@@ -2859,7 +2825,6 @@ impl From<forest_grpc_interface::Project> for crate::models::project::Project {
         }
     }
 }
-
 
 impl From<forest_grpc_interface::Ref> for crate::models::reference::Reference {
     fn from(value: forest_grpc_interface::Ref) -> Self {

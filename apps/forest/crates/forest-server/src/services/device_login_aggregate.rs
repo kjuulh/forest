@@ -56,7 +56,9 @@ pub enum DeviceLoginPollOutcome {
     Pending,
     /// The grant was approved and is now consumed. The handler should
     /// issue tokens for `user_id` and return them to the CLI.
-    Approved { user_id: Uuid },
+    Approved {
+        user_id: Uuid,
+    },
     Denied,
     Expired,
     /// The CLI polled faster than `interval_seconds`. RFC 8628 § 3.5.
@@ -162,8 +164,7 @@ impl DeviceLoginAggregateService {
             let user_code_for_insert = user_code_normalized.clone();
             let client_name_owned = client_name.to_string();
             let client_version_owned = client_version.to_string();
-            let scopes_json =
-                serde_json::to_value(&scopes).context("serialize scopes")?;
+            let scopes_json = serde_json::to_value(&scopes).context("serialize scopes")?;
             let device_code_hash_for_insert = device_code_hash.clone();
 
             let result = self

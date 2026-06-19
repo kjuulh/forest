@@ -44,10 +44,12 @@ async fn main() -> anyhow::Result<()> {
 
     let channel = Channel::from_shared(server.clone())?.connect().await?;
     let auth_token_meta: MetadataValue<_> = format!("Bearer {token}").parse()?;
-    let mut client = RegistryServiceClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
-        req.metadata_mut().insert("authorization", auth_token_meta.clone());
-        Ok(req)
-    });
+    let mut client =
+        RegistryServiceClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
+            req.metadata_mut()
+                .insert("authorization", auth_token_meta.clone());
+            Ok(req)
+        });
 
     let upload_ctx = client
         .begin_upload(BeginUploadRequest {
@@ -104,7 +106,9 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
     client
-        .commit_upload(CommitUploadRequest { upload_context: upload_ctx })
+        .commit_upload(CommitUploadRequest {
+            upload_context: upload_ctx,
+        })
         .await?;
 
     println!("OK — {org}/{name}@{version} published");
@@ -127,7 +131,8 @@ async fn main() -> anyhow::Result<()> {
     let channel2 = Channel::from_shared(server)?.connect().await?;
     let mut release =
         ReleaseServiceClient::with_interceptor(channel2, move |mut req: tonic::Request<()>| {
-            req.metadata_mut().insert("authorization", auth_token_meta2.clone());
+            req.metadata_mut()
+                .insert("authorization", auth_token_meta2.clone());
             Ok(req)
         });
 

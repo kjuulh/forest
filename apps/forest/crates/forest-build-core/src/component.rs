@@ -94,7 +94,10 @@ impl ComponentService<serde_json::Value> for BuildComponent {
             }),
             Toolchain::Docker => tools.push(RequiredTool {
                 name: "docker".to_string(),
-                hint: Some("Install Docker with buildx — see https://docs.docker.com/get-docker/".to_string()),
+                hint: Some(
+                    "Install Docker with buildx — see https://docs.docker.com/get-docker/"
+                        .to_string(),
+                ),
             }),
         }
         tools

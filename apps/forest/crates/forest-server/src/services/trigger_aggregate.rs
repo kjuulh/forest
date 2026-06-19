@@ -225,14 +225,13 @@ impl TriggerAggregateService {
         self.event_store
             .save_with(&mut root, move |_events, tx| {
                 Box::pin(async move {
-                    let res = sqlx::query(
-                        "DELETE FROM triggers WHERE project_id = $1 AND name = $2",
-                    )
-                    .bind(project_id_owned)
-                    .bind(&name_owned)
-                    .execute(&mut **tx)
-                    .await
-                    .context("delete trigger projection")?;
+                    let res =
+                        sqlx::query("DELETE FROM triggers WHERE project_id = $1 AND name = $2")
+                            .bind(project_id_owned)
+                            .bind(&name_owned)
+                            .execute(&mut **tx)
+                            .await
+                            .context("delete trigger projection")?;
 
                     if res.rows_affected() != 1 {
                         anyhow::bail!("trigger projection not found for delete");

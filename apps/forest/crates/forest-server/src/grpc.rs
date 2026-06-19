@@ -1,23 +1,18 @@
 use std::net::SocketAddr;
 
 use forest_grpc_interface::{
-    app_service_server::AppServiceServer,
-    artifact_service_server::ArtifactServiceServer,
-    policy_service_server::PolicyServiceServer,
-    trigger_service_server::TriggerServiceServer,
+    app_service_server::AppServiceServer, artifact_service_server::ArtifactServiceServer,
     destination_service_server::DestinationServiceServer,
-    environment_service_server::EnvironmentServiceServer,
-    event_service_server::EventServiceServer,
+    environment_service_server::EnvironmentServiceServer, event_service_server::EventServiceServer,
     event_subscription_service_server::EventSubscriptionServiceServer,
     notification_service_server::NotificationServiceServer,
     o_auth_apps_service_server::OAuthAppsServiceServer,
     organisation_service_server::OrganisationServiceServer,
-    registry_service_server::RegistryServiceServer,
-    release_pipeline_service_server::ReleasePipelineServiceServer,
-    release_service_server::ReleaseServiceServer,
-    runner_service_server::RunnerServiceServer,
+    policy_service_server::PolicyServiceServer, registry_service_server::RegistryServiceServer,
     release_health_service_server::ReleaseHealthServiceServer,
-    status_service_server::StatusServiceServer,
+    release_pipeline_service_server::ReleasePipelineServiceServer,
+    release_service_server::ReleaseServiceServer, runner_service_server::RunnerServiceServer,
+    status_service_server::StatusServiceServer, trigger_service_server::TriggerServiceServer,
     users_service_server::UsersServiceServer,
 };
 use notmad::MadError;
@@ -38,22 +33,22 @@ use crate::{
 mod apps;
 mod artifacts;
 pub(crate) mod authorize;
-mod policies;
-mod triggers;
 mod destinations;
-mod event_subscriptions;
-mod events;
-mod release_pipelines;
 mod environments;
 mod error;
+mod event_subscriptions;
+mod events;
 mod notifications;
 mod oauth_apps;
 mod organisations;
+mod policies;
 mod registry;
 mod release;
-pub mod runner;
 mod release_health;
+mod release_pipelines;
+pub mod runner;
 mod status;
+mod triggers;
 mod users;
 
 pub struct GrpcServer {
@@ -111,16 +106,12 @@ impl GrpcServer {
                     state: self.state.clone(),
                 },
             ))
-            .add_service(TriggerServiceServer::new(
-                triggers::TriggersServer {
-                    state: self.state.clone(),
-                },
-            ))
-            .add_service(PolicyServiceServer::new(
-                policies::PoliciesServer {
-                    state: self.state.clone(),
-                },
-            ))
+            .add_service(TriggerServiceServer::new(triggers::TriggersServer {
+                state: self.state.clone(),
+            }))
+            .add_service(PolicyServiceServer::new(policies::PoliciesServer {
+                state: self.state.clone(),
+            }))
             .add_service(ReleasePipelineServiceServer::new(
                 release_pipelines::ReleasePipelinesServer {
                     state: self.state.clone(),

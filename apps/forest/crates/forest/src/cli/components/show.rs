@@ -18,9 +18,10 @@ impl ShowCommand {
 
         let client = state.grpc_client();
         let detail = client.get_component_detail(org, name).await?;
-        let summary = detail.summary.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("component not found: {org}/{name}")
-        })?;
+        let summary = detail
+            .summary
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("component not found: {org}/{name}"))?;
 
         use crate::cli::output::OutputFormat;
         match state.config.format {
@@ -64,7 +65,10 @@ impl ShowCommand {
             }
         }
 
-        println!("{}/{} @ {}", summary.organisation, summary.name, summary.latest_version);
+        println!(
+            "{}/{} @ {}",
+            summary.organisation, summary.name, summary.latest_version
+        );
         println!("  shape:     {}", shape_label(summary.shape));
         println!("  kind:      {}", summary.kind);
         if !summary.description.is_empty() {
@@ -75,10 +79,7 @@ impl ShowCommand {
         }
         if let Some(tool) = &summary.tool {
             if !tool.name.is_empty() {
-                println!(
-                    "  tool:      {} (argv passthrough)",
-                    tool.name
-                );
+                println!("  tool:      {} (argv passthrough)", tool.name);
                 if !tool.description.is_empty() {
                     println!("             {}", tool.description);
                 }
@@ -171,7 +172,10 @@ mod tests {
     fn extracts_include_env() {
         let m = r#"{"kind":"binary","include":{"env":{"FUNGUS_SERVER":"https://fungus.understory.sh"}}}"#;
         let env = include_env_from_manifest(m);
-        assert_eq!(env.get("FUNGUS_SERVER").map(String::as_str), Some("https://fungus.understory.sh"));
+        assert_eq!(
+            env.get("FUNGUS_SERVER").map(String::as_str),
+            Some("https://fungus.understory.sh")
+        );
     }
 
     #[test]

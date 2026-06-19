@@ -1,6 +1,6 @@
 use admin::AdminCommand;
-use bootstrap::BootstrapCommand;
 use auth::AuthCommand;
+use bootstrap::BootstrapCommand;
 use clap::{Parser, Subcommand};
 use components::ComponentsCommand;
 use context::ContextCommand;
@@ -16,8 +16,7 @@ use tool::ToolCommand;
 
 use crate::{
     cli::{
-        components::generate::GenerateCommand,
-        components::publish::PublishCommand,
+        components::generate::GenerateCommand, components::publish::PublishCommand,
         destination::DestinationCommand, environment::EnvironmentCommand,
         notifications::NotificationsCommand, organisation::OrganisationCommand,
         project::ProjectCommand, release::ReleaseCommand,

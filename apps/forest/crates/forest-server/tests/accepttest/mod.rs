@@ -1,10 +1,10 @@
-mod fixtures;
 mod authz_coverage;
 mod authz_flow;
 mod auto_join_flow;
 mod component_flow;
 mod device_login;
 mod email_verification;
+mod fixtures;
 mod global_tools_flow;
 mod oauth_apps;
 mod oauth_flow;

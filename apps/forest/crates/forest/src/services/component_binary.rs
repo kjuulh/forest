@@ -20,7 +20,12 @@ pub fn component_meta_dir(organisation: &str, name: &str, version: &str) -> Opti
 
 /// Resolve meta.json for a component, checking the shared cache first,
 /// then falling back to the local `.forest/component/` directory.
-pub fn resolve_meta_json(component_dir: &Path, organisation: &str, name: &str, version: &str) -> Option<PathBuf> {
+pub fn resolve_meta_json(
+    component_dir: &Path,
+    organisation: &str,
+    name: &str,
+    version: &str,
+) -> Option<PathBuf> {
     // Check shared cache first
     if let Some(cache_meta_dir) = component_meta_dir(organisation, name, version) {
         let cache_meta = cache_meta_dir.join("meta.json");
@@ -74,7 +79,11 @@ pub fn resolve_binary_with_meta(
             .join(".forest")
             .join("component")
             .join("meta.json");
-        if local_meta.exists() { Some(local_meta) } else { None }
+        if local_meta.exists() {
+            Some(local_meta)
+        } else {
+            None
+        }
     };
 
     let meta_path = meta_path?;
@@ -107,7 +116,11 @@ fn resolve_meta_for_sync(
             .join(".forest")
             .join("component")
             .join("meta.json");
-        if local_meta.exists() { Some(local_meta) } else { None }
+        if local_meta.exists() {
+            Some(local_meta)
+        } else {
+            None
+        }
     }
 }
 
@@ -198,7 +211,10 @@ fn sync_local_binary_to_cache_at(
     }
 
     // Binary changed — update cache and meta.json
-    tracing::debug!("local binary changed ({}), syncing to cache", &current_hash[..12]);
+    tracing::debug!(
+        "local binary changed ({}), syncing to cache",
+        &current_hash[..12]
+    );
 
     let (hash, cache_path) = store_binary_in_cache(&content).ok()?;
 
@@ -277,8 +293,7 @@ pub fn store_binary_in_cache(binary_content: &[u8]) -> anyhow::Result<(String, P
     let sha256 = hex::encode(Sha256::digest(binary_content));
     let prefix = &sha256[..2];
 
-    let cache_dir = dirs::cache_dir()
-        .ok_or_else(|| anyhow::anyhow!("cache dir not available"))?;
+    let cache_dir = dirs::cache_dir().ok_or_else(|| anyhow::anyhow!("cache dir not available"))?;
     let bin_dir = cache_dir
         .join("forest")
         .join("components")
@@ -309,9 +324,7 @@ pub fn is_v2_component(component_dir: &Path) -> bool {
 
 /// Load the cached descriptor from meta.json without spawning the binary.
 /// Returns None if meta.json doesn't exist or doesn't contain a descriptor.
-pub fn load_cached_descriptor(
-    component_dir: &Path,
-) -> Option<forest_sdk::ComponentDescriptor> {
+pub fn load_cached_descriptor(component_dir: &Path) -> Option<forest_sdk::ComponentDescriptor> {
     load_cached_descriptor_with_meta(component_dir, None, None, None)
 }
 
@@ -329,7 +342,9 @@ pub fn load_cached_descriptor_with_meta(
             .join(".forest")
             .join("component")
             .join("meta.json");
-        if !local.exists() { return None; }
+        if !local.exists() {
+            return None;
+        }
         local
     };
 
@@ -341,9 +356,7 @@ pub fn load_cached_descriptor_with_meta(
 }
 
 /// Fetch template rendering config from a component binary.
-pub async fn get_template_config(
-    binary_path: &Path,
-) -> anyhow::Result<forest_sdk::TemplateConfig> {
+pub async fn get_template_config(binary_path: &Path) -> anyhow::Result<forest_sdk::TemplateConfig> {
     let output = tokio::time::timeout(
         DESCRIBE_TIMEOUT,
         tokio::process::Command::new(binary_path)
@@ -360,8 +373,8 @@ pub async fn get_template_config(
         return Ok(forest_sdk::TemplateConfig::default());
     }
 
-    let config: forest_sdk::TemplateConfig = serde_json::from_slice(&output.stdout)
-        .unwrap_or_default();
+    let config: forest_sdk::TemplateConfig =
+        serde_json::from_slice(&output.stdout).unwrap_or_default();
     Ok(config)
 }
 
@@ -547,10 +560,9 @@ pub async fn describe_component(
     let descriptor: forest_sdk::ComponentDescriptor = serde_json::from_slice(&output.stdout)
         .map_err(|e| {
             const PREFIX_LEN: usize = 1024;
-            let stdout_prefix = String::from_utf8_lossy(
-                &output.stdout[..output.stdout.len().min(PREFIX_LEN)],
-            )
-            .into_owned();
+            let stdout_prefix =
+                String::from_utf8_lossy(&output.stdout[..output.stdout.len().min(PREFIX_LEN)])
+                    .into_owned();
             DescribeError::MalformedDescriptor {
                 bin: binary_path.into(),
                 parse_error: e,
@@ -689,10 +701,9 @@ pub async fn invoke_component_with_context(
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| anyhow::anyhow!(
-            "failed to spawn component {}: {e}",
-            binary_path.display(),
-        ))?;
+        .map_err(
+            |e| anyhow::anyhow!("failed to spawn component {}: {e}", binary_path.display(),),
+        )?;
 
     // Write payload to stdin
     if let Some(mut stdin) = child.stdin.take() {
@@ -704,15 +715,14 @@ pub async fn invoke_component_with_context(
     // Wait with timeout
     let output = tokio::time::timeout(COMPONENT_TIMEOUT, child.wait_with_output())
         .await
-        .map_err(|_| anyhow::anyhow!(
-            "command '{}' timed out after {:?}",
-            method,
-            COMPONENT_TIMEOUT,
-        ))?
-        .map_err(|e| anyhow::anyhow!(
-            "command '{}' failed to execute: {e}",
-            method,
-        ))?;
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "command '{}' timed out after {:?}",
+                method,
+                COMPONENT_TIMEOUT,
+            )
+        })?
+        .map_err(|e| anyhow::anyhow!("command '{}' failed to execute: {e}", method,))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -769,9 +779,7 @@ pub async fn invoke_component_passthrough(
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| {
-            anyhow::anyhow!("failed to spawn component {}: {e}", binary_path.display())
-        })?;
+        .map_err(|e| anyhow::anyhow!("failed to spawn component {}: {e}", binary_path.display()))?;
 
     if let Some(mut stdin) = child.stdin.take() {
         let payload_bytes = serde_json::to_vec(&payload)?;
@@ -833,8 +841,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn component_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/components-v2")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/components-v2")
     }
 
     fn binary_path() -> Option<PathBuf> {
@@ -845,8 +852,8 @@ mod tests {
         }
 
         // Fall back to target/debug from workspace root
-        let workspace_binary = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug/kubernetes-service");
+        let workspace_binary =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/kubernetes-service");
         if workspace_binary.exists() {
             return Some(workspace_binary);
         }
@@ -935,14 +942,9 @@ mod tests {
             "annotations": {},
         });
 
-        let result = invoke_component(
-            &binary,
-            "commands/status",
-            &spec,
-            &serde_json::json!({}),
-        )
-        .await
-        .unwrap();
+        let result = invoke_component(&binary, "commands/status", &spec, &serde_json::json!({}))
+            .await
+            .unwrap();
 
         assert_eq!(result["ready"], 2);
         assert_eq!(result["desired"], 2);
@@ -970,17 +972,15 @@ mod tests {
             "annotations": {},
         });
 
-        let result = invoke_component(
-            &binary,
-            "commands/prepare",
-            &spec,
-            &serde_json::json!({}),
-        )
-        .await
-        .unwrap();
+        let result = invoke_component(&binary, "commands/prepare", &spec, &serde_json::json!({}))
+            .await
+            .unwrap();
 
         let manifests = result["manifests"].as_array().expect("manifests array");
-        assert!(manifests.len() >= 2, "expected at least Deployment + Service");
+        assert!(
+            manifests.len() >= 2,
+            "expected at least Deployment + Service"
+        );
 
         let deployment = manifests[0].as_str().unwrap();
         assert!(deployment.contains("kind: Deployment"));
@@ -1013,14 +1013,9 @@ mod tests {
             "annotations": {},
         });
 
-        let result = invoke_component(
-            &binary,
-            "commands/validate",
-            &spec,
-            &serde_json::json!({}),
-        )
-        .await
-        .unwrap();
+        let result = invoke_component(&binary, "commands/validate", &spec, &serde_json::json!({}))
+            .await
+            .unwrap();
 
         assert_eq!(result["valid"], true);
         assert!(result["errors"].as_array().unwrap().is_empty());

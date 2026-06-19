@@ -184,11 +184,10 @@ impl ComponentsService {
             // Download deps — check component kind to decide v1 (files) vs v2 (binary)
             for dep in upstream {
                 // Try to get manifest — if it exists and kind=binary, download binary
-                let manifest: Result<String, _> = self.grpc.get_component_manifest(
-                    &dep.organisation,
-                    &dep.name,
-                    &dep.version,
-                ).await;
+                let manifest: Result<String, _> = self
+                    .grpc
+                    .get_component_manifest(&dep.organisation, &dep.name, &dep.version)
+                    .await;
 
                 let is_binary = manifest
                     .as_ref()
@@ -257,8 +256,9 @@ impl ComponentsService {
             .context("download binary from registry")?;
 
         // Store in content-addressable cache
-        let (sha256, cache_path) = crate::services::component_binary::store_binary_in_cache(&binary)
-            .context("store binary in cache")?;
+        let (sha256, cache_path) =
+            crate::services::component_binary::store_binary_in_cache(&binary)
+                .context("store binary in cache")?;
 
         let sha256_prefixed = format!("sha256:{sha256}");
 
@@ -345,7 +345,11 @@ impl ComponentsService {
         //      `cue.mod/pkg/forest.sh/{org}/{name}@v{major}/` so
         //      `import "forest.sh/{org}/{name}@v0"` in consumer CUE
         //      resolves.
-        if let Ok(Some(comp)) = self.grpc.get_component_version(name, organisation, version).await {
+        if let Ok(Some(comp)) = self
+            .grpc
+            .get_component_version(name, organisation, version)
+            .await
+        {
             if let Ok(mut file_stream) = self.grpc.get_component_files(&comp.id).await {
                 use futures::StreamExt;
                 let mut cue_files: Vec<(String, Vec<u8>)> = Vec::new();
@@ -355,7 +359,13 @@ impl ComponentsService {
                         Ok(f) => {
                             if let Err(e) = self
                                 .component_cache
-                                .add_file(name, organisation, version, &f.file_path, &f.file_content)
+                                .add_file(
+                                    name,
+                                    organisation,
+                                    version,
+                                    &f.file_path,
+                                    &f.file_content,
+                                )
                                 .await
                             {
                                 tracing::warn!(
@@ -424,7 +434,9 @@ impl ComponentsService {
                         dep
                     ))
             }
-            DependencyType::Local(_path) => anyhow::bail!("local dependencies cannot be resolved as upstream components"),
+            DependencyType::Local(_path) => {
+                anyhow::bail!("local dependencies cannot be resolved as upstream components")
+            }
         }
     }
 
@@ -523,7 +535,11 @@ impl ComponentsService {
         let is_binary = manifest_raw
             .as_deref()
             .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok())
-            .and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(|s| s == "binary"))
+            .and_then(|v| {
+                v.get("kind")
+                    .and_then(|k| k.as_str())
+                    .map(|s| s == "binary")
+            })
             .unwrap_or(false);
         if is_binary {
             return Ok(EnsureCachedOutcome::BinaryRequiresPlatformDownload);
@@ -540,16 +556,12 @@ impl ComponentsService {
             .await
             .context("query component version metadata")?
             .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "component {organisation}/{name}@{version} not found in registry"
-                )
+                anyhow::anyhow!("component {organisation}/{name}@{version} not found in registry")
             })?;
 
         self.download_component(&comp.id.to_string(), name, organisation, version)
             .await
-            .with_context(|| {
-                format!("download files for {organisation}/{name}@{version}")
-            })?;
+            .with_context(|| format!("download files for {organisation}/{name}@{version}"))?;
 
         Ok(EnsureCachedOutcome::Downloaded)
     }

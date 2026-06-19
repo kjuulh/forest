@@ -1,7 +1,7 @@
 use forest_grpc_interface::{
-    release_health_service_server::ReleaseHealthService, DestinationHealth, GetReleaseHealthRequest,
-    GetReleaseHealthResponse, HealthStatus, ReleaseHealthEvent,
-    ReportHealthRequest, ReportHealthResponse, WatchReleaseHealthRequest,
+    DestinationHealth, GetReleaseHealthRequest, GetReleaseHealthResponse, HealthStatus,
+    ReleaseHealthEvent, ReportHealthRequest, ReportHealthResponse, WatchReleaseHealthRequest,
+    release_health_service_server::ReleaseHealthService,
 };
 use futures::StreamExt;
 use uuid::Uuid;
@@ -53,8 +53,9 @@ impl ReleaseHealthService for ReleaseHealthServer {
         )
         .await?;
 
-        let release_intent_id = Uuid::parse_str(&req.release_intent_id)
-            .map_err(|e| tonic::Status::invalid_argument(format!("invalid release_intent_id: {e}")))?;
+        let release_intent_id = Uuid::parse_str(&req.release_intent_id).map_err(|e| {
+            tonic::Status::invalid_argument(format!("invalid release_intent_id: {e}"))
+        })?;
 
         let release_id = Uuid::parse_str(&req.release_id)
             .map_err(|e| tonic::Status::invalid_argument(format!("invalid release_id: {e}")))?;
@@ -128,8 +129,9 @@ impl ReleaseHealthService for ReleaseHealthServer {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
-        let release_intent_id = Uuid::parse_str(&req.release_intent_id)
-            .map_err(|e| tonic::Status::invalid_argument(format!("invalid release_intent_id: {e}")))?;
+        let release_intent_id = Uuid::parse_str(&req.release_intent_id).map_err(|e| {
+            tonic::Status::invalid_argument(format!("invalid release_intent_id: {e}"))
+        })?;
 
         authorize_intent(&self.state.db, &actor, release_intent_id).await?;
 
@@ -157,9 +159,8 @@ impl ReleaseHealthService for ReleaseHealthServer {
         }))
     }
 
-    type WatchReleaseHealthStream = tokio_stream::wrappers::ReceiverStream<
-        Result<ReleaseHealthEvent, tonic::Status>,
-    >;
+    type WatchReleaseHealthStream =
+        tokio_stream::wrappers::ReceiverStream<Result<ReleaseHealthEvent, tonic::Status>>;
 
     async fn watch_release_health(
         &self,
@@ -168,8 +169,9 @@ impl ReleaseHealthService for ReleaseHealthServer {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
-        let release_intent_id = Uuid::parse_str(&req.release_intent_id)
-            .map_err(|e| tonic::Status::invalid_argument(format!("invalid release_intent_id: {e}")))?;
+        let release_intent_id = Uuid::parse_str(&req.release_intent_id).map_err(|e| {
+            tonic::Status::invalid_argument(format!("invalid release_intent_id: {e}"))
+        })?;
 
         authorize_intent(&self.state.db, &actor, release_intent_id).await?;
 
@@ -207,7 +209,9 @@ impl ReleaseHealthService for ReleaseHealthServer {
             }
         });
 
-        Ok(tonic::Response::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
+        Ok(tonic::Response::new(
+            tokio_stream::wrappers::ReceiverStream::new(rx),
+        ))
     }
 }
 

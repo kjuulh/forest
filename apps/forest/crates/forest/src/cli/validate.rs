@@ -41,10 +41,7 @@ impl ValidateCommand {
                         );
                     }
                     Err(failures) => {
-                        eprint!(
-                            "{}",
-                            crate::services::preflight::render_failures(&failures)
-                        );
+                        eprint!("{}", crate::services::preflight::render_failures(&failures));
                         anyhow::bail!("preflight failed");
                     }
                 }
@@ -63,8 +60,7 @@ impl ValidateCommand {
         let project = state.project_parser().get_project().await?;
 
         // Derive available contracts from dependencies
-        let enabled_contracts =
-            contracts::EnabledContracts::from_project_dependencies(&project);
+        let enabled_contracts = contracts::EnabledContracts::from_project_dependencies(&project);
         if enabled_contracts.has_any() {
             eprintln!("Contracts (from dependencies):");
             for topic in enabled_contracts.topics() {
@@ -126,7 +122,9 @@ impl ValidateCommand {
             }
 
             // Invoke commands/validate — try binary first, then deno
-            let validate_result = if let Some(binary_path) = component_binary::resolve_binary(&path, &dep.name) {
+            let validate_result = if let Some(binary_path) =
+                component_binary::resolve_binary(&path, &dep.name)
+            {
                 let input = serde_json::json!({});
                 component_binary::invoke_component(
                     &binary_path,
@@ -136,7 +134,8 @@ impl ValidateCommand {
                 )
                 .await
             } else if crate::services::component_deno::is_deno_component(&path) {
-                if let Some(entrypoint) = crate::services::component_deno::resolve_entrypoint(&path) {
+                if let Some(entrypoint) = crate::services::component_deno::resolve_entrypoint(&path)
+                {
                     crate::services::component_deno::invoke_deno_component(
                         &path,
                         &entrypoint,
@@ -194,7 +193,10 @@ impl ValidateCommand {
                 Err(e) => {
                     let msg = e.to_string();
                     errors.push(format!("{}/{}: {}", dep.organisation, dep.name, msg));
-                    eprintln!("  {} {}/{}  invalid config", "✗", dep.organisation, dep.name);
+                    eprintln!(
+                        "  {} {}/{}  invalid config",
+                        "✗", dep.organisation, dep.name
+                    );
                     validated += 1;
                 }
             }
@@ -213,11 +215,7 @@ impl ValidateCommand {
                         implementors.join(", ")
                     );
                 } else {
-                    eprintln!(
-                        "  {} {}  no component implements this contract",
-                        "!",
-                        topic,
-                    );
+                    eprintln!("  {} {}  no component implements this contract", "!", topic,);
                 }
             }
         }
@@ -227,7 +225,11 @@ impl ValidateCommand {
             eprintln!("Validated {} component(s), all configs valid.", validated);
             Ok(())
         } else {
-            eprintln!("Validated {} component(s), {} error(s):", validated, errors.len());
+            eprintln!(
+                "Validated {} component(s), {} error(s):",
+                validated,
+                errors.len()
+            );
             for err in &errors {
                 eprintln!("  - {err}");
             }

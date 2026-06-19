@@ -153,9 +153,9 @@ pub enum ManifestError {
 pub fn parse(json: &str) -> Result<Manifest, ManifestError> {
     let value: serde_json::Value =
         serde_json::from_str(json).map_err(|e| ManifestError::InvalidJson(e.to_string()))?;
-    let obj = value.as_object().ok_or_else(|| {
-        ManifestError::InvalidJson("manifest root must be a JSON object".into())
-    })?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| ManifestError::InvalidJson("manifest root must be a JSON object".into()))?;
 
     // --- kind ---------------------------------------------------------
     let kind = parse_kind(obj.get("kind"))?;
@@ -198,9 +198,7 @@ pub fn parse(json: &str) -> Result<Manifest, ManifestError> {
     let platforms_obj = obj
         .get("platforms")
         .and_then(|v| v.as_object())
-        .ok_or_else(|| {
-            ManifestError::InvalidJson("platforms must be a JSON object".into())
-        })?;
+        .ok_or_else(|| ManifestError::InvalidJson("platforms must be a JSON object".into()))?;
 
     let mut platforms = BTreeMap::new();
     for (key, raw) in platforms_obj {
@@ -226,7 +224,9 @@ fn parse_include(v: Option<&serde_json::Value>) -> Result<Include, ManifestError
         None | Some(serde_json::Value::Null) => return Ok(Include::default()),
         Some(serde_json::Value::Object(o)) => o,
         Some(_) => {
-            return Err(ManifestError::InvalidJson("include must be an object".into()));
+            return Err(ManifestError::InvalidJson(
+                "include must be an object".into(),
+            ));
         }
     };
 
@@ -235,15 +235,13 @@ fn parse_include(v: Option<&serde_json::Value>) -> Result<Include, ManifestError
         Some(serde_json::Value::Object(map)) => {
             let mut out = BTreeMap::new();
             for (k, v) in map {
-                validate_env_name(k).map_err(|_: EnvNameError| {
-                    ManifestError::InvalidEnvName(k.clone())
-                })?;
+                validate_env_name(k)
+                    .map_err(|_: EnvNameError| ManifestError::InvalidEnvName(k.clone()))?;
                 let val = v.as_str().ok_or_else(|| {
                     ManifestError::InvalidJson("include.env values must be strings".into())
                 })?;
-                validate_env_value(val).map_err(|_: EnvValueError| {
-                    ManifestError::InvalidEnvValue(k.clone())
-                })?;
+                validate_env_value(val)
+                    .map_err(|_: EnvValueError| ManifestError::InvalidEnvValue(k.clone()))?;
                 out.insert(k.clone(), val.to_string());
             }
             out
@@ -293,9 +291,9 @@ fn parse_kind(v: Option<&serde_json::Value>) -> Result<ManifestKind, ManifestErr
 }
 
 fn parse_tool_facet(v: &serde_json::Value) -> Result<ToolFacet, ManifestError> {
-    let obj = v.as_object().ok_or_else(|| {
-        ManifestError::InvalidJson("tool must be an object".into())
-    })?;
+    let obj = v
+        .as_object()
+        .ok_or_else(|| ManifestError::InvalidJson("tool must be an object".into()))?;
 
     let name = obj
         .get("name")
@@ -341,13 +339,10 @@ fn parse_platform_key(key: &str) -> Result<PlatformKey, ManifestError> {
     Ok(PlatformKey { os, arch })
 }
 
-fn parse_platform(
-    raw: &serde_json::Value,
-    kind: ManifestKind,
-) -> Result<Platform, ManifestError> {
-    let obj = raw.as_object().ok_or_else(|| {
-        ManifestError::InvalidJson("platform entry must be an object".into())
-    })?;
+fn parse_platform(raw: &serde_json::Value, kind: ManifestKind) -> Result<Platform, ManifestError> {
+    let obj = raw
+        .as_object()
+        .ok_or_else(|| ManifestError::InvalidJson("platform entry must be an object".into()))?;
 
     let sha256 = obj
         .get("sha256")
@@ -432,7 +427,9 @@ fn optional_string(
 }
 
 fn is_sha256_hex(s: &str) -> bool {
-    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
 fn validate_external_url(url: &str) -> Result<(), ManifestError> {
@@ -736,7 +733,10 @@ mod tests {
         assert_eq!(m.shape, ComponentShape::ToolExternal);
         let p = m.platforms.values().next().unwrap();
         assert!(matches!(p.archive, Archive::TarGz));
-        assert_eq!(p.binary_in_archive.as_deref(), Some("ripgrep-14.1.1-x86_64-unknown-linux-musl/rg"));
+        assert_eq!(
+            p.binary_in_archive.as_deref(),
+            Some("ripgrep-14.1.1-x86_64-unknown-linux-musl/rg")
+        );
         assert!(p.url.as_deref().unwrap().starts_with("https://"));
     }
 

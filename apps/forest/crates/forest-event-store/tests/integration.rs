@@ -641,16 +641,20 @@ async fn test_read_category_filters_correctly() {
     // Counter category only
     let counter_events = store.read_category("counter", start, 100).await.unwrap();
     assert!(!counter_events.is_empty());
-    assert!(counter_events
-        .iter()
-        .all(|e| e.stream_id.starts_with("counter-")));
+    assert!(
+        counter_events
+            .iter()
+            .all(|e| e.stream_id.starts_with("counter-"))
+    );
 
     // Wallet category only
     let wallet_events = store.read_category("wallet", start, 100).await.unwrap();
     assert!(!wallet_events.is_empty());
-    assert!(wallet_events
-        .iter()
-        .all(|e| e.stream_id.starts_with("wallet-")));
+    assert!(
+        wallet_events
+            .iter()
+            .all(|e| e.stream_id.starts_with("wallet-"))
+    );
 }
 
 #[tokio::test]

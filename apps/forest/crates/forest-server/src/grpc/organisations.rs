@@ -138,14 +138,17 @@ impl OrganisationService for OrganisationsServer {
             .map_err(error::to_status)?;
 
         let roles: Vec<String> = orgs.iter().map(|o| o.role.clone()).collect();
-        let organisations: Vec<Organisation> = orgs.into_iter().map(|o| Organisation {
-            organisation_id: o.organisation_id.to_string(),
-            name: o.name,
-            created_at: Some(prost_types::Timestamp {
-                seconds: o.created_at.timestamp(),
-                nanos: o.created_at.timestamp_subsec_nanos() as i32,
-            }),
-        }).collect();
+        let organisations: Vec<Organisation> = orgs
+            .into_iter()
+            .map(|o| Organisation {
+                organisation_id: o.organisation_id.to_string(),
+                name: o.name,
+                created_at: Some(prost_types::Timestamp {
+                    seconds: o.created_at.timestamp(),
+                    nanos: o.created_at.timestamp_subsec_nanos() as i32,
+                }),
+            })
+            .collect();
 
         Ok(tonic::Response::new(ListMyOrganisationsResponse {
             organisations,
@@ -422,7 +425,9 @@ impl OrganisationService for OrganisationsServer {
             .await
             .map_err(allowed_domain_err_to_status)?;
 
-        Ok(tonic::Response::new(RemoveAllowedDomainResponse { removed }))
+        Ok(tonic::Response::new(RemoveAllowedDomainResponse {
+            removed,
+        }))
     }
 
     async fn verify_allowed_domain(
@@ -469,9 +474,7 @@ impl OrganisationService for OrganisationsServer {
             VerifyAllowedDomainOutcome::AlreadyVerified => {
                 verify_allowed_domain_response::Status::AlreadyVerified
             }
-            VerifyAllowedDomainOutcome::Missing => {
-                verify_allowed_domain_response::Status::Missing
-            }
+            VerifyAllowedDomainOutcome::Missing => verify_allowed_domain_response::Status::Missing,
         };
 
         Ok(tonic::Response::new(VerifyAllowedDomainResponse {
@@ -608,9 +611,7 @@ fn member_to_grpc(member: crate::services::organisations::MemberInfo) -> Organis
     }
 }
 
-fn org_to_grpc(
-    org: crate::services::organisations::OrganisationInfo,
-) -> Organisation {
+fn org_to_grpc(org: crate::services::organisations::OrganisationInfo) -> Organisation {
     Organisation {
         organisation_id: org.organisation_id.to_string(),
         name: org.name,

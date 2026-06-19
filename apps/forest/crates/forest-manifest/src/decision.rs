@@ -79,9 +79,15 @@ mod tests {
 
     #[test]
     fn first_publish_when_no_prior() {
-        assert_eq!(decide_publish(None, "h", false), PublishDecision::FirstPublish);
+        assert_eq!(
+            decide_publish(None, "h", false),
+            PublishDecision::FirstPublish
+        );
         // Prerelease first publish is still a first publish.
-        assert_eq!(decide_publish(None, "h", true), PublishDecision::FirstPublish);
+        assert_eq!(
+            decide_publish(None, "h", true),
+            PublishDecision::FirstPublish
+        );
     }
 
     #[test]

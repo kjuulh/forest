@@ -52,11 +52,9 @@ impl UpdateRoleCommand {
         };
         let role = match &self.role {
             Some(r) => r.clone(),
-            None => {
-                inquire::Select::new("New role:", vec!["member", "admin"])
-                    .prompt()?
-                    .to_string()
-            }
+            None => inquire::Select::new("New role:", vec!["member", "admin"])
+                .prompt()?
+                .to_string(),
         };
 
         let resp = state

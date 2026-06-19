@@ -47,10 +47,7 @@ impl Subscription {
     /// Poll for the next batch of events from the global log.
     /// Returns an empty vec if caught up.
     pub async fn poll(&mut self) -> anyhow::Result<Vec<RecordedEvent>> {
-        let events = self
-            .store
-            .read_all(self.position, self.batch_size)
-            .await?;
+        let events = self.store.read_all(self.position, self.batch_size).await?;
 
         if let Some(last) = events.last() {
             self.position = last.global_position;

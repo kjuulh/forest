@@ -52,9 +52,7 @@ impl ShowCommand {
         let grpc = state.grpc_client();
 
         let resolved = match self.target.as_deref() {
-            Some(target) => {
-                resolve_target(state, target, self.organisation.as_deref()).await?
-            }
+            Some(target) => resolve_target(state, target, self.organisation.as_deref()).await?,
             None => {
                 pick_release_interactive(
                     state,
@@ -554,7 +552,10 @@ impl ShowOutput {
                     .reference
                     .as_ref()
                     .and_then(|r| r.repo_url.clone()),
-                version: annotation.reference.as_ref().and_then(|r| r.version.clone()),
+                version: annotation
+                    .reference
+                    .as_ref()
+                    .and_then(|r| r.version.clone()),
             },
             stages,
             destinations,
@@ -699,16 +700,16 @@ impl ShowOutput {
     }
 }
 
-fn render_logs_only(
-    plan_outputs: &[PlanView],
-    log_buffers: &BTreeMap<String, Vec<DestLog>>,
-) {
+fn render_logs_only(plan_outputs: &[PlanView], log_buffers: &BTreeMap<String, Vec<DestLog>>) {
     for plan in plan_outputs {
         for o in &plan.outputs {
             if o.plan_output.is_empty() {
                 continue;
             }
-            println!("# plan: {} stage={} ({})", o.destination, plan.stage_id, o.status);
+            println!(
+                "# plan: {} stage={} ({})",
+                o.destination, plan.stage_id, o.status
+            );
             println!("{}", o.plan_output);
         }
     }

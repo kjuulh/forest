@@ -66,9 +66,9 @@ async fn atomic_write_with_mode(dest: &Path, bytes: &[u8], mode: u32) -> Result<
 }
 
 fn sibling_tempfile(dest: &Path) -> Result<std::path::PathBuf> {
-    let parent = dest.parent().ok_or_else(|| {
-        anyhow::anyhow!("destination has no parent dir: {}", dest.display())
-    })?;
+    let parent = dest
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("destination has no parent dir: {}", dest.display()))?;
     let stem = dest
         .file_name()
         .ok_or_else(|| anyhow::anyhow!("destination has no file name: {}", dest.display()))?
@@ -83,9 +83,7 @@ pub async fn read_optional(path: &Path) -> Result<Option<String>> {
     match fs::read_to_string(path).await {
         Ok(s) => Ok(Some(s)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => {
-            Err(e).with_context(|| format!("reading {}", path.display()))
-        }
+        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
     }
 }
 

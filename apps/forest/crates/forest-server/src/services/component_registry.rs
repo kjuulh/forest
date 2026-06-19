@@ -18,9 +18,9 @@ pub mod models {
     }
 }
 use anyhow::Context;
+use forest_grpc_interface::GetComponentFilesResponse;
 use futures::{SinkExt, Stream};
 use models::*;
-use forest_grpc_interface::GetComponentFilesResponse;
 use uuid::Uuid;
 
 pub struct ComponentRegistry {
@@ -202,9 +202,11 @@ impl FileStream {
     pub async fn push_done(mut self) -> anyhow::Result<()> {
         self.tx
             .send(Ok(GetComponentFilesResponse {
-                msg: Some(forest_grpc_interface::get_component_files_response::Msg::Done(
-                    forest_grpc_interface::Done {},
-                )),
+                msg: Some(
+                    forest_grpc_interface::get_component_files_response::Msg::Done(
+                        forest_grpc_interface::Done {},
+                    ),
+                ),
             }))
             .await?;
 

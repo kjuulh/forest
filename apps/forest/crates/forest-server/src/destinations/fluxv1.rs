@@ -7,9 +7,7 @@ use sqlx::PgPool;
 
 use crate::{
     destinations::{DestinationEdge, DestinationIndex, logger::DestinationLogger},
-    services::{
-        artifact_staging_registry::ArtifactStagingRegistry, release_registry::ReleaseItem,
-    },
+    services::{artifact_staging_registry::ArtifactStagingRegistry, release_registry::ReleaseItem},
     temp_dir::TempDirectories,
 };
 

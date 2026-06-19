@@ -3,9 +3,7 @@ use forest_event_store::EventStore;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::domains::policy::{
-    self, CreatePolicyParams, PolicyAggregate, UpdatePolicyConfigParams,
-};
+use crate::domains::policy::{self, CreatePolicyParams, PolicyAggregate, UpdatePolicyConfigParams};
 use crate::services::policy::PolicyRecord;
 
 // ============================================================
@@ -154,14 +152,13 @@ impl PolicyAggregateService {
         self.event_store
             .save_with(&mut root, move |_events, tx| {
                 Box::pin(async move {
-                    let res = sqlx::query(
-                        "DELETE FROM policies WHERE project_id = $1 AND name = $2",
-                    )
-                    .bind(project_id_owned)
-                    .bind(&name_owned)
-                    .execute(&mut **tx)
-                    .await
-                    .context("delete policy projection")?;
+                    let res =
+                        sqlx::query("DELETE FROM policies WHERE project_id = $1 AND name = $2")
+                            .bind(project_id_owned)
+                            .bind(&name_owned)
+                            .execute(&mut **tx)
+                            .await
+                            .context("delete policy projection")?;
 
                     if res.rows_affected() != 1 {
                         anyhow::bail!("policy projection not found for delete");

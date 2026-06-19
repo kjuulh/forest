@@ -253,11 +253,7 @@ impl OAuthAppService {
         }))
     }
 
-    pub async fn delete_app(
-        &self,
-        organisation_id: Uuid,
-        app_id: Uuid,
-    ) -> anyhow::Result<bool> {
+    pub async fn delete_app(&self, organisation_id: Uuid, app_id: Uuid) -> anyhow::Result<bool> {
         self.repo
             .delete_oauth_app(self.repo.pool(), organisation_id, app_id)
             .await
@@ -1031,10 +1027,8 @@ mod tests {
         use std::collections::BTreeMap;
 
         // openid only — no profile/email.
-        let token = mint_id_token(
-            "s", "iss", "cid", "user-1", None, None, None, 1000, 4600,
-        )
-        .unwrap();
+        let token =
+            mint_id_token("s", "iss", "cid", "user-1", None, None, None, 1000, 4600).unwrap();
         let key: Hmac<Sha256> = Hmac::new_from_slice(b"s").unwrap();
         let claims: BTreeMap<String, String> = token.verify_with_key(&key).unwrap();
         assert_eq!(claims["sub"], "user-1");

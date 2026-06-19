@@ -47,7 +47,11 @@ fn emit_type_defs(out: &mut String, type_defs: &[TypeDef]) -> CodegenResult<()> 
             TypeDefKind::Struct(struct_def) => emit_interface(out, &td.name, struct_def)?,
             TypeDefKind::Map(inner) => {
                 let inner_type = type_ref_to_ts(inner);
-                writeln!(out, "export type {} = Record<string, {}>;", td.name, inner_type)?;
+                writeln!(
+                    out,
+                    "export type {} = Record<string, {}>;",
+                    td.name, inner_type
+                )?;
                 writeln!(out)?;
             }
         }
@@ -381,9 +385,15 @@ fn escape_ts_string(s: &str) -> String {
 pub fn emit_client(module: &Module, component_id: &str) -> CodegenResult<String> {
     let mut out = String::with_capacity(2048);
 
-    writeln!(out, "// Generated dependency client for {component_id}. Do not edit.")?;
+    writeln!(
+        out,
+        "// Generated dependency client for {component_id}. Do not edit."
+    )?;
     writeln!(out)?;
-    writeln!(out, "import {{ callComponent }} from \"@rawpotion/forest-sdk\";")?;
+    writeln!(
+        out,
+        "import {{ callComponent }} from \"@rawpotion/forest-sdk\";"
+    )?;
     writeln!(out)?;
 
     // Emit type definitions (shared types like Manifest, Postgres, etc.)

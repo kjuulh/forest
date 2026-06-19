@@ -1,5 +1,5 @@
 use anyhow::Context;
-use forest_grpc_interface::{create_policy_request, BranchRestrictionConfig, SoakTimeConfig};
+use forest_grpc_interface::{BranchRestrictionConfig, SoakTimeConfig, create_policy_request};
 
 use crate::{cli::prompts, grpc::GrpcClientState, state::State};
 
@@ -98,7 +98,9 @@ impl CreateCommand {
                     )),
                 )
             }
-            other => anyhow::bail!("unknown policy type: {other} (expected: soak_time, branch_restriction)"),
+            other => anyhow::bail!(
+                "unknown policy type: {other} (expected: soak_time, branch_restriction)"
+            ),
         };
 
         let policy = state

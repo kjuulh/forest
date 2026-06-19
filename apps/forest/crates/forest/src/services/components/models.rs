@@ -54,12 +54,8 @@ impl TryFrom<(String, project::models::Dependency)> for Dependency {
         };
 
         let dep = match dependency {
-            project::Dependency::String(version) => {
-                DependencyType::Versioned(version)
-            }
-            project::Dependency::Versioned(details) => {
-                DependencyType::Versioned(details.version)
-            }
+            project::Dependency::String(version) => DependencyType::Versioned(version),
+            project::Dependency::Versioned(details) => DependencyType::Versioned(details.version),
             project::Dependency::Local(details) => DependencyType::Local(details.path),
         };
 

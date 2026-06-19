@@ -98,12 +98,13 @@ async fn create_release_notification(
     status: ReleaseStatus,
     error_message: Option<&str>,
 ) -> anyhow::Result<()> {
-    let project_context = release_registry
-        .get_project_context(project_id)
-        .await
-        .ok();
+    let project_context = release_registry.get_project_context(project_id).await.ok();
 
-    let dest = destination_registry.get(destination_id).await.ok().flatten();
+    let dest = destination_registry
+        .get(destination_id)
+        .await
+        .ok()
+        .flatten();
     let dest_name = dest.as_ref().map(|d| d.name.clone());
     let dest_env = dest.as_ref().map(|d| d.environment.clone());
 
@@ -151,41 +152,23 @@ async fn create_release_notification(
         release_intent_id: Some(release_intent_id.to_string()),
         destination: dest_name,
         environment: dest_env,
-        source_username: ann_ctx
-            .as_ref()
-            .and_then(|a| a.source.username.clone()),
+        source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
         source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
-        source_user_id: ann_ctx
-            .as_ref()
-            .and_then(|a| a.source.user_id.clone()),
-        source_type: ann_ctx
-            .as_ref()
-            .and_then(|a| a.source.source_type.clone()),
+        source_user_id: ann_ctx.as_ref().and_then(|a| a.source.user_id.clone()),
+        source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
         run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
-        commit_sha: ann_ctx
-            .as_ref()
-            .map(|a| a.reference.commit_sha.clone()),
+        commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),
         commit_branch: ann_ctx
             .as_ref()
             .and_then(|a| a.reference.commit_branch.clone()),
         commit_message: ann_ctx
             .as_ref()
             .and_then(|a| a.reference.commit_message.clone()),
-        version: ann_ctx
-            .as_ref()
-            .and_then(|a| a.reference.version.clone()),
-        repo_url: ann_ctx
-            .as_ref()
-            .and_then(|a| a.reference.repo_url.clone()),
-        context_title: ann_ctx
-            .as_ref()
-            .map(|a| a.context.title.clone()),
-        context_description: ann_ctx
-            .as_ref()
-            .and_then(|a| a.context.description.clone()),
-        context_web: ann_ctx
-            .as_ref()
-            .and_then(|a| a.context.web.clone()),
+        version: ann_ctx.as_ref().and_then(|a| a.reference.version.clone()),
+        repo_url: ann_ctx.as_ref().and_then(|a| a.reference.repo_url.clone()),
+        context_title: ann_ctx.as_ref().map(|a| a.context.title.clone()),
+        context_description: ann_ctx.as_ref().and_then(|a| a.context.description.clone()),
+        context_web: ann_ctx.as_ref().and_then(|a| a.context.web.clone()),
         context_pr: ann_ctx.as_ref().and_then(|a| a.context.pr.clone()),
         error_message: error_message.map(|e| e.to_string()),
         ..Default::default()

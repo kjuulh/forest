@@ -214,10 +214,7 @@ impl DeviceGrantAggregate {
     /// past their TTL is the responsibility of the background sweep,
     /// not the poller.
     pub fn poll_status(&self, now: DateTime<Utc>) -> PollStatus {
-        let past_ttl = self
-            .expires_at
-            .map(|exp| now >= exp)
-            .unwrap_or(false);
+        let past_ttl = self.expires_at.map(|exp| now >= exp).unwrap_or(false);
 
         match self.status {
             DeviceGrantStatus::NonExistent => PollStatus::Expired,
@@ -337,10 +334,7 @@ impl DeviceGrantAggregate {
     /// Mark an approved grant as consumed. Called by the service layer
     /// when a successful poll returns tokens to the CLI. Single-use:
     /// a second call returns Err.
-    pub fn consume(
-        root: &mut AggregateRoot<Self>,
-        now: DateTime<Utc>,
-    ) -> anyhow::Result<()> {
+    pub fn consume(root: &mut AggregateRoot<Self>, now: DateTime<Utc>) -> anyhow::Result<()> {
         match root.state.status {
             DeviceGrantStatus::Approved => {}
             DeviceGrantStatus::NonExistent => bail!("device grant does not exist"),
@@ -362,10 +356,7 @@ impl DeviceGrantAggregate {
     /// Mark a non-terminal grant as expired. Idempotent on already-terminal
     /// states (returns Ok with no event recorded). Intended for a periodic
     /// sweep job that walks grants whose `expires_at` has passed.
-    pub fn expire(
-        root: &mut AggregateRoot<Self>,
-        now: DateTime<Utc>,
-    ) -> anyhow::Result<()> {
+    pub fn expire(root: &mut AggregateRoot<Self>, now: DateTime<Utc>) -> anyhow::Result<()> {
         match root.state.status {
             DeviceGrantStatus::NonExistent => bail!("device grant does not exist"),
             DeviceGrantStatus::Pending | DeviceGrantStatus::Approved => {}
@@ -430,8 +421,8 @@ pub const DEVICE_CODE_BYTES: usize = 32;
 
 /// Generate a device_code: 32 random bytes, base64url-no-pad encoded.
 pub fn generate_device_code<R: Rng + ?Sized>(rng: &mut R) -> String {
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
     let mut buf = [0u8; DEVICE_CODE_BYTES];
     rng.fill_bytes(&mut buf);
@@ -454,7 +445,7 @@ pub fn hash_device_code(device_code: &str) -> String {
 mod tests {
     use super::*;
     use chrono::Duration;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::{SeedableRng, rngs::StdRng};
 
     fn fresh_root() -> AggregateRoot<DeviceGrantAggregate> {
         AggregateRoot::new("device_grant-0190abcd".into())
@@ -528,14 +519,8 @@ mod tests {
         let mut root = fresh_root();
         DeviceGrantAggregate::initiate(&mut root, default_params()).unwrap();
         let user = Uuid::now_v7();
-        DeviceGrantAggregate::approve(
-            &mut root,
-            user,
-            "1.2.3.4".into(),
-            "browser".into(),
-            t0(),
-        )
-        .unwrap();
+        DeviceGrantAggregate::approve(&mut root, user, "1.2.3.4".into(), "browser".into(), t0())
+            .unwrap();
         assert_eq!(root.state.status, DeviceGrantStatus::Approved);
         assert_eq!(root.state.approved_user_id, Some(user));
         assert_eq!(root.state.approving_ip.as_deref(), Some("1.2.3.4"));
@@ -544,14 +529,16 @@ mod tests {
     #[test]
     fn approve_rejects_when_nonexistent() {
         let mut root = fresh_root();
-        assert!(DeviceGrantAggregate::approve(
-            &mut root,
-            Uuid::now_v7(),
-            "ip".into(),
-            "ua".into(),
-            t0()
-        )
-        .is_err());
+        assert!(
+            DeviceGrantAggregate::approve(
+                &mut root,
+                Uuid::now_v7(),
+                "ip".into(),
+                "ua".into(),
+                t0()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -559,14 +546,16 @@ mod tests {
         let mut root = fresh_root();
         DeviceGrantAggregate::initiate(&mut root, default_params()).unwrap();
         let later = t0() + Duration::seconds(901); // past expires_at
-        assert!(DeviceGrantAggregate::approve(
-            &mut root,
-            Uuid::now_v7(),
-            "ip".into(),
-            "ua".into(),
-            later,
-        )
-        .is_err());
+        assert!(
+            DeviceGrantAggregate::approve(
+                &mut root,
+                Uuid::now_v7(),
+                "ip".into(),
+                "ua".into(),
+                later,
+            )
+            .is_err()
+        );
         assert_eq!(root.state.status, DeviceGrantStatus::Pending); // unchanged
     }
 
@@ -576,14 +565,16 @@ mod tests {
         DeviceGrantAggregate::initiate(&mut root, default_params()).unwrap();
         DeviceGrantAggregate::approve(&mut root, Uuid::now_v7(), "ip".into(), "ua".into(), t0())
             .unwrap();
-        assert!(DeviceGrantAggregate::approve(
-            &mut root,
-            Uuid::now_v7(),
-            "ip".into(),
-            "ua".into(),
-            t0()
-        )
-        .is_err());
+        assert!(
+            DeviceGrantAggregate::approve(
+                &mut root,
+                Uuid::now_v7(),
+                "ip".into(),
+                "ua".into(),
+                t0()
+            )
+            .is_err()
+        );
     }
 
     // ---- deny ----

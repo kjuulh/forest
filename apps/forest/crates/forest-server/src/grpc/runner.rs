@@ -14,13 +14,9 @@ use crate::{
         artifact_staging_registry::ArtifactStagingRegistryState,
         destination_registry::DestinationRegistryState,
         notification_registry::NotificationRegistryState,
-        release_event_store::{
-            EventPayload, ReleaseEventStoreState, ReleaseEventType,
-        },
+        release_event_store::{EventPayload, ReleaseEventStoreState, ReleaseEventType},
         release_finalizer,
-        release_logs_registry::{
-            LogChannel, LogLine, ReleaseLogsRegistryState,
-        },
+        release_logs_registry::{LogChannel, LogLine, ReleaseLogsRegistryState},
         release_registry::ReleaseRegistryState,
         release_token_registry::ReleaseTokenRegistryState,
     },
@@ -55,7 +51,7 @@ impl RunnerService for RunnerServer {
             _ => {
                 return Err(tonic::Status::invalid_argument(
                     "first message must be RunnerRegister",
-                ))
+                ));
             }
         };
 
@@ -428,13 +424,9 @@ impl RunnerService for RunnerServer {
                 let scope = token_registry
                     .validate_token(&msg.release_token)
                     .await
-                    .map_err(|e| {
-                        tonic::Status::internal(format!("token validation error: {e}"))
-                    })?
+                    .map_err(|e| tonic::Status::internal(format!("token validation error: {e}")))?
                     .ok_or_else(|| {
-                        tonic::Status::unauthenticated(
-                            "invalid, expired, or revoked release token",
-                        )
+                        tonic::Status::unauthenticated("invalid, expired, or revoked release token")
                     })?;
                 validated_scope = Some(scope);
             }
@@ -473,17 +465,18 @@ impl RunnerService for RunnerServer {
 
         // Flush remaining
         if !buffer.is_empty()
-            && let Some(scope) = &validated_scope {
-                let _ = logs_registry
-                    .insert_log_block(
-                        attempt,
-                        scope.release_intent_id,
-                        scope.destination_id,
-                        &buffer,
-                        sequence,
-                    )
-                    .await;
-            }
+            && let Some(scope) = &validated_scope
+        {
+            let _ = logs_registry
+                .insert_log_block(
+                    attempt,
+                    scope.release_intent_id,
+                    scope.destination_id,
+                    &buffer,
+                    sequence,
+                )
+                .await;
+        }
 
         Ok(Response::new(PushLogResponse {}))
     }
@@ -509,7 +502,7 @@ impl RunnerService for RunnerServer {
             ReleaseOutcome::Unspecified => {
                 return Err(tonic::Status::invalid_argument(
                     "outcome must be SUCCESS or FAILURE",
-                ))
+                ));
             }
         };
 

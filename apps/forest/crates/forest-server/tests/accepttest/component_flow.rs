@@ -2,7 +2,7 @@ use forest_grpc_interface::*;
 use futures::StreamExt;
 use tonic::metadata::MetadataValue;
 
-use crate::accepttest::fixtures::{fixture, testcase, Given, Then, When};
+use crate::accepttest::fixtures::{Given, Then, When, fixture, testcase};
 
 // ============================================================
 // Test data

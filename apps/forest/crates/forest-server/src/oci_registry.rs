@@ -11,12 +11,12 @@
 //! into OCI artifacts and serves them from S3.
 
 use axum::{
+    Router,
     body::Body,
     extract::{Path, State},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
-    Router,
 };
 use sha2::{Digest, Sha256};
 
@@ -26,7 +26,10 @@ use crate::object_store::ObjectStore;
 pub fn oci_routes(object_store: ObjectStore) -> Router {
     Router::new()
         .route("/v2/", get(version_check))
-        .route("/v2/{*name_and_ref}", get(route_dispatch).head(route_dispatch_head))
+        .route(
+            "/v2/{*name_and_ref}",
+            get(route_dispatch).head(route_dispatch_head),
+        )
         .with_state(object_store)
 }
 
@@ -36,10 +39,7 @@ async fn version_check() -> impl IntoResponse {
 }
 
 /// Route dispatcher — parse the path to determine if it's a manifest or blob request.
-async fn route_dispatch(
-    State(store): State<ObjectStore>,
-    Path(path): Path<String>,
-) -> Response {
+async fn route_dispatch(State(store): State<ObjectStore>, Path(path): Path<String>) -> Response {
     if let Some((name, reference)) = parse_manifest_path(&path) {
         get_manifest(store, &name, &reference).await
     } else if let Some((name, digest)) = parse_blob_path(&path) {
@@ -244,7 +244,8 @@ pub async fn publish_cue_module(
     let manifest_bytes = serde_json::to_vec(&manifest)?;
     let manifest_digest = format!("sha256:{}", hex::encode(Sha256::digest(&manifest_bytes)));
 
-    let registry_domain = std::env::var("FOREST_CUE_DOMAIN").unwrap_or_else(|_| "forest.sh".to_string());
+    let registry_domain =
+        std::env::var("FOREST_CUE_DOMAIN").unwrap_or_else(|_| "forest.sh".to_string());
     let module_path = format!("{registry_domain}/{organisation}/{name}");
 
     // Store manifest under both tag and digest

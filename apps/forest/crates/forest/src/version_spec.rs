@@ -58,9 +58,7 @@ impl VersionSpec {
     pub fn matches(&self, version: &semver::Version) -> bool {
         match self {
             Self::Exact(v) => version == v,
-            Self::Minor { major, minor } => {
-                version.major == *major && version.minor == *minor
-            }
+            Self::Minor { major, minor } => version.major == *major && version.minor == *minor,
             Self::Major { major } => version.major == *major,
             Self::Latest => true,
         }
@@ -68,10 +66,7 @@ impl VersionSpec {
 
     /// Given a list of available versions, return the highest that matches.
     pub fn resolve<'a>(&self, versions: &'a [semver::Version]) -> Option<&'a semver::Version> {
-        versions
-            .iter()
-            .filter(|v| self.matches(v))
-            .max()
+        versions.iter().filter(|v| self.matches(v)).max()
     }
 }
 

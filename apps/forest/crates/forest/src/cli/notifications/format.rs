@@ -62,10 +62,7 @@ pub fn format_notification(notif: &Notification) -> String {
             };
             out.push_str(&format!("\n  destination: {}{env_suffix}", ctx.destination));
         } else if ctx.destination_count > 0 {
-            out.push_str(&format!(
-                "\n  destinations: {}",
-                ctx.destination_count
-            ));
+            out.push_str(&format!("\n  destinations: {}", ctx.destination_count));
         }
 
         // Web link

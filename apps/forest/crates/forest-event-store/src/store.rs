@@ -126,11 +126,7 @@ impl EventStore {
     /// Use this to update projections/read-models atomically with the events.
     ///
     /// If the closure returns an error, the entire transaction (events + projection) is rolled back.
-    pub async fn save_with<A, F>(
-        &self,
-        root: &mut AggregateRoot<A>,
-        f: F,
-    ) -> anyhow::Result<()>
+    pub async fn save_with<A, F>(&self, root: &mut AggregateRoot<A>, f: F) -> anyhow::Result<()>
     where
         A: Aggregate,
         for<'t> F: FnOnce(
@@ -155,7 +151,13 @@ impl EventStore {
 
         let category = A::stream_category();
         let new_version = self
-            .append_in_tx(&mut tx, &root.stream_id, category.as_str(), expected, &events)
+            .append_in_tx(
+                &mut tx,
+                &root.stream_id,
+                category.as_str(),
+                expected,
+                &events,
+            )
             .await?;
 
         // Run the projection/side-effect inside the same transaction
@@ -293,38 +295,34 @@ impl EventStore {
         query: &StreamQuery,
     ) -> anyhow::Result<Vec<RecordedEvent>> {
         let rows = match query.direction {
-            ReadDirection::Forward => {
-                sqlx::query(
-                    "SELECT global_position, stream_id, stream_version, event_type,
+            ReadDirection::Forward => sqlx::query(
+                "SELECT global_position, stream_id, stream_version, event_type,
                             data, metadata, created_at
                      FROM es_events
                      WHERE stream_id = $1 AND stream_version >= $2
                      ORDER BY stream_version ASC
                      LIMIT $3",
-                )
-                .bind(stream_id)
-                .bind(query.from_version)
-                .bind(query.limit)
-                .fetch_all(&self.db)
-                .await
-                .context("read stream forward")?
-            }
-            ReadDirection::Backward => {
-                sqlx::query(
-                    "SELECT global_position, stream_id, stream_version, event_type,
+            )
+            .bind(stream_id)
+            .bind(query.from_version)
+            .bind(query.limit)
+            .fetch_all(&self.db)
+            .await
+            .context("read stream forward")?,
+            ReadDirection::Backward => sqlx::query(
+                "SELECT global_position, stream_id, stream_version, event_type,
                             data, metadata, created_at
                      FROM es_events
                      WHERE stream_id = $1 AND stream_version <= $2
                      ORDER BY stream_version DESC
                      LIMIT $3",
-                )
-                .bind(stream_id)
-                .bind(query.from_version)
-                .bind(query.limit)
-                .fetch_all(&self.db)
-                .await
-                .context("read stream backward")?
-            }
+            )
+            .bind(stream_id)
+            .bind(query.from_version)
+            .bind(query.limit)
+            .fetch_all(&self.db)
+            .await
+            .context("read stream backward")?,
         };
 
         Ok(rows.into_iter().map(row_to_recorded_event).collect())

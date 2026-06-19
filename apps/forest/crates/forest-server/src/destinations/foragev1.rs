@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use forest_grpc_interface::{
-    forage_service_client::ForageServiceClient, ApplyResourcesRequest, ContainerServiceSpec,
-    ForageResource, RolloutStatus, ScalingPolicy, WatchRolloutRequest,
-    forage_resource, Container,
+    ApplyResourcesRequest, Container, ContainerServiceSpec, ForageResource, RolloutStatus,
+    ScalingPolicy, WatchRolloutRequest, forage_resource,
+    forage_service_client::ForageServiceClient,
 };
 use forest_models::Destination;
 
@@ -63,8 +63,8 @@ impl DestinationEdge for ForageV1Destination {
             forest_models::MetadataFieldSchema {
                 name: "image".into(),
                 label: "Container Image".into(),
-                description: "Container image override. Defaults to registry.forage.sh/{org}/{name}."
-                    .into(),
+                description:
+                    "Container image override. Defaults to registry.forage.sh/{org}/{name}.".into(),
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
@@ -135,9 +135,12 @@ impl DestinationEdge for ForageV1Destination {
         // resource from the release metadata.  In the future this will parse the
         // actual deployment files from the artifact.
         let resource_name = destination.name.clone();
-        let image = meta
-            .image
-            .unwrap_or_else(|| format!("registry.forage.sh/{}/{}", destination.organisation, resource_name));
+        let image = meta.image.unwrap_or_else(|| {
+            format!(
+                "registry.forage.sh/{}/{}",
+                destination.organisation, resource_name
+            )
+        });
 
         let resource = ForageResource {
             name: resource_name.clone(),
@@ -201,7 +204,8 @@ impl DestinationEdge for ForageV1Destination {
             .await
             .context("WatchRollout stream error")?
         {
-            let status = RolloutStatus::try_from(event.status).unwrap_or(RolloutStatus::Unspecified);
+            let status =
+                RolloutStatus::try_from(event.status).unwrap_or(RolloutStatus::Unspecified);
             let status_str = status.as_str_name();
 
             logger.log_stdout(&format!(

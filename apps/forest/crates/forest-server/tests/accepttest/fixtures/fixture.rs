@@ -83,74 +83,80 @@ fn base_test_config() -> forest_server::Config {
 }
 
 fn bring_up(config: forest_server::Config) -> Fixture {
-    tokio::task::block_in_place(|| FIXTURE_RUNTIME.block_on(async move {
-        dotenvy::dotenv().ok();
+    tokio::task::block_in_place(|| {
+        FIXTURE_RUNTIME.block_on(async move {
+            dotenvy::dotenv().ok();
 
-        // Initialize tracing for test output
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-            .with_test_writer()
-            .try_init();
+            // Initialize tracing for test output
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+                .with_test_writer()
+                .try_init();
 
-        // Inject a mock DNS resolver — tests must not perform real
-        // network DNS lookups, and HickoryResolver::from_system() also
-        // requires a usable /etc/resolv.conf which CI may not have.
-        let mock_dns = std::sync::Arc::new(forest_server::dns::MockDnsResolver::new());
-        let state = forest_server::State::new_with_dns(config, mock_dns.clone())
-            .await
-            .expect("failed to create state (is DATABASE_URL or TEST_DATABASE_URL set?)");
+            // Inject a mock DNS resolver — tests must not perform real
+            // network DNS lookups, and HickoryResolver::from_system() also
+            // requires a usable /etc/resolv.conf which CI may not have.
+            let mock_dns = std::sync::Arc::new(forest_server::dns::MockDnsResolver::new());
+            let state = forest_server::State::new_with_dns(config, mock_dns.clone())
+                .await
+                .expect("failed to create state (is DATABASE_URL or TEST_DATABASE_URL set?)");
 
-        let db = state.db.clone();
+            let db = state.db.clone();
 
-        // Bind to random port
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind to random port");
-        let addr = listener.local_addr().expect("get local addr");
-        drop(listener);
+            // Bind to random port
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind to random port");
+            let addr = listener.local_addr().expect("get local addr");
+            drop(listener);
 
-        let runner_manager = forest_server::runner_manager::RunnerManager::new();
+            let runner_manager = forest_server::runner_manager::RunnerManager::new();
 
-        // Start gRPC server on the fixture runtime so it outlives individual tests
-        let cancel = tokio_util::sync::CancellationToken::new();
-        {
-            let state = state.clone();
-            let runner_manager = runner_manager.clone();
-            let cancel = cancel.clone();
-            FIXTURE_RUNTIME.spawn(async move {
-                let grpc = forest_server::grpc::GrpcServer {
-                    host: addr,
-                    state: state.clone(),
-                    runner_manager: runner_manager.clone(),
-                };
-                grpc.serve(cancel).await.ok();
-            });
-        }
+            // Start gRPC server on the fixture runtime so it outlives individual tests
+            let cancel = tokio_util::sync::CancellationToken::new();
+            {
+                let state = state.clone();
+                let runner_manager = runner_manager.clone();
+                let cancel = cancel.clone();
+                FIXTURE_RUNTIME.spawn(async move {
+                    let grpc = forest_server::grpc::GrpcServer {
+                        host: addr,
+                        state: state.clone(),
+                        runner_manager: runner_manager.clone(),
+                    };
+                    grpc.serve(cancel).await.ok();
+                });
+            }
 
-        // Start scheduler as a Component
-        {
-            let state = state.clone();
-            let runner_manager = runner_manager.clone();
-            let cancel = cancel.clone();
-            FIXTURE_RUNTIME.spawn(async move {
-                use notmad::Component;
-                let sched =
-                    forest_server::scheduler::Scheduler::new(&state, runner_manager, false);
-                sched.run(cancel).await.ok();
-            });
-        }
+            // Start scheduler as a Component
+            {
+                let state = state.clone();
+                let runner_manager = runner_manager.clone();
+                let cancel = cancel.clone();
+                FIXTURE_RUNTIME.spawn(async move {
+                    use notmad::Component;
+                    let sched =
+                        forest_server::scheduler::Scheduler::new(&state, runner_manager, false);
+                    sched.run(cancel).await.ok();
+                });
+            }
 
-        // Wait for server to be ready
-        probe_grpc(addr).await;
+            // Wait for server to be ready
+            probe_grpc(addr).await;
 
-        let channel = Channel::from_shared(format!("http://{}", addr))
-            .expect("valid uri")
-            .connect()
-            .await
-            .expect("connect to grpc server");
+            let channel = Channel::from_shared(format!("http://{}", addr))
+                .expect("valid uri")
+                .connect()
+                .await
+                .expect("connect to grpc server");
 
-        Fixture { channel, db, dns: mock_dns }
-    }))
+            Fixture {
+                channel,
+                db,
+                dns: mock_dns,
+            }
+        })
+    })
 }
 
 pub async fn fixture() -> anyhow::Result<Fixture> {
@@ -174,9 +180,8 @@ pub async fn restricted_fixture() -> anyhow::Result<Fixture> {
         config.registration_email_domain_regex =
             Some(regex::Regex::new(r"@understory\.io$").unwrap());
         config.require_email_verification = true;
-        config.service_account_token_hash = Some(
-            sha2::Sha256::digest(RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY.as_bytes()).to_vec(),
-        );
+        config.service_account_token_hash =
+            Some(sha2::Sha256::digest(RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY.as_bytes()).to_vec());
         bring_up(config)
     });
     Ok(fixture.clone())

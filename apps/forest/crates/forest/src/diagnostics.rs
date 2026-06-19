@@ -163,7 +163,10 @@ impl PublishPreflightFailed {
                     .and_then(|m| field_for_check(f.id).map(|field| (m, field)))
                     .and_then(|(m, field)| {
                         locate_field(&m.content, field).map(|span| {
-                            (Some(NamedSource::new(&m.name, m.content.clone())), Some(span))
+                            (
+                                Some(NamedSource::new(&m.name, m.content.clone())),
+                                Some(span),
+                            )
                         })
                     })
                     .unwrap_or((None, None));
@@ -260,7 +263,10 @@ pub struct MissingTools {
 
 impl MissingTools {
     /// Build from the component name and the tools that failed the PATH check.
-    pub fn new(component: impl Into<String>, missing: Vec<crate::tools::which::RequiredTool>) -> Self {
+    pub fn new(
+        component: impl Into<String>,
+        missing: Vec<crate::tools::which::RequiredTool>,
+    ) -> Self {
         Self {
             component: component.into(),
             tools: missing
@@ -287,11 +293,7 @@ fn locate_field(src: &str, field: &str) -> Option<miette::SourceSpan> {
     for line in src.split_inclusive('\n') {
         let trimmed_start = line.len() - line.trim_start().len();
         let rest = &line[trimmed_start..];
-        if rest.starts_with(field)
-            && rest[field.len()..]
-                .trim_start()
-                .starts_with(':')
-        {
+        if rest.starts_with(field) && rest[field.len()..].trim_start().starts_with(':') {
             let start = offset + trimmed_start;
             return Some((start, field.len()).into());
         }
@@ -338,7 +340,11 @@ fn line_col_to_span(src: &str, line: usize, col: usize) -> miette::SourceSpan {
         if idx + 1 == line {
             let col0 = col.saturating_sub(1).min(line_str.len());
             let start = offset + col0;
-            let len = line_str.trim_end_matches('\n').len().saturating_sub(col0).max(1);
+            let len = line_str
+                .trim_end_matches('\n')
+                .len()
+                .saturating_sub(col0)
+                .max(1);
             return (start, len).into();
         }
         offset += line_str.len();
@@ -400,9 +406,18 @@ mod tests {
         // and the underlined source line.
         let rendered = render(&diag);
         assert!(rendered.contains("C8"), "rendered: {rendered}");
-        assert!(rendered.contains("not valid semver"), "rendered: {rendered}");
-        assert!(rendered.contains("Use MAJOR.MINOR.PATCH."), "rendered: {rendered}");
-        assert!(rendered.contains("version: \"latest\""), "rendered: {rendered}");
+        assert!(
+            rendered.contains("not valid semver"),
+            "rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains("Use MAJOR.MINOR.PATCH."),
+            "rendered: {rendered}"
+        );
+        assert!(
+            rendered.contains("version: \"latest\""),
+            "rendered: {rendered}"
+        );
     }
 
     #[test]

@@ -124,8 +124,7 @@ impl Executor {
         };
 
         // Create temp dir for this release
-        let temp_dir =
-            std::env::temp_dir().join(format!("forest-runner-{}", uuid::Uuid::new_v4()));
+        let temp_dir = std::env::temp_dir().join(format!("forest-runner-{}", uuid::Uuid::new_v4()));
         tokio::fs::create_dir_all(&temp_dir)
             .await
             .context("failed to create temp directory")?;
@@ -156,8 +155,8 @@ impl Executor {
             backend: Box::new(backend),
         };
 
-        let is_plan_mode = ReleaseMode::try_from(assignment.mode)
-            .unwrap_or(ReleaseMode::Deploy) == ReleaseMode::Plan;
+        let is_plan_mode = ReleaseMode::try_from(assignment.mode).unwrap_or(ReleaseMode::Deploy)
+            == ReleaseMode::Plan;
 
         // Run the destination handler
         let result = if is_plan_mode {
@@ -224,10 +223,7 @@ async fn run_destination_plan(
         .prepare(ctx)
         .await
         .context("destination prepare failed")?;
-    handler
-        .plan(ctx)
-        .await
-        .context("destination plan failed")
+    handler.plan(ctx).await.context("destination plan failed")
 }
 
 /// RAII guard that decrements active count on drop.

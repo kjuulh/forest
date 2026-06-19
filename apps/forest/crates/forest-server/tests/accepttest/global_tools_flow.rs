@@ -130,8 +130,7 @@ async fn upload_binary(
 
     let stream = tokio_stream::iter(vec![metadata_msg, chunk_msg]);
     let mut req = tonic::Request::new(stream);
-    let val: tonic::metadata::MetadataValue<_> =
-        format!("Bearer {token}").parse().unwrap();
+    let val: tonic::metadata::MetadataValue<_> = format!("Bearer {token}").parse().unwrap();
     req.metadata_mut().insert("authorization", val);
     g.fixture()
         .registry()
@@ -589,7 +588,10 @@ async fn end_to_end_hybrid_component_serves_methods_and_argv_passthrough() {
     let summary = detail.summary.expect("summary");
     assert_eq!(summary.shape, ComponentShape::Hybrid as i32);
     assert_eq!(summary.tool.as_ref().expect("tool").name, "greet");
-    assert_eq!(summary.methods, vec!["greet".to_string(), "status".to_string()]);
+    assert_eq!(
+        summary.methods,
+        vec!["greet".to_string(), "status".to_string()]
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -859,9 +861,18 @@ async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
         !names.contains(&"pure-comp"),
         "pure COMPONENT must be excluded from ListOrgTools, got {names:?}"
     );
-    assert!(names.contains(&"hello"), "tool_binary 'hello' missing: {names:?}");
-    assert!(names.contains(&"greet"), "hybrid 'greet' missing: {names:?}");
-    assert!(names.contains(&"rgwrap"), "tool_external 'rgwrap' missing: {names:?}");
+    assert!(
+        names.contains(&"hello"),
+        "tool_binary 'hello' missing: {names:?}"
+    );
+    assert!(
+        names.contains(&"greet"),
+        "hybrid 'greet' missing: {names:?}"
+    );
+    assert!(
+        names.contains(&"rgwrap"),
+        "tool_external 'rgwrap' missing: {names:?}"
+    );
 
     let hello = tools.iter().find(|t| t.name == "hello").unwrap();
     assert_eq!(

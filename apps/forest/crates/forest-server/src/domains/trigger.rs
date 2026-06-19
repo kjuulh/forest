@@ -200,7 +200,9 @@ impl TriggerAggregate {
             && params.targets.environments.is_empty()
             && params.targets.destinations.is_empty()
         {
-            bail!("at least one target_environment or target_destination is required (or use_pipeline=true)");
+            bail!(
+                "at least one target_environment or target_destination is required (or use_pipeline=true)"
+            );
         }
 
         let trigger_id = Uuid::now_v7();
@@ -242,10 +244,7 @@ impl TriggerAggregate {
         Ok(())
     }
 
-    pub fn toggle_enabled(
-        root: &mut AggregateRoot<Self>,
-        enabled: bool,
-    ) -> anyhow::Result<()> {
+    pub fn toggle_enabled(root: &mut AggregateRoot<Self>, enabled: bool) -> anyhow::Result<()> {
         match root.state.status {
             TriggerStatus::NonExistent => bail!("trigger does not exist"),
             TriggerStatus::Deleted => bail!("trigger has been deleted"),
@@ -675,7 +674,10 @@ mod tests {
         assert_eq!(replayed.state.status, TriggerStatus::Deleted);
         assert_eq!(replayed.state.trigger_id, Some(id));
         assert!(!replayed.state.enabled);
-        assert_eq!(replayed.state.patterns.branch.as_deref(), Some("^release/.*"));
+        assert_eq!(
+            replayed.state.patterns.branch.as_deref(),
+            Some("^release/.*")
+        );
         assert!(replayed.state.force_release);
     }
 
@@ -790,10 +792,7 @@ mod tests {
     #[test]
     fn stream_key_format() {
         let id = Uuid::nil();
-        assert_eq!(
-            stream_key(&id, "my-trigger"),
-            format!("{id}/my-trigger")
-        );
+        assert_eq!(stream_key(&id, "my-trigger"), format!("{id}/my-trigger"));
     }
 
     // ----------------------------------------------------------

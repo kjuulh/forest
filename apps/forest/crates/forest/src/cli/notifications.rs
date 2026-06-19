@@ -1,6 +1,6 @@
 mod format;
-mod listen;
 mod list;
+mod listen;
 mod preferences;
 
 use crate::state::State;

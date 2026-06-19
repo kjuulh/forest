@@ -143,10 +143,7 @@ pub struct CreateAppParams {
 }
 
 impl AppAggregate {
-    pub fn create(
-        root: &mut AggregateRoot<Self>,
-        params: CreateAppParams,
-    ) -> anyhow::Result<Uuid> {
+    pub fn create(root: &mut AggregateRoot<Self>, params: CreateAppParams) -> anyhow::Result<Uuid> {
         match root.state.status {
             AppStatus::Active => bail!("app '{}' already exists", params.name),
             AppStatus::Deleted => bail!("app '{}' has been deleted", params.name),
@@ -228,10 +225,7 @@ impl AppAggregate {
         Ok(token_id)
     }
 
-    pub fn revoke_token(
-        root: &mut AggregateRoot<Self>,
-        token_id: Uuid,
-    ) -> anyhow::Result<()> {
+    pub fn revoke_token(root: &mut AggregateRoot<Self>, token_id: Uuid) -> anyhow::Result<()> {
         match root.state.status {
             AppStatus::NonExistent => bail!("app does not exist"),
             AppStatus::Deleted => bail!("app has been deleted"),
@@ -414,8 +408,14 @@ mod tests {
             },
             AppEvent::Suspended,
             AppEvent::Unsuspended,
-            AppEvent::TokenCreated { token_id: Uuid::now_v7(), name: "ci".into(), expires_at: None },
-            AppEvent::TokenRevoked { token_id: Uuid::now_v7() },
+            AppEvent::TokenCreated {
+                token_id: Uuid::now_v7(),
+                name: "ci".into(),
+                expires_at: None,
+            },
+            AppEvent::TokenRevoked {
+                token_id: Uuid::now_v7(),
+            },
             AppEvent::Deleted,
         ];
 

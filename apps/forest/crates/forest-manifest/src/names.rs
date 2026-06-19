@@ -184,25 +184,49 @@ mod tests {
     fn rejects_slash() {
         // §1a.10 E9 — path separator.
         let err = validate_tool_name("ab/cd").unwrap_err();
-        assert_eq!(err, NameError::BadChar { ch: '/', position: 2 });
+        assert_eq!(
+            err,
+            NameError::BadChar {
+                ch: '/',
+                position: 2
+            }
+        );
     }
 
     #[test]
     fn rejects_backslash() {
         let err = validate_tool_name("ab\\cd").unwrap_err();
-        assert_eq!(err, NameError::BadChar { ch: '\\', position: 2 });
+        assert_eq!(
+            err,
+            NameError::BadChar {
+                ch: '\\',
+                position: 2
+            }
+        );
     }
 
     #[test]
     fn rejects_null_byte() {
         let err = validate_tool_name("ab\0cd").unwrap_err();
-        assert_eq!(err, NameError::BadChar { ch: '\0', position: 2 });
+        assert_eq!(
+            err,
+            NameError::BadChar {
+                ch: '\0',
+                position: 2
+            }
+        );
     }
 
     #[test]
     fn rejects_whitespace() {
         let err = validate_tool_name("ab cd").unwrap_err();
-        assert_eq!(err, NameError::BadChar { ch: ' ', position: 2 });
+        assert_eq!(
+            err,
+            NameError::BadChar {
+                ch: ' ',
+                position: 2
+            }
+        );
     }
 
     #[test]
@@ -292,11 +316,17 @@ mod tests {
     fn env_name_rejects_hyphen_and_dot() {
         assert_eq!(
             validate_env_name("FOO-BAR"),
-            Err(EnvNameError::BadChar { ch: '-', position: 3 })
+            Err(EnvNameError::BadChar {
+                ch: '-',
+                position: 3
+            })
         );
         assert_eq!(
             validate_env_name("FOO.BAR"),
-            Err(EnvNameError::BadChar { ch: '.', position: 3 })
+            Err(EnvNameError::BadChar {
+                ch: '.',
+                position: 3
+            })
         );
     }
 

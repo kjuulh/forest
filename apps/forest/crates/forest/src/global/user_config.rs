@@ -68,9 +68,9 @@ pub enum UserConfigError {
 pub fn parse(json: &str) -> Result<UserConfig, UserConfigError> {
     let value: serde_json::Value =
         serde_json::from_str(json).map_err(|e| UserConfigError::InvalidJson(e.to_string()))?;
-    let root = value
-        .as_object()
-        .ok_or(UserConfigError::InvalidJson("root must be an object".into()))?;
+    let root = value.as_object().ok_or(UserConfigError::InvalidJson(
+        "root must be an object".into(),
+    ))?;
     let cfg = root
         .get("config")
         .and_then(|v| v.as_object())
@@ -106,17 +106,13 @@ pub fn parse(json: &str) -> Result<UserConfig, UserConfigError> {
                     return Err(UserConfigError::InvalidDependencyKey(k.clone()));
                 }
                 let dep_obj = v.as_object().ok_or_else(|| {
-                    UserConfigError::InvalidJson(format!(
-                        "dependency {k:?} must be an object"
-                    ))
+                    UserConfigError::InvalidJson(format!("dependency {k:?} must be an object"))
                 })?;
                 let version = dep_obj
                     .get("version")
                     .and_then(|x| x.as_str())
                     .ok_or_else(|| {
-                        UserConfigError::InvalidVersion(format!(
-                            "dependency {k:?} missing version"
-                        ))
+                        UserConfigError::InvalidVersion(format!("dependency {k:?} missing version"))
                     })?
                     .to_string();
                 if !is_semver_shape(&version) {
@@ -125,8 +121,7 @@ pub fn parse(json: &str) -> Result<UserConfig, UserConfigError> {
                 let shim_name = match dep_obj.get("shim_name") {
                     None | Some(serde_json::Value::Null) => None,
                     Some(serde_json::Value::String(s)) => {
-                        validate_tool_name(s)
-                            .map_err(UserConfigError::InvalidShimName)?;
+                        validate_tool_name(s).map_err(UserConfigError::InvalidShimName)?;
                         Some(s.clone())
                     }
                     Some(_) => {
@@ -160,9 +155,7 @@ pub fn parse(json: &str) -> Result<UserConfig, UserConfigError> {
             let mut out = BTreeMap::new();
             for (org, v) in map {
                 let entry = v.as_object().ok_or_else(|| {
-                    UserConfigError::InvalidJson(format!(
-                        "org_catalog.{org:?} must be an object"
-                    ))
+                    UserConfigError::InvalidJson(format!("org_catalog.{org:?} must be an object"))
                 })?;
                 let enabled = entry
                     .get("enabled")
@@ -194,8 +187,7 @@ pub fn parse(json: &str) -> Result<UserConfig, UserConfigError> {
                     }
                 })?;
                 let aliases = parse_string_map(entry.get("aliases"), "aliases", |val| {
-                    validate_tool_name(val)
-                        .map_err(UserConfigError::InvalidAliasName)?;
+                    validate_tool_name(val).map_err(UserConfigError::InvalidAliasName)?;
                     Ok(val.to_string())
                 })?;
                 out.insert(
@@ -238,8 +230,7 @@ fn parse_dep_env(
                 let val = v.as_str().ok_or_else(|| {
                     UserConfigError::InvalidJson(format!("env value for {k:?} must be a string"))
                 })?;
-                validate_env_value(val)
-                    .map_err(|_| UserConfigError::InvalidEnvValue(k.clone()))?;
+                validate_env_value(val).map_err(|_| UserConfigError::InvalidEnvValue(k.clone()))?;
                 out.insert(k.clone(), val.to_string());
             }
             Ok(out)
@@ -355,13 +346,24 @@ mod tests {
         }"#;
         let c = parse(json).unwrap();
         let dep = c.dependencies.get("understory/fungus").unwrap();
-        assert_eq!(dep.env.get("FUNGUS_SERVER").unwrap(), "http://localhost:8080");
+        assert_eq!(
+            dep.env.get("FUNGUS_SERVER").unwrap(),
+            "http://localhost:8080"
+        );
     }
 
     #[test]
     fn dependency_env_defaults_empty() {
         let json = r#"{"config": {"dependencies": {"o/n": {"version": "0.1.0"}}}}"#;
-        assert!(parse(json).unwrap().dependencies.get("o/n").unwrap().env.is_empty());
+        assert!(
+            parse(json)
+                .unwrap()
+                .dependencies
+                .get("o/n")
+                .unwrap()
+                .env
+                .is_empty()
+        );
     }
 
     #[test]

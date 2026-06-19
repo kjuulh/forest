@@ -70,7 +70,11 @@ mod tests {
 
     #[test]
     fn matching_domain_allowed() {
-        assert!(understory_only().check_email("kasper@understory.io").is_ok());
+        assert!(
+            understory_only()
+                .check_email("kasper@understory.io")
+                .is_ok()
+        );
     }
 
     #[test]
@@ -83,7 +87,11 @@ mod tests {
 
     #[test]
     fn case_insensitive_normalization() {
-        assert!(understory_only().check_email("Kasper@Understory.IO").is_ok());
+        assert!(
+            understory_only()
+                .check_email("Kasper@Understory.IO")
+                .is_ok()
+        );
     }
 
     #[test]
@@ -117,8 +125,7 @@ mod tests {
         // Operator wrote `@understory\.io` without a `$`. We do not
         // auto-wrap; the spec calls this out and we log the compiled
         // pattern at startup so they can see what they configured.
-        let policy =
-            RegistrationPolicy::new(Some(regex::Regex::new(r"@understory\.io").unwrap()));
+        let policy = RegistrationPolicy::new(Some(regex::Regex::new(r"@understory\.io").unwrap()));
         assert!(policy.check_email("kasper@understory.io.evil.com").is_ok());
     }
 

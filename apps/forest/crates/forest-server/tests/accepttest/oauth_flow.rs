@@ -47,7 +47,10 @@ async fn create_org(fixture: &Fixture, token: &str) -> String {
     let name = format!("oa-org-{}", uuid::Uuid::now_v7());
     fixture
         .organisations()
-        .create_organisation(authed(token, CreateOrganisationRequest { name: name.clone() }))
+        .create_organisation(authed(
+            token,
+            CreateOrganisationRequest { name: name.clone() },
+        ))
         .await
         .expect("create org");
     let id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM organisations WHERE name = $1")
@@ -80,12 +83,7 @@ async fn create_app(fixture: &Fixture, token: &str, org_id: &str) -> (String, St
     (app.client_id, resp.client_secret)
 }
 
-async fn mint_code(
-    sa: &Fixture,
-    client_id: &str,
-    user_id: &str,
-    scopes: Vec<String>,
-) -> String {
+async fn mint_code(sa: &Fixture, client_id: &str, user_id: &str, scopes: Vec<String>) -> String {
     sa.oauth_apps()
         .create_o_auth_authorization_code(authed(
             SA,
@@ -225,7 +223,10 @@ async fn userinfo_returns_claims_gated_by_scope() {
         .userinfo
         .expect("userinfo");
     assert_eq!(info.sub, user_id);
-    assert!(!info.username.is_empty(), "profile scope → username present");
+    assert!(
+        !info.username.is_empty(),
+        "profile scope → username present"
+    );
     assert!(info.email.is_empty(), "email scope NOT granted → no email");
     assert!(info.emails.is_empty());
     assert_eq!(info.scopes, vec!["profile"]);
@@ -244,12 +245,7 @@ async fn userinfo_returns_claims_gated_by_scope() {
     assert_eq!(err.code(), tonic::Code::FailedPrecondition);
 }
 
-async fn exchange(
-    sa: &Fixture,
-    client_id: &str,
-    client_secret: &str,
-    code: &str,
-) -> OAuthTokens {
+async fn exchange(sa: &Fixture, client_id: &str, client_secret: &str, code: &str) -> OAuthTokens {
     sa.oauth_apps()
         .exchange_o_auth_code(authed(
             SA,
@@ -391,12 +387,11 @@ async fn revoke_grant_invalidates_access_token() {
     let tokens = exchange(&fixture, &client_id, &client_secret, &code).await;
 
     // The app_id for the grant.
-    let app_id: uuid::Uuid =
-        sqlx::query_scalar("SELECT id FROM oauth_apps WHERE client_id = $1")
-            .bind(&client_id)
-            .fetch_one(&fixture.db)
-            .await
-            .expect("app id");
+    let app_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM oauth_apps WHERE client_id = $1")
+        .bind(&client_id)
+        .fetch_one(&fixture.db)
+        .await
+        .expect("app id");
 
     let resp = fixture
         .oauth_apps()
@@ -547,7 +542,10 @@ async fn openid_scope_issues_verifiable_id_token() {
     assert_eq!(claims["sub"], user_id);
     assert_eq!(claims["aud"], client_id);
     assert_eq!(claims["iss"], "http://forage.test.invalid"); // restricted fixture web_app_url
-    assert!(claims.contains_key("preferred_username"), "profile scope → username");
+    assert!(
+        claims.contains_key("preferred_username"),
+        "profile scope → username"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -604,7 +602,10 @@ async fn id_token_echoes_oidc_nonce() {
     let tokens = exchange(&fixture, &client_id, &client_secret, &code).await;
     let key: Hmac<Sha256> = Hmac::new_from_slice(client_secret.as_bytes()).unwrap();
     let claims: BTreeMap<String, String> = tokens.id_token.verify_with_key(&key).unwrap();
-    assert_eq!(claims["nonce"], "n0nce-xyz", "id_token echoes the request nonce");
+    assert_eq!(
+        claims["nonce"], "n0nce-xyz",
+        "id_token echoes the request nonce"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -619,10 +620,7 @@ async fn consent_is_remembered_and_cleared_on_revoke() {
         let fx = fixture.clone();
         async move {
             fx.oauth_apps()
-                .get_o_auth_consent(authed(
-                    SA,
-                    GetOAuthConsentRequest { client_id, user_id },
-                ))
+                .get_o_auth_consent(authed(SA, GetOAuthConsentRequest { client_id, user_id }))
                 .await
                 .expect("get consent")
                 .into_inner()
@@ -631,7 +629,11 @@ async fn consent_is_remembered_and_cleared_on_revoke() {
     };
 
     // No consent on record yet.
-    assert!(get_consent(client_id.clone(), user_id.clone()).await.is_empty());
+    assert!(
+        get_consent(client_id.clone(), user_id.clone())
+            .await
+            .is_empty()
+    );
 
     // Approving (minting a code) records consent.
     mint_code(&fixture, &client_id, &user_id, vec!["profile".into()]).await;

@@ -24,9 +24,8 @@ impl ObjectStore {
             endpoint,
         };
 
-        let credentials =
-            Credentials::new(Some(&access_key), Some(&secret_key), None, None, None)
-                .context("failed to create S3 credentials")?;
+        let credentials = Credentials::new(Some(&access_key), Some(&secret_key), None, None, None)
+            .context("failed to create S3 credentials")?;
 
         let bucket = Bucket::new(&bucket_name, region, credentials)
             .context("failed to create S3 bucket client")?
@@ -89,7 +88,11 @@ pub mod keys {
     pub fn component_binary(org: &str, name: &str, version: &str, os: &str, arch: &str) -> String {
         format!(
             "components/{}/{}/{}/bin/{}_{}",
-            sanitize(org), sanitize(name), sanitize(version), sanitize(os), sanitize(arch)
+            sanitize(org),
+            sanitize(name),
+            sanitize(version),
+            sanitize(os),
+            sanitize(arch)
         )
     }
 
@@ -104,7 +107,10 @@ pub mod keys {
             .join("/");
         format!(
             "components/{}/{}/{}/files/{}",
-            sanitize(org), sanitize(name), sanitize(version), safe_path
+            sanitize(org),
+            sanitize(name),
+            sanitize(version),
+            safe_path
         )
     }
 
@@ -139,7 +145,9 @@ pub mod keys {
     pub fn component_manifest(org: &str, name: &str, version: &str) -> String {
         format!(
             "components/{}/{}/{}/manifest.json",
-            sanitize(org), sanitize(name), sanitize(version)
+            sanitize(org),
+            sanitize(name),
+            sanitize(version)
         )
     }
 

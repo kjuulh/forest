@@ -44,8 +44,8 @@ impl AppService for AppsServer {
         )
         .await?;
 
-        let permissions =
-            serde_json::to_value(&req.permissions).map_err(|e| tonic::Status::internal(e.to_string()))?;
+        let permissions = serde_json::to_value(&req.permissions)
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
         let app = self
             .state

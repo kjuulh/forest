@@ -89,7 +89,10 @@ pub enum SelectError {
     /// Target is not a valid canonicalisable path.
     InvalidTarget(PathError),
     /// No entry matched.
-    NotFound { target: String, available: Vec<String> },
+    NotFound {
+        target: String,
+        available: Vec<String>,
+    },
     /// More than one entry matched the canonical target.
     Ambiguous { target: String, matches: Vec<usize> },
 }
@@ -267,8 +270,7 @@ mod tests {
     fn select_rejects_invalid_target() {
         let entries = vec!["rg".to_string()];
         let err = select(&entries, "../etc/passwd").unwrap_err();
-        let is_invalid =
-            matches!(err, SelectError::InvalidTarget(PathError::DotDotSegment));
+        let is_invalid = matches!(err, SelectError::InvalidTarget(PathError::DotDotSegment));
         assert!(is_invalid, "got {err:?}");
     }
 
@@ -286,7 +288,8 @@ mod tests {
         // archive selector must not pick one arbitrarily.
         let entries = vec!["bin/rg".to_string(), "bin/rg".to_string()];
         let err = select(&entries, "bin/rg").unwrap_err();
-        let is_ambig = matches!(err, SelectError::Ambiguous { ref matches, .. } if matches.len() == 2);
+        let is_ambig =
+            matches!(err, SelectError::Ambiguous { ref matches, .. } if matches.len() == 2);
         assert!(is_ambig, "got {err:?}");
     }
 

@@ -53,15 +53,14 @@ impl DestinationAggregateService {
         type_version: u32,
     ) -> anyhow::Result<Uuid> {
         // Resolve environment name to environment_id from existing projection
-        let env_row = sqlx::query(
-            "SELECT id FROM environments WHERE organisation = $1 AND name = $2",
-        )
-        .bind(organisation)
-        .bind(environment)
-        .fetch_optional(&self.db)
-        .await
-        .context("lookup environment")?
-        .context("environment not found for this organisation")?;
+        let env_row =
+            sqlx::query("SELECT id FROM environments WHERE organisation = $1 AND name = $2")
+                .bind(organisation)
+                .bind(environment)
+                .fetch_optional(&self.db)
+                .await
+                .context("lookup environment")?
+                .context("environment not found for this organisation")?;
         let env_id: Uuid = env_row.get("id");
 
         let key = destination::stream_key(organisation, name);
@@ -163,11 +162,7 @@ impl DestinationAggregateService {
         Ok(())
     }
 
-    pub async fn delete_destination(
-        &self,
-        organisation: &str,
-        name: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn delete_destination(&self, organisation: &str, name: &str) -> anyhow::Result<()> {
         let key = destination::stream_key(organisation, name);
         let mut root = self
             .event_store
@@ -207,10 +202,7 @@ impl DestinationAggregateService {
     // Queries (read from projections)
     // ----------------------------------------------------------
 
-    pub async fn get(
-        &self,
-        destination_id: &Uuid,
-    ) -> anyhow::Result<Option<DestinationRecord>> {
+    pub async fn get(&self, destination_id: &Uuid) -> anyhow::Result<Option<DestinationRecord>> {
         let row = sqlx::query(
             "SELECT id, organisation, name, metadata, environment, environment_id,
                     type_organisation, type_name, type_version

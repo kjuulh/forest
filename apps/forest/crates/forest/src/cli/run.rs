@@ -164,8 +164,7 @@ fn build_dynamic_command(
     }
 
     // Collect component names for the help footer
-    let mut component_names: std::collections::BTreeSet<String> =
-        std::collections::BTreeSet::new();
+    let mut component_names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for cmd_name in cli_names.values() {
         if let crate::models::CommandName::Component { name, .. } = cmd_name {
             component_names.insert(name.clone());
@@ -189,13 +188,12 @@ fn build_dynamic_command(
         .after_help(after_help);
 
     for (cli_name, cmd_name) in &cli_names {
-        let mut sub = clap::Command::new(cli_name.clone())
-            .arg(
-                clap::Arg::new("input_args")
-                    .action(clap::ArgAction::Append)
-                    .allow_hyphen_values(true)
-                    .trailing_var_arg(true),
-            );
+        let mut sub = clap::Command::new(cli_name.clone()).arg(
+            clap::Arg::new("input_args")
+                .action(clap::ArgAction::Append)
+                .allow_hyphen_values(true)
+                .trailing_var_arg(true),
+        );
         if let Some(command) = project.commands.get(cmd_name) {
             if let crate::models::Command::ComponentBinary {
                 description: Some(desc),
@@ -254,7 +252,11 @@ async fn build_enriched_subcommand(
                 .long(field.name.clone())
                 .required(field.required)
                 .value_name(
-                    field.field_type.as_deref().unwrap_or("string").to_uppercase(),
+                    field
+                        .field_type
+                        .as_deref()
+                        .unwrap_or("string")
+                        .to_uppercase(),
                 );
             if let Some(desc) = &field.description {
                 arg = arg.help(desc.to_string());
@@ -324,9 +326,7 @@ async fn fetch_command_input_schema(
         .get("properties")?
         .get(command_short)?;
 
-    let input_schema = command_schema
-        .get("properties")?
-        .get("input")?;
+    let input_schema = command_schema.get("properties")?.get("input")?;
 
     let properties = input_schema.get("properties")?.as_object()?;
     let required_fields: std::collections::HashSet<&str> = input_schema
@@ -340,8 +340,14 @@ async fn fetch_command_input_schema(
         fields.push(InputField {
             name: name.clone(),
             required: required_fields.contains(name.as_str()),
-            description: schema.get("description").and_then(|d| d.as_str()).map(String::from),
-            field_type: schema.get("type").and_then(|t| t.as_str()).map(String::from),
+            description: schema
+                .get("description")
+                .and_then(|d| d.as_str())
+                .map(String::from),
+            field_type: schema
+                .get("type")
+                .and_then(|t| t.as_str())
+                .map(String::from),
         });
     }
 
@@ -389,7 +395,9 @@ fn build_call_resolver(
                 // same is_deno detection — the cache layout is faithful
                 // to the source (deno.json + src/main.ts present iff
                 // the publisher uploaded them).
-                let Some(cache_dir) = dirs::cache_dir() else { continue };
+                let Some(cache_dir) = dirs::cache_dir() else {
+                    continue;
+                };
                 let dep_path = cache_dir
                     .join("forest")
                     .join("components")
@@ -469,10 +477,7 @@ async fn parse_input_args(args: &ArgMatches) -> anyhow::Result<serde_json::Value
             if i + 1 < raw.len() && parse_flag_name(&raw[i + 1]).is_none() {
                 // Next token is a value (not another flag)
                 let value = resolve_value(&raw[i + 1]).await?;
-                map.insert(
-                    key.replace('-', "_"),
-                    serde_json::Value::String(value),
-                );
+                map.insert(key.replace('-', "_"), serde_json::Value::String(value));
                 i += 2;
             } else {
                 // No value follows — treat as boolean flag
@@ -665,7 +670,10 @@ impl CliRun {
                     .stderr(Stdio::piped())
                     .current_dir(&project.path)
                     .env(ForestContext::get_context_key(), ctx.context_string())
-                    .env(ForestContext::get_tmp_key(), ctx.get_tmp().await?.to_string());
+                    .env(
+                        ForestContext::get_tmp_key(),
+                        ctx.get_tmp().await?.to_string(),
+                    );
 
                 if let Ok(exe) = std::env::current_exe() {
                     cmd.env("forest", exe);

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::{actor::Actor, State};
+use crate::{State, actor::Actor};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReleaseEventType {
@@ -424,7 +424,11 @@ impl ReleaseEventStore {
             .fetch_one(&self.db)
             .await?;
 
-            let intent_status = if any_failed > 0 { "FAILED" } else { "SUCCEEDED" };
+            let intent_status = if any_failed > 0 {
+                "FAILED"
+            } else {
+                "SUCCEEDED"
+            };
 
             sqlx::query!(
                 "UPDATE release_intents SET status = $1, updated = now() WHERE id = $2",
@@ -853,7 +857,6 @@ impl ReleaseEventStore {
         Ok(())
     }
 
-
     /// Find releases with stale heartbeats.
     pub async fn find_stale_heartbeats(
         &self,
@@ -956,8 +959,6 @@ pub struct StuckRelease {
     pub runner_id: Option<String>,
 }
 
-
-
 // ── Release intent states (release-centric view) ─────────────────────
 
 pub struct ReleaseIntentRow {
@@ -1014,14 +1015,23 @@ pub(crate) async fn check_approval_policies(
 
     for policy in policies {
         let config: serde_json::Value = policy.config;
-        let target = config.get("target_environment").and_then(|v| v.as_str()).unwrap_or("");
-        if target != target_environment { continue; }
-        let required = config.get("required_approvals").and_then(|v| v.as_i64()).unwrap_or(1);
+        let target = config
+            .get("target_environment")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if target != target_environment {
+            continue;
+        }
+        let required = config
+            .get("required_approvals")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(1);
 
         let approved_count = sqlx::query_scalar!(
             r#"SELECT COUNT(*) as "count!" FROM approval_decisions
              WHERE release_intent_id = $1 AND target_environment = $2 AND decision = 'approved'"#,
-            release_intent_id, target_environment,
+            release_intent_id,
+            target_environment,
         )
         .fetch_one(&mut **tx)
         .await

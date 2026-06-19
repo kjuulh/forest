@@ -127,14 +127,7 @@ impl LockFile {
     }
 
     /// Look up the expected hash for a registry component+platform.
-    pub fn get(
-        &self,
-        org: &str,
-        name: &str,
-        version: &str,
-        os: &str,
-        arch: &str,
-    ) -> Option<&str> {
+    pub fn get(&self, org: &str, name: &str, version: &str, os: &str, arch: &str) -> Option<&str> {
         let key = format!("{org}/{name}@{version} {os}/{arch}");
         self.entries.get(&key).and_then(|e| match &e.source {
             LockSource::Registry { sha256, .. } => Some(sha256.as_str()),
@@ -246,10 +239,7 @@ mod tests {
                 path: "../../components/forest-contrib/terraform-service".into(),
             },
         };
-        assert_eq!(
-            entry.key(),
-            "forest-contrib/terraform-service@0.1.0"
-        );
+        assert_eq!(entry.key(), "forest-contrib/terraform-service@0.1.0");
         assert_eq!(
             entry.to_line(),
             "forest-contrib/terraform-service@0.1.0 path:../../components/forest-contrib/terraform-service"
@@ -258,8 +248,7 @@ mod tests {
 
     #[test]
     fn test_parse_registry_line() {
-        let entry =
-            parse_lock_line("forest-contrib/k8s@0.1.0 linux/amd64 sha256:abc").unwrap();
+        let entry = parse_lock_line("forest-contrib/k8s@0.1.0 linux/amd64 sha256:abc").unwrap();
         assert_eq!(entry.organisation, "forest-contrib");
         assert_eq!(entry.name, "k8s");
         assert_eq!(entry.version, "0.1.0");
@@ -294,16 +283,19 @@ mod tests {
             },
         });
 
-        assert!(lock
-            .verify("org", "comp", "1.0.0", "linux", "amd64", "sha256:abc")
-            .is_ok());
-        assert!(lock
-            .verify("org", "comp", "1.0.0", "linux", "amd64", "sha256:WRONG")
-            .is_err());
+        assert!(
+            lock.verify("org", "comp", "1.0.0", "linux", "amd64", "sha256:abc")
+                .is_ok()
+        );
+        assert!(
+            lock.verify("org", "comp", "1.0.0", "linux", "amd64", "sha256:WRONG")
+                .is_err()
+        );
         // No entry → ok (first time)
-        assert!(lock
-            .verify("org", "other", "1.0.0", "linux", "amd64", "sha256:anything")
-            .is_ok());
+        assert!(
+            lock.verify("org", "other", "1.0.0", "linux", "amd64", "sha256:anything")
+                .is_ok()
+        );
     }
 
     #[test]

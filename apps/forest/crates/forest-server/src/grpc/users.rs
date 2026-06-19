@@ -177,13 +177,7 @@ impl UsersService for UsersServer {
             let state_token = format!("mfa-{}", Uuid::now_v7());
             let expires_mfa = Utc::now() + chrono::Duration::minutes(5);
             self.service()
-                .create_oauth_state(
-                    "mfa",
-                    &state_token,
-                    None,
-                    &state_data,
-                    Some(expires_mfa),
-                )
+                .create_oauth_state("mfa", &state_token, None, &state_data, Some(expires_mfa))
                 .await
                 .map_err(error::to_status)?;
 
@@ -375,7 +369,11 @@ impl UsersService for UsersServer {
         }
 
         if let Some(ref url) = req.profile_picture_url {
-            let url = if url.is_empty() { None } else { Some(url.as_str()) };
+            let url = if url.is_empty() {
+                None
+            } else {
+                Some(url.as_str())
+            };
             self.service()
                 .update_profile_picture_url(user_id, url)
                 .await
@@ -668,10 +666,14 @@ impl UsersService for UsersServer {
         let provider_str = provider.as_str_name().to_lowercase();
 
         if req.provider_user_id.is_empty() {
-            return Err(tonic::Status::invalid_argument("provider_user_id is required"));
+            return Err(tonic::Status::invalid_argument(
+                "provider_user_id is required",
+            ));
         }
         if req.provider_email.is_empty() {
-            return Err(tonic::Status::invalid_argument("provider_email is required"));
+            return Err(tonic::Status::invalid_argument(
+                "provider_email is required",
+            ));
         }
 
         // Look up existing user by OAuth identity.
@@ -828,10 +830,8 @@ impl UsersService for UsersServer {
         // Merge display_name into provider_data_json so the read path
         // can surface it via OAuthConnection.provider_display_name.
         // If the caller passed neither, store None.
-        let provider_data = build_link_provider_data(
-            &req.provider_display_name,
-            &req.provider_data_json,
-        );
+        let provider_data =
+            build_link_provider_data(&req.provider_display_name, &req.provider_data_json);
 
         self.service()
             .link_oauth_provider(
@@ -863,9 +863,7 @@ impl UsersService for UsersServer {
         // signup-time service account has no legitimate need to unlink
         // providers on behalf of arbitrary users. Closes adversarial
         // review gap #10.
-        let _actor = unauth
-            .require_authenticated()?
-            .require_user_self(user_id)?;
+        let _actor = unauth.require_authenticated()?.require_user_self(user_id)?;
 
         let provider = forest_grpc_interface::OAuthProvider::try_from(req.provider)
             .map_err(|_| tonic::Status::invalid_argument("invalid provider"))?;
@@ -1104,8 +1102,16 @@ impl UsersService for UsersServer {
         }
 
         // Validate the TOTP code.
-        let totp = TOTP::new(Algorithm::SHA1, 6, 1, 30, mfa.secret.clone(), None, String::new())
-            .map_err(|e| tonic::Status::internal(format!("TOTP init error: {e}")))?;
+        let totp = TOTP::new(
+            Algorithm::SHA1,
+            6,
+            1,
+            30,
+            mfa.secret.clone(),
+            None,
+            String::new(),
+        )
+        .map_err(|e| tonic::Status::internal(format!("TOTP init error: {e}")))?;
         if !totp.check_current(&req.code).unwrap_or(false) {
             return Err(tonic::Status::unauthenticated("invalid TOTP code"));
         }
@@ -1142,8 +1148,16 @@ impl UsersService for UsersServer {
             .ok_or_else(|| tonic::Status::not_found("MFA not enabled"))?;
 
         // Require the current TOTP code to confirm the disable request.
-        let totp = TOTP::new(Algorithm::SHA1, 6, 1, 30, mfa.secret.clone(), None, String::new())
-            .map_err(|e| tonic::Status::internal(format!("TOTP init error: {e}")))?;
+        let totp = TOTP::new(
+            Algorithm::SHA1,
+            6,
+            1,
+            30,
+            mfa.secret.clone(),
+            None,
+            String::new(),
+        )
+        .map_err(|e| tonic::Status::internal(format!("TOTP init error: {e}")))?;
         if !totp.check_current(&req.code).unwrap_or(false) {
             return Err(tonic::Status::unauthenticated("invalid TOTP code"));
         }
@@ -1189,8 +1203,16 @@ impl UsersService for UsersServer {
             .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::internal("MFA not found for user"))?;
 
-        let totp = TOTP::new(Algorithm::SHA1, 6, 1, 30, mfa.secret.clone(), None, String::new())
-            .map_err(|e| tonic::Status::internal(format!("TOTP init error: {e}")))?;
+        let totp = TOTP::new(
+            Algorithm::SHA1,
+            6,
+            1,
+            30,
+            mfa.secret.clone(),
+            None,
+            String::new(),
+        )
+        .map_err(|e| tonic::Status::internal(format!("TOTP init error: {e}")))?;
         if !totp.check_current(&req.code).unwrap_or(false) {
             return Err(tonic::Status::unauthenticated("invalid TOTP code"));
         }
@@ -1252,8 +1274,7 @@ impl UsersService for UsersServer {
     async fn initiate_device_login(
         &self,
         request: tonic::Request<InitiateDeviceLoginRequest>,
-    ) -> std::result::Result<tonic::Response<InitiateDeviceLoginResponse>, tonic::Status>
-    {
+    ) -> std::result::Result<tonic::Response<InitiateDeviceLoginResponse>, tonic::Status> {
         let req = request.into_inner();
         let initiated = self
             .state
@@ -1295,9 +1316,7 @@ impl UsersService for UsersServer {
                     .get_user(user_id)
                     .await
                     .map_err(error::to_status)?
-                    .ok_or_else(|| {
-                        tonic::Status::internal("approved user not found")
-                    })?;
+                    .ok_or_else(|| tonic::Status::internal("approved user not found"))?;
 
                 let (refresh_token, hash) = self
                     .state
@@ -1348,8 +1367,7 @@ impl UsersService for UsersServer {
     async fn approve_device_login(
         &self,
         request: tonic::Request<ApproveDeviceLoginRequest>,
-    ) -> std::result::Result<tonic::Response<ApproveDeviceLoginResponse>, tonic::Status>
-    {
+    ) -> std::result::Result<tonic::Response<ApproveDeviceLoginResponse>, tonic::Status> {
         // Service-account-only — see TASKS/022-device-login.md §1.4.
         let _actor = crate::grpc::authorize::unauthenticated_actor(&request)
             .require_authenticated()?
@@ -1376,8 +1394,7 @@ impl UsersService for UsersServer {
     async fn deny_device_login(
         &self,
         request: tonic::Request<DenyDeviceLoginRequest>,
-    ) -> std::result::Result<tonic::Response<DenyDeviceLoginResponse>, tonic::Status>
-    {
+    ) -> std::result::Result<tonic::Response<DenyDeviceLoginResponse>, tonic::Status> {
         let _actor = crate::grpc::authorize::unauthenticated_actor(&request)
             .require_authenticated()?
             .require_service_account()?;
@@ -1479,18 +1496,14 @@ fn datetime_to_timestamp(dt: chrono::DateTime<chrono::Utc>) -> prost_types::Time
 /// optionally merge `display_name` into it under the `"display_name"`
 /// key. Returns `None` when both inputs are empty so we don't write a
 /// pointless `{}` row.
-fn build_link_provider_data(
-    display_name: &str,
-    data_json: &str,
-) -> Option<serde_json::Value> {
+fn build_link_provider_data(display_name: &str, data_json: &str) -> Option<serde_json::Value> {
     let mut value = if data_json.is_empty() {
         serde_json::Value::Object(serde_json::Map::new())
     } else {
         // Tolerate malformed JSON — we'd rather store the link than
         // refuse it because the caller sent garbage extras.
-        serde_json::from_str(data_json).unwrap_or_else(|_| {
-            serde_json::Value::Object(serde_json::Map::new())
-        })
+        serde_json::from_str(data_json)
+            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
     };
 
     // Coerce non-object JSON (arrays, numbers, strings) to an empty
@@ -1559,7 +1572,6 @@ fn split_provider_data(data: Option<&serde_json::Value>) -> (String, String) {
     (display_name, json)
 }
 
-
 #[cfg(test)]
 mod provider_data_tests {
     use super::{build_link_provider_data, split_provider_data};
@@ -1573,14 +1585,23 @@ mod provider_data_tests {
     #[test]
     fn build_with_only_display_name_creates_object() {
         let v = build_link_provider_data("kjuulh", "").unwrap();
-        assert_eq!(v.get("display_name").and_then(|x| x.as_str()), Some("kjuulh"));
+        assert_eq!(
+            v.get("display_name").and_then(|x| x.as_str()),
+            Some("kjuulh")
+        );
     }
 
     #[test]
     fn build_merges_display_name_into_provided_json() {
         let v = build_link_provider_data("kjuulh", r#"{"avatar_url":"https://a"}"#).unwrap();
-        assert_eq!(v.get("display_name").and_then(|x| x.as_str()), Some("kjuulh"));
-        assert_eq!(v.get("avatar_url").and_then(|x| x.as_str()), Some("https://a"));
+        assert_eq!(
+            v.get("display_name").and_then(|x| x.as_str()),
+            Some("kjuulh")
+        );
+        assert_eq!(
+            v.get("avatar_url").and_then(|x| x.as_str()),
+            Some("https://a")
+        );
     }
 
     #[test]
@@ -1588,7 +1609,10 @@ mod provider_data_tests {
         // The caller sent garbage extras — we still preserve the
         // display_name rather than rejecting the whole link.
         let v = build_link_provider_data("kjuulh", "not-json{").unwrap();
-        assert_eq!(v.get("display_name").and_then(|x| x.as_str()), Some("kjuulh"));
+        assert_eq!(
+            v.get("display_name").and_then(|x| x.as_str()),
+            Some("kjuulh")
+        );
     }
 
     #[test]
@@ -1631,7 +1655,10 @@ mod provider_data_tests {
             parsed.get("display_name").is_none(),
             "display_name should be stripped, got: {json_str}"
         );
-        assert_eq!(parsed.get("avatar_url").and_then(|x| x.as_str()), Some("https://a"));
+        assert_eq!(
+            parsed.get("avatar_url").and_then(|x| x.as_str()),
+            Some("https://a")
+        );
     }
 
     #[test]
@@ -1649,6 +1676,9 @@ mod provider_data_tests {
         let (display, json_str) = split_provider_data(Some(&v));
         assert_eq!(display, "");
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
-        assert_eq!(parsed.get("avatar_url").and_then(|x| x.as_str()), Some("https://a"));
+        assert_eq!(
+            parsed.get("avatar_url").and_then(|x| x.as_str()),
+            Some("https://a")
+        );
     }
 }

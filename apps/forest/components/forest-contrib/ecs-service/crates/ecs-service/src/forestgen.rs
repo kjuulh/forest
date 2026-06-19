@@ -8,39 +8,42 @@ pub struct DeploymentHooks {
     pub rollback: serde_json::Value,
 }
 
-pub type EnvVars = std::collections::BTreeMap<String, String>;
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct HealthCheck {
-    #[serde(default)]
-    pub live: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Port {
-    #[serde(default = "default_port_external")]
-    pub external: bool,
+pub struct Manifest {
+    pub content: String,
     pub name: String,
-    pub port: i64,
-    #[serde(default)]
-    pub subdomain: Option<String>,
-}
-
-fn default_port_external() -> bool {
-    false
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Spec {
-    pub env_vars: EnvVars,
     #[serde(default)]
-    pub health_checks: Option<HealthCheck>,
+    pub command: Option<Vec<String>>,
+    #[serde(default = "default_spec_cpu")]
+    pub cpu: String,
+    pub env_vars: serde_json::Value,
+    #[serde(default = "default_spec_health_check_path")]
+    pub health_check_path: String,
+    pub host_headers: Vec<String>,
+    pub image: String,
+    #[serde(default = "default_spec_memory")]
+    pub memory: String,
     pub name: String,
-    pub ports: Vec<Port>,
+    pub port: i64,
+    pub priority: i64,
     #[serde(default = "default_spec_replicas")]
     pub replicas: i64,
+    pub secrets: Vec<String>,
 }
 
+fn default_spec_cpu() -> String {
+    "256".to_string()
+}
+fn default_spec_health_check_path() -> String {
+    "/".to_string()
+}
+fn default_spec_memory() -> String {
+    "512".to_string()
+}
 fn default_spec_replicas() -> i64 {
     1
 }
@@ -77,13 +80,13 @@ pub trait CommandHandler: Send + Sync {
         spec: &Spec,
         input: PrepareInput,
     ) -> impl std::future::Future<Output = Result<PrepareOutput, forest_sdk::Error>> + Send;
-    /// Check deployment status
+    /// Check ECS service status
     fn status(
         &self,
         spec: &Spec,
         input: StatusInput,
     ) -> impl std::future::Future<Output = Result<StatusOutput, forest_sdk::Error>> + Send;
-    /// Validate Terraform configuration
+    /// Validate the spec
     fn validate(
         &self,
         spec: &Spec,
@@ -95,25 +98,43 @@ pub trait CommandHandler: Send + Sync {
 pub struct ForestDeploymentPrepareInput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForestDeploymentReleaseInput {}
+pub struct ForestDeploymentPrepareOutput {
+    pub manifests: Vec<Manifest>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForestDeploymentRollbackInput {}
+pub struct ForestDeploymentReleaseInput {
+    pub release_id: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ForestDeploymentReleaseOutput {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ForestDeploymentRollbackInput {
+    pub release_id: String,
+    #[serde(default = "default_forestdeploymentrollbackinput_target_revision")]
+    pub target_revision: String,
+}
+
+fn default_forestdeploymentrollbackinput_target_revision() -> String {
+    "".to_string()
+}
 
 pub trait ForestDeploymentHookHandler: Send + Sync {
-    /// Generate Terraform files for deployment
+    /// Generate Terraform files for the ECS service
     fn prepare(
         &self,
         spec: &Spec,
         input: ForestDeploymentPrepareInput,
-    ) -> impl std::future::Future<Output = Result<(), forest_sdk::Error>> + Send;
-    /// Apply Terraform configuration
+    ) -> impl std::future::Future<Output = Result<ForestDeploymentPrepareOutput, forest_sdk::Error>> + Send;
+    /// Apply Terraform configuration (creates / updates the ECS service)
     fn release(
         &self,
         spec: &Spec,
         input: ForestDeploymentReleaseInput,
-    ) -> impl std::future::Future<Output = Result<(), forest_sdk::Error>> + Send;
-    /// Roll back Terraform state
+    ) -> impl std::future::Future<Output = Result<ForestDeploymentReleaseOutput, forest_sdk::Error>> + Send;
+    /// Roll back to a previous Terraform state
     fn rollback(
         &self,
         spec: &Spec,
@@ -170,13 +191,13 @@ where
             }
             "hooks/forest/deployment/prepare" => {
                 let input: ForestDeploymentPrepareInput = serde_json::from_value(input)?;
-                self.hooks.prepare(spec, input).await?;
-                Ok(serde_json::Value::Null)
+                let output = self.hooks.prepare(spec, input).await?;
+                serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)
             }
             "hooks/forest/deployment/release" => {
                 let input: ForestDeploymentReleaseInput = serde_json::from_value(input)?;
-                self.hooks.release(spec, input).await?;
-                Ok(serde_json::Value::Null)
+                let output = self.hooks.release(spec, input).await?;
+                serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)
             }
             "hooks/forest/deployment/rollback" => {
                 let input: ForestDeploymentRollbackInput = serde_json::from_value(input)?;
@@ -197,33 +218,35 @@ where
             forest_sdk::MethodDescriptor {
                 name: "commands/status".into(),
                 kind: forest_sdk::MethodKind::Command,
-                description: Some("Check deployment status".into()),
+                description: Some("Check ECS service status".into()),
             },
             forest_sdk::MethodDescriptor {
                 name: "commands/validate".into(),
                 kind: forest_sdk::MethodKind::Command,
-                description: Some("Validate Terraform configuration".into()),
+                description: Some("Validate the spec".into()),
             },
             forest_sdk::MethodDescriptor {
                 name: "hooks/forest/deployment/prepare".into(),
                 kind: forest_sdk::MethodKind::Hook {
                     topic: "forest/deployment".into(),
                 },
-                description: Some("Generate Terraform files for deployment".into()),
+                description: Some("Generate Terraform files for the ECS service".into()),
             },
             forest_sdk::MethodDescriptor {
                 name: "hooks/forest/deployment/release".into(),
                 kind: forest_sdk::MethodKind::Hook {
                     topic: "forest/deployment".into(),
                 },
-                description: Some("Apply Terraform configuration".into()),
+                description: Some(
+                    "Apply Terraform configuration (creates / updates the ECS service)".into(),
+                ),
             },
             forest_sdk::MethodDescriptor {
                 name: "hooks/forest/deployment/rollback".into(),
                 kind: forest_sdk::MethodKind::Hook {
                     topic: "forest/deployment".into(),
                 },
-                description: Some("Roll back Terraform state".into()),
+                description: Some("Roll back to a previous Terraform state".into()),
             },
         ]
     }

@@ -94,7 +94,8 @@ async fn run_build_compiles_a_rust_component() {
     );
     // checksums.sha256 is written alongside the output tree.
     assert!(
-        root.join(".forest/component/output/checksums.sha256").is_file(),
+        root.join(".forest/component/output/checksums.sha256")
+            .is_file(),
         "checksums.sha256 should be written"
     );
 }

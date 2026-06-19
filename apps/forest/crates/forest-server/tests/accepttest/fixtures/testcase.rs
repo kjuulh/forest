@@ -8,7 +8,8 @@ pub struct TestCase<TData> {
     pub data: Arc<RwLock<TData>>,
 }
 
-pub async fn testcase<TData: Default>() -> anyhow::Result<(Given<TData>, When<TData>, Then<TData>)> {
+pub async fn testcase<TData: Default>() -> anyhow::Result<(Given<TData>, When<TData>, Then<TData>)>
+{
     let fixture = fixture().await?;
     let data = Arc::new(RwLock::new(TData::default()));
 

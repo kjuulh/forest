@@ -80,10 +80,7 @@ fn tag_to_version(tag: &str) -> anyhow::Result<Version> {
 async fn fetch_latest_version() -> anyhow::Result<Version> {
     let output = tokio::process::Command::new("gh")
         .args([
-            "release", "view",
-            "--repo", REPO,
-            "--json", "tagName",
-            "--jq", ".tagName",
+            "release", "view", "--repo", REPO, "--json", "tagName", "--jq", ".tagName",
         ])
         .output()
         .await
@@ -107,9 +104,7 @@ async fn print_check_status() -> anyhow::Result<()> {
         Ok(latest) => {
             println!("forest is up to date ({current})");
             if latest < current {
-                println!(
-                    "(running a newer version than the latest release — local dev build?)"
-                );
+                println!("(running a newer version than the latest release — local dev build?)");
             }
             Ok(())
         }
@@ -157,10 +152,15 @@ async fn perform_update(version: Option<&str>) -> anyhow::Result<()> {
     // output to stdout, so we don't need to wrap it in a spinner here.
     let status = tokio::process::Command::new("gh")
         .args([
-            "release", "download", &target_tag,
-            "--repo", REPO,
-            "--pattern", &asset,
-            "--pattern", &checksum,
+            "release",
+            "download",
+            &target_tag,
+            "--repo",
+            REPO,
+            "--pattern",
+            &asset,
+            "--pattern",
+            &checksum,
             "--dir",
         ])
         .arg(tmp.path())
@@ -256,7 +256,10 @@ fn replace_binary(new_binary: &Path, current_exe: &Path) -> anyhow::Result<()> {
         _ => {}
     }
 
-    eprintln!("==> {} needs root; retrying with sudo", current_exe.display());
+    eprintln!(
+        "==> {} needs root; retrying with sudo",
+        current_exe.display()
+    );
     let sudo = std::process::Command::new("sudo")
         .args(["install", "-m", "0755"])
         .arg(new_binary)
@@ -312,7 +315,9 @@ fn write_cache(cache: &UpdateCache) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let Ok(bytes) = serde_json::to_vec_pretty(cache) else { return };
+    let Ok(bytes) = serde_json::to_vec_pretty(cache) else {
+        return;
+    };
     let _ = std::fs::write(&path, bytes);
 }
 

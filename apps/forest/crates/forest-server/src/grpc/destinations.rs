@@ -67,14 +67,17 @@ impl DestinationService for DestinationServer {
             .context("create destination")
             .to_internal_error()?;
 
-        self.state.event_bus().emit(EventPayload {
-            organisation: req.organisation.clone(),
-            project: String::new(),
-            resource_type: "destination",
-            action: "created",
-            resource_id: req.name.clone(),
-            metadata: [("environment".into(), req.environment.clone())].into(),
-        }).await;
+        self.state
+            .event_bus()
+            .emit(EventPayload {
+                organisation: req.organisation.clone(),
+                project: String::new(),
+                resource_type: "destination",
+                action: "created",
+                resource_id: req.name.clone(),
+                metadata: [("environment".into(), req.environment.clone())].into(),
+            })
+            .await;
 
         Ok(Response::new(CreateDestinationResponse {}))
     }
@@ -103,14 +106,17 @@ impl DestinationService for DestinationServer {
             .context("update destination")
             .to_internal_error()?;
 
-        self.state.event_bus().emit(EventPayload {
-            organisation: req.organisation.clone(),
-            project: String::new(),
-            resource_type: "destination",
-            action: "updated",
-            resource_id: req.name.clone(),
-            metadata: Default::default(),
-        }).await;
+        self.state
+            .event_bus()
+            .emit(EventPayload {
+                organisation: req.organisation.clone(),
+                project: String::new(),
+                resource_type: "destination",
+                action: "updated",
+                resource_id: req.name.clone(),
+                metadata: Default::default(),
+            })
+            .await;
 
         Ok(Response::new(UpdateDestinationResponse {}))
     }
@@ -139,14 +145,17 @@ impl DestinationService for DestinationServer {
             .context("delete destination")
             .to_internal_error()?;
 
-        self.state.event_bus().emit(EventPayload {
-            organisation: req.organisation.clone(),
-            project: String::new(),
-            resource_type: "destination",
-            action: "deleted",
-            resource_id: req.name.clone(),
-            metadata: Default::default(),
-        }).await;
+        self.state
+            .event_bus()
+            .emit(EventPayload {
+                organisation: req.organisation.clone(),
+                project: String::new(),
+                resource_type: "destination",
+                action: "deleted",
+                resource_id: req.name.clone(),
+                metadata: Default::default(),
+            })
+            .await;
 
         Ok(Response::new(DeleteDestinationResponse {}))
     }

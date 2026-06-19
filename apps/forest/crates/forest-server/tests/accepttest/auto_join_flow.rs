@@ -152,15 +152,13 @@ async fn admin_can_add_domain_and_user_can_join() {
     // allowlist rows or DNS mock entries.
     let domain = format!("co-{}.example", uuid::Uuid::now_v7().simple());
 
-    let (admin_token, _admin_id) =
-        register_and_verify(&fixture, &unique_email_at(&domain)).await;
+    let (admin_token, _admin_id) = register_and_verify(&fixture, &unique_email_at(&domain)).await;
     let org_id = create_org(&fixture, &admin_token, &unique_org_name()).await;
 
     add_and_verify_domain(&fixture, &admin_token, org_id, &domain).await;
 
     // A second user signs up with the same domain and verifies.
-    let (joiner_token, joiner_id) =
-        register_and_verify(&fixture, &unique_email_at(&domain)).await;
+    let (joiner_token, joiner_id) = register_and_verify(&fixture, &unique_email_at(&domain)).await;
 
     // Offer is surfaced.
     let offers = fixture
@@ -350,9 +348,10 @@ async fn verify_rejects_wrong_txt_token() {
         .expect("add domain");
 
     // Attacker plants their *own* random token. Should NOT verify.
-    fixture
-        .dns
-        .set_txt(&format!("_forest-verify.{domain}"), "attacker-supplied-bogus-value");
+    fixture.dns.set_txt(
+        &format!("_forest-verify.{domain}"),
+        "attacker-supplied-bogus-value",
+    );
 
     let verify = fixture
         .organisations()
@@ -383,8 +382,7 @@ async fn multi_at_email_does_not_match_middle_segment() {
     let fixture = fixture().await.unwrap();
     let victim_domain = format!("victim-{}.example", uuid::Uuid::now_v7().simple());
 
-    let (admin_token, _) =
-        register_and_verify(&fixture, &unique_email_at(&victim_domain)).await;
+    let (admin_token, _) = register_and_verify(&fixture, &unique_email_at(&victim_domain)).await;
     let org_id = create_org(&fixture, &admin_token, &unique_org_name()).await;
     add_and_verify_domain(&fixture, &admin_token, org_id, &victim_domain).await;
 
@@ -537,10 +535,12 @@ async fn accepting_after_domain_removed_fails() {
         .await
         .expect("list offers")
         .into_inner();
-    assert!(offers
-        .offers
-        .iter()
-        .any(|o| o.organisation_id == org_id.to_string()));
+    assert!(
+        offers
+            .offers
+            .iter()
+            .any(|o| o.organisation_id == org_id.to_string())
+    );
 
     // Admin removes the domain.
     let removed = fixture

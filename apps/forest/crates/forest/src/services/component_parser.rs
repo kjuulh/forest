@@ -58,21 +58,29 @@ async fn get_component_spec_from_cue(path: &Path) -> anyhow::Result<Option<RawCo
     .await?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        tracing::warn!("failed to parse v2 component CUE at {}: {}", path.display(), stderr);
+        tracing::warn!(
+            "failed to parse v2 component CUE at {}: {}",
+            path.display(),
+            stderr
+        );
         return Ok(None);
     }
 
     let doc: serde_json::Value = serde_json::from_slice(&output.stdout)?;
 
     // Extract component metadata from forest.component section
-    let component = doc
-        .get("forest")
-        .and_then(|f| f.get("component"));
+    let component = doc.get("forest").and_then(|f| f.get("component"));
 
     let (name, organisation, version) = match component {
         Some(comp) => {
-            let name = comp.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
-            let version = comp.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0");
+            let name = comp
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let version = comp
+                .get("version")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0.0.0");
             // Organisation comes from project section
             let org = doc
                 .get("project")
@@ -82,7 +90,10 @@ async fn get_component_spec_from_cue(path: &Path) -> anyhow::Result<Option<RawCo
             (name.to_string(), org.to_string(), version.to_string())
         }
         None => {
-            tracing::warn!("v2 component at {} has no forest.component section", path.display());
+            tracing::warn!(
+                "v2 component at {} has no forest.component section",
+                path.display()
+            );
             return Ok(None);
         }
     };
@@ -140,19 +151,14 @@ impl ComponentParserState for State {
 mod test {
     use std::path::PathBuf;
 
-    use crate::services::component_parser::{
-        ComponentParser,
-        models::RawSpecComponent,
-    };
+    use crate::services::component_parser::{ComponentParser, models::RawSpecComponent};
 
     #[tokio::test]
     async fn can_parse_template() -> anyhow::Result<()> {
         let parser = ComponentParser {};
 
         let raw_component = parser
-            .parse(&PathBuf::from(
-                "../../examples/rust-service-component/",
-            ))
+            .parse(&PathBuf::from("../../examples/rust-service-component/"))
             .await?;
 
         assert_eq!(

@@ -30,7 +30,10 @@ const PLATFORM_ARM64: PlatformSpec = PlatformSpec {
     platform: "linux/arm64",
     rust_target: "aarch64-unknown-linux-gnu",
     extra_apt_pkgs: &["gcc-aarch64-linux-gnu"],
-    extra_env: &[("CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER", "aarch64-linux-gnu-gcc")],
+    extra_env: &[(
+        "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER",
+        "aarch64-linux-gnu-gcc",
+    )],
     is_cross: true,
 };
 
@@ -74,7 +77,9 @@ async fn run_pr(client: &dagger_sdk::Query) -> eyre::Result<()> {
     let base = build_base(client).await?;
 
     eprintln!("--- cargo check --workspace");
-    let check_output = cargo_with_stats(&base, "cargo check --workspace").stdout().await?;
+    let check_output = cargo_with_stats(&base, "cargo check --workspace")
+        .stdout()
+        .await?;
     eprintln!("{check_output}");
 
     eprintln!("--- running tests");
@@ -107,7 +112,9 @@ async fn run_main(client: &dagger_sdk::Query) -> eyre::Result<()> {
     let base = build_base(client).await?;
 
     eprintln!("--- cargo check --workspace");
-    let check_output = cargo_with_stats(&base, "cargo check --workspace").stdout().await?;
+    let check_output = cargo_with_stats(&base, "cargo check --workspace")
+        .stdout()
+        .await?;
     eprintln!("{check_output}");
 
     eprintln!("--- running tests");
@@ -145,8 +152,15 @@ async fn test_services(client: &dagger_sdk::Query) -> eyre::Result<()> {
         .from("debian:trixie-slim")
         .with_exec(vec!["apt-get", "update", "-qq"])
         .with_exec(vec![
-            "apt-get", "install", "-y", "-qq", "--no-install-recommends",
-            "postgresql-client", "curl", "wget", "netcat-openbsd",
+            "apt-get",
+            "install",
+            "-y",
+            "-qq",
+            "--no-install-recommends",
+            "postgresql-client",
+            "curl",
+            "wget",
+            "netcat-openbsd",
         ]);
 
     // --- post3 (S3) — test first to verify it works in Dagger ---
@@ -155,7 +169,8 @@ async fn test_services(client: &dagger_sdk::Query) -> eyre::Result<()> {
     base.clone()
         .with_service_binding("s3", s3)
         .with_exec(vec![
-            "sh", "-c",
+            "sh",
+            "-c",
             "until nc -z s3 9000; do echo 'waiting for post3...'; sleep 1; done && \
              curl -sf -X PUT http://s3:9000/forest && \
              echo 'post3: OK (bucket created)'",
@@ -184,7 +199,8 @@ async fn test_services(client: &dagger_sdk::Query) -> eyre::Result<()> {
     base.clone()
         .with_service_binding("nats", nats)
         .with_exec(vec![
-            "sh", "-c",
+            "sh",
+            "-c",
             "until nc -z nats 4222; do echo 'waiting for nats...'; sleep 1; done && \
              echo 'NATS: OK'",
         ])
@@ -201,14 +217,18 @@ async fn test_services(client: &dagger_sdk::Query) -> eyre::Result<()> {
         .with_service_binding("postgres", pg)
         .with_service_binding("nats", nats)
         .with_service_binding("s3", s3)
-        .with_env_variable("DATABASE_URL", "postgres://forest:forest@postgres:5432/forest")
+        .with_env_variable(
+            "DATABASE_URL",
+            "postgres://forest:forest@postgres:5432/forest",
+        )
         .with_env_variable("NATS_URL", "nats://nats:4222")
         .with_env_variable("S3_ENDPOINT", "http://s3:9000")
         .with_env_variable("S3_BUCKET", "forest")
         .with_env_variable("S3_ACCESS_KEY", "test")
         .with_env_variable("S3_SECRET_KEY", "test")
         .with_exec(vec![
-            "sh", "-c",
+            "sh",
+            "-c",
             "until pg_isready -h postgres -U forest -d forest; do sleep 1; done && echo 'pg ok' && \
              until nc -z nats 4222; do sleep 1; done && echo 'nats ok' && \
              curl -sf -X PUT http://s3:9000/forest; echo 's3 ok' && \
@@ -249,9 +269,12 @@ fn s3_service(client: &dagger_sdk::Query) -> dagger_sdk::Service {
                 .use_entrypoint(true)
                 .args(vec![
                     "serve",
-                    "--backend", "fs",
-                    "--data-dir", "/tmp/post3",
-                    "--host", "0.0.0.0:9000",
+                    "--backend",
+                    "fs",
+                    "--data-dir",
+                    "/tmp/post3",
+                    "--host",
+                    "0.0.0.0:9000",
                 ])
                 .build()
                 .unwrap(),
@@ -371,9 +394,21 @@ async fn build_base_for_platform(
         .with_exec(vec!["apt", "update"])
         .with_exec(vec!["apt", "install", "-y", "clang", "wget", "git"])
         // Git config needed for tests that commit.
-        .with_exec(vec!["git", "config", "--global", "user.email", "ci@forest.dev"])
+        .with_exec(vec![
+            "git",
+            "config",
+            "--global",
+            "user.email",
+            "ci@forest.dev",
+        ])
         .with_exec(vec!["git", "config", "--global", "user.name", "Forest CI"])
-        .with_exec(vec!["git", "config", "--global", "init.defaultBranch", "main"]);
+        .with_exec(vec![
+            "git",
+            "config",
+            "--global",
+            "init.defaultBranch",
+            "main",
+        ]);
 
     if spec.is_cross {
         // Cross-compilation: install cross-linker + add rustup target.
@@ -383,8 +418,7 @@ async fn build_base_for_platform(
             apt_cmd.extend(spec.extra_apt_pkgs.iter().copied());
             rust_base = rust_base.with_exec(apt_cmd);
         }
-        rust_base = rust_base
-            .with_exec(vec!["rustup", "target", "add", spec.rust_target]);
+        rust_base = rust_base.with_exec(vec!["rustup", "target", "add", spec.rust_target]);
         for &(key, val) in spec.extra_env {
             rust_base = rust_base.with_env_variable(key, val);
         }
@@ -502,7 +536,8 @@ fn with_services(
         .with_env_variable("S3_SECRET_KEY", "test")
         // Create the S3 bucket before tests run.
         .with_exec(vec![
-            "sh", "-c",
+            "sh",
+            "-c",
             "until curl -sf http://s3:9000/ > /dev/null 2>&1; do sleep 1; done && \
              curl -sf -X PUT http://s3:9000/forest || true",
         ])
@@ -554,11 +589,13 @@ async fn build_release_images(
 ) -> eyre::Result<(dagger_sdk::Container, dagger_sdk::Container)> {
     eprintln!("--- building amd64 release image");
     let base_amd64 = build_base_for_platform(client, &PLATFORM_AMD64).await?;
-    let image_amd64 = build_release_image_for_platform(client, &base_amd64, &PLATFORM_AMD64).await?;
+    let image_amd64 =
+        build_release_image_for_platform(client, &base_amd64, &PLATFORM_AMD64).await?;
 
     eprintln!("--- building arm64 release image (cross-compile)");
     let base_arm64 = build_base_for_platform(client, &PLATFORM_ARM64).await?;
-    let image_arm64 = build_release_image_for_platform(client, &base_arm64, &PLATFORM_ARM64).await?;
+    let image_arm64 =
+        build_release_image_for_platform(client, &base_arm64, &PLATFORM_ARM64).await?;
 
     Ok((image_amd64, image_arm64))
 }

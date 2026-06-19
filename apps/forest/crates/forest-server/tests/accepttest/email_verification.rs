@@ -7,9 +7,7 @@
 use forest_grpc_interface::*;
 use tonic::metadata::MetadataValue;
 
-use crate::accepttest::fixtures::{
-    RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY, restricted_fixture,
-};
+use crate::accepttest::fixtures::{RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY, restricted_fixture};
 
 fn authed_request<T>(token: &str, inner: T) -> tonic::Request<T> {
     let mut req = tonic::Request::new(inner);

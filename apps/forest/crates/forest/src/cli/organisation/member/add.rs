@@ -52,11 +52,9 @@ impl AddCommand {
         };
         let role = match &self.role {
             Some(r) => r.clone(),
-            None => {
-                inquire::Select::new("Role:", vec!["member", "admin"])
-                    .prompt()?
-                    .to_string()
-            }
+            None => inquire::Select::new("Role:", vec!["member", "admin"])
+                .prompt()?
+                .to_string(),
         };
 
         let resp = state

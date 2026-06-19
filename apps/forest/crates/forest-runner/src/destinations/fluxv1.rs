@@ -61,19 +61,14 @@ impl FluxMetadata {
             .context("metadata 'namespace' is required for flux destinations")?
             .clone();
 
-        let git_url = metadata
-            .get("git_url")
-            .filter(|v| !v.is_empty())
-            .cloned();
+        let git_url = metadata.get("git_url").filter(|v| !v.is_empty()).cloned();
         let local_path = metadata
             .get("local_path")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from);
 
         if git_url.is_none() && local_path.is_none() {
-            anyhow::bail!(
-                "flux destination requires either 'git_url' or 'local_path' in metadata"
-            );
+            anyhow::bail!("flux destination requires either 'git_url' or 'local_path' in metadata");
         }
         if git_url.is_some() && local_path.is_some() {
             anyhow::bail!(
@@ -102,7 +97,10 @@ impl FluxMetadata {
                 .unwrap_or_else(|| "forest@release.local".to_string()),
             local_path,
             reconcile_url: metadata.get("reconcile_url").cloned(),
-            webhook_secret: metadata.get("webhook_secret").cloned().filter(|s| !s.is_empty()),
+            webhook_secret: metadata
+                .get("webhook_secret")
+                .cloned()
+                .filter(|s| !s.is_empty()),
             forest_webhook_url: metadata
                 .get("forest_webhook_url")
                 .cloned()
@@ -135,9 +133,10 @@ impl FluxMetadata {
             .context("git_url required for git mode")?;
 
         if let (Some(username), Some(token)) = (&self.git_username, &self.git_token)
-            && let Some(rest) = url.strip_prefix("https://") {
-                return Ok(format!("https://{}:{}@{}", username, token, rest));
-            }
+            && let Some(rest) = url.strip_prefix("https://")
+        {
+            return Ok(format!("https://{}:{}@{}", username, token, rest));
+        }
 
         Ok(url.clone())
     }
@@ -148,10 +147,7 @@ impl FluxMetadata {
         if let Some(ssh_key) = &self.git_ssh_key_path {
             env.insert(
                 "GIT_SSH_COMMAND".to_string(),
-                format!(
-                    "ssh -i {} -o StrictHostKeyChecking=accept-new",
-                    ssh_key
-                ),
+                format!("ssh -i {} -o StrictHostKeyChecking=accept-new", ssh_key),
             );
         }
         env
@@ -297,19 +293,13 @@ impl FluxV1Handler {
             let manifest_files = collect_manifest_files(&manifests_dir).await?;
 
             if manifest_files.is_empty() {
-                anyhow::bail!(
-                    "no manifest files found in: {}",
-                    manifests_dir.display()
-                );
+                anyhow::bail!("no manifest files found in: {}", manifests_dir.display());
             }
 
             // 5. Collect metadata files for .forest/ directory
             let config_yaml = read_config_as_yaml(&manifests_dir).await?;
 
-            let spec_files = backend
-                .get_spec_files()
-                .await
-                .context("get spec files")?;
+            let spec_files = backend.get_spec_files().await.context("get spec files")?;
             let spec_yaml = build_spec_yaml(&spec_files)?;
 
             let annotation = backend
@@ -329,8 +319,7 @@ impl FluxV1Handler {
                 .get_project_info()
                 .await
                 .context("get project info")?;
-            let project_name =
-                format!("{}-{}", project_info.organisation, project_info.project);
+            let project_name = format!("{}-{}", project_info.organisation, project_info.project);
 
             // 7. Execute git or local mode
             if flux_meta.is_local() {
@@ -355,7 +344,8 @@ impl FluxV1Handler {
                     &config.environment,
                     &config.name,
                     &project_name,
-                    identity.as_ref(), &mode,
+                    identity.as_ref(),
+                    &mode,
                 )
                 .await?;
             }
@@ -716,8 +706,12 @@ async fn run_local(
 
             // Write Flux CR as <project>.yaml and regenerate kustomization.yaml
             tokio::fs::create_dir_all(&clusters_dir_abs).await?;
-            let kustomization_cr =
-                FluxV1Handler::generate_kustomization_cr(&meta.namespace, project, &releases_rel, identity);
+            let kustomization_cr = FluxV1Handler::generate_kustomization_cr(
+                &meta.namespace,
+                project,
+                &releases_rel,
+                identity,
+            );
             let cr_filename = format!("{project}.yaml");
             tokio::fs::write(
                 clusters_dir_abs.join(&cr_filename),
@@ -877,8 +871,7 @@ async fn run_git(
                     trigger_reconciliation(backend, url).await;
                 }
             } else {
-                backend
-                    .log_stdout("[flux@1] no changes to push, gitops repo is up to date");
+                backend.log_stdout("[flux@1] no changes to push, gitops repo is up to date");
             }
         }
     }
@@ -889,9 +882,7 @@ async fn run_git(
 // ====== RECONCILIATION ======
 
 async fn trigger_reconciliation(backend: &dyn DestinationBackend, url: &str) {
-    backend.log_stdout(&format!(
-        "[flux@1] triggering reconciliation via {url}"
-    ));
+    backend.log_stdout(&format!("[flux@1] triggering reconciliation via {url}"));
     match reqwest::Client::new()
         .post(url)
         .header("Content-Type", "application/json")
@@ -1049,11 +1040,7 @@ async fn write_forest_metadata(
     .await?;
 
     // Write spec.yaml (original spec files)
-    tokio::fs::write(
-        forest_dir.join("spec.yaml"),
-        metadata.spec_yaml.as_bytes(),
-    )
-    .await?;
+    tokio::fs::write(forest_dir.join("spec.yaml"), metadata.spec_yaml.as_bytes()).await?;
 
     Ok(())
 }
@@ -1120,20 +1107,14 @@ mod tests {
 
     #[test]
     fn test_metadata_requires_cluster_name() {
-        let meta = make_metadata(&[
-            ("namespace", "ns"),
-            ("git_url", "git@host:repo.git"),
-        ]);
+        let meta = make_metadata(&[("namespace", "ns"), ("git_url", "git@host:repo.git")]);
         let err = FluxMetadata::from_metadata(&meta).unwrap_err();
         assert!(err.to_string().contains("cluster_name"));
     }
 
     #[test]
     fn test_metadata_requires_namespace() {
-        let meta = make_metadata(&[
-            ("cluster_name", "prod"),
-            ("git_url", "git@host:repo.git"),
-        ]);
+        let meta = make_metadata(&[("cluster_name", "prod"), ("git_url", "git@host:repo.git")]);
         let err = FluxMetadata::from_metadata(&meta).unwrap_err();
         assert!(err.to_string().contains("namespace"));
     }
@@ -1283,9 +1264,8 @@ mod tests {
         let cr = FluxV1Handler::generate_kustomization_cr(
             "rust-podinfo",
             "rawpotion-rust-podinfo",
-            &PathBuf::from(
-                "releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo",
-            ), None,
+            &PathBuf::from("releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo"),
+            None,
         );
         assert!(cr.contains("apiVersion: kustomize.toolkit.fluxcd.io/v1"));
         assert!(cr.contains("kind: Kustomization"));
@@ -1343,9 +1323,10 @@ mod tests {
         let project = "rawpotion-rust-podinfo";
 
         // Write releases
-        let releases_abs = local_root
-            .path()
-            .join(meta.releases_path(env, destination_name, project));
+        let releases_abs =
+            local_root
+                .path()
+                .join(meta.releases_path(env, destination_name, project));
         tokio::fs::create_dir_all(&releases_abs).await.unwrap();
         write_manifest_files(&releases_abs, &manifest_files)
             .await
@@ -1393,23 +1374,22 @@ mod tests {
         let cr_content = tokio::fs::read_to_string(&cr_path).await.unwrap();
         assert!(cr_content.contains("kustomize.toolkit.fluxcd.io"));
         assert!(!cr_content.contains("targetNamespace"));
-        assert!(cr_content.contains(&format!(
-            "path: ./{}",
-            releases_rel.display()
-        )));
+        assert!(cr_content.contains(&format!("path: ./{}", releases_rel.display())));
 
         // Verify full path structure
-        let expected_releases = local_root.path().join(
-            "releases/dev/k8s-dev-01/dev-cluster-01/rust-podinfo/rawpotion-rust-podinfo",
-        );
+        let expected_releases = local_root
+            .path()
+            .join("releases/dev/k8s-dev-01/dev-cluster-01/rust-podinfo/rawpotion-rust-podinfo");
         let expected_clusters_dir = local_root
             .path()
             .join("clusters/dev/k8s-dev-01/dev-cluster-01/rust-podinfo");
         assert!(expected_releases.exists());
         assert!(expected_clusters_dir.exists());
-        assert!(expected_clusters_dir
-            .join("rawpotion-rust-podinfo.yaml")
-            .exists());
+        assert!(
+            expected_clusters_dir
+                .join("rawpotion-rust-podinfo.yaml")
+                .exists()
+        );
     }
 
     // ====== INTEGRATION: COLLECT MANIFEST FILES ======
@@ -1678,9 +1658,8 @@ mod tests {
         let repo_dir = work_dir.path().join("repo");
 
         // Place release manifests
-        let releases_dir = repo_dir.join(
-            "releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo",
-        );
+        let releases_dir =
+            repo_dir.join("releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo");
         tokio::fs::create_dir_all(&releases_dir).await.unwrap();
         write_manifest_files(
             &releases_dir,
@@ -1709,15 +1688,12 @@ mod tests {
             .unwrap();
 
         // Place kustomization CR as <project>.yaml + plain kustomization.yaml
-        let clusters_dir =
-            repo_dir.join("clusters/dev/k8s-dev-01/prod-eu/rust-podinfo");
+        let clusters_dir = repo_dir.join("clusters/dev/k8s-dev-01/prod-eu/rust-podinfo");
         tokio::fs::create_dir_all(&clusters_dir).await.unwrap();
         let cr = FluxV1Handler::generate_kustomization_cr(
             "rust-podinfo",
             "rawpotion-rust-podinfo",
-            &PathBuf::from(
-                "releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo",
-            ),
+            &PathBuf::from("releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo"),
             None,
         );
         tokio::fs::write(
@@ -1780,7 +1756,10 @@ mod tests {
         let ns_file = verify_repo.join(
             "releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo/10-namespace.yaml",
         );
-        assert!(ns_file.exists(), "namespace manifest not found in pushed repo");
+        assert!(
+            ns_file.exists(),
+            "namespace manifest not found in pushed repo"
+        );
         let ns_content = tokio::fs::read_to_string(&ns_file).await.unwrap();
         assert!(ns_content.contains("kind: Namespace"));
 
@@ -1790,8 +1769,8 @@ mod tests {
         assert!(deploy_file.exists(), "deployment manifest not found");
 
         // Check clusters — plain kustomize file lists the Flux CR
-        let kust_file = verify_repo
-            .join("clusters/dev/k8s-dev-01/prod-eu/rust-podinfo/kustomization.yaml");
+        let kust_file =
+            verify_repo.join("clusters/dev/k8s-dev-01/prod-eu/rust-podinfo/kustomization.yaml");
         assert!(kust_file.exists(), "kustomization.yaml not found");
         let kust_content = tokio::fs::read_to_string(&kust_file).await.unwrap();
         assert!(kust_content.contains("kustomize.config.k8s.io"));
@@ -1809,9 +1788,8 @@ mod tests {
         ));
 
         // Check .forest/ metadata was pushed
-        let forest_dir = verify_repo.join(
-            "releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo/.forest",
-        );
+        let forest_dir = verify_repo
+            .join("releases/dev/k8s-dev-01/prod-eu/rust-podinfo/rawpotion-rust-podinfo/.forest");
         assert!(forest_dir.exists(), ".forest/ directory not found");
         assert!(
             forest_dir.join("config.yaml").exists(),
@@ -1862,9 +1840,9 @@ mod tests {
         assert!(cr.contains("kind: Provider"));
         assert!(cr.contains("apiVersion: notification.toolkit.fluxcd.io/v1beta3"));
         assert!(cr.contains("type: generic-hmac"));
-        assert!(cr.contains(
-            "address: https://forest.example.com/webhooks/flux/notifications/my-dest"
-        ));
+        assert!(
+            cr.contains("address: https://forest.example.com/webhooks/flux/notifications/my-dest")
+        );
         assert!(cr.contains("name: forest-notify-secret"));
     }
 
@@ -1937,8 +1915,7 @@ mod tests {
         // Missing forest_webhook_url — should fail
         let err = FluxMetadata::from_metadata(&m).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("forest_webhook_url"),
+            err.to_string().contains("forest_webhook_url"),
             "expected error about forest_webhook_url, got: {err}"
         );
     }

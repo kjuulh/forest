@@ -105,11 +105,16 @@ pub async fn run(state: &State) -> anyhow::Result<()> {
             .poll_device_login(&init.device_code)
             .await?;
 
-        let status = DeviceLoginStatus::try_from(resp.status).unwrap_or(DeviceLoginStatus::Unspecified);
+        let status =
+            DeviceLoginStatus::try_from(resp.status).unwrap_or(DeviceLoginStatus::Unspecified);
         match status {
             DeviceLoginStatus::Approved => {
-                let user = resp.user.context("server reported APPROVED but sent no user")?;
-                let tokens = resp.tokens.context("server reported APPROVED but sent no tokens")?;
+                let user = resp
+                    .user
+                    .context("server reported APPROVED but sent no user")?;
+                let tokens = resp
+                    .tokens
+                    .context("server reported APPROVED but sent no tokens")?;
                 let now = chrono::Utc::now().timestamp();
                 let refresh_after = compute_refresh_after(now, tokens.expires_in_seconds);
                 state
@@ -135,8 +140,8 @@ pub async fn run(state: &State) -> anyhow::Result<()> {
             }
             DeviceLoginStatus::SlowDown => {
                 // Server asked us to back off. Add 5s and cap at 30s.
-                current_interval = (current_interval + Duration::from_secs(5))
-                    .min(Duration::from_secs(30));
+                current_interval =
+                    (current_interval + Duration::from_secs(5)).min(Duration::from_secs(30));
             }
             DeviceLoginStatus::Denied => {
                 anyhow::bail!("device login was denied in the browser");

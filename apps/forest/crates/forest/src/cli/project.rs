@@ -1,8 +1,8 @@
 use crate::{
     cli::project::{
-        create::CreateCommand, init::InitCommand, list::ListCommand,
-        pipeline::PipelineCommand, policy::PolicyCommand, publish::PublishCommand,
-        releases::ReleasesCommand, trigger::TriggerCommand,
+        create::CreateCommand, init::InitCommand, list::ListCommand, pipeline::PipelineCommand,
+        policy::PolicyCommand, publish::PublishCommand, releases::ReleasesCommand,
+        trigger::TriggerCommand,
     },
     state::State,
 };

@@ -1,9 +1,7 @@
 use anyhow::Context;
 
 use crate::{
-    cli::output::OutputFormat,
-    grpc::GrpcClientState,
-    state::State,
+    cli::output::OutputFormat, grpc::GrpcClientState, state::State,
     user_state::UserStateLoaderState,
 };
 

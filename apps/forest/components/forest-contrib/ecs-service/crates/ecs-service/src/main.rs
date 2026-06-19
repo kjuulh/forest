@@ -50,17 +50,17 @@ impl ForestDeploymentHookHandler for Deployment {
         &self,
         _spec: &Spec,
         _input: ForestDeploymentPrepareInput,
-    ) -> Result<(), forest_sdk::Error> {
-        Ok(())
+    ) -> Result<ForestDeploymentPrepareOutput, forest_sdk::Error> {
+        Ok(ForestDeploymentPrepareOutput { manifests: vec![] })
     }
 
     async fn release(
         &self,
         spec: &Spec,
         _input: ForestDeploymentReleaseInput,
-    ) -> Result<(), forest_sdk::Error> {
+    ) -> Result<ForestDeploymentReleaseOutput, forest_sdk::Error> {
         eprintln!("ecs-service: terraform apply for '{}'", spec.name);
-        Ok(())
+        Ok(ForestDeploymentReleaseOutput {})
     }
 
     async fn rollback(

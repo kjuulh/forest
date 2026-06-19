@@ -35,9 +35,7 @@ pub struct LoginCommand {
 impl LoginCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         // Username/email implies password mode.
-        let want_password = self.password_flag
-            || self.username.is_some()
-            || self.email.is_some();
+        let want_password = self.password_flag || self.username.is_some() || self.email.is_some();
 
         let mode = if self.web {
             LoginMode::Web
@@ -47,7 +45,10 @@ impl LoginCommand {
             // Interactive picker — TASKS/022-device-login.md §1.1.
             let choice = inquire::Select::new(
                 "How would you like to authenticate Forest?",
-                vec!["Login with a web browser  (recommended)", "Login with a password"],
+                vec![
+                    "Login with a web browser  (recommended)",
+                    "Login with a password",
+                ],
             )
             .prompt()?;
             if choice.starts_with("Login with a web") {

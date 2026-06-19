@@ -63,9 +63,8 @@ impl ToolHashCommand {
             .binary_in_archive
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("--binary-in-archive required for archive != none"))?;
-        let _canon = extract::canonicalise(target).map_err(|e| {
-            anyhow::anyhow!("invalid --binary-in-archive: {e:?}")
-        })?;
+        let _canon = extract::canonicalise(target)
+            .map_err(|e| anyhow::anyhow!("invalid --binary-in-archive: {e:?}"))?;
 
         let inner = extract_inner(&body, &self.archive, target)?;
         let binary_sha = hex::encode(Sha256::digest(&inner));

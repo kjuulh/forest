@@ -327,9 +327,9 @@ fn parse_kv_list(items: &[String], flag: &str) -> anyhow::Result<Vec<(String, St
     items
         .iter()
         .map(|s| {
-            let (k, v) = s.split_once('=').ok_or_else(|| {
-                anyhow::anyhow!("{flag} expects `name=value`, got {s:?}")
-            })?;
+            let (k, v) = s
+                .split_once('=')
+                .ok_or_else(|| anyhow::anyhow!("{flag} expects `name=value`, got {s:?}"))?;
             Ok((k.to_string(), v.to_string()))
         })
         .collect()
@@ -408,7 +408,10 @@ impl ListCommand {
                 },
             })
             .collect();
-        print!("{}", crate::cli::output::render(&state.config.format, &rows));
+        print!(
+            "{}",
+            crate::cli::output::render(&state.config.format, &rows)
+        );
         Ok(())
     }
 }
@@ -453,8 +456,7 @@ impl RunCommand {
         let ambient: std::collections::BTreeSet<String> = std::env::vars_os()
             .filter_map(|(k, _)| k.into_string().ok())
             .collect();
-        let injected =
-            crate::global::env::resolve_injection(&component_env, &local_env, &ambient);
+        let injected = crate::global::env::resolve_injection(&component_env, &local_env, &ambient);
 
         // Exec. We inherit the parent environment and only *add* the keys not
         // already present, so an exported ambient value is never overwritten.
@@ -565,11 +567,7 @@ async fn resolve_tool_ref(svc: &GlobalService, raw: &str) -> anyhow::Result<Reso
 ///   1. `config.dependencies` (explicit per-tool pin)
 ///   2. `config.org_catalog.<org>.pins.<upstream_name>` (catalogue pin)
 ///   3. Live `ListOrgTools(<org>)` if the org is subscribed (catalogue latest)
-async fn resolve_version(
-    svc: &GlobalService,
-    org: &str,
-    name: &str,
-) -> anyhow::Result<String> {
+async fn resolve_version(svc: &GlobalService, org: &str, name: &str) -> anyhow::Result<String> {
     let cfg = svc.load_user_config().await?;
     let key = format!("{org}/{name}");
 
@@ -588,9 +586,11 @@ async fn resolve_version(
         //     `name` field is the component name; tool.name may differ via
         //     alias), so fall through to ListOrgTools to learn it.
         // 2b. Live lookup for the latest_version + tool.name.
-        let entries = svc.grpc.list_org_tools(org).await.with_context(|| {
-            format!("looking up catalogue version for {key}")
-        })?;
+        let entries = svc
+            .grpc
+            .list_org_tools(org)
+            .await
+            .with_context(|| format!("looking up catalogue version for {key}"))?;
         for entry in entries {
             if entry.name == name {
                 let tool_name = entry
@@ -599,9 +599,7 @@ async fn resolve_version(
                     .map(|t| t.name.as_str())
                     .unwrap_or(&entry.name);
                 if cat.banned.iter().any(|b| b == tool_name) {
-                    anyhow::bail!(
-                        "{key} is banned in catalogue subscription {org}"
-                    );
+                    anyhow::bail!("{key} is banned in catalogue subscription {org}");
                 }
                 let v = cat
                     .pins
@@ -676,8 +674,7 @@ mod tests {
     fn no_sync_is_a_flag_not_a_value_arg() {
         // `--no-sync=true` should NOT be accepted because the field is a
         // bool flag (SetTrue), not a value-taking argument.
-        let res =
-            AddHarness::try_parse_from(["forest-global-add", "cuteorg/rg", "--no-sync=true"]);
+        let res = AddHarness::try_parse_from(["forest-global-add", "cuteorg/rg", "--no-sync=true"]);
         assert!(res.is_err(), "expected clap error, got Ok");
     }
 

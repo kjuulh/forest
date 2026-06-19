@@ -19,13 +19,14 @@ const DESCRIBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// component and returns its result.
 pub type ComponentCallResolver = Box<
     dyn Fn(
-            String,                           // component identifier
-            String,                           // method
-            serde_json::Value,                // spec
-            serde_json::Value,                // input
-            Option<forest_sdk::CallContext>,   // context from the caller
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>>
-        + Send
+            String,                          // component identifier
+            String,                          // method
+            serde_json::Value,               // spec
+            serde_json::Value,               // input
+            Option<forest_sdk::CallContext>, // context from the caller
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>,
+        > + Send
         + Sync,
 >;
 
@@ -37,9 +38,9 @@ pub async fn check_deno_available() -> anyhow::Result<()> {
         .await
     {
         Ok(output) if output.status.success() => Ok(()),
-        Ok(_) => anyhow::bail!(
-            "deno is installed but returned an error. Check your Deno installation."
-        ),
+        Ok(_) => {
+            anyhow::bail!("deno is installed but returned an error. Check your Deno installation.")
+        }
         Err(_) => anyhow::bail!(
             "deno is not installed. Install it from https://deno.land\n\
              Components written in TypeScript require the Deno runtime."
@@ -103,7 +104,9 @@ fn read_meta_json(
         super::component_binary::resolve_meta_json(path, org, n, v)?
     } else {
         let local = path.join(".forest").join("component").join("meta.json");
-        if !local.exists() { return None; }
+        if !local.exists() {
+            return None;
+        }
         local
     };
     let content = std::fs::read_to_string(&meta_path).ok()?;
@@ -140,7 +143,8 @@ pub async fn invoke_deno_component(
             .unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
     });
 
-    let component_dir = component_dir.canonicalize()
+    let component_dir = component_dir
+        .canonicalize()
         .with_context(|| format!("canonicalize component dir: {}", component_dir.display()))?;
     let entrypoint_path = component_dir.join(entrypoint);
 
@@ -281,9 +285,15 @@ pub async fn invoke_deno_component_simple(
     context: Option<&forest_sdk::CallContext>,
 ) -> anyhow::Result<serde_json::Value> {
     invoke_deno_component(
-        component_dir, entrypoint, method,
-        spec_json, input_json, context, None,
-    ).await
+        component_dir,
+        entrypoint,
+        method,
+        spec_json,
+        input_json,
+        context,
+        None,
+    )
+    .await
 }
 
 /// Describe a Deno component by invoking `_meta/describe`.
@@ -291,7 +301,8 @@ pub async fn describe_deno_component(
     component_dir: &Path,
     entrypoint: &str,
 ) -> anyhow::Result<forest_sdk::ComponentDescriptor> {
-    let component_dir = component_dir.canonicalize()
+    let component_dir = component_dir
+        .canonicalize()
         .with_context(|| format!("canonicalize component dir: {}", component_dir.display()))?;
     let entrypoint_path = component_dir.join(entrypoint);
 

@@ -71,14 +71,20 @@ impl ListCommand {
         let rows: Vec<ComponentRow> = components
             .iter()
             .map(|comp| ComponentRow {
-                qualified: format!("{}/{}@{}", comp.organisation, comp.name, comp.latest_version),
+                qualified: format!(
+                    "{}/{}@{}",
+                    comp.organisation, comp.name, comp.latest_version
+                ),
                 version: comp.latest_version.clone(),
                 shape: shape_badge(comp.shape).to_string(),
                 upstream_host: comp.upstream_host.clone(),
                 description: comp.description.clone(),
             })
             .collect();
-        print!("{}", crate::cli::output::render(&state.config.format, &rows));
+        print!(
+            "{}",
+            crate::cli::output::render(&state.config.format, &rows)
+        );
         Ok(())
     }
 }

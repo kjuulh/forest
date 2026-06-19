@@ -240,16 +240,9 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
                 .context(format!("failed to read spec file: {}", spec_path.display()))?;
 
             tracing::info!("uploading spec file: {}", file_name);
-            grpc.upload_artifact_file(
-                &upload_handle,
-                &file_name,
-                &file_content,
-                "",
-                "",
-                "spec",
-            )
-            .await
-            .context("upload spec file")?;
+            grpc.upload_artifact_file(&upload_handle, &file_name, &file_content, "", "", "spec")
+                .await
+                .context("upload spec file")?;
         } else {
             tracing::debug!("no spec file found, skipping spec upload");
         }
@@ -321,11 +314,9 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
 
     let commit_sha = match params.commit_sha.clone() {
         Some(sha) => sha,
-        None => {
-            git_output(&["rev-parse", "HEAD"])
-                .await
-                .context("--commit-sha is required (not in a git repository, or git not found)")?
-        }
+        None => git_output(&["rev-parse", "HEAD"])
+            .await
+            .context("--commit-sha is required (not in a git repository, or git not found)")?,
     };
 
     let commit_branch = match params.commit_branch.clone() {

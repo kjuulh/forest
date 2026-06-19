@@ -19,9 +19,7 @@ pub struct NotificationsServer {
 /// Extract the actor's identity from request extensions.
 /// Prefers `AppClaims` (JWT user tokens) and falls back to `Actor`
 /// (service accounts and app tokens).
-fn extract_actor_id(
-    extensions: &http::Extensions,
-) -> Result<Uuid, tonic::Status> {
+fn extract_actor_id(extensions: &http::Extensions) -> Result<Uuid, tonic::Status> {
     if let Some(claims) = extensions.get::<AppClaims>() {
         return claims
             .user_id
@@ -109,10 +107,7 @@ impl NotificationService for NotificationsServer {
         tokio::spawn(async move {
             let poll_interval = std::time::Duration::from_secs(2);
             // Start from the current max sequence so we only deliver new notifications
-            let mut last_sequence: i64 = registry
-                .get_max_sequence()
-                .await
-                .unwrap_or(0);
+            let mut last_sequence: i64 = registry.get_max_sequence().await.unwrap_or(0);
 
             loop {
                 match registry

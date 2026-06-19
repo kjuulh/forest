@@ -43,15 +43,16 @@ pub fn derive_cue_registry(server: &str) -> Option<String> {
     // if that fails, retry with `https://` prepended. This keeps the
     // helper friendly to half-typed user input without pulling in a
     // proper URL parser.
-    let after_scheme = server.split_once("://").map(|(_, rest)| rest).unwrap_or(server);
+    let after_scheme = server
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(server);
     let host = after_scheme
         .split('/')
         .next()
         .and_then(|host_port| host_port.split(':').next())
         .filter(|h| !h.is_empty())?;
-    Some(format!(
-        "forest.sh=registry.{host},registry.cuelang.org"
-    ))
+    Some(format!("forest.sh=registry.{host},registry.cuelang.org"))
 }
 
 /// On-disk shape of `contexts.json`. Kept stable; adding fields requires
@@ -160,15 +161,13 @@ pub fn validate_name(name: &str) -> Result<()> {
         Err(NameError::TooLong { len, max }) => {
             Err(anyhow!("context name is {len} chars; max {max}"))
         }
-        Err(NameError::BadFirstChar { ch }) => Err(anyhow!(
-            "context name must start with a letter; got {ch:?}"
-        )),
+        Err(NameError::BadFirstChar { ch }) => {
+            Err(anyhow!("context name must start with a letter; got {ch:?}"))
+        }
         Err(NameError::BadChar { ch, position }) => Err(anyhow!(
             "context name contains illegal char {ch:?} at position {position}"
         )),
-        Err(NameError::ContainsDotDot) => {
-            Err(anyhow!("context name must not contain `..`"))
-        }
+        Err(NameError::ContainsDotDot) => Err(anyhow!("context name must not contain `..`")),
     }
 }
 
@@ -237,7 +236,11 @@ impl ContextStore {
             std::fs::create_dir_all(target.parent().unwrap())
                 .context("creating contexts/default dir")?;
             std::fs::rename(&legacy, &target).with_context(|| {
-                format!("migrating legacy {} -> {}", legacy.display(), target.display())
+                format!(
+                    "migrating legacy {} -> {}",
+                    legacy.display(),
+                    target.display()
+                )
             })?;
             // Also move the .lock if present, best-effort.
             let legacy_lock = self.data_dir.join("user-state.lock");
@@ -247,9 +250,7 @@ impl ContextStore {
                     self.context_dir(DEFAULT_CONTEXT).join("user-state.lock"),
                 );
             }
-            eprintln!(
-                "forest: migrated legacy user-state.json into context 'default'"
-            );
+            eprintln!("forest: migrated legacy user-state.json into context 'default'");
         }
 
         let file = ContextsFile {
@@ -265,8 +266,7 @@ impl ContextStore {
         if !path.exists() {
             return Ok(None);
         }
-        let bytes = std::fs::read(&path)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
         let file: ContextsFile = serde_json::from_slice(&bytes)
             .with_context(|| format!("parsing {}", path.display()))?;
         Ok(Some(file))
@@ -280,8 +280,7 @@ impl ContextStore {
         // Atomic write: tempfile in same dir + rename.
         let rand: u64 = rand::random();
         let tmp = self.data_dir.join(format!(".contexts.tmp.{rand:016x}"));
-        std::fs::write(&tmp, &body)
-            .with_context(|| format!("writing {}", tmp.display()))?;
+        std::fs::write(&tmp, &body).with_context(|| format!("writing {}", tmp.display()))?;
         std::fs::rename(&tmp, &path)
             .with_context(|| format!("renaming {} -> {}", tmp.display(), path.display()))?;
         Ok(())
@@ -330,8 +329,7 @@ impl ContextStore {
             .find(|c| c.name == want)
             .cloned()
             .ok_or_else(|| {
-                let names: Vec<&str> =
-                    file.contexts.iter().map(|c| c.name.as_str()).collect();
+                let names: Vec<&str> = file.contexts.iter().map(|c| c.name.as_str()).collect();
                 anyhow!("context '{want}' not found. known: [{}]", names.join(", "))
             })
     }
@@ -340,8 +338,7 @@ impl ContextStore {
         validate_name(name)?;
         let mut file = self.load_or_bootstrap()?;
         if !file.contexts.iter().any(|c| c.name == name) {
-            let names: Vec<&str> =
-                file.contexts.iter().map(|c| c.name.as_str()).collect();
+            let names: Vec<&str> = file.contexts.iter().map(|c| c.name.as_str()).collect();
             anyhow::bail!("context '{name}' not found. known: [{}]", names.join(", "));
         }
         file.active = name.to_string();
@@ -389,9 +386,8 @@ impl ContextStore {
         }
         self.write_file(&file)?;
         if !keep_data && self.context_dir(name).exists() {
-            std::fs::remove_dir_all(self.context_dir(name)).with_context(|| {
-                format!("removing context dir for {name}")
-            })?;
+            std::fs::remove_dir_all(self.context_dir(name))
+                .with_context(|| format!("removing context dir for {name}"))?;
         }
         Ok(())
     }
@@ -675,10 +671,7 @@ mod tests {
         s.set_web_url("c", Some("https://forage.example.com"))
             .unwrap();
         let entry = s.resolve(Some("c")).unwrap();
-        assert_eq!(
-            entry.web_url.as_deref(),
-            Some("https://forage.example.com")
-        );
+        assert_eq!(entry.web_url.as_deref(), Some("https://forage.example.com"));
     }
 
     #[test]
@@ -701,10 +694,7 @@ mod tests {
         s.set_web_url("c", Some("https://forage.example.com/"))
             .unwrap();
         let entry = s.resolve(Some("c")).unwrap();
-        assert_eq!(
-            entry.web_url.as_deref(),
-            Some("https://forage.example.com")
-        );
+        assert_eq!(entry.web_url.as_deref(), Some("https://forage.example.com"));
     }
 
     #[test]
@@ -715,7 +705,10 @@ mod tests {
         let err = s.resolve(Some("missing")).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("not found"), "{msg}");
-        assert!(msg.contains("a") && msg.contains("default"), "should list known: {msg}");
+        assert!(
+            msg.contains("a") && msg.contains("default"),
+            "should list known: {msg}"
+        );
     }
 
     #[test]

@@ -1,8 +1,6 @@
 use anyhow::Context;
 use forest_grpc_interface::{
-    policy_service_server::PolicyService,
-    policy::Config as GrpcPolicyConfig,
-    *,
+    policy::Config as GrpcPolicyConfig, policy_service_server::PolicyService, *,
 };
 use tonic::Response;
 
@@ -11,9 +9,7 @@ use crate::{
     grpc::{artifacts::GrpcErrorExt, authorize},
     services::{
         event_bus::{EventBusState, EventPayload},
-        policy::{
-            self as policy_svc, PolicyConfig, PolicyRegistryState, PolicyType,
-        },
+        policy::{self as policy_svc, PolicyConfig, PolicyRegistryState, PolicyType},
         policy_aggregate::PolicyAggregateServiceState,
         release_registry::ReleaseRegistryState,
         users::UserServiceState,
@@ -85,13 +81,17 @@ fn eval_to_grpc(e: policy_svc::PolicyEvaluation) -> PolicyEvaluation {
     let external_approval_state = e.approval_state.map(|s| ExternalApprovalState {
         required_approvals: s.required_approvals,
         current_approvals: s.current_approvals,
-        decisions: s.decisions.into_iter().map(|d| ExternalApprovalDecisionEntry {
-            user_id: d.user_id,
-            username: d.username,
-            decision: d.decision,
-            decided_at: d.decided_at,
-            comment: d.comment,
-        }).collect(),
+        decisions: s
+            .decisions
+            .into_iter()
+            .map(|d| ExternalApprovalDecisionEntry {
+                user_id: d.user_id,
+                username: d.username,
+                decision: d.decision,
+                decided_at: d.decided_at,
+                comment: d.comment,
+            })
+            .collect(),
     });
     PolicyEvaluation {
         policy_name: e.policy_name,
@@ -114,14 +114,12 @@ fn extract_config(
                 duration_seconds: st.duration_seconds,
             }))
         }
-        (2, Some(create_policy_request::Config::BranchRestriction(br))) => {
-            Ok(PolicyConfig::BranchRestriction(
-                policy_svc::BranchRestrictionConfig {
-                    target_environment: br.target_environment,
-                    branch_pattern: br.branch_pattern,
-                },
-            ))
-        }
+        (2, Some(create_policy_request::Config::BranchRestriction(br))) => Ok(
+            PolicyConfig::BranchRestriction(policy_svc::BranchRestrictionConfig {
+                target_environment: br.target_environment,
+                branch_pattern: br.branch_pattern,
+            }),
+        ),
         (3, Some(create_policy_request::Config::ExternalApproval(ac))) => {
             Ok(PolicyConfig::Approval(policy_svc::ApprovalConfig {
                 target_environment: ac.target_environment,
@@ -144,14 +142,12 @@ fn extract_update_config(
                 duration_seconds: st.duration_seconds,
             })))
         }
-        Some(update_policy_request::Config::BranchRestriction(br)) => {
-            Ok(Some(PolicyConfig::BranchRestriction(
-                policy_svc::BranchRestrictionConfig {
-                    target_environment: br.target_environment,
-                    branch_pattern: br.branch_pattern,
-                },
-            )))
-        }
+        Some(update_policy_request::Config::BranchRestriction(br)) => Ok(Some(
+            PolicyConfig::BranchRestriction(policy_svc::BranchRestrictionConfig {
+                target_environment: br.target_environment,
+                branch_pattern: br.branch_pattern,
+            }),
+        )),
         Some(update_policy_request::Config::ExternalApproval(ac)) => {
             Ok(Some(PolicyConfig::Approval(policy_svc::ApprovalConfig {
                 target_environment: ac.target_environment,
@@ -192,8 +188,7 @@ impl PolicyService for PoliciesServer {
             .context("resolve project")
             .to_internal_error()?;
 
-        let config = extract_config(req.policy_type, req.config)
-            .to_internal_error()?;
+        let config = extract_config(req.policy_type, req.config).to_internal_error()?;
 
         let policy_type = config.policy_type().as_str().to_string();
         let config_json = config.to_json().to_internal_error()?;
@@ -251,11 +246,13 @@ impl PolicyService for PoliciesServer {
             .context("resolve project")
             .to_internal_error()?;
 
-        let config = extract_update_config(req.config)
-            .to_internal_error()?;
+        let config = extract_update_config(req.config).to_internal_error()?;
 
         let config_tuple = match config {
-            Some(c) => Some((c.policy_type().as_str().to_string(), c.to_json().to_internal_error()?)),
+            Some(c) => Some((
+                c.policy_type().as_str().to_string(),
+                c.to_json().to_internal_error()?,
+            )),
             None => None,
         };
 
@@ -440,7 +437,11 @@ impl PolicyService for PoliciesServer {
 
         let user_id = match &actor {
             Actor::User { user_id } => *user_id,
-            _ => return Err(tonic::Status::permission_denied("only users can approve releases")),
+            _ => {
+                return Err(tonic::Status::permission_denied(
+                    "only users can approve releases",
+                ));
+            }
         };
 
         let req = request.into_inner();
@@ -555,7 +556,11 @@ impl PolicyService for PoliciesServer {
         let state_info = self
             .state
             .policy_registry()
-            .get_approval_state_info(&release_intent_id, &req.target_environment, required_approvals)
+            .get_approval_state_info(
+                &release_intent_id,
+                &req.target_environment,
+                required_approvals,
+            )
             .await
             .context("get approval state")
             .to_internal_error()?;
@@ -564,13 +569,17 @@ impl PolicyService for PoliciesServer {
             state: Some(ExternalApprovalState {
                 required_approvals: state_info.required_approvals,
                 current_approvals: state_info.current_approvals,
-                decisions: state_info.decisions.into_iter().map(|d| ExternalApprovalDecisionEntry {
-                    user_id: d.user_id,
-                    username: d.username,
-                    decision: d.decision,
-                    decided_at: d.decided_at,
-                    comment: d.comment,
-                }).collect(),
+                decisions: state_info
+                    .decisions
+                    .into_iter()
+                    .map(|d| ExternalApprovalDecisionEntry {
+                        user_id: d.user_id,
+                        username: d.username,
+                        decision: d.decision,
+                        decided_at: d.decided_at,
+                        comment: d.comment,
+                    })
+                    .collect(),
             }),
         }))
     }
@@ -583,7 +592,11 @@ impl PolicyService for PoliciesServer {
 
         let user_id = match &actor {
             Actor::User { user_id } => *user_id,
-            _ => return Err(tonic::Status::permission_denied("only users can reject releases")),
+            _ => {
+                return Err(tonic::Status::permission_denied(
+                    "only users can reject releases",
+                ));
+            }
         };
 
         let req = request.into_inner();
@@ -676,7 +689,11 @@ impl PolicyService for PoliciesServer {
         let state_info = self
             .state
             .policy_registry()
-            .get_approval_state_info(&release_intent_id, &req.target_environment, required_approvals)
+            .get_approval_state_info(
+                &release_intent_id,
+                &req.target_environment,
+                required_approvals,
+            )
             .await
             .context("get approval state")
             .to_internal_error()?;
@@ -685,13 +702,17 @@ impl PolicyService for PoliciesServer {
             state: Some(ExternalApprovalState {
                 required_approvals: state_info.required_approvals,
                 current_approvals: state_info.current_approvals,
-                decisions: state_info.decisions.into_iter().map(|d| ExternalApprovalDecisionEntry {
-                    user_id: d.user_id,
-                    username: d.username,
-                    decision: d.decision,
-                    decided_at: d.decided_at,
-                    comment: d.comment,
-                }).collect(),
+                decisions: state_info
+                    .decisions
+                    .into_iter()
+                    .map(|d| ExternalApprovalDecisionEntry {
+                        user_id: d.user_id,
+                        username: d.username,
+                        decision: d.decision,
+                        decided_at: d.decided_at,
+                        comment: d.comment,
+                    })
+                    .collect(),
             }),
         }))
     }
@@ -754,7 +775,11 @@ impl PolicyService for PoliciesServer {
         let state_info = self
             .state
             .policy_registry()
-            .get_approval_state_info(&release_intent_id, &req.target_environment, required_approvals)
+            .get_approval_state_info(
+                &release_intent_id,
+                &req.target_environment,
+                required_approvals,
+            )
             .await
             .context("get approval state")
             .to_internal_error()?;
@@ -763,13 +788,17 @@ impl PolicyService for PoliciesServer {
             state: Some(ExternalApprovalState {
                 required_approvals: state_info.required_approvals,
                 current_approvals: state_info.current_approvals,
-                decisions: state_info.decisions.into_iter().map(|d| ExternalApprovalDecisionEntry {
-                    user_id: d.user_id,
-                    username: d.username,
-                    decision: d.decision,
-                    decided_at: d.decided_at,
-                    comment: d.comment,
-                }).collect(),
+                decisions: state_info
+                    .decisions
+                    .into_iter()
+                    .map(|d| ExternalApprovalDecisionEntry {
+                        user_id: d.user_id,
+                        username: d.username,
+                        decision: d.decision,
+                        decided_at: d.decided_at,
+                        comment: d.comment,
+                    })
+                    .collect(),
             }),
         }))
     }

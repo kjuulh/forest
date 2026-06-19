@@ -33,16 +33,16 @@ impl GenerateCommand {
     pub async fn execute(&self, _state: &State) -> anyhow::Result<()> {
         let language = match &self.language {
             Some(lang) => lang.clone(),
-            None => detect_codegen_language().await.unwrap_or_else(|| "rust".to_string()),
+            None => detect_codegen_language()
+                .await
+                .unwrap_or_else(|| "rust".to_string()),
         };
 
         let output = match &self.output {
             Some(o) => o.clone(),
-            None => detect_codegen_output()
-                .await
-                .ok_or_else(|| anyhow::anyhow!(
-                    "no --output specified and no codegen.output found in forest.cue"
-                ))?,
+            None => detect_codegen_output().await.ok_or_else(|| {
+                anyhow::anyhow!("no --output specified and no codegen.output found in forest.cue")
+            })?,
         };
 
         let codegen_language = match language.as_str() {
@@ -104,12 +104,10 @@ impl GenerateCommand {
 
             tracing::info!("generating dependency client for {}", component_id);
 
-            let openapi_json = run_cue_def_openapi_in_dir(
-                &[&component_cue.to_string_lossy()],
-                &component_path,
-            )
-            .await
-            .with_context(|| format!("cue def for dependency {component_id}"))?;
+            let openapi_json =
+                run_cue_def_openapi_in_dir(&[&component_cue.to_string_lossy()], &component_path)
+                    .await
+                    .with_context(|| format!("cue def for dependency {component_id}"))?;
 
             let client_code = codegen
                 .generate_client(openapi_json.trim(), &component_id)
@@ -179,8 +177,8 @@ async fn discover_component_dependencies() -> anyhow::Result<Vec<(String, PathBu
         return Ok(vec![]);
     }
 
-    let doc: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .context("parse forest.cue JSON")?;
+    let doc: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("parse forest.cue JSON")?;
 
     let Some(deps) = doc.get("dependencies").and_then(|d| d.as_object()) else {
         return Ok(vec![]);
@@ -232,8 +230,7 @@ async fn discover_component_dependencies() -> anyhow::Result<Vec<(String, PathBu
                     .join("component")
                     .join("meta.json")
                     .exists();
-                if dep_path.join("forest.component.cue").exists()
-                    && (has_deno_runtime || has_meta)
+                if dep_path.join("forest.component.cue").exists() && (has_deno_runtime || has_meta)
                 {
                     result.push((name.clone(), dep_path));
                 }

@@ -29,12 +29,8 @@ impl CommandHandler for Commands {
         let scalar_vars = scalarize(&input.vars).map_err(|e| {
             forest_sdk::Error::Handler(format!("vars contained non-scalar: {e}").into())
         })?;
-        let count = render_dir(
-            Path::new(&input.src),
-            Path::new(&input.dest),
-            &scalar_vars,
-        )
-        .map_err(|e| forest_sdk::Error::Handler(format!("render: {e:#}").into()))?;
+        let count = render_dir(Path::new(&input.src), Path::new(&input.dest), &scalar_vars)
+            .map_err(|e| forest_sdk::Error::Handler(format!("render: {e:#}").into()))?;
         Ok(RenderTemplateOutput {
             files_rendered: count as i64,
             src: input.src,
@@ -45,9 +41,7 @@ impl CommandHandler for Commands {
 
 /// Reduce arbitrary JSON values to strings. Strings pass through;
 /// numbers/bools stringify; nulls become empty; objects/arrays error.
-fn scalarize(
-    vars: &HashMap<String, serde_json::Value>,
-) -> anyhow::Result<HashMap<String, String>> {
+fn scalarize(vars: &HashMap<String, serde_json::Value>) -> anyhow::Result<HashMap<String, String>> {
     let mut out = HashMap::with_capacity(vars.len());
     for (k, v) in vars {
         let s = match v {
@@ -62,11 +56,7 @@ fn scalarize(
     Ok(out)
 }
 
-fn render_dir(
-    src: &Path,
-    dest: &Path,
-    vars: &HashMap<String, String>,
-) -> anyhow::Result<usize> {
+fn render_dir(src: &Path, dest: &Path, vars: &HashMap<String, String>) -> anyhow::Result<usize> {
     if !src.is_dir() {
         anyhow::bail!("source is not a directory: {}", src.display());
     }
@@ -84,8 +74,8 @@ fn walk(
     vars: &HashMap<String, String>,
     count: &mut usize,
 ) -> anyhow::Result<()> {
-    for entry in std::fs::read_dir(src)
-        .map_err(|e| anyhow::anyhow!("read_dir {}: {e}", src.display()))?
+    for entry in
+        std::fs::read_dir(src).map_err(|e| anyhow::anyhow!("read_dir {}: {e}", src.display()))?
     {
         let entry = entry?;
         let entry_path = entry.path();

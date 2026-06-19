@@ -41,8 +41,8 @@ impl ReleaseTokenRegistry {
         let token_hex = hex::encode(raw);
         let token_hash = Sha256::digest(raw).to_vec();
 
-        let expires =
-            chrono::Utc::now() + chrono::Duration::from_std(ttl).unwrap_or(chrono::Duration::hours(1));
+        let expires = chrono::Utc::now()
+            + chrono::Duration::from_std(ttl).unwrap_or(chrono::Duration::hours(1));
 
         sqlx::query!(
             "
@@ -73,8 +73,7 @@ impl ReleaseTokenRegistry {
         &self,
         token_hex: &str,
     ) -> anyhow::Result<Option<ReleaseTokenScope>> {
-        let raw =
-            hex::decode(token_hex).context("invalid token format: not valid hex")?;
+        let raw = hex::decode(token_hex).context("invalid token format: not valid hex")?;
         let token_hash = Sha256::digest(&raw).to_vec();
 
         let record = sqlx::query!(
@@ -157,12 +156,11 @@ impl ReleaseTokenRegistry {
 
     /// Delete expired tokens older than 1 day. Returns number of deleted rows.
     pub async fn cleanup_expired(&self) -> anyhow::Result<u64> {
-        let result = sqlx::query!(
-            "DELETE FROM release_tokens WHERE expires < now() - interval '1 day'"
-        )
-        .execute(&self.db)
-        .await
-        .context("failed to cleanup expired tokens")?;
+        let result =
+            sqlx::query!("DELETE FROM release_tokens WHERE expires < now() - interval '1 day'")
+                .execute(&self.db)
+                .await
+                .context("failed to cleanup expired tokens")?;
 
         Ok(result.rows_affected())
     }

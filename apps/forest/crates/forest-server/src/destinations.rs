@@ -123,9 +123,7 @@ impl DestinationService {
     ) -> anyhow::Result<Option<String>> {
         tracing::debug!(id =% staged_release.id, destination =% self.name(), "running plan");
 
-        self.inner
-            .plan(logger, staged_release, destination)
-            .await
+        self.inner.plan(logger, staged_release, destination).await
     }
 
     pub fn supports_plan(&self) -> bool {

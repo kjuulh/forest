@@ -133,8 +133,7 @@ impl UserStateLoaderState for State {
         // Context-aware: resolve which named context the auth state lives in.
         // The `--context` / FOREST_CONTEXT override wins over the registry's
         // active marker.
-        let store = crate::contexts::ContextStore::from_env()
-            .expect("resolve XDG data dir");
+        let store = crate::contexts::ContextStore::from_env().expect("resolve XDG data dir");
         let want = self.config.context.as_deref();
         let entry = store
             .resolve(want)

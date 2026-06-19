@@ -31,12 +31,8 @@ impl From<sqlx::Error> for DbError {
                 let constraint = db_err.constraint();
 
                 match code.as_deref() {
-                    Some("23505") => {
-                        DbError::AlreadyExists(constraint_message_unique(constraint))
-                    }
-                    Some("23503") => {
-                        DbError::ReferenceNotFound(constraint_message_fk(constraint))
-                    }
+                    Some("23505") => DbError::AlreadyExists(constraint_message_unique(constraint)),
+                    Some("23503") => DbError::ReferenceNotFound(constraint_message_fk(constraint)),
                     Some("23502") | Some("23514") => {
                         DbError::ConstraintViolation(constraint_message_generic(constraint))
                     }

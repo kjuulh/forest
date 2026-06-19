@@ -14,9 +14,7 @@
 //!   PROJECT_SUPPORT_URL, PROJECT_DOMAIN, PROJECT_OWNER  (all optional)
 
 use forest_grpc_interface::release_service_client::ReleaseServiceClient;
-use forest_grpc_interface::{
-    CreateProjectRequest, ProjectMetadata, UpdateProjectRequest,
-};
+use forest_grpc_interface::{CreateProjectRequest, ProjectMetadata, UpdateProjectRequest};
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
 
@@ -40,14 +38,12 @@ async fn main() -> anyhow::Result<()> {
 
     let channel = Channel::from_shared(server)?.connect().await?;
     let auth_token_meta: MetadataValue<_> = format!("Bearer {token}").parse()?;
-    let mut release = ReleaseServiceClient::with_interceptor(
-        channel,
-        move |mut req: tonic::Request<()>| {
+    let mut release =
+        ReleaseServiceClient::with_interceptor(channel, move |mut req: tonic::Request<()>| {
             req.metadata_mut()
                 .insert("authorization", auth_token_meta.clone());
             Ok(req)
-        },
-    );
+        });
 
     // Idempotent — ON CONFLICT DO NOTHING on the server.
     release

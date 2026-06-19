@@ -39,10 +39,16 @@ mod project {
             let projects = state
                 .grpc_client()
                 .get_projects(match (&self.destination, &self.organisation) {
-                    (None, None) => anyhow::bail!("either a destination or organisation is required"),
-                    (None, Some(org)) => crate::grpc::GetProjectsQuery::Organisation(org.clone().into()),
+                    (None, None) => {
+                        anyhow::bail!("either a destination or organisation is required")
+                    }
+                    (None, Some(org)) => {
+                        crate::grpc::GetProjectsQuery::Organisation(org.clone().into())
+                    }
                     (Some(_dest), None) => todo!(),
-                    (Some(_), Some(_)) => anyhow::bail!("only one of destination or organisation is required"),
+                    (Some(_), Some(_)) => {
+                        anyhow::bail!("only one of destination or organisation is required")
+                    }
                 })
                 .await
                 .context("get projects")?;

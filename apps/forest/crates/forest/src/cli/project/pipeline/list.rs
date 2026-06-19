@@ -1,6 +1,10 @@
 use anyhow::Context;
 
-use crate::{cli::{project::pipeline::format_stages, prompts}, grpc::GrpcClientState, state::State};
+use crate::{
+    cli::{project::pipeline::format_stages, prompts},
+    grpc::GrpcClientState,
+    state::State,
+};
 
 #[derive(clap::Parser)]
 pub struct ListCommand {
@@ -37,7 +41,11 @@ impl ListCommand {
         eprintln!("release pipelines\n");
 
         for pipeline in pipelines {
-            let status = if pipeline.enabled { "enabled" } else { "disabled" };
+            let status = if pipeline.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            };
             println!("{} ({})", pipeline.name, status);
             println!("  stages:     {}", format_stages(&pipeline.stages));
             println!("  created:    {}", pipeline.created_at);

@@ -52,7 +52,10 @@ fn generate_deployment(spec: &Spec) -> String {
         for p in &spec.ports {
             writeln!(y, "            - name: {}", p.name).unwrap();
             writeln!(y, "              containerPort: {}", p.port).unwrap();
-            let proto = match p.protocol { Protocol::Tcp => "TCP", Protocol::Udp => "UDP" };
+            let proto = match p.protocol {
+                Protocol::Tcp => "TCP",
+                Protocol::Udp => "UDP",
+            };
             writeln!(y, "              protocol: {proto}").unwrap();
         }
     }
@@ -66,7 +69,12 @@ fn generate_deployment(spec: &Spec) -> String {
     writeln!(y, "          resources:").unwrap();
     writeln!(y, "            requests:").unwrap();
     writeln!(y, "              cpu: \"{}\"", spec.resources.requests.cpu).unwrap();
-    writeln!(y, "              memory: \"{}\"", spec.resources.requests.memory).unwrap();
+    writeln!(
+        y,
+        "              memory: \"{}\"",
+        spec.resources.requests.memory
+    )
+    .unwrap();
     if let Some(limits) = &spec.resources.limits {
         writeln!(y, "            limits:").unwrap();
         writeln!(y, "              cpu: \"{}\"", limits.cpu).unwrap();
@@ -136,15 +144,27 @@ fn write_probe(y: &mut String, name: &str, probe: &Probe) {
         writeln!(y, "            tcpSocket:").unwrap();
         writeln!(y, "              port: {}", tcp.port).unwrap();
     }
-    writeln!(y, "            initialDelaySeconds: {}", probe.initial_delay).unwrap();
+    writeln!(
+        y,
+        "            initialDelaySeconds: {}",
+        probe.initial_delay
+    )
+    .unwrap();
     writeln!(y, "            periodSeconds: {}", probe.period).unwrap();
     writeln!(y, "            timeoutSeconds: {}", probe.timeout).unwrap();
-    writeln!(y, "            failureThreshold: {}", probe.failure_threshold).unwrap();
+    writeln!(
+        y,
+        "            failureThreshold: {}",
+        probe.failure_threshold
+    )
+    .unwrap();
 }
 
 fn generate_service(spec: &Spec) -> Option<String> {
     let external_ports: Vec<&Port> = spec.ports.iter().filter(|p| p.external).collect();
-    if external_ports.is_empty() { return None; }
+    if external_ports.is_empty() {
+        return None;
+    }
     let mut y = String::new();
     writeln!(y, "apiVersion: v1").unwrap();
     writeln!(y, "kind: Service").unwrap();
@@ -162,7 +182,10 @@ fn generate_service(spec: &Spec) -> Option<String> {
         writeln!(y, "    - name: {}", p.name).unwrap();
         writeln!(y, "      port: {}", p.port).unwrap();
         writeln!(y, "      targetPort: {}", p.port).unwrap();
-        let proto = match p.protocol { Protocol::Tcp => "TCP", Protocol::Udp => "UDP" };
+        let proto = match p.protocol {
+            Protocol::Tcp => "TCP",
+            Protocol::Udp => "UDP",
+        };
         writeln!(y, "      protocol: {proto}").unwrap();
     }
     Some(y)
@@ -179,7 +202,9 @@ fn generate_ingress(spec: &Spec) -> Option<String> {
     writeln!(y, "  namespace: {}", spec.namespace).unwrap();
     if !ingress.annotations.is_empty() {
         writeln!(y, "  annotations:").unwrap();
-        for (k, v) in &ingress.annotations { writeln!(y, "    {k}: \"{v}\"").unwrap(); }
+        for (k, v) in &ingress.annotations {
+            writeln!(y, "    {k}: \"{v}\"").unwrap();
+        }
     }
     writeln!(y, "spec:").unwrap();
     if ingress.tls {
@@ -243,7 +268,10 @@ fn generate_network_policy(spec: &Spec) -> String {
     writeln!(y, "  ingress:").unwrap();
     writeln!(y, "    - ports:").unwrap();
     for p in &spec.ports {
-        let proto = match p.protocol { Protocol::Tcp => "TCP", Protocol::Udp => "UDP" };
+        let proto = match p.protocol {
+            Protocol::Tcp => "TCP",
+            Protocol::Udp => "UDP",
+        };
         writeln!(y, "        - port: {}", p.port).unwrap();
         writeln!(y, "          protocol: {proto}").unwrap();
     }
@@ -276,40 +304,94 @@ fn generate_service_monitor(spec: &Spec) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 impl CommandHandler for K8sCommands {
-    async fn prepare(&self, spec: &Spec, _input: PrepareInput) -> Result<PrepareOutput, forest_sdk::Error> {
+    async fn prepare(
+        &self,
+        spec: &Spec,
+        _input: PrepareInput,
+    ) -> Result<PrepareOutput, forest_sdk::Error> {
         let mut manifests = Vec::new();
         manifests.push(generate_deployment(spec));
-        if let Some(svc) = generate_service(spec) { manifests.push(svc); }
-        if let Some(ing) = generate_ingress(spec) { manifests.push(ing); }
-        if let Some(hpa) = generate_hpa(spec) { manifests.push(hpa); }
+        if let Some(svc) = generate_service(spec) {
+            manifests.push(svc);
+        }
+        if let Some(ing) = generate_ingress(spec) {
+            manifests.push(ing);
+        }
+        if let Some(hpa) = generate_hpa(spec) {
+            manifests.push(hpa);
+        }
         Ok(PrepareOutput { manifests })
     }
 
-    async fn status(&self, spec: &Spec, _input: StatusInput) -> Result<StatusOutput, forest_sdk::Error> {
-        Ok(StatusOutput { ready: spec.replicas, desired: spec.replicas, healthy: true, age: "3d12h".to_string() })
+    async fn status(
+        &self,
+        spec: &Spec,
+        _input: StatusInput,
+    ) -> Result<StatusOutput, forest_sdk::Error> {
+        Ok(StatusOutput {
+            ready: spec.replicas,
+            desired: spec.replicas,
+            healthy: true,
+            age: "3d12h".to_string(),
+        })
     }
 
-    async fn validate(&self, spec: &Spec, _input: ValidateInput) -> Result<ValidateOutput, forest_sdk::Error> {
+    async fn validate(
+        &self,
+        spec: &Spec,
+        _input: ValidateInput,
+    ) -> Result<ValidateOutput, forest_sdk::Error> {
         let mut errors = Vec::new();
-        if spec.name.is_empty() { errors.push("name must not be empty".to_string()); }
-        if spec.image.is_empty() { errors.push("image must not be empty".to_string()); }
-        if spec.ports.is_empty() { errors.push("at least one port is required".to_string()); }
+        if spec.name.is_empty() {
+            errors.push("name must not be empty".to_string());
+        }
+        if spec.image.is_empty() {
+            errors.push("image must not be empty".to_string());
+        }
+        if spec.ports.is_empty() {
+            errors.push("at least one port is required".to_string());
+        }
         if let Some(auto) = &spec.autoscaling {
-            if auto.max_replicas < auto.min_replicas { errors.push("autoscaling.max_replicas must be >= min_replicas".to_string()); }
+            if auto.max_replicas < auto.min_replicas {
+                errors.push("autoscaling.max_replicas must be >= min_replicas".to_string());
+            }
         }
         if let Some(ingress) = &spec.ingress {
-            if ingress.host.is_empty() { errors.push("ingress.host must not be empty".to_string()); }
-            if !spec.ports.iter().any(|p| p.external) { errors.push("ingress requires at least one external port".to_string()); }
+            if ingress.host.is_empty() {
+                errors.push("ingress.host must not be empty".to_string());
+            }
+            if !spec.ports.iter().any(|p| p.external) {
+                errors.push("ingress requires at least one external port".to_string());
+            }
         }
-        Ok(ValidateOutput { valid: errors.is_empty(), errors })
+        Ok(ValidateOutput {
+            valid: errors.is_empty(),
+            errors,
+        })
     }
 
     async fn diff(&self, spec: &Spec, _input: DiffInput) -> Result<DiffOutput, forest_sdk::Error> {
-        Ok(DiffOutput { changes: vec![Change { resource: format!("Deployment/{}", spec.name), kind: Kind::Modify, diff: format!("replicas: ? -> {}", spec.replicas) }] })
+        Ok(DiffOutput {
+            changes: vec![Change {
+                resource: format!("Deployment/{}", spec.name),
+                kind: Kind::Modify,
+                diff: format!("replicas: ? -> {}", spec.replicas),
+            }],
+        })
     }
 
     async fn logs(&self, spec: &Spec, input: LogsInput) -> Result<LogsOutput, forest_sdk::Error> {
-        eprintln!("Would tail {} lines from {}/{} container={}", input.lines, spec.namespace, spec.name, if input.container.is_empty() { &spec.name } else { &input.container });
+        eprintln!(
+            "Would tail {} lines from {}/{} container={}",
+            input.lines,
+            spec.namespace,
+            spec.name,
+            if input.container.is_empty() {
+                &spec.name
+            } else {
+                &input.container
+            }
+        );
         Ok(LogsOutput {})
     }
 }
@@ -319,56 +401,122 @@ impl CommandHandler for K8sCommands {
 // ---------------------------------------------------------------------------
 
 impl ForestDeploymentHookHandler for DeploymentHooks {
-    async fn prepare(&self, spec: &Spec, _input: ForestDeploymentPrepareInput) -> Result<ForestDeploymentPrepareOutput, forest_sdk::Error> {
+    async fn prepare(
+        &self,
+        spec: &Spec,
+        _input: ForestDeploymentPrepareInput,
+    ) -> Result<ForestDeploymentPrepareOutput, forest_sdk::Error> {
         let mut manifests = Vec::new();
         manifests.push(generate_deployment(spec));
-        if let Some(svc) = generate_service(spec) { manifests.push(svc); }
-        if let Some(ing) = generate_ingress(spec) { manifests.push(ing); }
-        if let Some(hpa) = generate_hpa(spec) { manifests.push(hpa); }
-        eprintln!("deployment/prepare: generated {} manifests for '{}'", manifests.len(), spec.name);
+        if let Some(svc) = generate_service(spec) {
+            manifests.push(svc);
+        }
+        if let Some(ing) = generate_ingress(spec) {
+            manifests.push(ing);
+        }
+        if let Some(hpa) = generate_hpa(spec) {
+            manifests.push(hpa);
+        }
+        eprintln!(
+            "deployment/prepare: generated {} manifests for '{}'",
+            manifests.len(),
+            spec.name
+        );
         Ok(ForestDeploymentPrepareOutput { manifests })
     }
 
-    async fn release(&self, spec: &Spec, input: ForestDeploymentReleaseInput) -> Result<ForestDeploymentReleaseOutput, forest_sdk::Error> {
-        eprintln!("deployment/release: applying '{}' (release_id={})", spec.name, input.release_id);
+    async fn release(
+        &self,
+        spec: &Spec,
+        input: ForestDeploymentReleaseInput,
+    ) -> Result<ForestDeploymentReleaseOutput, forest_sdk::Error> {
+        eprintln!(
+            "deployment/release: applying '{}' (release_id={})",
+            spec.name, input.release_id
+        );
         Ok(ForestDeploymentReleaseOutput {})
     }
 
-    async fn rollback(&self, spec: &Spec, input: ForestDeploymentRollbackInput) -> Result<(), forest_sdk::Error> {
-        let target = if input.target_revision.is_empty() { "previous".to_string() } else { format!("revision {}", input.target_revision) };
-        eprintln!("deployment/rollback: rolling back '{}' to {} (release_id={})", spec.name, target, input.release_id);
+    async fn rollback(
+        &self,
+        spec: &Spec,
+        input: ForestDeploymentRollbackInput,
+    ) -> Result<(), forest_sdk::Error> {
+        let target = if input.target_revision.is_empty() {
+            "previous".to_string()
+        } else {
+            format!("revision {}", input.target_revision)
+        };
+        eprintln!(
+            "deployment/rollback: rolling back '{}' to {} (release_id={})",
+            spec.name, target, input.release_id
+        );
         Ok(())
     }
 }
 
 impl ForestObservabilityHookHandler for ObservabilityHooks {
-    async fn configure_monitoring(&self, spec: &Spec, _input: ForestObservabilityConfigureMonitoringInput) -> Result<ForestObservabilityConfigureMonitoringOutput, forest_sdk::Error> {
+    async fn configure_monitoring(
+        &self,
+        spec: &Spec,
+        _input: ForestObservabilityConfigureMonitoringInput,
+    ) -> Result<ForestObservabilityConfigureMonitoringOutput, forest_sdk::Error> {
         if let Some(monitor_yaml) = generate_service_monitor(spec) {
-            eprintln!("observability/configure_monitoring: generated ServiceMonitor ({} bytes)", monitor_yaml.len());
+            eprintln!(
+                "observability/configure_monitoring: generated ServiceMonitor ({} bytes)",
+                monitor_yaml.len()
+            );
         }
         Ok(ForestObservabilityConfigureMonitoringOutput {})
     }
 
-    async fn configure_logging(&self, spec: &Spec, input: ForestObservabilityConfigureLoggingInput) -> Result<ForestObservabilityConfigureLoggingOutput, forest_sdk::Error> {
-        eprintln!("observability/configure_logging: log_level={} for '{}'", input.log_level, spec.name);
+    async fn configure_logging(
+        &self,
+        spec: &Spec,
+        input: ForestObservabilityConfigureLoggingInput,
+    ) -> Result<ForestObservabilityConfigureLoggingOutput, forest_sdk::Error> {
+        eprintln!(
+            "observability/configure_logging: log_level={} for '{}'",
+            input.log_level, spec.name
+        );
         Ok(ForestObservabilityConfigureLoggingOutput {})
     }
 }
 
 impl ForestSecurityHookHandler for SecurityHooks {
-    async fn scan_image(&self, spec: &Spec, _input: ForestSecurityScanImageInput) -> Result<ForestSecurityScanImageOutput, forest_sdk::Error> {
+    async fn scan_image(
+        &self,
+        spec: &Spec,
+        _input: ForestSecurityScanImageInput,
+    ) -> Result<ForestSecurityScanImageOutput, forest_sdk::Error> {
         eprintln!("security/scan_image: scanning '{}'", spec.image);
-        Ok(ForestSecurityScanImageOutput { vulnerabilities: 3, critical: 0, passed: true })
+        Ok(ForestSecurityScanImageOutput {
+            vulnerabilities: 3,
+            critical: 0,
+            passed: true,
+        })
     }
 
-    async fn apply_policies(&self, spec: &Spec, _input: ForestSecurityApplyPoliciesInput) -> Result<ForestSecurityApplyPoliciesOutput, forest_sdk::Error> {
+    async fn apply_policies(
+        &self,
+        spec: &Spec,
+        _input: ForestSecurityApplyPoliciesInput,
+    ) -> Result<ForestSecurityApplyPoliciesOutput, forest_sdk::Error> {
         let policy = generate_network_policy(spec);
-        eprintln!("security/apply_policies: generated NetworkPolicy ({} bytes)", policy.len());
+        eprintln!(
+            "security/apply_policies: generated NetworkPolicy ({} bytes)",
+            policy.len()
+        );
         Ok(ForestSecurityApplyPoliciesOutput {})
     }
 }
 
 fn main() {
-    let router = ComponentRouter::new(K8sCommands, DeploymentHooks, ObservabilityHooks, SecurityHooks);
+    let router = ComponentRouter::new(
+        K8sCommands,
+        DeploymentHooks,
+        ObservabilityHooks,
+        SecurityHooks,
+    );
     forest_sdk::run_once(&router);
 }

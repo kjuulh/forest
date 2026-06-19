@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::Context as AnyhowContext;
 use forest_grpc_interface::{
-    TokenInfoRequest, users_service_client::UsersServiceClient, RefreshTokenRequest,
+    RefreshTokenRequest, TokenInfoRequest, users_service_client::UsersServiceClient,
 };
 use tokio::sync::{Mutex, OnceCell};
 use tonic::transport::{Channel, ClientTlsConfig};
@@ -141,8 +141,8 @@ where
                     .await
                     .map_err(|e| -> BoxError { format!("failed to read state: {e}").into() })?;
 
-                let current = locked_state
-                    .ok_or_else(|| -> BoxError { "user is not logged in".into() })?;
+                let current =
+                    locked_state.ok_or_else(|| -> BoxError { "user is not logged in".into() })?;
 
                 let still_needs_refresh = match current.refresh_after {
                     Some(refresh_after) => chrono::Utc::now().timestamp() >= refresh_after,
@@ -152,15 +152,7 @@ where
                 if still_needs_refresh {
                     tracing::debug!("access token needs refresh, refreshing");
 
-                    match do_refresh(
-                        &host,
-                        &refresh_channel,
-                        &loader,
-                        &current,
-                        &file_lock,
-                    )
-                    .await
-                    {
+                    match do_refresh(&host, &refresh_channel, &loader, &current, &file_lock).await {
                         Ok(new_state) => {
                             user_state = new_state;
                             let ts = chrono::Utc::now().timestamp();
@@ -192,13 +184,7 @@ where
                 if now - last >= VALIDATION_INTERVAL_SECS {
                     tracing::debug!("periodic token validation check");
 
-                    match validate_token(
-                        &host,
-                        &refresh_channel,
-                        &user_state.access_token,
-                    )
-                    .await
-                    {
+                    match validate_token(&host, &refresh_channel, &user_state.access_token).await {
                         Ok(()) => {
                             last_validated.store(now, Ordering::Relaxed);
                             write_last_validated(now);
@@ -207,10 +193,8 @@ where
                             tracing::debug!("token validation failed ({e:#}), attempting refresh");
 
                             let _guard = refresh_lock.lock().await;
-                            let (locked_state, file_lock) = loader
-                                .read_locked()
-                                .await
-                                .map_err(|e| -> BoxError {
+                            let (locked_state, file_lock) =
+                                loader.read_locked().await.map_err(|e| -> BoxError {
                                     format!("failed to read state: {e}").into()
                                 })?;
 
@@ -231,7 +215,9 @@ where
                                         write_last_validated(ts);
                                     }
                                     Err(e) => {
-                                        tracing::warn!("token refresh after failed validation: {e:#}");
+                                        tracing::warn!(
+                                            "token refresh after failed validation: {e:#}"
+                                        );
                                     }
                                 }
                             }
@@ -279,10 +265,7 @@ async fn validate_token(
     Ok(())
 }
 
-async fn get_or_connect(
-    host: &str,
-    channel: &Arc<OnceCell<Channel>>,
-) -> anyhow::Result<Channel> {
+async fn get_or_connect(host: &str, channel: &Arc<OnceCell<Channel>>) -> anyhow::Result<Channel> {
     let ch = channel
         .get_or_try_init(|| async {
             Channel::from_shared(host.to_owned())
@@ -349,12 +332,7 @@ impl AuthMiddlewareLayerState for State {
         // Resolve the server URL the same way the gRPC client does
         // (TASKS/019-context.md §1.3): explicit FOREST_SERVER override
         // wins, otherwise fall back to the active context.
-        let host = if let Some(s) = self
-            .config
-            .forest_server
-            .clone()
-            .filter(|s| !s.is_empty())
-        {
+        let host = if let Some(s) = self.config.forest_server.clone().filter(|s| !s.is_empty()) {
             s
         } else {
             match crate::contexts::ContextStore::from_env()

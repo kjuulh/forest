@@ -726,7 +726,11 @@ impl UserRepository {
         Ok(row)
     }
 
-    pub async fn verify_native_mfa(&self, db: impl PgExecutor<'_>, id: Uuid) -> Result<(), DbError> {
+    pub async fn verify_native_mfa(
+        &self,
+        db: impl PgExecutor<'_>,
+        id: Uuid,
+    ) -> Result<(), DbError> {
         sqlx::query!(
             r#"
             UPDATE provider_native_mfa

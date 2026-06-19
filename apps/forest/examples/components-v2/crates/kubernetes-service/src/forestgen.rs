@@ -10,8 +10,12 @@ pub struct Autoscaling {
     pub target_cpu: i64,
 }
 
-fn default_autoscaling_min_replicas() -> i64 { 1 }
-fn default_autoscaling_target_cpu() -> i64 { 80 }
+fn default_autoscaling_min_replicas() -> i64 {
+    1
+}
+fn default_autoscaling_target_cpu() -> i64 {
+    80
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Change {
@@ -58,8 +62,12 @@ pub struct Ingress {
     pub tls: bool,
 }
 
-fn default_ingress_path() -> String { "/".to_string() }
-fn default_ingress_tls() -> bool { true }
+fn default_ingress_path() -> String {
+    "/".to_string()
+}
+fn default_ingress_tls() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Port {
@@ -70,7 +78,9 @@ pub struct Port {
     pub protocol: Protocol,
 }
 
-fn default_port_external() -> bool { false }
+fn default_port_external() -> bool {
+    false
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Probe {
@@ -88,10 +98,18 @@ pub struct Probe {
     pub timeout: i64,
 }
 
-fn default_probe_failure_threshold() -> i64 { 3 }
-fn default_probe_initial_delay() -> i64 { 10 }
-fn default_probe_period() -> i64 { 10 }
-fn default_probe_timeout() -> i64 { 3 }
+fn default_probe_failure_threshold() -> i64 {
+    3
+}
+fn default_probe_initial_delay() -> i64 {
+    10
+}
+fn default_probe_period() -> i64 {
+    10
+}
+fn default_probe_timeout() -> i64 {
+    3
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ResourceQuantity {
@@ -123,8 +141,12 @@ pub struct ServiceMesh {
     pub mtls: bool,
 }
 
-fn default_servicemesh_enabled() -> bool { false }
-fn default_servicemesh_mtls() -> bool { true }
+fn default_servicemesh_enabled() -> bool {
+    false
+}
+fn default_servicemesh_mtls() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TcpProbe {
@@ -206,12 +228,15 @@ pub struct Spec {
     pub volumes: Option<Vec<Volume>>,
 }
 
-fn default_spec_namespace() -> String { "default".to_string() }
-fn default_spec_replicas() -> i64 { 1 }
+fn default_spec_namespace() -> String {
+    "default".to_string()
+}
+fn default_spec_replicas() -> i64 {
+    1
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DiffInput {
-}
+pub struct DiffInput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DiffOutput {
@@ -226,16 +251,18 @@ pub struct LogsInput {
     pub lines: i64,
 }
 
-fn default_logsinput_container() -> String { "".to_string() }
-fn default_logsinput_lines() -> i64 { 100 }
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LogsOutput {
+fn default_logsinput_container() -> String {
+    "".to_string()
+}
+fn default_logsinput_lines() -> i64 {
+    100
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PrepareInput {
-}
+pub struct LogsOutput {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PrepareInput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PrepareOutput {
@@ -243,8 +270,7 @@ pub struct PrepareOutput {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StatusInput {
-}
+pub struct StatusInput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StatusOutput {
@@ -255,8 +281,7 @@ pub struct StatusOutput {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ValidateInput {
-}
+pub struct ValidateInput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ValidateOutput {
@@ -266,20 +291,39 @@ pub struct ValidateOutput {
 
 pub trait CommandHandler: Send + Sync {
     /// Show diff of generated manifests against live cluster state
-    fn diff(&self, spec: &Spec, input: DiffInput) -> impl std::future::Future<Output = Result<DiffOutput, forest_sdk::Error>> + Send;
+    fn diff(
+        &self,
+        spec: &Spec,
+        input: DiffInput,
+    ) -> impl std::future::Future<Output = Result<DiffOutput, forest_sdk::Error>> + Send;
     /// Tail pod logs for the service
-    fn logs(&self, spec: &Spec, input: LogsInput) -> impl std::future::Future<Output = Result<LogsOutput, forest_sdk::Error>> + Send;
+    fn logs(
+        &self,
+        spec: &Spec,
+        input: LogsInput,
+    ) -> impl std::future::Future<Output = Result<LogsOutput, forest_sdk::Error>> + Send;
     /// Generate Kubernetes manifests (Deployment, Service, Ingress, HPA, etc.)
-    fn prepare(&self, spec: &Spec, input: PrepareInput) -> impl std::future::Future<Output = Result<PrepareOutput, forest_sdk::Error>> + Send;
+    fn prepare(
+        &self,
+        spec: &Spec,
+        input: PrepareInput,
+    ) -> impl std::future::Future<Output = Result<PrepareOutput, forest_sdk::Error>> + Send;
     /// Check deployment status against the cluster
-    fn status(&self, spec: &Spec, input: StatusInput) -> impl std::future::Future<Output = Result<StatusOutput, forest_sdk::Error>> + Send;
+    fn status(
+        &self,
+        spec: &Spec,
+        input: StatusInput,
+    ) -> impl std::future::Future<Output = Result<StatusOutput, forest_sdk::Error>> + Send;
     /// Validate spec and generated manifests
-    fn validate(&self, spec: &Spec, input: ValidateInput) -> impl std::future::Future<Output = Result<ValidateOutput, forest_sdk::Error>> + Send;
+    fn validate(
+        &self,
+        spec: &Spec,
+        input: ValidateInput,
+    ) -> impl std::future::Future<Output = Result<ValidateOutput, forest_sdk::Error>> + Send;
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForestDeploymentPrepareInput {
-}
+pub struct ForestDeploymentPrepareInput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForestDeploymentPrepareOutput {
@@ -292,8 +336,7 @@ pub struct ForestDeploymentReleaseInput {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForestDeploymentReleaseOutput {
-}
+pub struct ForestDeploymentReleaseOutput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForestDeploymentRollbackInput {
@@ -302,7 +345,9 @@ pub struct ForestDeploymentRollbackInput {
     pub target_revision: String,
 }
 
-fn default_forestdeploymentrollbackinput_target_revision() -> String { "".to_string() }
+fn default_forestdeploymentrollbackinput_target_revision() -> String {
+    "".to_string()
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForestObservabilityConfigureLoggingInput {
@@ -310,31 +355,27 @@ pub struct ForestObservabilityConfigureLoggingInput {
     pub log_level: String,
 }
 
-fn default_forestobservabilityconfigurelogginginput_log_level() -> String { "info".to_string() }
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForestObservabilityConfigureLoggingOutput {
+fn default_forestobservabilityconfigurelogginginput_log_level() -> String {
+    "info".to_string()
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForestObservabilityConfigureMonitoringInput {
-}
+pub struct ForestObservabilityConfigureLoggingOutput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForestObservabilityConfigureMonitoringOutput {
-}
+pub struct ForestObservabilityConfigureMonitoringInput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForestSecurityApplyPoliciesInput {
-}
+pub struct ForestObservabilityConfigureMonitoringOutput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForestSecurityApplyPoliciesOutput {
-}
+pub struct ForestSecurityApplyPoliciesInput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ForestSecurityScanImageInput {
-}
+pub struct ForestSecurityApplyPoliciesOutput {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ForestSecurityScanImageInput {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ForestSecurityScanImageOutput {
@@ -345,25 +386,59 @@ pub struct ForestSecurityScanImageOutput {
 
 pub trait ForestDeploymentHookHandler: Send + Sync {
     /// Generate and validate Kubernetes manifests for deployment
-    fn prepare(&self, spec: &Spec, input: ForestDeploymentPrepareInput) -> impl std::future::Future<Output = Result<ForestDeploymentPrepareOutput, forest_sdk::Error>> + Send;
+    fn prepare(
+        &self,
+        spec: &Spec,
+        input: ForestDeploymentPrepareInput,
+    ) -> impl std::future::Future<Output = Result<ForestDeploymentPrepareOutput, forest_sdk::Error>> + Send;
     /// Apply manifests to the target cluster
-    fn release(&self, spec: &Spec, input: ForestDeploymentReleaseInput) -> impl std::future::Future<Output = Result<ForestDeploymentReleaseOutput, forest_sdk::Error>> + Send;
+    fn release(
+        &self,
+        spec: &Spec,
+        input: ForestDeploymentReleaseInput,
+    ) -> impl std::future::Future<Output = Result<ForestDeploymentReleaseOutput, forest_sdk::Error>> + Send;
     /// Roll back to a previous revision
-    fn rollback(&self, spec: &Spec, input: ForestDeploymentRollbackInput) -> impl std::future::Future<Output = Result<(), forest_sdk::Error>> + Send;
+    fn rollback(
+        &self,
+        spec: &Spec,
+        input: ForestDeploymentRollbackInput,
+    ) -> impl std::future::Future<Output = Result<(), forest_sdk::Error>> + Send;
 }
 
 pub trait ForestObservabilityHookHandler: Send + Sync {
     /// Configure log collection pipeline for the service
-    fn configure_logging(&self, spec: &Spec, input: ForestObservabilityConfigureLoggingInput) -> impl std::future::Future<Output = Result<ForestObservabilityConfigureLoggingOutput, forest_sdk::Error>> + Send;
+    fn configure_logging(
+        &self,
+        spec: &Spec,
+        input: ForestObservabilityConfigureLoggingInput,
+    ) -> impl std::future::Future<
+        Output = Result<ForestObservabilityConfigureLoggingOutput, forest_sdk::Error>,
+    > + Send;
     /// Create or update ServiceMonitor and PrometheusRule resources
-    fn configure_monitoring(&self, spec: &Spec, input: ForestObservabilityConfigureMonitoringInput) -> impl std::future::Future<Output = Result<ForestObservabilityConfigureMonitoringOutput, forest_sdk::Error>> + Send;
+    fn configure_monitoring(
+        &self,
+        spec: &Spec,
+        input: ForestObservabilityConfigureMonitoringInput,
+    ) -> impl std::future::Future<
+        Output = Result<ForestObservabilityConfigureMonitoringOutput, forest_sdk::Error>,
+    > + Send;
 }
 
 pub trait ForestSecurityHookHandler: Send + Sync {
     /// Apply NetworkPolicy and PodSecurity resources
-    fn apply_policies(&self, spec: &Spec, input: ForestSecurityApplyPoliciesInput) -> impl std::future::Future<Output = Result<ForestSecurityApplyPoliciesOutput, forest_sdk::Error>> + Send;
+    fn apply_policies(
+        &self,
+        spec: &Spec,
+        input: ForestSecurityApplyPoliciesInput,
+    ) -> impl std::future::Future<
+        Output = Result<ForestSecurityApplyPoliciesOutput, forest_sdk::Error>,
+    > + Send;
     /// Run vulnerability scan on the container image
-    fn scan_image(&self, spec: &Spec, input: ForestSecurityScanImageInput) -> impl std::future::Future<Output = Result<ForestSecurityScanImageOutput, forest_sdk::Error>> + Send;
+    fn scan_image(
+        &self,
+        spec: &Spec,
+        input: ForestSecurityScanImageInput,
+    ) -> impl std::future::Future<Output = Result<ForestSecurityScanImageOutput, forest_sdk::Error>> + Send;
 }
 
 pub struct ComponentRouter<C, H1, H2, H3>
@@ -403,7 +478,13 @@ where
     H2: ForestObservabilityHookHandler + Send + Sync,
     H3: ForestSecurityHookHandler + Send + Sync,
 {
-    async fn call(&self, method: &str, spec: &Spec, input: serde_json::Value, _context: &forest_sdk::CallContext) -> Result<serde_json::Value, forest_sdk::Error> {
+    async fn call(
+        &self,
+        method: &str,
+        spec: &Spec,
+        input: serde_json::Value,
+        _context: &forest_sdk::CallContext,
+    ) -> Result<serde_json::Value, forest_sdk::Error> {
         match method {
             "commands/diff" => {
                 let input: DiffInput = serde_json::from_value(input)?;
@@ -446,12 +527,14 @@ where
                 Ok(serde_json::Value::Null)
             }
             "hooks/forest/observability/configure_logging" => {
-                let input: ForestObservabilityConfigureLoggingInput = serde_json::from_value(input)?;
+                let input: ForestObservabilityConfigureLoggingInput =
+                    serde_json::from_value(input)?;
                 let output = self.hooks2.configure_logging(spec, input).await?;
                 serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)
             }
             "hooks/forest/observability/configure_monitoring" => {
-                let input: ForestObservabilityConfigureMonitoringInput = serde_json::from_value(input)?;
+                let input: ForestObservabilityConfigureMonitoringInput =
+                    serde_json::from_value(input)?;
                 let output = self.hooks2.configure_monitoring(spec, input).await?;
                 serde_json::to_value(output).map_err(forest_sdk::Error::Deserialization)
             }
@@ -471,19 +554,89 @@ where
 
     fn methods(&self) -> Vec<forest_sdk::MethodDescriptor> {
         vec![
-            forest_sdk::MethodDescriptor { name: "commands/diff".into(), kind: forest_sdk::MethodKind::Command, description: Some("Show diff of generated manifests against live cluster state".into()) },
-            forest_sdk::MethodDescriptor { name: "commands/logs".into(), kind: forest_sdk::MethodKind::Command, description: Some("Tail pod logs for the service".into()) },
-            forest_sdk::MethodDescriptor { name: "commands/prepare".into(), kind: forest_sdk::MethodKind::Command, description: Some("Generate Kubernetes manifests (Deployment, Service, Ingress, HPA, etc.)".into()) },
-            forest_sdk::MethodDescriptor { name: "commands/status".into(), kind: forest_sdk::MethodKind::Command, description: Some("Check deployment status against the cluster".into()) },
-            forest_sdk::MethodDescriptor { name: "commands/validate".into(), kind: forest_sdk::MethodKind::Command, description: Some("Validate spec and generated manifests".into()) },
-            forest_sdk::MethodDescriptor { name: "hooks/forest/deployment/prepare".into(), kind: forest_sdk::MethodKind::Hook { topic: "forest/deployment".into() }, description: Some("Generate and validate Kubernetes manifests for deployment".into()) },
-            forest_sdk::MethodDescriptor { name: "hooks/forest/deployment/release".into(), kind: forest_sdk::MethodKind::Hook { topic: "forest/deployment".into() }, description: Some("Apply manifests to the target cluster".into()) },
-            forest_sdk::MethodDescriptor { name: "hooks/forest/deployment/rollback".into(), kind: forest_sdk::MethodKind::Hook { topic: "forest/deployment".into() }, description: Some("Roll back to a previous revision".into()) },
-            forest_sdk::MethodDescriptor { name: "hooks/forest/observability/configure_logging".into(), kind: forest_sdk::MethodKind::Hook { topic: "forest/observability".into() }, description: Some("Configure log collection pipeline for the service".into()) },
-            forest_sdk::MethodDescriptor { name: "hooks/forest/observability/configure_monitoring".into(), kind: forest_sdk::MethodKind::Hook { topic: "forest/observability".into() }, description: Some("Create or update ServiceMonitor and PrometheusRule resources".into()) },
-            forest_sdk::MethodDescriptor { name: "hooks/forest/security/apply_policies".into(), kind: forest_sdk::MethodKind::Hook { topic: "forest/security".into() }, description: Some("Apply NetworkPolicy and PodSecurity resources".into()) },
-            forest_sdk::MethodDescriptor { name: "hooks/forest/security/scan_image".into(), kind: forest_sdk::MethodKind::Hook { topic: "forest/security".into() }, description: Some("Run vulnerability scan on the container image".into()) },
+            forest_sdk::MethodDescriptor {
+                name: "commands/diff".into(),
+                kind: forest_sdk::MethodKind::Command,
+                description: Some(
+                    "Show diff of generated manifests against live cluster state".into(),
+                ),
+            },
+            forest_sdk::MethodDescriptor {
+                name: "commands/logs".into(),
+                kind: forest_sdk::MethodKind::Command,
+                description: Some("Tail pod logs for the service".into()),
+            },
+            forest_sdk::MethodDescriptor {
+                name: "commands/prepare".into(),
+                kind: forest_sdk::MethodKind::Command,
+                description: Some(
+                    "Generate Kubernetes manifests (Deployment, Service, Ingress, HPA, etc.)"
+                        .into(),
+                ),
+            },
+            forest_sdk::MethodDescriptor {
+                name: "commands/status".into(),
+                kind: forest_sdk::MethodKind::Command,
+                description: Some("Check deployment status against the cluster".into()),
+            },
+            forest_sdk::MethodDescriptor {
+                name: "commands/validate".into(),
+                kind: forest_sdk::MethodKind::Command,
+                description: Some("Validate spec and generated manifests".into()),
+            },
+            forest_sdk::MethodDescriptor {
+                name: "hooks/forest/deployment/prepare".into(),
+                kind: forest_sdk::MethodKind::Hook {
+                    topic: "forest/deployment".into(),
+                },
+                description: Some(
+                    "Generate and validate Kubernetes manifests for deployment".into(),
+                ),
+            },
+            forest_sdk::MethodDescriptor {
+                name: "hooks/forest/deployment/release".into(),
+                kind: forest_sdk::MethodKind::Hook {
+                    topic: "forest/deployment".into(),
+                },
+                description: Some("Apply manifests to the target cluster".into()),
+            },
+            forest_sdk::MethodDescriptor {
+                name: "hooks/forest/deployment/rollback".into(),
+                kind: forest_sdk::MethodKind::Hook {
+                    topic: "forest/deployment".into(),
+                },
+                description: Some("Roll back to a previous revision".into()),
+            },
+            forest_sdk::MethodDescriptor {
+                name: "hooks/forest/observability/configure_logging".into(),
+                kind: forest_sdk::MethodKind::Hook {
+                    topic: "forest/observability".into(),
+                },
+                description: Some("Configure log collection pipeline for the service".into()),
+            },
+            forest_sdk::MethodDescriptor {
+                name: "hooks/forest/observability/configure_monitoring".into(),
+                kind: forest_sdk::MethodKind::Hook {
+                    topic: "forest/observability".into(),
+                },
+                description: Some(
+                    "Create or update ServiceMonitor and PrometheusRule resources".into(),
+                ),
+            },
+            forest_sdk::MethodDescriptor {
+                name: "hooks/forest/security/apply_policies".into(),
+                kind: forest_sdk::MethodKind::Hook {
+                    topic: "forest/security".into(),
+                },
+                description: Some("Apply NetworkPolicy and PodSecurity resources".into()),
+            },
+            forest_sdk::MethodDescriptor {
+                name: "hooks/forest/security/scan_image".into(),
+                kind: forest_sdk::MethodKind::Hook {
+                    topic: "forest/security".into(),
+                },
+                description: Some("Run vulnerability scan on the container image".into()),
+            },
         ]
     }
 }
-

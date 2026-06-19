@@ -1,7 +1,5 @@
 use anyhow::Context;
-use forest_grpc_interface::{
-    release_service_server::ReleaseService, PipelineStageUpdate, *,
-};
+use forest_grpc_interface::{PipelineStageUpdate, release_service_server::ReleaseService, *};
 
 #[derive(sqlx::FromRow)]
 struct PlanOutputRow {
@@ -21,14 +19,14 @@ use crate::{
     domains::trigger::AnnotationMatchData,
     grpc::{artifacts::GrpcErrorExt, authorize},
     services::{
-        policy::{PolicyRegistryState, PolicyType},
-        trigger_aggregate::TriggerAggregateServiceState,
         event_bus::{EventBusState, EventPayload},
         notification_registry::{NotificationRegistryState, ReleaseContext as NotifReleaseContext},
+        policy::{PolicyRegistryState, PolicyType},
         release_event_store::ReleaseEventStoreState,
         release_logs_registry::{LogChannel, ReleaseLogsRegistryState},
         release_pipeline::ReleasePipelineRegistryState,
         release_registry::{self, ReleaseAnnotation, ReleaseDestination, ReleaseRegistryState},
+        trigger_aggregate::TriggerAggregateServiceState,
         users::UserServiceState,
     },
     state::State,
@@ -57,8 +55,12 @@ impl ReleaseService for ReleaseServer {
             .to_internal_error()?;
 
         authorize::require_org_access(
-            &self.state.db, &actor, &proj.organisation, authorize::OrgRole::Member,
-        ).await?;
+            &self.state.db,
+            &actor,
+            &proj.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let artifact_id = req
             .artifact_id
@@ -164,14 +166,17 @@ impl ReleaseService for ReleaseServer {
             tracing::warn!("failed to create annotation notification: {e:#}");
         }
 
-        self.state.event_bus().emit(EventPayload {
-            organisation: proj.organisation.clone(),
-            project: proj.project.clone(),
-            resource_type: "artifact",
-            action: "created",
-            resource_id: artifact_id.to_string(),
-            metadata: [("slug".into(), slug.clone())].into(),
-        }).await;
+        self.state
+            .event_bus()
+            .emit(EventPayload {
+                organisation: proj.organisation.clone(),
+                project: proj.project.clone(),
+                resource_type: "artifact",
+                action: "created",
+                resource_id: artifact_id.to_string(),
+                metadata: [("slug".into(), slug.clone())].into(),
+            })
+            .await;
 
         // When annotation_only is set, skip trigger evaluation entirely
         // (used by `forest release create` to avoid auto-releases).
@@ -183,8 +188,7 @@ impl ReleaseService for ReleaseServer {
         }
 
         // Evaluate triggers
-        let match_data =
-            AnnotationMatchData::from_parts(&source, &art_context, &reference);
+        let match_data = AnnotationMatchData::from_parts(&source, &art_context, &reference);
 
         tracing::debug!(
             branch = ?match_data.branch,
@@ -228,9 +232,7 @@ impl ReleaseService for ReleaseServer {
                             .await
                             .unwrap_or_default();
                         for eval in &evals {
-                            if !eval.passed
-                                && eval.policy_type == PolicyType::BranchRestriction
-                            {
+                            if !eval.passed && eval.policy_type == PolicyType::BranchRestriction {
                                 tracing::info!(
                                     trigger = %trigger_match.trigger_name,
                                     policy = %eval.policy_name,
@@ -354,8 +356,12 @@ impl ReleaseService for ReleaseServer {
             .to_internal_error()?;
 
         authorize::require_org_access(
-            &self.state.db, &actor, &project.organisation, authorize::OrgRole::Member,
-        ).await?;
+            &self.state.db,
+            &actor,
+            &project.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let release_annotation = self
             .state
@@ -400,8 +406,12 @@ impl ReleaseService for ReleaseServer {
 
         if let Some(ref org_name) = release_org {
             authorize::require_org_access(
-                &self.state.db, &actor, org_name, authorize::OrgRole::Member,
-            ).await?;
+                &self.state.db,
+                &actor,
+                org_name,
+                authorize::OrgRole::Member,
+            )
+            .await?;
         }
 
         // Evaluate branch restriction policies before releasing
@@ -440,9 +450,7 @@ impl ReleaseService for ReleaseServer {
                 for eval in &evaluations {
                     // Only enforce branch_restriction at request time.
                     // soak_time is handled by the scheduler (deferred retry).
-                    if !eval.passed
-                        && eval.policy_type == PolicyType::BranchRestriction
-                    {
+                    if !eval.passed && eval.policy_type == PolicyType::BranchRestriction {
                         return Err(tonic::Status::failed_precondition(format!(
                             "blocked by policy '{}': {}",
                             eval.policy_name, eval.reason
@@ -512,9 +520,7 @@ impl ReleaseService for ReleaseServer {
                         Actor::User { user_id } => Some(user_id.to_string()),
                         _ => None,
                     },
-                    source_type: ann_ctx
-                        .as_ref()
-                        .and_then(|a| a.source.source_type.clone()),
+                    source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
                     run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
                     commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),
                     commit_branch: ann_ctx
@@ -523,12 +529,8 @@ impl ReleaseService for ReleaseServer {
                     commit_message: ann_ctx
                         .as_ref()
                         .and_then(|a| a.reference.commit_message.clone()),
-                    version: ann_ctx
-                        .as_ref()
-                        .and_then(|a| a.reference.version.clone()),
-                    repo_url: ann_ctx
-                        .as_ref()
-                        .and_then(|a| a.reference.repo_url.clone()),
+                    version: ann_ctx.as_ref().and_then(|a| a.reference.version.clone()),
+                    repo_url: ann_ctx.as_ref().and_then(|a| a.reference.repo_url.clone()),
                     context_title: ann_ctx.as_ref().map(|a| a.context.title.clone()),
                     context_description: ann_ctx
                         .as_ref()
@@ -543,16 +545,17 @@ impl ReleaseService for ReleaseServer {
             tracing::warn!("failed to create release started notification: {e:#}");
         }
 
-        self.state.event_bus().emit(EventPayload {
-            organisation: created.organisation.clone(),
-            project: created.project.clone(),
-            resource_type: "release",
-            action: "created",
-            resource_id: created.release_intent_id.to_string(),
-            metadata: [
-                ("destinations".into(), dest_names.join(",")),
-            ].into(),
-        }).await;
+        self.state
+            .event_bus()
+            .emit(EventPayload {
+                organisation: created.organisation.clone(),
+                project: created.project.clone(),
+                resource_type: "release",
+                action: "created",
+                resource_id: created.release_intent_id.to_string(),
+                metadata: [("destinations".into(), dest_names.join(","))].into(),
+            })
+            .await;
 
         // Signal the IntentCoordinator to evaluate this pipeline
         if !created.activated_stages.is_empty() || req.use_pipeline {
@@ -648,8 +651,7 @@ impl ReleaseService for ReleaseServer {
             let mut last_stage_statuses: std::collections::HashMap<String, String> =
                 std::collections::HashMap::new();
 
-            let mut fallback_interval =
-                tokio::time::interval(std::time::Duration::from_secs(2));
+            let mut fallback_interval = tokio::time::interval(std::time::Duration::from_secs(2));
             fallback_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
             loop {
@@ -668,58 +670,58 @@ impl ReleaseService for ReleaseServer {
                 .await
                     && let (Some(stages_json), Some(stage_states_json)) =
                         (&intent_row.stages, &intent_row.stage_states)
-                    {
-                        use crate::services::release_pipeline::{
-                            PipelineStages, StageConfig, StageStates,
-                        };
+                {
+                    use crate::services::release_pipeline::{
+                        PipelineStages, StageConfig, StageStates,
+                    };
 
-                        if let (Ok(stages), Ok(stage_states)) = (
-                            serde_json::from_value::<PipelineStages>(stages_json.clone()),
-                            serde_json::from_value::<StageStates>(stage_states_json.clone()),
-                        ) {
-                            for (stage_id, state) in &stage_states {
-                                let status_str = format!("{:?}", state.status).to_uppercase();
-                                let changed = last_stage_statuses
+                    if let (Ok(stages), Ok(stage_states)) = (
+                        serde_json::from_value::<PipelineStages>(stages_json.clone()),
+                        serde_json::from_value::<StageStates>(stage_states_json.clone()),
+                    ) {
+                        for (stage_id, state) in &stage_states {
+                            let status_str = format!("{:?}", state.status).to_uppercase();
+                            let changed = last_stage_statuses
+                                .get(stage_id)
+                                .is_none_or(|prev| *prev != status_str);
+
+                            if changed {
+                                last_stage_statuses.insert(stage_id.clone(), status_str.clone());
+
+                                let stage_type = stages
                                     .get(stage_id)
-                                    .is_none_or(|prev| *prev != status_str);
+                                    .map(|def| match &def.config {
+                                        StageConfig::Deploy { .. } => "deploy",
+                                        StageConfig::Wait { .. } => "wait",
+                                        StageConfig::Plan { .. } => "plan",
+                                    })
+                                    .unwrap_or("unknown");
 
-                                if changed {
-                                    last_stage_statuses
-                                        .insert(stage_id.clone(), status_str.clone());
+                                let event = WaitReleaseEvent {
+                                    event: Some(wait_release_event::Event::StageUpdate(
+                                        PipelineStageUpdate {
+                                            stage_id: stage_id.clone(),
+                                            stage_type: stage_type.to_string(),
+                                            status: status_str,
+                                            queued_at: state.queued_at.clone(),
+                                            started_at: state.started_at.clone(),
+                                            completed_at: state.completed_at.clone(),
+                                            wait_until: state.wait_until.clone(),
+                                            error_message: state.error_message.clone(),
+                                            approval_status: state
+                                                .approval_status
+                                                .map(|a| format!("{:?}", a).to_uppercase()),
+                                        },
+                                    )),
+                                };
 
-                                    let stage_type = stages.get(stage_id).map(|def| {
-                                        match &def.config {
-                                            StageConfig::Deploy { .. } => "deploy",
-                                            StageConfig::Wait { .. } => "wait",
-                                            StageConfig::Plan { .. } => "plan",
-                                        }
-                                    }).unwrap_or("unknown");
-
-                                    let event = WaitReleaseEvent {
-                                        event: Some(
-                                            wait_release_event::Event::StageUpdate(
-                                                PipelineStageUpdate {
-                                                    stage_id: stage_id.clone(),
-                                                    stage_type: stage_type.to_string(),
-                                                    status: status_str,
-                                                    queued_at: state.queued_at.clone(),
-                                                    started_at: state.started_at.clone(),
-                                                    completed_at: state.completed_at.clone(),
-                                                    wait_until: state.wait_until.clone(),
-                                                    error_message: state.error_message.clone(),
-                                                    approval_status: state.approval_status.map(|a| format!("{:?}", a).to_uppercase()),
-                                                },
-                                            ),
-                                        ),
-                                    };
-
-                                    if tx.send(Ok(event)).await.is_err() {
-                                        return;
-                                    }
+                                if tx.send(Ok(event)).await.is_err() {
+                                    return;
                                 }
                             }
                         }
                     }
+                }
 
                 // Fetch current state and stream updates
                 match release_registry
@@ -732,10 +734,7 @@ impl ReleaseService for ReleaseServer {
                             // check if pipeline is fully complete via stage_states
                             if !last_stage_statuses.is_empty() {
                                 let all_stages_terminal = last_stage_statuses.values().all(|s| {
-                                    matches!(
-                                        s.as_str(),
-                                        "SUCCEEDED" | "FAILED" | "CANCELLED"
-                                    )
+                                    matches!(s.as_str(), "SUCCEEDED" | "FAILED" | "CANCELLED")
                                 });
                                 if all_stages_terminal {
                                     break;
@@ -889,9 +888,7 @@ impl ReleaseService for ReleaseServer {
         let caller_matches = match (&caller, req.actor_type.as_str(), actor_id) {
             (Actor::User { user_id }, "user", id) => *user_id == id,
             (Actor::App { app_id, .. }, "app", id) => *app_id == id,
-            (Actor::ServiceAccount { service_account_id }, "app", id) => {
-                *service_account_id == id
-            }
+            (Actor::ServiceAccount { service_account_id }, "app", id) => *service_account_id == id,
             _ => false,
         };
         if !caller_matches {
@@ -976,8 +973,12 @@ impl ReleaseService for ReleaseServer {
         // Check org membership before listing projects
         if let Some(get_projects_request::Query::Organisation(ref org)) = req.query {
             authorize::require_org_access(
-                &self.state.db, &actor, &org.organisation, authorize::OrgRole::Member,
-            ).await?;
+                &self.state.db,
+                &actor,
+                &org.organisation,
+                authorize::OrgRole::Member,
+            )
+            .await?;
         }
 
         let projects = match req.query.context("query is required").to_internal_error()? {
@@ -1003,8 +1004,12 @@ impl ReleaseService for ReleaseServer {
         let req = request.into_inner();
 
         authorize::require_org_access(
-            &self.state.db, &actor, &req.organisation, authorize::OrgRole::Member,
-        ).await?;
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
         tracing::debug!(
             organisation = %req.organisation,
             project = %req.project,
@@ -1037,8 +1042,12 @@ impl ReleaseService for ReleaseServer {
         let req = request.into_inner();
 
         authorize::require_org_access(
-            &self.state.db, &actor, &req.organisation, authorize::OrgRole::Member,
-        ).await?;
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let rec = self
             .state
@@ -1050,10 +1059,12 @@ impl ReleaseService for ReleaseServer {
 
         let rec = match rec {
             Some(r) => r,
-            None => return Err(tonic::Status::not_found(format!(
-                "project {}/{} not found",
-                req.organisation, req.project
-            ))),
+            None => {
+                return Err(tonic::Status::not_found(format!(
+                    "project {}/{} not found",
+                    req.organisation, req.project
+                )));
+            }
         };
 
         Ok(Response::new(GetProjectResponse {
@@ -1072,8 +1083,12 @@ impl ReleaseService for ReleaseServer {
         // as project creation. Tighten to Admin if metadata curation
         // needs to be gated; spec 008/009 don't require Admin for v1.
         authorize::require_org_access(
-            &self.state.db, &actor, &req.organisation, authorize::OrgRole::Member,
-        ).await?;
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         // Map proto field-mask (`optional` fields) → service-layer
         // partial update. Empty values clear; absent fields are left
@@ -1116,8 +1131,12 @@ impl ReleaseService for ReleaseServer {
         let req = request.into_inner();
 
         authorize::require_org_access(
-            &self.state.db, &actor, &req.organisation, authorize::OrgRole::Member,
-        ).await?;
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let project_id = if let Some(project) = &req.project {
             let id = self
@@ -1142,23 +1161,21 @@ impl ReleaseService for ReleaseServer {
 
         let destinations = rows
             .into_iter()
-            .map(|r| {
-                forest_grpc_interface::DestinationState {
-                    destination_id: r.destination_id.to_string(),
-                    destination_name: r.destination_name,
-                    environment: r.environment,
-                    release_id: Some(r.release_id.to_string()),
-                    artifact_id: Some(r.artifact_id.to_string()),
-                    status: Some(r.status),
-                    error_message: r.error_message,
-                    queued_at: Some(r.queued_at.to_rfc3339()),
-                    assigned_at: r.assigned_at.map(|t| t.to_rfc3339()),
-                    started_at: r.started_at.map(|t| t.to_rfc3339()),
-                    completed_at: r.completed_at.map(|t| t.to_rfc3339()),
-                    queue_position: r.queue_position.map(|p| p as i32),
-                    release_intent_id: Some(r.release_intent_id.to_string()),
-                    stage_id: r.stage_id,
-                }
+            .map(|r| forest_grpc_interface::DestinationState {
+                destination_id: r.destination_id.to_string(),
+                destination_name: r.destination_name,
+                environment: r.environment,
+                release_id: Some(r.release_id.to_string()),
+                artifact_id: Some(r.artifact_id.to_string()),
+                status: Some(r.status),
+                error_message: r.error_message,
+                queued_at: Some(r.queued_at.to_rfc3339()),
+                assigned_at: r.assigned_at.map(|t| t.to_rfc3339()),
+                started_at: r.started_at.map(|t| t.to_rfc3339()),
+                completed_at: r.completed_at.map(|t| t.to_rfc3339()),
+                queue_position: r.queue_position.map(|p| p as i32),
+                release_intent_id: Some(r.release_intent_id.to_string()),
+                stage_id: r.stage_id,
             })
             .collect();
 
@@ -1178,8 +1195,12 @@ impl ReleaseService for ReleaseServer {
         let req = request.into_inner();
 
         authorize::require_org_access(
-            &self.state.db, &actor, &req.organisation, authorize::OrgRole::Member,
-        ).await?;
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
 
         let project_id = if let Some(project) = &req.project {
             let id = self
@@ -1197,7 +1218,11 @@ impl ReleaseService for ReleaseServer {
         let event_store = self.state.release_event_store();
 
         let results = event_store
-            .get_release_intent_states(&req.organisation, project_id.as_ref(), req.include_completed)
+            .get_release_intent_states(
+                &req.organisation,
+                project_id.as_ref(),
+                req.include_completed,
+            )
             .await
             .context("get release intent states")
             .to_internal_error()?;
@@ -1242,11 +1267,15 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<ApprovePlanStageRequest>,
     ) -> Result<Response<ApprovePlanStageResponse>, tonic::Status> {
-        use crate::services::release_pipeline::{ApprovalStatus, PipelineStages, StageConfig, StageStates};
+        use crate::services::release_pipeline::{
+            ApprovalStatus, PipelineStages, StageConfig, StageStates,
+        };
 
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        let intent_id: Uuid = req.release_intent_id.parse()
+        let intent_id: Uuid = req
+            .release_intent_id
+            .parse()
             .context("invalid release_intent_id")
             .to_internal_error()?;
 
@@ -1272,7 +1301,11 @@ impl ReleaseService for ReleaseServer {
         )
         .await?;
 
-        let mut tx = self.state.db.begin().await
+        let mut tx = self
+            .state
+            .db
+            .begin()
+            .await
             .context("begin tx")
             .to_internal_error()?;
 
@@ -1291,30 +1324,42 @@ impl ReleaseService for ReleaseServer {
             return Err(tonic::Status::failed_precondition("intent is not active"));
         }
 
-        let stages: PipelineStages = intent.stages
+        let stages: PipelineStages = intent
+            .stages
             .context("intent has no pipeline stages")
             .to_internal_error()
-            .and_then(|v| serde_json::from_value(v).context("parse stages").to_internal_error())?;
+            .and_then(|v| {
+                serde_json::from_value(v)
+                    .context("parse stages")
+                    .to_internal_error()
+            })?;
 
-        let stage_def = stages.get(&req.stage_id)
-            .ok_or_else(|| tonic::Status::not_found(format!("stage '{}' not found", req.stage_id)))?;
+        let stage_def = stages.get(&req.stage_id).ok_or_else(|| {
+            tonic::Status::not_found(format!("stage '{}' not found", req.stage_id))
+        })?;
 
         if !matches!(stage_def.config, StageConfig::Plan { .. }) {
-            return Err(tonic::Status::failed_precondition("stage is not a plan stage"));
+            return Err(tonic::Status::failed_precondition(
+                "stage is not a plan stage",
+            ));
         }
 
-        let mut stage_states: StageStates = intent.stage_states
+        let mut stage_states: StageStates = intent
+            .stage_states
             .map(serde_json::from_value)
             .transpose()
             .context("parse stage_states")
             .to_internal_error()?
             .unwrap_or_default();
 
-        let state = stage_states.get_mut(&req.stage_id)
+        let state = stage_states
+            .get_mut(&req.stage_id)
             .ok_or_else(|| tonic::Status::not_found("stage state not found"))?;
 
         if state.approval_status != Some(ApprovalStatus::AwaitingApproval) {
-            return Err(tonic::Status::failed_precondition("stage is not awaiting approval"));
+            return Err(tonic::Status::failed_precondition(
+                "stage is not awaiting approval",
+            ));
         }
 
         state.approval_status = Some(ApprovalStatus::Approved);
@@ -1337,10 +1382,11 @@ impl ReleaseService for ReleaseServer {
         tx.commit().await.context("commit").to_internal_error()?;
 
         // Nudge coordinator to re-evaluate
-        let _ = self.state.nats.publish(
-            "forest.intent.evaluate",
-            intent_id.to_string().into(),
-        ).await;
+        let _ = self
+            .state
+            .nats
+            .publish("forest.intent.evaluate", intent_id.to_string().into())
+            .await;
 
         Ok(Response::new(ApprovePlanStageResponse {}))
     }
@@ -1349,11 +1395,15 @@ impl ReleaseService for ReleaseServer {
         &self,
         request: tonic::Request<RejectPlanStageRequest>,
     ) -> Result<Response<RejectPlanStageResponse>, tonic::Status> {
-        use crate::services::release_pipeline::{ApprovalStatus, PipelineStages, StageConfig, StageStates};
+        use crate::services::release_pipeline::{
+            ApprovalStatus, PipelineStages, StageConfig, StageStates,
+        };
 
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        let intent_id: Uuid = req.release_intent_id.parse()
+        let intent_id: Uuid = req
+            .release_intent_id
+            .parse()
             .context("invalid release_intent_id")
             .to_internal_error()?;
 
@@ -1377,7 +1427,11 @@ impl ReleaseService for ReleaseServer {
         )
         .await?;
 
-        let mut tx = self.state.db.begin().await
+        let mut tx = self
+            .state
+            .db
+            .begin()
+            .await
             .context("begin tx")
             .to_internal_error()?;
 
@@ -1396,30 +1450,42 @@ impl ReleaseService for ReleaseServer {
             return Err(tonic::Status::failed_precondition("intent is not active"));
         }
 
-        let stages: PipelineStages = intent.stages
+        let stages: PipelineStages = intent
+            .stages
             .context("intent has no pipeline stages")
             .to_internal_error()
-            .and_then(|v| serde_json::from_value(v).context("parse stages").to_internal_error())?;
+            .and_then(|v| {
+                serde_json::from_value(v)
+                    .context("parse stages")
+                    .to_internal_error()
+            })?;
 
-        let stage_def = stages.get(&req.stage_id)
-            .ok_or_else(|| tonic::Status::not_found(format!("stage '{}' not found", req.stage_id)))?;
+        let stage_def = stages.get(&req.stage_id).ok_or_else(|| {
+            tonic::Status::not_found(format!("stage '{}' not found", req.stage_id))
+        })?;
 
         if !matches!(stage_def.config, StageConfig::Plan { .. }) {
-            return Err(tonic::Status::failed_precondition("stage is not a plan stage"));
+            return Err(tonic::Status::failed_precondition(
+                "stage is not a plan stage",
+            ));
         }
 
-        let mut stage_states: StageStates = intent.stage_states
+        let mut stage_states: StageStates = intent
+            .stage_states
             .map(serde_json::from_value)
             .transpose()
             .context("parse stage_states")
             .to_internal_error()?
             .unwrap_or_default();
 
-        let state = stage_states.get_mut(&req.stage_id)
+        let state = stage_states
+            .get_mut(&req.stage_id)
             .ok_or_else(|| tonic::Status::not_found("stage state not found"))?;
 
         if state.approval_status != Some(ApprovalStatus::AwaitingApproval) {
-            return Err(tonic::Status::failed_precondition("stage is not awaiting approval"));
+            return Err(tonic::Status::failed_precondition(
+                "stage is not awaiting approval",
+            ));
         }
 
         state.approval_status = Some(ApprovalStatus::Rejected);
@@ -1442,10 +1508,11 @@ impl ReleaseService for ReleaseServer {
         tx.commit().await.context("commit").to_internal_error()?;
 
         // Nudge coordinator to re-evaluate
-        let _ = self.state.nats.publish(
-            "forest.intent.evaluate",
-            intent_id.to_string().into(),
-        ).await;
+        let _ = self
+            .state
+            .nats
+            .publish("forest.intent.evaluate", intent_id.to_string().into())
+            .await;
 
         Ok(Response::new(RejectPlanStageResponse {}))
     }
@@ -1458,7 +1525,9 @@ impl ReleaseService for ReleaseServer {
 
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        let intent_id: Uuid = req.release_intent_id.parse()
+        let intent_id: Uuid = req
+            .release_intent_id
+            .parse()
             .context("invalid release_intent_id")
             .to_internal_error()?;
 
@@ -1493,19 +1562,28 @@ impl ReleaseService for ReleaseServer {
         .context("release intent not found")
         .to_internal_error()?;
 
-        let stages: PipelineStages = intent.stages
+        let stages: PipelineStages = intent
+            .stages
             .context("intent has no pipeline stages")
             .to_internal_error()
-            .and_then(|v| serde_json::from_value(v).context("parse stages").to_internal_error())?;
+            .and_then(|v| {
+                serde_json::from_value(v)
+                    .context("parse stages")
+                    .to_internal_error()
+            })?;
 
-        let stage_def = stages.get(&req.stage_id)
-            .ok_or_else(|| tonic::Status::not_found(format!("stage '{}' not found", req.stage_id)))?;
+        let stage_def = stages.get(&req.stage_id).ok_or_else(|| {
+            tonic::Status::not_found(format!("stage '{}' not found", req.stage_id))
+        })?;
 
         if !matches!(stage_def.config, StageConfig::Plan { .. }) {
-            return Err(tonic::Status::failed_precondition("stage is not a plan stage"));
+            return Err(tonic::Status::failed_precondition(
+                "stage is not a plan stage",
+            ));
         }
 
-        let stage_states: StageStates = intent.stage_states
+        let stage_states: StageStates = intent
+            .stage_states
             .map(serde_json::from_value)
             .transpose()
             .context("parse stage_states")
@@ -1542,7 +1620,8 @@ impl ReleaseService for ReleaseServer {
             .collect();
 
         // Backward compat: first non-empty output
-        let plan_output = outputs.iter()
+        let plan_output = outputs
+            .iter()
             .find(|o| !o.plan_output.is_empty())
             .map(|o| o.plan_output.clone())
             .unwrap_or_default();
@@ -1565,9 +1644,7 @@ impl ReleaseService for ReleaseServer {
     }
 }
 
-fn project_record_to_proto(
-    rec: crate::services::release_registry::ProjectRecord,
-) -> Project {
+fn project_record_to_proto(rec: crate::services::release_registry::ProjectRecord) -> Project {
     Project {
         organisation: rec.organisation,
         project: rec.project,
@@ -1633,7 +1710,10 @@ fn stage_def_to_type_fields(
             Some(*duration_seconds),
             None,
         ),
-        StageConfig::Plan { environment, auto_approve } => (
+        StageConfig::Plan {
+            environment,
+            auto_approve,
+        } => (
             forest_grpc_interface::PipelineRunStageType::Plan as i32,
             Some(environment.clone()),
             None,
@@ -1665,27 +1745,42 @@ fn intent_to_stage_states(
     stages
         .iter()
         .map(|(id, def)| {
-            let (stage_type, environment, duration_seconds, auto_approve) = stage_def_to_type_fields(&def.config);
+            let (stage_type, environment, duration_seconds, auto_approve) =
+                stage_def_to_type_fields(&def.config);
             let state = stage_states.get(id);
 
-            let (status, queued_at, started_at, completed_at, error_message, wait_until, release_ids, approval_status) =
-                if let Some(s) = state {
-                    (
-                        stage_status_to_proto(&s.status) as i32,
-                        s.queued_at.clone(),
-                        s.started_at.clone(),
-                        s.completed_at.clone(),
-                        s.error_message.clone(),
-                        s.wait_until.clone(),
-                        s.release_ids.clone().unwrap_or_default(),
-                        s.approval_status.map(|a| format!("{:?}", a).to_uppercase()),
-                    )
-                } else {
-                    (
-                        forest_grpc_interface::PipelineRunStageStatus::Pending as i32,
-                        None, None, None, None, None, Vec::new(), None,
-                    )
-                };
+            let (
+                status,
+                queued_at,
+                started_at,
+                completed_at,
+                error_message,
+                wait_until,
+                release_ids,
+                approval_status,
+            ) = if let Some(s) = state {
+                (
+                    stage_status_to_proto(&s.status) as i32,
+                    s.queued_at.clone(),
+                    s.started_at.clone(),
+                    s.completed_at.clone(),
+                    s.error_message.clone(),
+                    s.wait_until.clone(),
+                    s.release_ids.clone().unwrap_or_default(),
+                    s.approval_status.map(|a| format!("{:?}", a).to_uppercase()),
+                )
+            } else {
+                (
+                    forest_grpc_interface::PipelineRunStageStatus::Pending as i32,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Vec::new(),
+                    None,
+                )
+            };
 
             forest_grpc_interface::PipelineStageState {
                 stage_id: id.clone(),
@@ -1733,24 +1828,38 @@ fn pipeline_run_to_proto(
                 stage_def_to_type_fields(&def.config);
             let state = stage_states.get(id);
 
-            let (status, queued_at, started_at, completed_at, error_message, wait_until, release_ids, approval_status) =
-                if let Some(s) = state {
-                    (
-                        stage_status_to_proto(&s.status) as i32,
-                        s.queued_at.clone(),
-                        s.started_at.clone(),
-                        s.completed_at.clone(),
-                        s.error_message.clone(),
-                        s.wait_until.clone(),
-                        s.release_ids.clone().unwrap_or_default(),
-                        s.approval_status.map(|a| format!("{:?}", a).to_uppercase()),
-                    )
-                } else {
-                    (
-                        forest_grpc_interface::PipelineRunStageStatus::Pending as i32,
-                        None, None, None, None, None, Vec::new(), None,
-                    )
-                };
+            let (
+                status,
+                queued_at,
+                started_at,
+                completed_at,
+                error_message,
+                wait_until,
+                release_ids,
+                approval_status,
+            ) = if let Some(s) = state {
+                (
+                    stage_status_to_proto(&s.status) as i32,
+                    s.queued_at.clone(),
+                    s.started_at.clone(),
+                    s.completed_at.clone(),
+                    s.error_message.clone(),
+                    s.wait_until.clone(),
+                    s.release_ids.clone().unwrap_or_default(),
+                    s.approval_status.map(|a| format!("{:?}", a).to_uppercase()),
+                )
+            } else {
+                (
+                    forest_grpc_interface::PipelineRunStageStatus::Pending as i32,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Vec::new(),
+                    None,
+                )
+            };
 
             forest_grpc_interface::PipelineRunStage {
                 stage_id: id.clone(),

@@ -116,7 +116,9 @@ fn print_architecture() {
     println!();
     println!("      projects/             Project configurations using components");
     println!("        my-project/");
-    println!("          forest.cue            Project config, dependencies, env/destination mapping");
+    println!(
+        "          forest.cue            Project config, dependencies, env/destination mapping"
+    );
     println!("          cue.mod/module.cue    CUE module for the project");
     println!("          secrets/              Sealed secret files per environment");
     println!();
@@ -205,8 +207,12 @@ fn print_commands() {
     println!();
     println!("        Examples:");
     println!("          forest run seal --env dev --key MY_SECRET --value s3cr3t --cert cert.pem");
-    println!("          cat creds.txt | forest run seal --env dev --key CREDS --value @- --cert cert.pem");
-    println!("          forest run seal --env dev --key CREDS --value @/path/to/creds --cert cert.pem");
+    println!(
+        "          cat creds.txt | forest run seal --env dev --key CREDS --value @- --cert cert.pem"
+    );
+    println!(
+        "          forest run seal --env dev --key CREDS --value @/path/to/creds --cert cert.pem"
+    );
     println!("          forest run validate");
     println!("          forest run service:status");
     println!();
@@ -342,10 +348,14 @@ fn print_protocol() {
     println!("  Message Types");
     println!();
     println!("    Runtime → Component (invocation):");
-    println!("      {{\"type\":\"invoke\",\"method\":\"commands/seal\",\"spec\":{{...}},\"input\":{{...}},\"context\":{{...}}}}");
+    println!(
+        "      {{\"type\":\"invoke\",\"method\":\"commands/seal\",\"spec\":{{...}},\"input\":{{...}},\"context\":{{...}}}}"
+    );
     println!();
     println!("    Component → Runtime (call another component):");
-    println!("      {{\"type\":\"call\",\"id\":\"1\",\"component\":\"org/name\",\"method\":\"commands/seal\",\"spec\":{{...}},\"input\":{{...}},\"context\":{{...}}}}");
+    println!(
+        "      {{\"type\":\"call\",\"id\":\"1\",\"component\":\"org/name\",\"method\":\"commands/seal\",\"spec\":{{...}},\"input\":{{...}},\"context\":{{...}}}}"
+    );
     println!();
     println!("    Runtime → Component (call result):");
     println!("      {{\"type\":\"call_result\",\"id\":\"1\",\"result\":{{...}}}}");
@@ -511,7 +521,9 @@ fn print_deployment() {
     println!();
     println!("    Set up immediate reconciliation:");
     println!("      1. Deploy a Flux Receiver CR (see `forest docs` > flux-destination guide)");
-    println!("      2. Get the webhook path: kubectl -n flux-system get receiver forest -o jsonpath='{{.status.webhookPath}}'");
+    println!(
+        "      2. Get the webhook path: kubectl -n flux-system get receiver forest -o jsonpath='{{.status.webhookPath}}'"
+    );
     println!("      3. Configure: forest destination update --name <dest> \\");
     println!("           --metadata reconcile_url=http://webhook-receiver.flux-system<path>");
     println!();

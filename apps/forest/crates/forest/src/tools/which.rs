@@ -68,7 +68,11 @@ mod tests {
         ];
         let missing = missing_tools(&tools);
         // `sh` is on PATH on every unix CI box; the fake one never is.
-        assert!(missing.iter().any(|t| t.name == "definitely-not-a-real-binary-xyz"));
+        assert!(
+            missing
+                .iter()
+                .any(|t| t.name == "definitely-not-a-real-binary-xyz")
+        );
         assert!(!missing.iter().any(|t| t.name == "sh"));
     }
 

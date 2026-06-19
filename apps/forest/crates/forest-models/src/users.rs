@@ -20,7 +20,11 @@ impl From<User> for forest_grpc_interface::User {
             user_id: value.id.to_string(),
             username: value.username,
             emails: value.emails.into_iter().map(Into::into).collect(),
-            oauth_connections: value.oauth_connections.into_iter().map(Into::into).collect(),
+            oauth_connections: value
+                .oauth_connections
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             mfa_enabled: value.mfa_enabled,
             created_at: Some(datetime_to_timestamp(value.created_at)),
             updated_at: Some(datetime_to_timestamp(value.updated_at)),
@@ -224,9 +228,7 @@ impl TryFrom<forest_grpc_interface::MfaType> for MfaType {
     fn try_from(value: forest_grpc_interface::MfaType) -> Result<Self, Self::Error> {
         match value {
             forest_grpc_interface::MfaType::Totp => Ok(Self::Totp),
-            forest_grpc_interface::MfaType::Unspecified => {
-                Err("unspecified mfa type".into())
-            }
+            forest_grpc_interface::MfaType::Unspecified => Err("unspecified mfa type".into()),
         }
     }
 }

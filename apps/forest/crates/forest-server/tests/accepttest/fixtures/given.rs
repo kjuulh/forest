@@ -52,9 +52,7 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
         org_client
             .create_organisation(authed_request(
                 &token,
-                CreateOrganisationRequest {
-                    name: name.into(),
-                },
+                CreateOrganisationRequest { name: name.into() },
             ))
             .await
             .expect("create organisation");
@@ -187,7 +185,11 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
         let mut release_client = self.fixture().releases();
         let (token, artifact_id, org) = {
             let data = self.data();
-            (data.auth_token.clone(), data.artifact_id.clone(), data.organisation.clone())
+            (
+                data.auth_token.clone(),
+                data.artifact_id.clone(),
+                data.organisation.clone(),
+            )
         };
 
         let resp = release_client

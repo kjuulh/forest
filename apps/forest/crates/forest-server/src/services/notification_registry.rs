@@ -99,12 +99,10 @@ impl NotificationRegistry {
     /// Returns the current maximum sequence number in the notifications table.
     /// Used by the listen stream to start from "now" rather than replaying history.
     pub async fn get_max_sequence(&self) -> anyhow::Result<i64> {
-        let rec = sqlx::query!(
-            r#"SELECT COALESCE(MAX(sequence), 0) as "max!" FROM notifications"#
-        )
-        .fetch_one(&self.db)
-        .await
-        .context("get max notification sequence")?;
+        let rec = sqlx::query!(r#"SELECT COALESCE(MAX(sequence), 0) as "max!" FROM notifications"#)
+            .fetch_one(&self.db)
+            .await
+            .context("get max notification sequence")?;
 
         Ok(rec.max)
     }
@@ -162,8 +160,7 @@ impl NotificationRegistry {
                 body: r.body,
                 organisation: r.organisation,
                 project: r.project,
-                release_context: serde_json::from_value(r.release_context)
-                    .unwrap_or_default(),
+                release_context: serde_json::from_value(r.release_context).unwrap_or_default(),
                 created_at: r.created_at,
             })
             .collect())
@@ -225,8 +222,7 @@ impl NotificationRegistry {
                 body: r.body,
                 organisation: r.organisation,
                 project: r.project,
-                release_context: serde_json::from_value(r.release_context)
-                    .unwrap_or_default(),
+                release_context: serde_json::from_value(r.release_context).unwrap_or_default(),
                 created_at: r.created_at,
             })
             .collect())

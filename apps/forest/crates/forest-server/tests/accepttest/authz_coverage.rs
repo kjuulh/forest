@@ -28,114 +28,231 @@ const EXEMPT: &[(&str, &str)] = &[
     // ─── UsersService ────────────────────────────────────────────────
     ("users.rs::register", "anonymous account creation"),
     ("users.rs::login", "anonymous credential check"),
-    ("users.rs::verify_login_mfa", "completes the login flow, no actor yet"),
-    ("users.rs::refresh_token", "validates the refresh token itself, no actor needed"),
-    ("users.rs::logout", "self-scoped via the refresh token in the request"),
+    (
+        "users.rs::verify_login_mfa",
+        "completes the login flow, no actor yet",
+    ),
+    (
+        "users.rs::refresh_token",
+        "validates the refresh token itself, no actor needed",
+    ),
+    (
+        "users.rs::logout",
+        "self-scoped via the refresh token in the request",
+    ),
     ("users.rs::token_info", "introspects the caller's own token"),
-    ("users.rs::get_user", "public lookup by id/username/email — also used by login flows"),
-    ("users.rs::update_user", "self-scoped — handler validates user_id matches actor"),
-    ("users.rs::delete_user", "self-scoped — handler validates user_id matches actor"),
-    ("users.rs::list_users", "admin-only via separate path-based check (see auth_layer)"),
-    ("users.rs::add_email", "self-scoped — user_id parsed from request matches actor"),
-    ("users.rs::remove_email", "self-scoped — user_id matches actor"),
-    ("users.rs::list_personal_access_tokens", "self-scoped — user_id matches actor"),
+    (
+        "users.rs::get_user",
+        "public lookup by id/username/email — also used by login flows",
+    ),
+    (
+        "users.rs::update_user",
+        "self-scoped — handler validates user_id matches actor",
+    ),
+    (
+        "users.rs::delete_user",
+        "self-scoped — handler validates user_id matches actor",
+    ),
+    (
+        "users.rs::list_users",
+        "admin-only via separate path-based check (see auth_layer)",
+    ),
+    (
+        "users.rs::add_email",
+        "self-scoped — user_id parsed from request matches actor",
+    ),
+    (
+        "users.rs::remove_email",
+        "self-scoped — user_id matches actor",
+    ),
+    (
+        "users.rs::list_personal_access_tokens",
+        "self-scoped — user_id matches actor",
+    ),
     ("users.rs::create_personal_access_token", "self-scoped"),
     ("users.rs::delete_personal_access_token", "self-scoped"),
     ("users.rs::o_auth_login", "anonymous OAuth callback handler"),
-    ("users.rs::link_o_auth_provider", "self-scoped — links to caller's user (handler must enforce)"),
-    ("users.rs::unlink_o_auth_provider", "self-scoped — unlinks from caller's user (handler must enforce)"),
-    ("users.rs::change_password", "self-scoped — current password proves identity"),
+    (
+        "users.rs::link_o_auth_provider",
+        "self-scoped — links to caller's user (handler must enforce)",
+    ),
+    (
+        "users.rs::unlink_o_auth_provider",
+        "self-scoped — unlinks from caller's user (handler must enforce)",
+    ),
+    (
+        "users.rs::change_password",
+        "self-scoped — current password proves identity",
+    ),
     ("users.rs::setup_mfa", "self-scoped"),
-    ("users.rs::verify_mfa", "completes login challenge, no actor yet"),
+    (
+        "users.rs::verify_mfa",
+        "completes login challenge, no actor yet",
+    ),
     ("users.rs::disable_mfa", "self-scoped"),
     ("users.rs::get_user_stats", "self-scoped via the actor"),
-    ("users.rs::verify_email", "email-verification token authenticates the action"),
-    ("users.rs::confirm_email_verification", "service-account internal call, scoped at the route"),
-    ("users.rs::initiate_device_login", "RFC 8628: CLI has no token yet — by design"),
-    ("users.rs::poll_device_login", "RFC 8628: device_code is the bearer; auth happens out-of-band in browser"),
-
+    (
+        "users.rs::verify_email",
+        "email-verification token authenticates the action",
+    ),
+    (
+        "users.rs::confirm_email_verification",
+        "service-account internal call, scoped at the route",
+    ),
+    (
+        "users.rs::initiate_device_login",
+        "RFC 8628: CLI has no token yet — by design",
+    ),
+    (
+        "users.rs::poll_device_login",
+        "RFC 8628: device_code is the bearer; auth happens out-of-band in browser",
+    ),
     // ─── OrganisationService ─────────────────────────────────────────
-    ("organisations.rs::create_organisation", "anyone authenticated may create their own org"),
-    ("organisations.rs::get_organisation", "public org lookup — names are public"),
-    ("organisations.rs::search_organisations", "public org search"),
-    ("organisations.rs::list_my_organisations", "scoped to caller via AppClaims.user_id"),
-    ("organisations.rs::add_member", "scoped via organisation_id in request — handler must enforce"),
-    ("organisations.rs::remove_member", "scoped via organisation_id in request — handler must enforce"),
-    ("organisations.rs::update_member_role", "scoped via organisation_id in request — handler must enforce"),
+    (
+        "organisations.rs::create_organisation",
+        "anyone authenticated may create their own org",
+    ),
+    (
+        "organisations.rs::get_organisation",
+        "public org lookup — names are public",
+    ),
+    (
+        "organisations.rs::search_organisations",
+        "public org search",
+    ),
+    (
+        "organisations.rs::list_my_organisations",
+        "scoped to caller via AppClaims.user_id",
+    ),
+    (
+        "organisations.rs::add_member",
+        "scoped via organisation_id in request — handler must enforce",
+    ),
+    (
+        "organisations.rs::remove_member",
+        "scoped via organisation_id in request — handler must enforce",
+    ),
+    (
+        "organisations.rs::update_member_role",
+        "scoped via organisation_id in request — handler must enforce",
+    ),
     // DATA-252 — auto-invite. Both RPCs are self-scoped: the user_id is
     // taken from AppClaims, the org_id in the request is only used to
     // filter results that are already constrained by that user_id. The
     // accept_join_offer path re-validates eligibility inside the service
     // tx, so a forged org_id grants no access.
-    ("organisations.rs::list_join_offers", "self-scoped via AppClaims.user_id"),
-    ("organisations.rs::accept_join_offer", "self-scoped via AppClaims.user_id; service re-checks eligibility"),
-
+    (
+        "organisations.rs::list_join_offers",
+        "self-scoped via AppClaims.user_id",
+    ),
+    (
+        "organisations.rs::accept_join_offer",
+        "self-scoped via AppClaims.user_id; service re-checks eligibility",
+    ),
     // ─── NotificationService ─────────────────────────────────────────
     // Notifications are entirely user-self-scoped; the handler module
     // uses its own `extract_actor_id` helper that takes the user_id
     // from the actor extension. No org/project scope exists.
-    ("notifications.rs::list_notifications", "self-scoped via extract_actor_id"),
-    ("notifications.rs::listen_notifications", "self-scoped via extract_actor_id"),
-    ("notifications.rs::get_notification_preferences", "self-scoped"),
-    ("notifications.rs::set_notification_preference", "self-scoped"),
-
+    (
+        "notifications.rs::list_notifications",
+        "self-scoped via extract_actor_id",
+    ),
+    (
+        "notifications.rs::listen_notifications",
+        "self-scoped via extract_actor_id",
+    ),
+    (
+        "notifications.rs::get_notification_preferences",
+        "self-scoped",
+    ),
+    (
+        "notifications.rs::set_notification_preference",
+        "self-scoped",
+    ),
     // ─── RunnerService ───────────────────────────────────────────────
     // Runners authenticate with release-scoped tokens validated in
     // auth_layer, not the JWT/Actor pipeline. Their authz model is
     // "the token only unlocks the release_id it was minted for", which
     // is checked inside the handler against the release context.
-    ("runner.rs::register_runner", "release-scoped runner token, validated upstream"),
-    ("runner.rs::get_release_files", "release-scoped runner token"),
+    (
+        "runner.rs::register_runner",
+        "release-scoped runner token, validated upstream",
+    ),
+    (
+        "runner.rs::get_release_files",
+        "release-scoped runner token",
+    ),
     ("runner.rs::get_spec_files", "release-scoped runner token"),
-    ("runner.rs::get_release_annotation", "release-scoped runner token"),
+    (
+        "runner.rs::get_release_annotation",
+        "release-scoped runner token",
+    ),
     ("runner.rs::get_project_info", "release-scoped runner token"),
     ("runner.rs::push_logs", "release-scoped runner token"),
     ("runner.rs::complete_release", "release-scoped runner token"),
-
     // ─── StatusService ───────────────────────────────────────────────
     ("status.rs::status", "unauthenticated liveness probe"),
-
     // ─── RegistryService — public listings ──────────────────────────
     // These read-only RPCs intentionally allow anonymous callers (set
     // to AuthMode::Optional in auth_layer) so unauthenticated users can
     // browse public components. Private components are filtered by the
     // handler if no actor is present.
-    ("registry.rs::search_components", "public browse + optional actor for private filter"),
-    ("registry.rs::get_component_detail", "public component detail + optional actor"),
+    (
+        "registry.rs::search_components",
+        "public browse + optional actor for private filter",
+    ),
+    (
+        "registry.rs::get_component_detail",
+        "public component detail + optional actor",
+    ),
     // Pre-existing drift caught by this DATA-252 PR: the public-only RPCs
     // introduced by PR #48 were never added to EXEMPT. Same shape as
     // search_components — anonymous-allowed, public-by-name.
-    ("registry.rs::search_public_components", "public browse (public-only RPC, no actor required)"),
-    ("registry.rs::get_public_component_detail", "public detail (public-only RPC, no actor required)"),
-    ("registry.rs::get_public_component_manifest", "public manifest (public-only RPC, no actor required)"),
-
+    (
+        "registry.rs::search_public_components",
+        "public browse (public-only RPC, no actor required)",
+    ),
+    (
+        "registry.rs::get_public_component_detail",
+        "public detail (public-only RPC, no actor required)",
+    ),
+    (
+        "registry.rs::get_public_component_manifest",
+        "public manifest (public-only RPC, no actor required)",
+    ),
     // ─── DestinationService ─────────────────────────────────────────
-    ("destinations.rs::list_destination_types", "static metadata, no org context"),
-
+    (
+        "destinations.rs::list_destination_types",
+        "static metadata, no org context",
+    ),
     // ─── ReleaseService — public/cross-org reads ────────────────────
     // Org names are public (used to populate the org picker in the UI).
-    ("release.rs::get_organisations", "public list of org names for UI dropdowns"),
+    (
+        "release.rs::get_organisations",
+        "public list of org names for UI dropdowns",
+    ),
 ];
 
 fn exempt_set() -> std::collections::HashSet<(&'static str, &'static str)> {
-    EXEMPT.iter().copied().map(|(k, _)| (k.split("::").next().unwrap(), k.split("::").nth(1).unwrap())).collect()
+    EXEMPT
+        .iter()
+        .copied()
+        .map(|(k, _)| (k.split("::").next().unwrap(), k.split("::").nth(1).unwrap()))
+        .collect()
 }
 
 fn grpc_dir() -> PathBuf {
     // tests run from the crate root
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src").join("grpc")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src")
+        .join("grpc")
 }
 
 /// Files in src/grpc/ that aren't gRPC service impls (helpers, layers, etc.)
 fn is_service_file(name: &str) -> bool {
     !matches!(
         name,
-        "mod.rs"
-            | "auth_layer.rs"
-            | "authorize.rs"
-            | "error.rs"
-            | "log_layer.rs"
-            | "artifacts.rs" // helper module, no service impl
+        "mod.rs" | "auth_layer.rs" | "authorize.rs" | "error.rs" | "log_layer.rs" | "artifacts.rs" // helper module, no service impl
     )
 }
 

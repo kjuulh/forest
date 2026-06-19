@@ -29,10 +29,7 @@ async fn connect_nats(url: &str) -> anyhow::Result<async_nats::Client> {
         return Ok(client);
     }
 
-    if let (Ok(user), Ok(password)) = (
-        std::env::var("NATS_USER"),
-        std::env::var("NATS_PASSWORD"),
-    ) {
+    if let (Ok(user), Ok(password)) = (std::env::var("NATS_USER"), std::env::var("NATS_PASSWORD")) {
         tracing::info!("connecting to NATS with user/password auth");
         let client = async_nats::ConnectOptions::with_user_and_password(user, password)
             .connect(url)
@@ -143,7 +140,8 @@ impl State {
             .context("failed to initialize S3 object store")?;
 
         let dns_resolver: std::sync::Arc<dyn crate::dns::DnsResolver> = std::sync::Arc::new(
-            crate::dns::HickoryResolver::from_system().context("failed to initialize DNS resolver")?,
+            crate::dns::HickoryResolver::from_system()
+                .context("failed to initialize DNS resolver")?,
         );
 
         Ok(Self {
@@ -176,7 +174,10 @@ impl State {
             .await?;
 
         let event_store = EventStore::new(pool.clone());
-        event_store.migrate().await.context("event store migration")?;
+        event_store
+            .migrate()
+            .await
+            .context("event store migration")?;
 
         let nats_url =
             std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());

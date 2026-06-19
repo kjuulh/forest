@@ -123,10 +123,7 @@ mod tests {
 
     #[test]
     fn normalize_strips_at_and_lowercases() {
-        assert_eq!(
-            normalize_domain("@Understory.IO").unwrap(),
-            "understory.io"
-        );
+        assert_eq!(normalize_domain("@Understory.IO").unwrap(), "understory.io");
         assert_eq!(normalize_domain("  Example.COM  ").unwrap(), "example.com");
     }
 

@@ -28,11 +28,8 @@ pub fn render<T: Tabled + Serialize>(format: &OutputFormat, rows: &[T]) -> Strin
         OutputFormat::Text => {
             let mut out = String::new();
             for row in rows {
-                let fields: Vec<String> = row
-                    .fields()
-                    .into_iter()
-                    .map(|f| f.into_owned())
-                    .collect();
+                let fields: Vec<String> =
+                    row.fields().into_iter().map(|f| f.into_owned()).collect();
                 out.push_str(&fields.join("\t"));
                 out.push('\n');
             }
@@ -50,7 +47,10 @@ pub fn render<T: Tabled + Serialize>(format: &OutputFormat, rows: &[T]) -> Strin
             out
         }
         OutputFormat::Json => {
-            format!("{}\n", serde_json::to_string_pretty(rows).unwrap_or_default())
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(rows).unwrap_or_default()
+            )
         }
     }
 }

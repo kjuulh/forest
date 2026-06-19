@@ -44,9 +44,13 @@ async fn registered_user(fixture: &crate::accepttest::fixtures::Fixture) -> (Str
         .into_inner();
 
     let user_id = resp.user.expect("user").user_id;
-    mark_email_verified(&fixture.db, uuid::Uuid::parse_str(&user_id).unwrap(), &email)
-        .await
-        .expect("mark verified");
+    mark_email_verified(
+        &fixture.db,
+        uuid::Uuid::parse_str(&user_id).unwrap(),
+        &email,
+    )
+    .await
+    .expect("mark verified");
 
     (user_id, email)
 }

@@ -86,7 +86,9 @@ fn version_gt(a: &str, b: &str) -> bool {
 
 /// Extract the host component from an https:// URL.
 fn extract_host(url: &str) -> Option<String> {
-    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
     let host = rest.split('/').next()?;
     if host.is_empty() {
         None
@@ -136,8 +138,7 @@ async fn load_component_readme(
         None => return Ok(String::new()),
     };
 
-    let s3_key =
-        crate::object_store::keys::component_file(organisation, name, version, &file_path);
+    let s3_key = crate::object_store::keys::component_file(organisation, name, version, &file_path);
     // 5s timeout — README is on the detail page hot path; a stalled S3
     // request must not block the whole page render. 1 MiB cap on the
     // decoded text — the gRPC write boundary caps writes at 64 KiB, but
@@ -195,8 +196,16 @@ pub struct ComponentService {
 }
 
 impl ComponentService {
-    pub fn new(event_store: EventStore, db: PgPool, object_store: crate::object_store::ObjectStore) -> Self {
-        Self { event_store, db, object_store }
+    pub fn new(
+        event_store: EventStore,
+        db: PgPool,
+        object_store: crate::object_store::ObjectStore,
+    ) -> Self {
+        Self {
+            event_store,
+            db,
+            object_store,
+        }
     }
 
     // ----------------------------------------------------------
@@ -269,13 +278,12 @@ impl ComponentService {
         ComponentAggregate::upload_file(&mut root, upload_id, file_path)?;
 
         // Resolve version from staging
-        let version: String = sqlx::query_scalar(
-            "SELECT version FROM component_staging WHERE id = $1",
-        )
-        .bind(upload_id)
-        .fetch_one(&self.db)
-        .await
-        .context("resolve version from staging")?;
+        let version: String =
+            sqlx::query_scalar("SELECT version FROM component_staging WHERE id = $1")
+                .bind(upload_id)
+                .fetch_one(&self.db)
+                .await
+                .context("resolve version from staging")?;
 
         // Store file content in S3
         let s3_key = crate::object_store::keys::component_file(
@@ -357,12 +365,8 @@ impl ComponentService {
             }
         });
 
-        let recorded = ComponentAggregate::unpublish_version(
-            &mut root,
-            version,
-            actor,
-            reason.as_deref(),
-        )?;
+        let recorded =
+            ComponentAggregate::unpublish_version(&mut root, version, actor, reason.as_deref())?;
 
         if !recorded {
             // No-op: nothing changed on the aggregate, nothing to persist.
@@ -515,13 +519,12 @@ impl ComponentService {
 
                     // The shape was computed and stashed by publish_manifest.
                     // Read it (may be NULL for legacy pre-spec manifests).
-                    let staged_shape: Option<String> = sqlx::query_scalar(
-                        "SELECT shape FROM component_staging WHERE id = $1",
-                    )
-                    .bind(upload_id)
-                    .fetch_one(&mut **tx)
-                    .await
-                    .unwrap_or(None);
+                    let staged_shape: Option<String> =
+                        sqlx::query_scalar("SELECT shape FROM component_staging WHERE id = $1")
+                            .bind(upload_id)
+                            .fetch_one(&mut **tx)
+                            .await
+                            .unwrap_or(None);
 
                     let kind = match staged_shape.as_deref() {
                         Some("tool_external") => "external",
@@ -692,13 +695,11 @@ impl ComponentService {
         file_stream: FileStream,
     ) -> anyhow::Result<()> {
         // Get component identity for S3 key construction
-        let comp = sqlx::query(
-            "SELECT name, organisation, version FROM components WHERE id = $1",
-        )
-        .bind(component_id)
-        .fetch_optional(&self.db)
-        .await
-        .context("get component for file streaming")?;
+        let comp = sqlx::query("SELECT name, organisation, version FROM components WHERE id = $1")
+            .bind(component_id)
+            .fetch_optional(&self.db)
+            .await
+            .context("get component for file streaming")?;
 
         let Some(comp) = comp else {
             file_stream.push_done().await?;
@@ -761,13 +762,12 @@ impl ComponentService {
         let size_bytes = binary_content.len() as i64;
 
         // Resolve version from staging
-        let version: String = sqlx::query_scalar(
-            "SELECT version FROM component_staging WHERE id = $1",
-        )
-        .bind(upload_id)
-        .fetch_one(&self.db)
-        .await
-        .context("resolve version from staging")?;
+        let version: String =
+            sqlx::query_scalar("SELECT version FROM component_staging WHERE id = $1")
+                .bind(upload_id)
+                .fetch_one(&self.db)
+                .await
+                .context("resolve version from staging")?;
 
         // Store binary in S3
         let s3_key = crate::object_store::keys::component_binary(
@@ -963,8 +963,7 @@ impl ComponentService {
         let mut versions = Vec::new();
         for row in rows {
             let platforms_json: String = row.get("platforms");
-            let platforms: Vec<String> =
-                serde_json::from_str(&platforms_json).unwrap_or_default();
+            let platforms: Vec<String> = serde_json::from_str(&platforms_json).unwrap_or_default();
 
             versions.push(ComponentVersionInfo {
                 version: row.get("version"),
@@ -983,10 +982,7 @@ impl ComponentService {
     /// per §1a.2c, picks the highest non-prerelease semver per (org, name),
     /// reads the tool facet from the latest manifest, and (for externals)
     /// the upstream host from `platforms[*].url`.
-    pub async fn list_org_tools(
-        &self,
-        organisation: &str,
-    ) -> anyhow::Result<Vec<OrgToolRow>> {
+    pub async fn list_org_tools(&self, organisation: &str) -> anyhow::Result<Vec<OrgToolRow>> {
         let rows = sqlx::query(
             "SELECT c.organisation, c.name, c.version, c.shape,
                     cm.manifest_json::text AS manifest_json
@@ -1112,12 +1108,9 @@ impl ComponentService {
             format!("binary not found: {organisation}/{name}@{version} ({os}/{arch})")
         })?;
 
-        self.object_store
-            .get(&s3_key)
-            .await
-            .with_context(|| format!(
-                "download binary from S3: {organisation}/{name}@{version} ({os}/{arch})"
-            ))
+        self.object_store.get(&s3_key).await.with_context(|| {
+            format!("download binary from S3: {organisation}/{name}@{version} ({os}/{arch})")
+        })
     }
 
     // ----------------------------------------------------------
@@ -1197,7 +1190,8 @@ impl ComponentService {
                 use sqlx::Row;
                 let shape_str: String = r.get("shape");
                 let manifest_json: String = r.get("manifest_json");
-                let manifest_value: Option<serde_json::Value> = serde_json::from_str(&manifest_json).ok();
+                let manifest_value: Option<serde_json::Value> =
+                    serde_json::from_str(&manifest_json).ok();
                 let description = manifest_value
                     .as_ref()
                     .and_then(|v| v.get("description"))
@@ -1252,8 +1246,12 @@ impl ComponentService {
                     latest_version: r.get("version"),
                     kind: r.get("kind"),
                     description,
-                    created_at: r.get::<chrono::DateTime<chrono::Utc>, _>("created").to_rfc3339(),
-                    updated_at: r.get::<chrono::DateTime<chrono::Utc>, _>("updated").to_rfc3339(),
+                    created_at: r
+                        .get::<chrono::DateTime<chrono::Utc>, _>("created")
+                        .to_rfc3339(),
+                    updated_at: r
+                        .get::<chrono::DateTime<chrono::Utc>, _>("updated")
+                        .to_rfc3339(),
                     version_count: r.get::<i64, _>("version_count") as i32,
                     contracts: vec![],
                     visibility: r.get("visibility"),
@@ -1282,7 +1280,9 @@ impl ComponentService {
         };
 
         let versions = self.list_versions(organisation, name).await?;
-        let manifest = self.get_manifest(organisation, name, &latest.version).await?;
+        let manifest = self
+            .get_manifest(organisation, name, &latest.version)
+            .await?;
 
         let visibility: String = sqlx::query_scalar::<_, String>(
             "SELECT COALESCE((SELECT p.visibility FROM projects p WHERE p.organisation = $1 AND p.project = $2 LIMIT 1), 'private')",
@@ -1324,15 +1324,30 @@ impl ComponentService {
             .as_ref()
             .and_then(|v| v.get("tool"))
             .map(|t| forest_grpc_interface::ToolFacet {
-                name: t.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-                argv_passthrough: t.get("argv_passthrough").and_then(|v| v.as_bool()).unwrap_or(true),
-                description: t.get("description").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+                name: t
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                argv_passthrough: t
+                    .get("argv_passthrough")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
+                description: t
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
             });
         let methods: Vec<String> = manifest_value
             .as_ref()
             .and_then(|v| v.get("methods"))
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|m| m.as_str().map(str::to_string)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|m| m.as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default();
         let upstream_host = if shape_str == "tool_external" {
             manifest_value
@@ -1518,6 +1533,10 @@ pub trait ComponentServiceState {
 
 impl ComponentServiceState for crate::state::State {
     fn component_service(&self) -> ComponentService {
-        ComponentService::new(self.event_store.clone(), self.db.clone(), self.object_store.clone())
+        ComponentService::new(
+            self.event_store.clone(),
+            self.db.clone(),
+            self.object_store.clone(),
+        )
     }
 }

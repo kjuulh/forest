@@ -60,7 +60,11 @@ impl StageDefinition {
         }
     }
 
-    pub fn plan(environment: impl Into<String>, auto_approve: bool, depends_on: Vec<String>) -> Self {
+    pub fn plan(
+        environment: impl Into<String>,
+        auto_approve: bool,
+        depends_on: Vec<String>,
+    ) -> Self {
         Self {
             depends_on,
             config: StageConfig::Plan {
@@ -279,9 +283,9 @@ pub fn has_failed_dependency(
         return false;
     };
     def.depends_on.iter().any(|dep| {
-        states.get(dep).is_some_and(|s| {
-            matches!(s.status, StageStatus::Failed | StageStatus::Cancelled)
-        })
+        states
+            .get(dep)
+            .is_some_and(|s| matches!(s.status, StageStatus::Failed | StageStatus::Cancelled))
     })
 }
 
@@ -488,10 +492,7 @@ mod tests {
     #[test]
     fn test_validate_pipeline_simple() {
         let mut stages = PipelineStages::new();
-        stages.insert(
-            "deploy-dev".into(),
-            StageDefinition::deploy("dev", vec![]),
-        );
+        stages.insert("deploy-dev".into(), StageDefinition::deploy("dev", vec![]));
         stages.insert(
             "deploy-prod".into(),
             StageDefinition::deploy("prod", vec!["deploy-dev".into()]),
@@ -502,10 +503,7 @@ mod tests {
     #[test]
     fn test_validate_pipeline_cycle() {
         let mut stages = PipelineStages::new();
-        stages.insert(
-            "a".into(),
-            StageDefinition::deploy("dev", vec!["b".into()]),
-        );
+        stages.insert("a".into(), StageDefinition::deploy("dev", vec!["b".into()]));
         stages.insert(
             "b".into(),
             StageDefinition::deploy("prod", vec!["a".into()]),
@@ -528,10 +526,7 @@ mod tests {
     #[test]
     fn test_find_ready_stages() {
         let mut stages = PipelineStages::new();
-        stages.insert(
-            "deploy-dev".into(),
-            StageDefinition::deploy("dev", vec![]),
-        );
+        stages.insert("deploy-dev".into(), StageDefinition::deploy("dev", vec![]));
         stages.insert(
             "soak".into(),
             StageDefinition::wait(300, vec!["deploy-dev".into()]),
@@ -561,10 +556,7 @@ mod tests {
     #[test]
     fn test_serde_roundtrip() {
         let mut stages = PipelineStages::new();
-        stages.insert(
-            "deploy-dev".into(),
-            StageDefinition::deploy("dev", vec![]),
-        );
+        stages.insert("deploy-dev".into(), StageDefinition::deploy("dev", vec![]));
         stages.insert(
             "soak".into(),
             StageDefinition::wait(300, vec!["deploy-dev".into()]),
@@ -602,7 +594,10 @@ mod tests {
 
         let stages: PipelineStages = serde_json::from_str(json).unwrap();
         assert_eq!(stages.len(), 2);
-        assert!(matches!(stages["deploy-dev"].config, StageConfig::Deploy { .. }));
+        assert!(matches!(
+            stages["deploy-dev"].config,
+            StageConfig::Deploy { .. }
+        ));
         assert!(matches!(stages["soak"].config, StageConfig::Wait { .. }));
     }
 
@@ -623,7 +618,10 @@ mod tests {
 
         assert_eq!(parsed.len(), 2);
         match &parsed["plan-prod"].config {
-            StageConfig::Plan { environment, auto_approve } => {
+            StageConfig::Plan {
+                environment,
+                auto_approve,
+            } => {
                 assert_eq!(environment, "prod");
                 assert!(!auto_approve);
             }
@@ -644,7 +642,10 @@ mod tests {
 
         let stages: PipelineStages = serde_json::from_str(json).unwrap();
         match &stages["plan-prod"].config {
-            StageConfig::Plan { environment, auto_approve } => {
+            StageConfig::Plan {
+                environment,
+                auto_approve,
+            } => {
                 assert_eq!(environment, "prod");
                 assert!(auto_approve);
             }
@@ -708,6 +709,9 @@ mod tests {
         assert!(json.contains("AWAITING_APPROVAL"));
 
         let parsed: StageState = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.approval_status, Some(ApprovalStatus::AwaitingApproval));
+        assert_eq!(
+            parsed.approval_status,
+            Some(ApprovalStatus::AwaitingApproval)
+        );
     }
 }

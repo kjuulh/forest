@@ -87,10 +87,7 @@ async fn resolve_app_token(db: &sqlx::PgPool, raw_token: &str) -> anyhow::Result
 
 /// Compare the incoming token against the pre-hashed service account key
 /// held in memory (loaded from `FOREST_SERVICE_ACCOUNT_API_KEY` at startup).
-fn resolve_service_account_token(
-    expected_hash: Option<&[u8]>,
-    raw_token: &str,
-) -> Option<Actor> {
+fn resolve_service_account_token(expected_hash: Option<&[u8]>, raw_token: &str) -> Option<Actor> {
     let expected = expected_hash?;
     let incoming = sha2::Sha256::digest(raw_token.as_bytes());
     if constant_time_eq(incoming.as_slice(), expected) {
@@ -262,18 +259,19 @@ where
             // 1. Try JWT (user tokens)
             let access_token = AccessToken::new_from(&token);
             if let Ok(access_token) = access_token
-                && let Ok(claims) = state.tokens().verify_access_token(&access_token) {
-                    let user_id: uuid::Uuid = match claims.user_id.parse() {
-                        Ok(id) => id,
-                        Err(_) => {
-                            return Ok(grpc_unauthenticated("invalid user_id in token"));
-                        }
-                    };
-                    let actor = Actor::User { user_id };
-                    req.extensions_mut().insert(actor);
-                    req.extensions_mut().insert(claims);
-                    return inner.call(req).await;
-                }
+                && let Ok(claims) = state.tokens().verify_access_token(&access_token)
+            {
+                let user_id: uuid::Uuid = match claims.user_id.parse() {
+                    Ok(id) => id,
+                    Err(_) => {
+                        return Ok(grpc_unauthenticated("invalid user_id in token"));
+                    }
+                };
+                let actor = Actor::User { user_id };
+                req.extensions_mut().insert(actor);
+                req.extensions_mut().insert(claims);
+                return inner.call(req).await;
+            }
 
             // 2. Try service account API key (in-memory, no DB hit)
             if let Some(actor) = resolve_service_account_token(

@@ -69,13 +69,12 @@ impl ComponentCache {
             if organisation_entry.file_name() == "bin" {
                 continue;
             }
-            let mut name_entries =
-                tokio::fs::read_dir(organisation_entry.path())
-                    .await
-                    .context(anyhow::anyhow!(
-                        "read names for organisation: {}",
-                        organisation_entry.path().to_string_lossy()
-                    ))?;
+            let mut name_entries = tokio::fs::read_dir(organisation_entry.path())
+                .await
+                .context(anyhow::anyhow!(
+                    "read names for organisation: {}",
+                    organisation_entry.path().to_string_lossy()
+                ))?;
 
             while let Some(name_entry) =
                 name_entries.next_entry().await.context(anyhow::anyhow!(

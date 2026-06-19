@@ -1,9 +1,9 @@
 pub mod rust;
 pub mod typescript;
 
+use crate::CodegenLanguage;
 use crate::errors::CodegenResult;
 use crate::ir;
-use crate::CodegenLanguage;
 
 pub fn emit(module: &ir::Module, language: &CodegenLanguage) -> CodegenResult<String> {
     match language {

@@ -221,7 +221,9 @@ impl UserService {
     }
 
     pub async fn logout_all(&self, user_id: Uuid) -> anyhow::Result<()> {
-        self.repo.revoke_all_user_sessions(self.db(), user_id).await?;
+        self.repo
+            .revoke_all_user_sessions(self.db(), user_id)
+            .await?;
         Ok(())
     }
 
@@ -341,11 +343,7 @@ impl UserService {
                     .search_users(self.db(), query, fetch_limit, offset)
                     .await?
             }
-            _ => {
-                self.repo
-                    .list_users(self.db(), fetch_limit, offset)
-                    .await?
-            }
+            _ => self.repo.list_users(self.db(), fetch_limit, offset).await?,
         };
 
         let has_more = users.len() as i64 > page_size;
@@ -470,12 +468,16 @@ impl UserService {
     }
 
     pub async fn verify_email(&self, user_id: Uuid, email: &str) -> anyhow::Result<()> {
-        self.repo.verify_user_email(self.db(), user_id, email).await?;
+        self.repo
+            .verify_user_email(self.db(), user_id, email)
+            .await?;
         Ok(())
     }
 
     pub async fn remove_email(&self, user_id: Uuid, email: &str) -> anyhow::Result<()> {
-        self.repo.delete_user_email(self.db(), user_id, email).await?;
+        self.repo
+            .delete_user_email(self.db(), user_id, email)
+            .await?;
         Ok(())
     }
 
@@ -787,10 +789,7 @@ mod helper_tests {
 
     #[test]
     fn unknown_provider_kept_verbatim() {
-        assert_eq!(
-            oauth_verification_source("custom_idp"),
-            "oauth_custom_idp"
-        );
+        assert_eq!(oauth_verification_source("custom_idp"), "oauth_custom_idp");
     }
 }
 

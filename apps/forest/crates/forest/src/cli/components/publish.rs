@@ -193,19 +193,28 @@ mod abort_on_drop_tests {
         );
     }
 
-    use super::{derive_summary_shape, PublishSummary};
+    use super::{PublishSummary, derive_summary_shape};
 
     #[test]
     fn shape_for_binary_tool() {
         assert_eq!(derive_summary_shape("binary", true, false), "tool_binary");
-        assert_eq!(derive_summary_shape("binary", true, true), "hybrid_component");
+        assert_eq!(
+            derive_summary_shape("binary", true, true),
+            "hybrid_component"
+        );
         assert_eq!(derive_summary_shape("binary", false, true), "component");
     }
 
     #[test]
     fn shape_for_external() {
-        assert_eq!(derive_summary_shape("external", true, false), "tool_external");
-        assert_eq!(derive_summary_shape("external", true, true), "tool_external");
+        assert_eq!(
+            derive_summary_shape("external", true, false),
+            "tool_external"
+        );
+        assert_eq!(
+            derive_summary_shape("external", true, true),
+            "tool_external"
+        );
     }
 
     #[test]
@@ -277,7 +286,11 @@ impl PublishCommand {
 
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         // 1. Parse the component's CUE files to get metadata
-        let mut cue_args = vec!["export".to_string(), "--out".to_string(), "json".to_string()];
+        let mut cue_args = vec![
+            "export".to_string(),
+            "--out".to_string(),
+            "json".to_string(),
+        ];
         let current_dir = std::env::current_dir()?;
         // Collect all .cue files for evaluation
         let mut dir_entries = tokio::fs::read_dir(&current_dir).await?;
@@ -307,9 +320,7 @@ impl PublishCommand {
         let doc: serde_json::Value = serde_json::from_slice(&output.stdout)?;
 
         // Extract metadata — forest.component is optional for CUE-only components
-        let component = doc
-            .get("forest")
-            .and_then(|f| f.get("component"));
+        let component = doc.get("forest").and_then(|f| f.get("component"));
 
         let project = doc.get("project");
 
@@ -329,9 +340,7 @@ impl PublishCommand {
             .and_then(|v| v.as_str())
             .context("project.organisation is required")?;
 
-        tracing::info!(
-            "publishing component {organisation}/{name}@{version}"
-        );
+        tracing::info!("publishing component {organisation}/{name}@{version}");
 
         // Sync project-level metadata (description, About-sidebar fields, README)
         // from forest.cue → server. CUE is source of truth: missing in CUE = cleared.
@@ -566,14 +575,9 @@ impl PublishCommand {
         // is_deno_component_with_meta()/resolve_entrypoint_with_meta()
         // helpers work against the cached copy without further changes.
         if kind == "deno" {
-            let deno_files = collect_deno_files(
-                &current_dir,
-                upload_source,
-                organisation,
-                name,
-                version,
-            )
-            .await?;
+            let deno_files =
+                collect_deno_files(&current_dir, upload_source, organisation, name, version)
+                    .await?;
             if !deno_files.is_empty() {
                 tracing::info!(
                     "uploading {} Deno source file(s) from {upload_source}",
@@ -767,9 +771,7 @@ fn describe_response_tool_facet(
 /// `cue export` output directly (no `cue eval -e` needed). Validates env
 /// names/values for a friendly publish-time error and warns on secret-ish keys.
 /// Returns `None` when there is no `include` block.
-fn include_manifest_value(
-    doc: &serde_json::Value,
-) -> anyhow::Result<Option<serde_json::Value>> {
+fn include_manifest_value(doc: &serde_json::Value) -> anyhow::Result<Option<serde_json::Value>> {
     let include = match doc.pointer("/forest/component/include") {
         Some(v) if !v.is_null() => v,
         _ => return Ok(None),
@@ -789,9 +791,8 @@ fn include_manifest_value(
             let val = value
                 .as_str()
                 .with_context(|| format!("include.env.{key} must be a string"))?;
-            forest_manifest::names::validate_env_value(val).map_err(|e| {
-                anyhow::anyhow!("include.env.{key} has an invalid value: {e:?}")
-            })?;
+            forest_manifest::names::validate_env_value(val)
+                .map_err(|e| anyhow::anyhow!("include.env.{key} has an invalid value: {e:?}"))?;
             if looks_secret(key) {
                 eprintln!(
                     "warning: include.env.{key} looks like a secret — `include.env` is \
@@ -971,17 +972,17 @@ async fn publish_prebuilt(
     let mut platforms_for_manifest = serde_json::Map::new();
     let mut uploads: Vec<(String, String, Vec<u8>, String)> = Vec::new();
     for (os, archs) in prebuilt {
-        let archs = archs.as_object().with_context(|| {
-            format!("prebuilt.{os} must be a map of arch → path")
-        })?;
+        let archs = archs
+            .as_object()
+            .with_context(|| format!("prebuilt.{os} must be a map of arch → path"))?;
         for (arch, path_val) in archs {
-            let rel_path = path_val.as_str().with_context(|| {
-                format!("prebuilt.{os}.{arch} must be a string path")
-            })?;
+            let rel_path = path_val
+                .as_str()
+                .with_context(|| format!("prebuilt.{os}.{arch} must be a string path"))?;
             let abs_path = current_dir.join(rel_path);
-            let bytes = tokio::fs::read(&abs_path).await.with_context(|| {
-                format!("reading prebuilt binary {}", abs_path.display())
-            })?;
+            let bytes = tokio::fs::read(&abs_path)
+                .await
+                .with_context(|| format!("reading prebuilt binary {}", abs_path.display()))?;
             let sha256 = hex::encode(Sha256::digest(&bytes));
 
             // Match the upload/external paths: SDK exposes "macos" to
@@ -1098,15 +1099,13 @@ async fn eval_tool_facet(dir: &std::path::Path) -> anyhow::Result<serde_json::Va
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    let v: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .context("parsing cue eval -e #Tool output")?;
+    let v: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("parsing cue eval -e #Tool output")?;
     Ok(v)
 }
 
 /// Collect all `.cue` files from a directory (non-recursive, excludes cue.mod/).
-async fn collect_cue_files(
-    dir: &std::path::Path,
-) -> anyhow::Result<Vec<(String, String)>> {
+async fn collect_cue_files(dir: &std::path::Path) -> anyhow::Result<Vec<(String, String)>> {
     let mut files = Vec::new();
     let mut entries = tokio::fs::read_dir(dir).await?;
 
@@ -1204,10 +1203,7 @@ fn collect_dir_recursive<'a>(
             // Skip hidden + scratch dirs. `.forest/component/meta.json` is
             // re-added by the caller from the build cache, not the source
             // tree, so excluding `.forest/` here is intentional.
-            if name_str.starts_with('.')
-                || name_str == "target"
-                || name_str == "node_modules"
-            {
+            if name_str.starts_with('.') || name_str == "target" || name_str == "node_modules" {
                 continue;
             }
 

@@ -154,13 +154,19 @@ mod tests {
 
     #[test]
     fn user_config_cue_lives_under_config_dir() {
-        assert_eq!(fixed().user_config_cue(), PathBuf::from("/cfg/forest/forest.cue"));
+        assert_eq!(
+            fixed().user_config_cue(),
+            PathBuf::from("/cfg/forest/forest.cue")
+        );
     }
 
     #[test]
     fn lockfile_lives_under_state_dir() {
         // §1a.4 — XDG_STATE_HOME, not config, not cache.
-        assert_eq!(fixed().lockfile(), PathBuf::from("/state/forest/forest.lock"));
+        assert_eq!(
+            fixed().lockfile(),
+            PathBuf::from("/state/forest/forest.lock")
+        );
     }
 
     #[test]

@@ -42,7 +42,9 @@ impl ReleaseCommand {
         match &self.commands {
             Some(Commands::Prepare(cmd)) => {
                 cmd.execute(state).await?;
-                eprintln!("\nhint: use 'forest release create --env <env>' to prepare, annotate, and release in one step");
+                eprintln!(
+                    "\nhint: use 'forest release create --env <env>' to prepare, annotate, and release in one step"
+                );
             }
             Some(Commands::Annotate(cmd)) => cmd.execute(state).await?,
             Some(Commands::Release(cmd)) => cmd.execute(state).await?,

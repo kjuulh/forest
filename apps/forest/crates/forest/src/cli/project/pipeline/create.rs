@@ -43,8 +43,7 @@ impl CreateCommand {
         };
 
         let stages_json = if let Some(path) = &self.stages_file {
-            std::fs::read_to_string(path)
-                .context(format!("read stages file: {path}"))?
+            std::fs::read_to_string(path).context(format!("read stages file: {path}"))?
         } else if let Some(json) = &self.stages_json {
             json.clone()
         } else {
@@ -60,7 +59,11 @@ impl CreateCommand {
             .context("create release pipeline")?;
 
         eprintln!("Created release pipeline '{}'", pipeline.name);
-        let status = if pipeline.enabled { "enabled" } else { "disabled" };
+        let status = if pipeline.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        };
         println!("  status:  {status}");
         println!("  id:      {}", pipeline.id);
 

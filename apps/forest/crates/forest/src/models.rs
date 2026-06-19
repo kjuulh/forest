@@ -349,10 +349,7 @@ impl TryFrom<&str> for ComponentReference {
         };
 
         let (name, source) = if let Some((name, rest)) = rest.split_once("@") {
-            (
-                name,
-                ComponentSource::Versioned(rest.to_string()),
-            )
+            (name, ComponentSource::Versioned(rest.to_string()))
         } else if let Some((name, rest)) = rest.split_once("#") {
             (name, ComponentSource::Local(PathBuf::from(rest)))
         } else {

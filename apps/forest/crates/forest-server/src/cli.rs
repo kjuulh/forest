@@ -3,7 +3,10 @@ use base64::{Engine, prelude::BASE64_STANDARD};
 use clap::{Parser, Subcommand};
 use sha2::Digest;
 
-use crate::{Config, state::{State, validate_config}};
+use crate::{
+    Config,
+    state::{State, validate_config},
+};
 
 mod serve;
 use serve::*;
@@ -64,9 +67,7 @@ pub async fn execute() -> anyhow::Result<()> {
         .filter(|v| !v.is_empty())
         .map(|pattern| {
             let compiled = regex::Regex::new(&pattern).with_context(|| {
-                format!(
-                    "FOREST_REGISTRATION_EMAIL_DOMAIN_REGEX is not a valid regex: {pattern:?}"
-                )
+                format!("FOREST_REGISTRATION_EMAIL_DOMAIN_REGEX is not a valid regex: {pattern:?}")
             })?;
             tracing::info!(
                 pattern = %compiled.as_str(),

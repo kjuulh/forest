@@ -98,11 +98,7 @@ impl DestinationRegistry {
         Ok(())
     }
 
-    pub async fn delete_destination(
-        &self,
-        organisation: &str,
-        name: &str,
-    ) -> anyhow::Result<()> {
+    pub async fn delete_destination(&self, organisation: &str, name: &str) -> anyhow::Result<()> {
         let res = sqlx::query!(
             "DELETE FROM destinations WHERE organisation = $1 AND name = $2",
             organisation,

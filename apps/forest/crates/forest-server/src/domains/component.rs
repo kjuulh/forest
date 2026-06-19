@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use forest_event_store::{Aggregate, AggregateRoot, EventData, IntoStreamCategory, StreamCategory};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -131,7 +131,8 @@ impl Aggregate for ComponentAggregate {
                 }
             }
             ComponentEvent::VersionPublished { version, .. } => {
-                self.versions.insert(version.clone(), VersionState::Published);
+                self.versions
+                    .insert(version.clone(), VersionState::Published);
             }
             ComponentEvent::UploadAborted { upload_id, .. } => {
                 self.versions
@@ -196,11 +197,9 @@ impl ComponentAggregate {
         upload_id: Uuid,
         file_path: &str,
     ) -> anyhow::Result<()> {
-        let is_active = root
-            .state
-            .versions
-            .values()
-            .any(|v| matches!(v, VersionState::Uploading { upload_id: id, .. } if *id == upload_id));
+        let is_active = root.state.versions.values().any(
+            |v| matches!(v, VersionState::Uploading { upload_id: id, .. } if *id == upload_id),
+        );
 
         if !is_active {
             bail!("upload {} is not active", upload_id);
@@ -265,11 +264,9 @@ impl ComponentAggregate {
         upload_id: Uuid,
         reason: &str,
     ) -> anyhow::Result<()> {
-        let is_active = root
-            .state
-            .versions
-            .values()
-            .any(|v| matches!(v, VersionState::Uploading { upload_id: id, .. } if *id == upload_id));
+        let is_active = root.state.versions.values().any(
+            |v| matches!(v, VersionState::Uploading { upload_id: id, .. } if *id == upload_id),
+        );
 
         if !is_active {
             return Ok(());
@@ -289,15 +286,10 @@ impl ComponentAggregate {
     /// counterpart to the service-layer `publish_manifest`, which writes
     /// the manifest JSON to a projection. Recording the event here lets
     /// `publish_version` later require manifest presence as a precondition.
-    pub fn record_manifest(
-        root: &mut AggregateRoot<Self>,
-        upload_id: Uuid,
-    ) -> anyhow::Result<()> {
-        let is_active = root
-            .state
-            .versions
-            .values()
-            .any(|v| matches!(v, VersionState::Uploading { upload_id: id, .. } if *id == upload_id));
+    pub fn record_manifest(root: &mut AggregateRoot<Self>, upload_id: Uuid) -> anyhow::Result<()> {
+        let is_active = root.state.versions.values().any(
+            |v| matches!(v, VersionState::Uploading { upload_id: id, .. } if *id == upload_id),
+        );
 
         if !is_active {
             bail!("upload {} is not active", upload_id);
@@ -378,7 +370,10 @@ mod tests {
         assert_eq!(root.state.name, "widget");
         assert_eq!(
             root.state.versions.get("1.0.0"),
-            Some(&VersionState::Uploading { upload_id: id, has_manifest: false })
+            Some(&VersionState::Uploading {
+                upload_id: id,
+                has_manifest: false
+            })
         );
         assert_eq!(root.pending_count(), 1);
     }
@@ -391,11 +386,7 @@ mod tests {
 
         let err = ComponentAggregate::begin_upload(&mut root, "acme", "widget", "1.0.0");
         assert!(err.is_err());
-        assert!(
-            err.unwrap_err()
-                .to_string()
-                .contains("already published")
-        );
+        assert!(err.unwrap_err().to_string().contains("already published"));
     }
 
     #[test]
@@ -408,7 +399,10 @@ mod tests {
         assert_ne!(id1, id2);
         assert_eq!(
             root.state.versions.get("1.0.0"),
-            Some(&VersionState::Uploading { upload_id: id2, has_manifest: false })
+            Some(&VersionState::Uploading {
+                upload_id: id2,
+                has_manifest: false
+            })
         );
         // 3 events: UploadStarted, UploadAborted, UploadStarted
         assert_eq!(root.pending_count(), 3);
@@ -475,7 +469,10 @@ mod tests {
         );
         assert_eq!(
             root.state.versions.get("2.0.0"),
-            Some(&VersionState::Uploading { upload_id: id2, has_manifest: false })
+            Some(&VersionState::Uploading {
+                upload_id: id2,
+                has_manifest: false
+            })
         );
     }
 
@@ -521,16 +518,14 @@ mod tests {
             .take_pending()
             .into_iter()
             .enumerate()
-            .map(|(i, e)| {
-                forest_event_store::RecordedEvent {
-                    global_position: i as i64 + 1,
-                    stream_id: "component-acme/widget".into(),
-                    stream_version: i as i64 + 1,
-                    event_type: e.event_type().into(),
-                    data: serde_json::to_value(&e).unwrap(),
-                    metadata: serde_json::json!({}),
-                    created_at: chrono::Utc::now(),
-                }
+            .map(|(i, e)| forest_event_store::RecordedEvent {
+                global_position: i as i64 + 1,
+                stream_id: "component-acme/widget".into(),
+                stream_version: i as i64 + 1,
+                event_type: e.event_type().into(),
+                data: serde_json::to_value(&e).unwrap(),
+                metadata: serde_json::json!({}),
+                created_at: chrono::Utc::now(),
             })
             .collect();
 
@@ -548,7 +543,10 @@ mod tests {
         );
         assert_eq!(
             replayed.state.versions.get("2.0.0"),
-            Some(&VersionState::Uploading { upload_id: id2, has_manifest: false })
+            Some(&VersionState::Uploading {
+                upload_id: id2,
+                has_manifest: false
+            })
         );
     }
 
@@ -579,7 +577,10 @@ mod tests {
         assert!(root.state.versions.get("1.0.0").is_none());
         assert_eq!(
             root.state.versions.get("2.0.0"),
-            Some(&VersionState::Uploading { upload_id: id2, has_manifest: false })
+            Some(&VersionState::Uploading {
+                upload_id: id2,
+                has_manifest: false
+            })
         );
     }
 
@@ -789,7 +790,10 @@ mod tests {
         // Aggregate state is unchanged — still Uploading.
         assert!(matches!(
             root.state.versions.get("1.0.0"),
-            Some(VersionState::Uploading { has_manifest: false, .. })
+            Some(VersionState::Uploading {
+                has_manifest: false,
+                ..
+            })
         ));
     }
 

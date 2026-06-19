@@ -114,11 +114,18 @@ impl ListCommand {
                     name: c.name.clone(),
                     server: c.server.clone(),
                     user,
-                    active: if c.name == file.active { "*".to_string() } else { String::new() },
+                    active: if c.name == file.active {
+                        "*".to_string()
+                    } else {
+                        String::new()
+                    },
                 }
             })
             .collect();
-        print!("{}", crate::cli::output::render(&state.config.format, &rows));
+        print!(
+            "{}",
+            crate::cli::output::render(&state.config.format, &rows)
+        );
         let _ = state.user_state();
         Ok(())
     }

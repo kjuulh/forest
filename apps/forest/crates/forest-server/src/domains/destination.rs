@@ -299,8 +299,11 @@ mod tests {
         let mut root = new_root();
         DestinationAggregate::create(&mut root, default_params()).unwrap();
 
-        let new_meta: HashMap<String, String> =
-            [("cluster".into(), "eu-west-1".into()), ("tier".into(), "premium".into())].into();
+        let new_meta: HashMap<String, String> = [
+            ("cluster".into(), "eu-west-1".into()),
+            ("tier".into(), "premium".into()),
+        ]
+        .into();
 
         DestinationAggregate::update_metadata(&mut root, new_meta.clone()).unwrap();
 
@@ -584,14 +587,22 @@ mod tests {
         let mut root1 = AggregateRoot::<DestinationAggregate>::new("destination-acme/a".into());
         let mut root2 = AggregateRoot::<DestinationAggregate>::new("destination-acme/b".into());
 
-        let id1 = DestinationAggregate::create(&mut root1, CreateDestinationParams {
-            name: "a".into(),
-            ..default_params()
-        }).unwrap();
-        let id2 = DestinationAggregate::create(&mut root2, CreateDestinationParams {
-            name: "b".into(),
-            ..default_params()
-        }).unwrap();
+        let id1 = DestinationAggregate::create(
+            &mut root1,
+            CreateDestinationParams {
+                name: "a".into(),
+                ..default_params()
+            },
+        )
+        .unwrap();
+        let id2 = DestinationAggregate::create(
+            &mut root2,
+            CreateDestinationParams {
+                name: "b".into(),
+                ..default_params()
+            },
+        )
+        .unwrap();
 
         assert_ne!(id1, id2);
     }
@@ -644,12 +655,16 @@ mod tests {
     #[test]
     fn hydrate_preserves_destination_type_fields() {
         let mut root = new_root();
-        DestinationAggregate::create(&mut root, CreateDestinationParams {
-            type_organisation: "myorg".into(),
-            type_name: "flux".into(),
-            type_version: 3,
-            ..default_params()
-        }).unwrap();
+        DestinationAggregate::create(
+            &mut root,
+            CreateDestinationParams {
+                type_organisation: "myorg".into(),
+                type_name: "flux".into(),
+                type_version: 3,
+                ..default_params()
+            },
+        )
+        .unwrap();
 
         let events: Vec<_> = root
             .take_pending()
@@ -694,14 +709,21 @@ mod tests {
                 type_organisation: String::new(),
                 type_name: String::new(),
                 type_version: 0,
-            }.event_type(),
+            }
+            .event_type(),
             "destination.created"
         );
         assert_eq!(
-            DestinationEvent::MetadataUpdated { metadata: HashMap::new() }.event_type(),
+            DestinationEvent::MetadataUpdated {
+                metadata: HashMap::new()
+            }
+            .event_type(),
             "destination.metadata_updated"
         );
-        assert_eq!(DestinationEvent::Deleted.event_type(), "destination.deleted");
+        assert_eq!(
+            DestinationEvent::Deleted.event_type(),
+            "destination.deleted"
+        );
     }
 
     // ----------------------------------------------------------
@@ -718,7 +740,11 @@ mod tests {
             name: "staging-flux".into(),
             environment: "staging".into(),
             environment_id: env_id,
-            metadata: [("region".into(), "eu".into()), ("tier".into(), "gold".into())].into(),
+            metadata: [
+                ("region".into(), "eu".into()),
+                ("tier".into(), "gold".into()),
+            ]
+            .into(),
             type_organisation: "forest".into(),
             type_name: "flux".into(),
             type_version: 2,
@@ -831,7 +857,10 @@ mod tests {
 
     #[test]
     fn stream_category_is_destination() {
-        assert_eq!(DestinationAggregate::stream_category().as_str(), "destination");
+        assert_eq!(
+            DestinationAggregate::stream_category().as_str(),
+            "destination"
+        );
     }
 
     #[test]

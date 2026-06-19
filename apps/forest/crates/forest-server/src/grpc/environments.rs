@@ -55,14 +55,17 @@ impl EnvironmentService for EnvironmentsServer {
             .context("create environment")
             .to_internal_error()?;
 
-        self.state.event_bus().emit(EventPayload {
-            organisation: req.organisation.clone(),
-            project: String::new(),
-            resource_type: "environment",
-            action: "created",
-            resource_id: rec.id.to_string(),
-            metadata: [("name".into(), req.name.clone())].into(),
-        }).await;
+        self.state
+            .event_bus()
+            .emit(EventPayload {
+                organisation: req.organisation.clone(),
+                project: String::new(),
+                resource_type: "environment",
+                action: "created",
+                resource_id: rec.id.to_string(),
+                metadata: [("name".into(), req.name.clone())].into(),
+            })
+            .await;
 
         Ok(Response::new(CreateEnvironmentResponse {
             environment: Some(record_to_grpc(rec)),
@@ -100,9 +103,7 @@ impl EnvironmentService for EnvironmentsServer {
                 .to_internal_error()?,
         };
 
-        let rec = rec
-            .context("environment not found")
-            .to_internal_error()?;
+        let rec = rec.context("environment not found").to_internal_error()?;
 
         let _authz = authorize::require_org_access(
             &self.state.db,
@@ -150,22 +151,16 @@ impl EnvironmentService for EnvironmentsServer {
     ) -> Result<Response<UpdateEnvironmentResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        let id: uuid::Uuid = req
-            .id
-            .parse()
-            .context("invalid id")
-            .to_internal_error()?;
-        let org_name = sqlx::query_scalar!(
-            "SELECT organisation FROM environments WHERE id = $1",
-            id
-        )
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!("authz: {e}");
-            tonic::Status::internal("lookup failed")
-        })?
-        .ok_or_else(|| tonic::Status::not_found("environment not found"))?;
+        let id: uuid::Uuid = req.id.parse().context("invalid id").to_internal_error()?;
+        let org_name =
+            sqlx::query_scalar!("SELECT organisation FROM environments WHERE id = $1", id)
+                .fetch_optional(&self.state.db)
+                .await
+                .map_err(|e| {
+                    tracing::error!("authz: {e}");
+                    tonic::Status::internal("lookup failed")
+                })?
+                .ok_or_else(|| tonic::Status::not_found("environment not found"))?;
         let _authz = authorize::require_org_access(
             &self.state.db,
             &actor,
@@ -182,14 +177,17 @@ impl EnvironmentService for EnvironmentsServer {
             .context("update environment")
             .to_internal_error()?;
 
-        self.state.event_bus().emit(EventPayload {
-            organisation: rec.organisation.clone(),
-            project: String::new(),
-            resource_type: "environment",
-            action: "updated",
-            resource_id: id.to_string(),
-            metadata: [("name".into(), rec.name.clone())].into(),
-        }).await;
+        self.state
+            .event_bus()
+            .emit(EventPayload {
+                organisation: rec.organisation.clone(),
+                project: String::new(),
+                resource_type: "environment",
+                action: "updated",
+                resource_id: id.to_string(),
+                metadata: [("name".into(), rec.name.clone())].into(),
+            })
+            .await;
 
         Ok(Response::new(UpdateEnvironmentResponse {
             environment: Some(record_to_grpc(rec)),
@@ -202,22 +200,16 @@ impl EnvironmentService for EnvironmentsServer {
     ) -> Result<Response<DeleteEnvironmentResponse>, tonic::Status> {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
-        let id: uuid::Uuid = req
-            .id
-            .parse()
-            .context("invalid id")
-            .to_internal_error()?;
-        let org_name = sqlx::query_scalar!(
-            "SELECT organisation FROM environments WHERE id = $1",
-            id
-        )
-        .fetch_optional(&self.state.db)
-        .await
-        .map_err(|e| {
-            tracing::error!("authz: {e}");
-            tonic::Status::internal("lookup failed")
-        })?
-        .ok_or_else(|| tonic::Status::not_found("environment not found"))?;
+        let id: uuid::Uuid = req.id.parse().context("invalid id").to_internal_error()?;
+        let org_name =
+            sqlx::query_scalar!("SELECT organisation FROM environments WHERE id = $1", id)
+                .fetch_optional(&self.state.db)
+                .await
+                .map_err(|e| {
+                    tracing::error!("authz: {e}");
+                    tonic::Status::internal("lookup failed")
+                })?
+                .ok_or_else(|| tonic::Status::not_found("environment not found"))?;
         let _authz = authorize::require_org_access(
             &self.state.db,
             &actor,
@@ -233,14 +225,17 @@ impl EnvironmentService for EnvironmentsServer {
             .context("delete environment")
             .to_internal_error()?;
 
-        self.state.event_bus().emit(EventPayload {
-            organisation: String::new(),
-            project: String::new(),
-            resource_type: "environment",
-            action: "deleted",
-            resource_id: id.to_string(),
-            metadata: Default::default(),
-        }).await;
+        self.state
+            .event_bus()
+            .emit(EventPayload {
+                organisation: String::new(),
+                project: String::new(),
+                resource_type: "environment",
+                action: "deleted",
+                resource_id: id.to_string(),
+                metadata: Default::default(),
+            })
+            .await;
 
         Ok(Response::new(DeleteEnvironmentResponse {}))
     }

@@ -94,8 +94,8 @@ pub async fn run_build(toolchain: Toolchain, work_dir: &Path) -> anyhow::Result<
 
     let mut artifacts = Vec::new();
     for target in &targets {
-        let path =
-            output_dir(&req.out_base, &target.os, &target.arch)?.join(output_filename(&req.name, target));
+        let path = output_dir(&req.out_base, &target.os, &target.arch)?
+            .join(output_filename(&req.name, target));
         let bytes = std::fs::read(&path)
             .with_context(|| format!("read built artifact {}", path.display()))?;
         artifacts.push(BuiltArtifact {
@@ -641,7 +641,10 @@ mod build_hint_tests {
         arches.insert("linux".to_string(), linux);
         let targets = resolve_targets(&arches, Toolchain::Rust).unwrap();
         assert_eq!(targets.len(), 2);
-        assert_eq!((targets[0].os.as_str(), targets[0].arch.as_str()), ("linux", "amd64"));
+        assert_eq!(
+            (targets[0].os.as_str(), targets[0].arch.as_str()),
+            ("linux", "amd64")
+        );
         assert!(targets[0].rust_target.is_some());
     }
 }

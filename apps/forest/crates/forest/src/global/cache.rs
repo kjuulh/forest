@@ -40,9 +40,7 @@ impl BinaryCache {
     /// the cache at `bin/<sha>` with mode 0755. Concurrent writers producing
     /// identical bytes converge to the same content-addressed name.
     pub async fn finalize(&self, tempfile_bytes: &[u8], expected_sha: &str) -> Result<PathBuf> {
-        let want_hex = expected_sha
-            .strip_prefix("sha256:")
-            .unwrap_or(expected_sha);
+        let want_hex = expected_sha.strip_prefix("sha256:").unwrap_or(expected_sha);
         let actual = hex::encode(Sha256::digest(tempfile_bytes));
         if actual != want_hex {
             return Err(anyhow!(
@@ -92,10 +90,7 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 
 /// Stream bytes from an `AsyncRead` into a tempfile, simultaneously hashing.
 /// Returns the temp path + computed sha. The caller then `finalize`s.
-pub async fn write_to_tempfile(
-    cache_root: &Path,
-    bytes: &[u8],
-) -> Result<(PathBuf, String)> {
+pub async fn write_to_tempfile(cache_root: &Path, bytes: &[u8]) -> Result<(PathBuf, String)> {
     ensure_dir(cache_root).await?;
     let rand: u64 = rand::random();
     let tmp = cache_root.join(format!(".incoming.{rand:016x}"));
@@ -144,7 +139,10 @@ mod tests {
         let td = TempDir::new().unwrap();
         let c = BinaryCache::new(paths_under(&td));
         let err = c
-            .finalize(b"hello", "0000000000000000000000000000000000000000000000000000000000000000")
+            .finalize(
+                b"hello",
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            )
             .await
             .unwrap_err();
         assert!(err.to_string().contains("sha mismatch"));

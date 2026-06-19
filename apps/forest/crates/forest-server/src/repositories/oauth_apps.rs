@@ -82,10 +82,7 @@ impl OAuthAppRepository {
     /// rows are kept so refresh-token reuse detection still has a signal.
     /// Returns `(codes_deleted, tokens_deleted)`. Pure housekeeping: these rows
     /// never resolve anyway (reads filter on `expires_at`/`revoked_at`).
-    pub async fn reap_expired(
-        &self,
-        db: impl PgExecutor<'_> + Copy,
-    ) -> anyhow::Result<(u64, u64)> {
+    pub async fn reap_expired(&self, db: impl PgExecutor<'_> + Copy) -> anyhow::Result<(u64, u64)> {
         let codes = sqlx::query!(
             "DELETE FROM oauth_authorization_codes WHERE expires_at < now() OR consumed_at IS NOT NULL",
         )

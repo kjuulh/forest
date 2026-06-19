@@ -58,8 +58,7 @@ impl ReleasesCommand {
                     let icon = match status {
                         PipelineRunStageStatus::Succeeded => "✓",
                         PipelineRunStageStatus::Active => "▶",
-                        PipelineRunStageStatus::Failed
-                        | PipelineRunStageStatus::Cancelled => "✗",
+                        PipelineRunStageStatus::Failed | PipelineRunStageStatus::Cancelled => "✗",
                         PipelineRunStageStatus::Pending => "◌",
                         _ => "•",
                     };

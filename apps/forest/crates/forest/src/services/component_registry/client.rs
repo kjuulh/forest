@@ -6,8 +6,8 @@ use tokio::sync::OnceCell;
 use crate::state::State;
 
 use super::{
-    models::{RegistryComponents, RegistryName},
     forest_client::ForestRegistryClientState,
+    models::{RegistryComponents, RegistryName},
 };
 
 pub struct RegistryClient {

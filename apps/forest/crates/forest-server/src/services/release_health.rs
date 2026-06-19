@@ -58,9 +58,7 @@ pub async fn upsert_observation(
         "message": message,
     });
 
-    let _ = nats
-        .publish(nats_subject, payload.to_string().into())
-        .await;
+    let _ = nats.publish(nats_subject, payload.to_string().into()).await;
 
     Ok(())
 }

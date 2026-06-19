@@ -31,8 +31,8 @@ impl CommandHandler for Commands {
             // Read back what's already there so the workflow author
             // gets consistent outputs regardless of whether we
             // initialised or no-op'd.
-            let sha = git_output(work_dir, &["rev-parse", "HEAD"])
-                .unwrap_or_else(|_| String::new());
+            let sha =
+                git_output(work_dir, &["rev-parse", "HEAD"]).unwrap_or_else(|_| String::new());
             let branch = git_output(work_dir, &["rev-parse", "--abbrev-ref", "HEAD"])
                 .unwrap_or_else(|_| input.branch.clone());
             return Ok(GitInitOutput {
@@ -45,7 +45,10 @@ impl CommandHandler for Commands {
         git(work_dir, &["init", "-q", "-b", &input.branch])?;
         git(work_dir, &["config", "user.name", &input.user_name])?;
         git(work_dir, &["config", "user.email", &input.user_email])?;
-        git(work_dir, &["commit", "--allow-empty", "-q", "-m", &input.message])?;
+        git(
+            work_dir,
+            &["commit", "--allow-empty", "-q", "-m", &input.message],
+        )?;
 
         let sha = git_output(work_dir, &["rev-parse", "HEAD"])?;
         Ok(GitInitOutput {
