@@ -152,12 +152,18 @@ impl UpdateCommand {
                             dep.organisation, dep.name, resolved_str
                         ));
 
+                        // The registry stores macOS binaries under the "darwin"
+                        // os key (publish translates macos→darwin on upload).
+                        // `forest run`'s download path does this too; the
+                        // update path needs the same translation or a macOS
+                        // consumer gets a spurious "binary not found". DATA-312.
+                        let registry_os = if os == "macos" { "darwin" } else { os };
                         let binary = client
                             .download_component_binary(
                                 &dep.organisation,
                                 &dep.name,
                                 &resolved_str,
-                                os,
+                                registry_os,
                                 arch,
                             )
                             .await
