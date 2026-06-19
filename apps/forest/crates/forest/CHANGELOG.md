@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.0](https://github.com/understory-io/forest/compare/v0.1.16...v0.2.0) (2026-06-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* **forest:** remove the bespoke `forest build` command (DATA-312)
+
+### Features
+
+* **components:** add build-rust / build-go / build-docker components (DATA-312) ([8379667](https://github.com/understory-io/forest/commit/83796674a80a25332139f350e367c7628fe7ff52))
+* **forest:** build-dispatch primitives — requires.tools + passthrough (DATA-312) ([88443ef](https://github.com/understory-io/forest/commit/88443ef01d6147a132138edf7b09f422e7d0ee6e))
+* **forest:** dispatch streaming + tool-gated component invocations (DATA-312) ([4a859d8](https://github.com/understory-io/forest/commit/4a859d8280b47078869f6e59c75fe26861612113))
+* **forest:** hidden `forest bootstrap` to publish workspace components (DATA-312) ([db2f081](https://github.com/understory-io/forest/commit/db2f081726b4ba1cca455babbcb230d3709582cf))
+* **forest:** remove the bespoke `forest build` command (DATA-312) ([82beb8c](https://github.com/understory-io/forest/commit/82beb8c30f8215730175d4adef34b0d75ac3929a))
+* **forest:** route build/publish errors through miette (DATA-312) ([9ed49bf](https://github.com/understory-io/forest/commit/9ed49bf31b435ec3314f72a843bec693021d5a15))
+
 ## [0.1.16](https://github.com/understory-io/forest/compare/v0.1.15...v0.1.16) (2026-06-17)
 
 
