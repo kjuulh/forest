@@ -100,7 +100,9 @@ impl RunCommand {
                 let (_, matches) = matches
                     .subcommand()
                     .ok_or(anyhow::anyhow!("run command is required"))?;
-                CliRun.execute(&ctx, &project, matches, &cli_names).await
+                CliRun
+                    .execute(&ctx, &project, matches, &cli_names, state.config.format)
+                    .await
             }
             Err(e) => {
                 match e.kind() {
@@ -530,6 +532,7 @@ impl CliRun {
         project: &Project,
         matches: &ArgMatches,
         cli_names: &std::collections::BTreeMap<String, crate::models::CommandName>,
+        format: crate::cli::output::OutputFormat,
     ) -> anyhow::Result<()> {
         let (subcommand, sub_matches) = matches
             .subcommand()
@@ -619,9 +622,11 @@ impl CliRun {
                     .await?
                 };
 
-                if !result.is_null() {
-                    println!("{}", serde_json::to_string_pretty(&result)?);
-                }
+                // Render the component's JSON result for the chosen --format:
+                // a recognised shape (e.g. a build summary) becomes a tidy table
+                // for humans, while machines and nested invocations get it
+                // verbatim. DATA-312.
+                crate::cli::run_output::print(format, &result)?;
             }
             crate::models::Command::ComponentDeno {
                 component_dir,
@@ -655,9 +660,11 @@ impl CliRun {
                 )
                 .await?;
 
-                if !result.is_null() {
-                    println!("{}", serde_json::to_string_pretty(&result)?);
-                }
+                // Render the component's JSON result for the chosen --format:
+                // a recognised shape (e.g. a build summary) becomes a tidy table
+                // for humans, while machines and nested invocations get it
+                // verbatim. DATA-312.
+                crate::cli::run_output::print(format, &result)?;
             }
             crate::models::Command::Inline(items) => {
                 let mut cmd = tokio::process::Command::new("bash");

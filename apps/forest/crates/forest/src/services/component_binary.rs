@@ -1,5 +1,28 @@
 use std::path::{Path, PathBuf};
 
+/// Env var carrying the invocation id of the *parent* forest invocation.
+/// forest stamps it onto every component child process, so a component that
+/// re-invokes `forest run` produces a nested forest able to see its parent.
+/// Presence at startup means "not the outermost layer": the nested forest emits
+/// raw JSON for its parent to parse instead of rendering a human view. The id is
+/// a UUIDv7 (time-ordered), so a future version can stitch the values into an
+/// invocation tree. See `crate::cli::run_output`.
+pub const INVOCATION_ENV: &str = "FOREST_INVOCATION_ID";
+
+/// This process's own invocation id, generated once. Passed to component
+/// children via [`INVOCATION_ENV`] so each records us as its parent.
+pub fn invocation_id() -> &'static str {
+    use std::sync::OnceLock;
+    static ID: OnceLock<String> = OnceLock::new();
+    ID.get_or_init(|| uuid::Uuid::now_v7().to_string())
+}
+
+/// The parent invocation's id when forest was spawned beneath another forest
+/// invocation (this is a nested layer); `None` at the outermost layer.
+pub fn parent_invocation_id() -> Option<String> {
+    std::env::var(INVOCATION_ENV).ok().filter(|s| !s.is_empty())
+}
+
 /// Compute the shared cache directory for a component's metadata.
 /// Layout: `~/.cache/forest/component-meta/<org>/<name>/<version>/`
 ///
@@ -702,6 +725,7 @@ pub async fn invoke_component_with_context(
 
     let mut child = tokio::process::Command::new(binary_path)
         .arg(method)
+        .env(INVOCATION_ENV, invocation_id())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -779,6 +803,7 @@ pub async fn invoke_component_passthrough(
 
     let mut child = tokio::process::Command::new(binary_path)
         .arg(method)
+        .env(INVOCATION_ENV, invocation_id())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         // Inherit stderr: stream the toolchain's output live.

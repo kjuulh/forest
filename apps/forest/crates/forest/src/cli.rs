@@ -40,6 +40,7 @@ mod organisation;
 mod project;
 mod release;
 mod run;
+mod run_output;
 mod self_cmd;
 mod shell;
 mod template;
