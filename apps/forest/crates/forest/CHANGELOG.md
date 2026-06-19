@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.4](https://github.com/understory-io/forest/compare/v0.2.3...v0.2.4) (2026-06-19)
+
+
+### Features
+
+* **forest:** make global sync invisible, auto-update in background, honour pins ([#108](https://github.com/understory-io/forest/issues/108)) ([a472e99](https://github.com/understory-io/forest/commit/a472e99f395b331883775f1efbda87af84c5b2a0))
+* **forest:** render `forest run` output for --format, reinterpret build summary ([#111](https://github.com/understory-io/forest/issues/111)) ([528e580](https://github.com/understory-io/forest/commit/528e5806dbd3caec31a9f1f5e9fa9aa39b610590))
+
+
+### Bug Fixes
+
+* **forest:** re-store local binary when cache blob is missing ([#109](https://github.com/understory-io/forest/issues/109)) ([3f02587](https://github.com/understory-io/forest/commit/3f025878732f682be050fe9c4d61a9d1f2bf1bfb))
+
 ## [0.2.3](https://github.com/understory-io/forest/compare/v0.2.2...v0.2.3) (2026-06-19)
 
 
