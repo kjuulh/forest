@@ -23,7 +23,14 @@
         {# Top bar: breadcrumb + user actions #}
         <div class="max-w-6xl mx-auto px-4 pb-3 flex items-center justify-between">
             <div class="flex items-center gap-2 text-sm min-w-0">
-                <a href="{% if current_org is defined and current_org %}/orgs/{{ current_org }}/projects{% else %}/dashboard{% endif %}" class="text-lg font-bold tracking-tight shrink-0">forest</a>
+                {# The logo is a "home" button: it always lands on the user's
+                   overview (/dashboard), the cross-org activity page — the same
+                   way GitHub's octocat returns you to your personal dashboard.
+                   This is deliberately distinct from the DATA-248 fix, which
+                   stopped *tab/page* navigation from silently dropping the org
+                   you're inside. Going home is an explicit action, not a
+                   context leak, so the home logo is exempt from org-scoping. #}
+                <a href="/dashboard" class="text-lg font-bold tracking-tight shrink-0">forest</a>
                 {% if current_org is defined and current_org %}
                 <span class="text-gray-300">/</span>
                 {% if orgs is defined and orgs | length > 1 %}

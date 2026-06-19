@@ -2076,10 +2076,16 @@ async fn project_overview_with_releases_and_components_renders_both() {
 
 // ─── Nav preserves org context (DATA-248) ───────────────────────────
 //
-// The top-level nav previously linked the "forest" logo and the org-level
-// "Overview" tab to the global `/dashboard`, which silently dropped the
-// org the user was inside. These tests pin the org-scoped behaviour so
-// the bug doesn't regress.
+// DATA-248: the org-level "Overview" *tab* linked to the global
+// `/dashboard` and silently dropped the org the user was inside while
+// navigating around — that tab is gone (Projects is the org root) and the
+// breadcrumb, remaining tabs and bell stay org-scoped. These tests pin
+// that behaviour so the bug doesn't regress.
+//
+// The "forest" logo is the one deliberate exception: it's a home button
+// and always points at `/dashboard` (the user's cross-org overview), the
+// same way GitHub's logo returns you home. Clicking home is an explicit
+// action, not the silent context leak DATA-248 was about.
 
 /// Extract the substring between `<nav` and `</nav>` so assertions don't
 /// accidentally match links inside the page body (where `/dashboard`
@@ -2090,8 +2096,14 @@ fn extract_nav(html: &str) -> &str {
     &html[start..start + end_rel]
 }
 
+/// The "forest" logo is a home button: it always returns the user to their
+/// cross-org overview at `/dashboard`, the same way GitHub's octocat returns
+/// you to your personal dashboard. Going home is an explicit user action, not
+/// the silent context leak DATA-248 was about — so the logo is deliberately
+/// exempt from org-scoping while the rest of the nav (breadcrumb, tabs, bell)
+/// stays anchored to the org you're inside.
 #[tokio::test]
-async fn nav_logo_links_to_org_when_inside_org() {
+async fn nav_logo_links_to_dashboard_inside_org() {
     let (state, sessions) = test_state();
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
@@ -2112,27 +2124,27 @@ async fn nav_logo_links_to_org_when_inside_org() {
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
     let nav = extract_nav(&html);
+    // The logo anchor (distinguished by its bold/tracking-tight classes)
+    // points home. Match the class string so we assert on the logo, not
+    // some other `/dashboard` link that might appear later.
+    assert!(
+        nav.contains(r#"href="/dashboard" class="text-lg font-bold tracking-tight shrink-0""#),
+        "logo should be a home button linking to /dashboard: {nav}"
+    );
+    // The rest of the nav must still preserve org context (DATA-248): the
+    // breadcrumb / Projects tab stay scoped to the org you're inside.
     assert!(
         nav.contains(r#"href="/orgs/testorg/projects""#),
-        "expected org-scoped link in nav, got: {nav}"
-    );
-    assert!(
-        !nav.contains(r#"href="/dashboard""#),
-        "nav must not link to global /dashboard while inside an org: {nav}"
+        "expected org-scoped link still present in nav, got: {nav}"
     );
 }
 
 #[tokio::test]
-async fn nav_logo_links_to_dashboard_when_no_org_context() {
+async fn nav_logo_links_to_dashboard_on_dashboard_page() {
     let (state, sessions) = test_state();
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
-    // The dashboard page has no org in the URL — the logo should fall
-    // back to /dashboard there. (`current_org` is still set in context
-    // via the first-org fallback, so the nav links into that org, but
-    // the page exists outside any org route — which is the only place
-    // the global dashboard is the right target.)
     let response = app
         .oneshot(
             Request::builder()
@@ -2149,10 +2161,12 @@ async fn nav_logo_links_to_dashboard_when_no_org_context() {
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
     let nav = extract_nav(&html);
-    // Logo + Projects tab both land on the user's first org's project
-    // list — that's the "I'm inside testorg" anchor the rest of the nav
-    // already uses.
-    assert!(nav.contains(r#"href="/orgs/testorg/projects""#));
+    // The home logo points at /dashboard everywhere, including on the
+    // dashboard itself.
+    assert!(
+        nav.contains(r#"href="/dashboard" class="text-lg font-bold tracking-tight shrink-0""#),
+        "logo should link to /dashboard: {nav}"
+    );
 }
 
 #[tokio::test]
