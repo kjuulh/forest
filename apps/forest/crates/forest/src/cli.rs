@@ -154,6 +154,10 @@ enum Commands {
 pub async fn execute() -> anyhow::Result<()> {
     let cli = Command::parse();
 
+    // Initialise tracing now that args are parsed — honours `--verbose` and
+    // the interactive-vs-CI audience (warn-only at a TTY, info otherwise).
+    crate::ui::init_logging(cli.config.verbose);
+
     // Resolve the active context once, up front. Two outcomes ride
     // on this:
     //   1. CUE_REGISTRY gets derived from the context's server if

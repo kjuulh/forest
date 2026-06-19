@@ -18,6 +18,12 @@ pub struct Config {
     /// json = typed JSON array.
     #[arg(long, value_enum, default_value_t, global = true)]
     pub format: OutputFormat,
+
+    /// Increase log verbosity: -v = info, -vv = debug, -vvv = trace. In a
+    /// terminal the default is warn-only (the rich UI carries the narration);
+    /// this brings the structured logs back. `FOREST_LOG` overrides it.
+    #[arg(short = 'v', long, action = clap::ArgAction::Count, global = true)]
+    pub verbose: u8,
 }
 
 #[derive(Clone)]

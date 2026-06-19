@@ -20,11 +20,12 @@ use crate::{
 /// just for the courtesy print.
 fn print_publish_context(owner: &str, component: &str) {
     match ContextStore::from_env().and_then(|s| s.active()) {
-        Ok(ctx) => eprintln!(
-            "publishing to {} ({}) as {}/{}",
-            ctx.name, ctx.server, owner, component
-        ),
-        Err(_) => eprintln!("publishing as {}/{}", owner, component),
+        Ok(ctx) => {
+            // Server URL is detail for the logs, not the human line.
+            tracing::debug!("publishing as {owner}/{component} to {} ({})", ctx.name, ctx.server);
+            crate::ui::status(format!("Publishing {owner}/{component} to {}", ctx.name));
+        }
+        Err(_) => crate::ui::status(format!("Publishing {owner}/{component}")),
     }
 }
 
@@ -42,10 +43,15 @@ struct PublishSummary {
 
 impl PublishSummary {
     fn print(&self) {
-        eprintln!(
+        // shape/kind/platform are diagnostic detail — keep them in the logs.
+        tracing::debug!(
             "published {}/{}@{} as shape={} [{}] {}",
             self.owner, self.component, self.version, self.shape, self.kind, self.platform,
         );
+        crate::ui::success(format!(
+            "Published {}/{}@{}",
+            self.owner, self.component, self.version
+        ));
     }
 }
 

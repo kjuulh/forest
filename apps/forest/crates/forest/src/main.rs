@@ -1,5 +1,4 @@
 #![allow(dead_code, clippy::too_many_arguments)]
-use tracing_subscriber::EnvFilter;
 
 mod cli;
 mod grpc;
@@ -28,21 +27,16 @@ mod otel;
 mod tools;
 
 mod forest_context;
+mod ui;
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     dotenvy::dotenv().ok();
 
-    // All tracing output (DEBUG/INFO/WARN/ERROR) goes to stderr so it never
-    // contaminates command stdout — `forest X --format json | jq` stays clean,
-    // and `slug=$(forest project publish)` doesn't capture log lines.
-    tracing_subscriber::fmt()
-        .pretty()
-        .with_writer(std::io::stderr)
-        .with_env_filter(
-            EnvFilter::from_default_env().add_directive("notmad=warn".parse().unwrap()),
-        )
-        .init();
+    // tracing is initialised inside `cli::execute` once args are parsed, so it
+    // can honour `--verbose` and the interactive-vs-CI audience (see
+    // `ui::init_logging`). All tracing output goes to stderr; stdout stays
+    // clean for machine output (`--format`).
 
     // Print errors ourselves (Debug form, same as anyhow's default Termination)
     // rather than returning a Result from `main`. The build/publish path

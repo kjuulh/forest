@@ -102,10 +102,10 @@ impl UpdateCommand {
 
                     // Resolve the best match
                     let Some(resolved) = spec.resolve(&semver_versions) else {
-                        eprintln!(
-                            "  {} {}/{}  no version matches spec '{spec}'",
-                            "!", dep.organisation, dep.name
-                        );
+                        crate::ui::warn(format!(
+                            "{}/{}: no version matches '{spec}'",
+                            dep.organisation, dep.name
+                        ));
                         continue;
                     };
 
@@ -139,18 +139,18 @@ impl UpdateCommand {
                                 .strip_prefix("sha256:")
                                 .unwrap_or(existing_hash);
                             if component_binary::resolve_binary_from_hash(hash).is_some() {
-                                eprintln!(
-                                    "  {} {}/{}@{}  up to date",
-                                    "✓", dep.organisation, dep.name, resolved_str
-                                );
+                                crate::ui::success(format!(
+                                    "{}/{}@{} up to date",
+                                    dep.organisation, dep.name, resolved_str
+                                ));
                                 continue;
                             }
                         }
 
-                        eprintln!(
-                            "  {} {}/{}@{}  downloading...",
-                            "↓", dep.organisation, dep.name, resolved_str
-                        );
+                        crate::ui::status(format!(
+                            "Downloading {}/{}@{}",
+                            dep.organisation, dep.name, resolved_str
+                        ));
 
                         let binary = client
                             .download_component_binary(
@@ -182,14 +182,14 @@ impl UpdateCommand {
                             },
                         });
 
-                        eprintln!(
-                            "  {} {}/{}@{}  updated ({} bytes)",
-                            "✓",
-                            dep.organisation,
-                            dep.name,
-                            resolved_str,
-                            binary.len()
+                        tracing::debug!(
+                            "updated {}/{}@{} ({} bytes)",
+                            dep.organisation, dep.name, resolved_str, binary.len()
                         );
+                        crate::ui::success(format!(
+                            "Updated {}/{}@{}",
+                            dep.organisation, dep.name, resolved_str
+                        ));
                         updated += 1;
                     } else {
                         // Files-based (CUE-only library or Deno component).
@@ -209,16 +209,16 @@ impl UpdateCommand {
                             })?;
                         match outcome {
                             EnsureCachedOutcome::AlreadyCached => {
-                                eprintln!(
-                                    "  {} {}/{}@{}  up to date",
-                                    "✓", dep.organisation, dep.name, resolved_str
-                                );
+                                crate::ui::success(format!(
+                                    "{}/{}@{} up to date",
+                                    dep.organisation, dep.name, resolved_str
+                                ));
                             }
                             EnsureCachedOutcome::Downloaded => {
-                                eprintln!(
-                                    "  {} {}/{}@{}  fetched (files)",
-                                    "✓", dep.organisation, dep.name, resolved_str
-                                );
+                                crate::ui::success(format!(
+                                    "Updated {}/{}@{} (files)",
+                                    dep.organisation, dep.name, resolved_str
+                                ));
                                 updated += 1;
                             }
                             EnsureCachedOutcome::BinaryRequiresPlatformDownload => {
@@ -241,11 +241,11 @@ impl UpdateCommand {
 
         lockfile.save(&project_dir).await?;
 
-        eprintln!();
         if updated > 0 {
-            eprintln!("Updated {updated} component(s). forest.lock written.");
+            tracing::debug!("forest.lock written");
+            crate::ui::success(format!("Updated {updated} component(s)"));
         } else {
-            eprintln!("All components up to date.");
+            crate::ui::success("All components up to date");
         }
 
         Ok(())
