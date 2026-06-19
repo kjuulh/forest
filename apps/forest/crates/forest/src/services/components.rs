@@ -252,7 +252,7 @@ impl ComponentsService {
         // spurious "binary not found". DATA-312.
         let registry_os = if os == "macos" { "darwin" } else { os };
 
-        tracing::info!(
+        tracing::debug!(
             "downloading binary component {organisation}/{name}@{version} ({registry_os}/{arch})"
         );
 

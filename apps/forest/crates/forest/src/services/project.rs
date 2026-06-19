@@ -139,7 +139,7 @@ impl ProjectParser {
                                     );
                                     registered += 1;
                                 }
-                                tracing::info!(
+                                tracing::trace!(
                                     "registered {} v2 commands from component {}/{}",
                                     registered,
                                     component.organisation,
@@ -216,7 +216,7 @@ impl ProjectParser {
                                         );
                                         registered += 1;
                                     }
-                                    tracing::info!(
+                                    tracing::trace!(
                                         "registered {} deno commands from component {}/{}",
                                         registered,
                                         component.organisation,
