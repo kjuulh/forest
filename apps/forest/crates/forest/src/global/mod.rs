@@ -27,6 +27,7 @@ pub mod shim;
 pub mod user_config;
 
 // --- Effectful shell ---
+pub mod autoupdate;
 pub mod cache;
 pub mod cue_eval;
 pub mod fs;

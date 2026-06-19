@@ -10,9 +10,16 @@ package sdk
 	// pre-spec `[user]` table semantics). Set via `forest global set`.
 	user: [string]: string
 
-	// Per-tool pins. Key is "<org>/<name>"; value carries the resolved version.
+	// Per-tool deps. Key is "<org>/<name>"; value carries the resolved version.
 	dependencies: [string]: {
 		version: string & =~#"^\d+\.\d+\.\d+"#
+
+		// Whether the version above is a hard pin. `true` when the user added
+		// the tool with an explicit `@<version>`; such tools are never moved
+		// by `forest global update`. When `false` (the default, i.e. a bare
+		// `forest global add <org>/<tool>`) the tool tracks latest and update
+		// refreshes `version` to the newest published release.
+		pinned?: bool | *false
 
 		// Optional client-side shim alias. If unset, the shim name comes from
 		// the component manifest's `#Tool.name` (which itself defaults to the

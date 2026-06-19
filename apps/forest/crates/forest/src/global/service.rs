@@ -386,6 +386,11 @@ pub fn render_user_config(cfg: &UserConfig) -> String {
         for (k, dep) in &cfg.dependencies {
             out.push_str(&format!("\t\t{}: {{\n", cue_string(k)));
             out.push_str(&format!("\t\t\tversion: {}\n", cue_string(&dep.version)));
+            // Only emit `pinned` when set — keeps floating deps (the common
+            // case) terse and configs written by older binaries unchanged.
+            if dep.pinned {
+                out.push_str("\t\t\tpinned: true\n");
+            }
             if let Some(shim) = &dep.shim_name {
                 out.push_str(&format!("\t\t\tshim_name: {}\n", cue_string(shim)));
             }
@@ -575,6 +580,8 @@ pub struct SyncOutcome {
 #[derive(Debug)]
 pub struct UpdateOutcome {
     pub bumps: Vec<VersionBump>,
+    /// Count of pinned per-tool deps left untouched (for reporting).
+    pub held: usize,
     pub sync: SyncOutcome,
 }
 
@@ -628,6 +635,9 @@ impl GlobalService {
             key.clone(),
             Dependency {
                 version: resolved_version.clone(),
+                // An explicit `@<version>` freezes the tool; a bare add tracks
+                // latest and is refreshed by `forest global update`.
+                pinned: version.is_some(),
                 shim_name: as_shim_name.map(str::to_string),
                 env: Default::default(),
             },
@@ -763,18 +773,28 @@ impl GlobalService {
     pub async fn update_all(&self) -> Result<UpdateOutcome> {
         let mut cfg = self.load_user_config().await?;
         let mut bumps = Vec::new();
+        let mut held = 0usize;
 
-        // Re-resolve each per-tool dep to the registry's current latest.
+        // Re-resolve each *floating* per-tool dep to the registry's current
+        // latest. Pinned deps (explicit `@<version>`) are intentionally
+        // frozen — a pin means "never move this", so update leaves it alone.
+        // (Catalogue subscriptions always track latest at run time and per-
+        // catalogue pins are honoured by `resolve_version`, so they need no
+        // bump here.)
         let keys: Vec<String> = cfg.dependencies.keys().cloned().collect();
         for key in keys {
             let (org, name) = key
                 .split_once('/')
                 .ok_or_else(|| anyhow!("malformed dep key {key}"))?;
-            let current = cfg
-                .dependencies
-                .get(&key)
-                .map(|d| d.version.clone())
-                .unwrap_or_default();
+            let dep = match cfg.dependencies.get(&key) {
+                Some(d) => d,
+                None => continue,
+            };
+            if dep.pinned {
+                held += 1;
+                continue;
+            }
+            let current = dep.version.clone();
             let latest = match self.grpc.get_component(name, org).await {
                 Ok(Some(c)) => c.version.to_string(),
                 _ => continue,
@@ -793,7 +813,7 @@ impl GlobalService {
 
         self.save_user_config(&cfg).await?;
         let sync = self.sync_shims().await?;
-        Ok(UpdateOutcome { bumps, sync })
+        Ok(UpdateOutcome { bumps, held, sync })
     }
 
     /// `forest global sync` — reconcile shim dir vs forest.cue.
@@ -934,8 +954,9 @@ impl GlobalService {
     }
 
     /// `forest global unban <org> <tool>`. Removes from ban list. Does NOT
-    /// recreate the shim — call `forest global sync` for that (or it will
-    /// be created on the next `forest global update`).
+    /// recreate the shim itself — the `unban` CLI command reconciles shims
+    /// immediately afterwards (and a background `update` would too), so the
+    /// shim reappears without the user running anything.
     pub async fn unban_tool(&self, organisation: &str, tool_name: &str) -> Result<()> {
         let mut cfg = self.load_user_config().await?;
         let cat = cfg
@@ -1048,7 +1069,11 @@ impl GlobalService {
                     name: name.to_string(),
                     version: dep.version.clone(),
                     status,
-                    source: ToolSource::Pin,
+                    source: if dep.pinned {
+                        ToolSource::Pin
+                    } else {
+                        ToolSource::Latest
+                    },
                 },
             );
         }
@@ -1108,11 +1133,11 @@ impl GlobalService {
                     .await?
                 };
 
-                // Per-tool pin wins; don't overwrite a Pin entry with a
-                // Catalog entry of the same shim name.
+                // An explicit per-tool dep (pinned or floating) wins; don't
+                // overwrite it with a Catalog entry of the same shim name.
                 if matches!(
                     out.get(&shim_name).map(|t| &t.source),
-                    Some(ToolSource::Pin)
+                    Some(ToolSource::Pin) | Some(ToolSource::Latest)
                 ) {
                     continue;
                 }
@@ -1177,8 +1202,12 @@ pub struct ListedTool {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolSource {
-    /// Explicit per-tool pin in `config.dependencies`.
+    /// Explicit per-tool pin in `config.dependencies` (`pinned: true`) — a
+    /// fixed version that `update` never moves.
     Pin,
+    /// Per-tool dep in `config.dependencies` that tracks latest (`pinned:
+    /// false`) — refreshed by `forest global update`.
+    Latest,
     /// Reachable via an `org_catalog` subscription, currently emitting a shim.
     Catalog { org: String },
     /// In the catalogue but banned by `config.org_catalog.<org>.banned`.
@@ -1320,6 +1349,7 @@ mod tests {
             "cuteorg/ripgrep".into(),
             Dependency {
                 version: "14.1.1".into(),
+                pinned: true,
                 shim_name: Some("rg".into()),
                 env: [("FUNGUS_SERVER".to_string(), "https://prod".to_string())]
                     .into_iter()
@@ -1338,6 +1368,7 @@ mod tests {
         let text = render_user_config(&cfg);
         assert!(text.contains("\"cuteorg/ripgrep\""));
         assert!(text.contains("version: \"14.1.1\""));
+        assert!(text.contains("pinned: true"));
         assert!(text.contains("shim_name: \"rg\""));
         assert!(text.contains("env: {"));
         assert!(text.contains("\"FUNGUS_SERVER\": \"https://prod\""));

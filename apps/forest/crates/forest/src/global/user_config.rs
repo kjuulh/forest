@@ -23,7 +23,17 @@ pub struct UserConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dependency {
+    /// The concrete resolved version. For a floating dep (`pinned == false`)
+    /// this is the last-known latest — refreshed by `forest global update`
+    /// and used as-is on the offline warm path. For a pinned dep it is the
+    /// version the user asked for and never changes on its own.
     pub version: String,
+    /// `true` when the user fixed an explicit `@<version>` (e.g.
+    /// `forest global add org/tool@1.2.3`). Pinned tools are **never**
+    /// touched by `forest global update` — including the automatic
+    /// background one. A bare `forest global add org/tool` leaves this
+    /// `false`, meaning "track latest".
+    pub pinned: bool,
     /// Optional client-side shim alias. If `None`, the shim name comes from
     /// the component manifest's `tool.name`.
     pub shim_name: Option<String>,
@@ -130,11 +140,21 @@ pub fn parse(json: &str) -> Result<UserConfig, UserConfigError> {
                         ));
                     }
                 };
+                let pinned = match dep_obj.get("pinned") {
+                    None | Some(serde_json::Value::Null) => false,
+                    Some(serde_json::Value::Bool(b)) => *b,
+                    Some(_) => {
+                        return Err(UserConfigError::InvalidJson(
+                            "pinned must be a bool".into(),
+                        ));
+                    }
+                };
                 let env = parse_dep_env(dep_obj.get("env"))?;
                 out.insert(
                     k.clone(),
                     Dependency {
                         version,
+                        pinned,
                         shim_name,
                         env,
                     },
@@ -316,6 +336,37 @@ mod tests {
         let dep = c.dependencies.get("cuteorg/ripgrep").unwrap();
         assert_eq!(dep.version, "14.1.1");
         assert!(dep.shim_name.is_none());
+        // Absent `pinned` defaults to floating (tracks latest).
+        assert!(!dep.pinned);
+    }
+
+    #[test]
+    fn parses_pinned_dependency() {
+        let json = r#"{
+            "config": {
+                "dependencies": {
+                    "cuteorg/ripgrep": {"version": "14.1.1", "pinned": true}
+                }
+            }
+        }"#;
+        let c = parse(json).unwrap();
+        let dep = c.dependencies.get("cuteorg/ripgrep").unwrap();
+        assert!(dep.pinned);
+    }
+
+    #[test]
+    fn rejects_non_bool_pinned() {
+        let json = r#"{
+            "config": {
+                "dependencies": {
+                    "cuteorg/ripgrep": {"version": "14.1.1", "pinned": "yes"}
+                }
+            }
+        }"#;
+        assert!(matches!(
+            parse(json),
+            Err(UserConfigError::InvalidJson(_))
+        ));
     }
 
     #[test]

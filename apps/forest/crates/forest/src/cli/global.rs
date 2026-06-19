@@ -37,9 +37,13 @@ enum Commands {
     Which(WhichCommand),
     /// Re-verify every cached binary; delete mismatches.
     Verify(VerifyCommand),
-    /// Reconcile shims with forest.cue (idempotent).
+    /// Repair shims if they drift from forest.cue (idempotent). Normally
+    /// automatic — add/remove/ban/unban reconcile for you, so you only need
+    /// this after hand-editing forest.cue or `add --no-sync`.
     Sync(SyncCommand),
-    /// Re-resolve pins + catalogue subscriptions; bump to latest.
+    /// Re-resolve pins + catalogue subscriptions; bump to latest. Also runs
+    /// automatically in the background (~once a day) when you invoke a global
+    /// tool — set FOREST_NO_AUTO_UPDATE=1 to opt out.
     Update(UpdateCommand),
     /// Ban a tool from a catalogue subscription.
     Ban(BanCommand),
@@ -95,11 +99,26 @@ impl SyncCommand {
 }
 
 #[derive(Args)]
-pub struct UpdateCommand {}
+pub struct UpdateCommand {
+    /// Internal: invoked by the throttled background auto-update. Runs the
+    /// update silently and swallows errors (the shell stdio is /dev/null
+    /// anyway) so a flaky network never leaves stray output or a non-zero
+    /// exit lying around. Not meant to be typed by hand.
+    #[arg(long = "background", hide = true)]
+    background: bool,
+}
 
 impl UpdateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let svc = GlobalService::from_state(state)?;
+
+        if self.background {
+            // Best-effort: the foreground tool the user actually launched
+            // must never be affected by an update failure here.
+            let _ = svc.update_all().await;
+            return Ok(());
+        }
+
         let out = svc.update_all().await?;
         if out.bumps.is_empty() {
             eprintln!("no per-tool version bumps");
@@ -107,6 +126,9 @@ impl UpdateCommand {
             for b in &out.bumps {
                 eprintln!("  {} : {} → {}", b.qualified, b.from, b.to);
             }
+        }
+        if out.held > 0 {
+            eprintln!("held {} pinned tool(s) at their pinned version", out.held);
         }
         eprintln!(
             "sync: {} shim(s) created, {} deleted",
@@ -144,10 +166,21 @@ impl UnbanCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let svc = GlobalService::from_state(state)?;
         svc.unban_tool(&self.organisation, &self.tool).await?;
-        eprintln!(
-            "unbanned {} (run `forest global sync` or `forest global update` to recreate the shim)",
-            self.tool
-        );
+        eprintln!("unbanned {} from {} catalogue", self.tool, self.organisation);
+        // Reconcile so the shim comes back immediately — the user shouldn't
+        // have to remember a follow-up `sync`. Best-effort: a sync failure
+        // (e.g. registry offline) is a warning, not a hard error, since the
+        // unban itself already succeeded.
+        match svc.sync_shims().await {
+            Ok(out) => {
+                for line in format_reconcile_lines(&out, "after unban") {
+                    eprintln!("{line}");
+                }
+            }
+            Err(e) => eprintln!(
+                "warning: could not recreate shim now: {e:#}; run `forest global sync` to retry"
+            ),
+        }
         Ok(())
     }
 }
@@ -288,7 +321,7 @@ impl AddCommand {
         }
         match svc.sync_shims().await {
             Ok(out) => {
-                for line in format_post_add_sync(&out) {
+                for line in format_reconcile_lines(&out, "after add") {
                     eprintln!("{line}");
                 }
             }
@@ -301,16 +334,17 @@ impl AddCommand {
     }
 }
 
-/// Render the stderr lines for the post-add sync step. Returns an empty
+/// Render the stderr lines for an implicit reconcile step (after add, after
+/// unban, …). `context` labels which command triggered it. Returns an empty
 /// vec when there is nothing to report (no shims created or deleted) so
 /// callers can stay quiet in the common case.
-fn format_post_add_sync(out: &SyncOutcome) -> Vec<String> {
+fn format_reconcile_lines(out: &SyncOutcome, context: &str) -> Vec<String> {
     if out.created.is_empty() && out.deleted.is_empty() {
         return Vec::new();
     }
     let mut lines = Vec::with_capacity(1 + out.created.len() + out.deleted.len());
     lines.push(format!(
-        "sync (after add): {} shim(s) created, {} deleted",
+        "sync ({context}): {} shim(s) created, {} deleted",
         out.created.len(),
         out.deleted.len()
     ));
@@ -399,11 +433,12 @@ impl ListCommand {
                     ToolStatus::Missing => "missing".to_string(),
                 },
                 source: match t.source {
-                    ToolSource::Pin => "[pin]".to_string(),
+                    ToolSource::Pin => "[pinned]".to_string(),
+                    ToolSource::Latest => "[latest]".to_string(),
                     ToolSource::Catalog { org } => format!("[catalog:{org}]"),
                     ToolSource::CatalogBanned { org } => format!("[catalog:{org} banned]"),
                     ToolSource::CatalogShadowed { org } => {
-                        format!("[catalog:{org} shadowed by pin]")
+                        format!("[catalog:{org} shadowed by dependency]")
                     }
                 },
             })
@@ -431,6 +466,13 @@ pub struct RunCommand {
 impl RunCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let svc = GlobalService::from_state(state)?;
+
+        // A global tool is being invoked — a natural, frequent signal that
+        // the user is actively using their toolset. Kick off a throttled,
+        // detached `forest global update` in the background. This is the
+        // hook that makes `update` automatic and `sync` invisible. Fully
+        // best-effort; it must not delay the exec below.
+        crate::global::autoupdate::maybe_spawn(&svc.paths);
 
         let (qref, version) = match resolve_tool_ref(&svc, &self.tool).await? {
             ResolvedRef::Qualified { qref, version } => (qref, version),
@@ -679,12 +721,12 @@ mod tests {
     }
 
     #[test]
-    fn format_post_add_sync_handles_many_entries() {
+    fn format_reconcile_lines_handles_many_entries() {
         let out = SyncOutcome {
             created: vec!["a".into(), "b".into()],
             deleted: vec!["c".into(), "d".into(), "e".into()],
         };
-        let lines = format_post_add_sync(&out);
+        let lines = format_reconcile_lines(&out, "after add");
         assert_eq!(lines.len(), 1 + 2 + 3);
         assert_eq!(lines[0], "sync (after add): 2 shim(s) created, 3 deleted");
         assert_eq!(&lines[1..3], &["  + a".to_string(), "  + b".to_string()]);
@@ -699,21 +741,21 @@ mod tests {
     }
 
     #[test]
-    fn format_post_add_sync_is_silent_when_no_changes() {
+    fn format_reconcile_lines_is_silent_when_no_changes() {
         let out = SyncOutcome {
             created: vec![],
             deleted: vec![],
         };
-        assert!(format_post_add_sync(&out).is_empty());
+        assert!(format_reconcile_lines(&out, "after add").is_empty());
     }
 
     #[test]
-    fn format_post_add_sync_reports_created_and_deleted() {
+    fn format_reconcile_lines_reports_created_and_deleted() {
         let out = SyncOutcome {
             created: vec!["rg".into()],
             deleted: vec!["old".into()],
         };
-        let lines = format_post_add_sync(&out);
+        let lines = format_reconcile_lines(&out, "after add");
         assert_eq!(
             lines,
             vec![
@@ -722,5 +764,15 @@ mod tests {
                 "  − old".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn format_reconcile_lines_uses_the_given_context_label() {
+        let out = SyncOutcome {
+            created: vec!["rg".into()],
+            deleted: vec![],
+        };
+        let lines = format_reconcile_lines(&out, "after unban");
+        assert_eq!(lines[0], "sync (after unban): 1 shim(s) created, 0 deleted");
     }
 }
