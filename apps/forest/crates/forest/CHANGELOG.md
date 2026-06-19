@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/understory-io/forest/compare/v0.2.1...v0.2.2) (2026-06-19)
+
+
+### Bug Fixes
+
+* **forest:** register commands for versioned v2 binary components ([#101](https://github.com/understory-io/forest/issues/101)) ([8222b25](https://github.com/understory-io/forest/commit/8222b2533041456b75a873622fb4ef84583e50a9))
+* **forest:** request macOS binary downloads under the "darwin" os key (DATA-312) ([#100](https://github.com/understory-io/forest/issues/100)) ([736bee4](https://github.com/understory-io/forest/commit/736bee4e55ebe9ec3f13c7d2505f1b17800668f5))
+
 ## [0.2.1](https://github.com/understory-io/forest/compare/v0.2.0...v0.2.1) (2026-06-19)
 
 
