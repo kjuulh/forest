@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.1](https://github.com/understory-io/forest/compare/v0.2.0...v0.2.1) (2026-06-19)
+
+
+### Features
+
+* cleanup ([f3f4efd](https://github.com/understory-io/forest/commit/f3f4efd75bc967907740d5601d0dceddac0fe8b0))
+* **forage:** show when each component version was published ([315c451](https://github.com/understory-io/forest/commit/315c451bb2b8150be278203234318922ef3f235d))
+* move components around ([39d8c12](https://github.com/understory-io/forest/commit/39d8c126f321b3d8e1cae6da7a7495b39d56f56f))
+* remove noise ([26b97d3](https://github.com/understory-io/forest/commit/26b97d36ed8dee2821aac0d1f66cac74f3e85b84))
+* wide fmt and fix ecs-service ([c49f89e](https://github.com/understory-io/forest/commit/c49f89e75d195388bf79e28b145b84c27c4f56bd))
+
+
+### Bug Fixes
+
+* **forage:** make the forest logo a home button to /dashboard (DATA-248) ([462af17](https://github.com/understory-io/forest/commit/462af17e30e3a57a7b3f33d5f4cf6b9c6e850d69))
+
 ## [0.2.0](https://github.com/understory-io/forest/compare/v0.1.16...v0.2.0) (2026-06-19)
 
 
