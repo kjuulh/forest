@@ -3832,7 +3832,7 @@ pub struct ComponentVersionInfo {
     #[prost(string, repeated, tag = "4")]
     pub platforms: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// ISO 8601 — when this version was published
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub created_at: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

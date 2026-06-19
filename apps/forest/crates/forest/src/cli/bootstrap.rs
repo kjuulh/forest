@@ -27,14 +27,14 @@ const COMPONENT_ORDER: &[&str] = &[
     "components/forest-contrib/build-go",
     "components/forest-contrib/build-docker",
     // Other v2 contrib components.
-    "components/forest-contrib/init",
-    "components/forest-contrib/git-init",
-    "components/forest-contrib/checkout",
-    "components/forest-contrib/git-commit-push",
-    "components/forest-contrib/gitea-create-repo",
-    "components/forest-contrib/render-template",
-    "components/forest-contrib/terraform-service",
-    "components/forest-contrib/ecs-service",
+    // "components/forest-contrib/init",
+    // "components/forest-contrib/git-init",
+    // "components/forest-contrib/checkout",
+    // "components/forest-contrib/git-commit-push",
+    // "components/forest-contrib/gitea-create-repo",
+    // "components/forest-contrib/render-template",
+    // "components/forest-contrib/terraform-service",
+    // "components/forest-contrib/ecs-service",
 ];
 
 #[derive(clap::Parser)]
