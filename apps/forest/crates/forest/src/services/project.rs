@@ -47,8 +47,32 @@ impl ProjectParser {
                 continue;
             }
 
-            // Check if this is a v2 component (has forest.component.cue)
-            if let CacheComponentSource::Local(path) = &component.source {
+            // Check if this is a v2 component (has forest.component.cue).
+            // Both local path deps and downloaded *versioned* deps materialise a
+            // component dir (forest.component.cue marker + .forest/component/
+            // meta.json); register `commands/*` for either. Before DATA-312 only
+            // local deps were handled, so a versioned binary component (e.g.
+            // fungus → forest-contrib/build-rust@x) exposed no `forest run`
+            // commands.
+            let v2_component: Option<(std::path::PathBuf, CommandSource)> =
+                match &component.source {
+                    CacheComponentSource::Local(path) => Some((
+                        path.clone(),
+                        CommandSource::Local(path.canonicalize().context("get absolute path")?),
+                    )),
+                    CacheComponentSource::Versioned(version) => dirs::cache_dir().map(|c| {
+                        let dir = c
+                            .join("forest")
+                            .join("components")
+                            .join(&component.organisation)
+                            .join(&component.name)
+                            .join(version.to_string());
+                        (dir, CommandSource::Versioned(version.to_string()))
+                    }),
+                    CacheComponentSource::Unknown => None,
+                };
+            if let Some((v2_dir, v2_source)) = &v2_component {
+                let path = v2_dir;
                 if component_binary::is_v2_component(path) {
                     // v2 component — check for binary (optional for template-only components)
                     let binary_path = component_binary::resolve_binary_with_meta(
@@ -79,9 +103,7 @@ impl ProjectParser {
                         };
                         match descriptor_result {
                             Ok(descriptor) => {
-                                let source = CommandSource::Local(
-                                    path.canonicalize().context("get absolute path")?,
-                                );
+                                let source = v2_source.clone();
                                 let mut registered = 0;
                                 for method in &descriptor.methods {
                                     // Only register "commands/*" for `forest run`.
@@ -167,7 +189,7 @@ impl ProjectParser {
                                 Ok(descriptor) => {
                                     let component_dir =
                                         path.canonicalize().context("get absolute path")?;
-                                    let source = CommandSource::Local(component_dir.clone());
+                                    let source = v2_source.clone();
                                     let mut registered = 0;
                                     for method in &descriptor.methods {
                                         if !method.name.starts_with("commands/") {
