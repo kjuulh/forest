@@ -245,13 +245,20 @@ impl ComponentsService {
     ) -> anyhow::Result<()> {
         let (os, arch) = crate::services::component_binary::current_platform();
 
+        // The registry stores macOS binaries under the "darwin" os key — publish
+        // translates macos→darwin on upload (see publish.rs, where the manifest
+        // validator requires "darwin"). Match it here so the download key lines
+        // up; otherwise a macOS consumer asks for "macos/arm64" and gets a
+        // spurious "binary not found". DATA-312.
+        let registry_os = if os == "macos" { "darwin" } else { os };
+
         tracing::info!(
-            "downloading binary component {organisation}/{name}@{version} ({os}/{arch})"
+            "downloading binary component {organisation}/{name}@{version} ({registry_os}/{arch})"
         );
 
         let binary = self
             .grpc
-            .download_component_binary(organisation, name, version, os, arch)
+            .download_component_binary(organisation, name, version, registry_os, arch)
             .await
             .context("download binary from registry")?;
 
