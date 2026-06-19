@@ -250,6 +250,7 @@ impl GlobalService {
                         version,
                         platform::os_str(host.os),
                         platform::arch_str(host.arch),
+                        Some(&format!("Downloading {}/{}", qref.organisation, qref.name)),
                     )
                     .await
                     .with_context(|| {

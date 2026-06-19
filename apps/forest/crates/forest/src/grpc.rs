@@ -224,8 +224,17 @@ impl GrpcClient {
         arch: &str,
         sha256: &str,
         binary_content: &[u8],
+        // Some(label) shows a transient progress bar (interactive only); the
+        // gRPC layer owns its lifecycle. DATA-312.
+        progress_label: Option<&str>,
     ) -> anyhow::Result<()> {
+        use futures::StreamExt as _;
+
         let mut client = self.registry_client().await?;
+
+        let bar = progress_label.map(|l| crate::ui::bytes_bar(l, binary_content.len() as u64));
+        // Cloneable handle ticked from inside the (Send + 'static) stream.
+        let pb = bar.as_ref().and_then(|b| b.handle());
 
         // Stream: first message is metadata, subsequent messages are chunks
         let chunk_size = 1024 * 1024; // 1MB chunks
@@ -248,11 +257,19 @@ impl GrpcClient {
             });
         }
 
-        client
-            .upload_binary(futures::stream::iter(messages))
-            .await
-            .map_err(grpc_err)?;
+        let stream = futures::stream::iter(messages).inspect(move |req| {
+            if let (Some(pb), Some(forest_grpc_interface::upload_binary_request::Msg::Chunk(c))) =
+                (&pb, &req.msg)
+            {
+                pb.inc(c.len() as u64);
+            }
+        });
 
+        client.upload_binary(stream).await.map_err(grpc_err)?;
+
+        if let Some(bar) = bar {
+            bar.clear();
+        }
         Ok(())
     }
 
@@ -320,6 +337,9 @@ impl GrpcClient {
         version: &str,
         os: &str,
         arch: &str,
+        // Some(label) shows a transient byte spinner (interactive only). The
+        // total isn't known up front, so it's a spinner, not a bar. DATA-312.
+        progress_label: Option<&str>,
     ) -> anyhow::Result<Vec<u8>> {
         let mut client = self.registry_client().await?;
 
@@ -335,11 +355,18 @@ impl GrpcClient {
             .map_err(grpc_err)?
             .into_inner();
 
+        let bar = progress_label.map(|l| crate::ui::transfer(l));
         let mut binary = Vec::new();
         while let Some(chunk) = stream.message().await.map_err(grpc_err)? {
             binary.extend_from_slice(&chunk.chunk);
+            if let Some(bar) = &bar {
+                bar.inc(chunk.chunk.len() as u64);
+            }
         }
 
+        if let Some(bar) = bar {
+            bar.clear();
+        }
         Ok(binary)
     }
 

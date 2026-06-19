@@ -556,7 +556,14 @@ impl PublishCommand {
             let sha256 = hex::encode(Sha256::digest(&binary_content));
             tracing::info!("uploading binary ({} bytes)", binary_content.len());
             client
-                .upload_component_binary(&upload_context, upload_os, arch, &sha256, &binary_content)
+                .upload_component_binary(
+                    &upload_context,
+                    upload_os,
+                    arch,
+                    &sha256,
+                    &binary_content,
+                    Some("Uploading binary"),
+                )
                 .await?;
         }
 
@@ -1044,7 +1051,14 @@ async fn publish_prebuilt(
             &sha256[..12],
         );
         client
-            .upload_component_binary(&upload_context, &os, &arch, &sha256, &bytes)
+            .upload_component_binary(
+                &upload_context,
+                &os,
+                &arch,
+                &sha256,
+                &bytes,
+                Some("Uploading binary"),
+            )
             .await?;
     }
 

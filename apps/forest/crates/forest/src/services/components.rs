@@ -256,9 +256,10 @@ impl ComponentsService {
             "downloading binary component {organisation}/{name}@{version} ({registry_os}/{arch})"
         );
 
+        let label = format!("Downloading {organisation}/{name}@{version}");
         let binary = self
             .grpc
-            .download_component_binary(organisation, name, version, registry_os, arch)
+            .download_component_binary(organisation, name, version, registry_os, arch, Some(&label))
             .await
             .context("download binary from registry")?;
 

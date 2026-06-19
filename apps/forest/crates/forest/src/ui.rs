@@ -157,7 +157,26 @@ pub fn bytes_bar(label: impl Into<String>, total: u64) -> Bar {
     }
 }
 
-/// Handle for a [`bytes_bar`].
+/// A transfer where the total size isn't known up front (a download): a green
+/// spinner with a live byte count. Inert (single log line) when not
+/// interactive.
+pub fn transfer(label: impl Into<String>) -> Bar {
+    let label = label.into();
+    if interactive() {
+        let pb = multi().add(ProgressBar::new_spinner());
+        if let Ok(style) = ProgressStyle::with_template("{spinner:.green} {msg} {bytes}") {
+            pb.set_style(style.tick_strings(TICK));
+        }
+        pb.set_message(label);
+        pb.enable_steady_tick(Duration::from_millis(90));
+        Bar { pb: Some(pb) }
+    } else {
+        eprintln!("→ {label}");
+        Bar { pb: None }
+    }
+}
+
+/// Handle for a [`bytes_bar`] or [`transfer`].
 pub struct Bar {
     pb: Option<ProgressBar>,
 }
@@ -166,6 +185,20 @@ impl Bar {
     pub fn inc(&self, delta: u64) {
         if let Some(pb) = &self.pb {
             pb.inc(delta);
+        }
+    }
+
+    /// A cloneable handle for ticking from inside a stream (the underlying
+    /// indicatif bar is an `Arc`). `None` when not interactive.
+    pub fn handle(&self) -> Option<ProgressBar> {
+        self.pb.clone()
+    }
+
+    /// Remove the bar without leaving a line — for transient bars whose caller
+    /// prints its own success/summary afterwards.
+    pub fn clear(self) {
+        if let Some(pb) = &self.pb {
+            pb.finish_and_clear();
         }
     }
 
