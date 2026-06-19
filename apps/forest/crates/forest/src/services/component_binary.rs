@@ -206,8 +206,14 @@ fn sync_local_binary_to_cache_at(
         });
 
     if stored_hash.as_deref() == Some(&current_hash) {
-        // Binary unchanged — use cached
-        return resolve_binary_from_hash(&current_hash);
+        // Binary unchanged since last sync — reuse the cached blob if it's
+        // still there. If the content-addressable cache was cleared or evicted,
+        // the local binary is right here, so fall through and re-store it
+        // rather than reporting "no artifact" — otherwise a cleared cache makes
+        // `forest publish` fail preflight C6 even after a successful build.
+        if let Some(cached) = resolve_binary_from_hash(&current_hash) {
+            return Some(cached);
+        }
     }
 
     // Binary changed — update cache and meta.json
