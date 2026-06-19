@@ -1,9 +1,0 @@
-[package]
-name = "{{ input.name }}"
-edition = "2024"
-version.workspace = true
-
-[dependencies]
-{% if input.http == "true" %}
-reqwest = "1"
-{% endif %}

@@ -23,7 +23,7 @@ package sdk
 	// Org-catalogue subscriptions. Key is the organisation name.
 	org_catalog: [string]: {
 		enabled: bool | *true
-		banned:  [...string] | *[]
+		banned: [...string] | *[]
 
 		// Optional per-tool pins inside this catalogue subscription.
 		// Key is the upstream `tool.name`; value is the version to pin.
