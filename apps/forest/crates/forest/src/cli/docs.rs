@@ -25,6 +25,7 @@ impl DocsCommand {
             Some("templates") => print_templates(),
             Some("deployment") => print_deployment(),
             Some("config") => print_config(),
+            Some("shell") => print_shell(),
             Some("topics") => print_topics(),
             Some(topic) => {
                 eprintln!("unknown topic: {topic}");
@@ -48,6 +49,7 @@ fn print_topics() {
     println!("  templates      Template system (minijinja) with available globals and filters");
     println!("  deployment     Deployment flow: prepare, release, rollback");
     println!("  config         Configuration: CUE modules, registries, environment variables");
+    println!("  shell          Shell integration + making forest tools available everywhere");
     println!();
     println!("Usage: forest docs <topic>");
     println!("       forest docs            (full reference)");
@@ -71,6 +73,8 @@ fn print_full_reference() {
     print_deployment();
     println!();
     print_config();
+    println!();
+    print_shell();
 }
 
 fn print_header() {
@@ -568,4 +572,61 @@ fn print_config() {
     println!("      - kind: \"deno\" | binary platform info");
     println!("      - entrypoint (for deno components)");
     println!("      - descriptor: protocol_version and method list");
+}
+
+fn print_shell() {
+    println!("SHELL INTEGRATION");
+    println!();
+    println!("  Forest installs its tools as shims under:");
+    println!();
+    println!("      ${{XDG_CACHE_HOME:-$HOME/.cache}}/forest/global/shims");
+    println!();
+    println!("  For that dir to be useful, it has to be on PATH.");
+    println!();
+    println!("  1. Interactive shells — `forest shell zsh|bash`");
+    println!();
+    println!("     Add to your rc file:");
+    println!();
+    println!("         eval \"$(forest shell zsh)\"    # or: bash");
+    println!();
+    println!("     This prepends the shim dir to PATH (idempotently — a POSIX `case`");
+    println!("     guard makes re-sourcing harmless) and defines the interactive helper");
+    println!("     functions (e.g. forest-tmp).");
+    println!();
+    println!("  2. Spawned / non-interactive shells — `forest shell install`");
+    println!();
+    println!("     The eval above lives in ~/.zshrc, which zsh sources ONLY for");
+    println!("     interactive shells. When another tool spawns a shell non-");
+    println!("     interactively — e.g. `zsh -c '...'` or `bash -c '...'`, as Claude");
+    println!("     Code and many editors/agents do — that shell skips ~/.zshrc, so a");
+    println!("     forest tool is found only if PATH happened to be inherited. Break");
+    println!("     that inheritance chain and the tool disappears.");
+    println!();
+    println!("     Fix it by putting the PATH prepend where EVERY shell invocation");
+    println!("     reads it:");
+    println!();
+    println!("         forest shell install");
+    println!();
+    println!("     This writes an idempotent, marker-delimited managed block into:");
+    println!();
+    println!("       zsh   ~/.zshenv    (sourced for ALL zsh, incl. `zsh -c`; ~/.zshrc");
+    println!("                          is interactive-only)");
+    println!("       bash  ~/.bashrc    (interactive bash; a bare `bash -c` reads no rc");
+    println!("                          unless $BASH_ENV is set, so bash coverage also");
+    println!("                          relies on PATH inheritance from a fixed zsh)");
+    println!();
+    println!("     Only shells actually installed on your system are touched. Preview");
+    println!("     without writing:");
+    println!();
+    println!("         forest shell install --dry-run");
+    println!();
+    println!("     Undo it (removes only the managed block, by its markers — the rest");
+    println!("     of your rc file is left untouched):");
+    println!();
+    println!("         forest shell uninstall");
+    println!();
+    println!("  Note: this is intentionally shell-only. GUI-app PATH (launchd/systemd)");
+    println!("  is deliberately NOT modified — it needs a persistent background agent,");
+    println!("  which is disproportionate for a CLI. If you truly need a Finder-launched");
+    println!("  app to see forest tools, add the shim dir via a login item yourself.");
 }

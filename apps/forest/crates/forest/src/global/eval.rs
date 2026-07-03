@@ -32,10 +32,29 @@ pub fn eval_bash() -> String {
 
 fn render() -> String {
     format!(
-        "# forest shell — adds the global shim dir to PATH idempotently\n\
-         case \":$PATH:\" in\n  \
-           *\":{SHIM_DIR_LITERAL}:\"*) ;;\n  \
-           *) export PATH=\"{SHIM_DIR_LITERAL}:$PATH\" ;;\n\
+        "# forest shell — adds the global shim dir to PATH idempotently\n{}",
+        posix_path_prepend(SHIM_DIR_LITERAL),
+    )
+}
+
+/// Render the POSIX `case`-guarded PATH-prepend for `shim_dir`.
+///
+/// This is the single source of truth for Forest's idempotent PATH injection:
+/// the `case` guard makes it safe to run more than once (double-sourcing a
+/// shell rc, re-running a launchd agent) because a second run finds `shim_dir`
+/// already present and does nothing. `eval_zsh`/`eval_bash` embed it with the
+/// unexpanded [`SHIM_DIR_LITERAL`]; the macOS LaunchAgent generator in
+/// `global::pathenv` embeds it with the *resolved* absolute shim dir (launchd
+/// has no `$XDG_CACHE_HOME`/`$HOME` to expand).
+///
+/// `shim_dir` is interpolated verbatim — callers pass either the literal or a
+/// pre-resolved absolute path. Deterministic: same input, byte-identical
+/// output.
+pub fn posix_path_prepend(shim_dir: &str) -> String {
+    format!(
+        "case \":$PATH:\" in\n  \
+           *\":{shim_dir}:\"*) ;;\n  \
+           *) export PATH=\"{shim_dir}:$PATH\" ;;\n\
          esac\n",
     )
 }
@@ -151,6 +170,28 @@ mod tests {
             first_line.starts_with('#'),
             "first line must be a comment: {first_line:?}"
         );
+    }
+
+    // --- Shared prepend helper (reused by global::pathenv) ---
+
+    #[test]
+    fn posix_path_prepend_is_guarded_and_prepends() {
+        let s = posix_path_prepend("/abs/shims");
+        assert!(s.contains("case \":$PATH:\" in"), "{s}");
+        assert!(s.contains("*\":/abs/shims:\"*) ;;"), "{s}");
+        assert!(s.contains("export PATH=\"/abs/shims:$PATH\""), "{s}");
+        assert!(s.trim_end().ends_with("esac"), "{s}");
+    }
+
+    #[test]
+    fn render_reuses_posix_path_prepend_with_the_literal() {
+        // The eval script is exactly the header comment + the shared prepend
+        // rendered against SHIM_DIR_LITERAL. Guards against the two drifting.
+        let expected = format!(
+            "# forest shell — adds the global shim dir to PATH idempotently\n{}",
+            posix_path_prepend(SHIM_DIR_LITERAL),
+        );
+        assert_eq!(eval_zsh(), expected);
     }
 
     #[test]

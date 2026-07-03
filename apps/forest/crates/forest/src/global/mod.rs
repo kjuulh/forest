@@ -23,6 +23,7 @@ pub mod lockfile;
 pub mod manifest;
 pub mod names;
 pub mod resolver;
+pub mod shellenv;
 pub mod shim;
 pub mod user_config;
 
@@ -31,6 +32,7 @@ pub mod autoupdate;
 pub mod cache;
 pub mod cue_eval;
 pub mod fs;
+pub mod install;
 pub mod paths;
 pub mod platform;
 pub mod service;
