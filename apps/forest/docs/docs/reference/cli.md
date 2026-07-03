@@ -466,3 +466,18 @@ Listen for and manage notifications.
 ```bash
 forest notifications subscribe [OPTIONS]
 ```
+
+---
+
+## `forest shell`
+
+Shell integration for the global-tools shim dir.
+
+```bash
+forest shell zsh          # emit integration to source from ~/.zshrc (or: bash)
+forest shell install      # put the shim dir on PATH so tools run directly
+forest shell uninstall    # remove what `install` wrote
+```
+
+`install` is an optional convenience that puts forest's global tools on your
+`PATH`. It's idempotent and reversible.

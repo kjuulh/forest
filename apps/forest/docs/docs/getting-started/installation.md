@@ -23,6 +23,18 @@ forest --version
 forest --help
 ```
 
+## Shell Integration
+
+Add the integration to your interactive rc file so your shell finds forest's
+global tools:
+
+```bash
+echo 'eval "$(forest shell zsh)"' >> ~/.zshrc    # or: forest shell bash
+```
+
+Optionally run `forest shell install` to put forest's global tools on your
+`PATH` so you can run them directly (reverse with `forest shell uninstall`).
+
 ## Requirements
 
 - **Rust 1.93+** — Forest uses recent Rust features

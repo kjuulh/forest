@@ -23,6 +23,9 @@ Next you need to add it to `.zshrc` to get full cli support
 echo 'eval "$(forest shell zsh)"' >> ~/.zshrc
 ```
 
+Optionally run `forest shell install` to put forest's global tools on your
+`PATH` so you can run them directly (reverse with `forest shell uninstall`).
+
 ## Logging in
 
 Either create an account or sign in, both can be done entirely in the terminal if wanted

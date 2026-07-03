@@ -251,6 +251,8 @@ $ echo $PATH | tr ':' '\n' | head -3
 
 `forest shell zsh` is idempotent — sourcing `.zshrc` twice does not duplicate the PATH entry.
 
+Optionally run `forest shell install` to put forest's global tools on your `PATH` so you can run them directly; undo with `forest shell uninstall`.
+
 ---
 
 ## Part 5 — Lazy invocation
