@@ -15,12 +15,13 @@
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::global::eval::{eval_bash, eval_zsh};
+use crate::global::eval::{eval_bash, eval_fish, eval_zsh};
 use crate::global::install;
 use crate::state::State;
 
 const ZSH_HELPERS: &str = include_str!("scripts/forest.zsh");
 const BASH_HELPERS: &str = include_str!("scripts/forest.bash");
+const FISH_HELPERS: &str = include_str!("scripts/forest.fish");
 
 #[derive(Parser)]
 pub struct ShellCommand {
@@ -34,6 +35,8 @@ pub enum ShellCommands {
     Zsh,
     /// Emit bash integration (eval into ~/.bashrc).
     Bash,
+    /// Emit fish integration (source from ~/.config/fish/config.fish).
+    Fish,
     /// Add the shim dir to PATH in your shell env files (~/.zshenv, ~/.bashrc)
     /// so tools that spawn non-interactive shells (which skip ~/.zshrc) can
     /// find forest-installed tools. Idempotent; reversible via `uninstall`.
@@ -61,6 +64,10 @@ impl ShellCommand {
                 print!("{}", eval_bash());
                 print!("{}", BASH_HELPERS);
             }
+            ShellCommands::Fish => {
+                print!("{}", eval_fish());
+                print!("{}", FISH_HELPERS);
+            }
             ShellCommands::Install(args) => run_install(args).await?,
             ShellCommands::Uninstall => run_uninstall().await?,
         }
@@ -79,7 +86,7 @@ async fn run_install(args: &InstallArgs) -> anyhow::Result<()> {
 
     for shell in &shells {
         let rc = shell.rc_file(&home);
-        match install::apply(&rc).await? {
+        match install::apply(*shell, &rc).await? {
             install::Applied::Added(p) => eprintln!("  + {} ({})", p.display(), shell.name()),
             install::Applied::Updated(p) => eprintln!("  ~ {} ({})", p.display(), shell.name()),
             install::Applied::Unchanged(p) => {

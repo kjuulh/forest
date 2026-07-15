@@ -47,11 +47,11 @@ pub enum Removed {
 }
 
 /// Resolve `$HOME` and the shells to target for the live environment. Targets
-/// the subset of {zsh, bash} whose binary is on PATH; falls back to zsh if
-/// neither resolves (zsh is the primary fix and always present on macOS).
+/// the subset of {zsh, bash, fish} whose binary is on PATH; falls back to zsh
+/// if none resolve (zsh is the primary fix and always present on macOS).
 pub fn resolve_targets() -> Result<(PathBuf, Vec<Shell>)> {
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("home dir is unset"))?;
-    let mut shells: Vec<Shell> = [Shell::Zsh, Shell::Bash]
+    let mut shells: Vec<Shell> = all_shells()
         .into_iter()
         .filter(|s| on_path(s.name()))
         .collect();
@@ -64,7 +64,7 @@ pub fn resolve_targets() -> Result<(PathBuf, Vec<Shell>)> {
 /// Every shell we know how to manage — used by uninstall so it cleans up files
 /// even for a shell whose binary has since been removed.
 pub fn all_shells() -> Vec<Shell> {
-    vec![Shell::Zsh, Shell::Bash]
+    vec![Shell::Zsh, Shell::Bash, Shell::Fish]
 }
 
 fn on_path(bin: &str) -> bool {
@@ -74,9 +74,9 @@ fn on_path(bin: &str) -> bool {
     std::env::split_paths(&paths).any(|dir| dir.join(bin).is_file())
 }
 
-/// Insert-or-replace the managed block in `rc_file`. Idempotent.
-pub async fn apply(rc_file: &Path) -> Result<Applied> {
-    let block = managed_block();
+/// Insert-or-replace `shell`'s managed block in `rc_file`. Idempotent.
+pub async fn apply(shell: Shell, rc_file: &Path) -> Result<Applied> {
+    let block = managed_block(shell);
     let existing = read_optional(rc_file).await?;
     let (new_contents, action) = upsert_block(existing.as_deref().unwrap_or(""), &block, rc_file);
     if let Applied::Unchanged(_) = action {
@@ -107,12 +107,11 @@ pub async fn uninstall(rc_file: &Path) -> Result<Removed> {
 /// Render the dry-run plan: for each target file, what the resulting managed
 /// block would be. No I/O.
 pub fn render_dry_run(home: &Path, shells: &[Shell]) -> String {
-    let block = managed_block();
     let mut s = String::new();
     for shell in shells {
         let rc = shell.rc_file(home);
         s.push_str(&format!("--- {} ({}) ---\n", rc.display(), shell.name()));
-        s.push_str(&block);
+        s.push_str(&managed_block(*shell));
     }
     s
 }
@@ -185,7 +184,9 @@ mod tests {
     use tempfile::TempDir;
 
     fn block() -> String {
-        managed_block()
+        // The pure upsert/strip core is shell-agnostic (marker-delimited); any
+        // shell's block exercises it.
+        managed_block(Shell::Zsh)
     }
 
     // --- pure upsert/strip ---
@@ -265,12 +266,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let rc = dir.path().join(".zshenv");
 
-        let a = apply(&rc).await.unwrap();
+        let a = apply(Shell::Zsh, &rc).await.unwrap();
         assert!(matches!(a, Applied::Added(_)));
         let body = tokio::fs::read_to_string(&rc).await.unwrap();
         assert!(body.contains(BLOCK_BEGIN) && body.contains("forest/global/shims"));
 
-        let a2 = apply(&rc).await.unwrap();
+        let a2 = apply(Shell::Zsh, &rc).await.unwrap();
         assert!(matches!(a2, Applied::Unchanged(_)), "got {a2:?}");
 
         let r = uninstall(&rc).await.unwrap();
@@ -287,7 +288,7 @@ mod tests {
         let rc = dir.path().join(".zshenv");
         atomic_write(&rc, b"export FOO=bar\nalias g=git\n").await.unwrap();
 
-        apply(&rc).await.unwrap();
+        apply(Shell::Zsh, &rc).await.unwrap();
         let body = tokio::fs::read_to_string(&rc).await.unwrap();
         assert!(body.contains("export FOO=bar"));
         assert!(body.contains("alias g=git"));
@@ -298,12 +299,34 @@ mod tests {
         assert_eq!(after, "export FOO=bar\nalias g=git\n", "user content must survive");
     }
 
+    #[tokio::test]
+    async fn apply_fish_writes_confd_file_with_fish_syntax() {
+        let dir = TempDir::new().unwrap();
+        // conf.d does not exist yet — atomic_write must create the parent chain.
+        let rc = Shell::Fish.rc_file(dir.path());
+
+        let a = apply(Shell::Fish, &rc).await.unwrap();
+        assert!(matches!(a, Applied::Added(_)));
+        let body = tokio::fs::read_to_string(&rc).await.unwrap();
+        assert!(body.contains(BLOCK_BEGIN));
+        // Fish guard, not POSIX case — the latter would be a syntax error.
+        assert!(body.contains("if not contains -- $forest_shim_dir $PATH"), "{body}");
+        assert!(!body.contains("case \":$PATH:\""), "{body}");
+
+        let a2 = apply(Shell::Fish, &rc).await.unwrap();
+        assert!(matches!(a2, Applied::Unchanged(_)), "got {a2:?}");
+
+        let r = uninstall(&rc).await.unwrap();
+        assert!(matches!(r, Removed::Removed(_)));
+    }
+
     #[test]
     fn dry_run_lists_each_target_and_the_block_without_writing() {
         let home = PathBuf::from("/home/u");
-        let out = render_dry_run(&home, &[Shell::Zsh, Shell::Bash]);
+        let out = render_dry_run(&home, &[Shell::Zsh, Shell::Bash, Shell::Fish]);
         assert!(out.contains("/home/u/.zshenv"));
         assert!(out.contains("/home/u/.bashrc"));
+        assert!(out.contains("/home/u/.config/fish/conf.d/forest.fish"));
         assert!(out.contains(BLOCK_BEGIN));
     }
 }

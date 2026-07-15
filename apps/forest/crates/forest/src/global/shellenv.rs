@@ -21,7 +21,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::global::eval::{posix_path_prepend, SHIM_DIR_LITERAL};
+use crate::global::eval::{fish_path_prepend, posix_path_prepend, SHIM_DIR_LITERAL};
 
 /// First line of the managed block. Also the needle the installer/uninstaller
 /// search for.
@@ -29,12 +29,13 @@ pub const BLOCK_BEGIN: &str = "# >>> forest shell (managed) >>>";
 /// Last line of the managed block.
 pub const BLOCK_END: &str = "# <<< forest shell (managed) <<<";
 
-/// The shells we manage an env file for. Explicit (not `cfg!`) so both are
+/// The shells we manage an env file for. Explicit (not `cfg!`) so all are
 /// unit-testable on any host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shell {
     Zsh,
     Bash,
+    Fish,
 }
 
 impl Shell {
@@ -42,6 +43,7 @@ impl Shell {
         match self {
             Shell::Zsh => "zsh",
             Shell::Bash => "bash",
+            Shell::Fish => "fish",
         }
     }
 
@@ -53,28 +55,37 @@ impl Shell {
     ///   note that a bare `bash -c` reads nothing unless `$BASH_ENV` is set, so
     ///   bash coverage leans on PATH inheritance from a `.zshenv`-fixed
     ///   ancestor; documented in `forest docs shell`).
+    /// - fish → `~/.config/fish/conf.d/forest.fish` (fish auto-sources every
+    ///   file in `conf.d` for ALL fish shells, interactive or not — the fish
+    ///   analogue of zsh's `.zshenv`, and the reason fish gets full coverage a
+    ///   bare `bash -c` can't).
     pub fn rc_file(self, home: &Path) -> PathBuf {
         match self {
             Shell::Zsh => home.join(".zshenv"),
             Shell::Bash => home.join(".bashrc"),
+            Shell::Fish => home.join(".config/fish/conf.d/forest.fish"),
         }
     }
 }
 
-/// The managed block to write into an rc file: the marker-delimited,
-/// `case`-guarded PATH prepend (the same shared guard as `forest shell zsh`,
-/// against the unexpanded [`SHIM_DIR_LITERAL`] so `$HOME`/`$XDG_CACHE_HOME`
-/// expand per-user at source time).
+/// The managed block to write into `shell`'s rc file: the marker-delimited
+/// PATH prepend, using the unexpanded shim-dir literal so `$HOME`/
+/// `$XDG_CACHE_HOME` expand per-user at source time.
 ///
-/// Identical for zsh and bash — the POSIX `case` form is valid in both.
+/// The prepend body is the SAME guard `forest shell <shell>` emits: the POSIX
+/// `case` form for zsh/bash (valid in both), and the fish `contains` form for
+/// fish (which is not POSIX). The `#`-comment markers are valid in all three.
 /// Deterministic: same input, byte-identical output.
-pub fn managed_block() -> String {
+pub fn managed_block(shell: Shell) -> String {
+    let prepend = match shell {
+        Shell::Zsh | Shell::Bash => posix_path_prepend(SHIM_DIR_LITERAL),
+        Shell::Fish => fish_path_prepend(),
+    };
     format!(
         "{BLOCK_BEGIN}\n\
          # Added by `forest shell install` so spawned (non-interactive) shells\n\
          # find forest-installed tools. Remove with `forest shell uninstall`.\n\
-         {}{BLOCK_END}\n",
-        posix_path_prepend(SHIM_DIR_LITERAL),
+         {prepend}{BLOCK_END}\n",
     )
 }
 
@@ -84,29 +95,45 @@ mod tests {
 
     #[test]
     fn managed_block_is_deterministic() {
-        assert_eq!(managed_block(), managed_block());
+        for shell in [Shell::Zsh, Shell::Bash, Shell::Fish] {
+            assert_eq!(managed_block(shell), managed_block(shell));
+        }
     }
 
     #[test]
     fn block_is_delimited_by_both_markers() {
-        let b = managed_block();
-        assert!(b.starts_with(BLOCK_BEGIN), "must start with begin marker: {b}");
-        assert!(b.trim_end().ends_with(BLOCK_END), "must end with end marker: {b}");
+        for shell in [Shell::Zsh, Shell::Bash, Shell::Fish] {
+            let b = managed_block(shell);
+            assert!(b.starts_with(BLOCK_BEGIN), "must start with begin marker: {b}");
+            assert!(b.trim_end().ends_with(BLOCK_END), "must end with end marker: {b}");
+        }
     }
 
     #[test]
-    fn block_embeds_the_shared_guarded_prepend_verbatim() {
-        // Single source of truth: the block reuses eval::posix_path_prepend
+    fn posix_block_embeds_the_shared_guarded_prepend_verbatim() {
+        // Single source of truth: the zsh/bash block reuses posix_path_prepend
         // against the literal, exactly like `forest shell zsh`.
-        assert!(managed_block().contains(&posix_path_prepend(SHIM_DIR_LITERAL)));
+        for shell in [Shell::Zsh, Shell::Bash] {
+            assert!(managed_block(shell).contains(&posix_path_prepend(SHIM_DIR_LITERAL)));
+        }
+    }
+
+    #[test]
+    fn fish_block_embeds_the_fish_prepend_and_no_posix_case() {
+        // Fish is not POSIX — its block must use the fish guard, never `case`.
+        let b = managed_block(Shell::Fish);
+        assert!(b.contains(&fish_path_prepend()), "{b}");
+        assert!(!b.contains("case \":$PATH:\""), "fish block must not embed POSIX case: {b}");
     }
 
     #[test]
     fn block_does_not_pre_expand_home_or_xdg() {
         // Expansion happens in the user's shell at source time.
-        let b = managed_block();
-        assert!(b.contains("$HOME"), "{b}");
-        assert!(b.contains("${XDG_CACHE_HOME:-"), "{b}");
+        for shell in [Shell::Zsh, Shell::Bash, Shell::Fish] {
+            let b = managed_block(shell);
+            assert!(b.contains("$HOME"), "{b}");
+            assert!(b.contains("XDG_CACHE_HOME"), "{b}");
+        }
     }
 
     #[test]
@@ -120,5 +147,15 @@ mod tests {
     fn bash_targets_bashrc() {
         let home = PathBuf::from("/home/u");
         assert_eq!(Shell::Bash.rc_file(&home), PathBuf::from("/home/u/.bashrc"));
+    }
+
+    #[test]
+    fn fish_targets_confd_which_is_always_sourced() {
+        // conf.d is fish's every-invocation dir — the analogue of .zshenv.
+        let home = PathBuf::from("/home/u");
+        assert_eq!(
+            Shell::Fish.rc_file(&home),
+            PathBuf::from("/home/u/.config/fish/conf.d/forest.fish")
+        );
     }
 }

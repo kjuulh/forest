@@ -30,6 +30,18 @@ pub fn eval_bash() -> String {
     render()
 }
 
+/// Render the fish eval script.
+///
+/// Fish is not POSIX: it has no `case`/`${VAR:-default}`, so it gets its own
+/// [`fish_path_prepend`] guard instead of [`posix_path_prepend`]. Deterministic:
+/// same input, byte-identical output.
+pub fn eval_fish() -> String {
+    format!(
+        "# forest shell — adds the global shim dir to PATH idempotently\n{}",
+        fish_path_prepend(),
+    )
+}
+
 fn render() -> String {
     format!(
         "# forest shell — adds the global shim dir to PATH idempotently\n{}",
@@ -57,6 +69,28 @@ pub fn posix_path_prepend(shim_dir: &str) -> String {
            *) export PATH=\"{shim_dir}:$PATH\" ;;\n\
          esac\n",
     )
+}
+
+/// Render the fish idempotent PATH-prepend for the shim dir.
+///
+/// The fish analogue of [`posix_path_prepend`]: same intent (prepend the shim
+/// dir to `$PATH` exactly once, safe to re-source), expressed in fish syntax.
+/// Fish lacks POSIX `${VAR:-default}` so the `$XDG_CACHE_HOME`-with-`$HOME`
+/// fallback is a `test -n`/`set` guard (matching POSIX "unset OR empty →
+/// default"), and idempotency comes from fish's `contains` rather than a `case`
+/// block. Resolution happens in the user's shell at source time, so `$HOME` and
+/// `$XDG_CACHE_HOME` are emitted literally, never pre-expanded here.
+///
+/// Deterministic: no input, byte-identical output every call.
+pub fn fish_path_prepend() -> String {
+    "set -l forest_shim_dir $HOME/.cache/forest/global/shims\n\
+     if test -n \"$XDG_CACHE_HOME\"\n    \
+         set forest_shim_dir $XDG_CACHE_HOME/forest/global/shims\n\
+     end\n\
+     if not contains -- $forest_shim_dir $PATH\n    \
+         set -gx PATH $forest_shim_dir $PATH\n\
+     end\n"
+        .to_string()
 }
 
 #[cfg(test)]
@@ -201,6 +235,74 @@ mod tests {
         assert!(
             trimmed.ends_with("esac"),
             "script must end with `esac`: {trimmed}"
+        );
+    }
+
+    // --- fish (non-POSIX; separate generator) ---
+
+    #[test]
+    fn eval_fish_is_deterministic() {
+        assert_eq!(eval_fish(), eval_fish());
+    }
+
+    #[test]
+    fn fish_starts_with_human_readable_comment() {
+        let script = eval_fish();
+        let first_line = script.lines().next().unwrap_or("");
+        assert!(
+            first_line.starts_with('#'),
+            "first line must be a comment: {first_line:?}"
+        );
+    }
+
+    #[test]
+    fn fish_uses_contains_guard_not_posix_case() {
+        // Idempotency in fish comes from `contains`, and fish has no POSIX
+        // `case`/`esac` — emitting those would be a syntax error under fish.
+        let script = eval_fish();
+        assert!(
+            script.contains("if not contains -- $forest_shim_dir $PATH"),
+            "missing fish contains guard: {script}"
+        );
+        assert!(!script.contains("case "), "must not emit POSIX case: {script}");
+        assert!(!script.contains("esac"), "must not emit esac: {script}");
+    }
+
+    #[test]
+    fn fish_prepends_shim_dir_on_miss() {
+        assert!(
+            eval_fish().contains("set -gx PATH $forest_shim_dir $PATH"),
+            "missing fish PATH-prepend: {}",
+            eval_fish()
+        );
+    }
+
+    #[test]
+    fn fish_never_pre_expands_home_or_xdg() {
+        // Same portability rule as POSIX: expansion happens in the user's shell.
+        let script = eval_fish();
+        let home = std::env::var("HOME").unwrap_or_default();
+        if !home.is_empty() {
+            assert!(
+                !script.contains(&format!("{home}/.cache/forest")),
+                "must not pre-expand $HOME: {script}"
+            );
+        }
+        assert!(script.contains("$HOME/.cache"), "must contain literal $HOME: {script}");
+        assert!(
+            script.contains("$XDG_CACHE_HOME"),
+            "must contain literal $XDG_CACHE_HOME: {script}"
+        );
+    }
+
+    #[test]
+    fn fish_falls_back_only_when_xdg_is_empty_or_unset() {
+        // `test -n` matches POSIX ${VAR:-default} (default on unset OR empty),
+        // unlike fish's `set -q` which treats empty as set.
+        assert!(
+            eval_fish().contains("if test -n \"$XDG_CACHE_HOME\""),
+            "must gate XDG on non-empty via test -n: {}",
+            eval_fish()
         );
     }
 }

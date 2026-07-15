@@ -32,6 +32,12 @@ global tools:
 echo 'eval "$(forest shell zsh)"' >> ~/.zshrc    # or: forest shell bash
 ```
 
+For fish, source it from your config instead:
+
+```fish
+echo 'forest shell fish | source' >> ~/.config/fish/config.fish
+```
+
 Optionally run `forest shell install` to put forest's global tools on your
 `PATH` so you can run them directly (reverse with `forest shell uninstall`).
 
