@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.5](https://github.com/understory-io/forest/compare/v0.2.4...v0.2.5) (2026-07-15)
+
+
+### Features
+
+* **forest:** add fish as option for 'forest shell' ([#116](https://github.com/understory-io/forest/issues/116)) ([8bbc462](https://github.com/understory-io/forest/commit/8bbc4622dbcf69ea78d12da0f8b2146e376596d4))
+* **forest:** DATA-420 make global shims discoverable to spawned shells ([#113](https://github.com/understory-io/forest/issues/113)) ([d81879c](https://github.com/understory-io/forest/commit/d81879ce45d31d7aa3fa2f5c0129f84fb2bd4441))
+
 ## [0.2.4](https://github.com/understory-io/forest/compare/v0.2.3...v0.2.4) (2026-06-19)
 
 
