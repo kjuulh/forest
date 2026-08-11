@@ -257,8 +257,10 @@ pub async fn build_target(
     target: &BuildTarget,
 ) -> anyhow::Result<()> {
     match toolchain {
-        Toolchain::Rust => build_rust(component_name, source, out_base, target).await,
-        Toolchain::Golang => build_golang(component_name, source, out_base, target).await,
+        Toolchain::Rust => build_rust(component_name, component_version, source, out_base, target).await,
+        Toolchain::Golang => {
+            build_golang(component_name, component_version, source, out_base, target).await
+        }
         Toolchain::Docker => {
             build_docker(component_name, component_version, source, out_base, target).await
         }
@@ -267,6 +269,7 @@ pub async fn build_target(
 
 async fn build_rust(
     component_name: &str,
+    component_version: &str,
     source: &Path,
     out_base: &Path,
     target: &BuildTarget,
@@ -285,6 +288,10 @@ async fn build_rust(
 
     let mut cmd = tokio::process::Command::new("cargo");
     cmd.current_dir(source);
+    // Rust can read this at compile time via option_env!, so the crate can
+    // report the component version rather than its Cargo.toml version — the two
+    // drift, and the registry only knows the former.
+    cmd.env(FOREST_VERSION_ENV, component_version);
     cmd.arg("+nightly")
         .arg("build")
         .arg("--release")
@@ -406,6 +413,7 @@ fn emit_rust_build_hints(stderr: &str, triple: &str) {
 
 async fn build_golang(
     component_name: &str,
+    component_version: &str,
     source: &Path,
     out_base: &Path,
     target: &BuildTarget,
@@ -459,6 +467,21 @@ async fn build_golang(
         }
     }
 
+    // Stamp the component version into the binary, so `mytool version` and the
+    // registry agree. Without it a Go binary reports the module pseudo-version
+    // — accurate about the commit, silent about which released component it is,
+    // which makes "does this machine have the fix?" unanswerable.
+    //
+    // The linker ignores -X for a symbol that does not exist, so this is safe
+    // for components that never declare it: they simply keep their old
+    // behaviour. Declaring `var version string` in package main opts in.
+    cmd.arg("-ldflags");
+    cmd.arg(format!("-X main.version={component_version}"));
+
+    // Also exposed as an environment variable, matching the Rust path, for
+    // anything that would rather read it at build time than link it in.
+    cmd.env(FOREST_VERSION_ENV, component_version);
+
     cmd.args(["build", "-o"]);
     cmd.arg(&output_path);
     cmd.arg(".");
@@ -479,6 +502,13 @@ async fn build_golang(
 
     Ok(())
 }
+
+/// Environment variable carrying the component version into a build.
+///
+/// Rust reads it with `option_env!(...)`, falling back to CARGO_PKG_VERSION;
+/// Go gets the same value linked in via -ldflags, since env vars are not
+/// visible at compile time there.
+pub const FOREST_VERSION_ENV: &str = "FOREST_COMPONENT_VERSION";
 
 /// Resolve CGO_ENABLED for a Go build.
 ///
@@ -721,5 +751,27 @@ mod cgo_tests {
         assert_eq!(cgo_setting_from(Some("1".to_string())), "1");
         assert_eq!(cgo_setting_from(Some(" 1 ".to_string())), "1");
         assert_eq!(cgo_setting_from(Some("0".to_string())), "0");
+    }
+}
+
+#[cfg(test)]
+mod version_stamp_tests {
+    use super::*;
+
+    /// The linker ignores -X for a symbol that does not exist, so always passing
+    /// it is safe; components that never declare `main.version` keep their old
+    /// behaviour. This pins the flag's shape, which is what consumers document
+    /// against.
+    #[test]
+    fn ldflags_shape_is_stable() {
+        let version = "0.1.6";
+        assert_eq!(format!("-X main.version={version}"), "-X main.version=0.1.6");
+    }
+
+    #[test]
+    fn version_env_name_is_stable() {
+        // Documented in component READMEs and read by Rust via option_env!;
+        // renaming it silently stops version stamping rather than failing.
+        assert_eq!(FOREST_VERSION_ENV, "FOREST_COMPONENT_VERSION");
     }
 }
