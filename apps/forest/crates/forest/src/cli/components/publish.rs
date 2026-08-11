@@ -22,7 +22,11 @@ fn print_publish_context(owner: &str, component: &str) {
     match ContextStore::from_env().and_then(|s| s.active()) {
         Ok(ctx) => {
             // Server URL is detail for the logs, not the human line.
-            tracing::debug!("publishing as {owner}/{component} to {} ({})", ctx.name, ctx.server);
+            tracing::debug!(
+                "publishing as {owner}/{component} to {} ({})",
+                ctx.name,
+                ctx.server
+            );
             crate::ui::status(format!("Publishing {owner}/{component} to {}", ctx.name));
         }
         Err(_) => crate::ui::status(format!("Publishing {owner}/{component}")),
@@ -46,7 +50,12 @@ impl PublishSummary {
         // shape/kind/platform are diagnostic detail — keep them in the logs.
         tracing::debug!(
             "published {}/{}@{} as shape={} [{}] {}",
-            self.owner, self.component, self.version, self.shape, self.kind, self.platform,
+            self.owner,
+            self.component,
+            self.version,
+            self.shape,
+            self.kind,
+            self.platform,
         );
         crate::ui::success(format!(
             "Published {}/{}@{}",
@@ -68,6 +77,32 @@ fn derive_summary_shape(kind: &str, has_tool: bool, has_methods: bool) -> &'stat
         ("cue", _, _) => "library",
         ("deno", _, _) => "deno",
         _ => "component",
+    }
+}
+
+/// The binaries to publish, newest-build-layout first.
+///
+/// Prefers everything under `.forest/component/output/`, which is what the build
+/// components write and therefore covers the whole cross-compile matrix. Falls
+/// back to the single resolved binary for layouts that predate it (a cargo target
+/// directory, or a binary restored from the registry cache), so behaviour is
+/// unchanged for projects that only ever produced one.
+fn publishable_binaries(
+    current_dir: &std::path::Path,
+    name: &str,
+    resolved: Option<&std::path::Path>,
+) -> Vec<(String, String, std::path::PathBuf)> {
+    let discovered = component_binary::discover_output_binaries(current_dir, name);
+    if !discovered.is_empty() {
+        return discovered;
+    }
+
+    match resolved {
+        Some(path) => {
+            let (os, arch) = component_binary::current_platform();
+            vec![(os.to_string(), arch.to_string(), path.to_path_buf())]
+        }
+        None => Vec::new(),
     }
 }
 
@@ -378,7 +413,16 @@ impl PublishCommand {
             .and_then(|u| u.get("type"))
             .and_then(|v| v.as_str());
         if upload_type == Some("prebuilt") {
-            return publish_prebuilt(state, &current_dir, organisation, name, version, &doc).await;
+            return publish_prebuilt(
+                state,
+                &current_dir,
+                organisation,
+                name,
+                version,
+                &doc,
+                self.dry_run,
+            )
+            .await;
         }
 
         // TASKS/028: run the full Phase 1 preflight as a gate. This
@@ -470,20 +514,27 @@ impl PublishCommand {
             // `platforms` is binary-only metadata: per-OS/arch hashes for
             // the downloader. Deno components run via the source bundle
             // we upload separately and have no `platforms` map.
-            if let Some(ref bp) = binary_path {
-                let (os, arch) = component_binary::current_platform();
-                // forest-manifest's validator accepts "darwin", not "macos".
-                // current_platform() emits "macos" for cache key parity, so
-                // translate at the manifest boundary.
-                let manifest_os = if os == "macos" { "darwin" } else { os };
-                let binary_content = tokio::fs::read(bp).await?;
-                let sha256 = hex::encode(Sha256::digest(&binary_content));
-                manifest["platforms"] = serde_json::json!({
-                    format!("{manifest_os}_{arch}"): {
-                        "sha256": sha256,
-                        "size": binary_content.len(),
-                    }
-                });
+            if binary_path.is_some() {
+                // Every platform the build produced, not just the host's.
+                let mut platforms = serde_json::Map::new();
+                for (os, arch, path) in
+                    publishable_binaries(&current_dir, name, binary_path.as_deref())
+                {
+                    // forest-manifest's validator accepts "darwin", not "macos";
+                    // the on-disk layout uses "macos", so translate at the
+                    // manifest boundary.
+                    let manifest_os = if os == "macos" { "darwin" } else { os.as_str() };
+                    let binary_content = tokio::fs::read(&path).await?;
+                    let sha256 = hex::encode(Sha256::digest(&binary_content));
+                    platforms.insert(
+                        format!("{manifest_os}_{arch}"),
+                        serde_json::json!({
+                            "sha256": sha256,
+                            "size": binary_content.len(),
+                        }),
+                    );
+                }
+                manifest["platforms"] = serde_json::Value::Object(platforms);
             }
         }
 
@@ -519,9 +570,26 @@ impl PublishCommand {
                 .map(|d| !d.methods.is_empty())
                 .unwrap_or(false);
             let platform = if binary_path.is_some() {
-                let (os, arch) = component_binary::current_platform();
-                let platform_os = if os == "macos" { "darwin" } else { os };
-                format!("{platform_os}_{arch}")
+                // Report every platform that would be uploaded. Summarising only
+                // the host's was how a single-platform publish went unnoticed:
+                // the dry-run agreed with the mistake.
+                let listed: Vec<String> =
+                    publishable_binaries(&current_dir, name, binary_path.as_deref())
+                        .into_iter()
+                        .map(|(os, arch, _)| {
+                            let os = if os == "macos" {
+                                "darwin".to_string()
+                            } else {
+                                os
+                            };
+                            format!("{os}_{arch}")
+                        })
+                        .collect();
+                if listed.is_empty() {
+                    "no-platform".to_string()
+                } else {
+                    listed.join(", ")
+                }
             } else {
                 "no-platform".to_string()
             };
@@ -547,24 +615,29 @@ impl PublishCommand {
         let abort_guard = AbortOnDrop::new(client.clone(), &upload_context);
 
         // 5. Upload binary (if present)
-        if let Some(ref bp) = binary_path {
-            let (os, arch) = component_binary::current_platform();
-            // Align the upload os with what the manifest validator + resolver
-            // expect ("darwin" not "macos"); see the platforms manifest key.
-            let upload_os = if os == "macos" { "darwin" } else { os };
-            let binary_content = tokio::fs::read(bp).await?;
-            let sha256 = hex::encode(Sha256::digest(&binary_content));
-            tracing::info!("uploading binary ({} bytes)", binary_content.len());
-            client
-                .upload_component_binary(
-                    &upload_context,
-                    upload_os,
-                    arch,
-                    &sha256,
-                    &binary_content,
-                    Some("Uploading binary"),
-                )
-                .await?;
+        if binary_path.is_some() {
+            for (os, arch, path) in publishable_binaries(&current_dir, name, binary_path.as_deref())
+            {
+                // Align the upload os with what the manifest validator +
+                // resolver expect ("darwin" not "macos").
+                let upload_os = if os == "macos" { "darwin" } else { os.as_str() };
+                let binary_content = tokio::fs::read(&path).await?;
+                let sha256 = hex::encode(Sha256::digest(&binary_content));
+                tracing::info!(
+                    "uploading binary for {upload_os}/{arch} ({} bytes)",
+                    binary_content.len()
+                );
+                client
+                    .upload_component_binary(
+                        &upload_context,
+                        upload_os,
+                        &arch,
+                        &sha256,
+                        &binary_content,
+                        Some(&format!("Uploading binary ({upload_os}/{arch})")),
+                    )
+                    .await?;
+            }
         }
 
         // 6. Upload CUE spec files
@@ -969,6 +1042,7 @@ async fn publish_prebuilt(
     name: &str,
     version: &str,
     doc: &serde_json::Value,
+    dry_run: bool,
 ) -> anyhow::Result<()> {
     let prebuilt = doc
         .pointer("/forest/component/upload/prebuilt")
@@ -1036,6 +1110,22 @@ async fn publish_prebuilt(
         "publishing prebuilt component {organisation}/{name}@{version} ({} platforms)",
         uploads.len(),
     );
+
+    // Honour --dry-run here too. The prebuilt path returns long before the
+    // dry-run check on the built path, so `--dry-run` used to publish for real
+    // against a flag documented as "do not contact the registry".
+    if dry_run {
+        let listed: Vec<String> = uploads
+            .iter()
+            .map(|(os, arch, _, _)| format!("{os}_{arch}"))
+            .collect();
+        eprintln!(
+            "dry-run: would publish {organisation}/{name}@{version} as shape=tool_binary [binary] {}",
+            listed.join(", ")
+        );
+        eprintln!("  no upload was performed.");
+        return Ok(());
+    }
 
     print_publish_context(organisation, name);
     let client = state.grpc_client();

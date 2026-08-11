@@ -428,11 +428,37 @@ async fn build_golang(
         source.display()
     );
 
+    let cgo = golang_cgo_setting();
+
+    tracing::info!("CGO_ENABLED={cgo}");
+
     let mut cmd = tokio::process::Command::new("go");
     cmd.current_dir(source);
     cmd.env("GOOS", go_os);
     cmd.env("GOARCH", go_arch);
-    cmd.env("CGO_ENABLED", "0");
+    cmd.env("CGO_ENABLED", &cgo);
+
+    // Cross-compiling with cgo needs a compiler told which architecture to
+    // target, or the build fails on the C toolchain rather than on anything Go.
+    // Apple's clang can target both macOS architectures from either, so a
+    // darwin→darwin cross is supported once CC says which one. Other
+    // combinations need a toolchain we cannot assume, so they are left alone and
+    // fail with the compiler's own message.
+    if cgo == "1"
+        && std::env::var("CC").is_err()
+        && target.os == "macos"
+        && cfg!(target_os = "macos")
+    {
+        let clang_arch = match target.arch.as_str() {
+            "amd64" => Some("x86_64"),
+            "arm64" => Some("arm64"),
+            _ => None,
+        };
+        if let Some(clang_arch) = clang_arch {
+            cmd.env("CC", format!("clang -arch {clang_arch}"));
+        }
+    }
+
     cmd.args(["build", "-o"]);
     cmd.arg(&output_path);
     cmd.arg(".");
@@ -452,6 +478,30 @@ async fn build_golang(
     }
 
     Ok(())
+}
+
+/// Resolve CGO_ENABLED for a Go build.
+///
+/// Defaults to "0", which keeps builds static and reproducible and is right for
+/// the majority of components. It is not right for all of them: a component that
+/// binds a platform API — the macOS Keychain, SQLite, anything behind a system
+/// framework — has those files guarded by `//go:build cgo`, so with cgo off they
+/// are silently compiled out. The binary still builds and still runs; it just
+/// quietly lacks the capability, which is a far worse failure than a build error.
+///
+/// So an explicit CGO_ENABLED in the environment now wins. Absent, nothing
+/// changes.
+fn golang_cgo_setting() -> String {
+    cgo_setting_from(std::env::var("CGO_ENABLED").ok())
+}
+
+/// Split out from the environment lookup so it can be tested without mutating
+/// process state, which is shared across tests and makes them order-dependent.
+fn cgo_setting_from(raw: Option<String>) -> String {
+    match raw {
+        Some(v) if !v.trim().is_empty() => v.trim().to_string(),
+        _ => "0".to_string(),
+    }
 }
 
 const FOREST_BUILDER_NAME: &str = "forest-builder";
@@ -646,5 +696,30 @@ mod build_hint_tests {
             ("linux", "amd64")
         );
         assert!(targets[0].rust_target.is_some());
+    }
+}
+
+#[cfg(test)]
+mod cgo_tests {
+    use super::*;
+
+    /// Default off: static, reproducible builds suit most components, and this
+    /// is the long-standing behaviour.
+    #[test]
+    fn defaults_to_disabled() {
+        assert_eq!(cgo_setting_from(None), "0");
+        assert_eq!(cgo_setting_from(Some(String::new())), "0");
+        assert_eq!(cgo_setting_from(Some("   ".to_string())), "0");
+    }
+
+    /// A component binding a platform API — the macOS Keychain, SQLite — has
+    /// those files behind `//go:build cgo`. With cgo off they are silently
+    /// compiled out: the binary builds, runs, and quietly lacks the capability,
+    /// which is worse than failing. An explicit request must be honoured.
+    #[test]
+    fn honours_an_explicit_request() {
+        assert_eq!(cgo_setting_from(Some("1".to_string())), "1");
+        assert_eq!(cgo_setting_from(Some(" 1 ".to_string())), "1");
+        assert_eq!(cgo_setting_from(Some("0".to_string())), "0");
     }
 }

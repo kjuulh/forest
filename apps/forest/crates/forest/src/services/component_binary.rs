@@ -76,6 +76,62 @@ pub fn resolve_meta_json(
 /// the component just works — no manual cache invalidation.
 ///
 /// For registry deps: uses the content-addressable cache via meta.json.
+/// Every platform binary the build produced, as `(os, arch, path)`.
+///
+/// Publishing used to record only `current_platform()`, so a project whose
+/// architecture matrix named four targets — and whose build dutifully produced
+/// all four — shipped one, and colleagues on other platforms got "missing" from
+/// `forest global add`. The artifacts were already on disk; nothing was looking
+/// at them.
+///
+/// Reads the layout the build component writes,
+/// `.forest/component/output/<os>/<arch>/<name>`, so it needs no manifest and
+/// stays correct for whatever subset actually built. Empty means fall back to the
+/// single-binary resolution below (cargo target dirs, registry cache).
+pub fn discover_output_binaries(
+    component_dir: &Path,
+    component_name: &str,
+) -> Vec<(String, String, PathBuf)> {
+    let base = component_dir.join(".forest/component/output");
+    let mut found = Vec::new();
+
+    let Ok(os_entries) = std::fs::read_dir(&base) else {
+        return found;
+    };
+
+    for os_entry in os_entries.flatten() {
+        if !os_entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let os = os_entry.file_name().to_string_lossy().to_string();
+
+        let Ok(arch_entries) = std::fs::read_dir(os_entry.path()) else {
+            continue;
+        };
+        for arch_entry in arch_entries.flatten() {
+            if !arch_entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let arch = arch_entry.file_name().to_string_lossy().to_string();
+
+            // Windows builds carry .exe; everything else is bare.
+            for candidate in [
+                arch_entry.path().join(component_name),
+                arch_entry.path().join(format!("{component_name}.exe")),
+            ] {
+                if candidate.is_file() {
+                    found.push((os.clone(), arch.clone(), candidate));
+                    break;
+                }
+            }
+        }
+    }
+
+    // Deterministic order so manifests and logs are reproducible.
+    found.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
+    found
+}
+
 pub fn resolve_binary(component_dir: &Path, component_name: &str) -> Option<PathBuf> {
     resolve_binary_with_meta(component_dir, component_name, None, None, None)
 }
@@ -1119,5 +1175,77 @@ mod tests {
 
         assert!(result["passed"].as_bool().unwrap());
         assert_eq!(result["critical"], 0);
+    }
+}
+
+#[cfg(test)]
+mod discover_tests {
+    use super::*;
+
+    fn write_binary(dir: &std::path::Path, os: &str, arch: &str, name: &str) {
+        let d = dir.join(".forest/component/output").join(os).join(arch);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join(name), b"binary").unwrap();
+    }
+
+    /// The whole point: a matrix build leaves several platforms on disk and all
+    /// of them must be found, not just the host's.
+    #[test]
+    fn finds_every_built_platform() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        write_binary(root, "linux", "amd64", "mytool");
+        write_binary(root, "linux", "arm64", "mytool");
+        write_binary(root, "macos", "arm64", "mytool");
+
+        let found = discover_output_binaries(root, "mytool");
+        let keys: Vec<String> = found
+            .iter()
+            .map(|(os, arch, _)| format!("{os}/{arch}"))
+            .collect();
+
+        // Sorted, so manifests and logs are reproducible.
+        assert_eq!(keys, vec!["linux/amd64", "linux/arm64", "macos/arm64"]);
+        assert!(found.iter().all(|(_, _, p)| p.is_file()));
+    }
+
+    #[test]
+    fn finds_windows_exe() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_binary(tmp.path(), "windows", "amd64", "mytool.exe");
+
+        let found = discover_output_binaries(tmp.path(), "mytool");
+        assert_eq!(found.len(), 1);
+        assert!(found[0].2.ends_with("mytool.exe"));
+    }
+
+    /// Empty means "fall back to the single-binary resolution", so it must be
+    /// empty rather than erroring when nothing has been built.
+    #[test]
+    fn empty_when_nothing_built() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(discover_output_binaries(tmp.path(), "mytool").is_empty());
+    }
+
+    /// A directory for a platform whose build failed has no binary in it, and
+    /// must not be reported as publishable.
+    #[test]
+    fn ignores_platform_dirs_without_a_binary() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_binary(tmp.path(), "linux", "amd64", "mytool");
+        std::fs::create_dir_all(tmp.path().join(".forest/component/output/linux/arm64")).unwrap();
+
+        let found = discover_output_binaries(tmp.path(), "mytool");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].1, "amd64");
+    }
+
+    /// Another component's binary in the same tree is not ours.
+    #[test]
+    fn ignores_other_component_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_binary(tmp.path(), "linux", "amd64", "somethingelse");
+        assert!(discover_output_binaries(tmp.path(), "mytool").is_empty());
     }
 }
