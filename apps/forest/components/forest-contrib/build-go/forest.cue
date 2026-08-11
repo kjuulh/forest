@@ -14,7 +14,7 @@ project: sdk.#ForestProject & {
 
 forest: component: sdk.#ForestComponent & {
 	name:    project.name
-	version: "0.1.0"
+	version: "0.1.1"
 
 	upload: {
 		source: "./crates/build-go"
