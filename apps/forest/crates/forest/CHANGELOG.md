@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.8](https://github.com/understory-io/forest/compare/v0.2.7...v0.2.8) (2026-08-12)
+
+
+### Features
+
+* **global:** store component binaries under &lt;hash&gt;/&lt;name&gt; so argv0 is the real name (DATA-510) ([#127](https://github.com/understory-io/forest/issues/127)) ([84c95ca](https://github.com/understory-io/forest/commit/84c95ca82754ce4dd3f4fa4b6f86e29d82fdb928))
+* **observability:** surface build provenance and page timings (DATA-505) ([#123](https://github.com/understory-io/forest/issues/123)) ([c591321](https://github.com/understory-io/forest/commit/c591321fe41f26519c9ab443d702163283091608))
+
 ## [0.2.7](https://github.com/understory-io/forest/compare/v0.2.6...v0.2.7) (2026-08-12)
 
 
