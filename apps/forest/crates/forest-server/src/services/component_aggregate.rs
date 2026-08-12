@@ -1092,6 +1092,51 @@ impl ComponentService {
         os: &str,
         arch: &str,
     ) -> anyhow::Result<Vec<u8>> {
+        let s3_key = self
+            .binary_storage_path(organisation, name, version, os, arch)
+            .await?;
+
+        self.object_store.get(&s3_key).await.with_context(|| {
+            format!("download binary from S3: {organisation}/{name}@{version} ({os}/{arch})")
+        })
+    }
+
+    /// Stream a binary artifact from S3 without buffering it (DATA-505).
+    ///
+    /// Preferred over [`Self::download_binary`] for the download RPC: that one
+    /// waits for the entire object before the handler can send anything, so
+    /// time-to-first-byte is the whole S3 GET and peak memory is the artifact
+    /// size (twice over, once the handler chunks it). This lets the handler
+    /// forward chunks as they arrive.
+    pub async fn download_binary_stream(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: &str,
+        os: &str,
+        arch: &str,
+    ) -> anyhow::Result<crate::object_store::ByteStream> {
+        let s3_key = self
+            .binary_storage_path(organisation, name, version, os, arch)
+            .await?;
+
+        self.object_store
+            .get_stream(&s3_key)
+            .await
+            .with_context(|| {
+                format!("stream binary from S3: {organisation}/{name}@{version} ({os}/{arch})")
+            })
+    }
+
+    /// Resolve the S3 key for a published platform binary.
+    async fn binary_storage_path(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: &str,
+        os: &str,
+        arch: &str,
+    ) -> anyhow::Result<String> {
         // Look up storage_path from component_artifacts
         let storage_path: Option<String> = sqlx::query_scalar(
             "SELECT ca.storage_path
@@ -1110,12 +1155,8 @@ impl ComponentService {
         .context("look up binary artifact")?
         .flatten();
 
-        let s3_key = storage_path.with_context(|| {
+        storage_path.with_context(|| {
             format!("binary not found: {organisation}/{name}@{version} ({os}/{arch})")
-        })?;
-
-        self.object_store.get(&s3_key).await.with_context(|| {
-            format!("download binary from S3: {organisation}/{name}@{version} ({os}/{arch})")
         })
     }
 

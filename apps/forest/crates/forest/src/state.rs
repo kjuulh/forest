@@ -24,6 +24,23 @@ pub struct Config {
     /// this brings the structured logs back. `FOREST_LOG` overrides it.
     #[arg(short = 'v', long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
+
+    /// Ceiling on binary downloads in flight at once (DATA-505).
+    ///
+    /// Downloads ramp up adaptively and settle wherever aggregate throughput
+    /// stops improving, so this is an upper bound rather than a target — the
+    /// steady state is usually below it. `1` disables concurrency entirely
+    /// (the pre-DATA-505 serial behaviour). Unset means the adaptive default.
+    #[arg(long, env = "FOREST_DOWNLOAD_CONCURRENCY", global = true, value_parser = clap::value_parser!(u16).range(1..))]
+    pub download_concurrency: Option<u16>,
+}
+
+impl Config {
+    /// In-flight download ceiling, resolved from the flag/env with the
+    /// adaptive default and the hard safety clamp applied.
+    pub fn max_downloads_in_flight(&self) -> usize {
+        crate::download::resolve_max_in_flight(self.download_concurrency.map(usize::from))
+    }
 }
 
 #[derive(Clone)]

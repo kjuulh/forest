@@ -40,6 +40,9 @@ pub struct ComponentsService {
     deployment: ComponentDeploymentService,
     user_config: UserConfigService,
     ctx: ForestContext,
+    /// Ceiling on concurrent registry downloads (DATA-505). Resolved once from
+    /// `--download-concurrency` / `FOREST_DOWNLOAD_CONCURRENCY`.
+    max_in_flight: usize,
 
     components_project: Arc<OnceCell<CacheComponents>>,
     components_user_config: Arc<OnceCell<CacheComponents>>,
@@ -166,48 +169,106 @@ impl ComponentsService {
                 }
             }
 
-            // 2. Fetch upstream version that is missing
-            let mut upstream = Vec::new();
-            for dep in &missing_deps.dependencies {
-                if let DependencyType::Versioned(version) = &dep.dependency_type {
+            // 2. Resolve the missing upstream versions. One RPC per dep, and
+            //    they are independent, so fan them out (DATA-505) — this used
+            //    to be a serial round-trip per dependency before any bytes
+            //    moved at all.
+            let limiter = crate::download::Limiter::new(self.max_in_flight);
+            let to_resolve: Vec<_> = missing_deps
+                .dependencies
+                .iter()
+                .filter_map(|dep| match &dep.dependency_type {
+                    DependencyType::Versioned(version) => Some((dep.clone(), version.to_string())),
+                    DependencyType::Local(_) => None,
+                })
+                .collect();
+
+            let resolved = crate::download::map_bounded(
+                to_resolve,
+                Arc::clone(&limiter),
+                |(dep, version), _lim| async move {
                     tracing::debug!("fetching upstream dep");
-                    let upstream_component = self
-                        .registry
-                        .get_component_version(&dep.name, &dep.organisation, &version.to_string())
+                    self.registry
+                        .get_component_version(&dep.name, &dep.organisation, &version)
                         .await?
-                        .ok_or(anyhow::anyhow!("failed to find upstream component"))?;
+                        .ok_or(anyhow::anyhow!("failed to find upstream component"))
+                },
+            )
+            .await;
+            let upstream = resolved.into_iter().collect::<anyhow::Result<Vec<_>>>()?;
 
-                    upstream.push(upstream_component);
-                }
+            // 3. Download deps — component kind decides v1 (files) vs v2
+            //    (binary). Bounded, adaptive concurrency: the binaries are the
+            //    large ones and each has a serial prologue (server-side S3
+            //    fetch, hashing, disk write) worth overlapping.
+            //
+            //    `forest.lock` is loaded once and shared read-only for
+            //    verification; the writes are applied below, after the fan-out
+            //    drains, because a read-modify-write per download would lose
+            //    entries.
+            let project_dir = std::env::current_dir()?;
+            let lockfile = crate::lockfile::LockFile::load(&project_dir).await?;
+
+            let outcomes =
+                crate::download::map_bounded(upstream, Arc::clone(&limiter), |dep, lim| {
+                    let lockfile = &lockfile;
+                    async move {
+                        // Try to get manifest — if it exists and kind=binary,
+                        // download binary
+                        let manifest: Result<String, _> = self
+                            .grpc
+                            .get_component_manifest(&dep.organisation, &dep.name, &dep.version)
+                            .await;
+
+                        let is_binary = manifest
+                            .as_ref()
+                            .ok()
+                            .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok())
+                            .and_then(|v| v.get("kind")?.as_str().map(|s| s == "binary"))
+                            .unwrap_or(false);
+
+                        if is_binary {
+                            self.download_binary_component(
+                                &dep.name,
+                                &dep.organisation,
+                                &dep.version,
+                                manifest.as_deref().ok(),
+                                lockfile,
+                                &lim,
+                            )
+                            .await
+                            .map(Some)
+                        } else {
+                            self.download_component(
+                                &dep.id,
+                                &dep.name,
+                                &dep.organisation,
+                                &dep.version,
+                            )
+                            .await
+                            .map(|()| None)
+                        }
+                    }
+                })
+                .await;
+
+            // Surface the first failure, but only after every sibling has had
+            // its chance to finish — a flaky dep must not silently drop the
+            // work the others already did.
+            let entries = outcomes
+                .into_iter()
+                .collect::<anyhow::Result<Vec<_>>>()?
+                .into_iter()
+                .flatten();
+
+            let mut lockfile = lockfile;
+            let mut touched = false;
+            for entry in entries {
+                lockfile.insert(entry);
+                touched = true;
             }
-
-            // Download deps — check component kind to decide v1 (files) vs v2 (binary)
-            for dep in upstream {
-                // Try to get manifest — if it exists and kind=binary, download binary
-                let manifest: Result<String, _> = self
-                    .grpc
-                    .get_component_manifest(&dep.organisation, &dep.name, &dep.version)
-                    .await;
-
-                let is_binary = manifest
-                    .as_ref()
-                    .ok()
-                    .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok())
-                    .and_then(|v| v.get("kind")?.as_str().map(|s| s == "binary"))
-                    .unwrap_or(false);
-
-                if is_binary {
-                    self.download_binary_component(
-                        &dep.name,
-                        &dep.organisation,
-                        &dep.version,
-                        manifest.as_deref().ok(),
-                    )
-                    .await?;
-                } else {
-                    self.download_component(&dep.id, &dep.name, &dep.organisation, &dep.version)
-                        .await?;
-                }
+            if touched {
+                lockfile.save(&project_dir).await?;
             }
         }
 
@@ -236,13 +297,21 @@ impl ComponentsService {
     }
 
     /// Download a v2 binary component from the registry and store in the content-addressable cache.
+    ///
+    /// Returns the lockfile entry to record rather than writing it: several of
+    /// these run concurrently (DATA-505) and a read-modify-write of the shared
+    /// `forest.lock` inside each one would lose updates. The caller verifies
+    /// against `lockfile` (read-only, safe to share) and applies the returned
+    /// entries serially once the fan-out has drained.
     async fn download_binary_component(
         &self,
         name: &str,
         organisation: &str,
         version: &str,
         manifest_json: Option<&str>,
-    ) -> anyhow::Result<()> {
+        lockfile: &crate::lockfile::LockFile,
+        limiter: &crate::download::Limiter,
+    ) -> anyhow::Result<crate::lockfile::LockEntry> {
         let (os, arch) = crate::services::component_binary::current_platform();
 
         // The registry stores macOS binaries under the "darwin" os key — publish
@@ -262,22 +331,25 @@ impl ComponentsService {
             .download_component_binary(organisation, name, version, registry_os, arch, Some(&label))
             .await
             .context("download binary from registry")?;
+        let size_bytes = binary.len();
+        // Feed the adaptive ramp: bytes actually moved is what it climbs.
+        // The driver signals completion; this only reports the bytes.
+        limiter.add_bytes(size_bytes as u64);
 
         // Store in content-addressable cache
         let (sha256, cache_path) =
             crate::services::component_binary::store_binary_in_cache(&binary)
                 .context("store binary in cache")?;
+        drop(binary);
 
         let sha256_prefixed = format!("sha256:{sha256}");
 
-        // Verify against lock file if present
-        let project_dir = std::env::current_dir()?;
-        let lockfile = crate::lockfile::LockFile::load(&project_dir).await?;
+        // Verify against the lock file the caller loaded. Read-only, so it is
+        // safe to do here inside the concurrent region; the corresponding
+        // *write* is the caller's job.
         lockfile.verify(organisation, name, version, os, arch, &sha256_prefixed)?;
 
-        // Update lock file
-        let mut lockfile = lockfile;
-        lockfile.insert(crate::lockfile::LockEntry {
+        let lock_entry = crate::lockfile::LockEntry {
             organisation: organisation.to_string(),
             name: name.to_string(),
             version: version.to_string(),
@@ -286,14 +358,13 @@ impl ComponentsService {
                 arch: arch.to_string(),
                 sha256: sha256_prefixed,
             },
-        });
-        lockfile.save(&project_dir).await?;
+        };
 
         tracing::info!(
             "cached binary at {} (sha256={}, {} bytes)",
             cache_path.display(),
             &sha256[..12],
-            binary.len()
+            size_bytes
         );
 
         // Write meta.json to the component cache directory so resolve_binary can find it
@@ -314,7 +385,7 @@ impl ComponentsService {
             "platforms": {
                 platform_key: {
                     "sha256": sha256,
-                    "size": binary.len(),
+                    "size": size_bytes,
                 }
             }
         });
@@ -418,7 +489,7 @@ impl ComponentsService {
             }
         }
 
-        Ok(())
+        Ok(lock_entry)
     }
 
     #[tracing::instrument(skip(self), level = "trace")]
@@ -659,6 +730,7 @@ impl ComponentsServiceState for State {
             deployment: self.component_deployment_service(),
             user_config: self.user_config_service(),
             ctx: self.context(),
+            max_in_flight: self.config.max_downloads_in_flight(),
             components_project: Arc::new(OnceCell::new()),
             components_user_config: Arc::new(OnceCell::new()),
         })

@@ -1,6 +1,7 @@
 #![allow(dead_code, clippy::too_many_arguments)]
 
 mod cli;
+mod download;
 mod grpc;
 mod services;
 mod state;

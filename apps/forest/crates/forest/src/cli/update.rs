@@ -31,6 +31,37 @@ pub struct UpdateCommand {
     component: Option<String>,
 }
 
+/// What updating one versioned dependency produced.
+///
+/// Dependencies are resolved and downloaded concurrently (DATA-505), so the
+/// per-dep work cannot write `forest.lock` or print progress lines itself —
+/// interleaved output is unreadable and concurrent read-modify-write of the
+/// lockfile loses entries. Each unit of work returns this instead, and the
+/// caller applies it in dependency order once the fan-out has drained.
+#[derive(Default)]
+struct DepUpdate {
+    /// Lockfile entry to record, if any.
+    entry: Option<LockEntry>,
+    /// Line to show the user, replayed in dependency order.
+    message: Option<UpdateMessage>,
+    /// Whether this counts toward the "updated N component(s)" tally.
+    updated: bool,
+}
+
+enum UpdateMessage {
+    Success(String),
+    Warn(String),
+}
+
+impl UpdateMessage {
+    fn emit(self) {
+        match self {
+            UpdateMessage::Success(m) => crate::ui::success(m),
+            UpdateMessage::Warn(m) => crate::ui::warn(m),
+        }
+    }
+}
+
 impl UpdateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let project = state.project_parser().get_project().await?;
@@ -41,6 +72,10 @@ impl UpdateCommand {
         let mut lockfile = LockFile::load(&project_dir).await?;
         let mut updated = 0;
 
+        // Pass 1 (serial, no I/O worth parallelising): local path deps are
+        // recorded straight away, versioned deps are collected for the
+        // concurrent pass.
+        let mut versioned = Vec::new();
         for dep in &project.dependencies.dependencies {
             // Filter to specific component if requested
             if let Some(filter) = &self.component {
@@ -75,7 +110,23 @@ impl UpdateCommand {
                             dep.organisation, dep.name
                         )
                     })?;
+                    versioned.push((dep.clone(), spec));
+                }
+            }
+        }
 
+        // Pass 2 (concurrent, bounded + adaptive): resolve each spec against
+        // the registry and fetch what it points at. `lockfile` is read-only
+        // here — the up-to-date check only reads Registry entries, and the
+        // path-dep inserts above never touch those.
+        let limiter = crate::download::Limiter::new(state.config.max_downloads_in_flight());
+        let lockfile_snapshot = &lockfile;
+        let results = crate::download::map_bounded(
+            versioned,
+            std::sync::Arc::clone(&limiter),
+            |(dep, spec), lim| {
+                let client = client.clone();
+                async move {
                     // List available versions from registry
                     let versions_response = client
                         .list_component_versions(&dep.organisation, &dep.name)
@@ -89,7 +140,7 @@ impl UpdateCommand {
                                 dep.organisation,
                                 dep.name
                             );
-                            continue;
+                            return Ok(DepUpdate::default());
                         }
                     };
 
@@ -102,11 +153,13 @@ impl UpdateCommand {
 
                     // Resolve the best match
                     let Some(resolved) = spec.resolve(&semver_versions) else {
-                        crate::ui::warn(format!(
-                            "{}/{}: no version matches '{spec}'",
-                            dep.organisation, dep.name
-                        ));
-                        continue;
+                        return Ok(DepUpdate {
+                            message: Some(UpdateMessage::Warn(format!(
+                                "{}/{}: no version matches '{spec}'",
+                                dep.organisation, dep.name
+                            ))),
+                            ..Default::default()
+                        });
                     };
 
                     let resolved_str = resolved.to_string();
@@ -132,18 +185,20 @@ impl UpdateCommand {
 
                     if is_binary {
                         // Check if we already have this version cached
-                        if let Some(existing_hash) =
-                            lockfile.get(&dep.organisation, &dep.name, &resolved_str, os, arch)
+                        if let Some(existing_hash) = lockfile_snapshot
+                            .get(&dep.organisation, &dep.name, &resolved_str, os, arch)
                         {
                             let hash = existing_hash
                                 .strip_prefix("sha256:")
                                 .unwrap_or(existing_hash);
                             if component_binary::resolve_binary_from_hash(hash).is_some() {
-                                crate::ui::success(format!(
-                                    "{}/{}@{} up to date",
-                                    dep.organisation, dep.name, resolved_str
-                                ));
-                                continue;
+                                return Ok(DepUpdate {
+                                    message: Some(UpdateMessage::Success(format!(
+                                        "{}/{}@{} up to date",
+                                        dep.organisation, dep.name, resolved_str
+                                    ))),
+                                    ..Default::default()
+                                });
                             }
                         }
 
@@ -153,8 +208,10 @@ impl UpdateCommand {
                         // update path needs the same translation or a macOS
                         // consumer gets a spurious "binary not found". DATA-312.
                         let registry_os = if os == "macos" { "darwin" } else { os };
-                        let label =
-                            format!("Downloading {}/{}@{}", dep.organisation, dep.name, resolved_str);
+                        let label = format!(
+                            "Downloading {}/{}@{}",
+                            dep.organisation, dep.name, resolved_str
+                        );
                         let binary = client
                             .download_component_binary(
                                 &dep.organisation,
@@ -171,30 +228,37 @@ impl UpdateCommand {
                                     dep.organisation, dep.name, resolved_str, os, arch
                                 )
                             })?;
+                        let size_bytes = binary.len();
+                        lim.add_bytes(size_bytes as u64);
 
                         let (sha256, _cache_path) =
                             component_binary::store_binary_in_cache(&binary)?;
-
-                        lockfile.insert(LockEntry {
-                            organisation: dep.organisation.clone(),
-                            name: dep.name.clone(),
-                            version: resolved_str.clone(),
-                            source: LockSource::Registry {
-                                os: os.to_string(),
-                                arch: arch.to_string(),
-                                sha256: format!("sha256:{sha256}"),
-                            },
-                        });
+                        drop(binary);
 
                         tracing::debug!(
                             "updated {}/{}@{} ({} bytes)",
-                            dep.organisation, dep.name, resolved_str, binary.len()
+                            dep.organisation,
+                            dep.name,
+                            resolved_str,
+                            size_bytes
                         );
-                        crate::ui::success(format!(
-                            "Updated {}/{}@{}",
-                            dep.organisation, dep.name, resolved_str
-                        ));
-                        updated += 1;
+                        Ok(DepUpdate {
+                            entry: Some(LockEntry {
+                                organisation: dep.organisation.clone(),
+                                name: dep.name.clone(),
+                                version: resolved_str.clone(),
+                                source: LockSource::Registry {
+                                    os: os.to_string(),
+                                    arch: arch.to_string(),
+                                    sha256: format!("sha256:{sha256}"),
+                                },
+                            }),
+                            message: Some(UpdateMessage::Success(format!(
+                                "Updated {}/{}@{}",
+                                dep.organisation, dep.name, resolved_str
+                            ))),
+                            updated: true,
+                        })
                     } else {
                         // Files-based (CUE-only library or Deno component).
                         let outcome = state
@@ -212,19 +276,21 @@ impl UpdateCommand {
                                 )
                             })?;
                         match outcome {
-                            EnsureCachedOutcome::AlreadyCached => {
-                                crate::ui::success(format!(
+                            EnsureCachedOutcome::AlreadyCached => Ok(DepUpdate {
+                                message: Some(UpdateMessage::Success(format!(
                                     "{}/{}@{} up to date",
                                     dep.organisation, dep.name, resolved_str
-                                ));
-                            }
-                            EnsureCachedOutcome::Downloaded => {
-                                crate::ui::success(format!(
+                                ))),
+                                ..Default::default()
+                            }),
+                            EnsureCachedOutcome::Downloaded => Ok(DepUpdate {
+                                message: Some(UpdateMessage::Success(format!(
                                     "Updated {}/{}@{} (files)",
                                     dep.organisation, dep.name, resolved_str
-                                ));
-                                updated += 1;
-                            }
+                                ))),
+                                updated: true,
+                                ..Default::default()
+                            }),
                             EnsureCachedOutcome::BinaryRequiresPlatformDownload => {
                                 // Manifest probe said non-binary but the
                                 // ensure helper disagreed. Race or stale
@@ -236,14 +302,45 @@ impl UpdateCommand {
                                     dep.name,
                                     resolved_str
                                 );
+                                Ok(DepUpdate::default())
                             }
                         }
                     }
                 }
+            },
+        )
+        .await;
+
+        // Pass 3 (serial): replay output in dependency order and apply the
+        // lockfile writes. Every dep got its chance to run before the first
+        // error surfaces, so one unreachable component does not discard the
+        // downloads that succeeded.
+        let mut first_error = None;
+        let mut pending = Vec::new();
+        for result in results {
+            match result {
+                Ok(update) => pending.push(update),
+                Err(e) if first_error.is_none() => first_error = Some(e),
+                Err(e) => tracing::warn!("update failed: {e:#}"),
+            }
+        }
+        for update in pending {
+            if let Some(entry) = update.entry {
+                lockfile.insert(entry);
+            }
+            if let Some(message) = update.message {
+                message.emit();
+            }
+            if update.updated {
+                updated += 1;
             }
         }
 
         lockfile.save(&project_dir).await?;
+
+        if let Some(e) = first_error {
+            return Err(e);
+        }
 
         if updated > 0 {
             tracing::debug!("forest.lock written");

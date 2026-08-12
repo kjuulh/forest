@@ -12,6 +12,71 @@ use crate::{
     state::State,
 };
 
+/// gRPC message payload size for binary downloads.
+///
+/// Unchanged from the pre-DATA-505 implementation on purpose — the wire shape
+/// stays byte-for-byte what older clients already expect. What changed is that
+/// these are now cut from a live S3 stream instead of from a fully buffered
+/// copy of the artifact.
+const DOWNLOAD_CHUNK_SIZE: usize = 1024 * 1024;
+
+/// Re-cut an object-storage byte stream into fixed-size gRPC messages.
+///
+/// S3 hands back HTTP body chunks of whatever size it likes (often tens of
+/// KiB). Emitting one gRPC message per S3 chunk would multiply per-message
+/// framing overhead, so chunks are coalesced up to `chunk_size` and flushed as
+/// they fill; the final message carries the remainder. An empty object yields
+/// no messages, exactly as before.
+///
+/// Pulling from S3 only happens when the consumer polls, so tonic's HTTP/2
+/// flow control backpressures all the way through to object storage and memory
+/// stays bounded at roughly one chunk.
+fn chunked_download(
+    bytes: crate::object_store::ByteStream,
+    chunk_size: usize,
+) -> impl Stream<Item = std::result::Result<DownloadBinaryResponse, tonic::Status>> + Send {
+    struct Cursor {
+        bytes: crate::object_store::ByteStream,
+        buffer: Vec<u8>,
+        finished: bool,
+    }
+
+    futures::stream::unfold(
+        Cursor {
+            bytes,
+            buffer: Vec::with_capacity(chunk_size),
+            finished: false,
+        },
+        move |mut cursor| async move {
+            if cursor.finished {
+                return None;
+            }
+            loop {
+                if cursor.buffer.len() >= chunk_size {
+                    let remainder = cursor.buffer.split_off(chunk_size);
+                    let chunk = std::mem::replace(&mut cursor.buffer, remainder);
+                    return Some((Ok(DownloadBinaryResponse { chunk }), cursor));
+                }
+                match cursor.bytes.next().await {
+                    Some(Ok(part)) => cursor.buffer.extend_from_slice(&part),
+                    Some(Err(e)) => {
+                        cursor.finished = true;
+                        return Some((Err(tonic::Status::internal(format!("{e:#}"))), cursor));
+                    }
+                    None => {
+                        cursor.finished = true;
+                        if cursor.buffer.is_empty() {
+                            return None;
+                        }
+                        let chunk = std::mem::take(&mut cursor.buffer);
+                        return Some((Ok(DownloadBinaryResponse { chunk }), cursor));
+                    }
+                }
+            }
+        },
+    )
+}
+
 fn shape_to_proto(s: &str) -> ComponentShape {
     match s {
         "component" => ComponentShape::Component,
@@ -360,10 +425,22 @@ impl RegistryService for RegistryServer {
         authorize::require_org_access(&self.state.db, &actor, &req.organisation, OrgRole::Member)
             .await?;
 
-        let binary_content = self
+        // Stream the object out of S3 rather than buffering it (DATA-505).
+        //
+        // This used to `download_binary(..)` the whole artifact into a `Vec`
+        // and then `.chunks(1 MiB).collect()` it into a second full copy of
+        // the file as a vector of ready-made messages. Time-to-first-byte was
+        // therefore the entire S3 GET, and peak RSS was ~2x the artifact per
+        // concurrent download — which is what made parallel downloads on the
+        // client side unattractive.
+        //
+        // The wire format is deliberately unchanged: still `DownloadBinary`,
+        // still ~1 MiB `DownloadBinaryResponse` messages. Older clients cannot
+        // tell the difference.
+        let byte_stream = self
             .state
             .component_service()
-            .download_binary(
+            .download_binary_stream(
                 &req.organisation,
                 &req.name,
                 &req.version,
@@ -373,19 +450,10 @@ impl RegistryService for RegistryServer {
             .await
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
-        // Stream in 1MB chunks
-        let chunk_size = 1024 * 1024;
-        let chunks: Vec<_> = binary_content
-            .chunks(chunk_size)
-            .map(|chunk| {
-                Ok(DownloadBinaryResponse {
-                    chunk: chunk.to_vec(),
-                })
-            })
-            .collect();
-
-        let stream = futures::stream::iter(chunks);
-        Ok(tonic::Response::new(Box::pin(stream)))
+        Ok(tonic::Response::new(Box::pin(chunked_download(
+            byte_stream,
+            DOWNLOAD_CHUNK_SIZE,
+        ))))
     }
 
     async fn publish_manifest(
@@ -804,5 +872,151 @@ impl From<ComponentVersion> for Component {
             id: value.id,
             version: value.version,
         }
+    }
+}
+
+#[cfg(test)]
+mod download_chunking_tests {
+    use super::*;
+
+    /// Build a `ByteStream` from pre-baked parts, standing in for whatever
+    /// chunk boundaries S3 happens to hand us.
+    fn stream_of(parts: Vec<Vec<u8>>) -> crate::object_store::ByteStream {
+        Box::pin(futures::stream::iter(
+            parts.into_iter().map(|p| Ok(bytes::Bytes::from(p))),
+        ))
+    }
+
+    fn failing_stream(parts: Vec<Vec<u8>>, error: &'static str) -> crate::object_store::ByteStream {
+        let ok = parts
+            .into_iter()
+            .map(|p| Ok(bytes::Bytes::from(p)))
+            .collect::<Vec<_>>();
+        Box::pin(
+            futures::stream::iter(ok).chain(futures::stream::once(async move {
+                Err(anyhow::anyhow!(error))
+            })),
+        )
+    }
+
+    async fn collect(
+        stream: impl Stream<Item = std::result::Result<DownloadBinaryResponse, tonic::Status>>,
+    ) -> std::result::Result<Vec<Vec<u8>>, tonic::Status> {
+        let mut out = Vec::new();
+        let mut stream = Box::pin(stream);
+        while let Some(item) = stream.next().await {
+            out.push(item?.chunk);
+        }
+        Ok(out)
+    }
+
+    #[tokio::test]
+    async fn coalesces_small_parts_into_full_chunks() {
+        // 10 parts of 100 bytes, cut at 256 → 256 + 256 + 256 + 232.
+        let parts = (0..10).map(|i| vec![i as u8; 100]).collect();
+        let chunks = collect(chunked_download(stream_of(parts), 256))
+            .await
+            .unwrap();
+        let sizes: Vec<usize> = chunks.iter().map(|c| c.len()).collect();
+        assert_eq!(sizes, vec![256, 256, 256, 232]);
+        assert_eq!(sizes.iter().sum::<usize>(), 1000);
+    }
+
+    #[tokio::test]
+    async fn splits_parts_larger_than_the_chunk_size() {
+        let chunks = collect(chunked_download(stream_of(vec![vec![7u8; 1000]]), 256))
+            .await
+            .unwrap();
+        let sizes: Vec<usize> = chunks.iter().map(|c| c.len()).collect();
+        assert_eq!(sizes, vec![256, 256, 256, 232]);
+    }
+
+    #[tokio::test]
+    async fn reassembles_to_exactly_the_original_bytes() {
+        // Awkward part boundaries, none aligned to the chunk size.
+        let parts = vec![
+            (0u8..37).collect::<Vec<u8>>(),
+            (37u8..40).collect(),
+            (40u8..200).collect(),
+            (200u8..255).collect(),
+        ];
+        let expected: Vec<u8> = parts.iter().flatten().copied().collect();
+        let chunks = collect(chunked_download(stream_of(parts), 64))
+            .await
+            .unwrap();
+        let joined: Vec<u8> = chunks.into_iter().flatten().collect();
+        assert_eq!(joined, expected, "download must be byte-identical");
+    }
+
+    #[tokio::test]
+    async fn exact_multiple_of_the_chunk_size_emits_no_empty_trailer() {
+        let chunks = collect(chunked_download(stream_of(vec![vec![1u8; 512]]), 256))
+            .await
+            .unwrap();
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks.iter().all(|c| c.len() == 256));
+    }
+
+    #[tokio::test]
+    async fn an_empty_object_yields_no_messages() {
+        // Matches the pre-DATA-505 behaviour: `[].chunks(n)` produced nothing.
+        let chunks = collect(chunked_download(stream_of(vec![]), 256))
+            .await
+            .unwrap();
+        assert!(chunks.is_empty());
+
+        // Empty parts in the middle of a stream must not produce empty
+        // messages either.
+        let chunks = collect(chunked_download(
+            stream_of(vec![vec![], vec![], vec![]]),
+            256,
+        ))
+        .await
+        .unwrap();
+        assert!(chunks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_storage_error_surfaces_as_a_stream_error() {
+        let result = collect(chunked_download(
+            failing_stream(vec![vec![1u8; 300]], "s3 connection reset"),
+            256,
+        ))
+        .await;
+        let err = result.expect_err("the storage failure must not be swallowed");
+        assert_eq!(err.code(), tonic::Code::Internal);
+        assert!(err.message().contains("s3 connection reset"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn chunks_already_sent_before_a_failure_are_delivered() {
+        // A mid-transfer S3 failure must not retroactively hide the bytes the
+        // client already received — it has to arrive as a stream error after
+        // them, so the client's sha check is what rejects the partial file.
+        let mut stream = Box::pin(chunked_download(
+            failing_stream(vec![vec![9u8; 600]], "truncated"),
+            256,
+        ));
+        assert_eq!(stream.next().await.unwrap().unwrap().chunk.len(), 256);
+        assert_eq!(stream.next().await.unwrap().unwrap().chunk.len(), 256);
+        let err = stream.next().await.unwrap().expect_err("expected failure");
+        assert!(err.message().contains("truncated"));
+        assert!(stream.next().await.is_none(), "stream must end after error");
+    }
+
+    #[tokio::test]
+    async fn the_production_chunk_size_is_the_legacy_wire_size() {
+        // Old clients were written against 1 MiB messages; keep it that way.
+        assert_eq!(DOWNLOAD_CHUNK_SIZE, 1024 * 1024);
+        let chunks = collect(chunked_download(
+            stream_of(vec![vec![0u8; DOWNLOAD_CHUNK_SIZE + 7]]),
+            DOWNLOAD_CHUNK_SIZE,
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            chunks.iter().map(|c| c.len()).collect::<Vec<_>>(),
+            vec![DOWNLOAD_CHUNK_SIZE, 7]
+        );
     }
 }

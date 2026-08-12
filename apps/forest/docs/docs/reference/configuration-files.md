@@ -145,6 +145,29 @@ mise run local:down  # Stop and clean up
 
 ---
 
+## Download Tuning
+
+Binary downloads run with bounded, adaptive concurrency. Concurrency starts
+low, grows while aggregate throughput keeps improving, and settles at the
+plateau — so the steady state is normally below the ceiling. Backpressure from
+the registry (`UNAVAILABLE`, `RESOURCE_EXHAUSTED`, timeouts) halves it.
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `--download-concurrency <N>` | adaptive, ceiling 8 | Upper bound on binary downloads in flight. |
+| `FOREST_DOWNLOAD_CONCURRENCY` | — | Same, as an environment variable. |
+
+`1` turns concurrency off entirely and restores fully serial downloads — the
+escape hatch if a registry or proxy misbehaves under parallel streams. Values
+above 32 are clamped to 32.
+
+Because every gRPC client in the CLI shares one HTTP/2 connection, concurrent
+downloads mainly hide per-download latency (the registry's object-storage read,
+plus local hashing and disk writes) rather than adding bandwidth. Raising the
+ceiling far above the default therefore buys little.
+
+---
+
 ## Templates
 
 Component templates live in `templates/deployment/{destination_type}/`:

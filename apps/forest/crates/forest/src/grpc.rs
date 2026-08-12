@@ -40,6 +40,38 @@ use crate::{
 
 mod interceptor;
 
+/// Starting per-stream HTTP/2 window (DATA-505). Adaptive sizing grows it from
+/// here based on the measured bandwidth-delay product; 4 MiB is enough to keep
+/// a transatlantic link busy from the first chunk instead of ramping from
+/// hyper's 2 MiB default.
+const DOWNLOAD_STREAM_WINDOW: u32 = 4 * 1024 * 1024;
+
+/// Starting connection-level HTTP/2 window. Must comfortably exceed the stream
+/// window times the number of concurrent downloads, or the shared connection
+/// becomes the bottleneck the per-stream window no longer is.
+const DOWNLOAD_CONNECTION_WINDOW: u32 = 32 * 1024 * 1024;
+
+/// Write-coalescing buffer for streamed downloads. The registry currently
+/// sends 1 MiB messages, which pass straight through a buffer this size
+/// (`BufWriter` bypasses itself for writes larger than its capacity), so this
+/// only earns its keep if a server chooses smaller chunks — at which point it
+/// stops us issuing one `write(2)` per message.
+const DOWNLOAD_WRITE_BUFFER: usize = 256 * 1024;
+
+/// A binary streamed to disk rather than buffered in memory.
+///
+/// The sha256 is computed incrementally *during* the transfer, so verification
+/// costs no extra pass over the file and the whole artifact never has to fit
+/// in RAM.
+pub struct StreamedBinary {
+    /// Tempfile holding the bytes. The caller owns it: verify the sha, then
+    /// rename it into place (or drop it).
+    pub temp_path: std::path::PathBuf,
+    /// Lowercase hex sha256 of everything received.
+    pub sha256_hex: String,
+    pub size_bytes: u64,
+}
+
 /// Convert a `tonic::Status` into a clean `anyhow::Error`.
 ///
 /// When the server returned a human-readable message (e.g.
@@ -370,6 +402,118 @@ impl GrpcClient {
         Ok(binary)
     }
 
+    /// Stream a component binary straight to a tempfile in `dest_dir`,
+    /// hashing as it goes (DATA-505).
+    ///
+    /// Preferred over [`Self::download_component_binary`] for anything that
+    /// ends up on disk: that one accumulates the entire artifact in a `Vec`
+    /// (peak RSS ≈ artifact size, plus reallocation churn) and forces the
+    /// caller into a second full pass to hash it. This keeps memory flat at
+    /// one chunk regardless of artifact size, which is what makes it safe to
+    /// run several downloads concurrently.
+    ///
+    /// `dest_dir` should be on the same filesystem as the final destination so
+    /// the caller's install step can be a plain `rename(2)`.
+    ///
+    /// `expected_size` (from the component manifest, when published) upgrades
+    /// the progress display from an open-ended spinner to a real bar. On
+    /// error the tempfile is removed before returning.
+    pub async fn download_component_binary_to_file(
+        &self,
+        organisation: &str,
+        name: &str,
+        version: &str,
+        os: &str,
+        arch: &str,
+        dest_dir: &Path,
+        expected_size: Option<u64>,
+        progress_label: Option<&str>,
+    ) -> anyhow::Result<StreamedBinary> {
+        use sha2::{Digest, Sha256};
+        use tokio::io::AsyncWriteExt as _;
+
+        let mut client = self.registry_client().await?;
+
+        let mut stream = client
+            .download_binary(DownloadBinaryRequest {
+                organisation: organisation.into(),
+                name: name.into(),
+                version: version.into(),
+                os: os.into(),
+                arch: arch.into(),
+            })
+            .await
+            .map_err(grpc_err)?
+            .into_inner();
+
+        tokio::fs::create_dir_all(dest_dir)
+            .await
+            .with_context(|| format!("creating download dir {}", dest_dir.display()))?;
+        let rand: u64 = rand::random();
+        let temp_path = dest_dir.join(format!(".incoming.{rand:016x}"));
+
+        let bar = progress_label.map(|label| match expected_size {
+            Some(total) if total > 0 => crate::ui::bytes_bar(label, total),
+            _ => crate::ui::transfer(label),
+        });
+
+        // Everything after the tempfile exists goes through this so a failure
+        // never strands a partial `.incoming.*` in the cache directory.
+        let result = async {
+            let file = tokio::fs::File::create(&temp_path)
+                .await
+                .with_context(|| format!("creating tempfile {}", temp_path.display()))?;
+            let mut writer = tokio::io::BufWriter::with_capacity(DOWNLOAD_WRITE_BUFFER, file);
+
+            let mut hasher = Sha256::new();
+            let mut size_bytes: u64 = 0;
+
+            while let Some(msg) = stream.message().await.map_err(grpc_err)? {
+                let chunk = msg.chunk;
+                if chunk.is_empty() {
+                    continue;
+                }
+                hasher.update(&chunk);
+                writer
+                    .write_all(&chunk)
+                    .await
+                    .with_context(|| format!("writing {}", temp_path.display()))?;
+                size_bytes += chunk.len() as u64;
+                if let Some(bar) = &bar {
+                    bar.inc(chunk.len() as u64);
+                }
+            }
+
+            writer
+                .flush()
+                .await
+                .with_context(|| format!("flushing {}", temp_path.display()))?;
+            let file = writer.into_inner();
+            file.sync_all()
+                .await
+                .with_context(|| format!("fsyncing {}", temp_path.display()))?;
+
+            Ok::<_, anyhow::Error>(StreamedBinary {
+                temp_path: temp_path.clone(),
+                sha256_hex: hex::encode(hasher.finalize()),
+                size_bytes,
+            })
+        }
+        .await;
+
+        if let Some(bar) = bar {
+            bar.clear();
+        }
+
+        match result {
+            Ok(streamed) => Ok(streamed),
+            Err(e) => {
+                tokio::fs::remove_file(&temp_path).await.ok();
+                Err(e)
+            }
+        }
+    }
+
     pub async fn upload_component_file(
         &self,
         upload_context: &str,
@@ -601,6 +745,24 @@ impl GrpcClient {
             .get_or_try_init(move || async move {
                 let channel = Channel::from_shared(self.host.clone())?
                     .tls_config(ClientTlsConfig::new().with_enabled_roots())?
+                    // HTTP/2 flow control, DATA-505. hyper's defaults are a
+                    // 2 MiB stream window and a 5 MiB connection window with
+                    // adaptive sizing OFF, which hard-caps a single download
+                    // stream at 2 MiB/RTT and this whole channel at 5 MiB/RTT
+                    // — every gRPC client in the CLI shares this one
+                    // connection. On a 100 ms link that was ~20 MB/s per
+                    // download no matter how fast the pipe or the registry
+                    // was.
+                    //
+                    // `http2_adaptive_window` lets hyper size the window from
+                    // the measured bandwidth-delay product instead, using the
+                    // values below as the starting point. Cost is bounded
+                    // buffering (a window's worth per in-flight stream), which
+                    // is why the download limiter keeps the in-flight count
+                    // small — see `crate::download`.
+                    .initial_stream_window_size(Some(DOWNLOAD_STREAM_WINDOW))
+                    .initial_connection_window_size(Some(DOWNLOAD_CONNECTION_WINDOW))
+                    .http2_adaptive_window(true)
                     .connect()
                     .await?;
 

@@ -31,6 +31,8 @@ pub struct GlobalService {
     pub cue: CueEvaluator,
     pub cache: BinaryCache,
     pub grpc: GrpcClient,
+    /// Ceiling on concurrent registry calls (DATA-505).
+    pub max_in_flight: usize,
 }
 
 impl GlobalService {
@@ -40,6 +42,7 @@ impl GlobalService {
             cache: BinaryCache::new(paths.clone()),
             cue: CueEvaluator::new(),
             grpc: state.grpc_client(),
+            max_in_flight: state.config.max_downloads_in_flight(),
             paths,
         })
     }
@@ -241,24 +244,47 @@ impl GlobalService {
         let cached_path = if let Some(p) = self.cache.read_by_sha(&expected_sha).await? {
             p
         } else {
-            let bytes = match fetch {
-                FetchPlan::Registry => self
-                    .grpc
-                    .download_component_binary(
-                        &qref.organisation,
-                        &qref.name,
-                        version,
-                        platform::os_str(host.os),
-                        platform::arch_str(host.arch),
-                        Some(&format!("Downloading {}/{}", qref.organisation, qref.name)),
-                    )
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "downloading {}/{}@{}",
-                            qref.organisation, qref.name, version
+            match fetch {
+                // Registry downloads stream straight into the binary cache
+                // directory and are hashed on the way in (DATA-505), so a
+                // 200 MB tool costs one chunk of RAM rather than 200 MB —
+                // and the tempfile is already on the cache filesystem, so
+                // installing it is a plain rename.
+                FetchPlan::Registry => {
+                    let streamed = self
+                        .grpc
+                        .download_component_binary_to_file(
+                            &qref.organisation,
+                            &qref.name,
+                            version,
+                            platform::os_str(host.os),
+                            platform::arch_str(host.arch),
+                            &self.paths.binary_cache_dir(),
+                            manifest
+                                .platforms
+                                .get(&forest_manifest::PlatformKey {
+                                    os: host.os,
+                                    arch: host.arch,
+                                })
+                                .and_then(|p| p.size),
+                            Some(&format!("Downloading {}/{}", qref.organisation, qref.name)),
                         )
-                    })?,
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "downloading {}/{}@{}",
+                                qref.organisation, qref.name, version
+                            )
+                        })?;
+                    self.cache
+                        .finalize_streamed(&streamed.temp_path, &streamed.sha256_hex, &expected_sha)
+                        .await?
+                }
+                // External URLs still land in memory: the archive has to be
+                // fully present to be decompressed and to have the *inner*
+                // binary extracted, so streaming to disk would buy nothing.
+                // These are third-party release tarballs, not our own large
+                // binaries.
                 FetchPlan::Url {
                     url,
                     archive,
@@ -277,10 +303,10 @@ impl GlobalService {
                             );
                         }
                     }
-                    extract_from_archive(&body, archive, binary_in_archive.as_deref())?
+                    let bytes = extract_from_archive(&body, archive, binary_in_archive.as_deref())?;
+                    self.cache.finalize(&bytes, &expected_sha).await?
                 }
-            };
-            self.cache.finalize(&bytes, &expected_sha).await?
+            }
         };
 
         // Update the lockfile with the version actually executed. This must
@@ -781,24 +807,44 @@ impl GlobalService {
         // (Catalogue subscriptions always track latest at run time and per-
         // catalogue pins are honoured by `resolve_version`, so they need no
         // bump here.)
-        let keys: Vec<String> = cfg.dependencies.keys().cloned().collect();
-        for key in keys {
+        // One `GetComponent` per floating dep, and they are independent — fan
+        // them out (DATA-505) instead of paying a serial round trip each.
+        let mut floating = Vec::new();
+        for (key, dep) in &cfg.dependencies {
             let (org, name) = key
                 .split_once('/')
                 .ok_or_else(|| anyhow!("malformed dep key {key}"))?;
-            let dep = match cfg.dependencies.get(&key) {
-                Some(d) => d,
-                None => continue,
-            };
             if dep.pinned {
                 held += 1;
                 continue;
             }
-            let current = dep.version.clone();
-            let latest = match self.grpc.get_component(name, org).await {
-                Ok(Some(c)) => c.version.to_string(),
-                _ => continue,
-            };
+            floating.push((
+                key.clone(),
+                org.to_string(),
+                name.to_string(),
+                dep.version.clone(),
+            ));
+        }
+
+        let limiter = crate::download::Limiter::new(self.max_in_flight);
+        let latests = crate::download::map_bounded(
+            floating,
+            std::sync::Arc::clone(&limiter),
+            |(key, org, name, current), _lim| async move {
+                // A dep that cannot be resolved right now is skipped, exactly
+                // as it was serially — `update` is advisory, not a gate.
+                let latest = match self.grpc.get_component(&name, &org).await {
+                    Ok(Some(c)) => Some(c.version.to_string()),
+                    _ => None,
+                };
+                Ok((key, current, latest))
+            },
+        )
+        .await;
+
+        for resolved in latests {
+            let (key, current, latest) = resolved?;
+            let Some(latest) = latest else { continue };
             if latest != current {
                 if let Some(dep) = cfg.dependencies.get_mut(&key) {
                     dep.version = latest.clone();
@@ -829,36 +875,77 @@ impl GlobalService {
         let mut expected: std::collections::BTreeMap<String, QualifiedRef> =
             std::collections::BTreeMap::new();
 
-        // 1a. Per-tool deps.
+        // 1a. Per-tool deps. Deps without an explicit `shim_name` each need a
+        //     manifest fetch to learn the tool name — one serial round trip
+        //     per dependency before DATA-505, which is most of what made
+        //     `sync` (and the auto-update that runs off `global run`) feel
+        //     slow with a dozen tools installed.
+        let mut dep_keys = Vec::new();
         for (key, dep) in &cfg.dependencies {
             let (org, name) = key
                 .split_once('/')
                 .ok_or_else(|| anyhow!("malformed dep key {key}"))?;
-            let shim_name = match &dep.shim_name {
-                Some(s) => s.clone(),
-                None => {
-                    // Need to look up the manifest to find the tool name.
-                    // Fallback: use the component name. Shim creation will
-                    // still write a deterministic body.
-                    match self.fetch_manifest(org, name, &dep.version).await {
-                        Ok(m) => m
-                            .tool
-                            .as_ref()
-                            .map(|t| t.name.clone())
-                            .unwrap_or_else(|| name.to_string()),
-                        Err(_) => name.to_string(),
-                    }
-                }
-            };
-            expected.insert(shim_name, QualifiedRef::new(org, name));
+            dep_keys.push((org.to_string(), name.to_string(), dep.clone()));
         }
 
-        // 1b. Org catalogue subscriptions.
-        for (org, cat) in &cfg.org_catalog {
-            if !cat.enabled {
-                continue;
-            }
-            let entries = match self.grpc.list_org_tools(org).await {
+        let limiter = crate::download::Limiter::new(self.max_in_flight);
+        let resolved_shims = crate::download::map_bounded(
+            dep_keys,
+            std::sync::Arc::clone(&limiter),
+            |(org, name, dep), _lim| async move {
+                let shim_name = match &dep.shim_name {
+                    Some(s) => s.clone(),
+                    None => {
+                        // Need to look up the manifest to find the tool name.
+                        // Fallback: use the component name. Shim creation will
+                        // still write a deterministic body.
+                        match self.fetch_manifest(&org, &name, &dep.version).await {
+                            Ok(m) => m
+                                .tool
+                                .as_ref()
+                                .map(|t| t.name.clone())
+                                .unwrap_or_else(|| name.clone()),
+                            Err(_) => name.clone(),
+                        }
+                    }
+                };
+                Ok((shim_name, QualifiedRef::new(&org, &name)))
+            },
+        )
+        .await;
+        for resolved in resolved_shims {
+            // The closure above absorbs manifest failures into a name
+            // fallback, so this cannot actually be an error today; propagate
+            // rather than silently dropping a shim if that ever changes.
+            let (shim_name, qref) = resolved?;
+            expected.insert(shim_name, qref);
+        }
+
+        // 1b. Org catalogue subscriptions. One `ListOrgTools` stream per
+        //     subscribed org, fetched concurrently (DATA-505).
+        let orgs: Vec<String> = cfg
+            .org_catalog
+            .iter()
+            .filter(|(_, cat)| cat.enabled)
+            .map(|(org, _)| org.clone())
+            .collect();
+        let catalogues = crate::download::map_bounded(
+            orgs,
+            std::sync::Arc::clone(&limiter),
+            |org, _lim| async move {
+                let entries = self.grpc.list_org_tools(&org).await;
+                Ok((org, entries))
+            },
+        )
+        .await;
+
+        for catalogue in catalogues {
+            let (org, entries) = catalogue?;
+            let cat = match cfg.org_catalog.get(&org) {
+                Some(c) => c,
+                None => continue,
+            };
+            let entries = match entries {
                 Ok(v) => v,
                 Err(e) => {
                     tracing::warn!("ListOrgTools({org}) failed: {e:#}; skipping catalogue");

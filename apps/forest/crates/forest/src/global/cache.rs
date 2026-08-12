@@ -53,6 +53,57 @@ impl BinaryCache {
         Ok(dest)
     }
 
+    /// Install an already-streamed tempfile (DATA-505).
+    ///
+    /// The sha was computed incrementally while the bytes were being written,
+    /// so this verifies `computed_sha == expected_sha` and then `rename(2)`s
+    /// the file into `bin/<sha>` — no second pass over the artifact and no
+    /// need to hold it in memory. Same P3 invariant as [`Self::finalize`]:
+    /// **verify before rename**, so a mismatch can never become a cache entry.
+    ///
+    /// The tempfile is removed on mismatch. `temp_path` must be on the same
+    /// filesystem as the cache dir (pass the cache dir to the downloader) or
+    /// the rename will fail with `EXDEV`.
+    pub async fn finalize_streamed(
+        &self,
+        temp_path: &Path,
+        computed_sha: &str,
+        expected_sha: &str,
+    ) -> Result<PathBuf> {
+        let want_hex = expected_sha.strip_prefix("sha256:").unwrap_or(expected_sha);
+        let got_hex = computed_sha.strip_prefix("sha256:").unwrap_or(computed_sha);
+        if got_hex != want_hex {
+            fs::remove_file(temp_path).await.ok();
+            return Err(anyhow!(
+                "sha mismatch — refusing to write to cache. expected={want_hex} actual={got_hex}"
+            ));
+        }
+
+        ensure_dir(&self.paths.binary_cache_dir()).await?;
+        let dest = self.paths.cached_binary(got_hex);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(temp_path)
+                .await
+                .with_context(|| format!("stat {}", temp_path.display()))?
+                .permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(temp_path, perms)
+                .await
+                .with_context(|| format!("chmod 0755 {}", temp_path.display()))?;
+        }
+
+        // Content-addressed destination: a concurrent writer racing us here is
+        // installing byte-identical content under the same name, so whichever
+        // rename lands last is still correct.
+        fs::rename(temp_path, &dest)
+            .await
+            .with_context(|| format!("renaming {} -> {}", temp_path.display(), dest.display()))?;
+        Ok(dest)
+    }
+
     /// Walk the cache and re-hash every entry. Returns mismatched paths
     /// that were deleted. Used by `forest global verify`.
     pub async fn re_verify(&self) -> Result<Vec<PathBuf>> {
@@ -158,6 +209,120 @@ mod tests {
         // Cached at the hex-only filename:
         assert!(c.read_by_sha(&prefixed).await.unwrap().is_some());
         assert!(c.read_by_sha(&sha256_hex(bytes)).await.unwrap().is_some());
+    }
+
+    // --- finalize_streamed (DATA-505) ---
+
+    async fn streamed_temp(paths: &GlobalPaths, bytes: &[u8]) -> PathBuf {
+        let dir = paths.binary_cache_dir();
+        ensure_dir(&dir).await.unwrap();
+        let tmp = dir.join(format!(".incoming.{:016x}", rand::random::<u64>()));
+        tokio::fs::write(&tmp, bytes).await.unwrap();
+        tmp
+    }
+
+    #[tokio::test]
+    async fn finalize_streamed_installs_and_is_findable_by_sha() {
+        let td = TempDir::new().unwrap();
+        let paths = paths_under(&td);
+        let c = BinaryCache::new(paths.clone());
+        let bytes = b"a streamed binary";
+        let sha = sha256_hex(bytes);
+        let tmp = streamed_temp(&paths, bytes).await;
+
+        let dest = c.finalize_streamed(&tmp, &sha, &sha).await.unwrap();
+        assert_eq!(c.read_by_sha(&sha).await.unwrap().unwrap(), dest);
+        assert_eq!(tokio::fs::read(&dest).await.unwrap(), bytes);
+        assert!(!tmp.exists(), "tempfile should have been renamed away");
+    }
+
+    #[tokio::test]
+    async fn finalize_streamed_sets_the_executable_bit() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let td = TempDir::new().unwrap();
+            let paths = paths_under(&td);
+            let c = BinaryCache::new(paths.clone());
+            let bytes = b"#!/bin/sh\n";
+            let sha = sha256_hex(bytes);
+            let tmp = streamed_temp(&paths, bytes).await;
+            let dest = c.finalize_streamed(&tmp, &sha, &sha).await.unwrap();
+            let mode = std::fs::metadata(&dest).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o755);
+        }
+    }
+
+    #[tokio::test]
+    async fn finalize_streamed_rejects_mismatch_and_writes_nothing() {
+        let td = TempDir::new().unwrap();
+        let paths = paths_under(&td);
+        let c = BinaryCache::new(paths.clone());
+        let bytes = b"tampered payload";
+        let actual = sha256_hex(bytes);
+        let expected = "0".repeat(64);
+        let tmp = streamed_temp(&paths, bytes).await;
+
+        let err = c
+            .finalize_streamed(&tmp, &actual, &expected)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("sha mismatch"), "{err}");
+        assert!(
+            c.read_by_sha(&expected).await.unwrap().is_none(),
+            "a mismatched download must never become a cache entry"
+        );
+        assert!(
+            c.read_by_sha(&actual).await.unwrap().is_none(),
+            "and must not be cached under its own sha either"
+        );
+        assert!(!tmp.exists(), "the rejected tempfile should be cleaned up");
+    }
+
+    #[tokio::test]
+    async fn finalize_streamed_accepts_the_sha256_prefix_on_either_side() {
+        let td = TempDir::new().unwrap();
+        let paths = paths_under(&td);
+        let c = BinaryCache::new(paths.clone());
+        let bytes = b"prefixed";
+        let sha = sha256_hex(bytes);
+
+        let tmp = streamed_temp(&paths, bytes).await;
+        c.finalize_streamed(&tmp, &sha, &format!("sha256:{sha}"))
+            .await
+            .unwrap();
+        assert!(c.read_by_sha(&sha).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn concurrent_streamed_finalize_of_identical_content_converges() {
+        // Two downloads of the same artifact racing to install it. Both must
+        // succeed and the cache must end up with the one content-addressed
+        // entry.
+        let td = TempDir::new().unwrap();
+        let paths = paths_under(&td);
+        let c = BinaryCache::new(paths.clone());
+        let bytes = b"raced content";
+        let sha = sha256_hex(bytes);
+
+        let a = streamed_temp(&paths, bytes).await;
+        let b = streamed_temp(&paths, bytes).await;
+        let (ra, rb) = tokio::join!(
+            c.finalize_streamed(&a, &sha, &sha),
+            c.finalize_streamed(&b, &sha, &sha)
+        );
+        assert_eq!(ra.unwrap(), rb.unwrap());
+        assert_eq!(
+            tokio::fs::read(paths.cached_binary(&sha)).await.unwrap(),
+            bytes
+        );
+
+        let mut entries = tokio::fs::read_dir(paths.binary_cache_dir()).await.unwrap();
+        let mut names = Vec::new();
+        while let Some(e) = entries.next_entry().await.unwrap() {
+            names.push(e.file_name().to_string_lossy().to_string());
+        }
+        assert_eq!(names, vec![sha], "no stray tempfiles, exactly one entry");
     }
 
     #[tokio::test]

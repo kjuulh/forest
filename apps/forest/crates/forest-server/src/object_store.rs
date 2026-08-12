@@ -1,6 +1,14 @@
+use std::pin::Pin;
+
 use anyhow::Context;
+use bytes::Bytes;
+use futures::Stream;
 use s3::creds::Credentials;
 use s3::{Bucket, Region};
+
+/// A byte stream from object storage, with the `s3` crate's error type mapped
+/// away so callers do not have to depend on it.
+pub type ByteStream = Pin<Box<dyn Stream<Item = anyhow::Result<Bytes>> + Send>>;
 
 /// S3-compatible object storage for binary data (component binaries, artifact tarballs).
 #[derive(Clone)]
@@ -51,6 +59,37 @@ impl ObjectStore {
             .await
             .with_context(|| format!("failed to get object: {key}"))?;
         Ok(response.to_vec())
+    }
+
+    /// Retrieve an object as a stream, without buffering it (DATA-505).
+    ///
+    /// [`Self::get`] pulls the whole object into a `Vec<u8>` before returning,
+    /// which for a large component binary means the caller cannot send a single
+    /// byte until the entire S3 GET has finished, and holds the whole artifact
+    /// in memory while it does. This yields chunks as they arrive so a download
+    /// handler can forward them straight to the client.
+    pub async fn get_stream(&self, key: &str) -> anyhow::Result<ByteStream> {
+        let response = self
+            .bucket
+            .get_object_stream(key)
+            .await
+            .with_context(|| format!("failed to stream object: {key}"))?;
+
+        // The `fail-on-err` feature makes a non-2xx status an error before we
+        // get here; this is belt and braces so a surprising status can never be
+        // mistaken for object content.
+        if !(200..300).contains(&response.status_code) {
+            anyhow::bail!(
+                "failed to stream object {key}: unexpected status {}",
+                response.status_code
+            );
+        }
+
+        let key = key.to_string();
+        Ok(Box::pin(futures::StreamExt::map(
+            response.bytes,
+            move |chunk| chunk.with_context(|| format!("reading object stream: {key}")),
+        )))
     }
 
     /// Delete an object.
