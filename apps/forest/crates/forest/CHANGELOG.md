@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.7](https://github.com/understory-io/forest/compare/v0.2.6...v0.2.7) (2026-08-12)
+
+
+### Features
+
+* **build:** stamp the component version into built binaries ([#120](https://github.com/understory-io/forest/issues/120)) ([fb2d8f9](https://github.com/understory-io/forest/commit/fb2d8f9e6b544901098c1075f9efae201317fe93))
+
+
+### Performance Improvements
+
+* **downloads:** stream binaries and fan out registry calls (DATA-505) ([#122](https://github.com/understory-io/forest/issues/122)) ([80f1585](https://github.com/understory-io/forest/commit/80f1585b23b7819388b4a1a12ce410b57c35dbf5))
+
 ## [0.2.6](https://github.com/understory-io/forest/compare/v0.2.5...v0.2.6) (2026-08-11)
 
 
