@@ -323,6 +323,22 @@ impl GrpcClient {
         Ok(())
     }
 
+    /// Server liveness plus build provenance.
+    ///
+    /// An older server predates the provenance fields and leaves them empty,
+    /// which is why the caller renders them as "unknown" rather than assuming
+    /// they are present.
+    pub async fn server_status(&self) -> anyhow::Result<GetStatusResponse> {
+        let channel = self.auth_channel(self.channel().await?);
+        let mut client =
+            forest_grpc_interface::status_service_client::StatusServiceClient::new(channel);
+        let res = client
+            .status(GetStatusRequest {})
+            .await
+            .map_err(grpc_err)?;
+        Ok(res.into_inner())
+    }
+
     pub async fn get_component_manifest(
         &self,
         organisation: &str,

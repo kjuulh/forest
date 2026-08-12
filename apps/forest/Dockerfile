@@ -54,4 +54,16 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser \
     && chown appuser:appuser /usr/bin/tofu
 USER appuser
 
+# Build provenance, baked into the final stage only (DATA-505 follow-up).
+#
+# Deliberately after the compile: an ARG/ENV before `cargo build` changes the
+# build environment on every commit and invalidates the cached compile. Placing
+# it here means the image still self-describes (`docker inspect` shows both
+# values, and the server reads them at startup) while the expensive builder
+# layers stay cacheable.
+ARG GIT_SHA=""
+ARG BUILD_TIME=""
+ENV FOREST_GIT_SHA=$GIT_SHA
+ENV FOREST_BUILD_TIME=$BUILD_TIME
+
 ENTRYPOINT ["forest-server"]

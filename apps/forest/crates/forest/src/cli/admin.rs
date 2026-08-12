@@ -6,6 +6,7 @@ use crate::state::State;
 
 mod deploy_components;
 mod get_component;
+mod status;
 mod unpublish;
 
 #[derive(clap::Parser)]
@@ -21,6 +22,8 @@ enum Commands {
     GetComponent(GetComponentCommand),
     /// Remove a previously-published version. TASKS/025.
     Unpublish(UnpublishCommand),
+    /// Show server version, commit, build time and round-trip latency.
+    Status(status::StatusCommand),
 }
 
 impl Commands {
@@ -31,6 +34,7 @@ impl Commands {
                 get_component_command.execute(state).await
             }
             Commands::Unpublish(cmd) => cmd.execute(state).await,
+            Commands::Status(cmd) => cmd.execute(state).await,
         }
     }
 }

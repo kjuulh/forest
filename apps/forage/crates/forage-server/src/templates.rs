@@ -137,6 +137,15 @@ impl TemplateEngine {
         // Default asset hash for tests/dev — overridden in production by compute_asset_hashes
         env.add_global("css_hash", "dev");
 
+        // Build provenance for the footer. Globals rather than per-handler
+        // context: every page extends base.html.jinja, and threading these
+        // through each handler would guarantee a page that forgets them.
+        let build = crate::build_info::BuildInfo::from_env();
+        // `build.version` is intentionally not exposed — see the footer
+        // comment in base.html.jinja.
+        env.add_global("build_commit", build.commit);
+        env.add_global("build_time", build.build_time);
+
         Ok(Self { env })
     }
 

@@ -1649,8 +1649,24 @@ impl RolloutStatus {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetStatusRequest {
 }
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+/// Liveness plus build provenance, so "is this server running my fix?" is
+/// answerable without shelling into it.
+///
+/// Every field is additive and optional: an older server leaves them empty and
+/// a newer server is still understood by an older client, so no API version
+/// bump is involved.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetStatusResponse {
+    /// Semver of the server binary (its crate version).
+    #[prost(string, tag="1")]
+    pub version: ::prost::alloc::string::String,
+    /// Short git commit the binary was built from. Empty for a local build that
+    /// was not stamped.
+    #[prost(string, tag="2")]
+    pub commit: ::prost::alloc::string::String,
+    /// RFC 3339 build timestamp. Empty when unstamped.
+    #[prost(string, tag="3")]
+    pub build_time: ::prost::alloc::string::String,
 }
 // ── Report (agent → server) ────────────────────────────────────────
 

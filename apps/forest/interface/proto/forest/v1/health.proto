@@ -8,7 +8,22 @@ service StatusService {
 }
 
 message GetStatusRequest {}
-message GetStatusResponse {}
+
+// Liveness plus build provenance, so "is this server running my fix?" is
+// answerable without shelling into it.
+//
+// Every field is additive and optional: an older server leaves them empty and
+// a newer server is still understood by an older client, so no API version
+// bump is involved.
+message GetStatusResponse {
+  // Semver of the server binary (its crate version).
+  string version = 1;
+  // Short git commit the binary was built from. Empty for a local build that
+  // was not stamped.
+  string commit = 2;
+  // RFC 3339 build timestamp. Empty when unstamped.
+  string build_time = 3;
+}
 
 // ── Release health monitoring ──────────────────────────────────────
 //

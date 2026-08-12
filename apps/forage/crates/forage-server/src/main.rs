@@ -1,4 +1,5 @@
 mod auth;
+mod build_info;
 mod compute_grpc;
 mod email_consumer;
 mod forest_client;
@@ -7,6 +8,7 @@ mod notification_consumer;
 mod notification_ingester;
 mod manifest_view;
 mod notification_worker;
+mod page_timing;
 mod pretty_json;
 mod routes;
 mod serve_grpc;
@@ -69,6 +71,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::router())
         .nest_service("/static", ServeDir::new("static"))
         .fallback(fallback_404)
+        // Inside the compression layer on purpose: registered first means
+        // innermost, so it sees uncompressed HTML and its placeholder
+        // substitution can actually match. See `page_timing`.
+        .layer(axum::middleware::from_fn(page_timing::layer))
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state)

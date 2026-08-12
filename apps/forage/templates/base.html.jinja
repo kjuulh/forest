@@ -185,15 +185,52 @@
         {% block content %}{% endblock %}
     </main>
 
-    {# Minimal footer: just the byline. Pricing / Dashboard / Account /
-       Components / Sign in are all available from the top nav, and we
-       don't currently have a pricing page. Re-introduce a full footer
-       only when there's something worth surfacing here. #}
+    {# Minimal footer: byline plus build provenance and timings, on one small
+       line (Gitea-style). `__FOREST_RENDER_MS__` is substituted by the
+       `page_timing` middleware — it can only be known after the handler has
+       run, so it cannot be a template global. The client load time is filled
+       in by the script below from the Navigation Timing API. #}
     <footer class="border-t border-gray-200 mt-auto">
-        <div class="max-w-6xl mx-auto px-4 py-6 text-sm text-gray-500">
-            &copy; 2026 Forest.
+        <div class="max-w-6xl mx-auto px-4 py-4 text-xs text-gray-400 flex flex-wrap gap-x-2">
+            <span>&copy; 2026 Forest</span>
+            {# No version segment on purpose: forage-server's crate version is
+               0.1.0 and is not managed by release-please, so rendering it next
+               to "Forest" would claim a product version that isn't real. The
+               commit below is the deployed server's actual identity. #}
+            {% if build_commit %}
+            <span aria-hidden="true">&middot;</span>
+            <span><code class="font-mono">{{ build_commit }}</code></span>
+            {% endif %}
+            {% if build_time %}
+            <span aria-hidden="true">&middot;</span>
+            <span>built <time datetime="{{ build_time }}">{{ build_time|timeago }}</time></span>
+            {% endif %}
+            <span aria-hidden="true">&middot;</span>
+            <span>page __FOREST_RENDER_MS__</span>
+            <span id="client-load-time" hidden><span aria-hidden="true">&middot;</span> load <span id="client-load-ms"></span></span>
         </div>
     </footer>
+    <script>
+    // Total navigation time as the browser saw it — the other half of the
+    // story from the server's own figure, and the one that includes network,
+    // parse and asset load.
+    (function () {
+        try {
+            var nav = performance.getEntriesByType('navigation')[0];
+            if (!nav) return;
+            var render = function () {
+                var ms = nav.duration;
+                if (!ms || ms <= 0) return;
+                document.getElementById('client-load-ms').textContent =
+                    ms >= 10 ? Math.round(ms) + 'ms' : ms.toFixed(1) + 'ms';
+                document.getElementById('client-load-time').hidden = false;
+            };
+            // `duration` is only final once loadEventEnd has happened.
+            if (document.readyState === 'complete') render();
+            else window.addEventListener('load', function () { setTimeout(render, 0); });
+        } catch (e) {}
+    })();
+    </script>
     <script>
     document.querySelectorAll('time[datetime]').forEach(function(el) {
         try {
