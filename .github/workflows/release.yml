@@ -69,7 +69,7 @@ jobs:
             os: ubuntu-24.04-arm
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # SSH auth for private git deps (canopy-otel etc.). Same
       # pattern the Dockerfile and ci.yaml use: load the deploy key
@@ -169,7 +169,7 @@ jobs:
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Attach install.sh to the forest release
         env:
