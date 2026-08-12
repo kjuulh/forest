@@ -175,7 +175,7 @@ impl GlobalService {
             platform::os_str(host.os),
             platform::arch_str(host.arch),
         ) {
-            if let Some(p) = self.cache.read_by_sha(pinned_sha).await? {
+            if let Some(p) = self.cache.read_by_sha(pinned_sha, &qref.name).await? {
                 return Ok(p);
             }
         }
@@ -241,7 +241,8 @@ impl GlobalService {
         // Cache hit by sha (e.g. same content under a different org/version)
         // OR cold fetch — either way we now know the sha and can pin the
         // lockfile so the next run takes the offline warm path.
-        let cached_path = if let Some(p) = self.cache.read_by_sha(&expected_sha).await? {
+        let cached_path = if let Some(p) = self.cache.read_by_sha(&expected_sha, &qref.name).await?
+        {
             p
         } else {
             match fetch {
@@ -277,7 +278,12 @@ impl GlobalService {
                             )
                         })?;
                     self.cache
-                        .finalize_streamed(&streamed.temp_path, &streamed.sha256_hex, &expected_sha)
+                        .finalize_streamed(
+                            &streamed.temp_path,
+                            &streamed.sha256_hex,
+                            &expected_sha,
+                            &qref.name,
+                        )
                         .await?
                 }
                 // External URLs still land in memory: the archive has to be
@@ -304,7 +310,9 @@ impl GlobalService {
                         }
                     }
                     let bytes = extract_from_archive(&body, archive, binary_in_archive.as_deref())?;
-                    self.cache.finalize(&bytes, &expected_sha).await?
+                    self.cache
+                        .finalize(&bytes, &expected_sha, &qref.name)
+                        .await?
                 }
             }
         };
@@ -330,6 +338,38 @@ impl GlobalService {
         self.save_lockfile(&lock).await?;
 
         Ok(cached_path)
+    }
+
+    /// Convert every cache entry the lockfile knows about to the
+    /// `bin/<sha>/<name>` layout (DATA-510).
+    ///
+    /// Migration is lazy by default — each tool's first `run`/`which`/`list`
+    /// after the upgrade fixes its own entry. This is the eager counterpart:
+    /// the lockfile maps each sha back to the `<org>/<name>` that produced it,
+    /// which is exactly the name the entry needs on disk, so an upgraded
+    /// forest can sweep the whole store in one pass instead of leaving old
+    /// entries around until each tool happens to be invoked.
+    ///
+    /// Runs from `forest global update` (including the daily background one,
+    /// so upgrades converge on their own) and `forest global verify`.
+    /// Idempotent, and entirely best-effort: a store that cannot be migrated
+    /// still works, because the lazy path re-materialises what it needs.
+    pub async fn migrate_binary_store(&self) -> Result<usize> {
+        let lock = self.load_lockfile().await.unwrap_or_default();
+        let mut migrated = 0usize;
+        for entry in lock.iter() {
+            // read_by_sha migrates the legacy shape as a side effect; a miss
+            // just means the tool isn't cached on this machine.
+            match self.cache.read_by_sha(&entry.sha256, &entry.name).await {
+                Ok(Some(_)) => migrated += 1,
+                Ok(None) => {}
+                Err(e) => tracing::debug!(
+                    tool = %format!("{}/{}", entry.organisation, entry.name),
+                    "skipping store migration for this entry: {e:#}"
+                ),
+            }
+        }
+        Ok(migrated)
     }
 
     /// Write a tool version's `include.env` to the cache, beside the binary
@@ -859,6 +899,11 @@ impl GlobalService {
 
         self.save_user_config(&cfg).await?;
         let sync = self.sync_shims().await?;
+        // Upgrade hook (DATA-510): fold any pre-`<hash>/<name>` cache entries
+        // into the current layout. Best-effort — update must not fail over it.
+        if let Err(e) = self.migrate_binary_store().await {
+            tracing::debug!("binary-store migration skipped: {e:#}");
+        }
         Ok(UpdateOutcome { bumps, held, sync })
     }
 
@@ -1266,7 +1311,7 @@ impl GlobalService {
             platform::arch_str(p.arch),
         ) {
             Some(sha) => {
-                if self.cache.read_by_sha(sha).await?.is_some() {
+                if self.cache.read_by_sha(sha, name).await?.is_some() {
                     Ok(ToolStatus::Cached)
                 } else {
                     Ok(ToolStatus::Missing)
@@ -1402,6 +1447,32 @@ mod tests {
         let body = "#!/bin/sh\n# forest shim — do not edit\nexec forest global run cuteorg/ripgrep -- \"$@\"\n";
         let q = parse_qualified_ref_from_shim(body).unwrap();
         assert_eq!(q, QualifiedRef::new("cuteorg", "ripgrep"));
+    }
+
+    #[test]
+    fn parses_qualified_ref_from_a_shim_that_forwards_its_invoked_name() {
+        // The body `sync` writes today (DATA-510). `sync` reads the ref back
+        // out of every shim it finds, so the `--as` argument must not confuse
+        // the parser — and an old-format shim must still parse, since sync
+        // reads them before rewriting them.
+        let body = crate::global::shim::shim_script_for(&QualifiedRef::new("cuteorg", "ripgrep"));
+        let q = parse_qualified_ref_from_shim(&body).unwrap();
+        assert_eq!(q, QualifiedRef::new("cuteorg", "ripgrep"));
+    }
+
+    #[test]
+    fn sync_rewrites_a_pre_data_510_shim_body() {
+        // Upgrade path: shims written before the `--as` forwarding differ from
+        // what `shim_script_for` renders now, which is exactly the comparison
+        // `sync_shims` uses to decide a shim is stale and rewrite it.
+        let old = "#!/bin/sh\n# forest shim — do not edit\nexec forest global run cuteorg/ripgrep -- \"$@\"\n";
+        let new = crate::global::shim::shim_script_for(&QualifiedRef::new("cuteorg", "ripgrep"));
+        assert_ne!(old, new, "a stale shim must not compare equal");
+        assert_eq!(
+            parse_qualified_ref_from_shim(old).unwrap(),
+            parse_qualified_ref_from_shim(&new).unwrap(),
+            "both forms must resolve to the same tool"
+        );
     }
 
     #[test]

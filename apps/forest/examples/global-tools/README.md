@@ -193,7 +193,10 @@ config: sdk.#UserConfig & {
 $ cat ~/.cache/forest/global/shims/rg
 #!/bin/sh
 # forest shim — do not edit
-exec forest global run cuteorg/ripgrep -- "$@"
+exec forest global run cuteorg/ripgrep --as "${0##*/}" -- "$@"
+
+# `--as` forwards the name the shim was invoked as, so the tool's argv[0] is
+# `rg` — the name you typed — rather than the upstream component name.
 
 $ ls ~/.local/state/forest/
 # (still empty — lockfile is written on first invocation)
@@ -266,7 +269,7 @@ forest: fetching https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/
 forest: archive_sha256 verified (4cf9f274…)
 forest: extracted ripgrep-14.1.1-x86_64-unknown-linux-musl/rg
 forest: binary_sha256 verified (ad3a44e3…)
-forest: cached at ~/.cache/forest/components/bin/ad3a44e3…
+forest: cached at ~/.cache/forest/components/bin/ad3a44e3…/ripgrep
 forest: lockfile updated
 ripgrep 14.1.1
 features:+pcre2 …
@@ -305,12 +308,12 @@ shadowed (per-tool pin overrides catalogue):
    rg via [dependencies] → catalogue entry ignored
 
 $ forest global which rg
-~/.cache/forest/components/bin/ad3a44e3…
+~/.cache/forest/components/bin/ad3a44e3…/ripgrep
 
 $ forest global which fd
 forest: cold cache for cuteorg/fd@10.2.0
 forest: fetching ...
-~/.cache/forest/components/bin/9b2c1e7f…
+~/.cache/forest/components/bin/9b2c1e7f…/fd
 ```
 
 ---
@@ -320,15 +323,15 @@ forest: fetching ...
 ```sh
 $ forest global verify
 scanning ~/.cache/forest/components/bin/
-  ad3a44e3…  ok
-  9b2c1e7f…  ok
+  ad3a44e3…/ripgrep  ok
+  9b2c1e7f…/fd        ok
 2 entries, 0 mismatches
 
-$ echo bogus >> ~/.cache/forest/components/bin/ad3a44e3…
+$ echo bogus >> ~/.cache/forest/components/bin/ad3a44e3…/ripgrep
 $ forest global verify
 scanning ~/.cache/forest/components/bin/
-  ad3a44e3…  MISMATCH (computed: 11e2…) → deleted
-  9b2c1e7f…  ok
+  ad3a44e3…/ripgrep  MISMATCH (computed: 11e2…) → deleted
+  9b2c1e7f…/fd        ok
 2 entries, 1 mismatch (deleted)
 $ rg --version
 forest: cold cache (recovering from deleted entry)

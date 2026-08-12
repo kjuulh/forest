@@ -81,11 +81,35 @@ impl GlobalPaths {
         self.cache_dir.join("components").join("bin")
     }
 
-    pub fn cached_binary(&self, sha: &str) -> PathBuf {
+    /// The content-addressed **directory** for one binary's bytes
+    /// (`bin/<hex>`). The binaries themselves live inside it, named after the
+    /// component (DATA-510) — see [`Self::cached_binary`].
+    ///
+    /// One hash can be known under several names (an alias, or two components
+    /// whose artifacts dedupe to the same bytes), so the directory holds a
+    /// hard-linked entry per name rather than a single file.
+    pub fn cached_binary_dir(&self, sha: &str) -> PathBuf {
         // sha may be "sha256:hex" or "hex" — strip the prefix so the on-disk
         // name is always just the hex digest.
         let hex = sha.strip_prefix("sha256:").unwrap_or(sha);
         self.binary_cache_dir().join(hex)
+    }
+
+    /// The executable for `sha`, materialised under its real name:
+    /// `bin/<hex>/<bin_name>`.
+    ///
+    /// Naming the file after the component is the whole point — `exec`ing this
+    /// path makes the child's `argv[0]` basename the component name instead of
+    /// a sha256 digest, which multi-call binaries and usage text depend on.
+    pub fn cached_binary(&self, sha: &str, bin_name: &str) -> PathBuf {
+        self.cached_binary_dir(sha).join(bin_name)
+    }
+
+    /// Pre-DATA-510 location: the content-addressed path *was* the executable.
+    /// Identical to [`Self::cached_binary_dir`] — kept as a distinct name so
+    /// the migration code reads unambiguously at its call sites.
+    pub fn legacy_cached_binary_file(&self, sha: &str) -> PathBuf {
+        self.cached_binary_dir(sha)
     }
 
     /// Per-(org, name, version) directory for the `include` block shipped
@@ -186,14 +210,54 @@ mod tests {
     }
 
     #[test]
-    fn cached_binary_strips_sha256_prefix() {
+    fn cached_binary_dir_strips_sha256_prefix() {
         assert_eq!(
-            fixed().cached_binary("sha256:abc123"),
+            fixed().cached_binary_dir("sha256:abc123"),
             PathBuf::from("/cache/forest/components/bin/abc123"),
         );
         assert_eq!(
-            fixed().cached_binary("abc123"),
+            fixed().cached_binary_dir("abc123"),
             PathBuf::from("/cache/forest/components/bin/abc123"),
+        );
+    }
+
+    #[test]
+    fn cached_binary_nests_the_real_name_under_the_hash_dir() {
+        // DATA-510: the hash is a directory; the file inside carries the
+        // component name so argv[0] reads as the tool, not the digest.
+        assert_eq!(
+            fixed().cached_binary("sha256:abc123", "shiitake"),
+            PathBuf::from("/cache/forest/components/bin/abc123/shiitake"),
+        );
+        assert_eq!(
+            fixed().cached_binary("abc123", "gitnow"),
+            PathBuf::from("/cache/forest/components/bin/abc123/gitnow"),
+        );
+    }
+
+    #[test]
+    fn cached_binary_file_name_is_exactly_the_bin_name() {
+        // The property `forest global run` relies on: basename(exec path) is
+        // what the child sees as argv[0].
+        let p = fixed().cached_binary("abc123", "forest-hello");
+        assert_eq!(p.file_name().unwrap(), "forest-hello");
+    }
+
+    #[test]
+    fn two_names_for_one_hash_share_a_directory() {
+        let a = fixed().cached_binary("abc123", "rg");
+        let b = fixed().cached_binary("abc123", "ripgrep");
+        assert_eq!(a.parent(), b.parent());
+        assert_eq!(a.parent().unwrap(), fixed().cached_binary_dir("abc123"));
+    }
+
+    #[test]
+    fn legacy_binary_file_is_the_path_the_hash_dir_now_occupies() {
+        // Migration hinges on these being the same path: what used to be a
+        // file becomes a directory.
+        assert_eq!(
+            fixed().legacy_cached_binary_file("sha256:abc123"),
+            fixed().cached_binary_dir("abc123"),
         );
     }
 

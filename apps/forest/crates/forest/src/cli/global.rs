@@ -166,7 +166,10 @@ impl UnbanCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let svc = GlobalService::from_state(state)?;
         svc.unban_tool(&self.organisation, &self.tool).await?;
-        eprintln!("unbanned {} from {} catalogue", self.tool, self.organisation);
+        eprintln!(
+            "unbanned {} from {} catalogue",
+            self.tool, self.organisation
+        );
         // Reconcile so the shim comes back immediately — the user shouldn't
         // have to remember a follow-up `sync`. Best-effort: a sync failure
         // (e.g. registry offline) is a warning, not a hard error, since the
@@ -458,6 +461,12 @@ pub struct RunCommand {
     /// Tool reference: `<bare-name>`, `<org>/<name>`, or `<org>/<name>@<ver>`.
     tool: String,
 
+    /// Name to hand the binary as `argv[0]`. Shims pass the name they were
+    /// invoked as, so an aliased tool sees the alias rather than the upstream
+    /// component name. Defaults to the component name.
+    #[arg(long = "as", value_name = "NAME")]
+    invoked_as: Option<String>,
+
     /// Trailing args are forwarded to the underlying binary.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
@@ -502,8 +511,27 @@ impl RunCommand {
 
         // Exec. We inherit the parent environment and only *add* the keys not
         // already present, so an exported ambient value is never overwritten.
+        //
+        // argv[0] is set explicitly (DATA-510). The cached path already ends
+        // in `<hash>/<name>`, so its basename is right on its own — but tools
+        // that inspect `$0` are exactly the ones that suffer when it's wrong,
+        // so we don't leave it to the layout alone. Without this, `$0` was the
+        // bare sha256 and multi-call dispatch, usage text, and self-re-exec
+        // all saw a hash.
+        //
+        // A shim forwards the name it was invoked as, which is what the user
+        // typed; it differs from the component name only for an alias. A
+        // malformed `--as` (a path, say) is ignored rather than handed to the
+        // child as its identity.
+        let arg0 = self
+            .invoked_as
+            .as_deref()
+            .filter(|n| forest_manifest::names::validate_tool_name(n).is_ok())
+            .unwrap_or(&qref.name);
+
         use std::os::unix::process::CommandExt;
         let mut cmd = std::process::Command::new(&path);
+        cmd.arg0(arg0);
         cmd.args(&self.args);
         cmd.envs(&injected);
         let err = cmd.exec();
@@ -564,6 +592,12 @@ pub struct VerifyCommand {}
 impl VerifyCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let svc = GlobalService::from_state(state)?;
+        // Fold any pre-DATA-510 `bin/<sha>` files into `bin/<sha>/<name>`
+        // first, so a verify right after an upgrade reports on the current
+        // layout rather than on entries it is about to migrate anyway.
+        if let Err(e) = svc.migrate_binary_store().await {
+            tracing::debug!("binary-store migration skipped: {e:#}");
+        }
         let deleted = svc.cache.re_verify().await?;
         if deleted.is_empty() {
             eprintln!("cache verified, no mismatches");

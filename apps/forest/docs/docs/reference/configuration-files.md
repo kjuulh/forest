@@ -139,9 +139,16 @@ mise run local:down  # Stop and clean up
 
 | Path | Contents |
 |------|----------|
-| `~/.cache/forest/components/bin/` | Content-addressable binary cache |
+| `~/.cache/forest/components/bin/<sha256>/<name>` | Content-addressable binary cache |
 | `~/.config/forest/` | Authentication credentials |
 | `.forest/` | Project-local cache (build metadata) |
+
+The sha256 names a *directory*, and the executable inside it carries the
+component's own name. Running a tool therefore execs `…/<sha256>/<name>`, so
+the process sees its real name in `argv[0]`/`$0` rather than a hash — which
+matters for tools that dispatch on, or print, their own name. Caches written
+by older versions store the binary as a plain `…/<sha256>` file and are
+converted in place the first time each tool is used; nothing is re-downloaded.
 
 ---
 

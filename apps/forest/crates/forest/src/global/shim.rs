@@ -36,10 +36,17 @@ pub const SHIM_MARKER: &str = "# forest shim — do not edit";
 /// Render the POSIX shell script for a shim that, when executed, exec's
 /// `forest global run <org>/<name>` with the caller's argv passed through.
 ///
+/// The shim also forwards **the name it was invoked as** (`${0##*/}` — POSIX
+/// parameter expansion, no subprocess) so the tool's `argv[0]` is the name the
+/// user actually typed (DATA-510). This only differs from the component name
+/// when the shim is an alias, and that is exactly the case that matters: a
+/// tool which dispatches on its own name should see `rg`, not `ripgrep`, when
+/// it was reached through an `rg` shim.
+///
 /// Output is deterministic — same input always yields byte-identical output.
 pub fn shim_script_for(qref: &QualifiedRef) -> String {
     format!(
-        "#!/bin/sh\n{SHIM_MARKER}\nexec forest global run {}/{} -- \"$@\"\n",
+        "#!/bin/sh\n{SHIM_MARKER}\nexec forest global run {}/{} --as \"${{0##*/}}\" -- \"$@\"\n",
         qref.organisation, qref.name,
     )
 }
@@ -55,7 +62,7 @@ mod tests {
         let expected = "\
 #!/bin/sh
 # forest shim — do not edit
-exec forest global run cuteorg/ripgrep -- \"$@\"
+exec forest global run cuteorg/ripgrep --as \"${0##*/}\" -- \"$@\"
 ";
         assert_eq!(script, expected);
     }
@@ -67,7 +74,7 @@ exec forest global run cuteorg/ripgrep -- \"$@\"
         let script = shim_script_for(&qref);
         assert_eq!(
             script,
-            "#!/bin/sh\n# forest shim — do not edit\nexec forest global run cuteorg/forest-hello -- \"$@\"\n"
+            "#!/bin/sh\n# forest shim — do not edit\nexec forest global run cuteorg/forest-hello --as \"${0##*/}\" -- \"$@\"\n"
         );
     }
 
@@ -93,7 +100,7 @@ exec forest global run cuteorg/ripgrep -- \"$@\"
         // can receive flags without forest's clap eating them.
         let s = shim_script_for(&QualifiedRef::new("cuteorg", "ripgrep"));
         assert!(
-            s.contains("exec forest global run cuteorg/ripgrep -- \"$@\""),
+            s.contains("exec forest global run cuteorg/ripgrep --as \"${0##*/}\" -- \"$@\""),
             "missing canonical exec line: {s:?}"
         );
     }
@@ -112,6 +119,31 @@ exec forest global run cuteorg/ripgrep -- \"$@\"
         // POSIX scripts SHOULD end with a newline; some shells warn otherwise.
         let s = shim_script_for(&QualifiedRef::new("o", "n"));
         assert!(s.ends_with('\n'), "must end with newline: {s:?}");
+    }
+
+    #[test]
+    fn body_forwards_the_name_the_shim_was_invoked_as() {
+        // DATA-510: `${0##*/}` strips the directory the shell resolved, so an
+        // `rg` shim hands `rg` to the tool as argv[0] even though it resolves
+        // the upstream `cuteorg/ripgrep`. Parameter expansion, not `basename`
+        // — no subprocess on the hot path of every tool invocation.
+        let s = shim_script_for(&QualifiedRef::new("cuteorg", "ripgrep"));
+        assert!(s.contains("--as \"${0##*/}\""), "got: {s:?}");
+        assert!(
+            !s.contains("basename"),
+            "should not fork a subprocess: {s:?}"
+        );
+    }
+
+    #[test]
+    fn invoked_name_is_forwarded_before_the_argv_separator() {
+        // `--as` is forest's own flag, so it has to land on forest's side of
+        // `--`; past the separator it would reach the tool as an argument.
+        let s = shim_script_for(&QualifiedRef::new("o", "n"));
+        let line = s.lines().nth(2).unwrap();
+        let as_at = line.find("--as").unwrap();
+        let sep_at = line.find(" -- ").unwrap();
+        assert!(as_at < sep_at, "got: {line:?}");
     }
 
     #[test]
