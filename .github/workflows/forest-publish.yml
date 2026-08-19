@@ -290,6 +290,29 @@ jobs:
           bash "$RUNNER_TEMP/install.sh" ${FOREST_CLI_VERSION:+"$FOREST_CLI_VERSION"}
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # A dirty worktree ends up *inside the released binary*. Go's build info
+      # records `vcs.modified`, and a component that reports its own version
+      # (pgjump does) then prints `0.1.8 (39d32d3) [dirty]` — a release
+      # advertising itself as a scratch build. Rust's `git-version`-style
+      # stamps behave the same way.
+      #
+      # Warn rather than fail: the artifact is still correct, and a repo may
+      # legitimately generate an untracked file during setup. But say so
+      # loudly, with the offending paths, because the alternative is noticing
+      # months later that every release is marked dirty and having no idea
+      # which step did it. Anything a build genuinely produces belongs in
+      # .gitignore.
+      - name: Check the worktree is clean before building
+        run: |
+          set -euo pipefail
+          dirty="$(git status --porcelain)"
+          if [ -n "$dirty" ]; then
+            echo "::warning::Worktree is not clean before the build — the release binary will be stamped as [dirty]. Add these to .gitignore, or stop generating them before the build:"
+            printf '%s\n' "$dirty"
+          else
+            echo "Worktree is clean."
+          fi
+
       # Build and publish must agree on the version, so the override — when
       # there is one — is exported here as well as in the publish job. Absent
       # on a normal release, which is exactly "read forest.cue".
