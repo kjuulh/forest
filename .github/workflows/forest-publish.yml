@@ -174,6 +174,7 @@ jobs:
         id: version
         env:
           RAW_TAG: ${{ inputs.tag || github.ref_name }}
+          FOREST_SERVER: ${{ inputs.server }}
         run: |
           set -euo pipefail
 
@@ -182,6 +183,19 @@ jobs:
             echo "::error::No tag to publish. Trigger this on a tag push, or pass the \`tag\` input." >&2
             exit 1
           fi
+
+          # This job calls `cue` directly rather than through forest, so it has
+          # to derive CUE_REGISTRY itself. forest normally sets it from the
+          # active context; without it `cue export` cannot resolve the
+          # `forest.sh/forest/sdk` import and fails with "module not found".
+          # Mirrors `contexts::derive_cue_registry`: strip scheme, path and port
+          # off the server URL, prefix the host with `registry.`. Registry reads
+          # are anonymous, so no credential is needed here.
+          host="${FOREST_SERVER#*://}"
+          host="${host%%/*}"
+          host="${host%%:*}"
+          export CUE_REGISTRY="forest.sh=registry.${host},registry.cuelang.org"
+          echo "CUE_REGISTRY=$CUE_REGISTRY"
 
           # Evaluate the manifest exactly the way `forest publish` does — every
           # *.cue in the component directory, as one package.
