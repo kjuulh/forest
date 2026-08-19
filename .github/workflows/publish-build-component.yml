@@ -210,6 +210,30 @@ jobs:
       # cue's default central registry, where `forest.sh/forest/sdk` does not
       # exist. Setting it up front is unambiguous, and forest honours an
       # existing value rather than overwriting it.
+      # Diagnostics for the module resolution that has failed here and only
+      # here. pgjump resolves the identical `forest.sh/forest/sdk@v0.7.0` pin
+      # from an identical GitHub-hosted runner minutes apart, and this
+      # directory resolves cleanly on a laptop with a cold cache and no
+      # credentials. Never blocks — it exists to make the next failure legible.
+      - name: Diagnose cue module resolution
+        working-directory: apps/forest/components/forest-contrib/${{ inputs.component }}
+        env:
+          FOREST_SERVER: ${{ inputs.server }}
+        run: |
+          set -uo pipefail
+          host="${FOREST_SERVER#*://}"; host="${host%%/*}"; host="${host%%:*}"
+          export CUE_REGISTRY="forest.sh=registry.${host},registry.cuelang.org"
+          echo "--- pwd + module"
+          pwd; cat cue.mod/module.cue
+          echo "--- registry manifest for the dep, straight over HTTP"
+          curl -sS -o /dev/null -w 'sdk v0.7.0 -> HTTP %{http_code}\n' \
+            "https://registry.${host}/v2/forest.sh/forest/sdk/manifests/v0.7.0" || true
+          curl -sS -w '\ntags -> HTTP %{http_code}\n' \
+            "https://registry.${host}/v2/forest.sh/forest/sdk/tags/list" 2>&1 | head -5 || true
+          echo "--- cue export, unwrapped"
+          cue export --out json ./*.cue > /dev/null 2>/tmp/cue.err || true
+          head -20 /tmp/cue.err || true
+
       - name: Publish
         working-directory: apps/forest/components/forest-contrib/${{ inputs.component }}
         env:
