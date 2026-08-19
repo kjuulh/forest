@@ -326,6 +326,38 @@ jobs:
           forest --version
           forest run build
 
+      # The pre-build check can pass and the binary still come out `[dirty]`,
+      # because Go samples VCS state *during* compilation — so anything the
+      # build itself creates counts. Checking again afterwards is what
+      # distinguishes "the repo arrived dirty" from "the build dirtied it",
+      # which is the difference between fixing .gitignore and fixing the build.
+      - name: Check what the build left behind
+        run: |
+          set -euo pipefail
+          dirty="$(git status --porcelain)"
+          if [ -n "$dirty" ]; then
+            echo "::warning::The build modified the worktree. Go stamps vcs.modified during compilation, so the released binary reports itself as [dirty]. Add these to .gitignore:"
+            printf '%s\n' "$dirty"
+          else
+            echo "Worktree still clean after the build."
+          fi
+          # Ground truth for Go components: what the linker actually recorded,
+          # rather than what git reports now. The two disagree when the
+          # dirtying is transient — visible only while the compiler samples it
+          # — and that distinction has already cost real debugging time.
+          if command -v go >/dev/null 2>&1; then
+            shopt -s nullglob
+            for bin in .forest/component/output/*/*/*; do
+              info="$(go version -m "$bin" 2>/dev/null || true)"
+              case "$info" in
+                *vcs.modified=true*)
+                  echo "::warning::$bin was stamped vcs.modified=true — it will report itself as a dirty build"
+                  ;;
+              esac
+              break
+            done
+          fi
+
       # Tarred rather than uploaded as a loose tree: upload-artifact roots the
       # archive at the least common ancestor of the matched files, so a leg
       # that produced a single platform would restore at a different depth than
