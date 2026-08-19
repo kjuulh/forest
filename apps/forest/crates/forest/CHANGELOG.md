@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.12](https://github.com/understory-io/forest/compare/v0.2.11...v0.2.12) (2026-08-19)
+
+
+### Bug Fixes
+
+* **ci:** install cue as a plain binary so build-component publishes hit prod ([#143](https://github.com/understory-io/forest/issues/143)) ([57c4329](https://github.com/understory-io/forest/commit/57c4329721ac6374c5cbd7adcb8302fe9c8b0ca9))
+* **publish:** honour --dry-run on the external path and for metadata sync (DATA-588) ([#145](https://github.com/understory-io/forest/issues/145)) ([b95e7a4](https://github.com/understory-io/forest/commit/b95e7a40d7d264be9a4440692f6e2ed85935d6c9))
+
 ## [0.2.11](https://github.com/understory-io/forest/compare/v0.2.10...v0.2.11) (2026-08-19)
 
 
