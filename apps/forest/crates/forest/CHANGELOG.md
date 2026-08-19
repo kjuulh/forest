@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.10](https://github.com/understory-io/forest/compare/v0.2.9...v0.2.10) (2026-08-19)
+
+
+### Features
+
+* **global:** let components declare their own shell integration (DATA-588) ([#133](https://github.com/understory-io/forest/issues/133)) ([2ae3ccd](https://github.com/understory-io/forest/commit/2ae3ccdca1c054faa8b4d40765ca838bad3be57d))
+
+
+### Bug Fixes
+
+* **ci:** derive CUE_REGISTRY in the publish workflow's resolve step ([#131](https://github.com/understory-io/forest/issues/131)) ([d64e588](https://github.com/understory-io/forest/commit/d64e588df1cbf3bbebe0a787460bfa6470085f01))
+* **server:** a prerelease version no longer breaks the component detail view ([#134](https://github.com/understory-io/forest/issues/134)) ([bfd6b16](https://github.com/understory-io/forest/commit/bfd6b1679c6f3588bd4274579ecd793664f8bcf2))
+
 ## [0.2.9](https://github.com/understory-io/forest/compare/v0.2.8...v0.2.9) (2026-08-19)
 
 
