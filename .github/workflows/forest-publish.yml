@@ -157,6 +157,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       component: ${{ steps.version.outputs.component }}
       override: ${{ steps.version.outputs.override }}
+      cue-registry: ${{ steps.version.outputs.cue_registry }}
     steps:
       - uses: actions/checkout@v6
 
@@ -196,6 +197,14 @@ jobs:
           host="${host%%:*}"
           export CUE_REGISTRY="forest.sh=registry.${host},registry.cuelang.org"
           echo "CUE_REGISTRY=$CUE_REGISTRY"
+          # Handed to the build and publish jobs as well. forest derives this
+          # itself from the active context, but only when it can resolve one —
+          # in a token-authenticated run with no local user state that has been
+          # observed to fall through to cue's default central registry, where
+          # `forest.sh/forest/sdk` does not exist. Passing it explicitly removes
+          # the dependency; forest honours an existing value rather than
+          # overwriting it.
+          echo "cue_registry=$CUE_REGISTRY" >> "$GITHUB_OUTPUT"
 
           # Evaluate the manifest exactly the way `forest publish` does — every
           # *.cue in the component directory, as one package.
@@ -239,6 +248,10 @@ jobs:
       fail-fast: true
       matrix:
         include: ${{ fromJSON(inputs.build-matrix) }}
+    env:
+      # Resolved once in `prepare`; see the note there for why it is not left
+      # to forest's own derivation.
+      CUE_REGISTRY: ${{ needs.prepare.outputs.cue-registry }}
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -378,6 +391,8 @@ jobs:
     name: publish
     needs: [prepare, build]
     runs-on: ${{ inputs.publish-runner }}
+    env:
+      CUE_REGISTRY: ${{ needs.prepare.outputs.cue-registry }}
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}

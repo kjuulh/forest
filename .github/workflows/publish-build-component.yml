@@ -197,11 +197,25 @@ jobs:
       # other publish. Re-publishing an existing version fails cleanly with
       # "already published", so a forgotten bump is caught here rather than
       # silently overwriting.
+      # CUE_REGISTRY is set explicitly rather than left to forest's derivation
+      # from the active context. forest only derives it when it can resolve an
+      # active context, and in a token-authenticated CI run with no local user
+      # state that resolution is not dependable — the first attempt at this
+      # publish provisioned the context successfully and still fell through to
+      # cue's default central registry, where `forest.sh/forest/sdk` does not
+      # exist. Setting it up front is unambiguous, and forest honours an
+      # existing value rather than overwriting it.
       - name: Publish
         working-directory: apps/forest/components/forest-contrib/${{ inputs.component }}
         env:
           FOREST_TOKEN: ${{ secrets.FOREST_TOKEN }}
-        run: forest publish
+          FOREST_SERVER: ${{ inputs.server }}
+        run: |
+          set -euo pipefail
+          host="${FOREST_SERVER#*://}"; host="${host%%/*}"; host="${host%%:*}"
+          export CUE_REGISTRY="forest.sh=registry.${host},registry.cuelang.org"
+          echo "CUE_REGISTRY=$CUE_REGISTRY"
+          forest publish
 
       - name: Verify the published version resolves
         working-directory: apps/forest/components/forest-contrib/${{ inputs.component }}
