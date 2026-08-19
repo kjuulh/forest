@@ -453,7 +453,14 @@ impl PublishCommand {
         // Sync project-level metadata (description, About-sidebar fields, README)
         // from forest.cue → server. CUE is source of truth: missing in CUE = cleared.
         // See specs/features/009-project-metadata.md.
-        sync_project_fields(state, &current_dir, organisation, name, &doc).await?;
+        //
+        // Skipped under --dry-run: this is `create_project` plus a metadata
+        // write, so running it contacts — and mutates — the registry the flag
+        // promises not to touch. It also *clears* server-side fields absent from
+        // CUE, so a dry run could quietly wipe a project's description.
+        if !self.dry_run {
+            sync_project_fields(state, &current_dir, organisation, name, &doc).await?;
+        }
 
         // Dispatch: `external:` block in forest.cue means external manifest mode
         // (TASKS/018-global-tools.md §1a.2b). No build, no UploadBinary.
@@ -467,6 +474,7 @@ impl PublishCommand {
                 version,
                 &doc,
                 external_block,
+                self.dry_run,
             )
             .await;
         }
@@ -1100,6 +1108,7 @@ async fn publish_external(
     version: &str,
     doc: &serde_json::Value,
     external_block: &serde_json::Value,
+    dry_run: bool,
 ) -> anyhow::Result<()> {
     // Build the platforms map from the CUE `external.platforms` array.
     let raw_platforms = external_block
@@ -1171,6 +1180,26 @@ async fn publish_external(
     );
 
     print_publish_context(organisation, name);
+
+    // Dry-run stops here, exactly as the built and prebuilt paths do. Everything
+    // above is local — cue eval, tool-facet extraction, manifest synthesis — and
+    // `begin_component_upload` below is the first RPC. Without this the flag was
+    // silently ignored on the external path and `--dry-run` published for real,
+    // which is the opposite of what it exists to promise.
+    if dry_run {
+        let listed: Vec<String> = platforms.keys().cloned().collect();
+        eprintln!(
+            "dry-run: would publish {organisation}/{name}@{version} as shape=tool_external [external] {}",
+            if listed.is_empty() {
+                "no-platform".to_string()
+            } else {
+                listed.join(", ")
+            },
+        );
+        eprintln!("  no upload was performed.");
+        return Ok(());
+    }
+
     let client = state.grpc_client();
     let upload_context = client
         .begin_component_upload(organisation, name, version)
@@ -1653,6 +1682,67 @@ mod include_tests {
     fn non_string_env_value_errors() {
         let doc = doc_with_include(serde_json::json!({ "env": { "FOO": 5 } }));
         assert!(include_manifest_value(&doc).is_err());
+    }
+
+    // --- include.shell (DATA-588) ----------------------------------------
+
+    #[test]
+    fn valid_shell_block_is_passed_through() {
+        let doc = doc_with_include(serde_json::json!({
+            "shell": { "init": { "zsh": ["init", "zsh"] } }
+        }));
+        let out = include_manifest_value(&doc).unwrap().unwrap();
+        assert_eq!(out["shell"]["init"]["zsh"][0], "init");
+        assert_eq!(out["shell"]["init"]["zsh"][1], "zsh");
+    }
+
+    #[test]
+    fn unknown_shell_name_errors_at_publish() {
+        // Catching the typo here is the whole point: an unrecognised shell would
+        // otherwise ship in the manifest and silently never load.
+        let doc = doc_with_include(serde_json::json!({
+            "shell": { "init": { "zshell": ["init", "zsh"] } }
+        }));
+        assert!(include_manifest_value(&doc).is_err());
+    }
+
+    #[test]
+    fn empty_shell_argv_errors_at_publish() {
+        // An empty argv would exec the tool with no arguments at capture time,
+        // running its default action instead of printing a script.
+        let doc = doc_with_include(serde_json::json!({
+            "shell": { "init": { "zsh": [] } }
+        }));
+        assert!(include_manifest_value(&doc).is_err());
+    }
+
+    #[test]
+    fn non_string_shell_argv_errors_at_publish() {
+        let doc = doc_with_include(serde_json::json!({
+            "shell": { "init": { "zsh": ["init", 3] } }
+        }));
+        assert!(include_manifest_value(&doc).is_err());
+        let doc = doc_with_include(serde_json::json!({
+            "shell": { "init": { "zsh": "init zsh" } }
+        }));
+        assert!(include_manifest_value(&doc).is_err());
+    }
+
+    #[test]
+    fn shell_without_init_is_accepted() {
+        let doc = doc_with_include(serde_json::json!({ "shell": {} }));
+        assert!(include_manifest_value(&doc).unwrap().is_some());
+    }
+
+    #[test]
+    fn env_and_shell_coexist() {
+        let doc = doc_with_include(serde_json::json!({
+            "env": { "FUNGUS_SERVER": "https://prod" },
+            "shell": { "init": { "fish": ["completion", "fish"] } }
+        }));
+        let out = include_manifest_value(&doc).unwrap().unwrap();
+        assert_eq!(out["env"]["FUNGUS_SERVER"], "https://prod");
+        assert_eq!(out["shell"]["init"]["fish"][0], "completion");
     }
 
     #[test]
