@@ -3,8 +3,9 @@
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand};
 
-use crate::global::service::{GlobalService, SyncOutcome, ToolSource, ToolStatus};
+use crate::global::service::{GlobalService, SyncOutcome, ToolSource, ToolStatus, WarmEvent};
 use crate::global::shim::QualifiedRef;
+use crate::global::warm;
 use crate::state::State;
 
 mod global_init;
@@ -37,6 +38,11 @@ enum Commands {
     Which(WhichCommand),
     /// Re-verify every cached binary; delete mismatches.
     Verify(VerifyCommand),
+    /// Pre-download the binaries for global tools that aren't cached yet, so
+    /// the first real invocation is instant. Designed to be called from a
+    /// shell rc file as `forest global warm --background --quiet`: it detaches,
+    /// prints nothing, and is throttled so repeated shell starts are free.
+    Warm(WarmCommand),
     /// Repair shims if they drift from forest.cue (idempotent). Normally
     /// automatic — add/remove/ban/unban reconcile for you, so you only need
     /// this after hand-editing forest.cue or `add --no-sync`.
@@ -66,6 +72,7 @@ impl GlobalCommand {
             Commands::Run(cmd) => cmd.execute(state).await,
             Commands::Which(cmd) => cmd.execute(state).await,
             Commands::Verify(cmd) => cmd.execute(state).await,
+            Commands::Warm(cmd) => cmd.execute(state).await,
             Commands::Sync(cmd) => cmd.execute(state).await,
             Commands::Update(cmd) => cmd.execute(state).await,
             Commands::Ban(cmd) => cmd.execute(state).await,
@@ -73,6 +80,124 @@ impl GlobalCommand {
             Commands::Pin(cmd) => cmd.execute(state).await,
             Commands::Unpin(cmd) => cmd.execute(state).await,
         }
+    }
+
+    /// Whether this invocation must stay completely silent, suppressing the
+    /// end-of-command "a newer forest exists" nag.
+    ///
+    /// `forest global warm --background|--quiet` is called from shell rc files,
+    /// where stderr *is* an interactive TTY — so the nag's own TTY check won't
+    /// save us. Worse, a stale nag cache makes it `await` a `gh` release
+    /// lookup, which is exactly the shell-startup stall this command exists to
+    /// remove.
+    pub fn is_silent(&self) -> bool {
+        match &self.commands {
+            Commands::Warm(cmd) => cmd.background || cmd.quiet,
+            _ => false,
+        }
+    }
+}
+
+// --- warm -----------------------------------------------------------------
+
+#[derive(Args)]
+pub struct WarmCommand {
+    /// Only warm these tools — the name you type (a shim name) or a qualified
+    /// `<org>/<name>`. Repeatable. Default: every installed tool.
+    tools: Vec<String>,
+
+    /// Return immediately, warming in a detached child. Nothing is printed and
+    /// the child survives the shell that started it — the mode to use from a
+    /// shell rc file.
+    #[arg(long)]
+    background: bool,
+
+    /// Print nothing at all. Implied by `--background` for the child.
+    #[arg(long, short)]
+    quiet: bool,
+
+    /// Ignore the throttle and warm now. Only meaningful with `--background`
+    /// (a foreground warm is an explicit request and is never throttled).
+    #[arg(long)]
+    force: bool,
+}
+
+impl WarmCommand {
+    pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        let svc = GlobalService::from_state(state)?;
+
+        // `--background`: claim the throttle slot, hand the work to a detached
+        // child, return. This branch does no I/O beyond a stat and a spawn, so
+        // it is safe on the shell-startup path.
+        if self.background {
+            if warm::disabled() {
+                return Ok(());
+            }
+            if self.force {
+                warm::spawn_detached();
+            } else {
+                warm::maybe_spawn(&svc.paths);
+            }
+            return Ok(());
+        }
+
+        // `--quiet` has to reach the download layer, not just this command's
+        // own summary: fetching a tool asks for a progress bar, which degrades
+        // to a `→ Downloading …` line when stderr isn't a TTY. Muting `ui`
+        // globally is what makes the promise of silence actually hold.
+        if self.quiet {
+            crate::ui::set_quiet(true);
+        }
+
+        // Foreground. Hold the single-instance lock so an explicit warm and a
+        // background one can't fight over the same downloads; if a warm is
+        // already running, the work is already happening — say so and leave.
+        let Some(_lock) = warm::WarmLock::acquire(&svc.paths) else {
+            if !self.quiet {
+                eprintln!("a warm is already running; nothing to do");
+            }
+            return Ok(());
+        };
+
+        let quiet = self.quiet;
+        let outcome = svc
+            .warm_tools(&self.tools, |ev| {
+                if quiet {
+                    return;
+                }
+                match ev {
+                    WarmEvent::AlreadyWarm(t) => eprintln!("  = {} (cached)", t.shim_name),
+                    WarmEvent::Fetching(_) => {}
+                    WarmEvent::Fetched(t) => {
+                        eprintln!("  + {}@{}", t.shim_name, t.version)
+                    }
+                    WarmEvent::Failed(t, e) => {
+                        eprintln!("  ! {}: {e:#}", t.shim_name)
+                    }
+                    WarmEvent::CapturedShell(t, shells) => {
+                        eprintln!(
+                            "  ↻ {}: shell integration ({})",
+                            t.shim_name,
+                            shells.join(", ")
+                        )
+                    }
+                    WarmEvent::Unknown(name) => {
+                        eprintln!("  ? {name}: not an installed global tool")
+                    }
+                }
+            })
+            .await?;
+
+        if !quiet {
+            eprintln!(
+                "warm: {} fetched, {} already cached, {} failed, {} shell integration(s) captured",
+                outcome.fetched.len(),
+                outcome.already_warm,
+                outcome.failed.len(),
+                outcome.shell_snippets,
+            );
+        }
+        Ok(())
     }
 }
 
@@ -467,14 +592,33 @@ pub struct RunCommand {
     #[arg(long = "as", value_name = "NAME")]
     invoked_as: Option<String>,
 
+    /// Don't lazily download the tool: if its binary isn't cached yet, start a
+    /// background warm and exit 75 (`EX_TEMPFAIL`) without running anything.
+    ///
+    /// This is what makes shell startup non-blocking (DATA-588). A rc file that
+    /// does `eval "$(gitnow init zsh)"` only wants an init script; on a cold
+    /// cache the honest answer is "not yet" rather than a multi-MB download
+    /// with the prompt held hostage behind it. Also settable as
+    /// `FOREST_GLOBAL_NO_FETCH=1`, which is how the `forest-init` shell helper
+    /// applies it to tools it invokes by their own name (through the shim,
+    /// where there is no forest command line to pass a flag on).
+    #[arg(long = "no-fetch")]
+    no_fetch: bool,
+
     /// Trailing args are forwarded to the underlying binary.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
 }
 
 impl RunCommand {
+    /// `--no-fetch`, or `FOREST_GLOBAL_NO_FETCH` set in the environment.
+    fn no_fetch(&self) -> bool {
+        self.no_fetch || std::env::var_os(warm::NO_FETCH_ENV).is_some()
+    }
+
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         let svc = GlobalService::from_state(state)?;
+        let no_fetch = self.no_fetch();
 
         // A global tool is being invoked — a natural, frequent signal that
         // the user is actively using their toolset. Kick off a throttled,
@@ -483,11 +627,28 @@ impl RunCommand {
         // best-effort; it must not delay the exec below.
         crate::global::autoupdate::maybe_spawn(&svc.paths);
 
-        let (qref, version) = match resolve_tool_ref(&svc, &self.tool).await? {
-            ResolvedRef::Qualified { qref, version } => (qref, version),
+        let resolved = resolve_tool_ref(&svc, &self.tool).await;
+        let (qref, version) = match resolved {
+            Ok(ResolvedRef::Qualified { qref, version }) => (qref, version),
+            // Under --no-fetch the caller is a shell rc file that wants an
+            // answer, not a diagnostic. A version we can't resolve (offline
+            // during a catalogue lookup, a tool mid-removal) is the same
+            // answer as a missing binary: not available yet, try later.
+            Err(e) if no_fetch => {
+                tracing::debug!(tool = %self.tool, "no-fetch: cannot resolve: {e:#}");
+                skip_uncached(&svc);
+            }
+            Err(e) => return Err(e),
         };
 
-        let path = svc.resolve_to_cached_path(&qref, &version).await?;
+        let path = if no_fetch {
+            match svc.cached_path_if_present(&qref, &version).await? {
+                Some(p) => p,
+                None => skip_uncached(&svc),
+            }
+        } else {
+            svc.resolve_to_cached_path(&qref, &version).await?
+        };
 
         // Resolve the default env to inject (TASKS/023): component-declared
         // defaults (cached beside the binary) < per-tool local override
@@ -537,6 +698,22 @@ impl RunCommand {
         let err = cmd.exec();
         anyhow::bail!("failed to exec {}: {err}", path.display());
     }
+}
+
+/// Bail out of a `--no-fetch` run: kick off a throttled background warm and
+/// exit [`warm::EXIT_NOT_CACHED`] without touching stdout.
+///
+/// Silence is the contract. The caller is `$(gitnow init zsh)` inside a shell
+/// rc file: anything on stdout would be `eval`'d as shell code, and anything on
+/// stderr would appear as garbage above a fresh prompt. The exit code carries
+/// the whole message, and `forest-init` knows how to read it.
+///
+/// Exits the process rather than returning an error because an error would be
+/// printed and reported as exit 1 — indistinguishable, to the shell helper,
+/// from the tool genuinely being broken.
+fn skip_uncached(svc: &GlobalService) -> ! {
+    warm::maybe_spawn(&svc.paths);
+    std::process::exit(warm::EXIT_NOT_CACHED)
 }
 
 // --- which ----------------------------------------------------------------
@@ -798,6 +975,118 @@ mod tests {
                 "  − old".to_string(),
             ]
         );
+    }
+
+    // --- warm / no-fetch (DATA-588) --------------------------------------
+
+    #[derive(Parser)]
+    struct WarmHarness {
+        #[command(flatten)]
+        warm: WarmCommand,
+    }
+
+    #[derive(Parser)]
+    struct RunHarness {
+        #[command(flatten)]
+        run: RunCommand,
+    }
+
+    #[test]
+    fn warm_defaults_to_foreground_noisy_and_all_tools() {
+        let h = WarmHarness::try_parse_from(["forest-global-warm"]).unwrap();
+        assert!(!h.warm.background);
+        assert!(!h.warm.quiet);
+        assert!(!h.warm.force);
+        assert!(h.warm.tools.is_empty(), "no args means every tool");
+    }
+
+    #[test]
+    fn warm_accepts_the_rc_file_invocation() {
+        // The exact form documented for ~/.zshrc — if this stops parsing,
+        // every user's shell startup prints a clap error.
+        let h =
+            WarmHarness::try_parse_from(["forest-global-warm", "--background", "--quiet"]).unwrap();
+        assert!(h.warm.background);
+        assert!(h.warm.quiet);
+    }
+
+    #[test]
+    fn warm_accepts_a_tool_list_alongside_flags() {
+        let h = WarmHarness::try_parse_from([
+            "forest-global-warm",
+            "--quiet",
+            "gitnow",
+            "understory/awslogin",
+        ])
+        .unwrap();
+        assert!(h.warm.quiet);
+        assert_eq!(h.warm.tools, vec!["gitnow", "understory/awslogin"]);
+    }
+
+    #[test]
+    fn warm_short_quiet_flag_works() {
+        let h = WarmHarness::try_parse_from(["forest-global-warm", "-q"]).unwrap();
+        assert!(h.warm.quiet);
+    }
+
+    #[test]
+    fn background_or_quiet_warm_suppresses_the_update_nag() {
+        // Shell rc files run with stderr on a TTY, so the nag's own TTY check
+        // won't stop it — and a stale nag cache makes it await a `gh` lookup,
+        // the exact stall this command exists to remove.
+        for args in [
+            vec!["forest-global", "warm", "--background"],
+            vec!["forest-global", "warm", "--quiet"],
+            vec!["forest-global", "warm", "--background", "--quiet"],
+        ] {
+            let cmd = GlobalCommand::try_parse_from(args.clone()).unwrap();
+            assert!(cmd.is_silent(), "{args:?} must be silent");
+        }
+    }
+
+    #[test]
+    fn ordinary_global_commands_still_nag() {
+        for args in [
+            vec!["forest-global", "warm"],
+            vec!["forest-global", "list"],
+            vec!["forest-global", "sync"],
+        ] {
+            let cmd = GlobalCommand::try_parse_from(args.clone()).unwrap();
+            assert!(!cmd.is_silent(), "{args:?} should not be silent");
+        }
+    }
+
+    #[test]
+    fn run_defaults_to_fetching() {
+        let h = RunHarness::try_parse_from(["forest-global-run", "cuteorg/rg"]).unwrap();
+        assert!(!h.run.no_fetch);
+    }
+
+    #[test]
+    fn run_accepts_no_fetch_before_the_argv_separator() {
+        // `--no-fetch` is forest's flag, so it has to land on forest's side of
+        // `--`; past the separator it would reach the tool as an argument.
+        let h = RunHarness::try_parse_from([
+            "forest-global-run",
+            "cuteorg/rg",
+            "--no-fetch",
+            "--",
+            "--version",
+        ])
+        .unwrap();
+        assert!(h.run.no_fetch);
+        assert_eq!(h.run.args, vec!["--version"]);
+    }
+
+    #[test]
+    fn no_fetch_env_var_alone_enables_the_guard() {
+        // The shim gives us no forest command line to add a flag to, so the
+        // env var is the only lever `forest-init` has.
+        let h = RunHarness::try_parse_from(["forest-global-run", "cuteorg/rg"]).unwrap();
+        unsafe { std::env::set_var(crate::global::warm::NO_FETCH_ENV, "1") };
+        let guarded = h.run.no_fetch();
+        unsafe { std::env::remove_var(crate::global::warm::NO_FETCH_ENV) };
+        assert!(guarded);
     }
 
     #[test]

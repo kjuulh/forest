@@ -57,7 +57,7 @@ source: {{
 }}
 deps: {{
 	"forest.sh/forest/sdk@v0": {{
-		v: "v0.7.0"
+		v: "v0.8.0"
 	}}
 }}
 "#

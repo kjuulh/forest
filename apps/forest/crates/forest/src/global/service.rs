@@ -165,20 +165,12 @@ impl GlobalService {
         version: &str,
     ) -> Result<PathBuf> {
         let host = platform::current().ok_or_else(|| anyhow!("unsupported host platform"))?;
-        let lockfile = self.load_lockfile().await.unwrap_or_default();
 
         // Warm-path shortcut: cache hit on lockfile pin → never touch network.
-        if let Some(pinned_sha) = lockfile.get(
-            &qref.organisation,
-            &qref.name,
-            version,
-            platform::os_str(host.os),
-            platform::arch_str(host.arch),
-        ) {
-            if let Some(p) = self.cache.read_by_sha(pinned_sha, &qref.name).await? {
-                return Ok(p);
-            }
+        if let Some(p) = self.cached_path_if_present(qref, version).await? {
+            return Ok(p);
         }
+        let lockfile = self.load_lockfile().await.unwrap_or_default();
 
         // Cold path: lockfile miss OR cache miss → need the manifest to
         // know how to fetch + what to verify against.
@@ -198,6 +190,21 @@ impl GlobalService {
                 tool = %format!("{}/{}", qref.organisation, qref.name),
                 version,
                 "failed to cache include env (ignored): {e:#}"
+            );
+        }
+
+        // Same for the component's declared shell integration (DATA-588): cache
+        // the declaration next to the env so `warm` can tell, offline, whether a
+        // snippet still needs capturing. The capture itself happens after the
+        // binary exists — see `capture_shell_snippets`.
+        if let Err(e) = self
+            .write_tool_include_shell(qref, version, &manifest.include.shell.init)
+            .await
+        {
+            tracing::debug!(
+                tool = %format!("{}/{}", qref.organisation, qref.name),
+                version,
+                "failed to cache include shell (ignored): {e:#}"
             );
         }
 
@@ -340,6 +347,131 @@ impl GlobalService {
         Ok(cached_path)
     }
 
+    /// The already-cached binary for `(qref, version)`, or `None` if it would
+    /// have to be fetched. **Never touches the network and never downloads.**
+    ///
+    /// This is the offline half of [`Self::resolve_to_cached_path`] — that
+    /// method's warm-path shortcut, exposed on its own so callers who must not
+    /// block can ask "is this tool ready *right now*?". `forest global run
+    /// --no-fetch` (the shell-init path, DATA-588) is the reason it exists: a
+    /// cold shell start needs the answer "no", not a download.
+    pub async fn cached_path_if_present(
+        &self,
+        qref: &QualifiedRef,
+        version: &str,
+    ) -> Result<Option<PathBuf>> {
+        let Some(host) = platform::current() else {
+            return Ok(None);
+        };
+        let lockfile = self.load_lockfile().await.unwrap_or_default();
+        let Some(pinned_sha) = lockfile.get(
+            &qref.organisation,
+            &qref.name,
+            version,
+            platform::os_str(host.os),
+            platform::arch_str(host.arch),
+        ) else {
+            return Ok(None);
+        };
+        self.cache.read_by_sha(pinned_sha, &qref.name).await
+    }
+
+    /// Prefetch the binaries for every global tool that isn't cached yet
+    /// (DATA-588) — the body of `forest global warm`.
+    ///
+    /// `only` filters to the given tools, matched against either the shim name
+    /// or `<org>/<name>`; empty means "all of them". `on_event` reports
+    /// progress so the CLI can render it (or, under `--quiet`, drop it).
+    ///
+    /// Tools are fetched **sequentially and best-effort**. Sequentially
+    /// because [`Self::resolve_to_cached_path`] finishes by read-modify-writing
+    /// the shared lockfile, so concurrent fetches would drop each other's pins
+    /// — and this runs detached in the background, where wall-clock is not the
+    /// scarce resource. Best-effort because one unpublished platform or one
+    /// expired token must not stop the rest of the toolset from warming.
+    pub async fn warm_tools(
+        &self,
+        only: &[String],
+        mut on_event: impl FnMut(WarmEvent<'_>),
+    ) -> Result<WarmOutcome> {
+        let listed = self.list().await?;
+
+        let mut outcome = WarmOutcome::default();
+        let selected: Vec<&ListedTool> = listed
+            .iter()
+            .filter(|t| tool_is_installable(t))
+            .filter(|t| only.is_empty() || matches_selector(t, only))
+            .collect();
+
+        // A name the user asked for that isn't in their toolset is a typo, not
+        // a no-op — worth saying so even though warming continues.
+        for want in only {
+            if !selected.iter().any(|t| selector_matches(t, want)) {
+                outcome.unknown.push(want.clone());
+                on_event(WarmEvent::Unknown(want));
+            }
+        }
+
+        for tool in &selected {
+            let qref = QualifiedRef::new(&tool.organisation, &tool.name);
+
+            // A cached tool still needs its shell snippet captured — the binary
+            // may predate the component declaring one, or predate this feature.
+            let binary = if matches!(tool.status, ToolStatus::Cached) {
+                outcome.already_warm += 1;
+                on_event(WarmEvent::AlreadyWarm(tool));
+                self.cached_path_if_present(&qref, &tool.version)
+                    .await
+                    .unwrap_or(None)
+            } else {
+                on_event(WarmEvent::Fetching(tool));
+                match self.resolve_to_cached_path(&qref, &tool.version).await {
+                    Ok(p) => {
+                        outcome.fetched.push(tool.shim_name.clone());
+                        on_event(WarmEvent::Fetched(tool));
+                        Some(p)
+                    }
+                    Err(e) => {
+                        outcome.failed.push(tool.shim_name.clone());
+                        on_event(WarmEvent::Failed(tool, &e));
+                        None
+                    }
+                }
+            };
+
+            if let Some(binary) = binary {
+                match self
+                    .capture_shell_snippets(&qref, &tool.version, &binary)
+                    .await
+                {
+                    Ok(shells) if !shells.is_empty() => {
+                        outcome.shell_snippets += shells.len();
+                        on_event(WarmEvent::CapturedShell(tool, &shells));
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::debug!(
+                        tool = %tool.shim_name,
+                        "shell-snippet capture skipped: {e:#}"
+                    ),
+                }
+            }
+        }
+
+        // Always rebuild, even when nothing was captured this run: the aggregate
+        // also has to *shrink* when a tool is removed, and its mere existence is
+        // what tells the emitted rc snippet there is something to source.
+        //
+        // Built from the full installable set rather than `selected`, so
+        // `forest global warm gitnow` doesn't drop everyone else's integrations
+        // out of the aggregate.
+        let all: Vec<ListedTool> = listed.into_iter().filter(tool_is_installable).collect();
+        if let Err(e) = self.rebuild_shell_aggregates(&all).await {
+            tracing::debug!("rebuilding shell aggregates failed (ignored): {e:#}");
+        }
+
+        Ok(outcome)
+    }
+
     /// Convert every cache entry the lockfile knows about to the
     /// `bin/<sha>/<name>` layout (DATA-510).
     ///
@@ -392,6 +524,202 @@ impl GlobalService {
     ) -> Result<std::collections::BTreeMap<String, String>> {
         read_include_env(&self.paths, qref, version).await
     }
+
+    // --- component-declared shell integration (DATA-588) ------------------
+
+    /// Persist a tool version's `include.shell.init` declaration. Thin wrapper
+    /// over [`write_include_shell`].
+    pub async fn write_tool_include_shell(
+        &self,
+        qref: &QualifiedRef,
+        version: &str,
+        init: &std::collections::BTreeMap<String, Vec<String>>,
+    ) -> Result<()> {
+        write_include_shell(&self.paths, qref, version, init).await
+    }
+
+    /// Load a tool version's cached `include.shell.init` declaration.
+    pub async fn load_tool_include_shell(
+        &self,
+        qref: &QualifiedRef,
+        version: &str,
+    ) -> Result<std::collections::BTreeMap<String, Vec<String>>> {
+        read_include_shell(&self.paths, qref, version).await
+    }
+
+    /// Capture the shell-integration scripts a tool declares, by running the
+    /// tool once per shell and caching its stdout (DATA-588).
+    ///
+    /// Returns the shells whose snippet was (re)captured. Already-captured
+    /// shells are skipped, which is what makes this cheap to call on every warm.
+    ///
+    /// Best-effort per shell: a tool that declares `bash` but errors on
+    /// `<tool> init bash` costs that one shell, not the rest. Every failure is a
+    /// `debug` log rather than an error, because this runs on the warm path
+    /// where the user asked for a *binary*, not for its shell script.
+    pub async fn capture_shell_snippets(
+        &self,
+        qref: &QualifiedRef,
+        version: &str,
+        binary: &std::path::Path,
+    ) -> Result<Vec<String>> {
+        let declared = self.load_tool_include_shell(qref, version).await?;
+        let mut captured = Vec::new();
+
+        for (shell, argv) in &declared {
+            let out_path =
+                self.paths
+                    .tool_shell_snippet(&qref.organisation, &qref.name, version, shell);
+            if read_optional(&out_path).await?.is_some() {
+                continue; // already captured for this version
+            }
+            match self
+                .run_for_shell_snippet(qref, version, binary, argv)
+                .await
+            {
+                Ok(script) => {
+                    ensure_dir(out_path.parent().expect("snippet path has a parent")).await?;
+                    atomic_write(&out_path, script.as_bytes()).await?;
+                    captured.push(shell.clone());
+                }
+                Err(e) => tracing::debug!(
+                    tool = %format!("{}/{}", qref.organisation, qref.name),
+                    version,
+                    shell = %shell,
+                    "shell-snippet capture failed (ignored): {e:#}"
+                ),
+            }
+        }
+
+        Ok(captured)
+    }
+
+    /// Run `<binary> <argv>` and return its stdout as the tool's integration
+    /// script for one shell.
+    ///
+    /// The tool's declared env defaults are injected exactly as a normal run
+    /// would, because a tool may need them to print anything sensible. Output is
+    /// bounded and the child is killed on timeout: this executes third-party
+    /// code during a warm, so a tool that hangs waiting on stdin, or one that
+    /// streams forever, must not wedge the warm or fill the cache disk.
+    async fn run_for_shell_snippet(
+        &self,
+        qref: &QualifiedRef,
+        version: &str,
+        binary: &std::path::Path,
+        argv: &[String],
+    ) -> Result<String> {
+        /// A shell init script is a few KB. Anything past this is a tool
+        /// misbehaving, not an integration.
+        const MAX_SNIPPET_BYTES: usize = 512 * 1024;
+        const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+        let component_env = self
+            .load_tool_include_env(qref, version)
+            .await
+            .unwrap_or_default();
+
+        let mut cmd = tokio::process::Command::new(binary);
+        cmd.args(argv)
+            .envs(&component_env)
+            // stdin closed: a tool that prompts gets EOF and exits instead of
+            // hanging the warm forever.
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        // argv[0] is the tool's real name (DATA-510) — a tool that dispatches on
+        // `$0` must see the same name here as on a normal run, or it may print a
+        // different script (or none).
+        cmd.arg0(&qref.name);
+        cmd.kill_on_drop(true);
+
+        let output = tokio::time::timeout(TIMEOUT, cmd.output())
+            .await
+            .map_err(|_| anyhow!("timed out after {}s", TIMEOUT.as_secs()))?
+            .with_context(|| format!("running {} {}", binary.display(), argv.join(" ")))?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "{} {} exited with {}",
+                qref.name,
+                argv.join(" "),
+                output.status
+            );
+        }
+        if output.stdout.len() > MAX_SNIPPET_BYTES {
+            anyhow::bail!(
+                "shell snippet is {} bytes, over the {MAX_SNIPPET_BYTES}-byte limit",
+                output.stdout.len()
+            );
+        }
+        String::from_utf8(output.stdout).context("shell snippet is not valid UTF-8")
+    }
+
+    /// Rebuild the per-shell aggregate scripts from the captured snippets of
+    /// `tools` (DATA-588).
+    ///
+    /// `forest shell <shell>` emits a `source <aggregate>` line, so this is what
+    /// makes newly captured integrations visible to the next shell — and, via
+    /// the deferred prompt hook, to shells already open.
+    ///
+    /// Writes an aggregate for every supported shell, including an empty one, so
+    /// the sourced path always exists once forest has run a warm: an absent file
+    /// is the signal "nothing captured yet", and it must not linger after a tool
+    /// that declared a shell is removed.
+    pub async fn rebuild_shell_aggregates(&self, tools: &[ListedTool]) -> Result<()> {
+        ensure_dir(&self.paths.shell_aggregate_dir()).await?;
+
+        for shell in forest_manifest::SUPPORTED_SHELLS {
+            let mut out = String::new();
+            out.push_str(&format!(
+                "# forest shell aggregate ({shell}) — generated, do not edit.\n\
+                 # Rebuilt by `forest global warm` / `sync` / `update` from each\n\
+                 # component's declared `include.shell.init.{shell}`.\n"
+            ));
+
+            // Deterministic order: `list()` already sorts by shim name, so the
+            // aggregate is byte-stable for an unchanged toolset and a diff of it
+            // means the toolset genuinely changed.
+            for tool in tools {
+                let path = self.paths.tool_shell_snippet(
+                    &tool.organisation,
+                    &tool.name,
+                    &tool.version,
+                    shell,
+                );
+                let Some(script) = read_optional(&path).await? else {
+                    continue;
+                };
+                out.push_str(&format!(
+                    "\n# ── {} ({}/{}@{}) ──\n",
+                    tool.shim_name, tool.organisation, tool.name, tool.version
+                ));
+                out.push_str(&script);
+                if !script.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+
+            atomic_write(&self.paths.shell_aggregate(shell), out.as_bytes()).await?;
+        }
+        Ok(())
+    }
+
+    /// Rebuild the aggregates for the current toolset (DATA-588).
+    ///
+    /// Convenience over [`Self::rebuild_shell_aggregates`] for callers that
+    /// change the toolset without warming it — `forest global update` bumps
+    /// versions, and since snippets are version-keyed the aggregate would
+    /// otherwise keep serving the previous version's script until the next warm.
+    pub async fn refresh_shell_aggregates(&self) -> Result<()> {
+        let listed: Vec<ListedTool> = self
+            .list()
+            .await?
+            .into_iter()
+            .filter(tool_is_installable)
+            .collect();
+        self.rebuild_shell_aggregates(&listed).await
+    }
 }
 
 // --- helpers --------------------------------------------------------------
@@ -414,6 +742,44 @@ async fn write_include_env(
     let json = serde_json::to_vec(env).context("serialise include env")?;
     atomic_write(&file, &json).await?;
     Ok(())
+}
+
+/// Persist a tool version's `include.shell.init` declaration (DATA-588) so the
+/// "does this tool still need a snippet captured?" question can be answered
+/// offline, without a manifest fetch.
+///
+/// Mirrors [`write_include_env`], including the "empty ⇒ delete the file" rule:
+/// a component that *removes* its shell block on upgrade must stop being treated
+/// as declaring one.
+async fn write_include_shell(
+    paths: &GlobalPaths,
+    qref: &QualifiedRef,
+    version: &str,
+    init: &std::collections::BTreeMap<String, Vec<String>>,
+) -> Result<()> {
+    let file = paths.tool_include_shell_file(&qref.organisation, &qref.name, version);
+    if init.is_empty() {
+        remove_if_present(&file).await?;
+        return Ok(());
+    }
+    ensure_dir(&paths.tool_include_dir(&qref.organisation, &qref.name, version)).await?;
+    let json = serde_json::to_vec(init).context("serialise include shell")?;
+    atomic_write(&file, &json).await?;
+    Ok(())
+}
+
+/// Read a tool version's cached `include.shell.init`. Absent ⇒ empty (a tool
+/// cached before this feature, or one that declares no shell integration).
+async fn read_include_shell(
+    paths: &GlobalPaths,
+    qref: &QualifiedRef,
+    version: &str,
+) -> Result<std::collections::BTreeMap<String, Vec<String>>> {
+    let file = paths.tool_include_shell_file(&qref.organisation, &qref.name, version);
+    match read_optional(&file).await? {
+        None => Ok(std::collections::BTreeMap::new()),
+        Some(s) => serde_json::from_str(&s).context("parse cached include shell"),
+    }
 }
 
 /// Read a tool version's cached `include.env`. Absent file ⇒ empty map (tool
@@ -904,6 +1270,13 @@ impl GlobalService {
         if let Err(e) = self.migrate_binary_store().await {
             tracing::debug!("binary-store migration skipped: {e:#}");
         }
+        // A version bump invalidates the shell aggregate: snippets are keyed by
+        // version, so the bumped tool has none yet and the aggregate still holds
+        // the old one. Rebuilding now drops the stale entry immediately; the next
+        // warm captures the new version's snippet and puts it back. Best-effort.
+        if let Err(e) = self.refresh_shell_aggregates().await {
+            tracing::debug!("refreshing shell aggregates skipped: {e:#}");
+        }
         Ok(UpdateOutcome { bumps, held, sync })
     }
 
@@ -1332,6 +1705,62 @@ pub struct ListedTool {
     pub source: ToolSource,
 }
 
+/// What `forest global warm` did about one tool. Reported as it happens so a
+/// foreground warm can narrate progress; `--quiet` simply discards these.
+pub enum WarmEvent<'a> {
+    /// Already in the cache — nothing to do (the throttled, common case).
+    AlreadyWarm(&'a ListedTool),
+    /// About to download.
+    Fetching(&'a ListedTool),
+    /// Downloaded and verified.
+    Fetched(&'a ListedTool),
+    /// Download failed; the rest of the toolset still warms.
+    Failed(&'a ListedTool, &'a anyhow::Error),
+    /// The tool's component-declared shell integration was captured for these
+    /// shells (DATA-588).
+    CapturedShell(&'a ListedTool, &'a [String]),
+    /// A selector the caller passed that matched no installed tool.
+    Unknown(&'a str),
+}
+
+#[derive(Debug, Default)]
+pub struct WarmOutcome {
+    /// Shim names actually downloaded by this run.
+    pub fetched: Vec<String>,
+    /// Shim names whose download failed.
+    pub failed: Vec<String>,
+    /// Tools that were already cached — the measure of how cheap a repeat
+    /// warm is.
+    pub already_warm: usize,
+    /// Component-declared shell snippets captured this run, counted across
+    /// tools and shells (DATA-588).
+    pub shell_snippets: usize,
+    /// Selectors that matched nothing.
+    pub unknown: Vec<String>,
+}
+
+/// Whether a listed tool is one `warm` should fetch: it has to be a tool the
+/// user can actually invoke. Banned and shadowed catalogue entries emit no
+/// shim, so downloading them would be pure waste.
+fn tool_is_installable(t: &ListedTool) -> bool {
+    !matches!(
+        t.source,
+        ToolSource::CatalogBanned { .. } | ToolSource::CatalogShadowed { .. }
+    )
+}
+
+/// A single `warm` selector matches a tool by the name the user types (the
+/// shim) or by its qualified `<org>/<name>`.
+fn selector_matches(t: &ListedTool, selector: &str) -> bool {
+    t.shim_name == selector
+        || format!("{}/{}", t.organisation, t.name) == selector
+        || t.name == selector
+}
+
+fn matches_selector(t: &ListedTool, selectors: &[String]) -> bool {
+    selectors.iter().any(|s| selector_matches(t, s))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolSource {
     /// Explicit per-tool pin in `config.dependencies` (`pinned: true`) — a
@@ -1548,5 +1977,98 @@ mod tests {
         let patched = ensure_kind_field(modern);
         let v: serde_json::Value = serde_json::from_str(&patched).unwrap();
         assert_eq!(v["kind"], "external");
+    }
+
+    // --- warm selection (DATA-588) ---------------------------------------
+
+    fn listed(shim: &str, org: &str, name: &str, source: ToolSource) -> ListedTool {
+        ListedTool {
+            shim_name: shim.to_string(),
+            organisation: org.to_string(),
+            name: name.to_string(),
+            version: "1.0.0".to_string(),
+            status: ToolStatus::Missing,
+            source,
+        }
+    }
+
+    #[test]
+    fn warm_selector_matches_the_name_you_type() {
+        // An aliased tool is warmed by its shim name — that's the only name a
+        // user has any reason to know.
+        let t = listed("rg", "cuteorg", "ripgrep", ToolSource::Pin);
+        assert!(selector_matches(&t, "rg"));
+    }
+
+    #[test]
+    fn warm_selector_matches_the_qualified_ref_and_bare_component_name() {
+        let t = listed("rg", "cuteorg", "ripgrep", ToolSource::Pin);
+        assert!(selector_matches(&t, "cuteorg/ripgrep"));
+        assert!(selector_matches(&t, "ripgrep"));
+    }
+
+    #[test]
+    fn warm_selector_rejects_unrelated_names() {
+        let t = listed("rg", "cuteorg", "ripgrep", ToolSource::Pin);
+        assert!(!selector_matches(&t, "grep"));
+        assert!(!selector_matches(&t, "otherorg/ripgrep"));
+    }
+
+    #[test]
+    fn warm_skips_banned_and_shadowed_catalogue_entries() {
+        // Neither emits a shim, so downloading them is pure waste.
+        let org = "cuteorg".to_string();
+        assert!(!tool_is_installable(&listed(
+            "a",
+            "cuteorg",
+            "a",
+            ToolSource::CatalogBanned { org: org.clone() }
+        )));
+        assert!(!tool_is_installable(&listed(
+            "b",
+            "cuteorg",
+            "b",
+            ToolSource::CatalogShadowed { org: org.clone() }
+        )));
+        assert!(tool_is_installable(&listed(
+            "c",
+            "cuteorg",
+            "c",
+            ToolSource::Catalog { org }
+        )));
+        assert!(tool_is_installable(&listed(
+            "d",
+            "cuteorg",
+            "d",
+            ToolSource::Pin
+        )));
+        assert!(tool_is_installable(&listed(
+            "e",
+            "cuteorg",
+            "e",
+            ToolSource::Latest
+        )));
+    }
+
+    #[test]
+    fn empty_selector_list_is_not_used_as_a_filter() {
+        // `forest global warm` with no arguments means "everything" — the
+        // caller checks `only.is_empty()` before consulting matches_selector,
+        // and an empty list matching nothing is why it has to.
+        let t = listed("rg", "cuteorg", "ripgrep", ToolSource::Pin);
+        assert!(!matches_selector(&t, &[]));
+    }
+
+    #[test]
+    fn matches_selector_accepts_any_of_the_given_names() {
+        let t = listed("rg", "cuteorg", "ripgrep", ToolSource::Pin);
+        assert!(matches_selector(
+            &t,
+            &["nope".to_string(), "rg".to_string()]
+        ));
+        assert!(!matches_selector(
+            &t,
+            &["nope".to_string(), "also-nope".to_string()]
+        ));
     }
 }

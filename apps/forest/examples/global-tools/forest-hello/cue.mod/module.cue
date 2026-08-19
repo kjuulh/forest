@@ -6,7 +6,10 @@ source: {
 	kind: "self"
 }
 deps: {
+	// v0.8.0 is the first SDK carrying #ForestShellIntegration, which this
+	// example's `include: shell: init` block needs — #ForestInclude is a closed
+	// definition, so an older SDK rejects the field outright.
 	"forest.sh/forest/sdk@v0": {
-		v: "v0.2.0"
+		v: "v0.8.0"
 	}
 }

@@ -14,6 +14,79 @@
 /// and Forest's runtime `xdg_cache_home()` resolver in `global::paths`.
 pub const SHIM_DIR_LITERAL: &str = "${XDG_CACHE_HOME:-$HOME/.cache}/forest/global/shims";
 
+/// The per-shell aggregate script that `forest shell <shell>` sources — the
+/// concatenation of every installed tool's component-declared shell integration
+/// (DATA-588). Same unexpanded-literal discipline as [`SHIM_DIR_LITERAL`]:
+/// `$HOME`/`$XDG_CACHE_HOME` expand in the user's shell, not here.
+///
+/// `{shell}` is substituted by [`shell_integration_block`]; the resolved
+/// counterpart is [`crate::global::paths::GlobalPaths::shell_aggregate`].
+const AGGREGATE_LITERAL: &str = "${XDG_CACHE_HOME:-$HOME/.cache}/forest/global/shell";
+
+/// Render the POSIX block that loads component-declared shell integrations
+/// (DATA-588).
+///
+/// This is what replaces a hand-maintained pile of `eval "$(<tool> init zsh)"`
+/// lines in the user's rc file. Components declare `include.shell.init.<shell>`
+/// in their manifest; forest captures each tool's script when the tool is
+/// fetched and concatenates them into one aggregate file. Startup therefore
+/// costs a single `source` of a single file — no process per tool, and above all
+/// no lazy download standing between the user and their prompt.
+///
+/// Cold cache (nothing captured yet, so no aggregate): kick off a detached,
+/// silent, throttled warm and arm the deferred loader, so integrations arrive in
+/// *this* shell a moment later instead of blocking it. The `forest` binary is
+/// always present — it is what emitted this block — so that call can't itself
+/// trigger a download.
+///
+/// `shell` selects the aggregate; deterministic per shell. POSIX form — fish
+/// gets [`fish_shell_integration_block`].
+pub fn shell_integration_block(shell: &str) -> String {
+    format!(
+        "\n\
+         # forest shell — component-declared tool integrations (DATA-588).\n\
+         # Tools declare `include.shell.init.{shell}` in their manifest; forest\n\
+         # captures each script once and concatenates them here, so this costs one\n\
+         # file read rather than one process (or one download) per tool.\n\
+         _forest_shell_aggregate=\"{AGGREGATE_LITERAL}/{shell}.sh\"\n\
+         if [ -r \"$_forest_shell_aggregate\" ]; then\n  \
+           . \"$_forest_shell_aggregate\"\n\
+         else\n  \
+           # Nothing captured yet (fresh install, or a cold cache). Warm in the\n  \
+           # background — detached, silent, throttled — and load the aggregate as\n  \
+           # soon as it lands, rather than downloading tools at startup.\n  \
+           forest global warm --background --quiet 2>/dev/null\n  \
+           forest-defer-aggregate\n\
+         fi\n\
+         unset _forest_shell_aggregate\n",
+    )
+}
+
+/// Fish counterpart of [`shell_integration_block`]. Same intent, fish syntax:
+/// no POSIX `${VAR:-default}` (hence the `test -n` guard, matching
+/// [`fish_path_prepend`]) and `source` instead of `.`.
+pub fn fish_shell_integration_block() -> String {
+    "\n\
+     # forest shell — component-declared tool integrations (DATA-588).\n\
+     # Tools declare `include.shell.init.fish` in their manifest; forest captures\n\
+     # each script once and concatenates them here, so this costs one file read\n\
+     # rather than one process (or one download) per tool.\n\
+     set -l forest_shell_aggregate $HOME/.cache/forest/global/shell/fish.sh\n\
+     if test -n \"$XDG_CACHE_HOME\"\n    \
+         set forest_shell_aggregate $XDG_CACHE_HOME/forest/global/shell/fish.sh\n\
+     end\n\
+     if test -r \"$forest_shell_aggregate\"\n    \
+         source \"$forest_shell_aggregate\"\n\
+     else\n    \
+         # Nothing captured yet (fresh install, or a cold cache). Warm in the\n    \
+         # background — detached, silent, throttled — and load the aggregate as\n    \
+         # soon as it lands, rather than downloading tools at startup.\n    \
+         forest global warm --background --quiet 2>/dev/null\n    \
+         forest-defer-aggregate\n\
+     end\n"
+        .to_string()
+}
+
 /// Render the zsh eval script. Byte-stable; same input always yields
 /// byte-identical output.
 pub fn eval_zsh() -> String {
@@ -264,7 +337,10 @@ mod tests {
             script.contains("if not contains -- $forest_shim_dir $PATH"),
             "missing fish contains guard: {script}"
         );
-        assert!(!script.contains("case "), "must not emit POSIX case: {script}");
+        assert!(
+            !script.contains("case "),
+            "must not emit POSIX case: {script}"
+        );
         assert!(!script.contains("esac"), "must not emit esac: {script}");
     }
 
@@ -288,11 +364,145 @@ mod tests {
                 "must not pre-expand $HOME: {script}"
             );
         }
-        assert!(script.contains("$HOME/.cache"), "must contain literal $HOME: {script}");
+        assert!(
+            script.contains("$HOME/.cache"),
+            "must contain literal $HOME: {script}"
+        );
         assert!(
             script.contains("$XDG_CACHE_HOME"),
             "must contain literal $XDG_CACHE_HOME: {script}"
         );
+    }
+
+    // --- component-declared shell integration (DATA-588) ------------------
+
+    #[test]
+    fn integration_block_is_deterministic_per_shell() {
+        for shell in ["zsh", "bash"] {
+            assert_eq!(
+                shell_integration_block(shell),
+                shell_integration_block(shell)
+            );
+        }
+        assert_ne!(
+            shell_integration_block("zsh"),
+            shell_integration_block("bash"),
+            "each shell must source its own aggregate"
+        );
+        assert_eq!(
+            fish_shell_integration_block(),
+            fish_shell_integration_block()
+        );
+    }
+
+    #[test]
+    fn integration_block_sources_the_aggregate_for_its_shell() {
+        for shell in ["zsh", "bash"] {
+            let b = shell_integration_block(shell);
+            assert!(
+                b.contains(&format!("{AGGREGATE_LITERAL}/{shell}.sh")),
+                "{b}"
+            );
+        }
+        assert!(
+            fish_shell_integration_block().contains("forest/global/shell/fish.sh"),
+            "{}",
+            fish_shell_integration_block()
+        );
+    }
+
+    #[test]
+    fn integration_block_guards_on_readability_before_sourcing() {
+        // A fresh install has no aggregate; sourcing unconditionally would print
+        // "no such file" above the user's first prompt on every new shell.
+        for shell in ["zsh", "bash"] {
+            assert!(
+                shell_integration_block(shell).contains("if [ -r \"$_forest_shell_aggregate\" ]"),
+                "{}",
+                shell_integration_block(shell)
+            );
+        }
+        assert!(
+            fish_shell_integration_block().contains("if test -r \"$forest_shell_aggregate\""),
+            "{}",
+            fish_shell_integration_block()
+        );
+    }
+
+    #[test]
+    fn cold_cache_branch_warms_in_background_and_defers() {
+        // The two halves of the non-blocking promise: never download inline, and
+        // still get the integrations into *this* shell.
+        for b in [
+            shell_integration_block("zsh"),
+            shell_integration_block("bash"),
+            fish_shell_integration_block(),
+        ] {
+            assert!(
+                b.contains("forest global warm --background --quiet"),
+                "must warm out-of-band: {b}"
+            );
+            assert!(
+                b.contains("forest-defer-aggregate"),
+                "must arm the deferred loader: {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn integration_block_never_execs_a_tool_at_startup() {
+        // The whole point: startup reads a file. Any per-tool invocation here
+        // would reintroduce the cold-cache download it exists to remove.
+        for b in [
+            shell_integration_block("zsh"),
+            shell_integration_block("bash"),
+            fish_shell_integration_block(),
+        ] {
+            assert!(!b.contains("global run"), "{b}");
+            assert!(!b.contains("forest-init"), "{b}");
+        }
+    }
+
+    #[test]
+    fn integration_block_does_not_pre_expand_home_or_xdg() {
+        // Same portability rule as the PATH prepend: expansion happens in the
+        // user's shell, so one emitted block is valid for any user.
+        for b in [
+            shell_integration_block("zsh"),
+            shell_integration_block("bash"),
+            fish_shell_integration_block(),
+        ] {
+            assert!(b.contains("$HOME"), "{b}");
+            assert!(b.contains("XDG_CACHE_HOME"), "{b}");
+        }
+        let home = std::env::var("HOME").unwrap_or_default();
+        if !home.is_empty() {
+            assert!(!shell_integration_block("zsh").contains(&format!("{home}/.cache/forest")));
+        }
+    }
+
+    #[test]
+    fn posix_block_cleans_up_its_temporary_variable() {
+        // The block runs in the user's interactive shell; leaving
+        // `_forest_shell_aggregate` set would leak a forest-internal name into
+        // their environment.
+        for shell in ["zsh", "bash"] {
+            assert!(
+                shell_integration_block(shell).contains("unset _forest_shell_aggregate"),
+                "{}",
+                shell_integration_block(shell)
+            );
+        }
+    }
+
+    #[test]
+    fn fish_block_uses_fish_syntax_only() {
+        // fish has no POSIX `[ -r … ]`, `.` sourcing, or `${VAR:-default}`.
+        let b = fish_shell_integration_block();
+        assert!(!b.contains("${XDG_CACHE_HOME:-"), "{b}");
+        assert!(b.contains("if test -n \"$XDG_CACHE_HOME\""), "{b}");
+        assert!(b.contains("source "), "{b}");
+        assert!(b.trim_end().ends_with("end"), "{b}");
     }
 
     #[test]

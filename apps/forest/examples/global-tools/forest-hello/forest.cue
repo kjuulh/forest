@@ -16,6 +16,17 @@ forest: component: sdk.#ForestComponent & {
 		output: "./crates/forest-hello/src/"
 	}
 
+	// Component-declared shell integration (DATA-588). Forest runs
+	// `forest-hello shell <shell>` once when the tool is fetched, caches the
+	// output, and serves it from `forest shell <shell>` — so a user who runs
+	// `forest global add cuteorg/forest-hello` gets the `hello-forest` function
+	// in new shells without touching their rc file.
+	include: shell: init: {
+		zsh: ["shell", "zsh"]
+		bash: ["shell", "bash"]
+		fish: ["shell", "fish"]
+	}
+
 	upload: {
 		source: "./crates/forest-hello"
 		type:   "rust"

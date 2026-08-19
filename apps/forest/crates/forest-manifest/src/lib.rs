@@ -28,9 +28,9 @@ pub struct Manifest {
     pub kind: ManifestKind,
     pub tool: Option<ToolFacet>,
     pub methods: Vec<String>,
-    /// Artifacts shipped alongside the binary (TASKS/023). Forward-looking
-    /// container — only `env` is populated today. Defaults to empty when the
-    /// manifest carries no `include` block.
+    /// Artifacts shipped alongside the binary (TASKS/023): default env vars,
+    /// and the component's own shell integration (DATA-588). Defaults to empty
+    /// when the manifest carries no `include` block.
     pub include: Include,
     pub platforms: BTreeMap<PlatformKey, Platform>,
     /// Derived from `(kind, tool, methods)` at parse time. Always consistent
@@ -47,7 +47,39 @@ pub struct Include {
     /// Default environment variables, applied as defaults at run time (the
     /// ambient shell environment always wins).
     pub env: BTreeMap<String, String>,
+    /// Shell integration the component declares for itself (DATA-588).
+    pub shell: ShellIntegration,
 }
+
+/// `include.shell` — how a tool tells forest to load its shell integration
+/// (DATA-588).
+///
+/// A tool that ships an rc-file snippet (completions, a wrapper function, a
+/// `cd`-ing helper) used to require the user to add `eval "$(<tool> init zsh)"`
+/// to their rc file by hand — which is both a manual step and, because tools
+/// install lazily, a cold-start download in the middle of shell startup.
+/// Declaring it here inverts that: the component says how to produce its
+/// snippet, forest captures the output once when the tool is fetched, and
+/// `forest shell <shell>` serves it from cache. The user's rc file needs
+/// nothing but the single `eval "$(forest shell zsh)"` line it already has.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShellIntegration {
+    /// Shell name → argv to run against the tool's own binary to print its
+    /// integration script on stdout. `{"zsh": ["init", "zsh"]}` means "run
+    /// `<tool> init zsh`".
+    ///
+    /// Keyed by shell rather than a single command because tools spell this
+    /// differently per shell (`init zsh` vs `completion fish`) and because a
+    /// tool may support only some shells.
+    pub init: BTreeMap<String, Vec<String>>,
+}
+
+/// Shells a component may declare an `include.shell.init` entry for.
+///
+/// A closed set: `forest shell <shell>` has to know how to emit the snippet, so
+/// a manifest naming a shell this forest can't serve is a publish-time error
+/// rather than a silently ignored key.
+pub const SUPPORTED_SHELLS: &[&str] = &["zsh", "bash", "fish"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManifestKind {
@@ -126,6 +158,13 @@ pub enum ManifestError {
     InvalidEnvName(String),
     /// `include.env` value is invalid (contains NUL). Carries the offending key.
     InvalidEnvValue(String),
+    /// `include.shell.init` names a shell this forest can't serve a snippet
+    /// for. Carries the offending shell name. Rejected rather than ignored so a
+    /// typo (`zshell`) surfaces at publish instead of silently never loading.
+    UnsupportedShell(String),
+    /// `include.shell.init.<shell>` is not a non-empty array of strings, or an
+    /// argument contains a NUL. Carries the offending shell name.
+    InvalidShellInit(String),
     InvalidArgvPassthrough,
     InvalidPlatformKey(String),
     UnsupportedOs(String),
@@ -218,7 +257,7 @@ pub fn parse(json: &str) -> Result<Manifest, ManifestError> {
 }
 
 /// Parse the optional top-level `include` block. Missing/null ⇒ empty.
-/// Unknown members are ignored (forward-compat); only `env` is read today.
+/// Unknown members are ignored (forward-compat); `env` and `shell` are read.
 fn parse_include(v: Option<&serde_json::Value>) -> Result<Include, ManifestError> {
     let obj = match v {
         None | Some(serde_json::Value::Null) => return Ok(Include::default()),
@@ -253,7 +292,65 @@ fn parse_include(v: Option<&serde_json::Value>) -> Result<Include, ManifestError
         }
     };
 
-    Ok(Include { env })
+    let shell = parse_shell_integration(obj.get("shell"))?;
+
+    Ok(Include { env, shell })
+}
+
+/// Parse `include.shell` (DATA-588). Missing/null ⇒ empty.
+///
+/// Validation is strict on the things that would otherwise fail silently much
+/// later: an unknown shell name would simply never be served, and an empty argv
+/// would have forest exec the binary with no arguments at capture time (running
+/// the tool's default action instead of asking it for a script).
+fn parse_shell_integration(
+    v: Option<&serde_json::Value>,
+) -> Result<ShellIntegration, ManifestError> {
+    let obj = match v {
+        None | Some(serde_json::Value::Null) => return Ok(ShellIntegration::default()),
+        Some(serde_json::Value::Object(o)) => o,
+        Some(_) => {
+            return Err(ManifestError::InvalidJson(
+                "include.shell must be an object".into(),
+            ));
+        }
+    };
+
+    let init_obj = match obj.get("init") {
+        None | Some(serde_json::Value::Null) => return Ok(ShellIntegration::default()),
+        Some(serde_json::Value::Object(m)) => m,
+        Some(_) => {
+            return Err(ManifestError::InvalidJson(
+                "include.shell.init must be an object keyed by shell name".into(),
+            ));
+        }
+    };
+
+    let mut init = BTreeMap::new();
+    for (shell, argv) in init_obj {
+        if !SUPPORTED_SHELLS.contains(&shell.as_str()) {
+            return Err(ManifestError::UnsupportedShell(shell.clone()));
+        }
+        let arr = argv
+            .as_array()
+            .ok_or_else(|| ManifestError::InvalidShellInit(shell.clone()))?;
+        if arr.is_empty() {
+            return Err(ManifestError::InvalidShellInit(shell.clone()));
+        }
+        let mut args = Vec::with_capacity(arr.len());
+        for a in arr {
+            let s = a
+                .as_str()
+                .ok_or_else(|| ManifestError::InvalidShellInit(shell.clone()))?;
+            if s.contains('\0') {
+                return Err(ManifestError::InvalidShellInit(shell.clone()));
+            }
+            args.push(s.to_string());
+        }
+        init.insert(shell.clone(), args);
+    }
+
+    Ok(ShellIntegration { init })
 }
 
 /// Pure derivation of the shape from the three discriminator inputs.
@@ -609,6 +706,134 @@ mod tests {
         }"#;
         let m = parse(json).unwrap();
         assert!(m.include.env.is_empty());
+        assert!(m.include.shell.init.is_empty());
+    }
+
+    // --- include { shell } (DATA-588) --------------------------------------
+
+    /// A tool-binary manifest with `include.shell.init` set to `body`.
+    fn shell_manifest(body: &str) -> String {
+        format!(
+            r#"{{
+            "kind": "binary",
+            "tool": {{"name": "hello", "argv_passthrough": true}},
+            "include": {{"shell": {{"init": {body}}}}},
+            "platforms": {{
+                "linux_amd64": {{"sha256": "4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c"}}
+            }}
+        }}"#
+        )
+    }
+
+    #[test]
+    fn parses_component_declared_shell_init_per_shell() {
+        // The whole point of DATA-588: the component says how to produce its
+        // integration script, so the user's rc file doesn't have to.
+        let m = parse(&shell_manifest(
+            r#"{"zsh": ["init", "zsh"], "fish": ["completion", "fish"]}"#,
+        ))
+        .unwrap();
+        assert_eq!(
+            m.include.shell.init.get("zsh").map(Vec::as_slice),
+            Some(&["init".to_string(), "zsh".to_string()][..])
+        );
+        assert_eq!(
+            m.include.shell.init.get("fish").map(Vec::as_slice),
+            Some(&["completion".to_string(), "fish".to_string()][..])
+        );
+        assert!(!m.include.shell.init.contains_key("bash"));
+    }
+
+    #[test]
+    fn include_shell_coexists_with_include_env() {
+        let json = r#"{
+            "kind": "binary",
+            "tool": {"name": "hello", "argv_passthrough": true},
+            "include": {
+                "env": {"HELLO_SERVER": "https://example.invalid"},
+                "shell": {"init": {"bash": ["init", "bash"]}}
+            },
+            "platforms": {
+                "linux_amd64": {"sha256": "4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c"}
+            }
+        }"#;
+        let m = parse(json).unwrap();
+        assert_eq!(
+            m.include.env.get("HELLO_SERVER").map(String::as_str),
+            Some("https://example.invalid")
+        );
+        assert!(m.include.shell.init.contains_key("bash"));
+    }
+
+    #[test]
+    fn include_shell_without_init_is_empty_not_an_error() {
+        let json = r#"{
+            "kind": "binary",
+            "tool": {"name": "hello", "argv_passthrough": true},
+            "include": {"shell": {}},
+            "platforms": {
+                "linux_amd64": {"sha256": "4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c"}
+            }
+        }"#;
+        assert!(parse(json).unwrap().include.shell.init.is_empty());
+    }
+
+    #[test]
+    fn unknown_shell_name_is_rejected() {
+        // A typo must fail at publish, not silently never load.
+        let err = parse(&shell_manifest(r#"{"zshell": ["init", "zsh"]}"#)).unwrap_err();
+        assert_eq!(err, ManifestError::UnsupportedShell("zshell".into()));
+    }
+
+    #[test]
+    fn empty_shell_init_argv_is_rejected() {
+        // An empty argv would exec the tool with no arguments at capture time,
+        // running its default action instead of printing a script.
+        let err = parse(&shell_manifest(r#"{"zsh": []}"#)).unwrap_err();
+        assert_eq!(err, ManifestError::InvalidShellInit("zsh".into()));
+    }
+
+    #[test]
+    fn non_string_shell_init_argv_is_rejected() {
+        let err = parse(&shell_manifest(r#"{"zsh": ["init", 3]}"#)).unwrap_err();
+        assert_eq!(err, ManifestError::InvalidShellInit("zsh".into()));
+        let err = parse(&shell_manifest(r#"{"zsh": "init zsh"}"#)).unwrap_err();
+        assert_eq!(err, ManifestError::InvalidShellInit("zsh".into()));
+    }
+
+    #[test]
+    fn nul_in_shell_init_argv_is_rejected() {
+        // An argv element goes straight into an exec, where a NUL cannot
+        // survive the C-string boundary. `\u0000` is the JSON escape, so the
+        // Rust source itself stays plain ASCII.
+        let err = parse(&shell_manifest(r#"{"zsh": ["init", "z\u0000sh"]}"#)).unwrap_err();
+        assert_eq!(err, ManifestError::InvalidShellInit("zsh".into()));
+    }
+
+    #[test]
+    fn non_object_include_shell_is_rejected() {
+        let json = r#"{
+            "kind": "binary",
+            "tool": {"name": "hello", "argv_passthrough": true},
+            "include": {"shell": "zsh"},
+            "platforms": {
+                "linux_amd64": {"sha256": "4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c3a4f9c"}
+            }
+        }"#;
+        assert!(matches!(
+            parse(json).unwrap_err(),
+            ManifestError::InvalidJson(_)
+        ));
+    }
+
+    #[test]
+    fn every_supported_shell_is_accepted() {
+        // SUPPORTED_SHELLS is the contract between the manifest and
+        // `forest shell <shell>`; each entry must actually parse.
+        for shell in SUPPORTED_SHELLS {
+            let m = parse(&shell_manifest(&format!(r#"{{"{shell}": ["init"]}}"#))).unwrap();
+            assert!(m.include.shell.init.contains_key(*shell), "{shell}");
+        }
     }
 
     #[test]

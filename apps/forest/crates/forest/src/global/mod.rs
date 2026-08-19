@@ -36,3 +36,4 @@ pub mod install;
 pub mod paths;
 pub mod platform;
 pub mod service;
+pub mod warm;

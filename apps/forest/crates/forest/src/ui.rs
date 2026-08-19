@@ -34,6 +34,26 @@ fn env_set(k: &str) -> bool {
     std::env::var(k).map(|v| !v.is_empty()).unwrap_or(false)
 }
 
+/// Global mute. See [`set_quiet`].
+static QUIET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Silence *everything* this module renders — status lines, spinners, and
+/// progress bars, in both the interactive and the plain-log branch.
+///
+/// Needed because a command's promise of silence has to hold for narration
+/// emitted far below it: `forest global warm --quiet` runs downloads, and the
+/// download layer asks for a progress bar (which degrades to a `→ Downloading …`
+/// line when stderr isn't a TTY). Without a global mute, "quiet" would only
+/// cover the command's own summary, and the one caller that most needs
+/// silence — a shell rc file — would still get output.
+pub fn set_quiet(quiet: bool) {
+    QUIET.store(quiet, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn muted() -> bool {
+    QUIET.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Shared draw target so concurrent bars/spinners and status lines don't
 /// clobber each other on the terminal.
 fn multi() -> &'static MultiProgress {
@@ -58,6 +78,9 @@ fn error_style() -> Style {
 /// Emit a status line that coexists with any active progress bars. Styled at
 /// an interactive TTY; plain (no ANSI) otherwise so piped/CI logs stay clean.
 fn emit(glyph: &str, style: &Style, msg: &str) {
+    if muted() {
+        return;
+    }
     if interactive() {
         let _ = multi().println(format!("{} {}", style.apply_to(glyph), msg));
     } else {
@@ -72,6 +95,9 @@ pub fn success(msg: impl AsRef<str>) {
 
 /// A neutral, in-progress status: `→ <msg>` (dim).
 pub fn status(msg: impl AsRef<str>) {
+    if muted() {
+        return;
+    }
     let m = msg.as_ref();
     if interactive() {
         let _ = multi().println(format!("{} {}", dim().apply_to("→"), dim().apply_to(m)));
@@ -99,6 +125,9 @@ const TICK: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 /// In non-interactive mode it logs a single line and the handle is inert.
 pub fn step(msg: impl Into<String>) -> Step {
     let msg = msg.into();
+    if muted() {
+        return Step { pb: None, msg };
+    }
     if interactive() {
         let pb = multi().add(ProgressBar::new_spinner());
         if let Ok(style) = ProgressStyle::with_template("{spinner:.green} {msg}") {
@@ -142,11 +171,14 @@ impl Step {
 /// interactive. Hand `inc`/`finish` the transferred byte counts.
 pub fn bytes_bar(label: impl Into<String>, total: u64) -> Bar {
     let label = label.into();
+    if muted() {
+        return Bar { pb: None };
+    }
     if interactive() {
         let pb = multi().add(ProgressBar::new(total));
-        if let Ok(style) = ProgressStyle::with_template(
-            "{msg} {bar:24.green/dim} {bytes}/{total_bytes} ({eta})",
-        ) {
+        if let Ok(style) =
+            ProgressStyle::with_template("{msg} {bar:24.green/dim} {bytes}/{total_bytes} ({eta})")
+        {
             pb.set_style(style.progress_chars("█▉▊▋▌▍▎▏ "));
         }
         pb.set_message(label);
@@ -162,6 +194,9 @@ pub fn bytes_bar(label: impl Into<String>, total: u64) -> Bar {
 /// interactive.
 pub fn transfer(label: impl Into<String>) -> Bar {
     let label = label.into();
+    if muted() {
+        return Bar { pb: None };
+    }
     if interactive() {
         let pb = multi().add(ProgressBar::new_spinner());
         if let Ok(style) = ProgressStyle::with_template("{spinner:.green} {msg} {bytes}") {

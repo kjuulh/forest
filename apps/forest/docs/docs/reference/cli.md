@@ -487,3 +487,84 @@ forest shell fish | source
 
 `install` is an optional convenience that puts forest's global tools on your
 `PATH`. It's idempotent and reversible.
+
+### What the emitted block does
+
+`forest shell <shell>` emits three things:
+
+1. The idempotent shim-dir `PATH` prepend.
+2. The helper functions (`forest-tmp`, `forest-init`, the deferred loader).
+3. A block that sources the **shell-integration aggregate** — every installed
+   tool's component-declared integration, concatenated into one cached file
+   (`$XDG_CACHE_HOME/forest/global/shell/<shell>.sh`).
+
+Tools declare their own integration with `include.shell.init.<shell>` in the
+component manifest; forest captures the output once when the tool is fetched. So
+shell startup is a single file read: no process per tool, and no lazy download on
+the critical path.
+
+If the aggregate doesn't exist yet (fresh install, cold cache), the block starts a
+detached silent warm and arms a prompt hook that sources the aggregate the moment
+it appears — the integrations land in the shell you're already in, without ever
+having blocked it.
+
+### `forest-init` — the escape hatch
+
+For tools forest can't discover: ones that aren't forest components (installed via
+cargo, brew, …), or forest tools whose component hasn't declared `include.shell`
+yet.
+
+```zsh
+eval "$(forest shell zsh)"       # defines forest-init — must come first
+forest-init kignore init zsh     # cargo-installed, not a forest component
+```
+
+It replaces `eval "$(<tool> <args…>)"` without blocking a cold shell: the tool runs
+with `FOREST_GLOBAL_NO_FETCH=1`, so a forest shim reports "not cached yet" (exit
+`75`, `EX_TEMPFAIL`) instead of downloading at startup. Skipped integrations are
+queued and retried from a `precmd` hook (zsh) / `PROMPT_COMMAND` (bash) /
+`fish_prompt` event (fish). Cached tools and non-forest commands take the ordinary
+path — one exec, `eval` the output.
+
+---
+
+## `forest global warm`
+
+Pre-download the binaries for global tools that aren't cached yet, capture their
+declared shell integrations, and rebuild the per-shell aggregate.
+
+```bash
+forest global warm                          # foreground, with progress
+forest global warm gitnow awslogin          # only these (shim or <org>/<name>)
+forest global warm --background --quiet     # detach, print nothing — for rc files
+forest global warm --background --force     # ignore the throttle
+```
+
+Behaviour:
+
+- **`--background`** returns immediately and does the work in a detached child
+  with `/dev/null` stdio, so it is safe to call from a shell rc file. Throttled
+  to one warm per 30 minutes (`FOREST_GLOBAL_WARM_INTERVAL_SECS` overrides), and
+  the slot is claimed atomically before spawning — a burst of terminals produces
+  one warm, not one per terminal.
+- **`--quiet`** silences the download narration too, not just the summary, so it
+  is genuinely safe on the shell-startup path.
+- A **single-instance lock** means two warms never download the same tool at
+  once, even with `--force`.
+- Already-cached tools are skipped, so a repeat warm costs a lockfile read — but
+  their **shell snippets are still captured** if missing, which is how a tool
+  cached before it declared `include.shell` catches up.
+- The aggregate is rebuilt on every warm (and on `update`, whose version bumps
+  invalidate version-keyed snippets), so it shrinks when a tool is removed.
+- Per-tool failures are reported and don't stop the rest of the toolset.
+- `FOREST_NO_GLOBAL_WARM=1` disables warming entirely, including the implicit
+  warms that a cold shell start or a skipped `forest-init` would trigger.
+
+### Capturing a declared integration
+
+For each tool with `include.shell.init.<shell>` in its manifest, warm runs
+`<binary> <argv>` once per shell and caches stdout at
+`components/include/<org>/<name>/<version>/shell/<shell>.sh`. The capture is
+bounded — stdin is closed, output is capped at 512 KB, and the child is killed
+after 10 s — because it executes third-party code during a warm. Failures are
+per-shell and logged at `debug`; they never fail the warm.

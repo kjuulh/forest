@@ -15,7 +15,9 @@
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::global::eval::{eval_bash, eval_fish, eval_zsh};
+use crate::global::eval::{
+    eval_bash, eval_fish, eval_zsh, fish_shell_integration_block, shell_integration_block,
+};
 use crate::global::install;
 use crate::state::State;
 
@@ -56,17 +58,24 @@ pub struct InstallArgs {
 impl ShellCommand {
     pub async fn execute(&self, _state: &State) -> anyhow::Result<()> {
         match &self.subcommands {
+            // Order matters: PATH first (so the shim dir is reachable), then the
+            // helper functions, then the integration block — which *calls* one
+            // of those helpers (`forest-defer-aggregate`) on a cold cache, so it
+            // has to come after they are defined.
             ShellCommands::Zsh => {
                 print!("{}", eval_zsh());
                 print!("{}", ZSH_HELPERS);
+                print!("{}", shell_integration_block("zsh"));
             }
             ShellCommands::Bash => {
                 print!("{}", eval_bash());
                 print!("{}", BASH_HELPERS);
+                print!("{}", shell_integration_block("bash"));
             }
             ShellCommands::Fish => {
                 print!("{}", eval_fish());
                 print!("{}", FISH_HELPERS);
+                print!("{}", fish_shell_integration_block());
             }
             ShellCommands::Install(args) => run_install(args).await?,
             ShellCommands::Uninstall => run_uninstall().await?,
@@ -111,7 +120,9 @@ async fn run_uninstall() -> anyhow::Result<()> {
                 removed += 1;
                 eprintln!("  − {} ({})", p.display(), shell.name());
             }
-            install::Removed::Absent(p) => eprintln!("  · {} ({}, no managed block)", p.display(), shell.name()),
+            install::Removed::Absent(p) => {
+                eprintln!("  · {} ({}, no managed block)", p.display(), shell.name())
+            }
         }
     }
     eprintln!("removed {removed} managed block(s).");

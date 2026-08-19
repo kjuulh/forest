@@ -356,8 +356,14 @@ impl CommandHandler {
         // Skip the auto-nag for `forest self …` — the user is already
         // engaging with the update flow, no need to prompt them again,
         // and `self update` would print the nag while the binary is
-        // mid-replacement.
-        let print_nag = !matches!(command, Commands::Self_(_));
+        // mid-replacement. Also skip it for invocations that have declared
+        // themselves silent (`forest global warm --background`, called from
+        // shell rc files): see `GlobalCommand::is_silent`.
+        let print_nag = match command {
+            Commands::Self_(_) => false,
+            Commands::Global(cmd) => !cmd.is_silent(),
+            _ => true,
+        };
 
         let result = match command {
             Commands::Init(cmd) => cmd.execute(state).await,

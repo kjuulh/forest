@@ -131,6 +131,45 @@ impl GlobalPaths {
     pub fn tool_include_env_file(&self, org: &str, name: &str, version: &str) -> PathBuf {
         self.tool_include_dir(org, name, version).join("env.json")
     }
+
+    /// The cached `include.shell.init` declaration for a tool version
+    /// (DATA-588): JSON object of shell → argv, written on cold fetch.
+    ///
+    /// Cached rather than re-read from the manifest because everything that
+    /// consumes it — deciding whether a snippet still needs capturing — has to
+    /// work offline, on the warm path, without a registry round-trip.
+    pub fn tool_include_shell_file(&self, org: &str, name: &str, version: &str) -> PathBuf {
+        self.tool_include_dir(org, name, version).join("shell.json")
+    }
+
+    /// The captured shell-integration script for one tool version and shell
+    /// (DATA-588) — the stdout of `<binary> <include.shell.init.<shell>>`.
+    ///
+    /// Keyed by version alongside `env.json` so an upgrade re-captures rather
+    /// than serving the old tool's script, and so a downgrade finds its own.
+    pub fn tool_shell_snippet(&self, org: &str, name: &str, version: &str, shell: &str) -> PathBuf {
+        self.tool_include_dir(org, name, version)
+            .join("shell")
+            .join(format!("{shell}.sh"))
+    }
+
+    /// The aggregate script `forest shell <shell>` tells the user's rc file to
+    /// source: every installed tool's captured snippet, concatenated (DATA-588).
+    ///
+    /// One file is the whole point. Shell startup reads a single path instead of
+    /// exec'ing one process per tool, and rebuilding it is how a warm makes new
+    /// integrations available to the next shell without the rc file changing.
+    pub fn shell_aggregate(&self, shell: &str) -> PathBuf {
+        self.cache_dir()
+            .join("global")
+            .join("shell")
+            .join(format!("{shell}.sh"))
+    }
+
+    /// Directory holding the per-shell aggregates.
+    pub fn shell_aggregate_dir(&self) -> PathBuf {
+        self.cache_dir().join("global").join("shell")
+    }
 }
 
 fn xdg_config_home() -> anyhow::Result<PathBuf> {
@@ -259,6 +298,68 @@ mod tests {
             fixed().legacy_cached_binary_file("sha256:abc123"),
             fixed().cached_binary_dir("abc123"),
         );
+    }
+
+    // --- shell integration (DATA-588) ------------------------------------
+
+    #[test]
+    fn shell_declaration_sits_beside_the_env_cache() {
+        // Both are per-(tool, version) include artifacts; keeping them in one
+        // directory means one mkdir and one obvious place to look.
+        let p = fixed();
+        assert_eq!(
+            p.tool_include_shell_file("understory", "gitnow", "0.5.0"),
+            PathBuf::from("/cache/forest/components/include/understory/gitnow/0.5.0/shell.json"),
+        );
+        assert_eq!(
+            p.tool_include_shell_file("understory", "gitnow", "0.5.0")
+                .parent(),
+            p.tool_include_env_file("understory", "gitnow", "0.5.0")
+                .parent(),
+        );
+    }
+
+    #[test]
+    fn snippets_are_keyed_by_version_and_shell() {
+        // Version-keyed so an upgrade re-captures instead of serving the old
+        // tool's script.
+        let p = fixed();
+        assert_eq!(
+            p.tool_shell_snippet("understory", "gitnow", "0.5.0", "zsh"),
+            PathBuf::from("/cache/forest/components/include/understory/gitnow/0.5.0/shell/zsh.sh"),
+        );
+        assert_ne!(
+            p.tool_shell_snippet("understory", "gitnow", "0.5.0", "zsh"),
+            p.tool_shell_snippet("understory", "gitnow", "0.5.1", "zsh"),
+        );
+        assert_ne!(
+            p.tool_shell_snippet("understory", "gitnow", "0.5.0", "zsh"),
+            p.tool_shell_snippet("understory", "gitnow", "0.5.0", "fish"),
+        );
+    }
+
+    #[test]
+    fn aggregate_is_one_stable_path_per_shell() {
+        // The emitted rc snippet hard-codes this path as a literal, so it must
+        // not depend on which tools are installed.
+        let p = fixed();
+        assert_eq!(
+            p.shell_aggregate("zsh"),
+            PathBuf::from("/cache/forest/global/shell/zsh.sh"),
+        );
+        assert_eq!(
+            p.shell_aggregate("zsh").parent().unwrap(),
+            p.shell_aggregate_dir(),
+        );
+    }
+
+    #[test]
+    fn aggregate_lives_next_to_the_shims_not_inside_them() {
+        // `forest global sync` deletes unknown files in the shims dir; the
+        // aggregate must not be swept up by it.
+        let p = fixed();
+        assert_ne!(p.shell_aggregate_dir(), p.shims_dir());
+        assert!(!p.shell_aggregate("zsh").starts_with(p.shims_dir()));
     }
 
     #[test]

@@ -1036,6 +1036,45 @@ fn include_manifest_value(doc: &serde_json::Value) -> anyhow::Result<Option<serd
         }
     }
 
+    // `include.shell` (DATA-588). Validated here so a typo'd shell name or a
+    // malformed argv fails the publish with a pointed message, rather than
+    // shipping a manifest whose shell integration silently never loads. The
+    // block is still passed through verbatim below — the manifest parser is the
+    // authority, this is just the friendly front door.
+    if let Some(shell) = obj.get("shell").filter(|v| !v.is_null()) {
+        let shell_obj = shell
+            .as_object()
+            .context("forest.component.include.shell must be an object")?;
+        if let Some(init) = shell_obj.get("init").filter(|v| !v.is_null()) {
+            let init_obj = init.as_object().context(
+                "forest.component.include.shell.init must be an object keyed by shell name",
+            )?;
+            for (shell_name, argv) in init_obj {
+                if !forest_manifest::SUPPORTED_SHELLS.contains(&shell_name.as_str()) {
+                    anyhow::bail!(
+                        "include.shell.init.{shell_name}: unknown shell; supported: {}",
+                        forest_manifest::SUPPORTED_SHELLS.join(", "),
+                    );
+                }
+                let args = argv.as_array().with_context(|| {
+                    format!("include.shell.init.{shell_name} must be an array of strings")
+                })?;
+                if args.is_empty() {
+                    anyhow::bail!(
+                        "include.shell.init.{shell_name} must not be empty — it is the argv \
+                         forest runs against your binary to get the script, e.g. \
+                         [\"init\", \"{shell_name}\"]"
+                    );
+                }
+                for a in args {
+                    a.as_str().with_context(|| {
+                        format!("include.shell.init.{shell_name} entries must be strings")
+                    })?;
+                }
+            }
+        }
+    }
+
     Ok(Some(include.clone()))
 }
 

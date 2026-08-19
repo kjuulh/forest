@@ -83,13 +83,38 @@ package sdk
 	hint?: string
 }
 
-// `include` — things shipped beside the binary. Forward-looking container;
-// `env` is the only member today (future: files, …). TASKS/023.
+// `include` — things shipped beside the binary. Forward-looking container
+// (future: files, …). TASKS/023, DATA-588.
 #ForestInclude: {
 	// Default environment variables, auto-applied as defaults when the tool
 	// runs (the ambient shell environment always wins). Keys are POSIX env
 	// names; values are plain strings.
 	env?: {[=~"^[A-Za-z_][A-Za-z0-9_]*$"]: string}
+
+	// Shell integration this tool ships. Declaring it here is what lets
+	// `eval "$(forest shell zsh)"` load the tool's completions/functions with
+	// no per-tool line in the user's rc file. DATA-588.
+	shell?: #ForestShellIntegration
+}
+
+// `include.shell` — how forest obtains this tool's shell-integration script.
+//
+// Tools that ship an rc-file snippet used to make every user add
+// `eval "$(<tool> init zsh)"` by hand — a manual step which, because global
+// tools install lazily, also turned shell startup into a cold-cache download.
+// Declaring it here inverts that: forest runs the command once when the tool is
+// fetched, caches the output, and serves it from `forest shell <shell>`.
+//
+//	include: shell: init: {
+//	    zsh:  ["init", "zsh"]
+//	    fish: ["completion", "fish"]
+//	}
+#ForestShellIntegration: {
+	// Shell name → argv to run against this tool's own binary to print its
+	// integration script on stdout. Keyed by shell because tools spell it
+	// differently (`init zsh` vs `completion fish`) and may not support all
+	// three. Omit a shell to opt out of it; the argv must be non-empty.
+	init?: {[=~"^(zsh|bash|fish)$"]: [...string] & [_, ...]}
 }
 
 #ForestComponentUpload: {

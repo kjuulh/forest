@@ -255,6 +255,59 @@ This uploads:
 
 The component is now available in the registry for other projects to consume.
 
+## Shipping shell integration
+
+If your tool prints an rc-file snippet — completions, a wrapper function, a
+`cd`-ing helper — declare how to get it and forest will load it for every user.
+No `eval "$(<tool> init zsh)"` line in anyone's `.zshrc`.
+
+```cue
+forest: component: sdk.#ForestComponent & {
+	name:    project.name
+	version: "0.5.0"
+
+	// argv to run against your own binary; stdout must be the script.
+	include: shell: init: {
+		zsh: ["shell", "zsh"]
+		bash: ["shell", "bash"]
+		fish: ["completion", "fish"]
+	}
+}
+```
+
+Forest runs each command once when the tool is fetched, caches stdout, and
+concatenates every installed tool's script into one file that
+`eval "$(forest shell zsh)"` sources. This is why it's declared rather than run at
+shell startup: global tools install lazily, so an rc file that invokes tools to get
+their init scripts would download binaries in front of the user's prompt.
+
+Rules for the command you point at:
+
+- **stdout is the script, and only the script.** It is `eval`'d by the user's
+  shell. Put diagnostics on stderr (forest discards them).
+- **Exit 0**, or the snippet isn't cached. Don't read stdin — it is closed.
+- **Emit per-shell syntax.** fish is not POSIX; a POSIX function body sourced into
+  fish is a syntax error. Omit a shell you don't support rather than emitting
+  something generic.
+- **End with a newline.** Snippets are concatenated.
+- Keep it fast and under 512 KB; the capture is killed after 10 s.
+- Supported shells: `zsh`, `bash`, `fish`. An unknown name fails the publish.
+
+Snippets are cached per version, so a release re-captures automatically. Users
+already on an older version keep theirs until they update. See
+`examples/global-tools/forest-hello` for a working component.
+
+`#ForestInclude` is a closed CUE definition, so your `cue.mod/module.cue` has to
+pin an SDK that knows about `shell` — **v0.8.0 or newer**:
+
+```cue
+deps: {
+	"forest.sh/forest/sdk@v0": {
+		v: "v0.8.0"
+	}
+}
+```
+
 ## Versioning
 
 Follow [semver](https://semver.org/) for component versions:
