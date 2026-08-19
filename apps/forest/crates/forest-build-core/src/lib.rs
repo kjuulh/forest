@@ -66,10 +66,11 @@ pub struct BuildSummary {
 pub async fn run_build(toolchain: Toolchain, work_dir: &Path) -> anyhow::Result<BuildSummary> {
     let req = manifest::read_build_request(toolchain, work_dir).await?;
 
-    let targets = resolve_targets(&req.architectures, toolchain)?;
-    if targets.is_empty() {
+    let all_targets = resolve_targets(&req.architectures, toolchain)?;
+    if all_targets.is_empty() {
         anyhow::bail!("no build targets resolved from architectures");
     }
+    let targets = select_targets(all_targets, target_selectors().as_deref())?;
 
     tracing::info!(
         "building {} target(s) for component '{}'",
@@ -153,6 +154,91 @@ fn docker_platform(os: &str, arch: &str) -> anyhow::Result<String> {
         _ => anyhow::bail!("unsupported docker arch: {arch}"),
     };
     Ok(format!("{plat_os}/{plat_arch}"))
+}
+
+/// Environment variable restricting a build to a subset of the declared
+/// architecture matrix (DATA-583).
+///
+/// Comma-separated `os/arch` selectors, e.g. `linux/amd64,linux/arm64`. Unset
+/// or blank builds everything `upload.architectures` declares, which is the
+/// behaviour every build had before this existed and still the right default.
+///
+/// It exists because cross-compiling is not always possible. A pure-Go
+/// component with `CGO_ENABLED=0` builds all four platforms from one Linux
+/// runner happily; one that binds a system framework, or a Rust component with
+/// awkward native deps, needs a *native* runner per platform. This lets CI fan
+/// the matrix out across runners — each leg building only what it can — and
+/// gather the artifacts back into one `forest publish`, which uploads whatever
+/// it finds in the output tree regardless of how many machines produced it.
+pub const FOREST_BUILD_TARGETS_ENV: &str = "FOREST_BUILD_TARGETS";
+
+/// Read [`FOREST_BUILD_TARGETS_ENV`], treating blank as unset — CI writes it
+/// from an interpolated input, and an unset input expands to "".
+fn target_selectors() -> Option<String> {
+    let raw = std::env::var(FOREST_BUILD_TARGETS_ENV).ok()?;
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+/// Narrow the resolved targets to those named by `selectors`.
+///
+/// `None` (no selection) returns everything untouched. A selector naming a
+/// platform the component does not declare is an error rather than a silent
+/// no-op: the failure mode it guards against is a matrix leg with a typo'd
+/// platform quietly building nothing, passing green, and leaving a gap in the
+/// published set that only surfaces when a colleague on that platform tries to
+/// install the tool.
+pub fn select_targets(
+    targets: Vec<BuildTarget>,
+    selectors: Option<&str>,
+) -> anyhow::Result<Vec<BuildTarget>> {
+    let Some(selectors) = selectors else {
+        return Ok(targets);
+    };
+
+    let wanted: Vec<&str> = selectors
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    if wanted.is_empty() {
+        return Ok(targets);
+    }
+
+    let declared: Vec<String> = targets
+        .iter()
+        .map(|t| format!("{}/{}", t.os, t.arch))
+        .collect();
+
+    let unknown: Vec<&str> = wanted
+        .iter()
+        .copied()
+        .filter(|w| !declared.iter().any(|d| d == w))
+        .collect();
+    if !unknown.is_empty() {
+        anyhow::bail!(
+            "{FOREST_BUILD_TARGETS_ENV} selects {} which the component does not declare. \
+             Declared: {}.",
+            unknown.join(", "),
+            declared.join(", "),
+        );
+    }
+
+    let selected: Vec<BuildTarget> = targets
+        .into_iter()
+        .filter(|t| wanted.contains(&format!("{}/{}", t.os, t.arch).as_str()))
+        .collect();
+
+    tracing::info!(
+        "{FOREST_BUILD_TARGETS_ENV} narrowed the build to {} target(s): {}",
+        selected.len(),
+        selected
+            .iter()
+            .map(|t| format!("{}/{}", t.os, t.arch))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    Ok(selected)
 }
 
 /// Resolve build targets from the CUE `upload.architectures` map
@@ -411,6 +497,29 @@ fn emit_rust_build_hints(stderr: &str, triple: &str) {
     }
 }
 
+/// The full argv for `go`, after the program name.
+///
+/// Split out from the spawn so the *ordering* is testable. It was wrong:
+/// `-ldflags` was pushed before `build`, producing `go -ldflags … build …`,
+/// which go rejects with its usage text — `go` accepts no flags ahead of the
+/// subcommand. It went unnoticed because `forest-contrib/build-go` has not
+/// been republished since the stamping was added, so the released build
+/// component predates the broken code and the path never ran.
+///
+/// The `-X main.version=…` stamp makes `mytool version` and the registry agree.
+/// The linker ignores `-X` for a symbol that does not exist, so components that
+/// never declare `var version string` in package main are unaffected.
+fn go_build_args(component_version: &str, output_path: &Path) -> Vec<std::ffi::OsString> {
+    vec![
+        "build".into(),
+        "-ldflags".into(),
+        format!("-X main.version={component_version}").into(),
+        "-o".into(),
+        output_path.as_os_str().to_os_string(),
+        ".".into(),
+    ]
+}
+
 async fn build_golang(
     component_name: &str,
     component_version: &str,
@@ -467,24 +576,11 @@ async fn build_golang(
         }
     }
 
-    // Stamp the component version into the binary, so `mytool version` and the
-    // registry agree. Without it a Go binary reports the module pseudo-version
-    // — accurate about the commit, silent about which released component it is,
-    // which makes "does this machine have the fix?" unanswerable.
-    //
-    // The linker ignores -X for a symbol that does not exist, so this is safe
-    // for components that never declare it: they simply keep their old
-    // behaviour. Declaring `var version string` in package main opts in.
-    cmd.arg("-ldflags");
-    cmd.arg(format!("-X main.version={component_version}"));
-
     // Also exposed as an environment variable, matching the Rust path, for
     // anything that would rather read it at build time than link it in.
     cmd.env(FOREST_VERSION_ENV, component_version);
 
-    cmd.args(["build", "-o"]);
-    cmd.arg(&output_path);
-    cmd.arg(".");
+    cmd.args(go_build_args(component_version, &output_path));
 
     cmd.stdout(std::io::stdout());
     cmd.stderr(std::io::stderr());
@@ -508,6 +604,13 @@ async fn build_golang(
 /// Rust reads it with `option_env!(...)`, falling back to CARGO_PKG_VERSION;
 /// Go gets the same value linked in via -ldflags, since env vars are not
 /// visible at compile time there.
+///
+/// DATA-583 gave it a second job on the way *in*: set in the environment, it
+/// overrides `forest.component.version` for this build, so a tag-triggered CI
+/// release builds and publishes the same version without editing forest.cue.
+/// `forest publish --version` is bound to the same name (see that command's
+/// `arg_is_wired_to_the_env_var` test) — the two must not drift, or the version
+/// stamped into the binary stops matching the one the registry records.
 pub const FOREST_VERSION_ENV: &str = "FOREST_COMPONENT_VERSION";
 
 /// Resolve CGO_ENABLED for a Go build.
@@ -729,6 +832,83 @@ mod build_hint_tests {
     }
 }
 
+/// DATA-583 — narrowing a build to a subset of the declared matrix, so CI can
+/// fan the platforms out across native runners.
+///
+/// `select_targets` takes the selector string as an argument rather than
+/// reading the environment, precisely so these can be plain deterministic tests
+/// with no process-global state to serialise on.
+#[cfg(test)]
+mod select_targets_tests {
+    use super::*;
+
+    fn targets() -> Vec<BuildTarget> {
+        let mut arches = HashMap::new();
+        arches.insert(
+            "linux".to_string(),
+            HashMap::from([
+                ("amd64".to_string(), serde_json::json!({})),
+                ("arm64".to_string(), serde_json::json!({})),
+            ]),
+        );
+        arches.insert(
+            "macos".to_string(),
+            HashMap::from([("arm64".to_string(), serde_json::json!({}))]),
+        );
+        resolve_targets(&arches, Toolchain::Golang).unwrap()
+    }
+
+    fn names(targets: &[BuildTarget]) -> Vec<String> {
+        targets
+            .iter()
+            .map(|t| format!("{}/{}", t.os, t.arch))
+            .collect()
+    }
+
+    #[test]
+    fn no_selector_builds_everything() {
+        // The pre-DATA-583 behaviour, which every existing build depends on.
+        let all = names(&select_targets(targets(), None).unwrap());
+        assert_eq!(all, vec!["linux/amd64", "linux/arm64", "macos/arm64"]);
+    }
+
+    #[test]
+    fn blank_selector_builds_everything() {
+        // An unset CI matrix entry interpolates to "", which must mean "all",
+        // not "none" — a leg that silently built nothing would pass green and
+        // leave a hole in the published platform set.
+        assert_eq!(select_targets(targets(), Some("")).unwrap().len(), 3);
+        assert_eq!(select_targets(targets(), Some("  ")).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn selector_narrows_to_the_named_platforms() {
+        let picked = names(&select_targets(targets(), Some("linux/arm64")).unwrap());
+        assert_eq!(picked, vec!["linux/arm64"]);
+    }
+
+    #[test]
+    fn selector_accepts_a_comma_separated_list_with_whitespace() {
+        let picked =
+            names(&select_targets(targets(), Some(" linux/amd64 , macos/arm64 ")).unwrap());
+        assert_eq!(picked, vec!["linux/amd64", "macos/arm64"]);
+    }
+
+    #[test]
+    fn selecting_an_undeclared_platform_is_an_error() {
+        // The typo case. Failing here beats publishing a component missing the
+        // platform a colleague is about to install it on.
+        let err = select_targets(targets(), Some("linux/amd64,windows/amd64")).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("windows/amd64"), "msg: {msg}");
+        assert!(msg.contains("linux/amd64"), "should list declared: {msg}");
+        assert!(
+            !msg.contains("selects linux/amd64,"),
+            "should name only the unknown selector: {msg}"
+        );
+    }
+}
+
 #[cfg(test)]
 mod cgo_tests {
     use super::*;
@@ -773,5 +953,37 @@ mod version_stamp_tests {
         // Documented in component READMEs and read by Rust via option_env!;
         // renaming it silently stops version stamping rather than failing.
         assert_eq!(FOREST_VERSION_ENV, "FOREST_COMPONENT_VERSION");
+    }
+
+    /// Regression: `-ldflags` was emitted *before* `build`, so every Go
+    /// component build ran `go -ldflags … build …` and go answered with its
+    /// usage text. `go` takes no flags ahead of the subcommand.
+    ///
+    /// It shipped unnoticed because forest-contrib/build-go was never
+    /// republished after the stamping landed, so the released build component
+    /// predates the bug and the broken path never executed. The moment it is
+    /// republished — which the CI publish flow requires — every Go build breaks.
+    /// Assert the whole argv, in order, rather than just the flag's shape.
+    #[test]
+    fn go_argv_puts_build_first() {
+        let args: Vec<String> = go_build_args("0.1.6", Path::new("/out/mytool"))
+            .into_iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            vec![
+                "build",
+                "-ldflags",
+                "-X main.version=0.1.6",
+                "-o",
+                "/out/mytool",
+                ".",
+            ]
+        );
+        assert_eq!(
+            args[0], "build",
+            "go accepts no flags before the subcommand"
+        );
     }
 }

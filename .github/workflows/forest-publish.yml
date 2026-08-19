@@ -1,0 +1,411 @@
+name: forest publish
+
+# Reusable workflow: build and publish a forest component to the registry
+# from a tagged release (DATA-583).
+#
+# Every understory repo that ships a forest component calls this instead of
+# copy-pasting the steps, so publishes stay consistent across the org and a fix
+# here reaches all of them. The caller's workflow is a thin `uses:` block; see
+# `apps/forest/docs/docs/guides/ci-cd.md` for the secrets and how to add it to
+# a new repo.
+#
+# ── The version comes from forest.cue, not from this workflow ──────────
+#
+# `forest.component.version` in forest.cue is the source of truth, and
+# release-please bumps it (via its `generic` updater and an
+# `# x-release-please-version` annotation) in the same commit it tags. By the
+# time the tag exists the file already carries the right version, and
+# `forest publish` simply reads it.
+#
+# So on a normal release this workflow does not *set* the version — it *checks*
+# it. A tag whose version disagrees with forest.cue means someone tagged by
+# hand, and publishing would ship a version nobody declared, so the job fails.
+#
+# Pre-release tags (`v0.1.99-ci.1`, `v0.2.0-rc.1` — any semver prerelease) are
+# the deliberate exception. They exist to exercise this pipeline, or to cut a
+# release candidate, without a commit bumping forest.cue. For those the tag
+# wins and is passed through `FOREST_COMPONENT_VERSION`, which both
+# `forest run build` and `forest publish` read — so the version stamped into
+# the binary matches the version the registry records. Overriding the publish
+# alone would leave the artifact misreporting itself.
+#
+# ── Why three jobs ─────────────────────────────────────────────────────
+#
+# The registry hosts binaries; it does not build them. `forest run build`
+# dispatches the depended-on build component (`forest-contrib/build-go` et al,
+# DATA-312), which writes `.forest/component/output/<os>/<arch>/<name>`;
+# `forest publish` uploads whatever it finds there. The build therefore has to
+# happen in CI, and it has to happen before the publish.
+#
+#   prepare → resolve one version for the whole run, once.
+#   build   → a matrix leg per runner, each building the platforms it can.
+#   publish → gather every leg's artifacts, upload them as one version.
+#
+# The matrix exists because cross-compiling is not always possible. A pure-Go
+# component with CGO off builds all four platforms from a single Linux runner,
+# which is the default here and costs one job. A component that binds a system
+# framework, or a Rust component with awkward native deps, needs a *native*
+# runner per platform — `build-matrix` fans those out, and each leg sets
+# `FOREST_BUILD_TARGETS` so it builds only its own share. Publishing is
+# deliberately a single job regardless: one version, one upload, one place for
+# it to fail.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: >-
+          Release tag to publish, e.g. `v0.1.8`. Defaults to the tag that
+          triggered the caller (`github.ref_name`). A leading `v` is stripped.
+        type: string
+        required: false
+        default: ""
+      working-directory:
+        description: >-
+          Directory holding forest.cue, relative to the repo root. Only needs
+          setting for a component that is not at the root of its repo.
+        type: string
+        required: false
+        default: "."
+      build-matrix:
+        description: >-
+          JSON array of build legs. Each entry is
+          `{"name": <artifact suffix>, "runner": <runs-on label>,
+          "targets": <comma-separated os/arch, empty for all>}`.
+
+          The default is one Linux runner cross-compiling the entire declared
+          matrix, which is right for any component that cross-compiles cleanly.
+          Split it only when a platform needs to be built natively, e.g.
+
+            [{"name":"linux","runner":"ubuntu-latest","targets":"linux/amd64,linux/arm64"},
+             {"name":"macos","runner":"macos-latest","targets":"macos/arm64"}]
+        type: string
+        required: false
+        default: '[{"name":"all","runner":"ubuntu-latest","targets":""}]'
+      publish-runner:
+        description: >-
+          Runner that performs the publish. It must be one of the platforms the
+          component declares: `forest publish` probes the freshly built binary
+          for its own platform (`_meta/describe`) to derive the manifest, so it
+          has to be able to *execute* it.
+        type: string
+        required: false
+        default: ubuntu-latest
+      context-name:
+        description: Name of the forest context to provision on the runner.
+        type: string
+        required: false
+        default: understory-prod
+      server:
+        description: >-
+          Forest registry to publish to. Point this at the dev server to
+          rehearse a release without touching prod.
+        type: string
+        required: false
+        default: https://api.forest.understory.sh
+      forest-version:
+        description: >-
+          forest CLI release tag to install, e.g. `v0.2.9`. Empty installs the
+          latest release. Pin it when a publish must be reproducible against a
+          known CLI.
+        type: string
+        required: false
+        default: ""
+      cue-version:
+        description: >-
+          `cue` version to install. forest shells out to `cue` to evaluate the
+          manifest and does not vendor it, so the runner must provide it. A
+          repo pinning cue in its own mise.toml overrides this.
+        type: string
+        required: false
+        default: latest
+    secrets:
+      forest-token:
+        description: >-
+          Forest token with write access to the component's organisation.
+          Create with `forest auth token create --name <repo>-ci`. Read by the
+          CLI as FOREST_TOKEN, which bypasses the interactive login entirely,
+          so nothing can prompt.
+        required: true
+      forest-repo-token:
+        description: >-
+          GitHub token with **read access to the private understory-io/forest
+          repo**. install.sh fetches the CLI with `gh release download`, so the
+          caller's automatic `secrets.GITHUB_TOKEN` is not sufficient — it is
+          scoped to the calling repository.
+        required: true
+      go-private-modules-pat:
+        description: >-
+          Optional PAT for private understory Go modules. Only needed by
+          components that import them; omit otherwise.
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Resolve one version for the whole run ─────────────────────────────
+  # Done once, in its own job, so every build leg and the publish agree by
+  # construction rather than by each re-deriving it and hoping.
+  prepare:
+    name: resolve version
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      component: ${{ steps.version.outputs.component }}
+      override: ${{ steps.version.outputs.override }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: jdx/mise-action@v4
+        with:
+          github_token: ${{ secrets.forest-repo-token }}
+
+      - name: Install cue
+        run: |
+          set -euo pipefail
+          mise use -g "cue@${{ inputs.cue-version }}"
+          cue version
+
+      - name: Resolve version from tag and manifest
+        id: version
+        env:
+          RAW_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          tag_version="${RAW_TAG#v}"
+          if [ -z "$tag_version" ]; then
+            echo "::error::No tag to publish. Trigger this on a tag push, or pass the \`tag\` input." >&2
+            exit 1
+          fi
+
+          # Evaluate the manifest exactly the way `forest publish` does — every
+          # *.cue in the component directory, as one package.
+          manifest="$(cue export --out json ./*.cue)"
+          cue_version="$(printf '%s' "$manifest" | jq -r '.forest.component.version')"
+          organisation="$(printf '%s' "$manifest" | jq -r '.project.organisation')"
+          name="$(printf '%s' "$manifest" | jq -r '.forest.component.name // .project.name')"
+
+          # A semver prerelease carries a `-suffix`; anything else is a real
+          # release and must match what the repo declared.
+          case "$tag_version" in
+            *-*)
+              echo "::notice::Prerelease tag $RAW_TAG — publishing as $tag_version, overriding forest.cue ($cue_version)."
+              echo "override=true" >> "$GITHUB_OUTPUT"
+              version="$tag_version"
+              ;;
+            *)
+              if [ "$tag_version" != "$cue_version" ]; then
+                {
+                  echo "::error::Tag $RAW_TAG implies version $tag_version, but forest.cue declares $cue_version."
+                  echo "forest.cue is the source of truth for a release, and release-please bumps it in the very commit it tags."
+                  echo "Either tag the commit carrying $tag_version, or bump forest.component.version to $tag_version."
+                } >&2
+                exit 1
+              fi
+              echo "override=false" >> "$GITHUB_OUTPUT"
+              version="$cue_version"
+              ;;
+          esac
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "component=$organisation/$name" >> "$GITHUB_OUTPUT"
+          echo "Publishing $organisation/$name@$version"
+
+  # ── Build each leg of the matrix ──────────────────────────────────────
+  build:
+    name: build ${{ matrix.name }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include: ${{ fromJSON(inputs.build-matrix) }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: jdx/mise-action@v4
+        with:
+          github_token: ${{ secrets.forest-repo-token }}
+
+      - name: Install cue
+        run: |
+          set -euo pipefail
+          mise use -g "cue@${{ inputs.cue-version }}"
+          cue version
+
+      # Only for components importing private understory Go modules. The
+      # emptiness test lives in the script rather than an `if:` because the
+      # `secrets` context is not dependably available to step conditions in a
+      # reusable workflow; an unsupplied optional secret arrives as "".
+      - name: Configure access to private Go modules
+        env:
+          GO_PRIVATE_MODULES_PAT: ${{ secrets.go-private-modules-pat }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GO_PRIVATE_MODULES_PAT:-}" ]; then
+            echo "No private-module PAT supplied — skipping."
+            exit 0
+          fi
+          git config --global \
+            url."https://understory-services:${GO_PRIVATE_MODULES_PAT}@github.com/understory-io".insteadOf \
+            "https://github.com/understory-io"
+          echo "GOPRIVATE=github.com/understory-io/*" >> "$GITHUB_ENV"
+          echo "GONOSUMDB=github.com/understory-io/*" >> "$GITHUB_ENV"
+
+      # understory-io/forest is private, so install.sh wraps `gh release
+      # download` rather than curl. FOREST_PROFILE provisions the context in
+      # the same step; FOREST_NO_SHELL_INTEGRATION keeps it from appending to a
+      # shell rc no interactive shell will ever read.
+      - name: Install forest CLI
+        env:
+          GH_TOKEN: ${{ secrets.forest-repo-token }}
+          FOREST_PROFILE: name=${{ inputs.context-name }},server=${{ inputs.server }}
+          FOREST_NO_SHELL_INTEGRATION: "1"
+          FOREST_CLI_VERSION: ${{ inputs.forest-version }}
+        run: |
+          set -euo pipefail
+          gh release download --repo understory-io/forest --pattern install.sh --dir "$RUNNER_TEMP"
+          bash "$RUNNER_TEMP/install.sh" ${FOREST_CLI_VERSION:+"$FOREST_CLI_VERSION"}
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Build and publish must agree on the version, so the override — when
+      # there is one — is exported here as well as in the publish job. Absent
+      # on a normal release, which is exactly "read forest.cue".
+      - name: Build
+        env:
+          FOREST_TOKEN: ${{ secrets.forest-token }}
+          FOREST_COMPONENT_VERSION: ${{ needs.prepare.outputs.override == 'true' && needs.prepare.outputs.version || '' }}
+          FOREST_BUILD_TARGETS: ${{ matrix.targets }}
+        run: |
+          set -euo pipefail
+          forest --version
+          forest run build
+
+      # Tarred rather than uploaded as a loose tree: upload-artifact roots the
+      # archive at the least common ancestor of the matched files, so a leg
+      # that produced a single platform would restore at a different depth than
+      # one that produced three. A tarball pins the layout, and a per-leg name
+      # keeps two legs from colliding on `checksums.sha256`.
+      - name: Package build output
+        run: tar -czf "$RUNNER_TEMP/forest-output.tar.gz" -C .forest/component output
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: forest-output-${{ matrix.name }}
+          path: ${{ runner.temp }}/forest-output.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+
+  # ── Publish once, from every leg's artifacts ──────────────────────────
+  publish:
+    name: publish
+    needs: [prepare, build]
+    runs-on: ${{ inputs.publish-runner }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: jdx/mise-action@v4
+        with:
+          github_token: ${{ secrets.forest-repo-token }}
+
+      - name: Install cue
+        run: |
+          set -euo pipefail
+          mise use -g "cue@${{ inputs.cue-version }}"
+          cue version
+
+      - name: Install forest CLI
+        env:
+          GH_TOKEN: ${{ secrets.forest-repo-token }}
+          FOREST_PROFILE: name=${{ inputs.context-name }},server=${{ inputs.server }}
+          FOREST_NO_SHELL_INTEGRATION: "1"
+          FOREST_CLI_VERSION: ${{ inputs.forest-version }}
+        run: |
+          set -euo pipefail
+          gh release download --repo understory-io/forest --pattern install.sh --dir "$RUNNER_TEMP"
+          bash "$RUNNER_TEMP/install.sh" ${FOREST_CLI_VERSION:+"$FOREST_CLI_VERSION"}
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: forest-output-*
+          path: ${{ runner.temp }}/forest-artifacts
+          merge-multiple: true
+
+      # Every leg's tarball extracts into the same tree, reassembling the full
+      # platform set `forest publish` expects to find.
+      - name: Restore build output
+        run: |
+          set -euo pipefail
+          mkdir -p .forest/component
+          shopt -s nullglob
+          archives=("$RUNNER_TEMP"/forest-artifacts/*.tar.gz)
+          if [ ${#archives[@]} -eq 0 ]; then
+            echo "::error::No build artifacts were downloaded — nothing to publish." >&2
+            exit 1
+          fi
+          for archive in "${archives[@]}"; do
+            tar -xzf "$archive" -C .forest/component
+          done
+          echo "Reassembled platforms:"
+          find .forest/component/output -mindepth 2 -maxdepth 2 -type d | sort
+
+      # `forest publish` derives the manifest by executing the binary for the
+      # *runner's own* platform and asking it to describe itself, so a publish
+      # runner outside the built set fails deep inside the publish with a much
+      # worse message than this one.
+      - name: Check the publish runner's platform was built
+        run: |
+          set -euo pipefail
+          case "$(uname -s)" in
+            Darwin) host_os=macos ;;
+            Linux)  host_os=linux ;;
+            *) echo "::error::Unsupported publish runner OS: $(uname -s)" >&2; exit 1 ;;
+          esac
+          case "$(uname -m)" in
+            x86_64|amd64)  host_arch=amd64 ;;
+            aarch64|arm64) host_arch=arm64 ;;
+            *) echo "::error::Unsupported publish runner arch: $(uname -m)" >&2; exit 1 ;;
+          esac
+          if [ ! -d ".forest/component/output/$host_os/$host_arch" ]; then
+            {
+              echo "::error::The publish runner is $host_os/$host_arch, but no binary was built for it."
+              echo "forest publish probes the binary for the runner's own platform to derive the manifest, so that platform must be in the build."
+              echo "Either add $host_os/$host_arch to forest.component.upload.architectures, or set publish-runner to a platform that is built."
+            } >&2
+            exit 1
+          fi
+
+      # Re-running a tag is safe: the registry refuses a version that is already
+      # published, so this fails cleanly rather than double-publishing or
+      # silently overwriting. A half-finished upload is rolled back by the CLI's
+      # abort-on-drop guard, leaving the version free to retry.
+      - name: Publish
+        env:
+          FOREST_TOKEN: ${{ secrets.forest-token }}
+          FOREST_COMPONENT_VERSION: ${{ needs.prepare.outputs.override == 'true' && needs.prepare.outputs.version || '' }}
+        run: forest publish
+
+      # Prove the version actually resolves from the registry rather than
+      # trusting the publish's own exit code.
+      - name: Verify the published version resolves
+        env:
+          FOREST_TOKEN: ${{ secrets.forest-token }}
+          COMPONENT: ${{ needs.prepare.outputs.component }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          forest components show "$COMPONENT" --format json \
+            | jq -e --arg v "$VERSION" '.versions[] | select(.version == $v)' > /dev/null
+          echo "::notice::$COMPONENT@$VERSION is resolvable from the registry."

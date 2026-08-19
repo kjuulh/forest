@@ -7,6 +7,7 @@ use crate::{
     grpc::{GrpcClient, GrpcClientState},
     services::component_binary,
     state::State,
+    user_state::UserStateLoaderState,
 };
 
 /// Print a single line naming the active forest context + server URL the
@@ -315,14 +316,62 @@ pub struct PublishCommand {
     /// against the right context, before flipping the destructive bit.
     #[arg(long = "dry-run")]
     dry_run: bool,
+
+    /// Publish under this version instead of `forest.component.version`
+    /// from forest.cue (DATA-583).
+    ///
+    /// Exists so a tag-triggered CI release can pick the version without
+    /// editing a tracked file mid-run: the workflow derives `0.1.8` from
+    /// the tag `v0.1.8` and passes it here. Precedence is
+    /// **`--version` > `FOREST_COMPONENT_VERSION` > forest.cue** — with
+    /// neither the flag nor the env set, the cue value is used exactly as
+    /// before, so manual publishing is unchanged.
+    ///
+    /// Set the *env* form rather than the flag when the build has to agree:
+    /// `forest run build` reads the same variable, so exporting it once
+    /// covers build and publish and the binary's stamped version matches
+    /// what the registry records. Passing only `--version` overrides the
+    /// publish but leaves an already-built binary stamped with the cue
+    /// version, which `forest publish` warns about.
+    #[arg(
+        long = "version",
+        value_name = "VERSION",
+        env = "FOREST_COMPONENT_VERSION"
+    )]
+    version: Option<String>,
 }
 
 impl PublishCommand {
     /// Construct a non-dry-run publish for programmatic use. Used by the
     /// hidden `forest bootstrap` command, which publishes many components by
     /// switching the working directory between them. DATA-312.
+    ///
+    /// `version: None` is deliberate and load-bearing. Bootstrap publishes
+    /// every workspace component in one process; a `FOREST_COMPONENT_VERSION`
+    /// in the ambient environment would otherwise stamp all of them with one
+    /// version. Because the override is read by clap's `env` (applied only
+    /// when parsing argv) rather than by `std::env::var` at use-site, this
+    /// constructor is immune by construction — keep it that way.
     pub fn for_bootstrap() -> Self {
-        Self { dry_run: false }
+        Self {
+            dry_run: false,
+            version: None,
+        }
+    }
+
+    /// Resolve the version to publish under: the override if one was given,
+    /// otherwise whatever forest.cue declared.
+    ///
+    /// An all-whitespace override is treated as absent. CI writes these from
+    /// shell interpolation (`--version "${{ inputs.version }}"`), and an
+    /// unset input expands to the empty string — publishing `""` would fail
+    /// the C8 semver gate with a baffling message instead of just falling
+    /// back to the manifest.
+    fn resolve_version<'a>(&'a self, cue_version: &'a str) -> &'a str {
+        match self.version.as_deref().map(str::trim) {
+            Some(v) if !v.is_empty() => v,
+            _ => cue_version,
+        }
     }
 
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
@@ -371,10 +420,21 @@ impl PublishCommand {
             .or_else(|| project.and_then(|p| p.get("name")).and_then(|v| v.as_str()))
             .context("component or project name is required")?;
 
-        let version = component
+        let cue_version = component
             .and_then(|c| c.get("version"))
             .and_then(|v| v.as_str())
             .unwrap_or("0.1.0");
+        // DATA-583: `--version` / FOREST_COMPONENT_VERSION win over the
+        // manifest so a tag-triggered release picks the version without
+        // editing forest.cue. Resolved once, here, so every downstream
+        // step — preflight, manifest, upload, summary — sees one value.
+        let version = self.resolve_version(cue_version);
+        if version != cue_version {
+            crate::ui::status(format!(
+                "Version overridden: {cue_version} (forest.cue) → {version}"
+            ));
+            warn_if_build_saw_a_different_version(component, version);
+        }
 
         let organisation = project
             .and_then(|p| p.get("organisation"))
@@ -382,6 +442,13 @@ impl PublishCommand {
             .context("project.organisation is required")?;
 
         tracing::info!("publishing component {organisation}/{name}@{version}");
+
+        // DATA-583: fail here, offline, rather than on the first RPC. Publish
+        // is the one command CI runs unattended, and the overwhelmingly common
+        // CI misconfiguration — the secret never reached the job — otherwise
+        // surfaces as a transport-layer "user is not logged in" from inside the
+        // auth interceptor, several frames from anything actionable.
+        ensure_authenticated(state).await?;
 
         // Sync project-level metadata (description, About-sidebar fields, README)
         // from forest.cue → server. CUE is source of truth: missing in CUE = cleared.
@@ -741,6 +808,86 @@ impl PublishCommand {
 
         Ok(())
     }
+}
+
+/// Confirm a credential exists before the first mutating RPC (DATA-583).
+///
+/// Two ways to be authenticated, matching the two audiences:
+///   - `FOREST_TOKEN` in the environment — the CI path. The gRPC auth
+///     interceptor short-circuits to it, so no local login is involved and
+///     nothing can prompt.
+///   - A logged-in user in the local state file — the interactive path,
+///     established by `forest auth login`.
+///
+/// This checks that *a* credential is present, not that it is valid — the
+/// first RPC does that, and it is the only thing that can. The failure it
+/// catches is the one worth a good message: an unattended publish that was
+/// never handed a token at all.
+async fn ensure_authenticated(state: &State) -> anyhow::Result<()> {
+    if std::env::var("FOREST_TOKEN")
+        .ok()
+        .is_some_and(|t| !t.trim().is_empty())
+    {
+        tracing::debug!("authenticating with FOREST_TOKEN from the environment");
+        return Ok(());
+    }
+
+    let logged_in = matches!(state.user_state().get_state().await, Ok(Some(_)));
+    if logged_in {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "not authenticated — refusing to publish.\n\n\
+         In CI: set FOREST_TOKEN to a forest token with write access to this \
+         organisation.\n  \
+         Create one with `forest auth token create --name <ci-bot>` and store it as a \
+         repository or organisation secret.\n\n\
+         Interactively: run `forest auth login` first.\n\n\
+         forest never prompts for credentials during a publish, so an unattended run \
+         with no token can only fail — this is that failure, before anything was \
+         uploaded."
+    )
+}
+
+/// Warn when the version being published cannot be the version that was
+/// built into the binary (DATA-583).
+///
+/// The build runs in a separate process — a depended-on `forest-contrib/build-*`
+/// component (DATA-312) — which recovers the version by re-reading forest.cue,
+/// with `FOREST_COMPONENT_VERSION` as its only override. So a `--version` passed
+/// to `forest publish` alone reaches the *upload* and not the *build*: the
+/// registry records 0.1.8 while `mytool version` reports the manifest's 0.1.7.
+/// That is precisely the inconsistency this flag exists to remove, so say so
+/// rather than shipping a binary that misreports itself.
+///
+/// Only meaningful for components that produce a binary — a CUE library has
+/// nothing stamped into it. Advisory: never blocks the publish, because the
+/// override is also legitimate for re-tagging an artifact whose version is not
+/// baked in.
+fn warn_if_build_saw_a_different_version(component: Option<&serde_json::Value>, version: &str) {
+    let declares_binary = component
+        .and_then(|c| c.pointer("/upload/architectures"))
+        .and_then(|v| v.as_object())
+        .map(|o| !o.is_empty())
+        .unwrap_or(false);
+    if !declares_binary {
+        return;
+    }
+
+    // The build only ever sees the env form. If it does not carry the version
+    // we are about to publish, the build could not have stamped it.
+    let build_saw = std::env::var("FOREST_COMPONENT_VERSION").ok();
+    if build_saw.as_deref().map(str::trim) == Some(version) {
+        return;
+    }
+
+    eprintln!(
+        "warning: publishing as {version}, but FOREST_COMPONENT_VERSION does not carry \
+         that value, so the build stamped a different version into the binary.\n         \
+         Export it instead of (or as well as) passing --version, and re-run the build:\n         \
+         export FOREST_COMPONENT_VERSION={version} && forest run build && forest publish"
+    );
 }
 
 /// Ensure the project exists and push its declared fields (description,
@@ -1332,6 +1479,106 @@ fn collect_dir_recursive<'a>(
         }
         Ok(())
     })
+}
+
+/// DATA-583 — version override resolution.
+///
+/// Precedence is **`--version` > `FOREST_COMPONENT_VERSION` > forest.cue**, and
+/// it is assembled from two independent pieces:
+///
+///   - clap resolves *flag vs env* into `self.version` before we see it. That
+///     leg is asserted structurally (`arg_is_wired_to_the_env_var`) rather than
+///     by setting the variable: every `try_parse_from` in this binary reads the
+///     process environment, so a test that mutates it corrupts whichever tests
+///     happen to run alongside it. Cargo runs them in threads; there is no
+///     serialisation to rely on.
+///   - `resolve_version` resolves *override vs manifest*, tested directly below.
+///
+/// Structs are built by literal rather than parsed, so no test here depends on
+/// the ambient environment being clean.
+#[cfg(test)]
+mod version_override_tests {
+    use super::*;
+
+    fn with_version(version: Option<&str>) -> PublishCommand {
+        PublishCommand {
+            dry_run: false,
+            version: version.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn cue_version_is_used_when_no_override_is_given() {
+        // The pre-DATA-583 behaviour, which must not change: manual publishing
+        // keeps reading forest.cue.
+        assert_eq!(with_version(None).resolve_version("0.1.7"), "0.1.7");
+    }
+
+    #[test]
+    fn override_wins_over_the_cue_version() {
+        assert_eq!(
+            with_version(Some("0.1.8")).resolve_version("0.1.7"),
+            "0.1.8"
+        );
+    }
+
+    #[test]
+    fn blank_and_whitespace_overrides_fall_back_to_cue() {
+        // An unset CI input interpolates to "" — that must mean "no override",
+        // not "publish as the empty string", which would fail the C8 semver
+        // gate with a message about `` instead of just working.
+        assert_eq!(with_version(Some("")).resolve_version("0.1.7"), "0.1.7");
+        assert_eq!(with_version(Some("   ")).resolve_version("0.1.7"), "0.1.7");
+    }
+
+    #[test]
+    fn override_is_trimmed() {
+        // Shell interpolation of a tag routinely carries a trailing newline.
+        assert_eq!(
+            with_version(Some(" 0.1.8\n")).resolve_version("0.1.7"),
+            "0.1.8"
+        );
+    }
+
+    #[test]
+    fn bootstrap_ignores_the_ambient_env_override() {
+        // Bootstrap publishes every workspace component in one process. If it
+        // honoured FOREST_COMPONENT_VERSION it would stamp all of them with the
+        // same version. It builds the command directly rather than parsing
+        // argv, so clap's `env` never applies — assert that, because the
+        // immunity is a property of the construction and easy to lose.
+        assert!(PublishCommand::for_bootstrap().version.is_none());
+        assert_eq!(
+            PublishCommand::for_bootstrap().resolve_version("0.1.7"),
+            "0.1.7"
+        );
+    }
+
+    #[test]
+    fn arg_is_wired_to_the_env_var() {
+        // The env leg of the precedence chain. clap applies `env` only when
+        // parsing argv and only when the flag is absent, which is exactly
+        // "flag > env"; what this asserts is that the variable is still named
+        // FOREST_COMPONENT_VERSION — the same name `forest run build` reads, so
+        // one export covers build and publish. Renaming one side silently
+        // decouples the stamped version from the published one.
+        //
+        // Spelled as a literal rather than imported from
+        // `forest_build_core::FOREST_VERSION_ENV`: the CLI does not depend on
+        // the build crate (the build is a separately published component), and
+        // taking a dependency for one constant would invert that. The coupling
+        // is real, so it is named here and in the build crate's doc comment.
+        use clap::CommandFactory;
+        let cmd = PublishCommand::command();
+        let arg = cmd
+            .get_arguments()
+            .find(|a| a.get_id() == "version")
+            .expect("--version arg should exist");
+        assert_eq!(
+            arg.get_env().and_then(|e| e.to_str()),
+            Some("FOREST_COMPONENT_VERSION"),
+        );
+    }
 }
 
 #[cfg(test)]

@@ -11,7 +11,18 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 
-use crate::Toolchain;
+use crate::{FOREST_VERSION_ENV, Toolchain};
+
+/// The component version supplied by the environment, if any (DATA-583).
+///
+/// Blank and whitespace-only values are treated as unset: CI writes this from
+/// shell interpolation, and an unset input expands to the empty string. Falling
+/// back to the manifest is the right answer there — building `""` is not.
+fn version_override() -> Option<String> {
+    let raw = std::env::var(FOREST_VERSION_ENV).ok()?;
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
 
 /// The inputs needed to drive a build, recovered from the project manifest.
 #[derive(Debug)]
@@ -56,11 +67,22 @@ pub async fn read_build_request(
         .context("forest.component.name (or project.name) is required")?
         .to_string();
 
-    let version = component
+    let cue_version = component
         .get("version")
         .and_then(|v| v.as_str())
-        .unwrap_or("0.1.0")
-        .to_string();
+        .unwrap_or("0.1.0");
+    // DATA-583: a tag-triggered CI release publishes under a version the
+    // manifest does not know, and the version is *stamped into the binary*
+    // (`-ldflags -X main.version=…` for Go, the same env for Rust). If the
+    // build kept reading forest.cue while `forest publish --version` moved,
+    // the artifact would misreport itself. The env var is the only channel
+    // available: a build component is a separate process dispatched with the
+    // project root and no structured parameters, so it inherits the
+    // environment and nothing else.
+    let version = version_override().unwrap_or_else(|| cue_version.to_string());
+    if version != cue_version {
+        tracing::info!("component version overridden by {FOREST_VERSION_ENV}: {version}");
+    }
 
     let upload = component
         .get("upload")

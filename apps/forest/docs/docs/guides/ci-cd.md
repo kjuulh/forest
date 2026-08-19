@@ -4,13 +4,21 @@ Forest is designed to be driven from CI/CD pipelines. This guide covers common i
 
 ## Authentication
 
-Use an app token for CI/CD:
+Generate a token for CI/CD:
 
 ```bash
-# Generate a token (one-time setup)
-forest organisation app create --name "ci-bot"
-# Store the token as a CI secret
+# One-time setup. Writes the raw token to stdout and everything else to
+# stderr, so it pipes straight into a secret store without leaking:
+forest auth token create --name "ci-bot" | gh secret set FOREST_TOKEN --repo <org>/<repo>
 ```
+
+:::note
+This is a *personal* access token — it carries the permissions of whoever
+created it. There is no machine/service-account token today; `forest
+organisation` has no `app` subcommand despite what earlier revisions of this
+guide claimed. Prefer a token created by an account that only holds the access
+CI actually needs.
+:::
 
 Set the token in your pipeline:
 
@@ -18,6 +26,158 @@ Set the token in your pipeline:
 export FOREST_TOKEN="<your-app-token>"
 export FOREST_SERVER="https://forest.example.com:4040"
 ```
+
+`FOREST_TOKEN` is read directly by the gRPC auth interceptor and bypasses the
+interactive login entirely — no browser, no refresh, no local state file. It is
+the only credential a CI publish needs.
+
+Forest never prompts for credentials during a publish. An unattended run with
+no token fails immediately, before any upload, with a message naming what is
+missing rather than a transport error from somewhere inside the interceptor.
+
+## Publishing a component on a tagged release
+
+Publishing a component from CI is a reusable workflow rather than something
+each repo assembles itself:
+
+```yaml
+# .github/workflows/release.yml in the component's repo
+name: Release
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    uses: understory-io/forest/.github/workflows/forest-publish.yml@main
+    with:
+      tag: ${{ github.ref_name }}
+      context-name: understory-prod
+      server: https://api.forest.understory.sh
+    secrets:
+      forest-token: ${{ secrets.FOREST_TOKEN }}
+      # Org-wide secret, already visible to every private repo.
+      forest-repo-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
+```
+
+### The version comes from `forest.cue`
+
+`forest.component.version` is the source of truth. The workflow does not set
+it — it *checks* it, and fails if the tag implies a version the manifest does
+not declare.
+
+Keeping the two in step is release-please's job. Annotate the version line so
+its `generic` updater rewrites it:
+
+```cue
+forest: component: {
+    name:    project.name
+    version: "0.1.7" // x-release-please-version
+}
+```
+
+```json
+// release-please-config.json
+{
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "mytool",
+      "include-component-in-tag": false,
+      "extra-files": [{ "type": "generic", "path": "forest.cue" }]
+    }
+  }
+}
+```
+
+Merging the release PR bumps the manifest and pushes the tag in one commit, so
+the tag and the published version cannot drift apart. The updater only touches
+the annotated line — a dependency pinned elsewhere in the file is left alone.
+
+### Prereleases override the manifest
+
+A semver prerelease tag (`v0.2.0-rc.1`, `v0.1.7-ci.1`) is the one case where
+the tag wins. This exists so the pipeline can be exercised, or a release
+candidate cut, without a commit bumping the manifest. The workflow passes the
+version through `FOREST_COMPONENT_VERSION`, which both `forest run build` and
+`forest publish` read — so the version stamped into the binary matches the one
+the registry records.
+
+Doing this by hand:
+
+```bash
+export FOREST_COMPONENT_VERSION=0.2.0-rc.1
+forest run build && forest publish
+```
+
+Precedence is `--version` > `FOREST_COMPONENT_VERSION` > `forest.cue`. Prefer
+the environment form: `--version` reaches the upload but not the build, leaving
+the binary reporting the manifest's version. `forest publish` warns when it
+detects this.
+
+:::warning
+Forest does not exclude prereleases when resolving a bare `<org>/<name>` — it
+takes the semver maximum. A prerelease numbered above the current release
+becomes what everyone installs. Number test prereleases *below* the current
+release (`0.1.7-ci.1`, not `0.1.99-ci.1`), or publish them to a dev registry.
+:::
+
+### The build runs in CI, not on the registry
+
+The registry hosts binaries; it does not build them. `forest run build`
+dispatches the depended-on build component, which writes
+`.forest/component/output/<os>/<arch>/<name>`, and `forest publish` uploads
+whatever it finds there. So the runner needs the component's toolchain, and the
+build must happen before the publish. The reusable workflow does both.
+
+By default one Linux runner cross-compiles the entire declared matrix, which is
+right for anything that cross-compiles cleanly (pure Go with CGO off, most
+Rust). When a platform has to be built natively — a cgo dependency on a system
+framework, an awkward native crate — split the build across runners and let each
+leg build its own share:
+
+```yaml
+    with:
+      build-matrix: >-
+        [{"name":"linux","runner":"ubuntu-latest","targets":"linux/amd64,linux/arm64"},
+         {"name":"macos","runner":"macos-latest","targets":"macos/arm64"}]
+```
+
+Each leg sets `FOREST_BUILD_TARGETS` to its `targets`, uploads its artifacts,
+and the single publish job reassembles them. A selector naming a platform the
+component does not declare is an error, so a typo fails the leg instead of
+quietly leaving a hole in the published platform set.
+
+The publish runner must itself be one of the built platforms: `forest publish`
+derives the manifest by executing the freshly built binary for its own platform
+and asking it to describe itself.
+
+### Re-running a tag
+
+Safe. The registry refuses a version that is already published, so a re-run
+fails cleanly rather than double-publishing or overwriting. A half-finished
+upload is rolled back by the CLI's abort-on-drop guard, which frees the version
+to be retried.
+
+### Adding this to a new repo
+
+1. Annotate `forest.cue` and add `release-please-config.json` +
+   `.release-please-manifest.json` as above, seeding the manifest with the
+   version already published.
+2. Copy `release-please.yml` and `release.yml` from
+   [pgjump](https://github.com/understory-io/pgjump/tree/main/.github/workflows).
+3. Add the secrets below.
+4. Ensure the repo's toolchain is pinned in `mise.toml`, including `cue` —
+   forest shells out to it and does not vendor it.
+
+| Secret | Why |
+|---|---|
+| `FOREST_TOKEN` | Forest token with write access to the org. `forest auth token create --name <repo>-ci`. **The only one you have to create.** |
+| `GO_PRIVATE_MODULES_PAT` | Org-wide, visible to every private repo — no setup. Pass it as `forest-repo-token`: `install.sh` fetches the CLI with `gh release download` from the **private** forest repo, and the caller's automatic `GITHUB_TOKEN` is scoped to the calling repository only. The same secret doubles as the private-Go-module PAT for components that need one. |
+| `RELEASE_PR_GITHUB_ACTIONS_WORKFLOW` | Org-wide, no setup. Used by release-please. It has to be a PAT (or app token) rather than `GITHUB_TOKEN` — a tag pushed with `GITHUB_TOKEN` does not trigger other workflows, so the release would tag but never publish. |
+
+`understory-io/forest` must also allow its workflows to be used by other
+repositories in the org (Settings → Actions → Access).
 
 ## Basic Pipeline
 
