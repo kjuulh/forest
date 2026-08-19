@@ -131,13 +131,18 @@ jobs:
           cp "target/${{ matrix.target }}/release/${{ inputs.component }}" "$out/${{ inputs.component }}"
           chmod +x "$out/${{ inputs.component }}"
           ls -l "$out"
-          tar -czf "$RUNNER_TEMP/out.tar.gz" \
+          # The filename must be unique per leg, not just the artifact name.
+          # `download-artifact` with `merge-multiple` flattens every artifact
+          # into one directory, so four legs all producing `out.tar.gz` collide
+          # there — which surfaced as `gzip: trailing garbage ignored` and a
+          # tree containing only whichever leg landed last.
+          tar -czf "$RUNNER_TEMP/out-${{ matrix.os }}-${{ matrix.arch }}.tar.gz" \
             -C "components/forest-contrib/${{ inputs.component }}/.forest/component" output
 
       - uses: actions/upload-artifact@v4
         with:
           name: build-output-${{ matrix.os }}-${{ matrix.arch }}
-          path: ${{ runner.temp }}/out.tar.gz
+          path: ${{ runner.temp }}/out-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
           retention-days: 7
           if-no-files-found: error
 

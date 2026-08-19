@@ -374,15 +374,22 @@ jobs:
       # Tarred rather than uploaded as a loose tree: upload-artifact roots the
       # archive at the least common ancestor of the matched files, so a leg
       # that produced a single platform would restore at a different depth than
-      # one that produced three. A tarball pins the layout, and a per-leg name
-      # keeps two legs from colliding on `checksums.sha256`.
+      # one that produced three. A tarball pins the layout.
+      #
+      # The tarball's *filename* carries the leg name too, not just the
+      # artifact name. `download-artifact` with `merge-multiple` flattens every
+      # artifact into one directory, so legs sharing an inner filename collide
+      # there — which shows up as `gzip: trailing garbage ignored` and a tree
+      # holding only whichever leg landed last. Invisible with the default
+      # single-leg matrix; immediate once anyone splits platforms across
+      # runners.
       - name: Package build output
-        run: tar -czf "$RUNNER_TEMP/forest-output.tar.gz" -C .forest/component output
+        run: tar -czf "$RUNNER_TEMP/forest-output-${{ matrix.name }}.tar.gz" -C .forest/component output
 
       - uses: actions/upload-artifact@v4
         with:
           name: forest-output-${{ matrix.name }}
-          path: ${{ runner.temp }}/forest-output.tar.gz
+          path: ${{ runner.temp }}/forest-output-${{ matrix.name }}.tar.gz
           retention-days: 7
           if-no-files-found: error
 
