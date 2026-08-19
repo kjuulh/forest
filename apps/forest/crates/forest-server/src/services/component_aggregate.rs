@@ -30,6 +30,28 @@ fn shape_str_to_proto(s: &str) -> forest_grpc_interface::ComponentShape {
     }
 }
 
+/// Order two component versions by semver precedence, ascending (DATA-583).
+///
+/// Replaces a SQL `ORDER BY split_part(version, '.', N)::int`, which was not
+/// just imprecise but *fatal*: the third dot-part of `0.1.7-ci.1` is `7-ci`,
+/// and casting that to `int` raises `invalid input syntax for type integer`.
+/// A single prerelease anywhere in a component's history therefore broke every
+/// query using that ordering, taking `forest components show` down for the
+/// whole component.
+///
+/// Non-semver versions can exist in old rows, so parse failures must not panic
+/// or reorder anything violently: anything unparseable sorts below everything
+/// parseable, and ties fall back to a plain string comparison so the order
+/// stays total and stable.
+fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    match (semver::Version::parse(a), semver::Version::parse(b)) {
+        (Ok(a), Ok(b)) => a.cmp(&b),
+        (Ok(_), Err(_)) => std::cmp::Ordering::Greater,
+        (Err(_), Ok(_)) => std::cmp::Ordering::Less,
+        (Err(_), Err(_)) => a.cmp(b),
+    }
+}
+
 // ============================================================
 // Read-model types
 // ============================================================
@@ -639,23 +661,35 @@ impl ComponentService {
         name: &str,
         organisation: &str,
     ) -> anyhow::Result<Option<ComponentVersion>> {
-        let row = sqlx::query(
+        // Ordering happens in Rust, not SQL. The previous
+        // `split_part(version, '.', N)::int DESC` could not merely mis-sort a
+        // semver prerelease — it made the whole query *fail*: for `0.1.7-ci.1`
+        // the third dot-separated part is `7-ci`, and `'7-ci'::int` raises
+        // `invalid input syntax for type integer`. One prerelease anywhere in a
+        // component's history took out `forest components show` for that
+        // component entirely (DATA-583).
+        //
+        // `semver::Version` also gets the precedence rules right, which the
+        // numeric split never could: a prerelease sorts *below* its release, so
+        // `0.1.8-rc.1 < 0.1.8`. That is what stops a release candidate from
+        // presenting itself as the latest version.
+        let rows = sqlx::query(
             "SELECT id, name, organisation, version
              FROM components
-             WHERE name = $1 AND organisation = $2
-             ORDER BY
-               split_part(version, '.', 1)::int DESC,
-               split_part(version, '.', 2)::int DESC,
-               split_part(version, '.', 3)::int DESC
-             LIMIT 1",
+             WHERE name = $1 AND organisation = $2",
         )
         .bind(name)
         .bind(organisation)
-        .fetch_optional(&self.db)
+        .fetch_all(&self.db)
         .await
         .context("get component")?;
 
-        Ok(row.map(|r| ComponentVersion {
+        let latest = rows.into_iter().max_by(|a, b| {
+            let (av, bv): (String, String) = (a.get("version"), b.get("version"));
+            compare_versions(&av, &bv)
+        });
+
+        Ok(latest.map(|r| ComponentVersion {
             id: r.get::<Uuid, _>("id").to_string(),
             name: r.get("name"),
             organisation: r.get("organisation"),
@@ -951,17 +985,22 @@ impl ComponentService {
                         ''
                     ) as protocol_version
              FROM components c
-             WHERE c.organisation = $1 AND c.name = $2
-             ORDER BY
-               split_part(c.version, '.', 1)::int DESC,
-               split_part(c.version, '.', 2)::int DESC,
-               split_part(c.version, '.', 3)::int DESC",
+             WHERE c.organisation = $1 AND c.name = $2",
         )
         .bind(organisation)
         .bind(name)
         .fetch_all(&self.db)
         .await
         .context("list versions")?;
+
+        // Sorted in Rust for the same reason as `get_component` above: the
+        // `::int` cast on a dot-part raised a Postgres error on any semver
+        // prerelease rather than just ordering it oddly. Newest first.
+        let mut rows = rows;
+        rows.sort_by(|a, b| {
+            let (av, bv): (String, String) = (a.get("version"), b.get("version"));
+            compare_versions(&bv, &av)
+        });
 
         let mut versions = Vec::new();
         for row in rows {
@@ -1319,8 +1358,6 @@ impl ComponentService {
         organisation: &str,
         name: &str,
     ) -> anyhow::Result<Option<forest_grpc_interface::GetComponentDetailResponse>> {
-        use sqlx::Row;
-
         let latest = self.get_component(name, organisation).await?;
         let Some(latest) = latest else {
             return Ok(None);
@@ -1586,5 +1623,111 @@ impl ComponentServiceState for crate::state::State {
             self.db.clone(),
             self.object_store.clone(),
         )
+    }
+}
+
+/// DATA-583 — semver ordering for the registry's "latest version" and the
+/// version list.
+///
+/// These are pure ordering tests against `compare_versions`; the behaviour they
+/// protect used to live in SQL, where it could not be tested at all without a
+/// live database — which is part of why a prerelease took `components show`
+/// down unnoticed.
+#[cfg(test)]
+mod version_ordering_tests {
+    use super::compare_versions;
+    use std::cmp::Ordering;
+
+    /// Newest-first sort, matching what `list_versions` does.
+    fn sorted_desc(versions: &[&str]) -> Vec<String> {
+        let mut v: Vec<String> = versions.iter().map(|s| s.to_string()).collect();
+        v.sort_by(|a, b| compare_versions(b, a));
+        v
+    }
+
+    #[test]
+    fn a_prerelease_does_not_break_ordering() {
+        // The regression. `0.1.7-ci.1` has `7-ci` as its third dot-part, which
+        // the old `::int` cast could not parse — the query errored outright
+        // rather than returning a wrong order.
+        assert_eq!(
+            sorted_desc(&["0.1.7", "0.1.8", "0.1.7-ci.1", "0.1.6"]),
+            vec!["0.1.8", "0.1.7", "0.1.7-ci.1", "0.1.6"],
+        );
+    }
+
+    #[test]
+    fn a_prerelease_sorts_below_its_release() {
+        // Semver precedence, and the property that keeps a release candidate
+        // from advertising itself as the latest version.
+        assert_eq!(compare_versions("0.1.8-rc.1", "0.1.8"), Ordering::Less);
+        assert_eq!(
+            compare_versions("1.0.0-alpha", "1.0.0-beta"),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn a_prerelease_still_outranks_the_previous_release() {
+        // 0.1.8-rc.1 is newer than 0.1.7 — which is exactly why a *high*
+        // prerelease would become "latest" and why test tags are numbered
+        // below the current release.
+        assert_eq!(compare_versions("0.1.8-rc.1", "0.1.7"), Ordering::Greater);
+    }
+
+    #[test]
+    fn double_digit_segments_compare_numerically_not_lexically() {
+        // The one thing the old integer cast did get right, kept: a string
+        // sort would put 0.1.9 above 0.1.10.
+        assert_eq!(sorted_desc(&["0.1.9", "0.1.10"]), vec!["0.1.10", "0.1.9"]);
+        assert_eq!(sorted_desc(&["0.9.0", "0.10.0"]), vec!["0.10.0", "0.9.0"]);
+    }
+
+    #[test]
+    fn build_metadata_breaks_ties_deterministically() {
+        // The semver *spec* says build metadata does not affect precedence,
+        // which makes precedence only a partial order. The `semver` crate's
+        // `Ord` deliberately deviates to give a total order, ranking build
+        // metadata above its absence.
+        //
+        // A total order is what sorting a version list actually requires — a
+        // partial one would let equal-precedence rows come back in arbitrary,
+        // run-to-run-varying positions. Asserted here so the deviation is a
+        // recorded decision rather than a surprise; no component in the
+        // registry publishes build metadata today.
+        assert_eq!(
+            compare_versions("1.0.0+build.1", "1.0.0"),
+            Ordering::Greater
+        );
+        assert_eq!(compare_versions("1.0.0", "1.0.0"), Ordering::Equal);
+    }
+
+    #[test]
+    fn unparseable_versions_sort_below_and_never_panic() {
+        // Old rows may hold values semver cannot parse. They must not take the
+        // query out a second time, and must not outrank a real version.
+        assert_eq!(compare_versions("not-a-version", "0.1.0"), Ordering::Less);
+        assert_eq!(
+            compare_versions("0.1.0", "not-a-version"),
+            Ordering::Greater
+        );
+        // Total and stable among themselves.
+        assert_eq!(compare_versions("latest", "latest"), Ordering::Equal);
+        assert_eq!(
+            sorted_desc(&["0.1.0", "latest", "0.2.0"]),
+            vec!["0.2.0", "0.1.0", "latest"],
+        );
+    }
+
+    #[test]
+    fn the_latest_of_a_realistic_history_is_the_highest_release() {
+        // pgjump's actual version history at the time of the bug.
+        let history = ["0.1.5", "0.1.6", "0.1.7", "0.1.7-ci.1", "0.1.8"];
+        let latest = history
+            .iter()
+            .copied()
+            .max_by(|a, b| compare_versions(a, b))
+            .unwrap();
+        assert_eq!(latest, "0.1.8");
     }
 }
