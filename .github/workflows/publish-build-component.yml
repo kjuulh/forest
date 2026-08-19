@@ -1,0 +1,221 @@
+name: publish build component
+
+# Release a `forest-contrib/build-*` component (DATA-583).
+#
+# ── Why this cannot use forest-publish.yml ─────────────────────────────
+#
+# The normal component release path is `forest run build` → `forest publish`,
+# where the build is done by a depended-on build component (DATA-312). That is
+# circular here: these *are* the build components. A build component cannot
+# build itself, and the published `build-rust` predates the `forest-build-core`
+# that understands `FOREST_BUILD_TARGETS`, so it cannot be split across native
+# runners either — it would try the whole architecture matrix on every runner
+# and fail on the cross targets.
+#
+# So this workflow bootstraps: plain `cargo build` per native runner, assembling
+# the same `.forest/component/output/<os>/<arch>/<name>` tree the build
+# components would have written. `forest publish` reads that layout directly and
+# neither knows nor cares what produced it.
+#
+# Cross-compilation is the whole reason for the matrix. Linux→macOS needs a
+# toolchain we do not have, so each platform is built where it is native —
+# except macOS amd64, which Apple's linker can target from arm64.
+#
+# ── Safety ────────────────────────────────────────────────────────────
+#
+# Publishing a new version of a build component is inert for existing
+# consumers: dependents pin an exact version (`"forest-contrib/build-go":
+# version: "0.1.3"`), so nothing picks it up until a repo deliberately bumps.
+#
+# Manual dispatch only. These are released rarely and deliberately, and the
+# in-repo version has drifted from the registry before (forest.cue said 0.1.1
+# while 0.1.3 was published) precisely because it was done by hand off-repo.
+# The version still comes from the component's own forest.cue.
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Which build component to publish.
+        type: choice
+        required: true
+        options:
+          - build-go
+          - build-rust
+          - build-docker
+      context-name:
+        description: forest context to provision on the runner.
+        type: string
+        required: false
+        default: understory-prod
+      server:
+        description: Registry to publish to.
+        type: string
+        required: false
+        default: https://api.forest.understory.sh
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Shell out to `git` for fetches so cargo picks up the SSH agent and the
+  # insteadOf rule below — same convention as ci.yaml and release.yml. Without
+  # it cargo uses libgit2 and cannot reach the workspace's private git deps.
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  # The forest CLI does not use sqlx, but other workspace members do; set this
+  # so resolving the workspace never needs a live database.
+  SQLX_OFFLINE: "true"
+
+jobs:
+  build:
+    name: build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            os: linux
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            os: linux
+            arch: arm64
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+            os: macos
+            arch: arm64
+          # Apple's clang targets x86_64 from an arm64 host, so this one cross
+          # is safe. Every other pairing needs a toolchain we cannot assume.
+          - runner: macos-latest
+            target: x86_64-apple-darwin
+            os: macos
+            arch: amd64
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup ssh agent
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.HB_GITHUB_SSH_KEY }}
+      - name: Setup git for private auth
+        run: |
+          git config --global url."ssh://git@github.com".insteadOf https://github.com
+          mkdir -p -m 0600 ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - uses: jdx/mise-action@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Native targets need no `rustup target add`; the one cross does.
+      - name: Add the cross target
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Build
+        working-directory: apps/forest
+        run: cargo build --release --target ${{ matrix.target }} -p ${{ inputs.component }}
+
+      # Assemble the layout `forest publish` discovers. This is the whole trick:
+      # the output tree is a plain filesystem contract, so a plain cargo build
+      # can stand in for the build component that cannot build itself.
+      - name: Stage the artifact
+        working-directory: apps/forest
+        run: |
+          set -euo pipefail
+          out="components/forest-contrib/${{ inputs.component }}/.forest/component/output/${{ matrix.os }}/${{ matrix.arch }}"
+          mkdir -p "$out"
+          cp "target/${{ matrix.target }}/release/${{ inputs.component }}" "$out/${{ inputs.component }}"
+          chmod +x "$out/${{ inputs.component }}"
+          ls -l "$out"
+          tar -czf "$RUNNER_TEMP/out.tar.gz" \
+            -C "components/forest-contrib/${{ inputs.component }}/.forest/component" output
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-output-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/out.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    needs: build
+    # linux/amd64 is in the matrix above, which matters: `forest publish` runs
+    # the freshly built binary for the runner's own platform to derive the
+    # manifest from its `_meta/describe` response.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: jdx/mise-action@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cue
+        run: |
+          set -euo pipefail
+          mise use -g cue@latest
+          cue version
+
+      - name: Install forest CLI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FOREST_PROFILE: name=${{ inputs.context-name }},server=${{ inputs.server }}
+          FOREST_NO_SHELL_INTEGRATION: "1"
+        run: |
+          set -euo pipefail
+          gh release download --repo understory-io/forest --pattern install.sh --dir "$RUNNER_TEMP"
+          bash "$RUNNER_TEMP/install.sh"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: build-output-*
+          path: ${{ runner.temp }}/artifacts
+          merge-multiple: true
+
+      - name: Reassemble the output tree
+        working-directory: apps/forest/components/forest-contrib/${{ inputs.component }}
+        run: |
+          set -euo pipefail
+          mkdir -p .forest/component
+          shopt -s nullglob
+          archives=("$RUNNER_TEMP"/artifacts/*.tar.gz)
+          if [ ${#archives[@]} -eq 0 ]; then
+            echo "::error::No build artifacts downloaded — nothing to publish." >&2
+            exit 1
+          fi
+          for a in "${archives[@]}"; do tar -xzf "$a" -C .forest/component; done
+          echo "Platforms:"
+          find .forest/component/output -mindepth 2 -maxdepth 2 -type d | sort
+
+      # The version comes from the component's own forest.cue, same as every
+      # other publish. Re-publishing an existing version fails cleanly with
+      # "already published", so a forgotten bump is caught here rather than
+      # silently overwriting.
+      - name: Publish
+        working-directory: apps/forest/components/forest-contrib/${{ inputs.component }}
+        env:
+          FOREST_TOKEN: ${{ secrets.FOREST_TOKEN }}
+        run: forest publish
+
+      - name: Verify the published version resolves
+        working-directory: apps/forest/components/forest-contrib/${{ inputs.component }}
+        env:
+          FOREST_TOKEN: ${{ secrets.FOREST_TOKEN }}
+          FOREST_SERVER: ${{ inputs.server }}
+        run: |
+          set -euo pipefail
+          # `cue` is invoked directly here rather than through forest, so it
+          # needs CUE_REGISTRY derived the way `contexts::derive_cue_registry`
+          # does — otherwise the sdk import cannot resolve. Reads are anonymous.
+          host="${FOREST_SERVER#*://}"; host="${host%%/*}"; host="${host%%:*}"
+          export CUE_REGISTRY="forest.sh=registry.${host},registry.cuelang.org"
+          version="$(cue export --out json ./*.cue | jq -r '.forest.component.version')"
+          forest components show "forest-contrib/${{ inputs.component }}" --format json \
+            | jq -e --arg v "$version" '.versions[] | select(.version == $v)' > /dev/null
+          echo "::notice::forest-contrib/${{ inputs.component }}@$version is resolvable."
