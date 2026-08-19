@@ -160,10 +160,31 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
+      # cue is installed as a plain binary here rather than through mise, and
+      # that is load-bearing.
+      #
+      # `apps/forest/mise.toml` sets, for local development:
+      #
+      #   CUE_REGISTRY = "forest.sh=registry.api.forest.development.understory.sh,…"
+      #
+      # Build components live under `apps/forest/`, so a mise-shimmed `cue`
+      # invoked from this directory picks that up — and mise's `[env]`
+      # *overrides* an explicitly exported value, so setting CUE_REGISTRY in the
+      # step is not enough. The dev registry does not serve the prod modules
+      # (`forest.sh/forest/sdk@v0.7.0` is HTTP 404 there, 200 on prod), which
+      # surfaces as a bare "module not found" pointing at the import line.
+      #
+      # A plain binary is outside mise's shim, so it sees the environment this
+      # workflow actually sets. The step below asserts that, because silently
+      # resolving against the wrong registry is exactly the failure this
+      # replaces — and publishing against the wrong one would be worse.
       - name: Install cue
+        env:
+          CUE_VERSION: v0.17.1
         run: |
           set -euo pipefail
-          mise use -g cue@latest
+          curl -sSL "https://github.com/cue-lang/cue/releases/download/${CUE_VERSION}/cue_${CUE_VERSION}_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin cue
           cue version
 
       - name: Install forest CLI
@@ -233,6 +254,20 @@ jobs:
           echo "--- cue export, unwrapped"
           cue export --out json ./*.cue > /dev/null 2>/tmp/cue.err || true
           head -20 /tmp/cue.err || true
+
+          # Guard against the failure this whole step was written for: a
+          # *mise-shimmed* cue re-injects apps/forest/mise.toml's dev
+          # CUE_REGISTRY and overrides what we exported, so the exported value
+          # alone proves nothing — where the binary comes from is what matters.
+          cue_path="$(command -v cue)"
+          echo "--- cue binary: $cue_path"
+          echo "--- exported CUE_REGISTRY: ${CUE_REGISTRY}"
+          case "$cue_path" in
+            *mise*|*/shims/*)
+              echo "::error::cue resolves through a mise shim, which re-applies apps/forest/mise.toml's development CUE_REGISTRY and overrides the exported one. That registry does not serve the prod modules, which surfaces as a bare 'module not found'. Install cue as a plain binary." >&2
+              exit 1
+              ;;
+          esac
 
       - name: Publish
         working-directory: apps/forest/components/forest-contrib/${{ inputs.component }}
