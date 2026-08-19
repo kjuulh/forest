@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.11](https://github.com/understory-io/forest/compare/v0.2.10...v0.2.11) (2026-08-19)
+
+
+### Bug Fixes
+
+* **ci:** give each build leg's tarball a unique filename ([#141](https://github.com/understory-io/forest/issues/141)) ([fd81c80](https://github.com/understory-io/forest/commit/fd81c80844e5502885bb81505190f2bd996d85a5))
+* **ci:** set CUE_REGISTRY explicitly in the publish workflows ([#138](https://github.com/understory-io/forest/issues/138)) ([0e4892e](https://github.com/understory-io/forest/commit/0e4892ecff3e7f69be71248b1fed1d1b01af620a))
+* **global:** capture shell integration for already-cached tools (DATA-588) ([#140](https://github.com/understory-io/forest/issues/140)) ([b9d0447](https://github.com/understory-io/forest/commit/b9d044746a8504477e1dbd01e2807300a2962419))
+
 ## [0.2.10](https://github.com/understory-io/forest/compare/v0.2.9...v0.2.10) (2026-08-19)
 
 
