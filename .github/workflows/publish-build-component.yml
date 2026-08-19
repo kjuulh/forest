@@ -194,8 +194,25 @@ jobs:
           FOREST_NO_SHELL_INTEGRATION: "1"
         run: |
           set -euo pipefail
-          gh release download --repo understory-io/forest --pattern install.sh --dir "$RUNNER_TEMP"
-          bash "$RUNNER_TEMP/install.sh"
+          # See forest-publish.yml for the reasoning: forest releases on every
+          # merge and attaches install.sh only once all platform builds finish,
+          # so "latest" can briefly be an assetless release. install.sh is
+          # uploaded by a job that needs the builds, so the newest release
+          # carrying it is the newest fully-published one.
+          tag=""
+          for candidate in $(gh release list --repo understory-io/forest --limit 10 --json tagName --jq '.[].tagName'); do
+            if gh release view "$candidate" --repo understory-io/forest --json assets \
+                 --jq '[.assets[].name] | any(. == "install.sh")' | grep -q true; then
+              tag="$candidate"; break
+            fi
+          done
+          if [ -z "$tag" ]; then
+            echo "::error::No forest release with install.sh found in the last 10 releases." >&2
+            exit 1
+          fi
+          echo "installing forest $tag"
+          gh release download "$tag" --repo understory-io/forest --pattern install.sh --dir "$RUNNER_TEMP"
+          bash "$RUNNER_TEMP/install.sh" "$tag"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - uses: actions/download-artifact@v4

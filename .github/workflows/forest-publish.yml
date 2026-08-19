@@ -299,8 +299,35 @@ jobs:
           FOREST_CLI_VERSION: ${{ inputs.forest-version }}
         run: |
           set -euo pipefail
-          gh release download --repo understory-io/forest --pattern install.sh --dir "$RUNNER_TEMP"
-          bash "$RUNNER_TEMP/install.sh" ${FOREST_CLI_VERSION:+"$FOREST_CLI_VERSION"}
+          # Resolve which forest release to install rather than trusting
+          # "latest". forest releases on every merge to main, and its
+          # release.yml attaches install.sh only after all three platform
+          # builds finish — so for several minutes the newest release exists
+          # with no assets, and `gh release download` fails with "no assets to
+          # download". A component release landing in that window would fail
+          # for a reason having nothing to do with the component.
+          #
+          # Because install.sh is uploaded by a job that `needs: [build]`, its
+          # presence proves the tarballs are already there: the newest release
+          # carrying install.sh is the newest fully-published one.
+          tag="${FOREST_CLI_VERSION:-}"
+          if [ -z "$tag" ]; then
+            for candidate in $(gh release list --repo understory-io/forest --limit 10 --json tagName --jq '.[].tagName'); do
+              if gh release view "$candidate" --repo understory-io/forest --json assets \
+                   --jq '[.assets[].name] | any(. == "install.sh")' | grep -q true; then
+                tag="$candidate"
+                break
+              fi
+              echo "forest $candidate has no install.sh yet (release still building) — looking further back"
+            done
+          fi
+          if [ -z "$tag" ]; then
+            echo "::error::No forest release with install.sh found in the last 10 releases." >&2
+            exit 1
+          fi
+          echo "installing forest $tag"
+          gh release download "$tag" --repo understory-io/forest --pattern install.sh --dir "$RUNNER_TEMP"
+          bash "$RUNNER_TEMP/install.sh" "$tag"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # A dirty worktree ends up *inside the released binary*. Go's build info
@@ -424,8 +451,35 @@ jobs:
           FOREST_CLI_VERSION: ${{ inputs.forest-version }}
         run: |
           set -euo pipefail
-          gh release download --repo understory-io/forest --pattern install.sh --dir "$RUNNER_TEMP"
-          bash "$RUNNER_TEMP/install.sh" ${FOREST_CLI_VERSION:+"$FOREST_CLI_VERSION"}
+          # Resolve which forest release to install rather than trusting
+          # "latest". forest releases on every merge to main, and its
+          # release.yml attaches install.sh only after all three platform
+          # builds finish — so for several minutes the newest release exists
+          # with no assets, and `gh release download` fails with "no assets to
+          # download". A component release landing in that window would fail
+          # for a reason having nothing to do with the component.
+          #
+          # Because install.sh is uploaded by a job that `needs: [build]`, its
+          # presence proves the tarballs are already there: the newest release
+          # carrying install.sh is the newest fully-published one.
+          tag="${FOREST_CLI_VERSION:-}"
+          if [ -z "$tag" ]; then
+            for candidate in $(gh release list --repo understory-io/forest --limit 10 --json tagName --jq '.[].tagName'); do
+              if gh release view "$candidate" --repo understory-io/forest --json assets \
+                   --jq '[.assets[].name] | any(. == "install.sh")' | grep -q true; then
+                tag="$candidate"
+                break
+              fi
+              echo "forest $candidate has no install.sh yet (release still building) — looking further back"
+            done
+          fi
+          if [ -z "$tag" ]; then
+            echo "::error::No forest release with install.sh found in the last 10 releases." >&2
+            exit 1
+          fi
+          echo "installing forest $tag"
+          gh release download "$tag" --repo understory-io/forest --pattern install.sh --dir "$RUNNER_TEMP"
+          bash "$RUNNER_TEMP/install.sh" "$tag"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - uses: actions/download-artifact@v4
