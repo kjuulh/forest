@@ -539,11 +539,17 @@ impl GlobalService {
     }
 
     /// Load a tool version's cached `include.shell.init` declaration.
+    ///
+    /// `None` means "not determined yet" — no manifest for this (tool, version)
+    /// has been inspected on this machine. `Some(empty)` means "inspected, and
+    /// the component declares no shell integration". The distinction is what
+    /// [`Self::capture_shell_snippets`] uses to decide whether a manifest fetch
+    /// is worth it.
     pub async fn load_tool_include_shell(
         &self,
         qref: &QualifiedRef,
         version: &str,
-    ) -> Result<std::collections::BTreeMap<String, Vec<String>>> {
+    ) -> Result<Option<std::collections::BTreeMap<String, Vec<String>>>> {
         read_include_shell(&self.paths, qref, version).await
     }
 
@@ -563,7 +569,39 @@ impl GlobalService {
         version: &str,
         binary: &std::path::Path,
     ) -> Result<Vec<String>> {
-        let declared = self.load_tool_include_shell(qref, version).await?;
+        let declared = match self.load_tool_include_shell(qref, version).await? {
+            Some(d) => d,
+            // Never determined: the declaration is normally written on the cold
+            // fetch, so a binary cached *before* this forest existed — or before
+            // the component declared anything — has none, and would otherwise
+            // never capture a snippet until its version changed. Ask the
+            // registry once and record the answer (possibly "nothing"), so this
+            // costs one manifest fetch per (tool, version) and never repeats.
+            //
+            // Only reachable from a warm, which is already a networked
+            // background operation; the hot `forest global run` path never
+            // calls this.
+            None => {
+                let init = match self
+                    .fetch_manifest(&qref.organisation, &qref.name, version)
+                    .await
+                {
+                    Ok(m) => m.include.shell.init,
+                    // Offline, or the version was unpublished. Record nothing —
+                    // a later warm retries.
+                    Err(e) => {
+                        tracing::debug!(
+                            tool = %format!("{}/{}", qref.organisation, qref.name),
+                            version,
+                            "shell declaration backfill skipped: {e:#}"
+                        );
+                        return Ok(Vec::new());
+                    }
+                };
+                self.write_tool_include_shell(qref, version, &init).await?;
+                init
+            }
+        };
         let mut captured = Vec::new();
 
         for (shell, argv) in &declared {
@@ -758,10 +796,13 @@ async fn write_include_shell(
     init: &std::collections::BTreeMap<String, Vec<String>>,
 ) -> Result<()> {
     let file = paths.tool_include_shell_file(&qref.organisation, &qref.name, version);
-    if init.is_empty() {
-        remove_if_present(&file).await?;
-        return Ok(());
-    }
+    // Written even when the component declares nothing (as `{}`). Unlike
+    // `include.env`, absence here is *meaningful*: it is the signal that this
+    // (tool, version) has never had its manifest inspected for a shell block,
+    // which is what lets a warm recover a binary cached by an older forest.
+    // Deleting on empty would make "nothing declared" and "never checked"
+    // indistinguishable, and the recovery path would refetch every manifest on
+    // every warm forever.
     ensure_dir(&paths.tool_include_dir(&qref.organisation, &qref.name, version)).await?;
     let json = serde_json::to_vec(init).context("serialise include shell")?;
     atomic_write(&file, &json).await?;
@@ -774,11 +815,13 @@ async fn read_include_shell(
     paths: &GlobalPaths,
     qref: &QualifiedRef,
     version: &str,
-) -> Result<std::collections::BTreeMap<String, Vec<String>>> {
+) -> Result<Option<std::collections::BTreeMap<String, Vec<String>>>> {
     let file = paths.tool_include_shell_file(&qref.organisation, &qref.name, version);
     match read_optional(&file).await? {
-        None => Ok(std::collections::BTreeMap::new()),
-        Some(s) => serde_json::from_str(&s).context("parse cached include shell"),
+        None => Ok(None),
+        Some(s) => serde_json::from_str(&s)
+            .map(Some)
+            .context("parse cached include shell"),
     }
 }
 
@@ -1990,6 +2033,82 @@ mod tests {
             status: ToolStatus::Missing,
             source,
         }
+    }
+
+    // --- shell declaration cache is tri-state (DATA-588) ------------------
+
+    #[tokio::test]
+    async fn absent_shell_declaration_reads_as_not_determined() {
+        // `None` is what drives the manifest backfill for a binary cached by an
+        // older forest. If this ever returned an empty map instead, such a tool
+        // would silently never capture its integration.
+        let (_d, paths) = tmp_paths();
+        let qref = QualifiedRef::new("cuteorg", "ripgrep");
+        assert_eq!(
+            read_include_shell(&paths, &qref, "1.0.0").await.unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_shell_declaration_is_recorded_not_deleted() {
+        // "Inspected, declares nothing" must be distinguishable from "never
+        // inspected", or every warm would refetch the manifest of every tool
+        // that has no shell integration — forever.
+        let (_d, paths) = tmp_paths();
+        let qref = QualifiedRef::new("cuteorg", "ripgrep");
+        let empty = std::collections::BTreeMap::new();
+        write_include_shell(&paths, &qref, "1.0.0", &empty)
+            .await
+            .unwrap();
+        assert_eq!(
+            read_include_shell(&paths, &qref, "1.0.0").await.unwrap(),
+            Some(empty)
+        );
+        assert!(
+            paths
+                .tool_include_shell_file("cuteorg", "ripgrep", "1.0.0")
+                .exists(),
+            "an empty declaration must still leave a file behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn shell_declaration_round_trips() {
+        let (_d, paths) = tmp_paths();
+        let qref = QualifiedRef::new("cuteorg", "ripgrep");
+        let mut init = std::collections::BTreeMap::new();
+        init.insert(
+            "zsh".to_string(),
+            vec!["init".to_string(), "zsh".to_string()],
+        );
+        write_include_shell(&paths, &qref, "1.0.0", &init)
+            .await
+            .unwrap();
+        assert_eq!(
+            read_include_shell(&paths, &qref, "1.0.0").await.unwrap(),
+            Some(init)
+        );
+    }
+
+    #[tokio::test]
+    async fn shell_declarations_are_per_version() {
+        // A version bump must re-ask, since the new release may add or drop the
+        // declaration entirely.
+        let (_d, paths) = tmp_paths();
+        let qref = QualifiedRef::new("cuteorg", "ripgrep");
+        let mut init = std::collections::BTreeMap::new();
+        init.insert(
+            "zsh".to_string(),
+            vec!["init".to_string(), "zsh".to_string()],
+        );
+        write_include_shell(&paths, &qref, "1.0.0", &init)
+            .await
+            .unwrap();
+        assert_eq!(
+            read_include_shell(&paths, &qref, "1.0.1").await.unwrap(),
+            None
+        );
     }
 
     #[test]
