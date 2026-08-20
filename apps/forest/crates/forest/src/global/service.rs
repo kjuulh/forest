@@ -4,7 +4,7 @@
 //! CLI commands. Reads/writes the user config + lockfile, hits the registry,
 //! manages shims, and dispatches `forest global run` to the right binary.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
@@ -719,19 +719,29 @@ impl GlobalService {
             // aggregate is byte-stable for an unchanged toolset and a diff of it
             // means the toolset genuinely changed.
             for tool in tools {
-                let path = self.paths.tool_shell_snippet(
-                    &tool.organisation,
-                    &tool.name,
-                    &tool.version,
-                    shell,
-                );
-                let Some(script) = read_optional(&path).await? else {
+                // Fall back to the newest *captured* version when the current
+                // one has no snippet yet. A version bump would otherwise silently
+                // delete a working integration from every new shell — the tool is
+                // installed, the user's rc file is unchanged, and their
+                // completions and functions simply vanish until something happens
+                // to run a warm. A one-release-stale completion script is a far
+                // smaller problem than none, and the next warm replaces it.
+                let Some((used_version, script)) =
+                    self.newest_captured_snippet(tool, shell).await?
+                else {
                     continue;
                 };
                 out.push_str(&format!(
                     "\n# ── {} ({}/{}@{}) ──\n",
-                    tool.shim_name, tool.organisation, tool.name, tool.version
+                    tool.shim_name, tool.organisation, tool.name, used_version
                 ));
+                if used_version != tool.version {
+                    out.push_str(&format!(
+                        "# (captured at {used_version}; {} is installed — the next \
+                         `forest global warm` refreshes this)\n",
+                        tool.version
+                    ));
+                }
                 out.push_str(&script);
                 if !script.ends_with('\n') {
                     out.push('\n');
@@ -743,21 +753,97 @@ impl GlobalService {
         Ok(())
     }
 
-    /// Rebuild the aggregates for the current toolset (DATA-588).
+    /// The captured snippet to use for `tool` in `shell`: the one matching its
+    /// installed version if present, otherwise the newest captured version.
     ///
-    /// Convenience over [`Self::rebuild_shell_aggregates`] for callers that
-    /// change the toolset without warming it — `forest global update` bumps
-    /// versions, and since snippets are version-keyed the aggregate would
-    /// otherwise keep serving the previous version's script until the next warm.
-    pub async fn refresh_shell_aggregates(&self) -> Result<()> {
-        let listed: Vec<ListedTool> = self
-            .list()
-            .await?
-            .into_iter()
-            .filter(tool_is_installable)
-            .collect();
-        self.rebuild_shell_aggregates(&listed).await
+    /// Returns `(version_the_script_came_from, script)`, or `None` when this tool
+    /// has never had a snippet captured for this shell.
+    async fn newest_captured_snippet(
+        &self,
+        tool: &ListedTool,
+        shell: &str,
+    ) -> Result<Option<(String, String)>> {
+        newest_captured_snippet(
+            &self.paths,
+            &tool.organisation,
+            &tool.name,
+            &tool.version,
+            shell,
+        )
+        .await
     }
+}
+
+/// The captured snippet to serve for `(org, name, shell)`: the one matching
+/// `version` if present, otherwise the newest captured version.
+///
+/// Returns `(version_the_script_came_from, script)`, or `None` when this tool has
+/// never had a snippet captured for this shell.
+///
+/// The fallback is the whole point. Snippets are keyed by version, so a bump
+/// leaves the installed version with nothing captured — and omitting the tool
+/// then deletes a working integration from every new shell, with no user action
+/// and no message. Serving one release's worth of stale completion script is a
+/// far smaller problem, and the next warm replaces it.
+async fn newest_captured_snippet(
+    paths: &GlobalPaths,
+    org: &str,
+    name: &str,
+    version: &str,
+    shell: &str,
+) -> Result<Option<(String, String)>> {
+    // Exact match is the overwhelmingly common case — one stat, no directory walk.
+    if let Some(script) =
+        read_optional(&paths.tool_shell_snippet(org, name, version, shell)).await?
+    {
+        return Ok(Some((version.to_string(), script)));
+    }
+
+    // Otherwise take the highest captured version by semver, falling back to
+    // string order for anything unparseable so a non-semver tag still yields a
+    // deterministic pick rather than an arbitrary readdir order.
+    // The parent of the *versioned* include dir — i.e. `include/<org>/<name>`,
+    // whose entries are the versions. Taking the parent of a `join("")` path
+    // instead lands on `include/<org>`, whose entries are tool names, and the
+    // walk then finds nothing.
+    let Some(dir) = paths
+        .tool_include_dir(org, name, version)
+        .parent()
+        .map(Path::to_path_buf)
+    else {
+        return Ok(None);
+    };
+    let mut entries = match tokio::fs::read_dir(&dir).await {
+        Ok(e) => e,
+        Err(_) => return Ok(None),
+    };
+    let mut candidates: Vec<String> = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        if let Some(n) = entry.file_name().to_str() {
+            candidates.push(n.to_string());
+        }
+    }
+    candidates.sort_by(
+        |a, b| match (semver::Version::parse(a), semver::Version::parse(b)) {
+            (Ok(x), Ok(y)) => x.cmp(&y),
+            _ => a.cmp(b),
+        },
+    );
+
+    for candidate in candidates.into_iter().rev() {
+        if let Some(script) =
+            read_optional(&paths.tool_shell_snippet(org, name, &candidate, shell)).await?
+        {
+            tracing::debug!(
+                tool = %format!("{org}/{name}"),
+                installed = %version,
+                using = %candidate,
+                "no snippet for the installed version; serving the newest captured one"
+            );
+            return Ok(Some((candidate, script)));
+        }
+    }
+    Ok(None)
 }
 
 // --- helpers --------------------------------------------------------------
@@ -1313,13 +1399,14 @@ impl GlobalService {
         if let Err(e) = self.migrate_binary_store().await {
             tracing::debug!("binary-store migration skipped: {e:#}");
         }
-        // A version bump invalidates the shell aggregate: snippets are keyed by
-        // version, so the bumped tool has none yet and the aggregate still holds
-        // the old one. Rebuilding now drops the stale entry immediately; the next
-        // warm captures the new version's snippet and puts it back. Best-effort.
-        if let Err(e) = self.refresh_shell_aggregates().await {
-            tracing::debug!("refreshing shell aggregates skipped: {e:#}");
-        }
+        // Deliberately does NOT rebuild the shell aggregate. Snippets are keyed
+        // by version, so a bump means the new version has none captured yet — and
+        // rebuilding here removed the tool's integration from every new shell
+        // until something happened to run a warm. Since `update` also runs
+        // unattended from the daily background auto-update, that made working
+        // completions and functions disappear with no user action and no message.
+        // Rebuilding is now the warm's job alone, because a warm has just
+        // captured whatever it is about to publish.
         Ok(UpdateOutcome { bumps, held, sync })
     }
 
@@ -2033,6 +2120,76 @@ mod tests {
             status: ToolStatus::Missing,
             source,
         }
+    }
+
+    // --- snippet fallback across versions (DATA-588) ----------------------
+
+    async fn put_snippet(paths: &GlobalPaths, version: &str, shell: &str, body: &str) {
+        let p = paths.tool_shell_snippet("understory", "pgjump", version, shell);
+        ensure_dir(p.parent().unwrap()).await.unwrap();
+        atomic_write(&p, body.as_bytes()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn exact_version_snippet_wins() {
+        let (_d, paths) = tmp_paths();
+        put_snippet(&paths, "0.1.9", "zsh", "old\n").await;
+        put_snippet(&paths, "0.1.10", "zsh", "new\n").await;
+        let got = newest_captured_snippet(&paths, "understory", "pgjump", "0.1.10", "zsh")
+            .await
+            .unwrap();
+        assert_eq!(got, Some(("0.1.10".to_string(), "new\n".to_string())));
+    }
+
+    #[tokio::test]
+    async fn falls_back_to_newest_captured_when_installed_version_has_none() {
+        // The regression this exists for: a version bump leaves the installed
+        // version with no snippet, and omitting the tool silently deletes a
+        // working integration from every new shell.
+        let (_d, paths) = tmp_paths();
+        put_snippet(&paths, "0.1.9", "zsh", "nine\n").await;
+        let got = newest_captured_snippet(&paths, "understory", "pgjump", "0.1.10", "zsh")
+            .await
+            .unwrap();
+        assert_eq!(got, Some(("0.1.9".to_string(), "nine\n".to_string())));
+    }
+
+    #[tokio::test]
+    async fn fallback_picks_highest_by_semver_not_string_order() {
+        // "0.1.9" > "0.1.10" lexically; semver must win, or a bump past x.y.9
+        // would serve an older script than the one available.
+        let (_d, paths) = tmp_paths();
+        put_snippet(&paths, "0.1.9", "zsh", "nine\n").await;
+        put_snippet(&paths, "0.1.10", "zsh", "ten\n").await;
+        let got = newest_captured_snippet(&paths, "understory", "pgjump", "0.2.0", "zsh")
+            .await
+            .unwrap();
+        assert_eq!(got, Some(("0.1.10".to_string(), "ten\n".to_string())));
+    }
+
+    #[tokio::test]
+    async fn fallback_is_per_shell() {
+        // A tool that declares only zsh must not have its zsh script served as
+        // the bash aggregate's content.
+        let (_d, paths) = tmp_paths();
+        put_snippet(&paths, "0.1.9", "zsh", "zshonly\n").await;
+        assert!(
+            newest_captured_snippet(&paths, "understory", "pgjump", "0.1.10", "bash")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn nothing_captured_yields_none() {
+        let (_d, paths) = tmp_paths();
+        assert!(
+            newest_captured_snippet(&paths, "understory", "pgjump", "0.1.10", "zsh")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     // --- shell declaration cache is tri-state (DATA-588) ------------------

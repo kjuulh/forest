@@ -33,6 +33,11 @@ const AGGREGATE_LITERAL: &str = "${XDG_CACHE_HOME:-$HOME/.cache}/forest/global/s
 /// costs a single `source` of a single file — no process per tool, and above all
 /// no lazy download standing between the user and their prompt.
 ///
+/// `FOREST_NO_SHELL_INTEGRATION=1` opts out entirely — nothing sourced, no warm
+/// started. This exists because the block runs in every interactive shell and
+/// sources third-party script: when that goes wrong, the way back to a working
+/// shell must not be "edit your rc file".
+///
 /// Cold cache (nothing captured yet, so no aggregate): kick off a detached,
 /// silent, throttled warm and arm the deferred loader, so integrations arrive in
 /// *this* shell a moment later instead of blocking it. The `forest` binary is
@@ -49,7 +54,9 @@ pub fn shell_integration_block(shell: &str) -> String {
          # captures each script once and concatenates them here, so this costs one\n\
          # file read rather than one process (or one download) per tool.\n\
          _forest_shell_aggregate=\"{AGGREGATE_LITERAL}/{shell}.sh\"\n\
-         if [ -r \"$_forest_shell_aggregate\" ]; then\n  \
+         if [ -n \"${{FOREST_NO_SHELL_INTEGRATION:-}}\" ]; then\n  \
+           : # opted out — load nothing, start nothing\n\
+         elif [ -r \"$_forest_shell_aggregate\" ]; then\n  \
            . \"$_forest_shell_aggregate\"\n\
          else\n  \
            # Nothing captured yet (fresh install, or a cold cache). Warm in the\n  \
@@ -75,7 +82,9 @@ pub fn fish_shell_integration_block() -> String {
      if test -n \"$XDG_CACHE_HOME\"\n    \
          set forest_shell_aggregate $XDG_CACHE_HOME/forest/global/shell/fish.sh\n\
      end\n\
-     if test -r \"$forest_shell_aggregate\"\n    \
+     if test -n \"$FOREST_NO_SHELL_INTEGRATION\"\n    \
+         # opted out — load nothing, start nothing\n\
+     else if test -r \"$forest_shell_aggregate\"\n    \
          source \"$forest_shell_aggregate\"\n\
      else\n    \
          # Nothing captured yet (fresh install, or a cold cache). Warm in the\n    \
