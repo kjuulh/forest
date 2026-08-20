@@ -86,6 +86,7 @@ and the integrations load into the shell you're already in as soon as they land.
 |---|---|
 | `forest global warm` | Foreground warm with progress. Worth running after `forest global update`. |
 | `forest global warm --background --quiet` | What the emitted block calls: detached, silent, throttled. |
+| `FOREST_NO_SHELL_INTEGRATION=1` | Load nothing, start no warm. The escape hatch: try this first if a new shell misbehaves — it settles in one step whether forest is involved. |
 | `FOREST_NO_GLOBAL_WARM=1` | Disable background warming entirely. |
 | `FOREST_GLOBAL_WARM_INTERVAL_SECS=<n>` | Override the 30-minute warm throttle. |
 | `forest-init <tool> <args…>` | Escape hatch for tools forest can't discover — non-forest installs (cargo, brew), or components that haven't declared `include.shell` yet. Never blocks a cold shell. |

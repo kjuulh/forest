@@ -83,6 +83,11 @@ Useful knobs:
 - `forest global warm --background --quiet` — what the emitted block calls: it
   detaches, prints nothing, and is throttled so opening ten terminals costs one
   warm.
+- `FOREST_NO_SHELL_INTEGRATION=1` turns the whole thing off — nothing sourced, no
+  warm started, the rest of your rc file untouched. Reach for this first if a new
+  shell starts misbehaving: the block sources each tool's own integration script,
+  so setting this and opening a new shell tells you in one step whether forest is
+  involved.
 - `FOREST_NO_GLOBAL_WARM=1` disables background warming;
   `FOREST_GLOBAL_WARM_INTERVAL_SECS` overrides the 30-minute throttle.
 - `forest-init <tool> <args…>` — the escape hatch for the two cases forest can't

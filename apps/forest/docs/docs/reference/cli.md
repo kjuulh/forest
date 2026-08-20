@@ -508,6 +508,21 @@ detached silent warm and arms a prompt hook that sources the aggregate the momen
 it appears — the integrations land in the shell you're already in, without ever
 having blocked it.
 
+### Turning it off
+
+```bash
+export FOREST_NO_SHELL_INTEGRATION=1
+```
+
+Nothing is sourced and no warm is started, in all three shells. The rest of your rc
+file is untouched and `forest` stays on `PATH`.
+
+Reach for this first if a new shell starts misbehaving, because the block sources
+script forest did not write — each tool's own integration, concatenated. Setting it
+and opening a new shell tells you in one step whether forest is involved: if the
+problem goes away it is ours, and if it doesn't, it isn't. That beats bisecting
+your rc file.
+
 ### `forest-init` — the escape hatch
 
 For tools forest can't discover: ones that aren't forest components (installed via
@@ -554,8 +569,14 @@ Behaviour:
 - Already-cached tools are skipped, so a repeat warm costs a lockfile read — but
   their **shell snippets are still captured** if missing, which is how a tool
   cached before it declared `include.shell` catches up.
-- The aggregate is rebuilt on every warm (and on `update`, whose version bumps
-  invalidate version-keyed snippets), so it shrinks when a tool is removed.
+- The aggregate is rebuilt **by warm only**. `forest global update` deliberately
+  leaves it alone: snippets are keyed by version, so a bump means the new version
+  has nothing captured yet, and rebuilding there removed the tool's integration
+  from every new shell until something happened to run a warm. Since `update` also
+  runs from the daily background auto-update, that happened unattended.
+- A tool whose installed version has no captured snippet falls back to its newest
+  captured one rather than dropping out. The entry is annotated with the version it
+  came from, and the next warm refreshes it.
 - Per-tool failures are reported and don't stop the rest of the toolset.
 - `FOREST_NO_GLOBAL_WARM=1` disables warming entirely, including the implicit
   warms that a cold shell start or a skipped `forest-init` would trigger.
