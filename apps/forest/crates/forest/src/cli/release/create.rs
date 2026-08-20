@@ -1,3 +1,5 @@
+use std::env;
+
 use anyhow::Context;
 
 use crate::{state::State, user_state::UserStateLoaderState};
@@ -131,6 +133,12 @@ pub struct CreateCommand {
     /// Use the project's release pipeline instead of deploying directly.
     #[arg(long)]
     pipeline: bool,
+
+    /// Only prepare and annotate; skip the final release step. The
+    /// published annotation is left for the server-side triggers/pipeline
+    /// to pick up and release automatically.
+    #[arg(long = "skip-commit")]
+    skip_commit: bool,
 }
 
 impl CreateCommand {
@@ -147,8 +155,19 @@ impl CreateCommand {
                 "project name not found: set project.name in forest.cue or pass --project",
             )?;
 
-        // ── Resolve git context ──────────────────────────────────────
+        // ── Resolve source context ───────────────────────────────────
+        // Explicit flags win. CI providers win over local git because CI
+        // checkouts are often detached and may not have the same remote
+        // metadata as the canonical source repository.
+        let ci = CiInfo::detect();
         let git = GitInfo::detect().await;
+
+        if self.detect {
+            tracing::debug!(
+                source_type = ?ci.source_type,
+                "detecting release context from environment"
+            );
+        }
 
         if git.dirty {
             tracing::warn!(
@@ -156,35 +175,62 @@ impl CreateCommand {
             );
         }
 
-        let commit_sha =
-            self.commit_sha.clone().or(git.sha.clone()).context(
-                "commit sha not found: are you in a git repository? or pass --commit-sha",
-            )?;
+        let commit_sha = self
+            .commit_sha
+            .clone()
+            .or(ci.sha.clone())
+            .or(git.sha.clone())
+            .context("commit sha not found: set CI env vars, run in a git repository, or pass --commit-sha")?;
 
-        let commit_branch = self.commit_branch.clone().or(git.branch.clone());
-        let commit_message = self.commit_message.clone().or(git.message.clone());
-        let repo_url = self.repo_url.clone().or(git.remote_url.clone());
+        let commit_branch = self
+            .commit_branch
+            .clone()
+            .or(ci.branch.clone())
+            .or(git.branch.clone());
+        let commit_message = self
+            .commit_message
+            .clone()
+            .or(ci.message.clone())
+            .or(git.message.clone());
+        let repo_url = self
+            .repo_url
+            .clone()
+            .or(ci.repo_url.clone())
+            .or(git.remote_url.clone());
 
-        // ── Build title from git context if not provided ─────────────
-        let title = self.title.clone().unwrap_or_else(|| {
+        // ── Build annotation context from CI/git if not provided ──────
+        let title = self.title.clone().or(ci.title.clone()).unwrap_or_else(|| {
             git.subject
                 .clone()
                 .unwrap_or_else(|| format!("release to {}", self.environment))
         });
-        let description = self.description.clone().or(git.body.clone());
+        let description = self
+            .description
+            .clone()
+            .or(ci.description.clone())
+            .or(git.body.clone());
 
-        let source_type = self.source_type.clone().or(Some("local".to_string()));
+        let source_type = self
+            .source_type
+            .clone()
+            .or(ci.source_type.clone())
+            .or(Some("local".to_string()));
+        let run_url = self.run_url.clone().or(ci.run_url.clone());
+        let context_web = self.context_web.clone().or(ci.context_web.clone());
+        let context_pr = self.context_pr.clone().or(ci.context_pr.clone());
+        let version = self.version.clone().or(ci.version.clone());
 
         // ── Resolve author info ──────────────────────────────────────
-        // Prefer explicit flags, then local auth state, then git config.
         //
-        // `--detect` asks a different question — "who wrote this", answered
-        // from the environment — and the chain below would pre-empt it, since
-        // it answers "who is running this" and always has something to say on
-        // a developer's machine. So under `--detect` the flags pass through
-        // untouched and `annotate` resolves them; see `detect::resolve`.
+        // `--detect` asks "who wrote this"; in Woodpecker/Drone that can be
+        // answered directly from the CI env, and in GitHub Actions `annotate`
+        // resolves it from the event payload. With the flag off, preserve the
+        // old local fallback chain.
         let (source_username, source_email) = if self.detect {
-            (self.source_username.clone(), self.source_email.clone())
+            (
+                self.source_username.clone().or(ci.author_name.clone()),
+                self.source_email.clone().or(ci.author_email.clone()),
+            )
         } else {
             let (auth_username, auth_email) = detect_author(state).await;
 
@@ -200,15 +246,17 @@ impl CreateCommand {
             )
         };
 
+        let total_steps = if self.skip_commit { 2 } else { 3 };
+
         // ── 1. Prepare ───────────────────────────────────────────────
-        tracing::info!("step 1/3: prepare");
+        tracing::info!("step 1/{total_steps}: prepare");
         let prepare = PrepareCommand {
             overrides: self.overrides.clone(),
         };
         prepare.execute(state).await.context("prepare")?;
 
         // ── 2. Annotate (annotation_only — no auto-release) ─────────
-        tracing::info!("step 2/3: annotate");
+        tracing::info!("step 2/{total_steps}: annotate");
 
         // Include --set overrides in annotation metadata for traceability
         let mut metadata = self.metadata.clone();
@@ -224,16 +272,16 @@ impl CreateCommand {
                 source_email,
                 context_title: title,
                 context_description: description,
-                context_web: self.context_web.clone(),
+                context_web,
                 organisation: organisation.clone(),
                 project_name,
                 commit_sha: Some(commit_sha),
                 commit_branch,
                 source_type,
-                run_url: self.run_url.clone(),
-                context_pr: self.context_pr.clone(),
+                run_url,
+                context_pr,
                 commit_message,
-                version: self.version.clone(),
+                version,
                 repo_url,
                 detect: self.detect,
                 spec_file: self.spec_file.clone(),
@@ -247,6 +295,13 @@ impl CreateCommand {
 
         let slug = annotated.slug;
         eprintln!("published artifact: {slug}");
+
+        if self.skip_commit {
+            tracing::info!(
+                "skipping release step (--skip-commit); annotation left for server-side pickup"
+            );
+            return Ok(());
+        }
 
         // ── 3. Release ───────────────────────────────────────────────
         tracing::info!("step 3/3: release");
@@ -287,6 +342,219 @@ async fn detect_author(state: &State) -> (Option<String>, Option<String>) {
     }
 }
 
+/// Best-effort source information collected from CI environment variables.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct CiInfo {
+    source_type: Option<String>,
+    sha: Option<String>,
+    branch: Option<String>,
+    message: Option<String>,
+    title: Option<String>,
+    description: Option<String>,
+    repo_url: Option<String>,
+    run_url: Option<String>,
+    context_web: Option<String>,
+    context_pr: Option<String>,
+    version: Option<String>,
+    author_name: Option<String>,
+    author_email: Option<String>,
+}
+
+impl CiInfo {
+    fn detect() -> Self {
+        Self::detect_with(|key| env::var(key).ok())
+    }
+
+    fn detect_with<F>(get: F) -> Self
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        Self::detect_woodpecker(&get)
+            .or_else(|| Self::detect_drone(&get))
+            .or_else(|| Self::detect_github_actions(&get))
+            .unwrap_or_default()
+    }
+
+    fn detect_woodpecker<F>(get: &F) -> Option<Self>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        if env_value(get, "CI_SYSTEM_NAME").as_deref() != Some("woodpecker")
+            && env_value(get, "WOODPECKER").is_none()
+            && env_value(get, "CI_PIPELINE_URL").is_none()
+        {
+            return None;
+        }
+
+        let sha = env_value(get, "CI_COMMIT_SHA");
+        let branch = env_value(get, "CI_COMMIT_SOURCE_BRANCH")
+            .or_else(|| env_value(get, "CI_COMMIT_BRANCH"));
+        let message = env_value(get, "CI_COMMIT_MESSAGE");
+        let (title, body) = split_message(message.as_deref());
+        let repo_url = env_value(get, "CI_REPO_URL")
+            .or_else(|| env_value(get, "CI_REPO_CLONE_URL"))
+            .or_else(|| env_value(get, "CI_REPO_LINK"));
+        let repo_link = env_value(get, "CI_REPO_LINK").or_else(|| repo_url.clone());
+        let run_url = env_value(get, "CI_PIPELINE_URL");
+        let context_pr = pull_request_url(
+            repo_link.as_deref(),
+            env_value(get, "CI_COMMIT_PULL_REQUEST").as_deref(),
+            "pulls",
+        );
+
+        Some(Self {
+            source_type: Some("woodpecker".to_string()),
+            description: body.or_else(|| ci_description(branch.as_deref(), sha.as_deref())),
+            context_web: run_url.clone(),
+            run_url,
+            context_pr,
+            version: sha.clone(),
+            author_name: env_value(get, "CI_COMMIT_AUTHOR"),
+            author_email: env_value(get, "CI_COMMIT_AUTHOR_EMAIL"),
+            sha,
+            branch,
+            message,
+            title,
+            repo_url,
+        })
+    }
+
+    fn detect_drone<F>(get: &F) -> Option<Self>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        if env_value(get, "DRONE").is_none() && env_value(get, "DRONE_BUILD_LINK").is_none() {
+            return None;
+        }
+
+        let sha = env_value(get, "DRONE_COMMIT_SHA");
+        let branch = env_value(get, "DRONE_SOURCE_BRANCH")
+            .or_else(|| env_value(get, "DRONE_TARGET_BRANCH"))
+            .or_else(|| env_value(get, "DRONE_BRANCH"));
+        let message = env_value(get, "DRONE_COMMIT_MESSAGE");
+        let (title, body) = split_message(message.as_deref());
+        let repo_url =
+            env_value(get, "DRONE_REMOTE_URL").or_else(|| env_value(get, "DRONE_REPO_LINK"));
+        let repo_link = env_value(get, "DRONE_REPO_LINK").or_else(|| repo_url.clone());
+        let run_url = env_value(get, "DRONE_BUILD_LINK");
+        let context_pr = pull_request_url(
+            repo_link.as_deref(),
+            env_value(get, "DRONE_PULL_REQUEST").as_deref(),
+            "pulls",
+        );
+
+        Some(Self {
+            source_type: Some("drone".to_string()),
+            description: body.or_else(|| ci_description(branch.as_deref(), sha.as_deref())),
+            context_web: run_url.clone(),
+            run_url,
+            context_pr,
+            version: sha.clone(),
+            author_name: env_value(get, "DRONE_COMMIT_AUTHOR"),
+            author_email: env_value(get, "DRONE_COMMIT_AUTHOR_EMAIL"),
+            sha,
+            branch,
+            message,
+            title,
+            repo_url,
+        })
+    }
+
+    fn detect_github_actions<F>(get: &F) -> Option<Self>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
+        if env_value(get, "GITHUB_ACTIONS").is_none() {
+            return None;
+        }
+
+        let sha = env_value(get, "GITHUB_SHA");
+        let branch =
+            env_value(get, "GITHUB_HEAD_REF").or_else(|| env_value(get, "GITHUB_REF_NAME"));
+        let server =
+            env_value(get, "GITHUB_SERVER_URL").unwrap_or_else(|| "https://github.com".to_string());
+        let repo = env_value(get, "GITHUB_REPOSITORY");
+        let repo_url = repo.as_ref().map(|repo| format!("{server}/{repo}"));
+        let run_url = match (repo.as_ref(), env_value(get, "GITHUB_RUN_ID")) {
+            (Some(repo), Some(run_id)) => Some(format!("{server}/{repo}/actions/runs/{run_id}")),
+            _ => None,
+        };
+        let context_pr = pull_request_url(
+            repo_url.as_deref(),
+            env_value(get, "GITHUB_REF_NAME").as_deref(),
+            "pull",
+        );
+
+        Some(Self {
+            source_type: Some("github_actions".to_string()),
+            description: ci_description(branch.as_deref(), sha.as_deref()),
+            context_web: run_url.clone(),
+            run_url,
+            context_pr,
+            version: sha.clone(),
+            sha,
+            branch,
+            repo_url,
+            ..Default::default()
+        })
+    }
+}
+
+fn env_value<F>(get: &F, key: &str) -> Option<String>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    get(key)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn split_message(message: Option<&str>) -> (Option<String>, Option<String>) {
+    let Some(msg) = message else {
+        return (None, None);
+    };
+
+    let trimmed = msg.trim();
+    if trimmed.is_empty() {
+        return (None, None);
+    }
+
+    match trimmed.split_once('\n') {
+        Some((subject, rest)) => {
+            let rest = rest.trim();
+            (
+                Some(subject.trim().to_string()),
+                if rest.is_empty() {
+                    None
+                } else {
+                    Some(rest.to_string())
+                },
+            )
+        }
+        None => (Some(trimmed.to_string()), None),
+    }
+}
+
+fn ci_description(branch: Option<&str>, sha: Option<&str>) -> Option<String> {
+    match (branch, sha) {
+        (Some(branch), Some(sha)) => Some(format!("Branch: {branch}. Commit: {sha}")),
+        (Some(branch), None) => Some(format!("Branch: {branch}")),
+        (None, Some(sha)) => Some(format!("Commit: {sha}")),
+        (None, None) => None,
+    }
+}
+
+fn pull_request_url(repo_url: Option<&str>, number: Option<&str>, segment: &str) -> Option<String> {
+    let repo_url = repo_url?.trim_end_matches(".git").trim_end_matches('/');
+    let number = number?.trim().split('/').next().unwrap_or_default();
+
+    if number.is_empty() || number == "0" || !number.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+
+    Some(format!("{repo_url}/{segment}/{number}"))
+}
+
 /// Best-effort git information collected from the local repository.
 struct GitInfo {
     sha: Option<String>,
@@ -320,26 +588,7 @@ impl GitInfo {
             git_output(&["config", "user.email"]),
         );
 
-        let (subject, body) = match &message {
-            Some(msg) => {
-                let trimmed = msg.trim();
-                match trimmed.split_once('\n') {
-                    Some((subj, rest)) => {
-                        let rest = rest.trim();
-                        (
-                            Some(subj.trim().to_string()),
-                            if rest.is_empty() {
-                                None
-                            } else {
-                                Some(rest.to_string())
-                            },
-                        )
-                    }
-                    None => (Some(trimmed.to_string()), None),
-                }
-            }
-            None => (None, None),
-        };
+        let (subject, body) = split_message(message.as_deref());
 
         // When dirty, append -dirty to the SHA so it's clear the commit
         // doesn't fully represent what was released.
@@ -369,4 +618,108 @@ async fn git_is_dirty() -> bool {
     git_output(&["status", "--porcelain"])
         .await
         .is_some_and(|s| !s.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn detect(vars: &[(&str, &str)]) -> CiInfo {
+        let vars: HashMap<&str, &str> = vars.iter().copied().collect();
+        CiInfo::detect_with(|key| vars.get(key).map(|value| (*value).to_string()))
+    }
+
+    #[test]
+    fn detects_woodpecker_release_context() {
+        let ci = detect(&[
+            ("CI_SYSTEM_NAME", "woodpecker"),
+            ("CI_COMMIT_SHA", "abc123"),
+            ("CI_COMMIT_BRANCH", "main"),
+            ("CI_COMMIT_MESSAGE", "ship it\n\nbody"),
+            ("CI_REPO_URL", "https://git.kjuulh.io/kjuulh/app.git"),
+            ("CI_REPO_LINK", "https://git.kjuulh.io/kjuulh/app"),
+            (
+                "CI_PIPELINE_URL",
+                "https://ci.git.kjuulh.io/repos/1/pipeline/2",
+            ),
+            ("CI_COMMIT_PULL_REQUEST", "17"),
+            ("CI_COMMIT_AUTHOR", "Kasper"),
+            ("CI_COMMIT_AUTHOR_EMAIL", "kasper@example.com"),
+        ]);
+
+        assert_eq!(ci.source_type.as_deref(), Some("woodpecker"));
+        assert_eq!(ci.sha.as_deref(), Some("abc123"));
+        assert_eq!(ci.branch.as_deref(), Some("main"));
+        assert_eq!(ci.title.as_deref(), Some("ship it"));
+        assert_eq!(ci.description.as_deref(), Some("body"));
+        assert_eq!(ci.version.as_deref(), Some("abc123"));
+        assert_eq!(
+            ci.context_web.as_deref(),
+            Some("https://ci.git.kjuulh.io/repos/1/pipeline/2")
+        );
+        assert_eq!(
+            ci.context_pr.as_deref(),
+            Some("https://git.kjuulh.io/kjuulh/app/pulls/17")
+        );
+        assert_eq!(ci.author_name.as_deref(), Some("Kasper"));
+        assert_eq!(ci.author_email.as_deref(), Some("kasper@example.com"));
+    }
+
+    #[test]
+    fn detects_drone_release_context() {
+        let ci = detect(&[
+            ("DRONE", "true"),
+            ("DRONE_COMMIT_SHA", "def456"),
+            ("DRONE_BRANCH", "main"),
+            ("DRONE_COMMIT_MESSAGE", "deploy"),
+            ("DRONE_REMOTE_URL", "https://git.kjuulh.io/kjuulh/app.git"),
+            ("DRONE_REPO_LINK", "https://git.kjuulh.io/kjuulh/app"),
+            ("DRONE_BUILD_LINK", "https://drone.example.com/kjuulh/app/3"),
+            ("DRONE_PULL_REQUEST", "0"),
+        ]);
+
+        assert_eq!(ci.source_type.as_deref(), Some("drone"));
+        assert_eq!(ci.sha.as_deref(), Some("def456"));
+        assert_eq!(ci.branch.as_deref(), Some("main"));
+        assert_eq!(ci.title.as_deref(), Some("deploy"));
+        assert_eq!(
+            ci.description.as_deref(),
+            Some("Branch: main. Commit: def456")
+        );
+        assert_eq!(
+            ci.run_url.as_deref(),
+            Some("https://drone.example.com/kjuulh/app/3")
+        );
+        assert_eq!(ci.context_pr, None);
+    }
+
+    #[test]
+    fn detects_github_actions_release_context() {
+        let ci = detect(&[
+            ("GITHUB_ACTIONS", "true"),
+            ("GITHUB_SHA", "fed789"),
+            ("GITHUB_REF_NAME", "42/merge"),
+            ("GITHUB_SERVER_URL", "https://github.com"),
+            ("GITHUB_REPOSITORY", "kjuulh/app"),
+            ("GITHUB_RUN_ID", "123"),
+        ]);
+
+        assert_eq!(ci.source_type.as_deref(), Some("github_actions"));
+        assert_eq!(ci.sha.as_deref(), Some("fed789"));
+        assert_eq!(ci.version.as_deref(), Some("fed789"));
+        assert_eq!(ci.branch.as_deref(), Some("42/merge"));
+        assert_eq!(
+            ci.repo_url.as_deref(),
+            Some("https://github.com/kjuulh/app")
+        );
+        assert_eq!(
+            ci.run_url.as_deref(),
+            Some("https://github.com/kjuulh/app/actions/runs/123")
+        );
+        assert_eq!(
+            ci.context_pr.as_deref(),
+            Some("https://github.com/kjuulh/app/pull/42")
+        );
+    }
 }
