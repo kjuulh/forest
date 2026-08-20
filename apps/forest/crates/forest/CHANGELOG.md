@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.13](https://github.com/understory-io/forest/compare/v0.2.12...v0.2.13) (2026-08-20)
+
+
+### Bug Fixes
+
+* **ci:** install the newest forest release that is actually published ([#146](https://github.com/understory-io/forest/issues/146)) ([184550a](https://github.com/understory-io/forest/commit/184550a499892dfc2e0b16a4df3150f372eed6cf))
+* **global:** stop version bumps from deleting shell integrations, add an opt-out (DATA-588) ([#148](https://github.com/understory-io/forest/issues/148)) ([80f207c](https://github.com/understory-io/forest/commit/80f207c5af4c78532b6050b174384d4f63c57804))
+
 ## [0.2.12](https://github.com/understory-io/forest/compare/v0.2.11...v0.2.12) (2026-08-19)
 
 
