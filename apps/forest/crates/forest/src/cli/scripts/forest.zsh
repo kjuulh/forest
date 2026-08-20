@@ -10,6 +10,59 @@ function forest-tmp() {
 
 autoload -Uz add-zsh-hook
 
+# ── compdef guard: tool snippets that assume compinit already ran ────────────
+#
+# Tool snippets register completions with `compdef` at source time. Some check
+# first (`if whence compdef …`, as cobra's generated zsh script does) — but
+# clap's generated footer calls it unguarded. So when the completion system has
+# not been initialised yet, sourcing the aggregate prints
+#
+#   .../forest/global/shell/zsh.sh:1515: command not found: compdef
+#
+# on every new shell. Forest sources script it did not write, so a snippet's
+# assumptions must not be able to spew into the user's startup.
+#
+# Swallowing the calls would trade the error for a silently missing completion.
+# So queue them while `compdef` is absent, and replay them if something defines
+# the real one later (a framework's compinit, running after this point in the rc).
+#
+# The stub is removed again as soon as the aggregate is sourced: leaving a fake
+# `compdef` defined would make later rc code that tests `whence compdef` believe
+# the completion system is up, and skip initialising it.
+
+typeset -ga _forest_compdef_queue
+
+function _forest_compdef_stub() {
+  _forest_compdef_queue+=("${(j: :)${(q)@}}")
+}
+
+function _forest_compdef_guard_begin() {
+  (( $+functions[compdef] || $+builtins[compdef] )) && return 0
+  functions[compdef]='_forest_compdef_stub "$@"'
+  typeset -g _forest_compdef_stubbed=1
+}
+
+function _forest_compdef_guard_end() {
+  (( ${_forest_compdef_stubbed:-0} )) || return 0
+  # Only remove what we installed — never a real compdef.
+  [[ ${functions[compdef]-} == *_forest_compdef_stub* ]] && unfunction compdef
+  unset _forest_compdef_stubbed
+  (( $#_forest_compdef_queue )) && add-zsh-hook precmd _forest_compdef_replay
+  return 0
+}
+
+function _forest_compdef_replay() {
+  (( $+functions[compdef] || $+builtins[compdef] )) || return 0
+  local entry
+  local -a cmd
+  for entry in $_forest_compdef_queue; do
+    cmd=( ${(Q)${(z)entry}} )
+    compdef "${cmd[@]}" 2>/dev/null
+  done
+  _forest_compdef_queue=()
+  add-zsh-hook -d precmd _forest_compdef_replay
+}
+
 # ── forest-defer-aggregate: load component-declared integrations late ────────
 #
 # Called by the block `forest shell zsh` emits when the aggregate of
@@ -29,7 +82,9 @@ function forest-defer-aggregate() {
 
 function _forest_aggregate_drain() {
   [[ -r $_forest_aggregate_path ]] || return 0
+  _forest_compdef_guard_begin
   source "$_forest_aggregate_path"
+  _forest_compdef_guard_end
   # One shot: the aggregate is loaded, so stop checking.
   add-zsh-hook -d precmd _forest_aggregate_drain
   unset _forest_aggregate_path

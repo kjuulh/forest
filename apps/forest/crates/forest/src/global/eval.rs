@@ -47,6 +47,20 @@ const AGGREGATE_LITERAL: &str = "${XDG_CACHE_HOME:-$HOME/.cache}/forest/global/s
 /// `shell` selects the aggregate; deterministic per shell. POSIX form — fish
 /// gets [`fish_shell_integration_block`].
 pub fn shell_integration_block(shell: &str) -> String {
+    // zsh only: tool snippets register completions with `compdef`, and clap's
+    // generated footer calls it unguarded — so on a shell whose completion system
+    // hasn't been initialised yet, sourcing the aggregate prints
+    // "command not found: compdef". The guard queues those calls and replays them
+    // if compinit runs later. bash and fish need nothing equivalent: their
+    // `complete` is a builtin, always available.
+    let (compdef_begin, compdef_end) = if shell == "zsh" {
+        (
+            "_forest_compdef_guard_begin\n  ",
+            "\n  _forest_compdef_guard_end",
+        )
+    } else {
+        ("", "")
+    };
     format!(
         "\n\
          # forest shell — component-declared tool integrations (DATA-588).\n\
@@ -57,7 +71,7 @@ pub fn shell_integration_block(shell: &str) -> String {
          if [ -n \"${{FOREST_NO_SHELL_INTEGRATION:-}}\" ]; then\n  \
            : # opted out — load nothing, start nothing\n\
          elif [ -r \"$_forest_shell_aggregate\" ]; then\n  \
-           . \"$_forest_shell_aggregate\"\n\
+           {compdef_begin}. \"$_forest_shell_aggregate\"{compdef_end}\n\
          else\n  \
            # Nothing captured yet (fresh install, or a cold cache). Warm in the\n  \
            # background — detached, silent, throttled — and load the aggregate as\n  \
@@ -456,6 +470,32 @@ mod tests {
                 "must arm the deferred loader: {b}"
             );
         }
+    }
+
+    #[test]
+    fn zsh_block_guards_the_source_against_a_missing_compdef() {
+        // Tool snippets register completions at source time and clap's generated
+        // footer calls `compdef` unguarded, so a shell whose completion system is
+        // not up yet printed "command not found: compdef" on every start. The
+        // guard queues those calls instead.
+        let b = shell_integration_block("zsh");
+        let begin = b
+            .find("_forest_compdef_guard_begin")
+            .expect("begin missing");
+        let src = b
+            .find(". \"$_forest_shell_aggregate\"")
+            .expect("source missing");
+        let end = b.find("_forest_compdef_guard_end").expect("end missing");
+        assert!(begin < src && src < end, "guard must wrap the source: {b}");
+    }
+
+    #[test]
+    fn only_zsh_gets_the_compdef_guard() {
+        // `complete` is a builtin in bash and fish — always available — so there
+        // is nothing to guard, and emitting a zsh-only helper call would be an
+        // unbound command.
+        assert!(!shell_integration_block("bash").contains("_forest_compdef_guard"));
+        assert!(!fish_shell_integration_block().contains("_forest_compdef_guard"));
     }
 
     #[test]
