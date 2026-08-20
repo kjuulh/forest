@@ -18,6 +18,7 @@ pub struct DestinationRecord {
     pub environment: String,
     pub environment_id: Uuid,
     pub metadata: HashMap<String, String>,
+    pub sensitive_keys: Vec<String>,
     pub type_organisation: String,
     pub type_name: String,
     pub type_version: i32,
@@ -48,6 +49,7 @@ impl DestinationAggregateService {
         name: &str,
         environment: &str,
         metadata: HashMap<String, String>,
+        sensitive_keys: Vec<String>,
         type_organisation: &str,
         type_name: &str,
         type_version: u32,
@@ -77,6 +79,7 @@ impl DestinationAggregateService {
                 environment: environment.to_string(),
                 environment_id: env_id,
                 metadata: metadata.clone(),
+                sensitive_keys: sensitive_keys.clone(),
                 type_organisation: type_organisation.to_string(),
                 type_name: type_name.to_string(),
                 type_version,
@@ -97,8 +100,9 @@ impl DestinationAggregateService {
                     sqlx::query(
                         "INSERT INTO destinations (
                             id, organisation, name, environment, environment_id,
-                            metadata, type_organisation, type_name, type_version
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                            metadata, sensitive_keys, type_organisation, type_name,
+                            type_version
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
                     )
                     .bind(destination_id)
                     .bind(&org)
@@ -106,6 +110,7 @@ impl DestinationAggregateService {
                     .bind(&env_name)
                     .bind(env_id_owned)
                     .bind(serde_json::to_value(&metadata).unwrap())
+                    .bind(serde_json::to_value(&sensitive_keys).unwrap())
                     .bind(&t_org)
                     .bind(&t_name)
                     .bind(type_version as i32)
@@ -162,6 +167,51 @@ impl DestinationAggregateService {
         Ok(())
     }
 
+    pub async fn update_sensitive_keys(
+        &self,
+        organisation: &str,
+        name: &str,
+        sensitive_keys: Vec<String>,
+    ) -> anyhow::Result<()> {
+        let key = destination::stream_key(organisation, name);
+        let mut root = self
+            .event_store
+            .load_or_default::<DestinationAggregate>(&key)
+            .await?;
+
+        DestinationAggregate::update_sensitive_keys(&mut root, sensitive_keys)?;
+
+        // Read back the normalised set the aggregate settled on, so the
+        // projection and the event stream cannot drift.
+        let normalised = root.state.sensitive_keys.clone();
+        let org_owned = organisation.to_string();
+        let name_owned = name.to_string();
+
+        self.event_store
+            .save_with(&mut root, move |_events, tx| {
+                Box::pin(async move {
+                    let res = sqlx::query(
+                        "UPDATE destinations SET sensitive_keys = $1
+                         WHERE organisation = $2 AND name = $3",
+                    )
+                    .bind(serde_json::to_value(&normalised).unwrap())
+                    .bind(&org_owned)
+                    .bind(&name_owned)
+                    .execute(&mut **tx)
+                    .await
+                    .context("update destination sensitive keys projection")?;
+
+                    if res.rows_affected() != 1 {
+                        anyhow::bail!("destination projection not found for update");
+                    }
+                    Ok(())
+                })
+            })
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn delete_destination(&self, organisation: &str, name: &str) -> anyhow::Result<()> {
         let key = destination::stream_key(organisation, name);
         let mut root = self
@@ -204,8 +254,8 @@ impl DestinationAggregateService {
 
     pub async fn get(&self, destination_id: &Uuid) -> anyhow::Result<Option<DestinationRecord>> {
         let row = sqlx::query(
-            "SELECT id, organisation, name, metadata, environment, environment_id,
-                    type_organisation, type_name, type_version
+            "SELECT id, organisation, name, metadata, sensitive_keys, environment,
+                    environment_id, type_organisation, type_name, type_version
              FROM destinations
              WHERE id = $1
              LIMIT 1",
@@ -226,8 +276,8 @@ impl DestinationAggregateService {
         name: &str,
     ) -> anyhow::Result<Option<DestinationRecord>> {
         let row = sqlx::query(
-            "SELECT id, organisation, name, metadata, environment, environment_id,
-                    type_organisation, type_name, type_version
+            "SELECT id, organisation, name, metadata, sensitive_keys, environment,
+                    environment_id, type_organisation, type_name, type_version
              FROM destinations
              WHERE organisation = $1 AND name = $2
              LIMIT 1",
@@ -246,6 +296,7 @@ impl DestinationAggregateService {
 
 fn row_to_record(row: sqlx::postgres::PgRow) -> anyhow::Result<DestinationRecord> {
     let metadata: serde_json::Value = row.get("metadata");
+    let sensitive_keys: serde_json::Value = row.get("sensitive_keys");
     Ok(DestinationRecord {
         id: row.get("id"),
         organisation: row.get("organisation"),
@@ -253,6 +304,8 @@ fn row_to_record(row: sqlx::postgres::PgRow) -> anyhow::Result<DestinationRecord
         environment: row.get("environment"),
         environment_id: row.get("environment_id"),
         metadata: serde_json::from_value(metadata).context("metadata is invalid")?,
+        sensitive_keys: serde_json::from_value(sensitive_keys)
+            .context("sensitive_keys is invalid")?,
         type_organisation: row.get("type_organisation"),
         type_name: row.get("type_name"),
         type_version: row.get("type_version"),

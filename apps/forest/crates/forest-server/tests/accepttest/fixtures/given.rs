@@ -19,6 +19,13 @@ pub trait GivenReleaseFlow {
     async fn an_organisation(self, name: &str) -> Self;
     async fn an_environment(self, name: &str) -> Self;
     async fn a_destination(self, name: &str, environment: &str) -> Self;
+    async fn a_destination_with_sensitive_keys(
+        self,
+        name: &str,
+        environment: &str,
+        extra_metadata: HashMap<String, String>,
+        sensitive_keys: Vec<String>,
+    ) -> Self;
     async fn an_uploaded_artifact(self) -> Self;
     async fn an_annotated_release(self) -> Self;
 }
@@ -87,6 +94,19 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
     }
 
     async fn a_destination(self, name: &str, environment: &str) -> Self {
+        self.a_destination_with_sensitive_keys(name, environment, HashMap::new(), vec![])
+            .await
+    }
+
+    /// Same as `a_destination`, plus extra metadata and a set of
+    /// destination-declared sensitive keys.
+    async fn a_destination_with_sensitive_keys(
+        self,
+        name: &str,
+        environment: &str,
+        extra_metadata: HashMap<String, String>,
+        sensitive_keys: Vec<String>,
+    ) -> Self {
         let mut dest_client = self.fixture().destinations();
 
         // Create a temp directory for the local flux destination
@@ -97,6 +117,7 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
         metadata.insert("cluster_name".into(), "test-cluster".into());
         metadata.insert("namespace".into(), "test-namespace".into());
         metadata.insert("local_path".into(), local_path.clone());
+        metadata.extend(extra_metadata);
 
         let (token, org) = {
             let data = self.data();
@@ -118,6 +139,7 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
                         description: String::new(),
                         fields: vec![],
                     }),
+                    sensitive_keys,
                 },
             ))
             .await

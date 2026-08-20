@@ -287,10 +287,28 @@ pub struct Destination {
     pub name: String,
     pub environment: String,
     pub organisation: String,
+    /// Non-sensitive metadata only — the platform withholds values for keys it
+    /// considers credentials.
     #[serde(default)]
     pub metadata: std::collections::HashMap<String, String>,
+    /// Names of the metadata keys whose values were withheld. Fetch one at a
+    /// time via `reveal_destination_metadata`.
+    #[serde(default)]
+    pub sensitive_keys: Vec<String>,
     #[serde(default)]
     pub dest_type: Option<DestinationType>,
+}
+
+/// Everything needed to create a destination. A struct rather than a long
+/// parameter list so the call sites stay readable.
+pub struct NewDestination<'a> {
+    pub name: &'a str,
+    pub environment: &'a str,
+    pub metadata: &'a std::collections::HashMap<String, String>,
+    /// Metadata keys to treat as credentials on top of whatever the
+    /// destination type declares sensitive.
+    pub sensitive_keys: &'a [String],
+    pub dest_type: Option<&'a DestinationType>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -317,6 +335,10 @@ pub struct MetadataFieldDef {
     pub required: bool,
     pub field_type: String,
     pub default_value: String,
+    /// This field holds a credential: render it masked and never print the
+    /// value into the page by default.
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -679,10 +701,7 @@ pub trait ForestPlatform: Send + Sync {
         &self,
         access_token: &str,
         organisation: &str,
-        name: &str,
-        environment: &str,
-        metadata: &std::collections::HashMap<String, String>,
-        dest_type: Option<&DestinationType>,
+        dest: NewDestination<'_>,
     ) -> Result<(), PlatformError>;
 
     async fn list_destination_types(
@@ -696,7 +715,18 @@ pub trait ForestPlatform: Send + Sync {
         organisation: &str,
         name: &str,
         metadata: &std::collections::HashMap<String, String>,
+        // `None` leaves the stored set untouched.
+        sensitive_keys: Option<&[String]>,
     ) -> Result<(), PlatformError>;
+
+    /// Fetches the value of exactly one withheld metadata key.
+    async fn reveal_destination_metadata(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        name: &str,
+        key: &str,
+    ) -> Result<String, PlatformError>;
 
     async fn get_destination_states(
         &self,

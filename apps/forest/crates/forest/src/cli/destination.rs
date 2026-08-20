@@ -1,7 +1,7 @@
 use crate::{
     cli::destination::{
-        create::CreateCommand, delete::DeleteCommand, list::ListCommand, types::TypesCommand,
-        update::UpdateCommand,
+        create::CreateCommand, delete::DeleteCommand, list::ListCommand,
+        reveal::RevealCommand, types::TypesCommand, update::UpdateCommand,
     },
     state::State,
 };
@@ -9,6 +9,7 @@ use crate::{
 mod create;
 mod delete;
 mod list;
+mod reveal;
 mod types;
 mod update;
 
@@ -26,8 +27,10 @@ enum Commands {
     Update(UpdateCommand),
     /// Delete a destination
     Delete(DeleteCommand),
-    /// List destinations in an organisation
+    /// List destinations in an organisation (sensitive values are hidden)
     List(ListCommand),
+    /// Print one hidden metadata value for a destination
+    Reveal(RevealCommand),
     /// List available destination types (the blessed kinds: flux, terraform, forage, …)
     Types(TypesCommand),
 }
@@ -46,6 +49,7 @@ impl DestinationCommand {
             Commands::Update(cmd) => cmd.execute(state).await,
             Commands::Delete(cmd) => cmd.execute(state).await,
             Commands::List(cmd) => cmd.execute(state).await,
+            Commands::Reveal(cmd) => cmd.execute(state).await,
             Commands::Types(cmd) => cmd.execute(state).await,
         }
     }

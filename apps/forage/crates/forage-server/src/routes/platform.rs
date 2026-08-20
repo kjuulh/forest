@@ -68,6 +68,10 @@ pub fn router() -> Router<AppState> {
             "/orgs/{org}/destinations/detail/update",
             post(update_destination_submit),
         )
+        .route(
+            "/orgs/{org}/destinations/detail/reveal",
+            get(reveal_destination_metadata),
+        )
         .route("/orgs/{org}/settings", get(org_settings))
         .route("/orgs/{org}/settings/usage", get(usage))
         .route("/orgs/{org}/settings/compute", get(compute_page))
@@ -3164,6 +3168,9 @@ async fn destinations_page(
                         .iter()
                         .map(|(k, v)| context! { key => k, value => v })
                         .collect();
+                    // Only non-sensitive values are exported. Withheld keys are
+                    // listed by name so an import prompts for them rather than
+                    // silently writing a placeholder over a real credential.
                     let metadata_json = serde_json::to_string(&d.metadata).unwrap_or_default();
                     context! {
                         name => d.name,
@@ -3173,6 +3180,10 @@ async fn destinations_page(
                         type_version => d.dest_type.as_ref().map(|t| t.version),
                         metadata => meta_entries,
                         metadata_json => metadata_json,
+                        sensitive_keys => &d.sensitive_keys,
+                        sensitive_keys_json => serde_json::to_string(&d.sensitive_keys)
+                            .unwrap_or_else(|_| "[]".to_string()),
+                        metadata_count => d.metadata.len() + d.sensitive_keys.len(),
                     }
                 })
                 .collect();
@@ -3207,6 +3218,10 @@ async fn destinations_page(
                 type_version => d.dest_type.as_ref().map(|t| t.version),
                 metadata => meta_entries,
                 metadata_json => metadata_json,
+                sensitive_keys => &d.sensitive_keys,
+                sensitive_keys_json => serde_json::to_string(&d.sensitive_keys)
+                    .unwrap_or_else(|_| "[]".to_string()),
+                metadata_count => d.metadata.len() + d.sensitive_keys.len(),
             }
         })
         .collect();
@@ -3339,6 +3354,11 @@ struct CreateDestinationForm {
     metadata_keys: Vec<String>,
     #[serde(default, deserialize_with = "deserialize_string_or_seq")]
     metadata_values: Vec<String>,
+    /// Metadata keys the operator marked as credentials. Used for keys the
+    /// destination type does not declare — the type's own sensitive fields are
+    /// handled by the platform without the form saying anything.
+    #[serde(default, deserialize_with = "deserialize_string_or_seq")]
+    sensitive_keys: Vec<String>,
 }
 
 /// HTML forms send a single value as a string, multiple values as a sequence.
@@ -3384,6 +3404,18 @@ fn parse_metadata(keys: &[String], values: &[String]) -> std::collections::HashM
         .filter(|(k, _)| !k.trim().is_empty())
         .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
         .collect()
+}
+
+/// Trims, drops blanks, sorts and de-duplicates a form-supplied key list.
+fn sanitise_sensitive_keys(keys: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = keys
+        .iter()
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 async fn create_destination_submit(
@@ -3433,10 +3465,13 @@ async fn create_destination_submit(
         .create_destination(
             &session.access_token,
             &org,
-            &form.name,
-            &form.environment,
-            &metadata,
-            dest_type.as_ref(),
+            forage_core::platform::NewDestination {
+                name: &form.name,
+                environment: &form.environment,
+                metadata: &metadata,
+                sensitive_keys: &sanitise_sensitive_keys(&form.sensitive_keys),
+                dest_type: dest_type.as_ref(),
+            },
         )
         .await
         .map_err(|e| {
@@ -3480,11 +3515,24 @@ async fn destination_detail(
             )
         })?;
 
-    let meta_entries: Vec<minijinja::Value> = dest
+    // Withheld keys carry no value: the platform did not send one. They render
+    // as a masked row with a reveal control instead.
+    let mut meta_entries: Vec<minijinja::Value> = dest
         .metadata
         .iter()
-        .map(|(k, v)| context! { key => k, value => v })
+        .map(|(k, v)| context! { key => k, value => v, sensitive => false })
+        .chain(
+            dest.sensitive_keys
+                .iter()
+                .map(|k| context! { key => k, value => "", sensitive => true }),
+        )
         .collect();
+    meta_entries.sort_by_key(|e| {
+        e.get_attr("key")
+            .ok()
+            .and_then(|k| k.as_str().map(str::to_owned))
+            .unwrap_or_default()
+    });
 
     let html = state
         .templates
@@ -3506,6 +3554,7 @@ async fn destination_detail(
                 dest_type_organisation => dest.dest_type.as_ref().map(|t| t.organisation.clone()),
                 dest_type_version => dest.dest_type.as_ref().map(|t| t.version),
                 metadata => meta_entries,
+                sensitive_keys => &dest.sensitive_keys,
             },
         )
         .map_err(|e| {
@@ -3516,12 +3565,58 @@ async fn destination_detail(
 }
 
 #[derive(Deserialize)]
+struct RevealQuery {
+    name: String,
+    key: String,
+}
+
+/// Returns one withheld metadata value as plain text, for the reveal control on
+/// the detail page. One key per request, mirroring the platform RPC — there is
+/// no endpoint that hands back every credential on a destination.
+async fn reveal_destination_metadata(
+    State(state): State<AppState>,
+    session: Session,
+    Path(org): Path<String>,
+    Query(query): Query<RevealQuery>,
+) -> Result<Response, Response> {
+    let orgs = &session.user.orgs;
+    let current_org = require_org_membership(&state, orgs, &org)?;
+    require_admin(&state, current_org)?;
+
+    let value = state
+        .platform_client
+        .reveal_destination_metadata(&session.access_token, &org, &query.name, &query.key)
+        .await
+        .map_err(|e| internal_error(&state, "reveal destination metadata", &e))?;
+
+    Ok((
+        StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+            // Keep it out of any shared cache or history.
+            (axum::http::header::CACHE_CONTROL, "no-store, max-age=0"),
+        ],
+        value,
+    )
+        .into_response())
+}
+
+#[derive(Deserialize)]
 struct UpdateDestinationForm {
     _csrf: String,
     #[serde(default, deserialize_with = "deserialize_string_or_seq")]
     metadata_keys: Vec<String>,
     #[serde(default, deserialize_with = "deserialize_string_or_seq")]
     metadata_values: Vec<String>,
+    /// Keys whose values the page never received, so the form cannot echo them
+    /// back. Without these the save below would blank out live credentials.
+    #[serde(default, deserialize_with = "deserialize_string_or_seq")]
+    preserve_sensitive_keys: Vec<String>,
+    /// The sensitive-key set to store. Empty means "leave it as it is".
+    #[serde(default, deserialize_with = "deserialize_string_or_seq")]
+    sensitive_keys: Vec<String>,
+    #[serde(default)]
+    set_sensitive_keys: Option<String>,
 }
 
 async fn update_destination_submit(
@@ -3544,7 +3639,38 @@ async fn update_destination_submit(
         ));
     }
 
-    let metadata = parse_metadata(&form.metadata_keys, &form.metadata_values);
+    let mut metadata = parse_metadata(&form.metadata_keys, &form.metadata_values);
+
+    // The update RPC replaces the whole metadata map, but this page is never
+    // sent the withheld values — so re-read each one here, server-side, and put
+    // it back. Skipping this would delete live credentials on every save.
+    // The values are fetched into this handler only; they never reach the
+    // browser.
+    for key in sanitise_sensitive_keys(&form.preserve_sensitive_keys) {
+        // A blank field means "leave it alone" — the row renders empty because
+        // the value was withheld, not because the operator cleared it. Only a
+        // non-empty entry counts as a deliberate replacement.
+        if metadata.get(&key).is_some_and(|v| !v.is_empty()) {
+            continue;
+        }
+        metadata.remove(&key);
+        let value = state
+            .platform_client
+            .reveal_destination_metadata(
+                &session.access_token,
+                &current_org.name,
+                dest_name,
+                &key,
+            )
+            .await
+            .map_err(|e| internal_error(&state, "preserve sensitive metadata", &e))?;
+        metadata.insert(key, value);
+    }
+
+    let sensitive_keys = form
+        .set_sensitive_keys
+        .as_deref()
+        .map(|_| sanitise_sensitive_keys(&form.sensitive_keys));
 
     state
         .platform_client
@@ -3553,6 +3679,7 @@ async fn update_destination_submit(
             &current_org.name,
             dest_name,
             &metadata,
+            sensitive_keys.as_deref(),
         )
         .await
         .map_err(|e| {

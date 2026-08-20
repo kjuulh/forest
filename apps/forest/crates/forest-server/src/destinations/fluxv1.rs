@@ -74,6 +74,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: true,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "namespace".into(),
@@ -82,6 +83,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: true,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_url".into(),
@@ -91,6 +93,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "url".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_branch".into(),
@@ -99,6 +102,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: "main".into(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_ssh_key_path".into(),
@@ -107,6 +111,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_username".into(),
@@ -115,14 +120,16 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_token".into(),
                 label: "Git Token".into(),
                 description: "Personal access token for HTTPS Git authentication.".into(),
                 required: false,
-                field_type: "text".into(),
+                field_type: "secret".into(),
                 default_value: String::new(),
+                sensitive: true,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_author_name".into(),
@@ -131,6 +138,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: "forest-release".into(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_author_email".into(),
@@ -139,6 +147,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: "forest@release.local".into(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "local_path".into(),
@@ -148,6 +157,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "reconcile_url".into(),
@@ -157,14 +167,16 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "url".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "webhook_secret".into(),
                 label: "Webhook Secret".into(),
                 description: "Shared HMAC secret for Flux notification webhooks back to forest. When set, Provider/Alert/Secret CRs are auto-generated.".into(),
                 required: false,
-                field_type: "text".into(),
+                field_type: "secret".into(),
                 default_value: String::new(),
+                sensitive: true,
             },
             forest_models::MetadataFieldSchema {
                 name: "forest_webhook_url".into(),
@@ -173,6 +185,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "url".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "flux_git_repository_name".into(),
@@ -181,6 +194,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: "flux-system".into(),
+                sensitive: false,
             },
         ]
     }

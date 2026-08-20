@@ -215,6 +215,11 @@ pub struct CreateDestinationRequest {
     pub r#type: ::core::option::Option<DestinationType>,
     #[prost(string, tag="5")]
     pub organisation: ::prost::alloc::string::String,
+    /// Metadata keys to treat as credentials, in addition to those the
+    /// destination type declares sensitive. Lets free-form keys (e.g. terraform
+    /// TF_VAR_* credentials) be marked without changing the type schema.
+    #[prost(string, repeated, tag="6")]
+    pub sensitive_keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateDestinationResponse {
@@ -227,6 +232,12 @@ pub struct UpdateDestinationRequest {
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     #[prost(string, tag="3")]
     pub organisation: ::prost::alloc::string::String,
+    /// Replaces the destination's sensitive-key set when `set_sensitive_keys`
+    /// is true. Ignored otherwise, so older clients keep the existing set.
+    #[prost(string, repeated, tag="4")]
+    pub sensitive_keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(bool, tag="5")]
+    pub set_sensitive_keys: bool,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateDestinationResponse {
@@ -251,6 +262,25 @@ pub struct GetDestinationsResponse {
     #[prost(message, repeated, tag="1")]
     pub destinations: ::prost::alloc::vec::Vec<Destination>,
 }
+/// Fetches the value of exactly one sensitive metadata key. Deliberately
+/// per-key: there is no "reveal everything" call, so pulling a credential is
+/// always an explicit act against a named key.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RevealDestinationMetadataRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub key: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RevealDestinationMetadataResponse {
+    #[prost(string, tag="1")]
+    pub key: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub value: ::prost::alloc::string::String,
+}
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListDestinationTypesRequest {
 }
@@ -265,12 +295,18 @@ pub struct Destination {
     pub name: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
     pub environment: ::prost::alloc::string::String,
+    /// Non-sensitive metadata only. Values for sensitive keys are never sent
+    /// here; fetch them one at a time via RevealDestinationMetadata.
     #[prost(map="string, string", tag="3")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     #[prost(message, optional, tag="4")]
     pub r#type: ::core::option::Option<DestinationType>,
     #[prost(string, tag="5")]
     pub organisation: ::prost::alloc::string::String,
+    /// Names of the metadata keys whose values were withheld from `metadata`.
+    /// Key names only — never values.
+    #[prost(string, repeated, tag="6")]
+    pub sensitive_keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DestinationType {
@@ -299,6 +335,12 @@ pub struct MetadataFieldSchema {
     pub field_type: ::prost::alloc::string::String,
     #[prost(string, tag="6")]
     pub default_value: ::prost::alloc::string::String,
+    /// When true, this field holds a credential. Servers omit its value from
+    /// Destination.metadata in read RPCs and list the key in
+    /// Destination.sensitive_keys instead; clients must not render the value.
+    /// Absent/false on older types, so this is additive and backward compatible.
+    #[prost(bool, tag="7")]
+    pub sensitive: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Environment {

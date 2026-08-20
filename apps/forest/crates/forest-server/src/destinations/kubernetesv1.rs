@@ -31,6 +31,7 @@ impl DestinationEdge for KubernetesV1Destination {
                 required: true,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "namespace".into(),
@@ -39,6 +40,7 @@ impl DestinationEdge for KubernetesV1Destination {
                 required: true,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
         ]
     }

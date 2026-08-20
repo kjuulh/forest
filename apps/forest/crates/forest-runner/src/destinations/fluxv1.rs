@@ -909,6 +909,52 @@ async fn trigger_reconciliation(backend: &dyn DestinationBackend, url: &str) {
 
 // ====== COMMAND EXECUTION ======
 
+/// Strips the userinfo out of any `scheme://user:secret@host` in `text`.
+///
+/// `effective_git_url` embeds `git_username`/`git_token` in the clone URL, so
+/// the argv we log — and the message we bail with — would otherwise carry a
+/// live token into logs and release output.
+fn scrub_url_credentials(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(scheme_end) = rest.find("://") {
+        let after_scheme = scheme_end + 3;
+        // Userinfo ends at the first '@' before the authority's end.
+        let authority_end = rest[after_scheme..]
+            .find(['/', ' '])
+            .map(|i| after_scheme + i)
+            .unwrap_or(rest.len());
+
+        match rest[after_scheme..authority_end].rfind('@') {
+            Some(at) => {
+                let at = after_scheme + at;
+                let userinfo = &rest[after_scheme..at];
+                out.push_str(&rest[..after_scheme]);
+                match userinfo.split_once(':') {
+                    // `user:secret@` — the username is safe to keep, and keeping
+                    // it makes the log useful.
+                    Some((user, _)) if !user.is_empty() => {
+                        out.push_str(user);
+                        out.push_str(":***");
+                    }
+                    // No colon: the whole userinfo may itself be the token
+                    // (`https://ghp_xxx@host` is a valid way to authenticate),
+                    // and there is no way to tell it from a username. Redact it.
+                    _ => out.push_str("***"),
+                }
+                out.push_str(&rest[at..authority_end]);
+            }
+            None => out.push_str(&rest[..authority_end]),
+        }
+
+        rest = &rest[authority_end..];
+    }
+
+    out.push_str(rest);
+    out
+}
+
 async fn run_command(
     backend: &dyn DestinationBackend,
     cwd: &Path,
@@ -916,8 +962,10 @@ async fn run_command(
     env: &HashMap<String, String>,
 ) -> anyhow::Result<()> {
     let exe = std::env::var("GIT_EXE").unwrap_or_else(|_| "git".to_string());
+    // Never log or surface raw argv: the clone URL carries git credentials.
+    let safe_args = scrub_url_credentials(&args.join(" "));
 
-    tracing::debug!(cwd =% cwd.display(), "running {} {}", exe, args.join(" "));
+    tracing::debug!(cwd =% cwd.display(), "running {} {}", exe, safe_args);
 
     let output = tokio::process::Command::new(&exe)
         .current_dir(cwd)
@@ -943,7 +991,7 @@ async fn run_command(
         anyhow::bail!(
             "{} {} failed: {}",
             exe,
-            args.join(" "),
+            safe_args,
             output.status.code().unwrap_or(-1)
         );
     }
@@ -1918,5 +1966,80 @@ mod tests {
             err.to_string().contains("forest_webhook_url"),
             "expected error about forest_webhook_url, got: {err}"
         );
+    }
+}
+
+#[cfg(test)]
+mod credential_scrubbing_tests {
+    use super::*;
+
+    #[test]
+    fn https_userinfo_is_stripped_from_logged_argv() {
+        let argv = "clone --depth 1 https://bot:ghp_abc123@github.com/org/repo.git repo";
+
+        let scrubbed = scrub_url_credentials(argv);
+
+        assert!(!scrubbed.contains("ghp_abc123"), "token leaked: {scrubbed}");
+        assert_eq!(
+            scrubbed,
+            "clone --depth 1 https://bot:***@github.com/org/repo.git repo"
+        );
+    }
+
+    #[test]
+    fn urls_without_credentials_are_untouched() {
+        for argv in [
+            "clone https://github.com/org/repo.git repo",
+            "push origin main",
+            "clone git@github.com:org/repo.git repo",
+        ] {
+            assert_eq!(scrub_url_credentials(argv), argv);
+        }
+    }
+
+    #[test]
+    fn token_only_userinfo_is_redacted_whole() {
+        // `https://<token>@host` authenticates with no username, so the whole
+        // userinfo has to go — it is indistinguishable from a bare username.
+        let scrubbed = scrub_url_credentials("clone https://ghp_abc123@github.com/o/r.git");
+
+        assert!(!scrubbed.contains("ghp_abc123"));
+        assert_eq!(scrubbed, "clone https://***@github.com/o/r.git");
+    }
+
+    #[test]
+    fn multiple_urls_in_one_argv_are_all_scrubbed() {
+        let scrubbed = scrub_url_credentials(
+            "remote set-url https://a:s1@h1/r.git --push https://b:s2@h2/r.git",
+        );
+
+        assert!(!scrubbed.contains("s1"));
+        assert!(!scrubbed.contains("s2"));
+        assert_eq!(
+            scrubbed,
+            "remote set-url https://a:***@h1/r.git --push https://b:***@h2/r.git"
+        );
+    }
+
+    #[test]
+    fn the_effective_git_url_never_survives_scrubbing() {
+        let meta = FluxMetadata::from_metadata(
+            &[
+                ("cluster_name", "c"),
+                ("namespace", "n"),
+                ("git_url", "https://github.com/org/repo.git"),
+                ("git_username", "bot"),
+                ("git_token", "ghp_supersecret"),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        )
+        .unwrap();
+
+        let url = meta.effective_git_url().unwrap();
+        assert!(url.contains("ghp_supersecret"), "precondition: token is embedded");
+
+        assert!(!scrub_url_credentials(&url).contains("ghp_supersecret"));
     }
 }

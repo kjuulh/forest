@@ -1707,6 +1707,7 @@ impl ForestPlatform for GrpcForestClient {
                 environment: d.environment,
                 organisation: d.organisation,
                 metadata: d.metadata,
+                sensitive_keys: d.sensitive_keys,
                 dest_type: d.r#type.map(|t| DestinationType {
                     organisation: t.organisation,
                     name: t.name,
@@ -1792,19 +1793,17 @@ impl ForestPlatform for GrpcForestClient {
         &self,
         access_token: &str,
         organisation: &str,
-        name: &str,
-        environment: &str,
-        metadata: &std::collections::HashMap<String, String>,
-        dest_type: Option<&forage_core::platform::DestinationType>,
+        dest: forage_core::platform::NewDestination<'_>,
     ) -> Result<(), PlatformError> {
         let req = platform_authed_request(
             access_token,
             forage_grpc::CreateDestinationRequest {
                 organisation: organisation.into(),
-                name: name.into(),
-                environment: environment.into(),
-                metadata: metadata.clone(),
-                r#type: dest_type.map(|t| forage_grpc::DestinationType {
+                name: dest.name.into(),
+                environment: dest.environment.into(),
+                metadata: dest.metadata.clone(),
+                sensitive_keys: dest.sensitive_keys.to_vec(),
+                r#type: dest.dest_type.map(|t| forage_grpc::DestinationType {
                     organisation: t.organisation.clone(),
                     name: t.name.clone(),
                     version: t.version,
@@ -1853,6 +1852,7 @@ impl ForestPlatform for GrpcForestClient {
                         required: f.required,
                         field_type: f.field_type,
                         default_value: f.default_value,
+                        sensitive: f.sensitive,
                     })
                     .collect(),
             })
@@ -1865,6 +1865,7 @@ impl ForestPlatform for GrpcForestClient {
         organisation: &str,
         name: &str,
         metadata: &std::collections::HashMap<String, String>,
+        sensitive_keys: Option<&[String]>,
     ) -> Result<(), PlatformError> {
         let req = platform_authed_request(
             access_token,
@@ -1872,6 +1873,8 @@ impl ForestPlatform for GrpcForestClient {
                 name: name.into(),
                 metadata: metadata.clone(),
                 organisation: organisation.into(),
+                set_sensitive_keys: sensitive_keys.is_some(),
+                sensitive_keys: sensitive_keys.unwrap_or_default().to_vec(),
             },
         )?;
         self.dest_client()
@@ -1879,6 +1882,32 @@ impl ForestPlatform for GrpcForestClient {
             .await
             .map_err(map_platform_status)?;
         Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn reveal_destination_metadata(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        name: &str,
+        key: &str,
+    ) -> Result<String, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::RevealDestinationMetadataRequest {
+                organisation: organisation.into(),
+                name: name.into(),
+                key: key.into(),
+            },
+        )?;
+        let resp = self
+            .dest_client()
+            .reveal_destination_metadata(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+
+        Ok(resp.value)
     }
 
     #[tracing::instrument(skip_all)]

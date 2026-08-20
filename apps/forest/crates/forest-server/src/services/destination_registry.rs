@@ -18,6 +18,7 @@ impl DestinationRegistry {
         name: &str,
         environment: &str,
         metadata: HashMap<String, String>,
+        sensitive_keys: Vec<String>,
         destination_type: DestinationType,
     ) -> anyhow::Result<()> {
         // Resolve environment name to environment_id
@@ -39,6 +40,7 @@ impl DestinationRegistry {
                     environment,
                     environment_id,
                     metadata,
+                    sensitive_keys,
                     type_organisation,
                     type_name,
                     type_version
@@ -50,7 +52,8 @@ impl DestinationRegistry {
                     $5,
                     $6,
                     $7,
-                    $8
+                    $8,
+                    $9
                 )
                 ",
             organisation,
@@ -58,6 +61,7 @@ impl DestinationRegistry {
             environment,
             env.id,
             serde_json::to_value(&metadata)?,
+            serde_json::to_value(&sensitive_keys)?,
             destination_type.organisation,
             destination_type.name,
             destination_type.version as i32,
@@ -122,6 +126,7 @@ impl DestinationRegistry {
                     organisation,
                     name,
                     metadata,
+                    sensitive_keys,
                     environment,
                     type_organisation,
                     type_name,
@@ -138,19 +143,24 @@ impl DestinationRegistry {
 
         let Some(rec) = rec else { return Ok(None) };
 
-        Ok(Some(Destination::new(
-            &rec.organisation.to_string(),
-            &rec.name,
-            &rec.environment,
-            serde_json::from_value(rec.metadata).context("metadata is invalid")?,
-            forest_models::DestinationType {
-                organisation: rec.type_organisation,
-                name: rec.type_name,
-                version: rec.type_version as usize,
-                description: String::new(),
-                fields: vec![],
-            },
-        )))
+        Ok(Some(
+            Destination::new(
+                &rec.organisation.to_string(),
+                &rec.name,
+                &rec.environment,
+                serde_json::from_value(rec.metadata).context("metadata is invalid")?,
+                forest_models::DestinationType {
+                    organisation: rec.type_organisation,
+                    name: rec.type_name,
+                    version: rec.type_version as usize,
+                    description: String::new(),
+                    fields: vec![],
+                },
+            )
+            .with_sensitive_keys(
+                serde_json::from_value(rec.sensitive_keys).context("sensitive_keys is invalid")?,
+            ),
+        ))
     }
 }
 

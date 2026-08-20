@@ -77,6 +77,7 @@ pub(crate) struct MockPlatformBehavior {
     pub get_notification_preferences_result: Option<Result<Vec<NotificationPreference>, PlatformError>>,
     pub set_notification_preference_result: Option<Result<(), PlatformError>>,
     pub list_destination_types_result: Option<Result<Vec<DestinationTypeInfo>, PlatformError>>,
+    pub reveal_destination_metadata_result: Option<Result<String, PlatformError>>,
     // DATA-252 — allowed-domain auto-invite.
     pub list_allowed_domains_result:
         Option<Result<Vec<forage_core::platform::AllowedDomain>, PlatformError>>,
@@ -664,10 +665,7 @@ impl ForestPlatform for MockPlatformClient {
         &self,
         _access_token: &str,
         _organisation: &str,
-        _name: &str,
-        _environment: &str,
-        _metadata: &std::collections::HashMap<String, String>,
-        _dest_type: Option<&forage_core::platform::DestinationType>,
+        _dest: forage_core::platform::NewDestination<'_>,
     ) -> Result<(), PlatformError> {
         Ok(())
     }
@@ -686,8 +684,22 @@ impl ForestPlatform for MockPlatformClient {
         _organisation: &str,
         _name: &str,
         _metadata: &std::collections::HashMap<String, String>,
+        _sensitive_keys: Option<&[String]>,
     ) -> Result<(), PlatformError> {
         Ok(())
+    }
+
+    async fn reveal_destination_metadata(
+        &self,
+        _access_token: &str,
+        _organisation: &str,
+        _name: &str,
+        key: &str,
+    ) -> Result<String, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.reveal_destination_metadata_result
+            .clone()
+            .unwrap_or_else(|| Ok(format!("revealed-{key}")))
     }
 
     async fn get_destination_states(

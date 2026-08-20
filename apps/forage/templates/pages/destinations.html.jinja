@@ -36,8 +36,11 @@
                         {% if dest.type_name %}
                         <span class="text-xs px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{{ dest.type_name }}{% if dest.type_version %} v{{ dest.type_version }}{% endif %}</span>
                         {% endif %}
-                        {% if dest.metadata | length > 0 %}
-                        <span class="text-xs text-gray-400">{{ dest.metadata | length }} key{% if dest.metadata | length != 1 %}s{% endif %}</span>
+                        {% if dest.metadata_count > 0 %}
+                        <span class="text-xs text-gray-400">{{ dest.metadata_count }} key{% if dest.metadata_count != 1 %}s{% endif %}</span>
+                        {% endif %}
+                        {% if dest.sensitive_keys | length > 0 %}
+                        <span class="text-xs text-gray-400" title="Hidden values are not included in the exported JSON">{{ dest.sensitive_keys | length }} hidden</span>
                         {% endif %}
                     </a>
                     <button type="button" class="export-dest text-gray-300 hover:text-gray-600 transition-colors p-1 shrink-0" title="Copy JSON to clipboard"
@@ -46,7 +49,8 @@
                         data-type-org="{{ dest.type_org }}"
                         data-type-name="{{ dest.type_name }}"
                         data-type-version="{{ dest.type_version }}"
-                        data-metadata='{{ dest.metadata_json }}'>
+                        data-metadata='{{ dest.metadata_json }}'
+                        data-sensitive-keys='{{ dest.sensitive_keys_json }}'>
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                     </button>
                 </div>
@@ -112,6 +116,9 @@
                                 <div class="flex gap-2 items-center metadata-row">
                                     <input type="text" name="metadata_keys" placeholder="key" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
                                     <input type="text" name="metadata_values" placeholder="value" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
+                                    <label class="shrink-0 flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 cursor-pointer" title="Mark as a credential: the value is hidden after saving">
+                                        <input type="checkbox" class="meta-sensitive accent-green-600">secret
+                                    </label>
                                     <button type="button" onclick="this.closest('.metadata-row').remove()"
                                         class="text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -214,12 +221,33 @@
 <script>
 const destTypes = {{ destination_types_json | safe }};
 
+document.querySelectorAll('form[id^="create-dest-form-"]').forEach(function(form) {
+    form.addEventListener('submit', function() {
+        form.querySelectorAll('input[name="sensitive_keys"]').forEach(function(el) { el.remove(); });
+
+        form.querySelectorAll('.metadata-row').forEach(function(row) {
+            const box = row.querySelector('.meta-sensitive');
+            const keyInput = row.querySelector('input[name="metadata_keys"]');
+            if (!box || !box.checked || !keyInput || !keyInput.value.trim()) return;
+
+            const hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.name = 'sensitive_keys';
+            hidden.value = keyInput.value.trim();
+            form.appendChild(hidden);
+        });
+    });
+});
+
 function addMetaRow(container) {
     const row = document.createElement('div');
     row.className = 'flex gap-2 items-center metadata-row';
     row.innerHTML = `
         <input type="text" name="metadata_keys" placeholder="key" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
         <input type="text" name="metadata_values" placeholder="value" class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 font-mono">
+        <label class="shrink-0 flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 cursor-pointer" title="Mark as a credential: the value is hidden after saving">
+            <input type="checkbox" class="meta-sensitive accent-green-600">secret
+        </label>
         <button type="button" onclick="this.closest('.metadata-row').remove()"
             class="text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -239,6 +267,10 @@ document.querySelectorAll('.export-dest').forEach(function(btn) {
                 version: parseInt(btn.dataset.typeVersion) || 0,
             },
             metadata: JSON.parse(btn.dataset.metadata || '{}'),
+            // Values for these keys were never sent to the browser. They are
+            // listed so an import knows to ask for them rather than writing a
+            // placeholder over a live credential.
+            sensitive_keys_omitted: JSON.parse(btn.dataset.sensitiveKeys || '[]'),
         };
         const json = JSON.stringify(dest, null, 2);
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -414,7 +446,7 @@ function updateTypeFields(idx) {
     }
 
     type.fields.forEach(function(field) {
-        const inputType = field.field_type === 'secret' ? 'password'
+        const inputType = (field.sensitive || field.field_type === 'secret') ? 'password'
                         : field.field_type === 'number' ? 'number'
                         : field.field_type === 'url'    ? 'url'
                         : 'text';

@@ -2,6 +2,7 @@ mod account_link_tests;
 mod account_tests;
 mod auth_tests;
 mod developer_tests;
+mod destination_sensitive_tests;
 mod footer_tests;
 mod device_tests;
 mod integration_tests;

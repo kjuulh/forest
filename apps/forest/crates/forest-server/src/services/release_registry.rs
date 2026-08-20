@@ -1065,6 +1065,7 @@ impl ReleaseRegistry {
                     organisation,
                     name,
                     metadata,
+                    sensitive_keys,
                     environment,
                     type_organisation,
                     type_name,
@@ -1090,8 +1091,14 @@ impl ReleaseRegistry {
                         name: r.type_name,
                         version: r.type_version as usize,
                         description: String::new(),
+                        // Left empty here; the caller joins the live type
+                        // registry to fill in the field schema (and with it
+                        // the `sensitive` flags).
                         fields: vec![],
                     },
+                )
+                .with_sensitive_keys(
+                    serde_json::from_value(r.sensitive_keys).context("parse sensitive_keys")?,
                 ))
             })
             .collect::<anyhow::Result<Vec<_>>>()

@@ -56,9 +56,14 @@
     <div class="border border-gray-200 rounded-lg overflow-hidden">
         <div class="px-5 py-3 bg-gray-50 flex items-center justify-between">
             <span class="text-sm font-medium text-gray-900">Metadata</span>
-            {% if metadata | length > 0 %}
-            <span class="text-xs text-gray-400">{{ metadata | length }} key{% if metadata | length != 1 %}s{% endif %}</span>
-            {% endif %}
+            <span class="flex items-center gap-3">
+                {% if sensitive_keys | length > 0 %}
+                <span class="text-xs text-gray-400">{{ sensitive_keys | length }} hidden</span>
+                {% endif %}
+                {% if metadata | length > 0 %}
+                <span class="text-xs text-gray-400">{{ metadata | length }} key{% if metadata | length != 1 %}s{% endif %}</span>
+                {% endif %}
+            </span>
         </div>
 
         {% if is_admin %}
@@ -68,11 +73,25 @@
                 {% for entry in metadata %}
                 <div class="px-5 py-3 flex items-center gap-3 metadata-row">
                     <input type="text" name="metadata_keys" value="{{ entry.key }}"
-                        placeholder="key"
-                        class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+                        placeholder="key" {% if entry.sensitive %}readonly{% endif %}
+                        class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono{% if entry.sensitive %} bg-gray-50 text-gray-500{% endif %}">
+                    {% if entry.sensitive %}
+                    {# The page is never sent this value. The name is echoed back so
+                       the save can restore it server-side instead of blanking it. #}
+                    <input type="hidden" name="preserve_sensitive_keys" value="{{ entry.key }}">
+                    <div class="flex-1 flex items-center gap-2">
+                        <input type="text" name="metadata_values" value="" autocomplete="off"
+                            data-sensitive-key="{{ entry.key }}"
+                            placeholder="hidden — leave blank to keep, or type to replace"
+                            class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+                        <button type="button" class="reveal-btn shrink-0 text-xs px-2 py-1 border border-gray-200 rounded-md text-gray-500 hover:text-gray-900 hover:border-gray-300 transition-colors"
+                            data-key="{{ entry.key }}" title="Fetch and show this value">Reveal</button>
+                    </div>
+                    {% else %}
                     <input type="text" name="metadata_values" value="{{ entry.value }}"
                         placeholder="value"
                         class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+                    {% endif %}
                     <button type="button" onclick="this.closest('.metadata-row').remove()"
                         class="text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -110,7 +129,11 @@
             {% for entry in metadata %}
             <div class="px-5 py-3 flex items-center gap-3">
                 <span class="flex-1 text-sm font-mono text-gray-600">{{ entry.key }}</span>
+                {% if entry.sensitive %}
+                <span class="flex-1 text-sm font-mono text-gray-400 select-none" title="Hidden — ask an admin to reveal it">••••••••</span>
+                {% else %}
                 <span class="flex-1 text-sm font-mono text-gray-900">{{ entry.value }}</span>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
@@ -122,6 +145,46 @@
 </section>
 
 <script>
+// Reveal fetches one key at a time from the server; values are never rendered
+// into the page up front.
+document.querySelectorAll('.reveal-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        const key = btn.dataset.key;
+        const input = btn.parentElement.querySelector('input[name="metadata_values"]');
+        if (!input) return;
+
+        if (btn.dataset.revealed === '1') {
+            input.value = '';
+            input.placeholder = 'hidden — leave blank to keep, or type to replace';
+            btn.textContent = 'Reveal';
+            btn.dataset.revealed = '0';
+            return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = '…';
+        const url = '/orgs/{{ org_name }}/destinations/detail/reveal'
+            + '?name=' + encodeURIComponent('{{ dest_name }}')
+            + '&key=' + encodeURIComponent(key);
+
+        fetch(url, { headers: { 'Accept': 'text/plain' } })
+            .then(function(res) {
+                if (!res.ok) throw new Error('reveal failed (' + res.status + ')');
+                return res.text();
+            })
+            .then(function(value) {
+                input.value = value;
+                btn.textContent = 'Hide';
+                btn.dataset.revealed = '1';
+            })
+            .catch(function(err) {
+                btn.textContent = 'Reveal';
+                alert(err.message);
+            })
+            .finally(function() { btn.disabled = false; });
+    });
+});
+
 document.getElementById('add-row-btn')?.addEventListener('click', function() {
     const container = document.getElementById('metadata-rows');
     const row = document.createElement('div');

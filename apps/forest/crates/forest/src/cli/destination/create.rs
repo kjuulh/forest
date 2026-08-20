@@ -21,6 +21,14 @@ pub struct CreateCommand {
 
     #[arg(long = "metadata")]
     metadata: Vec<String>,
+
+    /// Treat this metadata key as a credential: its value is withheld from
+    /// `destination list` and must be fetched with `destination reveal`.
+    /// Repeatable. Keys the destination type already declares sensitive (e.g.
+    /// flux `git_token`) need no flag — use this for free-form keys such as
+    /// terraform's `TF_VAR_*` credentials.
+    #[arg(long = "sensitive", visible_alias = "sensitive-key")]
+    sensitive: Vec<String>,
 }
 
 impl CreateCommand {
@@ -54,6 +62,7 @@ impl CreateCommand {
                 &self.name,
                 &self.environment,
                 metadata,
+                self.sensitive.clone(),
                 DestinationType {
                     organisation: organisation.into(),
                     name: name.into(),

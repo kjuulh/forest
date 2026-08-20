@@ -100,6 +100,7 @@ async fn setup_org_with_destination(
                     description: String::new(),
                     fields: vec![],
                 }),
+                sensitive_keys: vec![],
             },
         ))
         .await
@@ -152,6 +153,7 @@ async fn unauthenticated_cannot_create_destination() {
                 description: String::new(),
                 fields: vec![],
             }),
+            sensitive_keys: vec![],
         }))
         .await;
 
@@ -265,6 +267,7 @@ async fn user_cannot_create_destination_in_other_org() {
                     description: String::new(),
                     fields: vec![],
                 }),
+                sensitive_keys: vec![],
             },
         ))
         .await;

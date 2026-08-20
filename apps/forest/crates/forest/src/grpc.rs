@@ -1849,7 +1849,7 @@ impl GrpcClient {
                 name: t.name,
                 version: t.version as usize,
                 description: t.description,
-                fields: vec![],
+                fields: t.fields.into_iter().map(Into::into).collect(),
             })
             .collect())
     }
@@ -1870,6 +1870,10 @@ impl GrpcClient {
             .destinations
             .into_iter()
             .map(|r| {
+                // `r.metadata` holds only the values the server was willing to
+                // send; `r.sensitive_keys` names the ones it withheld. Fetch
+                // those one at a time with `reveal_destination_metadata`.
+                let sensitive_keys = r.sensitive_keys;
                 Destination::new(
                     &r.organisation,
                     &r.name,
@@ -1877,6 +1881,7 @@ impl GrpcClient {
                     r.metadata,
                     r.r#type.expect("to always be available").into(),
                 )
+                .with_sensitive_keys(sensitive_keys)
             })
             .collect())
     }
@@ -1887,6 +1892,7 @@ impl GrpcClient {
         name: &str,
         environment: &str,
         metadata: HashMap<String, String>,
+        sensitive_keys: Vec<String>,
         destination_type: DestinationType,
     ) -> anyhow::Result<()> {
         self.destination_client()
@@ -1896,6 +1902,7 @@ impl GrpcClient {
                 name: name.to_string(),
                 environment: environment.to_string(),
                 metadata,
+                sensitive_keys,
                 r#type: Some(destination_type.into()),
             })
             .await
@@ -1910,6 +1917,7 @@ impl GrpcClient {
         organisation: &str,
         name: &str,
         metadata: HashMap<String, String>,
+        sensitive_keys: Option<Vec<String>>,
     ) -> anyhow::Result<()> {
         self.destination_client()
             .await?
@@ -1917,12 +1925,37 @@ impl GrpcClient {
                 name: name.to_string(),
                 metadata,
                 organisation: organisation.to_string(),
+                set_sensitive_keys: sensitive_keys.is_some(),
+                sensitive_keys: sensitive_keys.unwrap_or_default(),
             })
             .await
             .map_err(grpc_err)
             .context("update destination (grpc)")?;
 
         Ok(())
+    }
+
+    /// Fetches one withheld metadata value. Deliberately per-key: there is no
+    /// call that returns every secret on a destination at once.
+    pub async fn reveal_destination_metadata(
+        &self,
+        organisation: &str,
+        name: &str,
+        key: &str,
+    ) -> anyhow::Result<String> {
+        let response = self
+            .destination_client()
+            .await?
+            .reveal_destination_metadata(RevealDestinationMetadataRequest {
+                organisation: organisation.to_string(),
+                name: name.to_string(),
+                key: key.to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("reveal destination metadata (grpc)")?;
+
+        Ok(response.into_inner().value)
     }
 
     pub async fn delete_destination(&self, organisation: &str, name: &str) -> anyhow::Result<()> {

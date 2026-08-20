@@ -8,6 +8,10 @@ message CreateDestinationRequest {
   map<string, string> metadata = 3;
   DestinationType type = 4;
   string organisation = 5;
+  // Metadata keys to treat as credentials, in addition to those the
+  // destination type declares sensitive. Lets free-form keys (e.g. terraform
+  // TF_VAR_* credentials) be marked without changing the type schema.
+  repeated string sensitive_keys = 6;
 }
 message CreateDestinationResponse {}
 
@@ -15,6 +19,10 @@ message UpdateDestinationRequest {
   string name = 1;
   map<string, string> metadata = 2;
   string organisation = 3;
+  // Replaces the destination's sensitive-key set when `set_sensitive_keys`
+  // is true. Ignored otherwise, so older clients keep the existing set.
+  repeated string sensitive_keys = 4;
+  bool set_sensitive_keys = 5;
 }
 message UpdateDestinationResponse {}
 
@@ -31,6 +39,19 @@ message GetDestinationsResponse {
   repeated Destination destinations = 1;
 }
 
+// Fetches the value of exactly one sensitive metadata key. Deliberately
+// per-key: there is no "reveal everything" call, so pulling a credential is
+// always an explicit act against a named key.
+message RevealDestinationMetadataRequest {
+  string organisation = 1;
+  string name = 2;
+  string key = 3;
+}
+message RevealDestinationMetadataResponse {
+  string key = 1;
+  string value = 2;
+}
+
 message ListDestinationTypesRequest {}
 message ListDestinationTypesResponse {
   repeated DestinationType types = 1;
@@ -42,14 +63,20 @@ service DestinationService {
   rpc DeleteDestination(DeleteDestinationRequest) returns (DeleteDestinationResponse) {}
   rpc GetDestinations(GetDestinationsRequest) returns (GetDestinationsResponse);
   rpc ListDestinationTypes(ListDestinationTypesRequest) returns (ListDestinationTypesResponse);
+  rpc RevealDestinationMetadata(RevealDestinationMetadataRequest) returns (RevealDestinationMetadataResponse);
 }
 
 message Destination {
   string name = 1;
   string environment = 2;
+  // Non-sensitive metadata only. Values for sensitive keys are never sent
+  // here; fetch them one at a time via RevealDestinationMetadata.
   map<string, string> metadata = 3;
   DestinationType type = 4;
   string organisation = 5;
+  // Names of the metadata keys whose values were withheld from `metadata`.
+  // Key names only — never values.
+  repeated string sensitive_keys = 6;
 }
 
 message DestinationType {
@@ -67,4 +94,9 @@ message MetadataFieldSchema {
   bool required = 4;
   string field_type = 5;
   string default_value = 6;
+  // When true, this field holds a credential. Servers omit its value from
+  // Destination.metadata in read RPCs and list the key in
+  // Destination.sensitive_keys instead; clients must not render the value.
+  // Absent/false on older types, so this is additive and backward compatible.
+  bool sensitive = 7;
 }

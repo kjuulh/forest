@@ -14,6 +14,17 @@ pub struct UpdateCommand {
 
     #[arg(long = "metadata")]
     metadata: Vec<String>,
+
+    /// Replace the destination's sensitive-key set. Repeatable. Omit the flag
+    /// entirely to leave the existing set alone; pass `--clear-sensitive` to
+    /// empty it.
+    #[arg(long = "sensitive", visible_alias = "sensitive-key")]
+    sensitive: Vec<String>,
+
+    /// Clear every destination-declared sensitive key. Keys the destination
+    /// type declares sensitive stay hidden regardless.
+    #[arg(long, conflicts_with = "sensitive")]
+    clear_sensitive: bool,
 }
 
 impl UpdateCommand {
@@ -28,9 +39,19 @@ impl UpdateCommand {
             })
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
+        // `None` leaves the stored set untouched, so an update that only
+        // touches metadata cannot accidentally unhide a credential.
+        let sensitive_keys = if self.clear_sensitive {
+            Some(Vec::new())
+        } else if self.sensitive.is_empty() {
+            None
+        } else {
+            Some(self.sensitive.clone())
+        };
+
         state
             .grpc_client()
-            .update_destination(&self.organisation, &self.name, metadata)
+            .update_destination(&self.organisation, &self.name, metadata, sensitive_keys)
             .await
             .context("update destination")?;
 

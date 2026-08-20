@@ -22,9 +22,16 @@ pub enum DestinationEvent {
         type_organisation: String,
         type_name: String,
         type_version: u32,
+        /// Absent on events recorded before sensitive keys existed, which
+        /// replay as an empty set — the behaviour those destinations had.
+        #[serde(default)]
+        sensitive_keys: Vec<String>,
     },
     MetadataUpdated {
         metadata: HashMap<String, String>,
+    },
+    SensitiveKeysUpdated {
+        sensitive_keys: Vec<String>,
     },
     Deleted,
 }
@@ -34,6 +41,9 @@ impl EventData for DestinationEvent {
         match self {
             DestinationEvent::Created { .. } => "destination.created",
             DestinationEvent::MetadataUpdated { .. } => "destination.metadata_updated",
+            DestinationEvent::SensitiveKeysUpdated { .. } => {
+                "destination.sensitive_keys_updated"
+            }
             DestinationEvent::Deleted => "destination.deleted",
         }
     }
@@ -59,6 +69,7 @@ pub struct DestinationAggregate {
     pub environment: String,
     pub environment_id: Option<Uuid>,
     pub metadata: HashMap<String, String>,
+    pub sensitive_keys: Vec<String>,
     pub type_organisation: String,
     pub type_name: String,
     pub type_version: u32,
@@ -74,6 +85,7 @@ impl Default for DestinationAggregate {
             environment: String::new(),
             environment_id: None,
             metadata: HashMap::new(),
+            sensitive_keys: Vec::new(),
             type_organisation: String::new(),
             type_name: String::new(),
             type_version: 0,
@@ -100,6 +112,7 @@ impl Aggregate for DestinationAggregate {
                 type_organisation,
                 type_name,
                 type_version,
+                sensitive_keys,
             } => {
                 self.status = DestinationStatus::Active;
                 self.destination_id = Some(*destination_id);
@@ -108,12 +121,16 @@ impl Aggregate for DestinationAggregate {
                 self.environment.clone_from(environment);
                 self.environment_id = Some(*environment_id);
                 self.metadata.clone_from(metadata);
+                self.sensitive_keys.clone_from(sensitive_keys);
                 self.type_organisation.clone_from(type_organisation);
                 self.type_name.clone_from(type_name);
                 self.type_version = *type_version;
             }
             DestinationEvent::MetadataUpdated { metadata } => {
                 self.metadata.clone_from(metadata);
+            }
+            DestinationEvent::SensitiveKeysUpdated { sensitive_keys } => {
+                self.sensitive_keys.clone_from(sensitive_keys);
             }
             DestinationEvent::Deleted => {
                 self.status = DestinationStatus::Deleted;
@@ -132,6 +149,7 @@ pub struct CreateDestinationParams {
     pub environment: String,
     pub environment_id: Uuid,
     pub metadata: HashMap<String, String>,
+    pub sensitive_keys: Vec<String>,
     pub type_organisation: String,
     pub type_name: String,
     pub type_version: u32,
@@ -172,6 +190,7 @@ impl DestinationAggregate {
             type_organisation: params.type_organisation,
             type_name: params.type_name,
             type_version: params.type_version,
+            sensitive_keys: normalise_keys(params.sensitive_keys),
         });
 
         Ok(destination_id)
@@ -196,6 +215,30 @@ impl DestinationAggregate {
         Ok(())
     }
 
+    /// Replaces the destination-declared sensitive-key set. Keys need not be
+    /// present in `metadata`: declaring a credential before it is set keeps it
+    /// from ever being displayed, even for the first write.
+    pub fn update_sensitive_keys(
+        root: &mut AggregateRoot<Self>,
+        sensitive_keys: Vec<String>,
+    ) -> anyhow::Result<()> {
+        match root.state.status {
+            DestinationStatus::NonExistent => {
+                bail!("destination does not exist");
+            }
+            DestinationStatus::Deleted => {
+                bail!("destination has been deleted");
+            }
+            DestinationStatus::Active => {}
+        }
+
+        root.record(DestinationEvent::SensitiveKeysUpdated {
+            sensitive_keys: normalise_keys(sensitive_keys),
+        });
+
+        Ok(())
+    }
+
     pub fn delete(root: &mut AggregateRoot<Self>) -> anyhow::Result<()> {
         match root.state.status {
             DestinationStatus::NonExistent => {
@@ -211,6 +254,15 @@ impl DestinationAggregate {
 
         Ok(())
     }
+}
+
+/// Sorted and de-duplicated, so the stored set has one canonical form and
+/// projections compare cleanly.
+fn normalise_keys(mut keys: Vec<String>) -> Vec<String> {
+    keys.retain(|k| !k.trim().is_empty());
+    keys.sort();
+    keys.dedup();
+    keys
 }
 
 /// Stream key for a destination aggregate: `{org}/{name}`
@@ -241,6 +293,7 @@ mod tests {
             type_organisation: "forest".into(),
             type_name: "kubernetes".into(),
             type_version: 1,
+            sensitive_keys: Vec::new(),
         }
     }
 
@@ -475,6 +528,7 @@ mod tests {
                 type_organisation: "forest".into(),
                 type_name: "kubernetes".into(),
                 type_version: 1,
+                sensitive_keys: Vec::new(),
             },
             DestinationEvent::MetadataUpdated {
                 metadata: [("new".into(), "meta".into())].into(),
@@ -709,6 +763,7 @@ mod tests {
                 type_organisation: String::new(),
                 type_name: String::new(),
                 type_version: 0,
+                sensitive_keys: Vec::new(),
             }
             .event_type(),
             "destination.created"
@@ -748,6 +803,7 @@ mod tests {
             type_organisation: "forest".into(),
             type_name: "flux".into(),
             type_version: 2,
+            sensitive_keys: vec!["tier".into()],
         };
 
         let json = serde_json::to_value(&event).unwrap();
@@ -764,6 +820,7 @@ mod tests {
                 type_organisation,
                 type_name,
                 type_version,
+                sensitive_keys,
             } => {
                 assert_eq!(destination_id, dest_id);
                 assert_eq!(organisation, "myorg");
@@ -776,9 +833,72 @@ mod tests {
                 assert_eq!(type_organisation, "forest");
                 assert_eq!(type_name, "flux");
                 assert_eq!(type_version, 2);
+                assert_eq!(sensitive_keys, vec!["tier".to_string()]);
             }
             _ => panic!("wrong variant after roundtrip"),
         }
+    }
+
+    #[test]
+    fn created_events_recorded_before_sensitive_keys_existed_still_replay() {
+        // Events already in the store have no `sensitive_keys` field. They must
+        // deserialise to an empty set rather than failing hydration, which is
+        // what keeps existing destinations behaving exactly as before.
+        let json = serde_json::json!({
+            "type": "Created",
+            "destination_id": Uuid::now_v7(),
+            "organisation": "myorg",
+            "name": "staging-flux",
+            "environment": "staging",
+            "environment_id": Uuid::now_v7(),
+            "metadata": { "region": "eu" },
+            "type_organisation": "forest",
+            "type_name": "flux",
+            "type_version": 2,
+        });
+
+        let event: DestinationEvent =
+            serde_json::from_value(json).expect("legacy Created event must still deserialise");
+
+        let mut state = DestinationAggregate::default();
+        state.apply(&event);
+
+        assert!(state.sensitive_keys.is_empty());
+        assert_eq!(state.status, DestinationStatus::Active);
+    }
+
+    #[test]
+    fn update_sensitive_keys_normalises_and_replaces_the_set() {
+        let mut root = new_root();
+        DestinationAggregate::create(&mut root, default_params()).unwrap();
+
+        DestinationAggregate::update_sensitive_keys(
+            &mut root,
+            vec!["zeta".into(), "alpha".into(), "zeta".into(), "  ".into()],
+        )
+        .unwrap();
+
+        assert_eq!(root.state.sensitive_keys, vec!["alpha", "zeta"]);
+
+        // Replaces rather than merges.
+        DestinationAggregate::update_sensitive_keys(&mut root, vec!["only".into()]).unwrap();
+        assert_eq!(root.state.sensitive_keys, vec!["only"]);
+    }
+
+    #[test]
+    fn update_sensitive_keys_rejects_missing_and_deleted_destinations() {
+        let mut root = new_root();
+        assert!(
+            DestinationAggregate::update_sensitive_keys(&mut root, vec!["k".into()]).is_err(),
+            "must not mark keys on a destination that does not exist"
+        );
+
+        DestinationAggregate::create(&mut root, default_params()).unwrap();
+        DestinationAggregate::delete(&mut root).unwrap();
+        assert!(
+            DestinationAggregate::update_sensitive_keys(&mut root, vec!["k".into()]).is_err(),
+            "must not mark keys on a deleted destination"
+        );
     }
 
     #[test]
@@ -829,6 +949,7 @@ mod tests {
             type_organisation: "f".into(),
             type_name: "k".into(),
             type_version: 1,
+            sensitive_keys: Vec::new(),
         };
 
         agg.apply(&event);

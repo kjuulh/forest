@@ -33,7 +33,16 @@ impl DestinationService for DestinationServer {
         )
         .await?;
 
-        tracing::debug!("create destination: {:?}", req);
+        // Never log the request wholesale: `req.metadata` carries credentials.
+        // Key names are enough to debug a create.
+        tracing::debug!(
+            organisation = %req.organisation,
+            name = %req.name,
+            environment = %req.environment,
+            metadata_keys = ?req.metadata.keys().collect::<Vec<_>>(),
+            sensitive_keys = ?req.sensitive_keys,
+            "create destination"
+        );
 
         let dest_type: forest_models::DestinationType = req
             .r#type
@@ -59,6 +68,7 @@ impl DestinationService for DestinationServer {
                 &req.name,
                 &req.environment,
                 req.metadata,
+                req.sensitive_keys,
                 &dest_type.organisation,
                 &dest_type.name,
                 dest_type.version as u32,
@@ -105,6 +115,17 @@ impl DestinationService for DestinationServer {
             .await
             .context("update destination")
             .to_internal_error()?;
+
+        // Guarded by an explicit flag so older clients, which cannot send the
+        // field, don't silently clear an existing set.
+        if req.set_sensitive_keys {
+            self.state
+                .destination_aggregate_service()
+                .update_sensitive_keys(&req.organisation, &req.name, req.sensitive_keys)
+                .await
+                .context("update destination sensitive keys")
+                .to_internal_error()?;
+        }
 
         self.state
             .event_bus()
@@ -174,6 +195,66 @@ impl DestinationService for DestinationServer {
         Ok(Response::new(ListDestinationTypesResponse { types }))
     }
 
+    async fn reveal_destination_metadata(
+        &self,
+        request: tonic::Request<RevealDestinationMetadataRequest>,
+    ) -> std::result::Result<tonic::Response<RevealDestinationMetadataResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
+        let req = request.into_inner();
+        if req.organisation.is_empty() {
+            return Err(tonic::Status::invalid_argument("organisation is required"));
+        }
+        if req.key.is_empty() {
+            return Err(tonic::Status::invalid_argument("key is required"));
+        }
+        let _authz = authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &req.organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
+
+        let record = self
+            .state
+            .destination_aggregate_service()
+            .get_by_name(&req.organisation, &req.name)
+            .await
+            .context("get destination")
+            .to_internal_error()?
+            .ok_or_else(|| tonic::Status::not_found("destination not found"))?;
+
+        let value = record.metadata.get(&req.key).ok_or_else(|| {
+            tonic::Status::not_found(format!("destination has no metadata key '{}'", req.key))
+        })?;
+
+        // One key per call, and the key name is recorded — pulling a
+        // credential leaves a trail. The value never enters the audit event.
+        self.state
+            .event_bus()
+            .emit(EventPayload {
+                organisation: req.organisation.clone(),
+                project: String::new(),
+                resource_type: "destination",
+                action: "metadata_revealed",
+                resource_id: req.name.clone(),
+                metadata: [("key".into(), req.key.clone())].into(),
+            })
+            .await;
+
+        tracing::info!(
+            organisation = %req.organisation,
+            destination = %req.name,
+            key = %req.key,
+            "destination metadata revealed"
+        );
+
+        Ok(Response::new(RevealDestinationMetadataResponse {
+            key: req.key,
+            value: value.clone(),
+        }))
+    }
+
     async fn get_destinations(
         &self,
         request: tonic::Request<GetDestinationsRequest>,
@@ -189,7 +270,7 @@ impl DestinationService for DestinationServer {
         )
         .await?;
 
-        let destinations = self
+        let mut destinations = self
             .state
             .release_registry()
             .get_destinations(&req.organisation)
@@ -197,6 +278,20 @@ impl DestinationService for DestinationServer {
             .context("failed to find destinations")
             .to_internal_error()?;
 
+        // The projection stores only the type's coordinates, so join the live
+        // type registry to recover each field schema. Without this the
+        // `sensitive` flags are invisible here and type-declared credentials
+        // would be serialised in full.
+        let dest_services = self.state.destination_services();
+        for dest in &mut destinations {
+            let t = &dest.destination_type;
+            if let Some(svc) = dest_services.get_destination(&t.organisation, &t.name, t.version) {
+                dest.destination_type.fields = svc.metadata_schema();
+            }
+        }
+
+        // The `Destination -> proto` conversion is what drops sensitive values;
+        // see `forest_models::Destination::partition_metadata`.
         Ok(Response::new(GetDestinationsResponse {
             destinations: destinations.into_iter().map(|n| n.into()).collect(),
         }))
