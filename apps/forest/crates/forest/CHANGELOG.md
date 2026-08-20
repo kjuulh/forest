@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.14](https://github.com/understory-io/forest/compare/v0.2.13...v0.2.14) (2026-08-20)
+
+
+### Bug Fixes
+
+* **shell:** stop a tool snippet's compdef call from erroring at startup (DATA-588) ([#150](https://github.com/understory-io/forest/issues/150)) ([fc8d05c](https://github.com/understory-io/forest/commit/fc8d05c0e394b77d325cc7c94e3d1f91e805499a))
+
 ## [0.2.13](https://github.com/understory-io/forest/compare/v0.2.12...v0.2.13) (2026-08-20)
 
 
