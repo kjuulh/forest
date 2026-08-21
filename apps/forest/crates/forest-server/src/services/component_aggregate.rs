@@ -52,6 +52,28 @@ fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
+/// The version a component should report as its latest: the highest **stable**
+/// one, falling back to the highest of any kind when no stable release exists.
+///
+/// Ordering alone is not enough. A prerelease sorts below *its own* release but
+/// still above the previous one, so `0.2.0-rc.1` outranks a shipped `0.1.8` and
+/// would present itself as the component's latest version — a release candidate
+/// promoting itself on the detail page.
+///
+/// The fallback keeps a component that has only ever published release
+/// candidates from reporting no version at all.
+///
+/// Same rule fungus applies to ports (DATA-499), the same one `list_org_tools`
+/// already used, and the same one the CLI's `VersionSpec::resolve` uses so an
+/// install and the page describing it agree.
+fn pick_latest_version(versions: &[String]) -> Option<&String> {
+    versions
+        .iter()
+        .filter(|v| !is_prerelease(v))
+        .max_by(|a, b| compare_versions(a, b))
+        .or_else(|| versions.iter().max_by(|a, b| compare_versions(a, b)))
+}
+
 // ============================================================
 // Read-model types
 // ============================================================
@@ -671,8 +693,7 @@ impl ComponentService {
         //
         // `semver::Version` also gets the precedence rules right, which the
         // numeric split never could: a prerelease sorts *below* its release, so
-        // `0.1.8-rc.1 < 0.1.8`. That is what stops a release candidate from
-        // presenting itself as the latest version.
+        // `0.1.8-rc.1 < 0.1.8`.
         let rows = sqlx::query(
             "SELECT id, name, organisation, version
              FROM components
@@ -684,10 +705,21 @@ impl ComponentService {
         .await
         .context("get component")?;
 
-        let latest = rows.into_iter().max_by(|a, b| {
-            let (av, bv): (String, String) = (a.get("version"), b.get("version"));
-            compare_versions(&av, &bv)
-        });
+        // Latest *stable*, falling back to the highest of any kind when no
+        // stable release exists. Same rule fungus applies to ports (DATA-499)
+        // and the same one `list_org_tools` below already used — this brings
+        // the component detail view in line with both, and with the CLI, where
+        // a range spec no longer resolves to a prerelease.
+        //
+        // Ordering alone was not enough: a prerelease sorts below *its own*
+        // release but still above the previous one, so `0.2.0-rc.1` outranked a
+        // shipped `0.1.8` and presented itself as the component's latest
+        // version. The fallback keeps a component that has only ever published
+        // release candidates from reporting no version at all.
+        let versions: Vec<String> = rows.iter().map(|r| r.get("version")).collect();
+        let chosen = pick_latest_version(&versions);
+        let latest =
+            chosen.and_then(|want| rows.iter().find(|r| &r.get::<String, _>("version") == want));
 
         Ok(latest.map(|r| ComponentVersion {
             id: r.get::<Uuid, _>("id").to_string(),
@@ -1681,6 +1713,44 @@ mod version_ordering_tests {
         // sort would put 0.1.9 above 0.1.10.
         assert_eq!(sorted_desc(&["0.1.9", "0.1.10"]), vec!["0.1.10", "0.1.9"]);
         assert_eq!(sorted_desc(&["0.9.0", "0.10.0"]), vec!["0.10.0", "0.9.0"]);
+    }
+
+    /// DATA-583 — the detail view reports the latest *stable* version.
+    ///
+    /// Ordering alone never fixed this: a prerelease sorts below its own
+    /// release but still above the previous one, so an rc outranked a shipped
+    /// release and advertised itself as latest.
+    #[test]
+    fn latest_version_prefers_a_stable_release_over_a_higher_prerelease() {
+        let versions = vec![
+            "0.1.7".to_string(),
+            "0.1.8".to_string(),
+            "0.2.0-rc.1".to_string(),
+        ];
+        assert_eq!(super::pick_latest_version(&versions).unwrap(), "0.1.8");
+    }
+
+    #[test]
+    fn latest_version_falls_back_when_only_prereleases_exist() {
+        // A component that has never cut a stable release must still report
+        // something rather than nothing.
+        let versions = vec!["0.1.0-rc.1".to_string(), "0.1.0-rc.2".to_string()];
+        assert_eq!(super::pick_latest_version(&versions).unwrap(), "0.1.0-rc.2");
+    }
+
+    #[test]
+    fn latest_version_is_the_highest_stable_not_merely_the_first() {
+        let versions = vec![
+            "0.1.10".to_string(),
+            "0.1.9".to_string(),
+            "0.1.2".to_string(),
+        ];
+        assert_eq!(super::pick_latest_version(&versions).unwrap(), "0.1.10");
+    }
+
+    #[test]
+    fn latest_version_of_nothing_is_nothing() {
+        assert!(super::pick_latest_version(&[]).is_none());
     }
 
     #[test]
