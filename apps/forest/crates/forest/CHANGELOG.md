@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.15](https://github.com/understory-io/forest/compare/v0.2.14...v0.2.15) (2026-08-21)
+
+
+### Features
+
+* **destination:** withhold sensitive metadata values, reveal per key ([#152](https://github.com/understory-io/forest/issues/152)) ([0782568](https://github.com/understory-io/forest/commit/0782568b31bfa2c4bc686188d84a4fc3c19baf95))
+
+
+### Bug Fixes
+
+* **server:** report the latest stable version, not a higher prerelease ([#156](https://github.com/understory-io/forest/issues/156)) ([1821fef](https://github.com/understory-io/forest/commit/1821fef80a7e6a2bf033c7712b8eab6048cc04e7))
+* **version:** range specs no longer resolve to a prerelease ([#155](https://github.com/understory-io/forest/issues/155)) ([8200bbe](https://github.com/understory-io/forest/commit/8200bbeecbe6f2fbf358dab2d6d3e6b8b69a288c))
+
 ## [0.2.14](https://github.com/understory-io/forest/compare/v0.2.13...v0.2.14) (2026-08-20)
 
 
