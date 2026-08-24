@@ -131,9 +131,15 @@ impl ReleaseService for ReleaseServer {
             .notification_registry()
             .create_notification(
                 "RELEASE_ANNOTATED",
-                &format!("Artifact annotated: {}", slug),
+                // An annotation is the front half of a deploy: something has
+                // been recorded and a release for it has not happened yet. The
+                // title says that, because it is what a reader of the
+                // notification wants to know — "Artifact annotated: <slug>"
+                // named the mechanism and buried the state (DATA-637). The slug
+                // is still carried in the context, and every renderer shows it.
+                &format!("Release pending: {}/{}", &proj.organisation, &proj.project),
                 &format!(
-                    "Artifact {} annotated in {}/{}",
+                    "Artifact {} annotated in {}/{} — awaiting release",
                     slug, &proj.organisation, &proj.project
                 ),
                 &proj.organisation,
@@ -374,6 +380,130 @@ impl ReleaseService for ReleaseServer {
         Ok(Response::new(GetArtifactsByProjectResponse {
             artifact: release_annotation.into_iter().map(|r| r.into()).collect(),
         }))
+    }
+
+    /// Report that the deploy an annotation announced never happened.
+    ///
+    /// The announce-only shape (DATA-637) has a hole in it: a project whose
+    /// rollout Forest does not perform annotates first — which subscribers see
+    /// as "pending" — and then releases once its own CI has finished. If that CI
+    /// fails there is no release intent, so no destination can fail, so nothing
+    /// ever contradicts the pending state and it sits looking in-flight forever.
+    ///
+    /// So let the caller say so directly. This emits RELEASE_FAILED against the
+    /// annotation, which lands on the same notification thread as the pending
+    /// one — forage keys its Slack message by slug — turning it into a failure
+    /// rather than leaving it dangling.
+    ///
+    /// It creates no release intent on purpose. Nothing was released; writing a
+    /// failed release into the release history for a release that never happened
+    /// would be a lie that `forest release show` and every dashboard then repeat.
+    async fn report_release_failed(
+        &self,
+        request: tonic::Request<ReportReleaseFailedRequest>,
+    ) -> std::result::Result<tonic::Response<ReportReleaseFailedResponse>, tonic::Status> {
+        tracing::debug!("report release failed");
+
+        let actor = authorize::extract_actor(&request)?;
+        let req = request.into_inner();
+
+        if req.reason.trim().is_empty() {
+            return Err(tonic::Status::invalid_argument(
+                "reason is required — a failure notification with nothing to say is noise",
+            ));
+        }
+
+        let annotation = self
+            .state
+            .release_registry()
+            .get_release_annotation_by_slug(&req.slug)
+            .await
+            .context("get release annotation by slug")
+            .to_internal_error()?;
+
+        let organisation = annotation.project.organisation.clone();
+        let project = annotation.project.project.clone();
+
+        authorize::require_org_access(
+            &self.state.db,
+            &actor,
+            &organisation,
+            authorize::OrgRole::Member,
+        )
+        .await?;
+
+        // Reuse the annotation's own context so the failure carries the same
+        // commit, author and links the pending notification did. Without this
+        // the failure would render as a bare title with none of the provenance
+        // that makes it actionable.
+        let ann_ctx = self
+            .state
+            .release_registry()
+            .get_annotation_context(&annotation.artifact_id)
+            .await
+            .ok();
+
+        self.state
+            .notification_registry()
+            .create_notification(
+                "RELEASE_FAILED",
+                &format!("Release failed: {organisation}/{project}"),
+                &format!("Release {} failed: {}", req.slug, req.reason),
+                &organisation,
+                &project,
+                &NotifReleaseContext {
+                    slug: Some(req.slug.clone()),
+                    artifact_id: Some(annotation.artifact_id.to_string()),
+                    destination: req.destination.clone(),
+                    environment: req.environment.clone(),
+                    error_message: Some(req.reason.clone()),
+                    source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
+                    source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
+                    source_user_id: match &actor {
+                        Actor::User { user_id } => Some(user_id.to_string()),
+                        _ => None,
+                    },
+                    source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
+                    run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
+                    commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),
+                    commit_branch: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.reference.commit_branch.clone()),
+                    commit_message: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.reference.commit_message.clone()),
+                    version: ann_ctx.as_ref().and_then(|a| a.reference.version.clone()),
+                    repo_url: ann_ctx.as_ref().and_then(|a| a.reference.repo_url.clone()),
+                    context_title: ann_ctx.as_ref().map(|a| a.context.title.clone()),
+                    context_description: ann_ctx
+                        .as_ref()
+                        .and_then(|a| a.context.description.clone()),
+                    context_web: ann_ctx.as_ref().and_then(|a| a.context.web.clone()),
+                    context_pr: ann_ctx.as_ref().and_then(|a| a.context.pr.clone()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .context("create release failed notification")
+            .to_internal_error()?;
+
+        self.state
+            .event_bus()
+            .emit(EventPayload {
+                organisation,
+                project,
+                resource_type: "artifact",
+                action: "failed",
+                resource_id: annotation.artifact_id.to_string(),
+                metadata: [
+                    ("slug".into(), req.slug.clone()),
+                    ("reason".into(), req.reason.clone()),
+                ]
+                .into(),
+            })
+            .await;
+
+        Ok(Response::new(ReportReleaseFailedResponse {}))
     }
 
     async fn release(

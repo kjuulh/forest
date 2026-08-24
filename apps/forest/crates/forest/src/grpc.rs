@@ -1557,6 +1557,34 @@ impl GrpcClient {
             .context("release annotation")
     }
 
+    /// Tell the server the deploy this annotation announced never happened.
+    ///
+    /// Creates no release — see `ReportReleaseFailed` in releases.proto for why
+    /// a failed release that never ran must not enter the release history. All
+    /// this does is close out the pending notification with a reason.
+    pub async fn report_release_failed(
+        &self,
+        slug: &str,
+        reason: &str,
+        destination: Option<String>,
+        environment: Option<String>,
+    ) -> anyhow::Result<()> {
+        let mut client = self.release_client().await?;
+
+        client
+            .report_release_failed(ReportReleaseFailedRequest {
+                slug: slug.into(),
+                reason: reason.into(),
+                destination,
+                environment,
+            })
+            .await
+            .map_err(grpc_err)
+            .context("report release failed")?;
+
+        Ok(())
+    }
+
     /// Same as `get_release_annotation_by_slug` but also returns the
     /// artifact's owning project (org + project). The CLI's annotation
     /// model intentionally drops the project info, but `release show`

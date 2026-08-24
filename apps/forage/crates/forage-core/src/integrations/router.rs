@@ -325,13 +325,14 @@ pub fn format_slack_message(
                 "release_succeeded" => ":white_check_mark:",
                 "release_failed" => ":x:",
                 "release_started" => ":arrows_counterclockwise:",
+                "release_annotated" => ":hourglass_flowing_sand:",
                 _ => ":bell:",
             };
             let status_label = match event.notification_type.as_str() {
                 "release_succeeded" => "Deployed",
                 "release_failed" => "Failed",
                 "release_started" => "Deploying",
-                "release_annotated" => "Annotated",
+                "release_annotated" => "Pending",
                 _ => "Unknown",
             };
             let mut dest_line = format!("{dest_emoji}  `{}`  {status_label}", r.destination);
@@ -678,7 +679,11 @@ fn aggregate_emoji(event_type: &str) -> &'static str {
         "release_succeeded" => ":white_check_mark:",
         "release_failed" => ":x:",
         "release_started" => ":rocket:",
-        "release_annotated" => ":memo:",
+        // An annotation is a deploy that has been announced and not yet
+        // happened, so it reads as waiting rather than as filing (DATA-637).
+        // For projects that annotate up front and release when their own CI
+        // finishes, this is the state a reader spends the most time looking at.
+        "release_annotated" => ":hourglass_flowing_sand:",
         _ => ":bell:",
     }
 }
@@ -829,6 +834,31 @@ mod tests {
         let event = test_event();
         let tasks = route_notification(&event, &[]);
         assert!(tasks.is_empty());
+    }
+
+    /// The pending half of an announce-first deploy (DATA-637). A project that
+    /// annotates when CI starts and releases when it finishes spends most of the
+    /// deploy in this state, so it has to read as "on its way", not as
+    /// bookkeeping.
+    #[test]
+    fn slack_message_annotated_reads_as_pending() {
+        let mut event = test_event();
+        event.notification_type = "release_annotated".into();
+        event.title = "Release pending: understory/commission-dashboard".into();
+
+        let msg = format_slack_message(&event, &std::collections::HashMap::new(), "");
+
+        assert!(
+            msg.text.starts_with(":hourglass_flowing_sand:"),
+            "expected an hourglass in the fallback text, got {:?}",
+            msg.text
+        );
+        assert!(
+            msg.text.contains("Release pending"),
+            "expected the pending title, got {:?}",
+            msg.text
+        );
+        assert_eq!(msg.color, "#6c757d", "pending stays grey, not green or red");
     }
 
     #[test]
