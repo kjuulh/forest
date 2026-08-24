@@ -384,20 +384,21 @@ impl ReleaseService for ReleaseServer {
 
     /// Report that the deploy an annotation announced never happened.
     ///
-    /// The announce-only shape (DATA-637) has a hole in it: a project whose
+    /// The announce-first shape (DATA-637) has a hole in it: a project whose
     /// rollout Forest does not perform annotates first — which subscribers see
-    /// as "pending" — and then releases once its own CI has finished. If that CI
-    /// fails there is no release intent, so no destination can fail, so nothing
-    /// ever contradicts the pending state and it sits looking in-flight forever.
+    /// as pending — and releases once its own CI has finished. If that CI fails
+    /// there is nothing to fail, so nothing ever contradicts the pending state.
     ///
-    /// So let the caller say so directly. This emits RELEASE_FAILED against the
-    /// annotation, which lands on the same notification thread as the pending
-    /// one — forage keys its Slack message by slug — turning it into a failure
-    /// rather than leaving it dangling.
+    /// This closes it by recording the release that did not work, rather than by
+    /// emitting a notification about it. Same intent, same destination, same
+    /// history as the successful path — a project whose successes are releases
+    /// and whose failures are loose notifications would under-report itself in
+    /// every view over the release history. The destination is a
+    /// `forest/noop@1`, which is the honest description of what Forest did
+    /// either way; only the outcome differs.
     ///
-    /// It creates no release intent on purpose. Nothing was released; writing a
-    /// failed release into the release history for a release that never happened
-    /// would be a lie that `forest release show` and every dashboard then repeat.
+    /// The releases are born FAILED in one transaction, so the scheduler cannot
+    /// pick one up and succeed it in the window before the failure is written.
     async fn report_release_failed(
         &self,
         request: tonic::Request<ReportReleaseFailedRequest>,
@@ -409,7 +410,16 @@ impl ReleaseService for ReleaseServer {
 
         if req.reason.trim().is_empty() {
             return Err(tonic::Status::invalid_argument(
-                "reason is required — a failure notification with nothing to say is noise",
+                "reason is required — a failure with nothing to say is noise",
+            ));
+        }
+
+        let destinations: Vec<String> = req.destination.clone().into_iter().collect();
+        let environments: Vec<String> = req.environment.clone().into_iter().collect();
+
+        if destinations.is_empty() && environments.is_empty() {
+            return Err(tonic::Status::invalid_argument(
+                "a destination or an environment is required — the failed release has to be recorded against the destination it was headed for",
             ));
         }
 
@@ -421,21 +431,44 @@ impl ReleaseService for ReleaseServer {
             .context("get release annotation by slug")
             .to_internal_error()?;
 
-        let organisation = annotation.project.organisation.clone();
-        let project = annotation.project.project.clone();
-
         authorize::require_org_access(
             &self.state.db,
             &actor,
-            &organisation,
+            &annotation.project.organisation,
             authorize::OrgRole::Member,
         )
         .await?;
 
+        let created = self
+            .state
+            .release_registry()
+            .release_failed(
+                &annotation.artifact_id,
+                destinations,
+                environments,
+                &actor,
+                &self.state.release_event_store(),
+                &req.reason,
+            )
+            .await
+            .context("record failed release")
+            .to_internal_error()?;
+
+        let dest_names: Vec<String> = created
+            .releases
+            .iter()
+            .map(|r| r.destination.clone())
+            .collect();
+        let dest_envs: Vec<String> = created
+            .releases
+            .iter()
+            .map(|r| r.environment.clone())
+            .collect();
+
         // Reuse the annotation's own context so the failure carries the same
-        // commit, author and links the pending notification did. Without this
-        // the failure would render as a bare title with none of the provenance
-        // that makes it actionable.
+        // commit, author and links the pending notification did. Without it the
+        // failure renders as a bare title with none of the provenance that makes
+        // it actionable.
         let ann_ctx = self
             .state
             .release_registry()
@@ -443,19 +476,25 @@ impl ReleaseService for ReleaseServer {
             .await
             .ok();
 
-        self.state
+        if let Err(e) = self
+            .state
             .notification_registry()
             .create_notification(
                 "RELEASE_FAILED",
-                &format!("Release failed: {organisation}/{project}"),
+                &format!(
+                    "Release failed: {}/{}",
+                    &created.organisation, &created.project
+                ),
                 &format!("Release {} failed: {}", req.slug, req.reason),
-                &organisation,
-                &project,
+                &created.organisation,
+                &created.project,
                 &NotifReleaseContext {
                     slug: Some(req.slug.clone()),
                     artifact_id: Some(annotation.artifact_id.to_string()),
-                    destination: req.destination.clone(),
-                    environment: req.environment.clone(),
+                    release_intent_id: Some(created.release_intent_id.to_string()),
+                    destination: dest_names.first().cloned(),
+                    environment: dest_envs.first().cloned(),
+                    destination_count: dest_names.len() as i32,
                     error_message: Some(req.reason.clone()),
                     source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
                     source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
@@ -484,20 +523,22 @@ impl ReleaseService for ReleaseServer {
                 },
             )
             .await
-            .context("create release failed notification")
-            .to_internal_error()?;
+        {
+            tracing::warn!("failed to create release failed notification: {e:#}");
+        }
 
         self.state
             .event_bus()
             .emit(EventPayload {
-                organisation,
-                project,
-                resource_type: "artifact",
+                organisation: created.organisation.clone(),
+                project: created.project.clone(),
+                resource_type: "release",
                 action: "failed",
-                resource_id: annotation.artifact_id.to_string(),
+                resource_id: created.release_intent_id.to_string(),
                 metadata: [
                     ("slug".into(), req.slug.clone()),
                     ("reason".into(), req.reason.clone()),
+                    ("destinations".into(), dest_names.join(",")),
                 ]
                 .into(),
             })

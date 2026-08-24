@@ -3209,17 +3209,17 @@ pub struct PlanDestinationOutput {
 /// Report that the deploy an annotation announced did not happen.
 ///
 /// For a project whose rollout Forest does not perform — CI builds an image and
-/// deploys it elsewhere, and only announces the result here (DATA-637) — an
+/// deploys it elsewhere, and Forest only announces the result (DATA-637) — an
 /// annotation is a promise that something is on its way. When that something
-/// fails, nothing in Forest can notice: no release intent was ever created, so
-/// no destination can report a failure, and the annotation would otherwise sit
-/// looking pending forever.
+/// fails, nothing in Forest can notice on its own: no release intent exists, so
+/// no destination can fail, and the annotation would sit looking pending forever.
 ///
-/// This closes it. It emits a RELEASE_FAILED notification against the
-/// annotation, so subscribers see the deploy fail on the same thread they saw it
-/// start. It deliberately does NOT fabricate a release intent: nothing was
-/// released, and recording a failed release for a release that never happened
-/// would put a lie in the release history.
+/// This records the release that did not work. It creates the same intent
+/// against the same destination the successful path would have, and the releases
+/// are born FAILED. A project whose successes are releases and whose failures
+/// are loose notifications would under-report itself in every view over the
+/// release history; the destination is a `forest/noop@1` either way, which is
+/// the honest description of what Forest did. Only the outcome differs.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReportReleaseFailedRequest {
     /// Release slug from the annotation, as printed by `forest release annotate`.
@@ -3229,9 +3229,9 @@ pub struct ReportReleaseFailedRequest {
     /// concrete — "ECS rollout did not converge" beats "failed".
     #[prost(string, tag="2")]
     pub reason: ::prost::alloc::string::String,
-    /// Destination and environment the deploy was headed for. Optional, and only
-    /// cosmetic: they let the notification name the target the way a real release
-    /// failure would.
+    /// Where the deploy was headed. At least one is required: the failed release
+    /// is recorded against a destination, so there has to be one to record it
+    /// against. Resolved exactly as `Release` resolves them.
     #[prost(string, optional, tag="3")]
     pub destination: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(string, optional, tag="4")]

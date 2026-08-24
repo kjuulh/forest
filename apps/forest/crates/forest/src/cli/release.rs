@@ -1,7 +1,7 @@
 use crate::{
     cli::release::{
-        annotate::AnnotateCommand, commit::CommitCommand, create::CreateCommand,
-        fail::FailCommand, prepare::PrepareCommand, show::ShowCommand,
+        annotate::AnnotateCommand, commit::CommitCommand, create::CreateCommand, fail::FailCommand,
+        prepare::PrepareCommand, show::ShowCommand,
     },
     state::State,
 };

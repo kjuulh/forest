@@ -12,8 +12,10 @@ use crate::{grpc::GrpcClientState, state::State};
 ///
 ///   forest release fail <slug> --reason "ECS rollout did not converge"
 ///
-/// This records no release. Nothing was released, and a failed release in the
-/// history for a release that never ran is a lie every dashboard would repeat.
+/// This records the release that did not work — the same intent against the
+/// same destination the successful path would have created, born FAILED. Keeping
+/// failures out of the release history would leave a project whose successes are
+/// releases and whose failures are not, which under-reports it everywhere.
 #[derive(clap::Parser)]
 pub struct FailCommand {
     /// Release slug to fail, as printed by `forest release annotate`.
@@ -25,12 +27,14 @@ pub struct FailCommand {
     #[arg(long, short = 'r')]
     reason: String,
 
-    /// Destination the deploy was headed for. Cosmetic — it lets the
-    /// notification name the target the way a real release failure would.
+    /// Destination the deploy was headed for. This or `--environment` is
+    /// required: the failed release is recorded against a destination, so there
+    /// has to be one to record it against.
     #[arg(long, short = 'd')]
     destination: Option<String>,
 
-    /// Environment the deploy was headed for. Cosmetic, as with `--destination`.
+    /// Environment the deploy was headed for. Alternative to `--destination`,
+    /// resolved the way `forest release --env` resolves it.
     #[arg(long, short = 'e', alias = "env")]
     environment: Option<String>,
 }

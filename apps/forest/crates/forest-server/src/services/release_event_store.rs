@@ -189,6 +189,92 @@ impl ReleaseEventStore {
         Ok(release_id)
     }
 
+    /// Create a release that is already failed, in one transaction.
+    ///
+    /// For a deploy Forest did not perform: CI announced it, ran it elsewhere,
+    /// and it failed (DATA-637). The release still belongs in the history —
+    /// leaving the failure as a bare notification would mean a project whose
+    /// successes are releases and whose failures are not, and every view over
+    /// the release history would quietly under-report.
+    ///
+    /// Born failed rather than created-then-failed on purpose. Creating it
+    /// QUEUED and transitioning it afterwards leaves a window — the scheduler
+    /// sweeps every 5s and a `forest/noop@1` destination completes in
+    /// milliseconds, so losing that race would report a *successful* release for
+    /// a deploy that failed. Writing the terminal state and both events in one
+    /// transaction means the release is never dispatchable and there is no race
+    /// to lose.
+    pub async fn create_failed_release(
+        &self,
+        params: CreateReleaseParams,
+        error_message: &str,
+    ) -> anyhow::Result<Uuid> {
+        let release_id = Uuid::now_v7();
+        let mut tx = self.db.begin().await?;
+
+        let actor_id = params.actor.actor_id();
+        let actor_type = params.actor.actor_type();
+
+        sqlx::query!(
+            "INSERT INTO release_states (
+                release_id, release_intent_id, project_id,
+                destination_id, artifact_id, status, stage_id,
+                error_message, completed_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, 'FAILED', $6, $7, now(), now())",
+            release_id,
+            params.release_intent_id,
+            params.project_id,
+            params.destination_id,
+            params.artifact_id,
+            params.stage_id,
+            error_message,
+        )
+        .execute(&mut *tx)
+        .await
+        .context("insert failed release_states")?;
+
+        // Both events, so the log still reads as a lifecycle rather than a
+        // status appearing from nowhere.
+        sqlx::query!(
+            "INSERT INTO release_events (
+                release_id, event_type, payload, actor_id, actor_type
+            ) VALUES ($1, 'release.requested', '{}', $2, $3)",
+            release_id,
+            actor_id,
+            actor_type,
+        )
+        .execute(&mut *tx)
+        .await
+        .context("insert release.requested event")?;
+
+        sqlx::query!(
+            "INSERT INTO release_events (
+                release_id, event_type, payload, actor_id, actor_type
+            ) VALUES ($1, 'release.failed', $2, $3, $4)",
+            release_id,
+            serde_json::json!({ "error_message": error_message }),
+            actor_id,
+            actor_type,
+        )
+        .execute(&mut *tx)
+        .await
+        .context("insert release.failed event")?;
+
+        tx.commit().await?;
+
+        // Deliberately not published to `forest.release.queued`: nothing should
+        // pick this up. Anyone watching the intent still learns about it through
+        // the status subject.
+        let subject = format!("forest.release.status.{}", params.release_intent_id);
+        let payload = serde_json::json!({
+            "release_id": release_id.to_string(),
+            "status": "FAILED",
+        });
+        let _ = self.nats.publish(subject, payload.to_string().into()).await;
+
+        Ok(release_id)
+    }
+
     /// Emit an event and update materialized state atomically.
     /// Returns Err if the current status doesn't allow this transition.
     pub async fn emit_event(

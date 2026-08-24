@@ -271,34 +271,9 @@ impl ReleaseRegistry {
         }
 
         // Non-pipeline mode: flat release to all requested destinations.
-        // Scope strictly to the project's organisation so `--env dev` (or a
-        // destination name typo) can never fan out into another org's
-        // destinations even though env/destination names may collide globally.
-        let destination_recs = sqlx::query!(
-            r#"
-            SELECT DISTINCT d.id, d.name, d.environment
-            FROM destinations d
-            LEFT JOIN environments e ON d.environment_id = e.id
-            WHERE d.organisation = $3
-              AND (d.name = ANY($1) OR e.name = ANY($2))
-            "#,
-            &destinations,
-            &environments,
-            organisation,
-        )
-        .fetch_all(&self.db)
-        .await
-        .context("release")?;
-
-        if destination_recs.len() < destinations.len() {
-            anyhow::bail!("not all destinations exist in organisation {organisation}")
-        }
-
-        if destination_recs.is_empty() {
-            anyhow::bail!(
-                "found no destinations in organisation {organisation} for requested environment"
-            );
-        }
+        let destination_recs = self
+            .resolve_destinations(&organisation, &destinations, &environments)
+            .await?;
 
         let actor_id = actor.actor_id();
         let actor_type = actor.actor_type();
@@ -351,6 +326,161 @@ impl ReleaseRegistry {
                 .await
                 .context(anyhow::anyhow!(
                     "create release: {} to {}",
+                    artifact_id,
+                    dest.id
+                ))?;
+
+            created_releases.push(CreatedRelease {
+                destination: dest.name.clone(),
+                environment: dest.environment.clone(),
+            });
+        }
+
+        Ok(CreatedReleaseIntent {
+            release_intent_id: release_intent.id,
+            releases: created_releases,
+            organisation,
+            project,
+            activated_stages: Vec::new(),
+        })
+    }
+
+    /// Destinations for a release request, by name or by environment.
+    ///
+    /// Scoped strictly to the project's organisation so `--env dev` (or a typo
+    /// in a destination name) can never fan out into another org's
+    /// destinations, even though env and destination names collide globally.
+    ///
+    /// Shared by `release` and `release_failed` so a deploy that failed resolves
+    /// its destinations exactly the way the successful one would have.
+    async fn resolve_destinations(
+        &self,
+        organisation: &str,
+        destinations: &[String],
+        environments: &[String],
+    ) -> anyhow::Result<Vec<DestinationRec>> {
+        let recs = sqlx::query_as!(
+            DestinationRec,
+            r#"
+            SELECT DISTINCT d.id, d.name, d.environment
+            FROM destinations d
+            LEFT JOIN environments e ON d.environment_id = e.id
+            WHERE d.organisation = $3
+              AND (d.name = ANY($1) OR e.name = ANY($2))
+            "#,
+            destinations,
+            environments,
+            organisation,
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("resolve destinations")?;
+
+        if recs.len() < destinations.len() {
+            anyhow::bail!("not all destinations exist in organisation {organisation}")
+        }
+
+        if recs.is_empty() {
+            anyhow::bail!(
+                "found no destinations in organisation {organisation} for requested environment"
+            );
+        }
+
+        Ok(recs)
+    }
+
+    /// Record a release that failed outside Forest.
+    ///
+    /// Same shape as `release`, and deliberately so: a project whose rollout
+    /// Forest only announces (DATA-637) should produce a release record whether
+    /// the deploy worked or not. Its destination is a `forest/noop@1` — the
+    /// provider really is a no-op — so the intent is honest about what Forest
+    /// did, and the FAILED state is honest about what happened downstream.
+    ///
+    /// The releases are born failed (see `create_failed_release`), so nothing
+    /// can dispatch them between creation and the failure being recorded.
+    pub async fn release_failed(
+        &self,
+        artifact_id: &ArtifactID,
+        destinations: Vec<String>,
+        environments: Vec<String>,
+        actor: &Actor,
+        event_store: &crate::services::release_event_store::ReleaseEventStore,
+        error_message: &str,
+    ) -> anyhow::Result<CreatedReleaseIntent> {
+        let annotation_rec = sqlx::query!(
+            "
+                SELECT id, project_id
+                FROM annotations
+                WHERE
+                    artifact_id = $1
+            ",
+            artifact_id
+        )
+        .fetch_one(&self.db)
+        .await
+        .context("get annotation")?;
+
+        let annotation_id = annotation_rec.id;
+        let project_id = annotation_rec.project_id;
+
+        let (organisation, project) = self.get_project_context(&project_id).await?;
+
+        let destination_recs = self
+            .resolve_destinations(&organisation, &destinations, &environments)
+            .await?;
+
+        let actor_id = actor.actor_id();
+        let actor_type = actor.actor_type();
+
+        let release_intent = sqlx::query!(
+            "
+            INSERT INTO release_intents (
+                artifact,
+                annotation_id,
+                project_id,
+                actor_id,
+                actor_type
+            ) VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5
+            )
+            RETURNING id
+            ",
+            artifact_id,
+            annotation_id,
+            project_id,
+            actor_id,
+            actor_type,
+        )
+        .fetch_one(&self.db)
+        .await
+        .context("create release_intent for failed release")?;
+
+        let mut created_releases = Vec::new();
+
+        for dest in &destination_recs {
+            use crate::services::release_event_store::CreateReleaseParams;
+
+            event_store
+                .create_failed_release(
+                    CreateReleaseParams {
+                        release_intent_id: release_intent.id,
+                        project_id,
+                        destination_id: dest.id,
+                        artifact_id: *artifact_id,
+                        actor: actor.clone(),
+                        force: false,
+                        stage_id: None,
+                    },
+                    error_message,
+                )
+                .await
+                .context(anyhow::anyhow!(
+                    "create failed release: {} to {}",
                     artifact_id,
                     dest.id
                 ))?;
@@ -1175,6 +1305,13 @@ pub struct ReleaseDestination {
     pub type_name: String,
     pub type_version: i32,
     pub status: String,
+}
+
+/// A destination row as a release request resolves it.
+pub struct DestinationRec {
+    pub id: Uuid,
+    pub name: String,
+    pub environment: String,
 }
 
 #[derive(Clone)]
