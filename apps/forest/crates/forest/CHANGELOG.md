@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.16](https://github.com/understory-io/forest/compare/v0.2.15...v0.2.16) (2026-08-24)
+
+
+### Features
+
+* **oauth:** add the client_credentials grant for machine-to-machine auth ([#158](https://github.com/understory-io/forest/issues/158)) ([355eda0](https://github.com/understory-io/forest/commit/355eda05b92632643331f7a2ade2392df2ac0207))
+* **release:** say a release is pending, and let CI report it failed (DATA-637) ([#160](https://github.com/understory-io/forest/issues/160)) ([10be0a8](https://github.com/understory-io/forest/commit/10be0a84c09fbaebbedde964dc0932baffb673ba))
+
 ## [0.2.15](https://github.com/understory-io/forest/compare/v0.2.14...v0.2.15) (2026-08-21)
 
 
