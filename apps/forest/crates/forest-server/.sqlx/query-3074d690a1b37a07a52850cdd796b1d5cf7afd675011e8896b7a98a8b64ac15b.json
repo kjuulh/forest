@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, organisation_id, name, description, homepage_url, client_id,\n                   client_secret_hash, redirect_uris, scopes, created_by, created_at, updated_at\n            FROM oauth_apps\n            WHERE organisation_id = $1\n            ORDER BY created_at DESC\n            ",
+  "query": "\n            INSERT INTO oauth_apps\n                (id, organisation_id, name, description, homepage_url, client_id,\n                 client_secret_hash, redirect_uris, scopes, grant_types, created_by)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n            RETURNING id, organisation_id, name, description, homepage_url, client_id,\n                      client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at\n            ",
   "describe": {
     "columns": [
       {
@@ -50,22 +50,37 @@
       },
       {
         "ordinal": 9,
+        "name": "grant_types",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 10,
         "name": "created_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bytea",
+        "TextArray",
+        "TextArray",
+        "TextArray",
         "Uuid"
       ]
     },
@@ -81,8 +96,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "89f33de8f6fff946038068d109484e1b302b65d6f2aaffa3b30baebe30f86934"
+  "hash": "3074d690a1b37a07a52850cdd796b1d5cf7afd675011e8896b7a98a8b64ac15b"
 }

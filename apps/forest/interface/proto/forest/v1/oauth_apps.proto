@@ -28,6 +28,12 @@ service OAuthAppsService {
   rpc ExchangeOAuthCode(ExchangeOAuthCodeRequest) returns (ExchangeOAuthCodeResponse);
   // Resolve an OAuth access token to user claims, gated by granted scopes.
   rpc GetOAuthUserinfo(GetOAuthUserinfoRequest) returns (GetOAuthUserinfoResponse);
+  // The client_credentials grant: an app authenticating as itself, with no
+  // user in the loop. No refresh token and no id_token are issued.
+  rpc IssueClientCredentialsToken(IssueClientCredentialsTokenRequest) returns (IssueClientCredentialsTokenResponse);
+  // Resolve a machine token to the app behind it. Called by resource servers
+  // to authorise a request.
+  rpc IntrospectClientToken(IntrospectClientTokenRequest) returns (IntrospectClientTokenResponse);
   // Exchange a refresh token for a new access + refresh token (with rotation).
   rpc RefreshOAuthToken(RefreshOAuthTokenRequest) returns (RefreshOAuthTokenResponse);
   // Revoke a user's grant for an app (drops all its issued tokens).
@@ -90,6 +96,33 @@ message ExchangeOAuthCodeRequest {
 
 message ExchangeOAuthCodeResponse {
   OAuthTokens tokens = 1;
+}
+
+message IssueClientCredentialsTokenRequest {
+  string client_id = 1;
+  string client_secret = 2;
+  // Subset of the app's registered scopes. Empty means all of them.
+  repeated string scopes = 3;
+}
+
+message IssueClientCredentialsTokenResponse {
+  string access_token = 1;
+  string token_type = 2; // always "bearer"
+  int64 expires_in_seconds = 3;
+  repeated string scopes = 4;
+}
+
+message IntrospectClientTokenRequest {
+  string access_token = 1;
+}
+
+// Empty `app_id` means the token is not live — unknown, expired or
+// revoked, deliberately indistinguishable to the caller.
+message IntrospectClientTokenResponse {
+  bool active = 1;
+  string app_id = 2;
+  string organisation_id = 3;
+  repeated string scopes = 4;
 }
 
 message GetOAuthUserinfoRequest {
@@ -168,6 +201,10 @@ message OAuthApp {
   string client_id = 6; // public client identifier
   repeated string redirect_uris = 7;
   repeated string scopes = 8; // scopes this app is permitted to request
+  // OAuth grants this app may use: "authorization_code" and/or
+  // "client_credentials". Apps predating machine-to-machine support
+  // carry "authorization_code" alone.
+  repeated string grant_types = 12;
   string created_by = 9; // UUID of the creating user
   google.protobuf.Timestamp created_at = 10;
   google.protobuf.Timestamp updated_at = 11;
@@ -180,6 +217,9 @@ message CreateOAuthAppRequest {
   string homepage_url = 4;
   repeated string redirect_uris = 5;
   repeated string scopes = 6;
+  // Empty defaults to ["authorization_code"], so an app only becomes
+  // machine-capable by asking.
+  repeated string grant_types = 7;
 }
 
 message CreateOAuthAppResponse {

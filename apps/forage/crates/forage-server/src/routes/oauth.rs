@@ -384,6 +384,10 @@ struct TokenForm {
     code_verifier: Option<String>,
     #[serde(default)]
     refresh_token: String,
+    /// Space-delimited, per RFC 6749 §3.3. Only read for
+    /// `client_credentials`; empty means "everything this app has".
+    #[serde(default)]
+    scope: String,
 }
 
 async fn token(
@@ -401,6 +405,33 @@ async fn token(
         Some((id, secret)) => (id, secret),
         None => (form.client_id.clone(), form.client_secret.clone()),
     };
+
+    // client_credentials answers with a different shape — no refresh
+    // token, no id_token — so it returns straight from here rather than
+    // being forced through the user-token response builder below.
+    if form.grant_type == "client_credentials" {
+        let scopes: Vec<String> = form
+            .scope
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        return match client
+            .issue_client_credentials_token(&client_id, &client_secret, &scopes)
+            .await
+        {
+            Ok(t) => Json(json!({
+                "access_token": t.access_token,
+                "token_type": t.token_type,
+                "expires_in": t.expires_in_seconds,
+                "scope": t.scopes.join(" "),
+            }))
+            .into_response(),
+            Err(e) => {
+                let (status, code) = oauth_error_code(&e);
+                token_error(status, code)
+            }
+        };
+    }
 
     let result = match form.grant_type.as_str() {
         "authorization_code" => {
@@ -436,15 +467,7 @@ async fn token(
             Json(serde_json::Value::Object(body)).into_response()
         }
         Err(e) => {
-            let (status, code) = match e {
-                OAuthFlowError::InvalidClient => (StatusCode::UNAUTHORIZED, "invalid_client"),
-                OAuthFlowError::InvalidGrant => (StatusCode::BAD_REQUEST, "invalid_grant"),
-                OAuthFlowError::InvalidScope => (StatusCode::BAD_REQUEST, "invalid_scope"),
-                OAuthFlowError::InvalidRequest(_) => (StatusCode::BAD_REQUEST, "invalid_request"),
-                OAuthFlowError::ServerError(_) => {
-                    (StatusCode::INTERNAL_SERVER_ERROR, "server_error")
-                }
-            };
+            let (status, code) = oauth_error_code(&e);
             token_error(status, code)
         }
     }
@@ -460,7 +483,7 @@ async fn discovery(State(state): State<AppState>) -> Response {
         "token_endpoint": format!("{base}/oauth/token"),
         "userinfo_endpoint": format!("{base}/oauth/userinfo"),
         "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
         "scopes_supported": ["openid", "profile", "email"],
         "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
         "id_token_signing_alg_values_supported": ["HS256"],
@@ -511,6 +534,17 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
                 .into_response()
         }
         Err(_) => unauthorized("invalid_token"),
+    }
+}
+
+/// RFC 6749 §5.2 error code and its HTTP status.
+fn oauth_error_code(e: &OAuthFlowError) -> (StatusCode, &'static str) {
+    match e {
+        OAuthFlowError::InvalidClient => (StatusCode::UNAUTHORIZED, "invalid_client"),
+        OAuthFlowError::InvalidGrant => (StatusCode::BAD_REQUEST, "invalid_grant"),
+        OAuthFlowError::InvalidScope => (StatusCode::BAD_REQUEST, "invalid_scope"),
+        OAuthFlowError::InvalidRequest(_) => (StatusCode::BAD_REQUEST, "invalid_request"),
+        OAuthFlowError::ServerError(_) => (StatusCode::INTERNAL_SERVER_ERROR, "server_error"),
     }
 }
 

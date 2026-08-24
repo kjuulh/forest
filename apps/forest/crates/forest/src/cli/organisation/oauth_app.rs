@@ -110,6 +110,12 @@ pub struct CreateCommand {
     /// Requested scope (repeatable). Defaults to: openid profile
     #[arg(long)]
     scope: Vec<String>,
+    /// OAuth grant this app may use (repeatable): `authorization_code`
+    /// for "Sign in with Forest", `client_credentials` for a service
+    /// calling as itself. Defaults to `authorization_code` — an app only
+    /// becomes machine-capable by asking for it.
+    #[arg(long = "grant-type")]
+    grant_type: Vec<String>,
 }
 
 #[derive(Tabled, Serialize)]
@@ -141,6 +147,7 @@ impl CreateCommand {
                 &self.homepage_url,
                 self.redirect_uri.clone(),
                 scopes,
+                self.grant_type.clone(),
             )
             .await
             .context("failed to create oauth app")?;

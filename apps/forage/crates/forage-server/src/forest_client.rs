@@ -7,7 +7,8 @@ use forage_core::platform::{
     ArtifactDestination, ArtifactRef, ArtifactSource, CreatePolicyInput,
     CreateReleasePipelineInput, CreateTriggerInput, CreatedOAuthApp, Destination, DestinationType,
     DestinationTypeInfo, Environment, ForestOAuthApps, ForestPlatform, JoinOffer, MetadataFieldDef,
-    OAuthApp, OAuthClientInfo, OAuthFlowError, OAuthGrant, OAuthIssuedTokens, OAuthUserinfo,
+    OAuthApp, OAuthClientInfo, OAuthClientToken, OAuthFlowError, OAuthGrant, OAuthIssuedTokens,
+    OAuthUserinfo,
     NotificationPreference, Organisation, OrgMember, PipelineStage, PipelineStageConfig,
     PlanOutput, PlatformError, Policy, PolicyConfig, PolicyEvaluation, ReleasePipeline,
     Trigger, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
@@ -3305,6 +3306,9 @@ impl ForestOAuthApps for GrpcForestClient {
         let req = platform_authed_request(
             access_token,
             forage_grpc::CreateOAuthAppRequest {
+                // Apps created through Forage's UI are login apps; a
+                // machine app is provisioned deliberately via the CLI.
+                grant_types: vec!["authorization_code".to_string()],
                 organisation_id: organisation_id.into(),
                 name: name.into(),
                 description: description.into(),
@@ -3540,6 +3544,40 @@ impl ForestOAuthApps for GrpcForestClient {
             .await
             .map_err(map_oauth_flow_status)?;
         Ok(resp.into_inner().code)
+    }
+
+    async fn issue_client_credentials_token(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        scopes: &[String],
+    ) -> Result<OAuthClientToken, OAuthFlowError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| OAuthFlowError::ServerError("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::IssueClientCredentialsTokenRequest {
+                client_id: client_id.into(),
+                client_secret: client_secret.into(),
+                scopes: scopes.to_vec(),
+            },
+        )
+        .map_err(OAuthFlowError::ServerError)?;
+
+        let resp = self
+            .oauth_apps_client()
+            .issue_client_credentials_token(req)
+            .await
+            .map_err(map_oauth_flow_status)?
+            .into_inner();
+        Ok(OAuthClientToken {
+            access_token: resp.access_token,
+            token_type: resp.token_type,
+            expires_in_seconds: resp.expires_in_seconds,
+            scopes: resp.scopes,
+        })
     }
 
     async fn exchange_oauth_code(

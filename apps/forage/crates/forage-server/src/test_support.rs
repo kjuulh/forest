@@ -6,7 +6,8 @@ use forage_core::auth::{self, LoginResult, MfaSetup, *};
 use forage_core::platform::{
     Artifact, ArtifactContext, CreatePolicyInput, CreateReleasePipelineInput, CreateTriggerInput,
     CreatedOAuthApp, Destination, DestinationTypeInfo, Environment, ForestOAuthApps, ForestPlatform,
-    NotificationPreference, OAuthApp, OAuthClientInfo, OAuthFlowError, OAuthIssuedTokens,
+    NotificationPreference, OAuthApp, OAuthClientInfo, OAuthClientToken, OAuthFlowError,
+    OAuthIssuedTokens,
     OAuthGrant, OAuthUserinfo, Organisation, OrgMember, PlatformError, Policy, ReleasePipeline,
     Trigger, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
 };
@@ -1431,6 +1432,20 @@ impl ForestOAuthApps for MockOAuthAppsClient {
             }
         }
         Ok(code)
+    }
+
+    async fn issue_client_credentials_token(
+        &self,
+        _client_id: &str,
+        _client_secret: &str,
+        scopes: &[String],
+    ) -> Result<OAuthClientToken, OAuthFlowError> {
+        Ok(OAuthClientToken {
+            access_token: "forest_cat_mocktoken".into(),
+            token_type: "bearer".into(),
+            expires_in_seconds: 3600,
+            scopes: scopes.to_vec(),
+        })
     }
 
     async fn exchange_oauth_code(

@@ -74,6 +74,7 @@ async fn create_app(fixture: &Fixture, token: &str, org_id: &str) -> (String, St
                 homepage_url: String::new(),
                 redirect_uris: vec![REDIRECT.into()],
                 scopes: vec!["profile".into(), "email".into()],
+                grant_types: vec![],
             },
         ))
         .await
@@ -514,6 +515,7 @@ async fn openid_scope_issues_verifiable_id_token() {
                 homepage_url: String::new(),
                 redirect_uris: vec![REDIRECT.into()],
                 scopes: vec!["openid".into(), "profile".into()],
+                grant_types: vec![],
             },
         ))
         .await
@@ -570,6 +572,7 @@ async fn id_token_echoes_oidc_nonce() {
                 homepage_url: String::new(),
                 redirect_uris: vec![REDIRECT.into()],
                 scopes: vec!["openid".into()],
+                grant_types: vec![],
             },
         ))
         .await

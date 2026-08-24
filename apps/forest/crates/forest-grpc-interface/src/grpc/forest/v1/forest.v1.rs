@@ -2137,6 +2137,46 @@ pub struct ExchangeOAuthCodeResponse {
     pub tokens: ::core::option::Option<OAuthTokens>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IssueClientCredentialsTokenRequest {
+    #[prost(string, tag="1")]
+    pub client_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub client_secret: ::prost::alloc::string::String,
+    /// Subset of the app's registered scopes. Empty means all of them.
+    #[prost(string, repeated, tag="3")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IssueClientCredentialsTokenResponse {
+    #[prost(string, tag="1")]
+    pub access_token: ::prost::alloc::string::String,
+    /// always "bearer"
+    #[prost(string, tag="2")]
+    pub token_type: ::prost::alloc::string::String,
+    #[prost(int64, tag="3")]
+    pub expires_in_seconds: i64,
+    #[prost(string, repeated, tag="4")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IntrospectClientTokenRequest {
+    #[prost(string, tag="1")]
+    pub access_token: ::prost::alloc::string::String,
+}
+/// Empty `app_id` means the token is not live — unknown, expired or
+/// revoked, deliberately indistinguishable to the caller.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IntrospectClientTokenResponse {
+    #[prost(bool, tag="1")]
+    pub active: bool,
+    #[prost(string, tag="2")]
+    pub app_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="4")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetOAuthUserinfoRequest {
     /// raw OAuth access token presented by the client
     #[prost(string, tag="1")]
@@ -2259,6 +2299,11 @@ pub struct OAuthApp {
     /// scopes this app is permitted to request
     #[prost(string, repeated, tag="8")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// OAuth grants this app may use: "authorization_code" and/or
+    /// "client_credentials". Apps predating machine-to-machine support
+    /// carry "authorization_code" alone.
+    #[prost(string, repeated, tag="12")]
+    pub grant_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// UUID of the creating user
     #[prost(string, tag="9")]
     pub created_by: ::prost::alloc::string::String,
@@ -2281,6 +2326,10 @@ pub struct CreateOAuthAppRequest {
     pub redirect_uris: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(string, repeated, tag="6")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Empty defaults to \["authorization_code"\], so an app only becomes
+    /// machine-capable by asking.
+    #[prost(string, repeated, tag="7")]
+    pub grant_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateOAuthAppResponse {

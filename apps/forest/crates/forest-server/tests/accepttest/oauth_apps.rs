@@ -57,6 +57,7 @@ fn default_create(org_id: &str) -> CreateOAuthAppRequest {
         homepage_url: "https://app.example".into(),
         redirect_uris: vec!["https://app.example/callback".into()],
         scopes: vec!["profile".into(), "email".into()],
+        grant_types: vec![],
     }
 }
 

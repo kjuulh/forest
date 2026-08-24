@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE oauth_client_tokens t\n            SET last_used_at = now()\n            FROM oauth_apps a\n            WHERE t.token_hash = $1\n              AND t.app_id = a.id\n              AND t.revoked_at IS NULL\n              AND t.expires_at > now()\n            RETURNING t.app_id, a.organisation_id, t.scopes\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "app_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "organisation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scopes",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5bfbd425b111bc47063d22f990f723e9e20208924356680ecd10b3aeae388491"
+}

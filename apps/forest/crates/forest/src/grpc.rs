@@ -916,6 +916,7 @@ impl GrpcClient {
         homepage_url: &str,
         redirect_uris: Vec<String>,
         scopes: Vec<String>,
+        grant_types: Vec<String>,
     ) -> anyhow::Result<CreateOAuthAppResponse> {
         let mut client = self.oauth_apps_client().await?;
         let resp = client
@@ -926,6 +927,7 @@ impl GrpcClient {
                 homepage_url: homepage_url.into(),
                 redirect_uris,
                 scopes,
+                grant_types,
             })
             .await
             .map_err(grpc_err)

@@ -60,6 +60,7 @@ impl OAuthAppsService for OAuthAppsServer {
                 &req.homepage_url,
                 &req.redirect_uris,
                 &req.scopes,
+                &req.grant_types,
             )
             .await
             .map_err(error::to_status)?;
@@ -251,6 +252,66 @@ impl OAuthAppsService for OAuthAppsServer {
         }))
     }
 
+    /// The client_credentials grant. Same service-account gate as the
+    /// rest of the authorization-server surface: Forage fronts it, and
+    /// the client's own credentials are checked inside the service.
+    async fn issue_client_credentials_token(
+        &self,
+        request: tonic::Request<IssueClientCredentialsTokenRequest>,
+    ) -> Result<tonic::Response<IssueClientCredentialsTokenResponse>, tonic::Status> {
+        let _actor = authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+        let req = request.into_inner();
+
+        let issued = self
+            .service()
+            .client_credentials_token(&req.client_id, &req.client_secret, &req.scopes)
+            .await
+            .map_err(oauth_flow_status)?;
+
+        Ok(tonic::Response::new(IssueClientCredentialsTokenResponse {
+            access_token: issued.access_token,
+            token_type: "bearer".to_string(),
+            expires_in_seconds: issued.expires_in_seconds,
+            scopes: issued.scopes,
+        }))
+    }
+
+    /// Resolve a machine token for a resource server.
+    ///
+    /// An unknown, expired or revoked token all return `active: false`
+    /// with empty fields — the caller learns only that it can't be used,
+    /// which keeps this from doubling as a token-probing oracle.
+    async fn introspect_client_token(
+        &self,
+        request: tonic::Request<IntrospectClientTokenRequest>,
+    ) -> Result<tonic::Response<IntrospectClientTokenResponse>, tonic::Status> {
+        let _actor = authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+        let req = request.into_inner();
+
+        let found = self
+            .service()
+            .introspect_client_token(&req.access_token)
+            .await
+            .map_err(oauth_flow_status)?;
+
+        Ok(tonic::Response::new(match found {
+            Some(p) => IntrospectClientTokenResponse {
+                active: true,
+                app_id: p.app_id.to_string(),
+                organisation_id: p.organisation_id.to_string(),
+                scopes: p.scopes,
+            },
+            None => IntrospectClientTokenResponse {
+                active: false,
+                ..Default::default()
+            },
+        }))
+    }
+
     async fn exchange_o_auth_code(
         &self,
         request: tonic::Request<ExchangeOAuthCodeRequest>,
@@ -424,6 +485,13 @@ fn oauth_flow_status(err: anyhow::Error) -> tonic::Status {
             OAuthAppError::InvalidCodeChallengeMethod => {
                 tonic::Status::invalid_argument("invalid_request")
             }
+            // RFC 6749 names these exactly.
+            OAuthAppError::UnsupportedGrant(_) => {
+                tonic::Status::invalid_argument("unsupported_grant_type")
+            }
+            OAuthAppError::ScopeNotGranted(_) => {
+                tonic::Status::invalid_argument("invalid_scope")
+            }
             OAuthAppError::InvalidName
             | OAuthAppError::NoRedirectUris
             | OAuthAppError::InvalidRedirectUri(_) => {
@@ -461,6 +529,7 @@ fn to_proto(app: OAuthApp) -> forest_grpc_interface::OAuthApp {
         homepage_url: app.homepage_url,
         client_id: app.client_id,
         redirect_uris: app.redirect_uris,
+        grant_types: app.grant_types,
         scopes: app.scopes,
         created_by: app.created_by.to_string(),
         created_at: Some(datetime_to_timestamp(app.created_at)),

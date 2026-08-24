@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, organisation_id, name, description, homepage_url, client_id,\n                   client_secret_hash, redirect_uris, scopes, created_by, created_at, updated_at\n            FROM oauth_apps\n            WHERE organisation_id = $1 AND id = $2\n            ",
+  "query": "\n            UPDATE oauth_apps\n            SET client_secret_hash = $3, updated_at = now()\n            WHERE organisation_id = $1 AND id = $2\n            RETURNING id, organisation_id, name, description, homepage_url, client_id,\n                      client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at\n            ",
   "describe": {
     "columns": [
       {
@@ -50,16 +50,21 @@
       },
       {
         "ordinal": 9,
+        "name": "grant_types",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 10,
         "name": "created_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -67,7 +72,8 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid"
+        "Uuid",
+        "Bytea"
       ]
     },
     "nullable": [
@@ -82,8 +88,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "41f84ef33b0e63b5586c7b445edbe1d7180f7c832e925ecd5da0e8b3b7a0a4c8"
+  "hash": "e2cd6d74097a94e300d56458ec07312f5cbc0eeabb1655598f16ee88225b9503"
 }

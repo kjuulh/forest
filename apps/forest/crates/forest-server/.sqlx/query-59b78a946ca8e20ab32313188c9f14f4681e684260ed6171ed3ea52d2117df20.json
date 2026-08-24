@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, organisation_id, name, description, homepage_url, client_id,\n                   client_secret_hash, redirect_uris, scopes, created_by, created_at, updated_at\n            FROM oauth_apps\n            WHERE client_id = $1\n            ",
+  "query": "\n            SELECT id, organisation_id, name, description, homepage_url, client_id,\n                   client_secret_hash, redirect_uris, scopes, grant_types,\n                   created_by, created_at, updated_at\n            FROM oauth_apps\n            WHERE client_id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -50,16 +50,21 @@
       },
       {
         "ordinal": 9,
+        "name": "grant_types",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 10,
         "name": "created_by",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -81,8 +86,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "b96498639f798df9f0b3ee80913ff8180965ccaf1c5be6609b14e812fcd510df"
+  "hash": "59b78a946ca8e20ab32313188c9f14f4681e684260ed6171ed3ea52d2117df20"
 }

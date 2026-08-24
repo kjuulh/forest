@@ -35,6 +35,12 @@ pub enum OAuthAppError {
     /// client_secret did not match.
     #[error("invalid client credentials")]
     InvalidClientSecret,
+    /// The app is not registered for the grant it tried to use.
+    #[error("client is not authorised for the {0} grant")]
+    UnsupportedGrant(String),
+    /// A machine app asked for a scope it was never registered with.
+    #[error("scope not registered for this client: {0}")]
+    ScopeNotGranted(String),
     /// redirect_uri is not in the app's allowlist.
     #[error("redirect_uri not registered for this client")]
     RedirectUriNotAllowed,
@@ -61,6 +67,8 @@ pub struct OAuthApp {
     pub client_id: String,
     pub redirect_uris: Vec<String>,
     pub scopes: Vec<String>,
+    /// Which OAuth grants this app may use.
+    pub grant_types: Vec<String>,
     pub created_by: Uuid,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -77,6 +85,7 @@ impl From<OAuthAppRow> for OAuthApp {
             client_id: row.client_id,
             redirect_uris: row.redirect_uris,
             scopes: row.scopes,
+            grant_types: row.grant_types,
             created_by: row.created_by,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -96,8 +105,36 @@ pub struct CreatedOAuthApp {
 pub const AUTH_CODE_TTL_SECONDS: i64 = 60;
 /// Access-token lifetime.
 pub const ACCESS_TOKEN_TTL_SECONDS: i64 = 8 * 3600;
+/// Machine-token lifetime. Much shorter than a user's access token: a
+/// client-credentials holder can re-mint at will with the secret it
+/// already has, so a long life buys nothing and costs blast radius.
+pub const CLIENT_TOKEN_TTL_SECONDS: i64 = 3600;
+
+/// `grant_types` vocabulary.
+pub const GRANT_AUTHORIZATION_CODE: &str = "authorization_code";
+pub const GRANT_CLIENT_CREDENTIALS: &str = "client_credentials";
+
+/// Grants an app may be registered for.
+pub const SUPPORTED_GRANT_TYPES: &[&str] = &[GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS];
 /// Refresh-token lifetime.
 pub const REFRESH_TOKEN_TTL_SECONDS: i64 = 90 * 24 * 3600;
+
+/// A minted machine token. No refresh token and no id_token — see
+/// `client_credentials_token` for why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssuedClientToken {
+    pub access_token: String,
+    pub expires_in_seconds: i64,
+    pub scopes: Vec<String>,
+}
+
+/// Who a machine token belongs to, as seen by a resource server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientPrincipal {
+    pub app_id: Uuid,
+    pub organisation_id: Uuid,
+    pub scopes: Vec<String>,
+}
 
 /// Opaque tokens minted on a successful code exchange.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,8 +193,10 @@ impl OAuthAppService {
         homepage_url: &str,
         redirect_uris: &[String],
         scopes: &[String],
+        grant_types: &[String],
     ) -> anyhow::Result<CreatedOAuthApp> {
         let input = validate_input(name, description, homepage_url, redirect_uris, scopes)?;
+        let grant_types = validate_grant_types(grant_types)?;
 
         let app_id = Uuid::now_v7();
         let client_id = generate_client_id();
@@ -177,6 +216,7 @@ impl OAuthAppService {
                 &secret_hash,
                 &input.redirect_uris,
                 &input.scopes,
+                &grant_types,
                 created_by,
             )
             .await?;
@@ -472,6 +512,91 @@ impl OAuthAppService {
         Ok(Some(token))
     }
 
+    /// The `client_credentials` grant: an app authenticating as *itself*,
+    /// with no user in the loop.
+    ///
+    /// Deliberately narrower than the code flow. There is no refresh
+    /// token (the client re-mints with the secret it already holds), no
+    /// id_token (there is no subject to describe), and no consent (an
+    /// app cannot consent on a user's behalf when no user is involved).
+    ///
+    /// Requested scopes must be a subset of the app's registered scopes;
+    /// asking for more is an error rather than a silent downgrade, so a
+    /// misconfigured client fails loudly instead of quietly getting less
+    /// access than it thinks it has.
+    pub async fn client_credentials_token(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        requested_scopes: &[String],
+    ) -> anyhow::Result<IssuedClientToken> {
+        let row = self
+            .repo
+            .get_oauth_app_by_client_id(self.repo.pool(), client_id)
+            .await?
+            .ok_or(OAuthAppError::UnknownClient)?;
+
+        if !constant_time_eq(&hash_secret(client_secret), &row.client_secret_hash) {
+            return Err(OAuthAppError::InvalidClientSecret.into());
+        }
+
+        if !row
+            .grant_types
+            .iter()
+            .any(|g| g == GRANT_CLIENT_CREDENTIALS)
+        {
+            return Err(
+                OAuthAppError::UnsupportedGrant(GRANT_CLIENT_CREDENTIALS.to_string()).into(),
+            );
+        }
+
+        // Empty request means "everything this app is registered for" —
+        // the conventional reading, and it keeps simple clients simple.
+        let scopes = if requested_scopes.is_empty() {
+            row.scopes.clone()
+        } else {
+            for requested in requested_scopes {
+                if !row.scopes.iter().any(|s| s == requested) {
+                    return Err(OAuthAppError::ScopeNotGranted(requested.clone()).into());
+                }
+            }
+            requested_scopes.to_vec()
+        };
+
+        let (access_token, access_hash) = generate_opaque_token("forest_cat_");
+        let expires_at = chrono::Utc::now() + chrono::Duration::seconds(CLIENT_TOKEN_TTL_SECONDS);
+        self.repo
+            .insert_client_token(self.repo.pool(), &access_hash, row.id, &scopes, expires_at)
+            .await?;
+
+        Ok(IssuedClientToken {
+            access_token,
+            expires_in_seconds: CLIENT_TOKEN_TTL_SECONDS,
+            scopes,
+        })
+    }
+
+    /// Resolve a machine token to the app behind it. Resource servers
+    /// call this to authorise a request.
+    pub async fn introspect_client_token(
+        &self,
+        access_token: &str,
+    ) -> anyhow::Result<Option<ClientPrincipal>> {
+        let hash = hash_secret(access_token);
+        let Some(row) = self
+            .repo
+            .resolve_client_token(self.repo.pool(), &hash)
+            .await?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(ClientPrincipal {
+            app_id: row.app_id,
+            organisation_id: row.organisation_id,
+            scopes: row.scopes,
+        }))
+    }
+
     /// Exchange a refresh token for a fresh access + refresh token, rotating
     /// the refresh token. Detects reuse of an already-rotated refresh token and
     /// revokes the whole (user, app) grant family as a defence (RFC 6749 §10.4).
@@ -699,6 +824,28 @@ pub fn validate_input(
 /// A redirect URI must be an absolute http(s) URL with no fragment. https is
 /// required, except for loopback (localhost / 127.0.0.1) which may use http
 /// for local development.
+/// Normalise and check an app's requested grant types.
+///
+/// An empty list means `authorization_code`, matching both the column
+/// default and every app that existed before this grant did — so an app
+/// only becomes machine-capable by asking for it.
+pub fn validate_grant_types(requested: &[String]) -> Result<Vec<String>, OAuthAppError> {
+    if requested.is_empty() {
+        return Ok(vec![GRANT_AUTHORIZATION_CODE.to_string()]);
+    }
+    let mut out: Vec<String> = Vec::new();
+    for raw in requested {
+        let g = raw.trim().to_ascii_lowercase();
+        if !SUPPORTED_GRANT_TYPES.contains(&g.as_str()) {
+            return Err(OAuthAppError::UnsupportedGrant(g));
+        }
+        if !out.contains(&g) {
+            out.push(g);
+        }
+    }
+    Ok(out)
+}
+
 pub fn validate_redirect_uri(uri: &str) -> Result<(), OAuthAppError> {
     let invalid = |u: &str| OAuthAppError::InvalidRedirectUri(u.to_string());
 
@@ -1113,6 +1260,73 @@ mod tests {
             normalize_pkce_method(Some("c"), Some("bogus")).unwrap_err(),
             OAuthAppError::InvalidCodeChallengeMethod
         );
+    }
+
+    // ── client_credentials grant ──────────────────────────────────────
+
+    #[test]
+    fn grant_types_default_to_authorization_code_only() {
+        // An app that says nothing is a login app. This is what stops
+        // every pre-existing app from silently gaining machine access
+        // when the column was added.
+        assert_eq!(
+            validate_grant_types(&[]).unwrap(),
+            vec![GRANT_AUTHORIZATION_CODE.to_string()]
+        );
+    }
+
+    #[test]
+    fn grant_types_are_normalised_and_deduplicated() {
+        let got = validate_grant_types(&[
+            "  Client_Credentials ".to_string(),
+            "client_credentials".to_string(),
+            "authorization_code".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(
+            got,
+            vec![
+                GRANT_CLIENT_CREDENTIALS.to_string(),
+                GRANT_AUTHORIZATION_CODE.to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unknown_grant_type_is_refused_rather_than_ignored() {
+        // Silently dropping it would register an app that appears to
+        // support a grant it does not.
+        let err = validate_grant_types(&["implicit".to_string()]).unwrap_err();
+        assert!(matches!(err, OAuthAppError::UnsupportedGrant(g) if g == "implicit"));
+        // And one bad entry fails the whole list.
+        assert!(
+            validate_grant_types(&[
+                "authorization_code".to_string(),
+                "password".to_string()
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn machine_tokens_are_short_lived_relative_to_user_tokens() {
+        // A client-credentials holder can re-mint at will with the
+        // secret it already has, so a long life buys nothing and only
+        // widens the blast radius of a leak.
+        assert!(CLIENT_TOKEN_TTL_SECONDS < ACCESS_TOKEN_TTL_SECONDS);
+        assert!(CLIENT_TOKEN_TTL_SECONDS > 0);
+    }
+
+    #[test]
+    fn machine_and_user_tokens_are_distinguishable_by_prefix() {
+        // The two live in separate tables and must never be accepted
+        // interchangeably; distinct prefixes make a mix-up obvious in
+        // logs and in a bug report.
+        let (machine, _) = generate_opaque_token("forest_cat_");
+        let (user, _) = generate_opaque_token("forest_oat_");
+        assert!(machine.starts_with("forest_cat_"));
+        assert!(user.starts_with("forest_oat_"));
+        assert_ne!(machine, user);
     }
 }
 

@@ -1036,6 +1036,17 @@ pub struct OAuthIssuedTokens {
     pub id_token: Option<String>,
 }
 
+/// A minted machine token. Deliberately narrower than
+/// [`OAuthIssuedTokens`]: no refresh token (the client re-mints with the
+/// secret it holds) and no id_token (there is no subject to describe).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthClientToken {
+    pub access_token: String,
+    pub token_type: String,
+    pub expires_in_seconds: i64,
+    pub scopes: Vec<String>,
+}
+
 /// A user's authorization of an OAuth app, for the "authorized apps" page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthGrant {
@@ -1131,6 +1142,15 @@ pub trait ForestOAuthApps: Send + Sync {
     ) -> Result<(), PlatformError>;
 
     // ── Authorization server (Forage authenticates as a service account) ──
+
+    /// The `client_credentials` grant: an app authenticating as itself,
+    /// with no user in the loop. No refresh token, no id_token.
+    async fn issue_client_credentials_token(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        scopes: &[String],
+    ) -> Result<OAuthClientToken, OAuthFlowError>;
 
     /// Public client metadata for the consent screen. `None` if no such client.
     async fn lookup_oauth_client(

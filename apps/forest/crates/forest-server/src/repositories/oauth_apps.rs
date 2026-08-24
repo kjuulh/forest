@@ -25,9 +25,21 @@ pub struct OAuthAppRow {
     pub client_secret_hash: Vec<u8>,
     pub redirect_uris: Vec<String>,
     pub scopes: Vec<String>,
+    /// Which OAuth grants this app may use. Apps created before
+    /// machine-to-machine support default to `authorization_code` only,
+    /// so nothing gains a capability by being old.
+    pub grant_types: Vec<String>,
     pub created_by: Uuid,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// A live machine (client-credentials) token: which app it belongs to and
+/// what it may do. No user — that is the whole point of the grant.
+pub struct ResolvedClientTokenRow {
+    pub app_id: Uuid,
+    pub organisation_id: Uuid,
+    pub scopes: Vec<String>,
 }
 
 /// The bearer + scopes resolved from a live access token.
@@ -117,6 +129,7 @@ impl OAuthAppRepository {
         client_secret_hash: &[u8],
         redirect_uris: &[String],
         scopes: &[String],
+        grant_types: &[String],
         created_by: Uuid,
     ) -> Result<OAuthAppRow, DbError> {
         let row = sqlx::query_as!(
@@ -124,10 +137,10 @@ impl OAuthAppRepository {
             r#"
             INSERT INTO oauth_apps
                 (id, organisation_id, name, description, homepage_url, client_id,
-                 client_secret_hash, redirect_uris, scopes, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 client_secret_hash, redirect_uris, scopes, grant_types, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING id, organisation_id, name, description, homepage_url, client_id,
-                      client_secret_hash, redirect_uris, scopes, created_by, created_at, updated_at
+                      client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at
             "#,
             id,
             organisation_id,
@@ -138,6 +151,7 @@ impl OAuthAppRepository {
             client_secret_hash,
             redirect_uris,
             scopes,
+            grant_types,
             created_by,
         )
         .fetch_one(db)
@@ -155,7 +169,7 @@ impl OAuthAppRepository {
             OAuthAppRow,
             r#"
             SELECT id, organisation_id, name, description, homepage_url, client_id,
-                   client_secret_hash, redirect_uris, scopes, created_by, created_at, updated_at
+                   client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at
             FROM oauth_apps
             WHERE organisation_id = $1
             ORDER BY created_at DESC
@@ -179,7 +193,7 @@ impl OAuthAppRepository {
             OAuthAppRow,
             r#"
             SELECT id, organisation_id, name, description, homepage_url, client_id,
-                   client_secret_hash, redirect_uris, scopes, created_by, created_at, updated_at
+                   client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at
             FROM oauth_apps
             WHERE organisation_id = $1 AND id = $2
             "#,
@@ -202,7 +216,8 @@ impl OAuthAppRepository {
             OAuthAppRow,
             r#"
             SELECT id, organisation_id, name, description, homepage_url, client_id,
-                   client_secret_hash, redirect_uris, scopes, created_by, created_at, updated_at
+                   client_secret_hash, redirect_uris, scopes, grant_types,
+                   created_by, created_at, updated_at
             FROM oauth_apps
             WHERE client_id = $1
             "#,
@@ -212,6 +227,83 @@ impl OAuthAppRepository {
         .await?;
 
         Ok(row)
+    }
+
+    // ── Machine (client-credentials) tokens ──────────────────────────
+    //
+    // Deliberately a separate table from `oauth_access_tokens`: these
+    // have no user, no refresh token and no consent, and keeping them
+    // apart means neither flow can accept the other's tokens. See the
+    // migration for the full reasoning.
+
+    pub async fn insert_client_token(
+        &self,
+        db: impl PgExecutor<'_>,
+        token_hash: &[u8],
+        app_id: Uuid,
+        scopes: &[String],
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), DbError> {
+        sqlx::query!(
+            r#"
+            INSERT INTO oauth_client_tokens (token_hash, app_id, scopes, expires_at)
+            VALUES ($1, $2, $3, $4)
+            "#,
+            token_hash,
+            app_id,
+            scopes,
+            expires_at,
+        )
+        .execute(db)
+        .await?;
+        Ok(())
+    }
+
+    /// Resolve a live machine token to its app + granted scopes, touching
+    /// `last_used_at`. `None` when unknown, expired or revoked — the
+    /// caller cannot tell which, on purpose.
+    pub async fn resolve_client_token(
+        &self,
+        db: impl PgExecutor<'_>,
+        token_hash: &[u8],
+    ) -> anyhow::Result<Option<ResolvedClientTokenRow>> {
+        let row = sqlx::query_as!(
+            ResolvedClientTokenRow,
+            r#"
+            UPDATE oauth_client_tokens t
+            SET last_used_at = now()
+            FROM oauth_apps a
+            WHERE t.token_hash = $1
+              AND t.app_id = a.id
+              AND t.revoked_at IS NULL
+              AND t.expires_at > now()
+            RETURNING t.app_id, a.organisation_id, t.scopes
+            "#,
+            token_hash,
+        )
+        .fetch_optional(db)
+        .await?;
+        Ok(row)
+    }
+
+    /// Revoke every live machine token for an app. Used when the app's
+    /// secret is rotated or the app is disabled.
+    pub async fn revoke_client_tokens_for_app(
+        &self,
+        db: impl PgExecutor<'_>,
+        app_id: Uuid,
+    ) -> Result<u64, DbError> {
+        let done = sqlx::query!(
+            r#"
+            UPDATE oauth_client_tokens
+            SET revoked_at = now()
+            WHERE app_id = $1 AND revoked_at IS NULL
+            "#,
+            app_id,
+        )
+        .execute(db)
+        .await?;
+        Ok(done.rows_affected())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -234,7 +326,7 @@ impl OAuthAppRepository {
                 redirect_uris = $6, scopes = $7, updated_at = now()
             WHERE organisation_id = $1 AND id = $2
             RETURNING id, organisation_id, name, description, homepage_url, client_id,
-                      client_secret_hash, redirect_uris, scopes, created_by, created_at, updated_at
+                      client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at
             "#,
             organisation_id,
             app_id,
@@ -264,7 +356,7 @@ impl OAuthAppRepository {
             SET client_secret_hash = $3, updated_at = now()
             WHERE organisation_id = $1 AND id = $2
             RETURNING id, organisation_id, name, description, homepage_url, client_id,
-                      client_secret_hash, redirect_uris, scopes, created_by, created_at, updated_at
+                      client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at
             "#,
             organisation_id,
             app_id,
