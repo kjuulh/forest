@@ -329,6 +329,10 @@ impl OAuthAppService {
             .await?
             .ok_or(OAuthAppError::UnknownClient)?;
 
+        // Checked before anything else user-visible happens: a machine-only
+        // app should never reach a consent screen at all.
+        Self::require_grant(&app, GRANT_AUTHORIZATION_CODE)?;
+
         if !app.redirect_uris.iter().any(|u| u == redirect_uri) {
             return Err(OAuthAppError::RedirectUriNotAllowed.into());
         }
@@ -406,6 +410,11 @@ impl OAuthAppService {
         if !constant_time_eq(&hash_secret(client_secret), &row.client_secret_hash) {
             return Err(OAuthAppError::InvalidClientSecret.into());
         }
+
+        // Re-checked here rather than trusted from issue time: a code
+        // outlives the check that minted it, and the grant may have been
+        // taken away in between.
+        Self::require_grant(&row, GRANT_AUTHORIZATION_CODE)?;
 
         let code_hash = hash_secret(code);
         let consumed = self
@@ -512,6 +521,20 @@ impl OAuthAppService {
         Ok(Some(token))
     }
 
+    /// Refuse an app a grant it was never registered for.
+    ///
+    /// Both directions matter. An app is free to hold *both* grants —
+    /// acting for a user and acting as itself, the way a GitHub App does
+    /// — but it should only be able to use what it declared, so a
+    /// machine-only credential can't quietly run a login flow and a
+    /// login-only app can't mint machine tokens.
+    fn require_grant(app: &OAuthAppRow, grant: &str) -> Result<(), OAuthAppError> {
+        if app.grant_types.iter().any(|g| g == grant) {
+            return Ok(());
+        }
+        Err(OAuthAppError::UnsupportedGrant(grant.to_string()))
+    }
+
     /// The `client_credentials` grant: an app authenticating as *itself*,
     /// with no user in the loop.
     ///
@@ -540,15 +563,7 @@ impl OAuthAppService {
             return Err(OAuthAppError::InvalidClientSecret.into());
         }
 
-        if !row
-            .grant_types
-            .iter()
-            .any(|g| g == GRANT_CLIENT_CREDENTIALS)
-        {
-            return Err(
-                OAuthAppError::UnsupportedGrant(GRANT_CLIENT_CREDENTIALS.to_string()).into(),
-            );
-        }
+        Self::require_grant(&row, GRANT_CLIENT_CREDENTIALS)?;
 
         // Empty request means "everything this app is registered for" —
         // the conventional reading, and it keeps simple clients simple.
@@ -615,6 +630,10 @@ impl OAuthAppService {
         if !constant_time_eq(&hash_secret(client_secret), &app.client_secret_hash) {
             return Err(OAuthAppError::InvalidClientSecret.into());
         }
+        // A refresh token can only have come from the code flow, so
+        // withdrawing that grant should stop the whole family working —
+        // not just stop new logins while old sessions roll on forever.
+        Self::require_grant(&app, GRANT_AUTHORIZATION_CODE)?;
 
         let refresh_hash = hash_secret(refresh_token);
 
@@ -1306,6 +1325,66 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    fn app_with(grants: &[&str]) -> OAuthAppRow {
+        OAuthAppRow {
+            id: Uuid::nil(),
+            organisation_id: Uuid::nil(),
+            name: "app".into(),
+            description: String::new(),
+            homepage_url: String::new(),
+            client_id: "cid".into(),
+            client_secret_hash: vec![],
+            redirect_uris: vec![],
+            scopes: vec![],
+            grant_types: grants.iter().map(|g| g.to_string()).collect(),
+            created_by: Uuid::nil(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    /// The GitHub-App shape: one credential that both acts for a user
+    /// and acts as itself.
+    #[test]
+    fn an_app_may_hold_both_grants() {
+        let both = validate_grant_types(&[
+            GRANT_AUTHORIZATION_CODE.to_string(),
+            GRANT_CLIENT_CREDENTIALS.to_string(),
+        ])
+        .unwrap();
+        assert_eq!(both.len(), 2);
+
+        let app = app_with(&[GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS]);
+        assert!(OAuthAppService::require_grant(&app, GRANT_AUTHORIZATION_CODE).is_ok());
+        assert!(OAuthAppService::require_grant(&app, GRANT_CLIENT_CREDENTIALS).is_ok());
+    }
+
+    /// `grant_types` has to bite in *both* directions, or it is
+    /// decoration. A machine-only credential must not be able to run a
+    /// login flow.
+    #[test]
+    fn each_grant_is_refused_to_an_app_that_did_not_register_it() {
+        let machine_only = app_with(&[GRANT_CLIENT_CREDENTIALS]);
+        assert!(OAuthAppService::require_grant(&machine_only, GRANT_CLIENT_CREDENTIALS).is_ok());
+        assert!(matches!(
+            OAuthAppService::require_grant(&machine_only, GRANT_AUTHORIZATION_CODE),
+            Err(OAuthAppError::UnsupportedGrant(g)) if g == GRANT_AUTHORIZATION_CODE
+        ));
+
+        let login_only = app_with(&[GRANT_AUTHORIZATION_CODE]);
+        assert!(OAuthAppService::require_grant(&login_only, GRANT_AUTHORIZATION_CODE).is_ok());
+        assert!(matches!(
+            OAuthAppService::require_grant(&login_only, GRANT_CLIENT_CREDENTIALS),
+            Err(OAuthAppError::UnsupportedGrant(g)) if g == GRANT_CLIENT_CREDENTIALS
+        ));
+
+        // An app with nothing registered can do nothing — it cannot fall
+        // back to "whatever was asked for".
+        let none = app_with(&[]);
+        assert!(OAuthAppService::require_grant(&none, GRANT_AUTHORIZATION_CODE).is_err());
+        assert!(OAuthAppService::require_grant(&none, GRANT_CLIENT_CREDENTIALS).is_err());
     }
 
     #[test]

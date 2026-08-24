@@ -112,8 +112,15 @@ pub struct CreateCommand {
     scope: Vec<String>,
     /// OAuth grant this app may use (repeatable): `authorization_code`
     /// for "Sign in with Forest", `client_credentials` for a service
-    /// calling as itself. Defaults to `authorization_code` — an app only
-    /// becomes machine-capable by asking for it.
+    /// calling as itself.
+    ///
+    /// Pass both to get both, the way a GitHub App acts for a user and
+    /// as itself:
+    ///
+    ///   --grant-type authorization_code --grant-type client_credentials
+    ///
+    /// Defaults to `authorization_code` — an app only becomes
+    /// machine-capable by asking for it.
     #[arg(long = "grant-type")]
     grant_type: Vec<String>,
 }
