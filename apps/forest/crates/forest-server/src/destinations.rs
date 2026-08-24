@@ -9,6 +9,7 @@ use crate::{
         foragev1::ForageV1Destination,
         kubernetesv1::KubernetesV1Destination,
         logger::DestinationLogger,
+        noopv1::NoopV1Destination,
         terraformv1::{TerraformStateStoreState, TerraformV1Destination},
     },
     services::{
@@ -22,6 +23,7 @@ pub mod fluxv1;
 pub mod foragev1;
 pub mod in_process_backend;
 pub mod kubernetesv1;
+pub mod noopv1;
 pub mod terraformv1;
 
 pub mod logger;
@@ -59,6 +61,10 @@ impl DestinationService {
 
     pub fn new_forage_v1(release_logs_registry: ReleaseLogsRegistry) -> Self {
         Self::new(ForageV1Destination {}, release_logs_registry)
+    }
+
+    pub fn new_noop_v1(release_logs_registry: ReleaseLogsRegistry) -> Self {
+        Self::new(NoopV1Destination {}, release_logs_registry)
     }
 
     pub fn new_terraform_v1(state: &State, release_logs_registry: ReleaseLogsRegistry) -> Self {

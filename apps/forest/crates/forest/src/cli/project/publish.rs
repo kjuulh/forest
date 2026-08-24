@@ -2,7 +2,12 @@ use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::Context;
 
-use crate::{grpc::GrpcClientState, models::source::Source, state::State};
+use crate::{
+    cli::release::annotate::{DEPLOYMENT_DIR, deployment_files},
+    grpc::GrpcClientState,
+    models::source::Source,
+    state::State,
+};
 
 #[derive(clap::Parser)]
 pub struct PublishCommand {
@@ -78,21 +83,11 @@ impl PublishCommand {
             .await
             .context("begin artifact upload")?;
 
-        let mut files = Vec::new();
-        for entry in walkdir::WalkDir::new(".forest/deployment") {
-            let entry = entry?;
-            let path = entry.path();
-            let metadata = entry.metadata()?;
-
-            if !metadata.is_file() {
-                continue;
-            }
-
-            files.push(path.to_path_buf());
-        }
-
-        for file in files {
-            let artifact_file = file.strip_prefix(".forest/deployment")?;
+        // Shared with `forest release annotate`, which uploads the same tree the
+        // same way — including treating a missing directory as "nothing to
+        // upload" rather than as a failure (DATA-637).
+        for file in deployment_files()? {
+            let artifact_file = file.strip_prefix(DEPLOYMENT_DIR)?;
             let mut components = artifact_file.components();
             let Some(env) = components.next() else {
                 tracing::warn!("file doesn't exist, env is required");

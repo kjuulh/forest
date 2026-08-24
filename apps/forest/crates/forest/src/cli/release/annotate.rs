@@ -1,8 +1,14 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 
 use crate::{grpc::GrpcClientState, models::source::Source, state::State};
+
+/// Where `forest release prepare` writes the manifests a release uploads.
+pub(crate) const DEPLOYMENT_DIR: &str = ".forest/deployment";
 
 /// Run a git command and return its trimmed stdout, or `None` on failure.
 pub(super) async fn git_output(args: &[&str]) -> Option<String> {
@@ -18,6 +24,43 @@ pub(super) async fn git_output(args: &[&str]) -> Option<String> {
 
     let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if s.is_empty() { None } else { Some(s) }
+}
+
+/// Every file under `.forest/deployment`, or nothing at all when the directory
+/// does not exist.
+///
+/// A release does not have to deploy anything. A notification-only project — an
+/// empty `forest.cue` whose only job is to record that something shipped
+/// elsewhere (DATA-637) — never runs `forest release prepare`, so nothing ever
+/// creates `.forest/deployment`. Neither does a fresh CI checkout of a project
+/// that annotates before it prepares.
+///
+/// `WalkDir` reports a missing root as an `Err` on the first iteration rather
+/// than as an empty walk, so iterating it directly turned "there is nothing to
+/// upload" into `IO error for operation on .forest/deployment: No such file or
+/// directory` and killed the annotate outright. Absent means empty.
+pub(crate) fn deployment_files() -> anyhow::Result<Vec<PathBuf>> {
+    deployment_files_in(Path::new(DEPLOYMENT_DIR))
+}
+
+fn deployment_files_in(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    if !root.exists() {
+        tracing::debug!("{} does not exist — nothing to upload", root.display());
+        return Ok(Vec::new());
+    }
+
+    let mut files = Vec::new();
+    for entry in walkdir::WalkDir::new(root) {
+        let entry = entry?;
+
+        if !entry.metadata()?.is_file() {
+            continue;
+        }
+
+        files.push(entry.path().to_path_buf());
+    }
+
+    Ok(files)
 }
 
 #[derive(clap::Parser)]
@@ -158,21 +201,8 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
         .await
         .context("begin artifact upload")?;
 
-    let mut files = Vec::new();
-    for entry in walkdir::WalkDir::new(".forest/deployment") {
-        let entry = entry?;
-        let path = entry.path();
-        let metadata = entry.metadata()?;
-
-        if !metadata.is_file() {
-            continue;
-        }
-
-        files.push(path.to_path_buf());
-    }
-
-    for file in files {
-        let artifact_file = file.strip_prefix(".forest/deployment")?;
+    for file in deployment_files()? {
+        let artifact_file = file.strip_prefix(DEPLOYMENT_DIR)?;
         let mut components = artifact_file.components();
         let Some(env) = components.next() else {
             tracing::warn!("file doesn't exist, env is required");
@@ -346,4 +376,35 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
         .context("annotate artifact")?;
 
     Ok(slug)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The regression: a project with nothing to deploy. `WalkDir` surfaces the
+    /// missing root as an error on the first item, which used to abort the whole
+    /// annotate (DATA-637).
+    #[test]
+    fn a_missing_deployment_dir_is_empty_not_an_error() {
+        let missing = Path::new(".forest/deployment-does-not-exist-data-637");
+        assert!(!missing.exists());
+
+        assert_eq!(deployment_files_in(missing).unwrap(), Vec::<PathBuf>::new());
+    }
+
+    /// And a directory that does exist is still walked, files only.
+    #[test]
+    fn an_existing_dir_yields_its_files_and_no_directories() {
+        let files = deployment_files_in(Path::new("src/cli/release")).unwrap();
+
+        assert!(
+            files.iter().any(|f| f.ends_with("annotate.rs")),
+            "expected to find this very file, got {files:?}"
+        );
+        assert!(
+            files.iter().all(|f| f.is_file()),
+            "directories leaked into the walk: {files:?}"
+        );
+    }
 }
