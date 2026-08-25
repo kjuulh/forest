@@ -349,14 +349,14 @@ impl UsersService for UsersServer {
                 // `link_oauth_provider`). Normalise through the same
                 // round-trip so callers can say either and a lookup can
                 // never silently miss the rows it is looking for.
-                let provider = normalise_provider(&id.provider).ok_or_else(|| {
+                let providers = provider_spellings(&id.provider).ok_or_else(|| {
                     tonic::Status::invalid_argument(format!(
                         "unknown provider: {}",
                         id.provider
                     ))
                 })?;
                 self.service()
-                    .get_user_by_provider_identity(&provider, &id.provider_user_id)
+                    .get_user_by_provider_identity(&providers, &id.provider_user_id)
                     .await
             }
             None => return Err(tonic::Status::invalid_argument("identifier is required")),
@@ -1483,14 +1483,20 @@ fn pat_info_to_grpc(info: crate::services::users::PersonalAccessTokenInfo) -> Pe
     }
 }
 
-/// The stored spelling of a provider, from any accepted spelling.
+/// Every spelling of a provider that could be sitting in
+/// `identities.provider`, from any accepted input spelling.
 ///
-/// Writes go in as `OAuthProvider::as_str_name().to_lowercase()`, so the
-/// column holds `oauth_provider_github`. Reads that pass a friendly
-/// `github` would match nothing — and, worse, look exactly like "this
-/// person has no GitHub account". Round-tripping through the enum keeps
-/// read and write on the same spelling by construction.
-fn normalise_provider(provider: &str) -> Option<String> {
+/// The column is not consistent across the table's history. Current
+/// writes store the enum wire name lowercased
+/// (`oauth_provider_github`), but rows created by earlier versions hold
+/// the short form (`github`). Matching one spelling silently misses the
+/// other half of the table, and reports it as "no such person" — which
+/// is indistinguishable from the truth, so nobody ever finds out.
+///
+/// Returning both and matching on either is deliberate: it costs one
+/// array parameter and removes a whole class of read that depends on
+/// when a row happened to be written.
+fn provider_spellings(provider: &str) -> Option<Vec<String>> {
     let trimmed = provider.trim().to_ascii_lowercase();
     if trimmed.is_empty() {
         return None;
@@ -1499,7 +1505,17 @@ fn normalise_provider(provider: &str) -> Option<String> {
     if as_enum == forest_grpc_interface::OAuthProvider::OauthProviderUnspecified {
         return None;
     }
-    Some(as_enum.as_str_name().to_lowercase())
+    let wire = as_enum.as_str_name().to_lowercase();
+    // e.g. `oauth_provider_github` -> also accept `github`
+    let short = wire
+        .strip_prefix("oauth_provider_")
+        .unwrap_or(&wire)
+        .to_string();
+    let mut out = vec![wire];
+    if !out.contains(&short) {
+        out.push(short);
+    }
+    Some(out)
 }
 
 fn provider_str_to_enum(provider: &str) -> forest_grpc_interface::OAuthProvider {
@@ -1728,40 +1744,46 @@ mod provider_data_tests {
 mod provider_tests {
     use super::*;
 
-    /// The bug this exists to prevent: the column holds
-    /// `oauth_provider_github`, so a lookup for `github` matched nothing
-    /// and returned "no such person" — indistinguishable from someone
-    /// genuinely having no GitHub account.
+    /// The bug this exists to prevent: `identities.provider` holds
+    /// different spellings depending on when the row was written, so
+    /// matching only one silently misses half the table and reports it
+    /// as "no such person".
     #[test]
-    fn friendly_and_stored_spellings_both_normalise_to_the_stored_one() {
+    fn every_input_spelling_yields_every_stored_spelling() {
         for input in ["github", "GitHub", "  oauth_provider_github  "] {
-            assert_eq!(
-                normalise_provider(input).as_deref(),
-                Some("oauth_provider_github"),
-                "{input}"
-            );
+            let got = provider_spellings(input).unwrap();
+            assert!(got.contains(&"oauth_provider_github".to_string()), "{input}");
+            assert!(got.contains(&"github".to_string()), "{input}");
         }
-        assert_eq!(
-            normalise_provider("google").as_deref(),
-            Some("oauth_provider_google")
-        );
+        let google = provider_spellings("google").unwrap();
+        assert!(google.contains(&"oauth_provider_google".to_string()));
+        assert!(google.contains(&"google".to_string()));
     }
 
-    /// Normalisation must agree with the write path by construction, not
-    /// by coincidence — this asserts the exact expression
-    /// `link_oauth_provider` stores.
+    /// One of the spellings must be exactly what the write path stores,
+    /// by construction rather than by two hand-written constants that
+    /// happen to agree today.
     #[test]
-    fn normalisation_matches_what_the_write_path_stores() {
+    fn the_set_includes_what_the_write_path_stores() {
         let written = forest_grpc_interface::OAuthProvider::OauthProviderGithub
             .as_str_name()
             .to_lowercase();
-        assert_eq!(normalise_provider("github").as_deref(), Some(written.as_str()));
+        assert!(provider_spellings("github").unwrap().contains(&written));
     }
 
     #[test]
-    fn an_unknown_provider_is_rejected_rather_than_stored_as_unspecified() {
-        assert_eq!(normalise_provider("bitbucket"), None);
-        assert_eq!(normalise_provider(""), None);
-        assert_eq!(normalise_provider("   "), None);
+    fn spellings_are_not_duplicated() {
+        let got = provider_spellings("github").unwrap();
+        let mut sorted = got.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), got.len());
+    }
+
+    #[test]
+    fn an_unknown_provider_is_rejected_rather_than_matching_nothing() {
+        assert_eq!(provider_spellings("bitbucket"), None);
+        assert_eq!(provider_spellings(""), None);
+        assert_eq!(provider_spellings("   "), None);
     }
 }

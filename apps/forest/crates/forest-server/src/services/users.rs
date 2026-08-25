@@ -295,12 +295,12 @@ impl UserService {
     /// because logins get renamed and ids don't.
     pub async fn get_user_by_provider_identity(
         &self,
-        provider: &str,
+        providers: &[String],
         provider_user_id: &str,
     ) -> anyhow::Result<Option<UserProfile>> {
         let identity = self
             .repo
-            .get_identity_by_provider(self.db(), provider, provider_user_id)
+            .get_identity_by_provider_any(self.db(), providers, provider_user_id)
             .await?;
         match identity {
             Some(i) => self.get_user(i.user_id).await,

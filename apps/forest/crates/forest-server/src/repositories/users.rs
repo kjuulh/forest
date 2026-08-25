@@ -533,6 +533,37 @@ impl UserRepository {
         Ok(rows)
     }
 
+    /// Like [`Self::get_identity_by_provider`], but accepts several
+    /// spellings of the provider at once.
+    ///
+    /// `identities.provider` is not consistent across the table's
+    /// history: current writes store the enum wire name lowercased
+    /// (`oauth_provider_github`), but rows created by earlier versions
+    /// hold the short form (`github`). A read that picks one spelling
+    /// silently misses the other half of the table — and reports it as
+    /// "no such person", which is indistinguishable from the truth.
+    pub async fn get_identity_by_provider_any(
+        &self,
+        db: impl PgExecutor<'_>,
+        providers: &[String],
+        provider_user_id: &str,
+    ) -> anyhow::Result<Option<IdentityRow>> {
+        let row = sqlx::query_as!(
+            IdentityRow,
+            r#"
+            SELECT id, user_id, provider, provider_user_id, provider_email, provider_data, created_at, updated_at
+            FROM identities
+            WHERE provider = ANY($1) AND provider_user_id = $2
+            "#,
+            providers,
+            provider_user_id,
+        )
+        .fetch_optional(db)
+        .await?;
+
+        Ok(row)
+    }
+
     pub async fn get_identity_by_provider(
         &self,
         db: impl PgExecutor<'_>,
