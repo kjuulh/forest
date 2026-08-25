@@ -7,8 +7,8 @@ use forage_core::platform::{
     ArtifactDestination, ArtifactRef, ArtifactSource, CreatePolicyInput,
     CreateReleasePipelineInput, CreateTriggerInput, CreatedOAuthApp, Destination, DestinationType,
     DestinationTypeInfo, Environment, ForestOAuthApps, ForestPlatform, JoinOffer, MetadataFieldDef,
-    OAuthApp, OAuthClientInfo, OAuthClientToken, OAuthFlowError, OAuthGrant, OAuthIssuedTokens,
-    OAuthUserinfo,
+    ClientPrincipal, DirectoryLookup, DirectoryUser, OAuthApp, OAuthClientInfo, OAuthClientToken,
+    OAuthFlowError, OAuthGrant, OAuthIssuedTokens, OAuthUserinfo,
     NotificationPreference, Organisation, OrgMember, PipelineStage, PipelineStageConfig,
     PlanOutput, PlatformError, Policy, PolicyConfig, PolicyEvaluation, ReleasePipeline,
     Trigger, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
@@ -72,6 +72,10 @@ impl GrpcForestClient {
 
     fn org_client(&self) -> OrganisationServiceClient<Channel> {
         OrganisationServiceClient::new(self.channel.clone())
+    }
+
+    fn user_service_client(&self) -> forage_grpc::users_service_client::UsersServiceClient<Channel> {
+        forage_grpc::users_service_client::UsersServiceClient::new(self.channel.clone())
     }
 
     fn oauth_apps_client(
@@ -3583,6 +3587,82 @@ impl ForestOAuthApps for GrpcForestClient {
             expires_in_seconds: resp.expires_in_seconds,
             scopes: resp.scopes,
         })
+    }
+
+    async fn introspect_client_token(
+        &self,
+        access_token: &str,
+    ) -> Result<Option<ClientPrincipal>, OAuthFlowError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| OAuthFlowError::ServerError("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::IntrospectClientTokenRequest {
+                access_token: access_token.into(),
+            },
+        )
+        .map_err(OAuthFlowError::ServerError)?;
+
+        let resp = self
+            .oauth_apps_client()
+            .introspect_client_token(req)
+            .await
+            .map_err(map_oauth_flow_status)?
+            .into_inner();
+        if !resp.active {
+            return Ok(None);
+        }
+        Ok(Some(ClientPrincipal {
+            app_id: resp.app_id,
+            organisation_id: resp.organisation_id,
+            scopes: resp.scopes,
+        }))
+    }
+
+    async fn resolve_directory_user(
+        &self,
+        lookup: DirectoryLookup,
+    ) -> Result<Option<DirectoryUser>, PlatformError> {
+        let service_key = self.service_account_key.as_deref().ok_or_else(|| {
+            PlatformError::Other("service account key not configured".into())
+        })?;
+
+        use forage_grpc::get_user_request::Identifier;
+        let identifier = match lookup {
+            DirectoryLookup::Email(email) => Identifier::Email(email),
+            DirectoryLookup::Provider {
+                provider,
+                provider_user_id,
+            } => Identifier::ProviderIdentity(forage_grpc::ProviderIdentity {
+                provider,
+                provider_user_id,
+            }),
+        };
+
+        let req = platform_authed_request(
+            service_key,
+            forage_grpc::GetUserRequest {
+                identifier: Some(identifier),
+            },
+        )?;
+
+        match self.user_service_client().get_user(req).await {
+            Ok(resp) => {
+                let Some(u) = resp.into_inner().user else {
+                    return Ok(None);
+                };
+                Ok(Some(DirectoryUser {
+                    user_id: u.user_id,
+                    username: u.username,
+                    emails: u.emails.into_iter().map(|e| e.email).collect(),
+                }))
+            }
+            // A person who isn't there is a normal answer, not a fault.
+            Err(status) if status.code() == tonic::Code::NotFound => Ok(None),
+            Err(status) => Err(map_platform_status(status)),
+        }
     }
 
     async fn exchange_oauth_code(

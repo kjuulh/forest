@@ -11,7 +11,12 @@ use crate::{
 /// - `openid`:  OIDC marker — issues an `id_token` on the code exchange
 /// - `profile`: sub (user_id), username, profile_picture_url
 /// - `email`:   primary + all verified emails
-pub const ALLOWED_SCOPES: &[&str] = &["openid", "profile", "email"];
+pub const ALLOWED_SCOPES: &[&str] = &["openid", "profile", "email", "directory:read"];
+
+/// Scope for reading the organisation directory — resolving a person from
+/// an external identity to their linked accounts. Only ever granted to
+/// machine clients; there is nothing here a browser login needs.
+pub const SCOPE_DIRECTORY_READ: &str = "directory:read";
 
 /// Validation failures for OAuth-app management. The gRPC layer maps these
 /// to `invalid_argument` with the message surfaced to the caller.

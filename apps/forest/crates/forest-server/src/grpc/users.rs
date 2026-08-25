@@ -337,6 +337,16 @@ impl UsersService for UsersServer {
             Some(get_user_request::Identifier::Email(email)) => {
                 self.service().get_user_by_email(&email).await
             }
+            Some(get_user_request::Identifier::ProviderIdentity(id)) => {
+                if id.provider.trim().is_empty() || id.provider_user_id.trim().is_empty() {
+                    return Err(tonic::Status::invalid_argument(
+                        "provider and provider_user_id are both required",
+                    ));
+                }
+                self.service()
+                    .get_user_by_provider_identity(&id.provider, &id.provider_user_id)
+                    .await
+            }
             None => return Err(tonic::Status::invalid_argument("identifier is required")),
         }
         .map_err(error::to_status)?

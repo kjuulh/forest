@@ -1039,6 +1039,36 @@ pub struct OAuthIssuedTokens {
     pub id_token: Option<String>,
 }
 
+/// What a machine token turned out to belong to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientPrincipal {
+    pub app_id: String,
+    pub organisation_id: String,
+    pub scopes: Vec<String>,
+}
+
+/// How to find a person in the directory.
+///
+/// `Provider` is the join that email cannot make: people commit from
+/// addresses their Forest account has never seen, but a linked GitHub
+/// identity is exact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DirectoryLookup {
+    Email(String),
+    Provider {
+        provider: String,
+        provider_user_id: String,
+    },
+}
+
+/// A person as the directory sees them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryUser {
+    pub user_id: String,
+    pub username: String,
+    pub emails: Vec<String>,
+}
+
 /// A minted machine token. Deliberately narrower than
 /// [`OAuthIssuedTokens`]: no refresh token (the client re-mints with the
 /// secret it holds) and no id_token (there is no subject to describe).
@@ -1156,6 +1186,20 @@ pub trait ForestOAuthApps: Send + Sync {
         client_secret: &str,
         scopes: &[String],
     ) -> Result<OAuthClientToken, OAuthFlowError>;
+
+    /// Resolve a machine token to the app behind it, for authorising a
+    /// request. `None` when the token is unknown, expired or revoked —
+    /// deliberately indistinguishable to the caller.
+    async fn introspect_client_token(
+        &self,
+        access_token: &str,
+    ) -> Result<Option<ClientPrincipal>, OAuthFlowError>;
+
+    /// Resolve a person from an external identity or a verified email.
+    async fn resolve_directory_user(
+        &self,
+        lookup: DirectoryLookup,
+    ) -> Result<Option<DirectoryUser>, PlatformError>;
 
     /// Public client metadata for the consent screen. `None` if no such client.
     async fn lookup_oauth_client(

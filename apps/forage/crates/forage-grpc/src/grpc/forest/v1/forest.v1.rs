@@ -5033,7 +5033,7 @@ pub struct TokenInfoResponse {
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetUserRequest {
-    #[prost(oneof="get_user_request::Identifier", tags="1, 2, 3")]
+    #[prost(oneof="get_user_request::Identifier", tags="1, 2, 3, 4")]
     pub identifier: ::core::option::Option<get_user_request::Identifier>,
 }
 /// Nested message and enum types in `GetUserRequest`.
@@ -5046,7 +5046,23 @@ pub mod get_user_request {
         Username(::prost::alloc::string::String),
         #[prost(string, tag="3")]
         Email(::prost::alloc::string::String),
+        /// Look a user up by a linked external account — e.g. the GitHub
+        /// account that authored a commit. This is the join that email alone
+        /// cannot make: people commit from addresses their Forest account has
+        /// never heard of, but the linked GitHub identity is exact.
+        #[prost(message, tag="4")]
+        ProviderIdentity(super::ProviderIdentity),
     }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ProviderIdentity {
+    /// "github" | "google" — matches the `identities.provider` column.
+    #[prost(string, tag="1")]
+    pub provider: ::prost::alloc::string::String,
+    /// The provider's own stable id for the user (GitHub's numeric id,
+    /// Google's `sub`), not a username: logins get renamed, ids don't.
+    #[prost(string, tag="2")]
+    pub provider_user_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetUserResponse {

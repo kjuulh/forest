@@ -172,7 +172,20 @@ message GetUserRequest {
     string user_id = 1;
     string username = 2;
     string email = 3;
+    // Look a user up by a linked external account — e.g. the GitHub
+    // account that authored a commit. This is the join that email alone
+    // cannot make: people commit from addresses their Forest account has
+    // never heard of, but the linked GitHub identity is exact.
+    ProviderIdentity provider_identity = 4;
   }
+}
+
+message ProviderIdentity {
+  // "github" | "google" — matches the `identities.provider` column.
+  string provider = 1;
+  // The provider's own stable id for the user (GitHub's numeric id,
+  // Google's `sub`), not a username: logins get renamed, ids don't.
+  string provider_user_id = 2;
 }
 
 message GetUserResponse {

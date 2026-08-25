@@ -6,8 +6,8 @@ use forage_core::auth::{self, LoginResult, MfaSetup, *};
 use forage_core::platform::{
     Artifact, ArtifactContext, CreatePolicyInput, CreateReleasePipelineInput, CreateTriggerInput,
     CreatedOAuthApp, Destination, DestinationTypeInfo, Environment, ForestOAuthApps, ForestPlatform,
-    NotificationPreference, OAuthApp, OAuthClientInfo, OAuthClientToken, OAuthFlowError,
-    OAuthIssuedTokens,
+    ClientPrincipal, DirectoryLookup, DirectoryUser, NotificationPreference, OAuthApp,
+    OAuthClientInfo, OAuthClientToken, OAuthFlowError, OAuthIssuedTokens,
     OAuthGrant, OAuthUserinfo, Organisation, OrgMember, PlatformError, Policy, ReleasePipeline,
     Trigger, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
 };
@@ -1461,6 +1461,37 @@ impl ForestOAuthApps for MockOAuthAppsClient {
             expires_in_seconds: 3600,
             scopes: scopes.to_vec(),
         })
+    }
+
+    async fn introspect_client_token(
+        &self,
+        access_token: &str,
+    ) -> Result<Option<ClientPrincipal>, OAuthFlowError> {
+        // Any non-empty token is a directory-capable client; the real
+        // gate is Forest's.
+        if access_token.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(ClientPrincipal {
+            app_id: "app-1".into(),
+            organisation_id: "org-1".into(),
+            scopes: vec!["directory:read".into()],
+        }))
+    }
+
+    async fn resolve_directory_user(
+        &self,
+        lookup: DirectoryLookup,
+    ) -> Result<Option<DirectoryUser>, PlatformError> {
+        let known = matches!(&lookup,
+            DirectoryLookup::Email(e) if e == "kasper@understory.io")
+            || matches!(&lookup, DirectoryLookup::Provider { provider, provider_user_id }
+                if provider == "github" && provider_user_id == "26280046");
+        Ok(known.then(|| DirectoryUser {
+            user_id: "user-1".into(),
+            username: "kjuulh".into(),
+            emails: vec!["kasper@understory.io".into()],
+        }))
     }
 
     async fn exchange_oauth_code(

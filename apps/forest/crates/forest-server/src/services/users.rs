@@ -287,6 +287,27 @@ impl UserService {
         }
     }
 
+    /// Resolve a user from a linked external account.
+    ///
+    /// The join email cannot make: people commit from addresses their
+    /// Forest account has never seen, but the linked GitHub identity is
+    /// exact. Keyed on the provider's stable id rather than a login,
+    /// because logins get renamed and ids don't.
+    pub async fn get_user_by_provider_identity(
+        &self,
+        provider: &str,
+        provider_user_id: &str,
+    ) -> anyhow::Result<Option<UserProfile>> {
+        let identity = self
+            .repo
+            .get_identity_by_provider(self.db(), provider, provider_user_id)
+            .await?;
+        match identity {
+            Some(i) => self.get_user(i.user_id).await,
+            None => Ok(None),
+        }
+    }
+
     pub async fn update_username(&self, user_id: Uuid, username: &str) -> anyhow::Result<()> {
         self.repo
             .update_user_username(self.db(), user_id, username)
