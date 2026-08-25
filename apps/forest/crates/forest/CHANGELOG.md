@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.19](https://github.com/understory-io/forest/compare/v0.2.18...v0.2.19) (2026-08-25)
+
+
+### Features
+
+* **forage:** mark an existing metadata key sensitive from the UI (one-way) ([#170](https://github.com/understory-io/forest/issues/170)) ([d217689](https://github.com/understory-io/forest/commit/d217689893bca74b1d41aad5b27fb6d888828851))
+* **release:** give annotate machine-readable output, and reconcile stuck intents ([#169](https://github.com/understory-io/forest/issues/169)) ([51c3e79](https://github.com/understory-io/forest/commit/51c3e7915c64697421b5059e69dff2f2dd4aa456))
+
 ## [0.2.18](https://github.com/understory-io/forest/compare/v0.2.17...v0.2.18) (2026-08-25)
 
 
