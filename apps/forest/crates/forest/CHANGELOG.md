@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.20](https://github.com/understory-io/forest/compare/v0.2.19...v0.2.20) (2026-08-25)
+
+
+### Bug Fixes
+
+* **destination:** stop 'update --metadata' deleting the keys it does not name ([#176](https://github.com/understory-io/forest/issues/176)) ([54b165d](https://github.com/understory-io/forest/commit/54b165d9b4200d851e904e4c5dac1940198d3eb3))
+* **release:** commit the synced Cargo.lock instead of only building with it ([#174](https://github.com/understory-io/forest/issues/174)) ([c80fbeb](https://github.com/understory-io/forest/commit/c80fbeb6c25c99c8e0d4c2d50790ee7ec344928e))
+* **release:** sync Cargo.lock without cargo, which cannot run there ([#178](https://github.com/understory-io/forest/issues/178)) ([22e1bf6](https://github.com/understory-io/forest/commit/22e1bf6de7eb739a3dd582cfe90d265a3cf70d2e))
+
 ## [0.2.19](https://github.com/understory-io/forest/compare/v0.2.18...v0.2.19) (2026-08-25)
 
 
