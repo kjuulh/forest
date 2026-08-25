@@ -12,10 +12,18 @@ name: Release Please
 #
 # Because `release-type: simple` doesn't know about Cargo.toml, the
 # config uses `extra-files` to bump
-# `apps/forest/crates/forest/Cargo.toml`'s `$.package.version`. The
-# `release.yml` workflow's `cargo update -p forest` step then syncs
-# `apps/forest/Cargo.lock` to match. CHANGELOG stays at
-# `apps/forest/crates/forest/CHANGELOG.md`.
+# `apps/forest/crates/forest/Cargo.toml`'s `$.package.version`, and the
+# step below syncs `apps/forest/Cargo.lock` into the same PR. CHANGELOG
+# stays at `apps/forest/crates/forest/CHANGELOG.md`.
+#
+# The lock has to be bumped *in the release PR* rather than only in the
+# build, which is what used to happen: `release.yml` ran `cargo update
+# -p forest` in its own ephemeral workspace so `--locked` builds passed,
+# and nothing ever committed the result. Releases were fine and the
+# committed lock fell one version behind on every one of them — enough
+# that `cargo build --locked` failed on a fresh checkout of main, and
+# that anyone running a plain `cargo build` picked up a stray lock diff
+# in an unrelated PR.
 #
 # Merging the release-please PR creates a `v<version>` tag and
 # publishes a GitHub release; `release.yml` then takes over to build
@@ -46,9 +54,49 @@ jobs:
           app-id: ${{ secrets.BREW_APP_ID }}
           private-key: ${{ secrets.BREW_SSH_KEY }}
 
+      - uses: actions/checkout@v6
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
       - uses: googleapis/release-please-action@v5
         id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           token: ${{ steps.app-token.outputs.token }}
+
+      # `-p forest --offline` rewrites exactly one line — the `version` on
+      # the workspace's own `forest` entry — and pins nothing else: every
+      # external dependency stays at the version already in the lock. It
+      # needs no network and no SSH, which is why it can run here rather
+      # than behind the private-git-dep setup `release.yml` needs.
+      #
+      # Runs on every push to main and is idempotent, so it also repairs
+      # itself if release-please rewrites the branch from under it.
+      - name: Sync Cargo.lock into the release PR
+        if: steps.release.outputs.pr
+        env:
+          PR: ${{ steps.release.outputs.pr }}
+        run: |
+          set -euo pipefail
+          branch="$(printf '%s' "$PR" | jq -r '.headBranchName')"
+          if [ -z "$branch" ] || [ "$branch" = "null" ]; then
+            echo "::warning::release-please reported a PR with no branch name — skipping the lockfile sync."
+            exit 0
+          fi
+
+          git fetch origin "$branch"
+          git checkout "$branch"
+
+          cargo update -p forest --offline --manifest-path apps/forest/Cargo.toml
+
+          if git diff --quiet -- apps/forest/Cargo.lock; then
+            echo "Cargo.lock already agrees with the bumped version."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/forest/Cargo.lock
+          git commit -m "chore: sync Cargo.lock with the released version"
+          git push origin "$branch"
