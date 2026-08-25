@@ -128,6 +128,7 @@ async fn full_lifecycle_create_list_get_update_rotate_delete() {
                 homepage_url: "https://app.example".into(),
                 redirect_uris: vec!["https://app.example/cb2".into()],
                 scopes: vec!["profile".into()],
+                grant_types: vec![],
             },
         ))
         .await

@@ -2377,6 +2377,11 @@ pub struct UpdateOAuthAppRequest {
     pub redirect_uris: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(string, repeated, tag="7")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Empty defaults to \["authorization_code"\], matching create. Removing
+    /// a grant takes effect immediately: in-flight codes and existing
+    /// refresh tokens for that flow stop working.
+    #[prost(string, repeated, tag="8")]
+    pub grant_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateOAuthAppResponse {

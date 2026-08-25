@@ -999,6 +999,9 @@ pub struct OAuthApp {
     pub client_id: String,
     pub redirect_uris: Vec<String>,
     pub scopes: Vec<String>,
+    /// Which OAuth grants this app may use. An app can hold both —
+    /// acting for a user and acting as itself.
+    pub grant_types: Vec<String>,
     pub created_by: String,
     pub created_at: String,
     pub updated_at: String,
@@ -1098,6 +1101,7 @@ pub trait ForestOAuthApps: Send + Sync {
         homepage_url: &str,
         redirect_uris: &[String],
         scopes: &[String],
+        grant_types: &[String],
     ) -> Result<CreatedOAuthApp, PlatformError>;
 
     async fn list_oauth_apps(
@@ -1125,6 +1129,7 @@ pub trait ForestOAuthApps: Send + Sync {
         homepage_url: &str,
         redirect_uris: &[String],
         scopes: &[String],
+        grant_types: &[String],
     ) -> Result<OAuthApp, PlatformError>;
 
     async fn rotate_oauth_app_secret(

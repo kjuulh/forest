@@ -123,6 +123,7 @@ fn app_context(app: &OAuthApp) -> minijinja::Value {
         client_id => &app.client_id,
         redirect_uris => &app.redirect_uris,
         scopes => &app.scopes,
+        grant_types => &app.grant_types,
     }
 }
 
@@ -151,9 +152,31 @@ struct AppForm {
     scope_profile: Option<String>,
     #[serde(default)]
     scope_email: Option<String>,
+    /// An app may hold both grants — acting for a user and acting as
+    /// itself, the way a GitHub App does.
+    #[serde(default)]
+    grant_authorization_code: Option<String>,
+    #[serde(default)]
+    grant_client_credentials: Option<String>,
 }
 
 impl AppForm {
+    /// Which grants the ticked boxes add up to.
+    ///
+    /// An empty result is left empty rather than defaulted here — Forest
+    /// treats that as `authorization_code`, and duplicating the default
+    /// in two places is how they drift apart.
+    fn grant_type_list(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if self.grant_authorization_code.is_some() {
+            out.push("authorization_code".to_string());
+        }
+        if self.grant_client_credentials.is_some() {
+            out.push("client_credentials".to_string());
+        }
+        out
+    }
+
     /// Split the redirect-URI textarea (one per line) into trimmed entries.
     fn redirect_uri_list(&self) -> Vec<String> {
         self.redirect_uris
@@ -282,6 +305,7 @@ async fn create_app(
             form.homepage_url.trim(),
             &form.redirect_uri_list(),
             &form.scope_list(),
+            &form.grant_type_list(),
         )
         .await
     {
@@ -383,6 +407,7 @@ async fn update_app(
             form.homepage_url.trim(),
             &form.redirect_uri_list(),
             &form.scope_list(),
+            &form.grant_type_list(),
         )
         .await
     {
@@ -449,4 +474,57 @@ async fn delete_app(
         .map_err(|e| internal_error(&state, "delete oauth app", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/settings/developers")).into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn form(auth_code: bool, client_creds: bool) -> AppForm {
+        AppForm {
+            csrf: String::new(),
+            name: "app".into(),
+            description: String::new(),
+            homepage_url: String::new(),
+            redirect_uris: String::new(),
+            scope_openid: None,
+            scope_profile: None,
+            scope_email: None,
+            grant_authorization_code: auth_code.then(|| "on".to_string()),
+            grant_client_credentials: client_creds.then(|| "on".to_string()),
+        }
+    }
+
+    /// The GitHub-App shape: one credential that both signs a user in
+    /// and calls as itself. Ticking both boxes has to produce both.
+    #[test]
+    fn both_boxes_ticked_yields_both_grants() {
+        assert_eq!(
+            form(true, true).grant_type_list(),
+            vec![
+                "authorization_code".to_string(),
+                "client_credentials".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn each_box_yields_only_its_own_grant() {
+        assert_eq!(
+            form(true, false).grant_type_list(),
+            vec!["authorization_code".to_string()]
+        );
+        assert_eq!(
+            form(false, true).grant_type_list(),
+            vec!["client_credentials".to_string()]
+        );
+    }
+
+    /// Neither box ticked sends an empty list, deliberately: Forest owns
+    /// the default. Defaulting here too would put the same rule in two
+    /// places, which is how the two drift apart.
+    #[test]
+    fn no_boxes_defers_the_default_to_forest() {
+        assert!(form(false, false).grant_type_list().is_empty());
+    }
 }

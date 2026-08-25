@@ -317,13 +317,14 @@ impl OAuthAppRepository {
         homepage_url: &str,
         redirect_uris: &[String],
         scopes: &[String],
+        grant_types: &[String],
     ) -> Result<Option<OAuthAppRow>, DbError> {
         let row = sqlx::query_as!(
             OAuthAppRow,
             r#"
             UPDATE oauth_apps
             SET name = $3, description = $4, homepage_url = $5,
-                redirect_uris = $6, scopes = $7, updated_at = now()
+                redirect_uris = $6, scopes = $7, grant_types = $8, updated_at = now()
             WHERE organisation_id = $1 AND id = $2
             RETURNING id, organisation_id, name, description, homepage_url, client_id,
                       client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at
@@ -335,6 +336,7 @@ impl OAuthAppRepository {
             homepage_url,
             redirect_uris,
             scopes,
+            grant_types,
         )
         .fetch_optional(db)
         .await?;

@@ -3278,6 +3278,7 @@ fn convert_oauth_app(app: forage_grpc::OAuthApp) -> OAuthApp {
         client_id: app.client_id,
         redirect_uris: app.redirect_uris,
         scopes: app.scopes,
+        grant_types: app.grant_types,
         created_by: app.created_by,
         created_at: app
             .created_at
@@ -3302,13 +3303,12 @@ impl ForestOAuthApps for GrpcForestClient {
         homepage_url: &str,
         redirect_uris: &[String],
         scopes: &[String],
+        grant_types: &[String],
     ) -> Result<CreatedOAuthApp, PlatformError> {
         let req = platform_authed_request(
             access_token,
             forage_grpc::CreateOAuthAppRequest {
-                // Apps created through Forage's UI are login apps; a
-                // machine app is provisioned deliberately via the CLI.
-                grant_types: vec!["authorization_code".to_string()],
+                grant_types: grant_types.to_vec(),
                 organisation_id: organisation_id.into(),
                 name: name.into(),
                 description: description.into(),
@@ -3395,10 +3395,12 @@ impl ForestOAuthApps for GrpcForestClient {
         homepage_url: &str,
         redirect_uris: &[String],
         scopes: &[String],
+        grant_types: &[String],
     ) -> Result<OAuthApp, PlatformError> {
         let req = platform_authed_request(
             access_token,
             forage_grpc::UpdateOAuthAppRequest {
+                grant_types: grant_types.to_vec(),
                 organisation_id: organisation_id.into(),
                 app_id: app_id.into(),
                 name: name.into(),

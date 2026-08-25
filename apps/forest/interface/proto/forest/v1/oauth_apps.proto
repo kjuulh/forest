@@ -253,6 +253,10 @@ message UpdateOAuthAppRequest {
   string homepage_url = 5;
   repeated string redirect_uris = 6;
   repeated string scopes = 7;
+  // Empty defaults to ["authorization_code"], matching create. Removing
+  // a grant takes effect immediately: in-flight codes and existing
+  // refresh tokens for that flow stop working.
+  repeated string grant_types = 8;
 }
 
 message UpdateOAuthAppResponse {

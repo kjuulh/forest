@@ -256,8 +256,10 @@ impl OAuthAppService {
         homepage_url: &str,
         redirect_uris: &[String],
         scopes: &[String],
+        grant_types: &[String],
     ) -> anyhow::Result<Option<OAuthApp>> {
         let input = validate_input(name, description, homepage_url, redirect_uris, scopes)?;
+        let grant_types = validate_grant_types(grant_types)?;
 
         let row = self
             .repo
@@ -270,6 +272,7 @@ impl OAuthAppService {
                 &input.homepage_url,
                 &input.redirect_uris,
                 &input.scopes,
+                &grant_types,
             )
             .await?;
         Ok(row.map(OAuthApp::from))

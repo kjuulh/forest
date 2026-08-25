@@ -1221,6 +1221,7 @@ impl MockOAuthAppsClient {
             client_id: client_id.into(),
             redirect_uris,
             scopes,
+            grant_types: vec!["authorization_code".into()],
             created_by: "user-1".into(),
             created_at: "0".into(),
             updated_at: "0".into(),
@@ -1239,6 +1240,7 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         homepage_url: &str,
         redirect_uris: &[String],
         scopes: &[String],
+        grant_types: &[String],
     ) -> Result<CreatedOAuthApp, PlatformError> {
         if let Some(err) = &self.forced_error {
             return Err(err.clone());
@@ -1255,6 +1257,12 @@ impl ForestOAuthApps for MockOAuthAppsClient {
             client_id: format!("forest_oa_{id}"),
             redirect_uris: redirect_uris.to_vec(),
             scopes: scopes.to_vec(),
+            // Mirror Forest: an empty list means the default, not "none".
+            grant_types: if grant_types.is_empty() {
+                vec!["authorization_code".to_string()]
+            } else {
+                grant_types.to_vec()
+            },
             created_by: "user-1".into(),
             created_at: "0".into(),
             updated_at: "0".into(),
@@ -1312,6 +1320,7 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         homepage_url: &str,
         redirect_uris: &[String],
         scopes: &[String],
+        grant_types: &[String],
     ) -> Result<OAuthApp, PlatformError> {
         if let Some(err) = &self.forced_error {
             return Err(err.clone());
@@ -1326,6 +1335,12 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         app.homepage_url = homepage_url.into();
         app.redirect_uris = redirect_uris.to_vec();
         app.scopes = scopes.to_vec();
+        // Mirror Forest: an empty list means the default, not "none".
+        app.grant_types = if grant_types.is_empty() {
+            vec!["authorization_code".to_string()]
+        } else {
+            grant_types.to_vec()
+        };
         Ok(app.clone())
     }
 

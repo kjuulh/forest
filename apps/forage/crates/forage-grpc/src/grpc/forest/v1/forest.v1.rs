@@ -2377,6 +2377,11 @@ pub struct UpdateOAuthAppRequest {
     pub redirect_uris: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(string, repeated, tag="7")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Empty defaults to \["authorization_code"\], matching create. Removing
+    /// a grant takes effect immediately: in-flight codes and existing
+    /// refresh tokens for that flow stop working.
+    #[prost(string, repeated, tag="8")]
+    pub grant_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateOAuthAppResponse {
@@ -3205,6 +3210,40 @@ pub struct PlanDestinationOutput {
     /// SUCCEEDED, FAILED, RUNNING, etc.
     #[prost(string, tag="4")]
     pub status: ::prost::alloc::string::String,
+}
+/// Report that the deploy an annotation announced did not happen.
+///
+/// For a project whose rollout Forest does not perform — CI builds an image and
+/// deploys it elsewhere, and Forest only announces the result (DATA-637) — an
+/// annotation is a promise that something is on its way. When that something
+/// fails, nothing in Forest can notice on its own: no release intent exists, so
+/// no destination can fail, and the annotation would sit looking pending forever.
+///
+/// This records the release that did not work. It creates the same intent
+/// against the same destination the successful path would have, and the releases
+/// are born FAILED. A project whose successes are releases and whose failures
+/// are loose notifications would under-report itself in every view over the
+/// release history; the destination is a `forest/noop@1` either way, which is
+/// the honest description of what Forest did. Only the outcome differs.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReportReleaseFailedRequest {
+    /// Release slug from the annotation, as printed by `forest release annotate`.
+    #[prost(string, tag="1")]
+    pub slug: ::prost::alloc::string::String,
+    /// Why it failed, shown to whoever reads the notification. Keep it short and
+    /// concrete — "ECS rollout did not converge" beats "failed".
+    #[prost(string, tag="2")]
+    pub reason: ::prost::alloc::string::String,
+    /// Where the deploy was headed. At least one is required: the failed release
+    /// is recorded against a destination, so there has to be one to record it
+    /// against. Resolved exactly as `Release` resolves them.
+    #[prost(string, optional, tag="3")]
+    pub destination: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="4")]
+    pub environment: ::core::option::Option<::prost::alloc::string::String>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReportReleaseFailedResponse {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Source {

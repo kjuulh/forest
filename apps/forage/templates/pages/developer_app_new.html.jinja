@@ -58,6 +58,19 @@
             </label>
         </fieldset>
 
+        <fieldset>
+            <legend class="block text-sm font-medium text-gray-700 mb-1">Grant types</legend>
+            <p class="text-xs text-gray-500 mb-2">How the app authenticates. An app may use both &mdash; acting for a user and acting as itself.</p>
+            <label class="flex items-start gap-2 mb-2">
+                <input type="checkbox" name="grant_authorization_code" checked class="mt-0.5">
+                <span class="text-sm"><span class="font-mono">authorization_code</span> &mdash; &ldquo;Sign in with Forest&rdquo;, on behalf of a user</span>
+            </label>
+            <label class="flex items-start gap-2">
+                <input type="checkbox" name="grant_client_credentials" class="mt-0.5">
+                <span class="text-sm"><span class="font-mono">client_credentials</span> &mdash; a service calling as itself, with no user involved</span>
+            </label>
+        </fieldset>
+
         <div class="flex items-center gap-3">
             <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-800">Create application</button>
             <a href="/orgs/{{ current_org }}/settings/developers" class="text-sm text-gray-500 hover:text-gray-900">Cancel</a>

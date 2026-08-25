@@ -582,13 +582,15 @@ async fn token_unsupported_grant_type_is_400() {
     let (state, _sessions) = test_state_with_oauth_apps(seeded());
     let app = build_router(state);
 
+    // `password` rather than `client_credentials`: the latter used to be
+    // the example of an unsupported grant here, and became supported.
     let resp = app
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri("/oauth/token")
                 .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from("grant_type=client_credentials"))
+                .body(Body::from("grant_type=password"))
                 .unwrap(),
         )
         .await
@@ -596,6 +598,36 @@ async fn token_unsupported_grant_type_is_400() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     let json: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
     assert_eq!(json["error"], "unsupported_grant_type");
+}
+
+#[tokio::test]
+async fn token_client_credentials_returns_a_bearer_token() {
+    let (state, _sessions) = test_state_with_oauth_apps(seeded());
+    let app = build_router(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/oauth/token")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    "grant_type=client_credentials&client_id=cid&client_secret=secret&scope=profile",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let json: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+    assert_eq!(json["token_type"], "bearer");
+    assert!(json["access_token"].as_str().is_some_and(|t| !t.is_empty()));
+    assert_eq!(json["scope"], "profile");
+    // A machine token carries no user, so there is nothing to refresh
+    // and no subject to describe.
+    assert!(json.get("refresh_token").is_none());
+    assert!(json.get("id_token").is_none());
 }
 
 #[tokio::test]

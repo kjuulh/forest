@@ -136,6 +136,7 @@ impl OAuthAppsService for OAuthAppsServer {
                 &req.homepage_url,
                 &req.redirect_uris,
                 &req.scopes,
+                &req.grant_types,
             )
             .await
             .map_err(error::to_status)?
