@@ -134,8 +134,9 @@ impl TemplateEngine {
             forage_core::platform::prettify_url(&v)
         });
 
-        // Default asset hash for tests/dev — overridden in production by compute_asset_hashes
+        // Default asset hashes for tests/dev — overridden in production by compute_asset_hashes.
         env.add_global("css_hash", "dev");
+        env.add_global("components_js_hash", "dev");
 
         // Build provenance for the footer. Globals rather than per-handler
         // context: every page extends base.html.jinja, and threading these
@@ -156,16 +157,23 @@ impl TemplateEngine {
     }
 
     /// Compute content hashes for static assets and inject them as globals.
-    /// Templates can use `{{ css_hash }}` for cache-busting query strings.
+    /// Templates use these for cache-busting query strings.
     fn compute_asset_hashes(&mut self) {
-        let css_hash = match std::fs::read("static/css/style.css") {
-            Ok(bytes) => {
-                let digest = sha2::Sha256::digest(&bytes);
-                format!("{:x}", digest)[..12].to_string()
+        fn asset_hash(path: &str) -> String {
+            match std::fs::read(path) {
+                Ok(bytes) => {
+                    let digest = sha2::Sha256::digest(&bytes);
+                    format!("{digest:x}")[..12].to_string()
+                }
+                Err(_) => "dev".to_string(),
             }
-            Err(_) => "dev".to_string(),
-        };
-        self.env.add_global("css_hash", css_hash);
+        }
+
+        self.env.add_global("css_hash", asset_hash("static/css/style.css"));
+        self.env.add_global(
+            "components_js_hash",
+            asset_hash("static/js/components/forage-components.js"),
+        );
     }
 
     pub fn render(&self, template: &str, ctx: minijinja::Value) -> anyhow::Result<String> {

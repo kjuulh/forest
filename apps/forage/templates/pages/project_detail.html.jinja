@@ -98,7 +98,7 @@
         </div>
         <release-timeline org="{{ org_name }}" project="{{ project_name }}" csrf="{{ csrf_token }}" username="{{ user.username }}" role="{{ current_role }}" limit="3"></release-timeline>
     </div>
-    <script src="/static/js/components/forage-components.js"></script>
+    <script src="/static/js/components/forage-components.js?v={{ components_js_hash }}"></script>
     {% endif %}
 
     {# ── README (main content, GitHub-style) ───────────────────── #}

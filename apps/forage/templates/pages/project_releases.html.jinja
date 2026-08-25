@@ -28,5 +28,5 @@
 
     <release-timeline org="{{ org_name }}" project="{{ project_name }}" csrf="{{ csrf_token }}" username="{{ user.username }}" role="{{ current_role }}"></release-timeline>
 </section>
-<script src="/static/js/components/forage-components.js"></script>
+<script src="/static/js/components/forage-components.js?v={{ components_js_hash }}"></script>
 {% endblock %}
