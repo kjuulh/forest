@@ -343,8 +343,20 @@ impl UsersService for UsersServer {
                         "provider and provider_user_id are both required",
                     ));
                 }
+                // `identities.provider` holds the enum's wire name
+                // lowercased — `oauth_provider_github`, not `github` —
+                // because that is what the *write* path stores (see
+                // `link_oauth_provider`). Normalise through the same
+                // round-trip so callers can say either and a lookup can
+                // never silently miss the rows it is looking for.
+                let provider = normalise_provider(&id.provider).ok_or_else(|| {
+                    tonic::Status::invalid_argument(format!(
+                        "unknown provider: {}",
+                        id.provider
+                    ))
+                })?;
                 self.service()
-                    .get_user_by_provider_identity(&id.provider, &id.provider_user_id)
+                    .get_user_by_provider_identity(&provider, &id.provider_user_id)
                     .await
             }
             None => return Err(tonic::Status::invalid_argument("identifier is required")),
@@ -1471,6 +1483,25 @@ fn pat_info_to_grpc(info: crate::services::users::PersonalAccessTokenInfo) -> Pe
     }
 }
 
+/// The stored spelling of a provider, from any accepted spelling.
+///
+/// Writes go in as `OAuthProvider::as_str_name().to_lowercase()`, so the
+/// column holds `oauth_provider_github`. Reads that pass a friendly
+/// `github` would match nothing — and, worse, look exactly like "this
+/// person has no GitHub account". Round-tripping through the enum keeps
+/// read and write on the same spelling by construction.
+fn normalise_provider(provider: &str) -> Option<String> {
+    let trimmed = provider.trim().to_ascii_lowercase();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let as_enum = provider_str_to_enum(&trimmed);
+    if as_enum == forest_grpc_interface::OAuthProvider::OauthProviderUnspecified {
+        return None;
+    }
+    Some(as_enum.as_str_name().to_lowercase())
+}
+
 fn provider_str_to_enum(provider: &str) -> forest_grpc_interface::OAuthProvider {
     match provider {
         "github" | "oauth_provider_github" => {
@@ -1690,5 +1721,47 @@ mod provider_data_tests {
             parsed.get("avatar_url").and_then(|x| x.as_str()),
             Some("https://a")
         );
+    }
+}
+
+#[cfg(test)]
+mod provider_tests {
+    use super::*;
+
+    /// The bug this exists to prevent: the column holds
+    /// `oauth_provider_github`, so a lookup for `github` matched nothing
+    /// and returned "no such person" — indistinguishable from someone
+    /// genuinely having no GitHub account.
+    #[test]
+    fn friendly_and_stored_spellings_both_normalise_to_the_stored_one() {
+        for input in ["github", "GitHub", "  oauth_provider_github  "] {
+            assert_eq!(
+                normalise_provider(input).as_deref(),
+                Some("oauth_provider_github"),
+                "{input}"
+            );
+        }
+        assert_eq!(
+            normalise_provider("google").as_deref(),
+            Some("oauth_provider_google")
+        );
+    }
+
+    /// Normalisation must agree with the write path by construction, not
+    /// by coincidence — this asserts the exact expression
+    /// `link_oauth_provider` stores.
+    #[test]
+    fn normalisation_matches_what_the_write_path_stores() {
+        let written = forest_grpc_interface::OAuthProvider::OauthProviderGithub
+            .as_str_name()
+            .to_lowercase();
+        assert_eq!(normalise_provider("github").as_deref(), Some(written.as_str()));
+    }
+
+    #[test]
+    fn an_unknown_provider_is_rejected_rather_than_stored_as_unspecified() {
+        assert_eq!(normalise_provider("bitbucket"), None);
+        assert_eq!(normalise_provider(""), None);
+        assert_eq!(normalise_provider("   "), None);
     }
 }
