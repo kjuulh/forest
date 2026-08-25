@@ -4925,6 +4925,9 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
     return `${Math.floor(diff / 86400)}d ago`;
   }
   const ENV_COLORS = {
+    "platform-dev": ["#6366f1", "#e0e7ff"],
+    "platform_dev": ["#6366f1", "#e0e7ff"],
+    "platform dev": ["#6366f1", "#e0e7ff"],
     prod: ["#ec4899", "#fce7f3"],
     production: ["#ec4899", "#fce7f3"],
     preprod: ["#f97316", "#ffedd5"],
@@ -4932,6 +4935,8 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
     staging: ["#eab308", "#fef9c3"],
     stage: ["#eab308", "#fef9c3"],
     dev: ["#8b5cf6", "#ede9fe"],
+    data: ["#0ea5e9", "#e0f2fe"],
+    finance: ["#f59e0b", "#fef3c7"],
     development: ["#8b5cf6", "#ede9fe"],
     test: ["#06b6d4", "#cffafe"]
   };
@@ -4955,8 +4960,17 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
     if (lower.includes("stag")) {
       return { bg: "bg-yellow-100 text-yellow-800", dot: "bg-yellow-500" };
     }
+    if (lower.includes("platform-dev") || lower.includes("platform_dev") || lower.includes("platform dev")) {
+      return { bg: "bg-indigo-100 text-indigo-800", dot: "bg-indigo-500" };
+    }
     if (lower.includes("dev")) {
       return { bg: "bg-violet-100 text-violet-800", dot: "bg-violet-500" };
+    }
+    if (lower.includes("data")) {
+      return { bg: "bg-sky-100 text-sky-800", dot: "bg-sky-500" };
+    }
+    if (lower.includes("finance")) {
+      return { bg: "bg-amber-100 text-amber-800", dot: "bg-amber-500" };
     }
     return { bg: "bg-gray-100 text-gray-700", dot: "bg-gray-400" };
   }
@@ -5053,7 +5067,7 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
         return "Plan";
     }
   }
-  var root_1$2 = /* @__PURE__ */ from_html(`<div class="max-w-5xl mx-auto mb-4 px-4 py-3 border border-red-200 bg-red-50 rounded-lg flex items-center gap-2 text-sm text-red-700 svelte-4kxpm1"><svg class="w-4 h-4 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" class="svelte-4kxpm1"></path></svg> <button class="ml-auto text-red-400 hover:text-red-600 svelte-4kxpm1"><svg class="w-4 h-4 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" class="svelte-4kxpm1"></path></svg></button></div>`);
+  var root_1$2 = /* @__PURE__ */ from_html(`<div class="max-w-5xl mx-auto mb-4 px-4 py-3 border border-red-200 bg-red-50 rounded-lg flex items-center gap-2 text-sm text-red-700 svelte-4kxpm1"><svg class="w-4 h-4 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" class="svelte-4kxpm1"></path></svg> <button class="ml-auto text-red-400 hover:text-red-600 svelte-4kxpm1" aria-label="Dismiss approval error"><svg class="w-4 h-4 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" class="svelte-4kxpm1"></path></svg></button></div>`);
   var root_2$1 = /* @__PURE__ */ from_html(`<div class="max-w-5xl mx-auto p-12 text-center text-gray-400 svelte-4kxpm1"><span class="w-5 h-5 inline-block border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin svelte-4kxpm1"></span> <p class="mt-2 text-sm svelte-4kxpm1">Loading releases...</p></div>`);
   var root_3 = /* @__PURE__ */ from_html(`<div class="max-w-5xl mx-auto p-6 border border-red-200 rounded-lg text-center svelte-4kxpm1"><p class="text-red-600 svelte-4kxpm1"> </p> <button class="mt-2 text-sm text-gray-500 hover:text-gray-900 underline svelte-4kxpm1">Retry</button></div>`);
   var root_4$1 = /* @__PURE__ */ from_html(`<div class="max-w-5xl mx-auto p-6 border border-gray-200 rounded-lg text-center svelte-4kxpm1"><p class="text-gray-600 svelte-4kxpm1">No releases yet.</p> <p class="text-sm text-gray-400 mt-2 svelte-4kxpm1">Create a release with <code class="bg-gray-100 px-1 rounded svelte-4kxpm1">forest release create</code></p></div>`);
@@ -5061,7 +5075,7 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
   var root_9$1 = /* @__PURE__ */ from_html(`<div class="lane-bar svelte-4kxpm1"></div>`);
   var root_10$1 = /* @__PURE__ */ from_html(`<div class="lane-dot svelte-4kxpm1"></div>`);
   var root_7$1 = /* @__PURE__ */ from_html(`<!> <!> <!>`, 1);
-  var root_6$1 = /* @__PURE__ */ from_html(`<div class="svelte-4kxpm1"><!></div>`);
+  var root_6$1 = /* @__PURE__ */ from_html(`<div class="swim-lane svelte-4kxpm1"><!></div>`);
   var root_13 = /* @__PURE__ */ from_html(`<span class="flex items-center gap-1 svelte-4kxpm1"><svg class="w-3.5 h-3.5 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" class="svelte-4kxpm1"></path></svg> </span>`);
   var root_14 = /* @__PURE__ */ from_html(`<span class="font-mono svelte-4kxpm1"> </span>`);
   var root_15 = /* @__PURE__ */ from_html(`<span class="flex items-center gap-1 svelte-4kxpm1"><svg class="w-3.5 h-3.5 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" class="svelte-4kxpm1"></path></svg> <a class="hover:underline svelte-4kxpm1"> </a></span>`);
@@ -5122,16 +5136,19 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
   var root_76 = /* @__PURE__ */ from_html(`<span class="font-mono svelte-4kxpm1"> </span>`);
   var root_75 = /* @__PURE__ */ from_html(`<div data-release="" data-envs="" class="border border-gray-200 rounded-lg overflow-hidden opacity-75 svelte-4kxpm1"><div class="px-4 py-3 flex items-center gap-3 flex-wrap svelte-4kxpm1"><div class="flex items-center gap-2 min-w-0 flex-1 svelte-4kxpm1"><span class="inline-block w-6 h-6 rounded-full bg-gray-200 shrink-0 svelte-4kxpm1" data-avatar=""></span> <a class="font-medium text-gray-900 hover:text-black truncate svelte-4kxpm1"> </a></div> <div class="flex items-center gap-4 text-xs text-gray-500 shrink-0 svelte-4kxpm1"><!> <time class="svelte-4kxpm1"> </time></div></div></div>`);
   var root_74 = /* @__PURE__ */ from_html(`<details class="group svelte-4kxpm1"><summary class="flex items-center gap-2 py-2 px-1 text-sm text-gray-400 cursor-pointer hover:text-gray-600 list-none svelte-4kxpm1"><svg class="w-3 h-3 transition-transform group-open:rotate-90 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" class="svelte-4kxpm1"></path></svg> <span class="text-gray-300 svelte-4kxpm1">&middot;</span> <span class="group-open:hidden svelte-4kxpm1"> </span> <span class="hidden group-open:inline svelte-4kxpm1"> </span></summary> <div class="space-y-3 mt-1 svelte-4kxpm1"></div></details>`);
-  var root_77 = /* @__PURE__ */ from_html(`<div class="svelte-4kxpm1"><span class="svelte-4kxpm1"> </span></div>`);
-  var root_5$1 = /* @__PURE__ */ from_html(`<div class="max-w-5xl mx-auto grid svelte-4kxpm1"><div class="flex svelte-4kxpm1" style="grid-row: 1;"></div> <div class="space-y-3 min-w-0 svelte-4kxpm1" style="grid-row: 1;"></div> <div class="flex pt-1 svelte-4kxpm1" style="grid-row: 2; grid-column: 1; height: 56px;"></div></div>`);
+  var root_77 = /* @__PURE__ */ from_html(`<div class="svelte-4kxpm1"><span class="lane-label svelte-4kxpm1"> </span></div>`);
+  var root_5$1 = /* @__PURE__ */ from_html(`<div class="max-w-5xl mx-auto grid svelte-4kxpm1"><div class="swim-lane-gutter flex svelte-4kxpm1" style="grid-row: 1; grid-column: 1;"></div> <div class="space-y-3 min-w-0 svelte-4kxpm1" style="grid-row: 1; grid-column: 2;"></div> <div class="swim-lane-labels flex pt-1 svelte-4kxpm1" style="grid-row: 2; grid-column: 1;"></div></div>`);
   var root$2 = /* @__PURE__ */ from_html(`<!> <!>`, 1);
   const $$css$2 = {
     hash: "svelte-4kxpm1",
-    code: "\n  @keyframes svelte-4kxpm1-lane-pulse {\n    0%, 100% { opacity: 0.6; }\n    50% { opacity: 1; }\n  }.lane-pulse {\n    animation: svelte-4kxpm1-lane-pulse 2s ease-in-out infinite;}"
+    code: ".swim-lane-gutter {align-self:stretch;}.swim-lane {position:relative;min-height:100%;}.swim-lane-labels {min-height:56px;}.lane-label {writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:500;line-height:1;pointer-events:none;white-space:nowrap;}\n\n  @keyframes svelte-4kxpm1-lane-pulse {\n    0%, 100% { opacity: 0.6; }\n    50% { opacity: 1; }\n  }.lane-pulse {\n    animation: svelte-4kxpm1-lane-pulse 2s ease-in-out infinite;}"
   };
   function ReleaseTimeline($$anchor, $$props) {
     push($$props, false);
     append_styles($$anchor, $$css$2);
+    const renderedTimeline = /* @__PURE__ */ mutable_source();
+    const renderedLaneNames = /* @__PURE__ */ mutable_source();
+    const displayedLanes = /* @__PURE__ */ mutable_source();
     const laneCount = /* @__PURE__ */ mutable_source();
     const gutterWidth = /* @__PURE__ */ mutable_source();
     let org = prop($$props, "org", 12, "");
@@ -5152,11 +5169,16 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
     let timerInterval = null;
     let timelineEl = /* @__PURE__ */ mutable_source(null);
     let laneBarData = /* @__PURE__ */ mutable_source({});
+    let laneBarRaf = null;
+    let laneBarScheduled = false;
+    let laneBarRetryCount = 0;
     const BAR_WIDTH = 20;
     const BAR_GAP = 4;
     const DOT_SIZE = 12;
+    const MAX_LANE_BAR_RETRIES = 8;
     const IN_FLIGHT = /* @__PURE__ */ new Set(["QUEUED", "RUNNING", "ASSIGNED"]);
     const DEPLOYED = /* @__PURE__ */ new Set(["SUCCEEDED"]);
+    const STOPPED = /* @__PURE__ */ new Set(["FAILED", "TIMED_OUT", "CANCELLED"]);
     let approving = /* @__PURE__ */ mutable_source(/* @__PURE__ */ new Set());
     let approvalError = /* @__PURE__ */ mutable_source(null);
     function isAdmin() {
@@ -5488,24 +5510,43 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
         return { env: entry.slice(0, colon), status: entry.slice(colon + 1) };
       });
     }
-    let laneBarRaf = null;
     function scheduleComputeLaneBars() {
-      if (laneBarRaf) return;
-      laneBarRaf = requestAnimationFrame(() => {
-        laneBarRaf = null;
-        tick().then(computeLaneBars);
+      if (laneBarScheduled) return;
+      laneBarScheduled = true;
+      tick().then(() => {
+        laneBarRaf = requestAnimationFrame(() => {
+          laneBarRaf = null;
+          laneBarScheduled = false;
+          computeLaneBars();
+        });
       });
     }
+    function retryComputeLaneBars() {
+      if (laneBarRetryCount >= MAX_LANE_BAR_RETRIES) return;
+      laneBarRetryCount += 1;
+      scheduleComputeLaneBars();
+    }
     function computeLaneBars() {
-      if (!get(timelineEl)) return;
+      if (!get(displayedLanes).length) {
+        set(laneBarData, {});
+        laneBarRetryCount = 0;
+        return;
+      }
+      if (!get(timelineEl)) {
+        retryComputeLaneBars();
+        return;
+      }
       const timelineRect = get(timelineEl).getBoundingClientRect();
-      if (timelineRect.height === 0) return;
-      const timelineH = timelineRect.height;
       const cards = Array.from(get(timelineEl).querySelectorAll("[data-release]"));
+      if (timelineRect.height === 0 || cards.length === 0) {
+        retryComputeLaneBars();
+        return;
+      }
+      const timelineH = timelineRect.height;
       const newBarData = {};
-      for (const lane of get(lanes)) {
+      for (const lane of get(displayedLanes)) {
         const env = lane.name;
-        let deployedCard = null, flightCard = null;
+        let deployedCard = null, flightCard = null, stoppedCard = null;
         let deployedIdx = -1, flightIdx = -1;
         for (let i = 0; i < cards.length; i++) {
           const entries = parseEnvs(cards[i].dataset.envs);
@@ -5519,15 +5560,19 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
               flightCard = cards[i];
               flightIdx = i;
             }
+            if (STOPPED.has(entry.status) && !stoppedCard) stoppedCard = cards[i];
           }
         }
         const deployedTop = deployedCard ? deployedCard.getBoundingClientRect().top - timelineRect.top : null;
         const flightTop = flightCard ? flightCard.getBoundingClientRect().top - timelineRect.top : null;
+        const stoppedTop = stoppedCard ? stoppedCard.getBoundingClientRect().top - timelineRect.top : null;
         let solidH = 0;
         if (deployedTop !== null && flightTop !== null) {
           solidH = timelineH - Math.max(deployedTop, flightTop);
         } else if (deployedTop !== null) {
           solidH = timelineH - deployedTop;
+        } else if (stoppedTop !== null) {
+          solidH = timelineH - stoppedTop;
         }
         const hasHatch = !!flightCard;
         let hatchTop = 0, hatchH = 0, isForward = false;
@@ -5558,6 +5603,7 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
           color: envColors(env)
         };
       }
+      laneBarRetryCount = 0;
       set(laneBarData, newBarData);
     }
     const hatchCache = /* @__PURE__ */ new Map();
@@ -5584,6 +5630,7 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
       if (timerInterval) clearInterval(timerInterval);
       if (refetchTimer) clearTimeout(refetchTimer);
       if (laneBarRaf) cancelAnimationFrame(laneBarRaf);
+      laneBarScheduled = false;
     });
     function handleResize() {
       scheduleComputeLaneBars();
@@ -5630,6 +5677,16 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
     function isPlanAwaiting(stage) {
       return stage.stage_type === "plan" && effectiveStatus(stage) === "AWAITING_APPROVAL";
     }
+    function laneNamesInTimeline(items) {
+      const names = /* @__PURE__ */ new Set();
+      for (const item of items) {
+        if (item.kind !== "release" || !item.release) continue;
+        for (const entry of parseEnvs(item.release.dest_envs)) {
+          if (entry.status !== "PENDING") names.add(entry.env);
+        }
+      }
+      return names;
+    }
     legacy_pre_effect(
       () => (get(initialLoading), get(error), deep_read_state(org()), get(disconnectSSE), deep_read_state(project())),
       () => {
@@ -5638,11 +5695,26 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
         }
       }
     );
-    legacy_pre_effect(() => get(lanes), () => {
-      set(laneCount, get(lanes).length);
+    legacy_pre_effect(() => (deep_read_state(limit()), get(timeline)), () => {
+      set(renderedTimeline, limit() && Number(limit()) > 0 ? get(timeline).slice(0, Number(limit())) : get(timeline));
     });
+    legacy_pre_effect(() => get(renderedTimeline), () => {
+      set(renderedLaneNames, laneNamesInTimeline(get(renderedTimeline)));
+    });
+    legacy_pre_effect(() => (get(lanes), get(renderedLaneNames)), () => {
+      set(displayedLanes, get(lanes).filter((lane) => get(renderedLaneNames).has(lane.name)));
+    });
+    legacy_pre_effect(() => get(displayedLanes), () => {
+      set(laneCount, get(displayedLanes).length);
+    });
+    legacy_pre_effect(
+      () => (get(initialLoading), get(renderedTimeline), get(laneCount)),
+      () => {
+        if (!get(initialLoading) && get(renderedTimeline).length && get(laneCount) > 0) scheduleComputeLaneBars();
+      }
+    );
     legacy_pre_effect(() => get(laneCount), () => {
-      set(gutterWidth, get(laneCount) * (BAR_WIDTH + BAR_GAP) + 8);
+      set(gutterWidth, get(laneCount) > 0 ? get(laneCount) * (BAR_WIDTH + BAR_GAP) + 8 : 0);
     });
     legacy_pre_effect_reset();
     var $$exports = {
@@ -5731,17 +5803,17 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
       var alternate_8 = ($$anchor2) => {
         var div_4 = root_5$1();
         var div_5 = child(div_4);
-        each(div_5, 5, () => get(lanes), (lane) => lane.name, ($$anchor3, lane) => {
+        each(div_5, 5, () => get(displayedLanes), (lane) => lane.name, ($$anchor3, lane) => {
           const bar = /* @__PURE__ */ derived_safe_equal(() => (get(laneBarData), get(lane), untrack(() => get(laneBarData)[get(lane).name])));
           const computed_const = /* @__PURE__ */ derived_safe_equal(() => {
-            const [barColor, lightColor] = (deep_read_state(get(bar)), get(lane), untrack(() => {
+            const [barColor, lightColor] = (deep_read_state(get(bar)), deep_read_state(envColors), get(lane), untrack(() => {
               var _a2;
-              return ((_a2 = get(bar)) == null ? void 0 : _a2.color) || [get(lane).color, "#e5e7eb"];
+              return ((_a2 = get(bar)) == null ? void 0 : _a2.color) || envColors(get(lane).name);
             }));
             return { barColor, lightColor };
           });
           var div_6 = root_6$1();
-          set_style(div_6, "width: 20px; margin-right: 4px; position: relative;");
+          set_style(div_6, "width: 20px; margin-right: 4px;");
           var node_2 = child(div_6);
           {
             var consequent_6 = ($$anchor4) => {
@@ -5796,984 +5868,986 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
         });
         reset(div_5);
         var div_10 = sibling(div_5, 2);
-        each(
-          div_10,
-          5,
-          () => (deep_read_state(limit()), get(timeline), untrack(() => limit() && Number(limit()) > 0 ? get(timeline).slice(0, Number(limit())) : get(timeline))),
-          (item) => itemKey(item),
-          ($$anchor3, item) => {
-            var fragment_2 = comment();
-            var node_6 = first_child(fragment_2);
-            {
-              var consequent_54 = ($$anchor4) => {
-                const release = /* @__PURE__ */ derived_safe_equal(() => (get(item), untrack(() => get(item).release)));
-                var div_11 = root_12$1();
-                var div_12 = child(div_11);
-                var div_13 = child(div_12);
-                var a_1 = sibling(child(div_13), 2);
-                var text_3 = child(a_1, true);
-                reset(a_1);
-                reset(div_13);
-                var div_14 = sibling(div_13, 2);
-                var node_7 = child(div_14);
-                {
-                  var consequent_7 = ($$anchor5) => {
-                    var span = root_13();
-                    var text_4 = sibling(child(span));
-                    reset(span);
-                    template_effect(() => set_text(text_4, ` ${(deep_read_state(get(release)), untrack(() => get(release).branch)) ?? ""}`));
-                    append($$anchor5, span);
-                  };
-                  if_block(node_7, ($$render) => {
-                    if (deep_read_state(get(release)), untrack(() => get(release).branch)) $$render(consequent_7);
+        each(div_10, 5, () => get(renderedTimeline), (item) => itemKey(item), ($$anchor3, item) => {
+          var fragment_2 = comment();
+          var node_6 = first_child(fragment_2);
+          {
+            var consequent_54 = ($$anchor4) => {
+              const release = /* @__PURE__ */ derived_safe_equal(() => (get(item), untrack(() => get(item).release)));
+              var div_11 = root_12$1();
+              var div_12 = child(div_11);
+              var div_13 = child(div_12);
+              var a_1 = sibling(child(div_13), 2);
+              var text_3 = child(a_1, true);
+              reset(a_1);
+              reset(div_13);
+              var div_14 = sibling(div_13, 2);
+              var node_7 = child(div_14);
+              {
+                var consequent_7 = ($$anchor5) => {
+                  var span = root_13();
+                  var text_4 = sibling(child(span));
+                  reset(span);
+                  template_effect(() => set_text(text_4, ` ${(deep_read_state(get(release)), untrack(() => get(release).branch)) ?? ""}`));
+                  append($$anchor5, span);
+                };
+                if_block(node_7, ($$render) => {
+                  if (deep_read_state(get(release)), untrack(() => get(release).branch)) $$render(consequent_7);
+                });
+              }
+              var node_8 = sibling(node_7, 2);
+              {
+                var consequent_8 = ($$anchor5) => {
+                  var span_1 = root_14();
+                  var text_5 = child(span_1, true);
+                  reset(span_1);
+                  template_effect(($0) => set_text(text_5, $0), [
+                    () => (deep_read_state(get(release)), untrack(() => get(release).commit_sha.slice(0, 7)))
+                  ]);
+                  append($$anchor5, span_1);
+                };
+                if_block(node_8, ($$render) => {
+                  if (deep_read_state(get(release)), untrack(() => get(release).commit_sha)) $$render(consequent_8);
+                });
+              }
+              var time = sibling(node_8, 2);
+              var text_6 = child(time, true);
+              reset(time);
+              var node_9 = sibling(time, 2);
+              {
+                var consequent_9 = ($$anchor5) => {
+                  var span_2 = root_15();
+                  var a_2 = sibling(child(span_2), 2);
+                  var text_7 = child(a_2, true);
+                  reset(a_2);
+                  reset(span_2);
+                  template_effect(() => {
+                    set_attribute(a_2, "href", `/users/${(deep_read_state(get(release)), untrack(() => get(release).source_user)) ?? ""}`);
+                    set_text(text_7, (deep_read_state(get(release)), untrack(() => get(release).source_user)));
                   });
-                }
-                var node_8 = sibling(node_7, 2);
-                {
-                  var consequent_8 = ($$anchor5) => {
-                    var span_1 = root_14();
-                    var text_5 = child(span_1, true);
-                    reset(span_1);
-                    template_effect(($0) => set_text(text_5, $0), [
-                      () => (deep_read_state(get(release)), untrack(() => get(release).commit_sha.slice(0, 7)))
-                    ]);
-                    append($$anchor5, span_1);
-                  };
-                  if_block(node_8, ($$render) => {
-                    if (deep_read_state(get(release)), untrack(() => get(release).commit_sha)) $$render(consequent_8);
+                  append($$anchor5, span_2);
+                };
+                if_block(node_9, ($$render) => {
+                  if (deep_read_state(get(release)), untrack(() => get(release).source_user)) $$render(consequent_9);
+                });
+              }
+              var node_10 = sibling(node_9, 2);
+              {
+                var consequent_10 = ($$anchor5) => {
+                  var a_3 = root_16();
+                  var text_8 = child(a_3, true);
+                  reset(a_3);
+                  template_effect(() => {
+                    set_attribute(a_3, "href", `/orgs/${org() ?? ""}/projects/${(deep_read_state(get(release)), untrack(() => get(release).project_name)) ?? ""}`);
+                    set_text(text_8, (deep_read_state(get(release)), untrack(() => get(release).project_name)));
                   });
-                }
-                var time = sibling(node_8, 2);
-                var text_6 = child(time, true);
-                reset(time);
-                var node_9 = sibling(time, 2);
-                {
-                  var consequent_9 = ($$anchor5) => {
-                    var span_2 = root_15();
-                    var a_2 = sibling(child(span_2), 2);
-                    var text_7 = child(a_2, true);
-                    reset(a_2);
-                    reset(span_2);
-                    template_effect(() => {
-                      set_attribute(a_2, "href", `/users/${(deep_read_state(get(release)), untrack(() => get(release).source_user)) ?? ""}`);
-                      set_text(text_7, (deep_read_state(get(release)), untrack(() => get(release).source_user)));
+                  append($$anchor5, a_3);
+                };
+                if_block(node_10, ($$render) => {
+                  if (deep_read_state(get(release)), deep_read_state(project()), untrack(() => get(release).project_name && get(release).project_name !== project())) $$render(consequent_10);
+                });
+              }
+              reset(div_14);
+              reset(div_12);
+              var details = sibling(div_12, 2);
+              var summary_1 = child(details);
+              var node_11 = child(summary_1);
+              {
+                var consequent_12 = ($$anchor5) => {
+                  const envAllDone = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(get(release)), untrack(() => get(release).env_groups && get(release).env_groups.length > 0 && get(release).env_groups.every((g) => g.status === "SUCCEEDED"))));
+                  var fragment_3 = root_17();
+                  var node_12 = sibling(first_child(fragment_3));
+                  {
+                    var consequent_11 = ($$anchor6) => {
+                      var fragment_4 = root_18();
+                      next(2);
+                      append($$anchor6, fragment_4);
+                    };
+                    var alternate = ($$anchor6) => {
+                      var fragment_5 = root_19();
+                      next(2);
+                      append($$anchor6, fragment_5);
+                    };
+                    if_block(node_12, ($$render) => {
+                      if (get(envAllDone)) $$render(consequent_11);
+                      else $$render(alternate, -1);
                     });
-                    append($$anchor5, span_2);
-                  };
-                  if_block(node_9, ($$render) => {
-                    if (deep_read_state(get(release)), untrack(() => get(release).source_user)) $$render(consequent_9);
-                  });
-                }
-                var node_10 = sibling(node_9, 2);
-                {
-                  var consequent_10 = ($$anchor5) => {
-                    var a_3 = root_16();
-                    var text_8 = child(a_3, true);
-                    reset(a_3);
-                    template_effect(() => {
-                      set_attribute(a_3, "href", `/orgs/${org() ?? ""}/projects/${(deep_read_state(get(release)), untrack(() => get(release).project_name)) ?? ""}`);
-                      set_text(text_8, (deep_read_state(get(release)), untrack(() => get(release).project_name)));
+                  }
+                  append($$anchor5, fragment_3);
+                };
+                var d_1 = /* @__PURE__ */ user_derived(() => (deep_read_state(get(release)), deep_read_state(pipelineSummary), untrack(() => get(release).has_pipeline && !pipelineSummary(get(release).pipeline_stages))));
+                var consequent_23 = ($$anchor5) => {
+                  const summary = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(pipelineSummary), deep_read_state(get(release)), untrack(() => pipelineSummary(get(release).pipeline_stages))));
+                  var fragment_6 = root_20();
+                  var node_13 = sibling(first_child(fragment_6), 2);
+                  {
+                    var consequent_13 = ($$anchor6) => {
+                      var span_3 = root_21();
+                      append($$anchor6, span_3);
+                    };
+                    var consequent_14 = ($$anchor6) => {
+                      var svg_1 = root_22();
+                      template_effect(() => set_class(
+                        svg_1,
+                        0,
+                        `w-4 h-4 ${(deep_read_state(get(summary)), untrack(() => get(summary).iconColor)) ?? ""} shrink-0`,
+                        "svelte-4kxpm1"
+                      ));
+                      append($$anchor6, svg_1);
+                    };
+                    var consequent_15 = ($$anchor6) => {
+                      var svg_2 = root_23();
+                      template_effect(() => set_class(
+                        svg_2,
+                        0,
+                        `w-4 h-4 ${(deep_read_state(get(summary)), untrack(() => get(summary).iconColor)) ?? ""} shrink-0`,
+                        "svelte-4kxpm1"
+                      ));
+                      append($$anchor6, svg_2);
+                    };
+                    var consequent_16 = ($$anchor6) => {
+                      var svg_3 = root_24();
+                      template_effect(() => set_class(
+                        svg_3,
+                        0,
+                        `w-4 h-4 ${(deep_read_state(get(summary)), untrack(() => get(summary).iconColor)) ?? ""} shrink-0`,
+                        "svelte-4kxpm1"
+                      ));
+                      append($$anchor6, svg_3);
+                    };
+                    var consequent_17 = ($$anchor6) => {
+                      var svg_4 = root_25();
+                      template_effect(() => set_class(
+                        svg_4,
+                        0,
+                        `w-4 h-4 ${(deep_read_state(get(summary)), untrack(() => get(summary).iconColor)) ?? ""} shrink-0`,
+                        "svelte-4kxpm1"
+                      ));
+                      append($$anchor6, svg_4);
+                    };
+                    var alternate_1 = ($$anchor6) => {
+                      var svg_5 = root_26();
+                      append($$anchor6, svg_5);
+                    };
+                    if_block(node_13, ($$render) => {
+                      if (deep_read_state(get(summary)), untrack(() => get(summary).icon === "pulse")) $$render(consequent_13);
+                      else if (deep_read_state(get(summary)), untrack(() => get(summary).icon === "check-circle")) $$render(consequent_14, 1);
+                      else if (deep_read_state(get(summary)), untrack(() => get(summary).icon === "x-circle")) $$render(consequent_15, 2);
+                      else if (deep_read_state(get(summary)), untrack(() => get(summary).icon === "clock")) $$render(consequent_16, 3);
+                      else if (deep_read_state(get(summary)), untrack(() => get(summary).icon === "shield")) $$render(consequent_17, 4);
+                      else $$render(alternate_1, -1);
                     });
-                    append($$anchor5, a_3);
-                  };
-                  if_block(node_10, ($$render) => {
-                    if (deep_read_state(get(release)), deep_read_state(project()), untrack(() => get(release).project_name && get(release).project_name !== project())) $$render(consequent_10);
+                  }
+                  var span_4 = sibling(node_13, 2);
+                  var text_9 = child(span_4, true);
+                  reset(span_4);
+                  var node_14 = sibling(span_4, 2);
+                  each(
+                    node_14,
+                    3,
+                    () => (deep_read_state(get(release)), untrack(() => get(release).pipeline_stages)),
+                    (stage, i) => stage.id || `${stage.stage_type}-${stage.environment}-${i}`,
+                    ($$anchor6, stage) => {
+                      var fragment_7 = root_27();
+                      var node_15 = first_child(fragment_7);
+                      {
+                        var consequent_18 = ($$anchor7) => {
+                          const badge = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(envBadgeClasses), get(stage), untrack(() => envBadgeClasses(get(stage).environment || ""))));
+                          const dot = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(statusDotColor), get(stage), deep_read_state(get(badge)), untrack(() => statusDotColor(get(stage).status) || get(badge).dot)));
+                          var span_5 = root_28();
+                          var text_10 = child(span_5);
+                          var span_6 = sibling(text_10);
+                          reset(span_5);
+                          template_effect(() => {
+                            set_class(
+                              span_5,
+                              1,
+                              `inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${(deep_read_state(get(badge)), untrack(() => get(badge).bg)) ?? ""}`,
+                              "svelte-4kxpm1"
+                            );
+                            set_text(text_10, `${(get(stage), untrack(() => get(stage).environment)) ?? ""} `);
+                            set_class(span_6, 1, `w-1.5 h-1.5 rounded-full ${get(dot) ?? ""}`, "svelte-4kxpm1");
+                          });
+                          append($$anchor7, span_5);
+                        };
+                        var d_2 = /* @__PURE__ */ user_derived(() => (get(stage), deep_read_state(get(summary)), untrack(() => get(stage).stage_type === "deploy" && summaryShowsStage(get(summary), get(stage).status))));
+                        if_block(node_15, ($$render) => {
+                          if (get(d_2)) $$render(consequent_18);
+                        });
+                      }
+                      var node_16 = sibling(node_15, 2);
+                      {
+                        var consequent_19 = ($$anchor7) => {
+                          var fragment_8 = root_29();
+                          var span_7 = first_child(fragment_8);
+                          var text_11 = child(span_7);
+                          next();
+                          reset(span_7);
+                          var button_2 = sibling(span_7, 2);
+                          template_effect(
+                            ($0) => {
+                              set_text(text_11, `${(get(stage), untrack(() => get(stage).environment)) ?? ""} plan `);
+                              button_2.disabled = $0;
+                            },
+                            [
+                              () => (get(approving), deep_read_state(get(release)), get(stage), untrack(() => get(approving).has(`plan:${get(release).release_intent_id}:${get(stage).id}`)))
+                            ]
+                          );
+                          event("click", button_2, stopPropagation(() => approvePlanStage(get(release), get(stage))));
+                          append($$anchor7, fragment_8);
+                        };
+                        var d_3 = /* @__PURE__ */ user_derived(() => (get(stage), deep_read_state(get(release)), deep_read_state(csrf()), untrack(() => get(stage).stage_type === "plan" && isPlanAwaiting(get(stage)) && get(release).release_intent_id && csrf())));
+                        if_block(node_16, ($$render) => {
+                          if (get(d_3)) $$render(consequent_19);
+                        });
+                      }
+                      var node_17 = sibling(node_16, 2);
+                      {
+                        var consequent_22 = ($$anchor7) => {
+                          var fragment_9 = comment();
+                          var node_18 = first_child(fragment_9);
+                          {
+                            var consequent_20 = ($$anchor8) => {
+                              var button_3 = root_31();
+                              template_effect(($0) => button_3.disabled = $0, [
+                                () => (get(approving), deep_read_state(get(release)), get(stage), untrack(() => get(approving).has(`${get(release).release_intent_id}:${get(stage).environment}`)))
+                              ]);
+                              event("click", button_3, stopPropagation(() => {
+                                if (confirm("You are the release author. Bypass approval?")) approveRelease(get(release), get(stage), true);
+                              }));
+                              append($$anchor8, button_3);
+                            };
+                            var d_4 = /* @__PURE__ */ user_derived(() => (deep_read_state(get(release)), untrack(() => isAuthor(get(release)) && isAdmin())));
+                            var consequent_21 = ($$anchor8) => {
+                              var button_4 = root_32();
+                              template_effect(($0) => button_4.disabled = $0, [
+                                () => (get(approving), deep_read_state(get(release)), get(stage), untrack(() => get(approving).has(`${get(release).release_intent_id}:${get(stage).environment}`)))
+                              ]);
+                              event("click", button_4, stopPropagation(() => approveRelease(get(release), get(stage))));
+                              append($$anchor8, button_4);
+                            };
+                            var d_5 = /* @__PURE__ */ user_derived(() => (deep_read_state(get(release)), untrack(() => !isAuthor(get(release)))));
+                            if_block(node_18, ($$render) => {
+                              if (get(d_4)) $$render(consequent_20);
+                              else if (get(d_5)) $$render(consequent_21, 1);
+                            });
+                          }
+                          append($$anchor7, fragment_9);
+                        };
+                        if_block(node_17, ($$render) => {
+                          if (get(stage), deep_read_state(get(release)), deep_read_state(csrf()), untrack(() => get(stage).blocked_by && get(release).release_intent_id && csrf())) $$render(consequent_22);
+                        });
+                      }
+                      append($$anchor6, fragment_7);
+                    }
+                  );
+                  var span_8 = sibling(node_14, 2);
+                  var text_12 = child(span_8);
+                  reset(span_8);
+                  template_effect(() => {
+                    set_class(
+                      span_4,
+                      1,
+                      `${(deep_read_state(get(summary)), untrack(() => get(summary).color)) ?? ""} text-sm`,
+                      "svelte-4kxpm1"
+                    );
+                    set_text(text_9, (deep_read_state(get(summary)), untrack(() => get(summary).label)));
+                    set_text(text_12, `${(deep_read_state(get(summary)), untrack(() => get(summary).done)) ?? ""}/${(deep_read_state(get(summary)), untrack(() => get(summary).total)) ?? ""}`);
                   });
-                }
-                reset(div_14);
-                reset(div_12);
-                var details = sibling(div_12, 2);
-                var summary_1 = child(details);
-                var node_11 = child(summary_1);
-                {
-                  var consequent_12 = ($$anchor5) => {
-                    const envAllDone = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(get(release)), untrack(() => get(release).env_groups && get(release).env_groups.length > 0 && get(release).env_groups.every((g) => g.status === "SUCCEEDED"))));
-                    var fragment_3 = root_17();
-                    var node_12 = sibling(first_child(fragment_3));
-                    {
-                      var consequent_11 = ($$anchor6) => {
-                        var fragment_4 = root_18();
-                        next(2);
-                        append($$anchor6, fragment_4);
-                      };
-                      var alternate = ($$anchor6) => {
-                        var fragment_5 = root_19();
-                        next(2);
-                        append($$anchor6, fragment_5);
-                      };
-                      if_block(node_12, ($$render) => {
-                        if (get(envAllDone)) $$render(consequent_11);
-                        else $$render(alternate, -1);
-                      });
-                    }
-                    append($$anchor5, fragment_3);
-                  };
-                  var d_1 = /* @__PURE__ */ user_derived(() => (deep_read_state(get(release)), deep_read_state(pipelineSummary), untrack(() => get(release).has_pipeline && !pipelineSummary(get(release).pipeline_stages))));
-                  var consequent_23 = ($$anchor5) => {
-                    const summary = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(pipelineSummary), deep_read_state(get(release)), untrack(() => pipelineSummary(get(release).pipeline_stages))));
-                    var fragment_6 = root_20();
-                    var node_13 = sibling(first_child(fragment_6), 2);
-                    {
-                      var consequent_13 = ($$anchor6) => {
-                        var span_3 = root_21();
-                        append($$anchor6, span_3);
-                      };
-                      var consequent_14 = ($$anchor6) => {
-                        var svg_1 = root_22();
-                        template_effect(() => set_class(
-                          svg_1,
-                          0,
-                          `w-4 h-4 ${(deep_read_state(get(summary)), untrack(() => get(summary).iconColor)) ?? ""} shrink-0`,
-                          "svelte-4kxpm1"
-                        ));
-                        append($$anchor6, svg_1);
-                      };
-                      var consequent_15 = ($$anchor6) => {
-                        var svg_2 = root_23();
-                        template_effect(() => set_class(
-                          svg_2,
-                          0,
-                          `w-4 h-4 ${(deep_read_state(get(summary)), untrack(() => get(summary).iconColor)) ?? ""} shrink-0`,
-                          "svelte-4kxpm1"
-                        ));
-                        append($$anchor6, svg_2);
-                      };
-                      var consequent_16 = ($$anchor6) => {
-                        var svg_3 = root_24();
-                        template_effect(() => set_class(
-                          svg_3,
-                          0,
-                          `w-4 h-4 ${(deep_read_state(get(summary)), untrack(() => get(summary).iconColor)) ?? ""} shrink-0`,
-                          "svelte-4kxpm1"
-                        ));
-                        append($$anchor6, svg_3);
-                      };
-                      var consequent_17 = ($$anchor6) => {
-                        var svg_4 = root_25();
-                        template_effect(() => set_class(
-                          svg_4,
-                          0,
-                          `w-4 h-4 ${(deep_read_state(get(summary)), untrack(() => get(summary).iconColor)) ?? ""} shrink-0`,
-                          "svelte-4kxpm1"
-                        ));
-                        append($$anchor6, svg_4);
-                      };
-                      var alternate_1 = ($$anchor6) => {
-                        var svg_5 = root_26();
-                        append($$anchor6, svg_5);
-                      };
-                      if_block(node_13, ($$render) => {
-                        if (deep_read_state(get(summary)), untrack(() => get(summary).icon === "pulse")) $$render(consequent_13);
-                        else if (deep_read_state(get(summary)), untrack(() => get(summary).icon === "check-circle")) $$render(consequent_14, 1);
-                        else if (deep_read_state(get(summary)), untrack(() => get(summary).icon === "x-circle")) $$render(consequent_15, 2);
-                        else if (deep_read_state(get(summary)), untrack(() => get(summary).icon === "clock")) $$render(consequent_16, 3);
-                        else if (deep_read_state(get(summary)), untrack(() => get(summary).icon === "shield")) $$render(consequent_17, 4);
-                        else $$render(alternate_1, -1);
-                      });
-                    }
-                    var span_4 = sibling(node_13, 2);
-                    var text_9 = child(span_4, true);
-                    reset(span_4);
-                    var node_14 = sibling(span_4, 2);
-                    each(
-                      node_14,
-                      3,
-                      () => (deep_read_state(get(release)), untrack(() => get(release).pipeline_stages)),
-                      (stage, i) => stage.id || `${stage.stage_type}-${stage.environment}-${i}`,
-                      ($$anchor6, stage) => {
-                        var fragment_7 = root_27();
-                        var node_15 = first_child(fragment_7);
-                        {
-                          var consequent_18 = ($$anchor7) => {
-                            const badge = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(envBadgeClasses), get(stage), untrack(() => envBadgeClasses(get(stage).environment || ""))));
-                            const dot = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(statusDotColor), get(stage), deep_read_state(get(badge)), untrack(() => statusDotColor(get(stage).status) || get(badge).dot)));
-                            var span_5 = root_28();
-                            var text_10 = child(span_5);
-                            var span_6 = sibling(text_10);
-                            reset(span_5);
-                            template_effect(() => {
+                  append($$anchor5, fragment_6);
+                };
+                var d_6 = /* @__PURE__ */ user_derived(() => (deep_read_state(get(release)), deep_read_state(pipelineSummary), untrack(() => get(release).has_pipeline && pipelineSummary(get(release).pipeline_stages))));
+                var consequent_28 = ($$anchor5) => {
+                  const allSucceeded = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(get(release)), untrack(() => get(release).env_groups.every((g) => g.status === "SUCCEEDED"))));
+                  var fragment_10 = comment();
+                  var node_19 = first_child(fragment_10);
+                  {
+                    var consequent_24 = ($$anchor6) => {
+                      var fragment_11 = root_34();
+                      next(2);
+                      append($$anchor6, fragment_11);
+                    };
+                    var alternate_3 = ($$anchor6) => {
+                      var fragment_12 = comment();
+                      var node_20 = first_child(fragment_12);
+                      each(
+                        node_20,
+                        1,
+                        () => (deep_read_state(get(release)), untrack(() => get(release).env_groups)),
+                        index,
+                        ($$anchor7, group) => {
+                          var fragment_13 = comment();
+                          var node_21 = first_child(fragment_13);
+                          {
+                            var consequent_27 = ($$anchor8) => {
+                              const cfg = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(STATUS_CONFIG), get(group), untrack(() => STATUS_CONFIG[get(group).status] || STATUS_CONFIG.SUCCEEDED)));
+                              var fragment_14 = root_37();
+                              var node_22 = first_child(fragment_14);
+                              {
+                                var consequent_25 = ($$anchor9) => {
+                                  var span_9 = root_38();
+                                  append($$anchor9, span_9);
+                                };
+                                var consequent_26 = ($$anchor9) => {
+                                  var svg_6 = root_39();
+                                  template_effect(() => set_class(
+                                    svg_6,
+                                    0,
+                                    `w-4 h-4 ${(deep_read_state(get(cfg)), untrack(() => get(cfg).iconColor)) ?? ""} shrink-0`,
+                                    "svelte-4kxpm1"
+                                  ));
+                                  append($$anchor9, svg_6);
+                                };
+                                var alternate_2 = ($$anchor9) => {
+                                  var svg_7 = root_40();
+                                  template_effect(() => set_class(
+                                    svg_7,
+                                    0,
+                                    `w-4 h-4 ${(deep_read_state(get(cfg)), untrack(() => get(cfg).iconColor)) ?? ""} shrink-0`,
+                                    "svelte-4kxpm1"
+                                  ));
+                                  append($$anchor9, svg_7);
+                                };
+                                if_block(node_22, ($$render) => {
+                                  if (deep_read_state(get(cfg)), untrack(() => get(cfg).icon === "pulse")) $$render(consequent_25);
+                                  else if (deep_read_state(get(cfg)), untrack(() => get(cfg).icon === "check-circle")) $$render(consequent_26, 1);
+                                  else $$render(alternate_2, -1);
+                                });
+                              }
+                              var span_10 = sibling(node_22, 2);
+                              var text_13 = child(span_10, true);
+                              reset(span_10);
+                              var node_23 = sibling(span_10, 2);
+                              each(node_23, 1, () => (get(group), untrack(() => get(group).envs)), (env) => env, ($$anchor9, env) => {
+                                const badge = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(envBadgeClasses), get(env), untrack(() => envBadgeClasses(get(env)))));
+                                var span_11 = root_41();
+                                var text_14 = child(span_11);
+                                var span_12 = sibling(text_14);
+                                reset(span_11);
+                                template_effect(() => {
+                                  set_class(
+                                    span_11,
+                                    1,
+                                    `inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${(deep_read_state(get(badge)), untrack(() => get(badge).bg)) ?? ""}`,
+                                    "svelte-4kxpm1"
+                                  );
+                                  set_text(text_14, `${get(env) ?? ""} `);
+                                  set_class(
+                                    span_12,
+                                    1,
+                                    `w-1.5 h-1.5 rounded-full ${(deep_read_state(get(badge)), untrack(() => get(badge).dot)) ?? ""}`,
+                                    "svelte-4kxpm1"
+                                  );
+                                });
+                                append($$anchor9, span_11);
+                              });
+                              template_effect(() => {
+                                set_class(
+                                  span_10,
+                                  1,
+                                  `${(deep_read_state(get(cfg)), untrack(() => get(cfg).color)) ?? ""} text-sm`,
+                                  "svelte-4kxpm1"
+                                );
+                                set_text(text_13, (deep_read_state(get(cfg)), untrack(() => get(cfg).label)));
+                              });
+                              append($$anchor8, fragment_14);
+                            };
+                            if_block(node_21, ($$render) => {
+                              if (get(group), untrack(() => get(group).status !== "SUCCEEDED")) $$render(consequent_27);
+                            });
+                          }
+                          append($$anchor7, fragment_13);
+                        }
+                      );
+                      append($$anchor6, fragment_12);
+                    };
+                    if_block(node_19, ($$render) => {
+                      if (get(allSucceeded)) $$render(consequent_24);
+                      else $$render(alternate_3, -1);
+                    });
+                  }
+                  append($$anchor5, fragment_10);
+                };
+                var alternate_4 = ($$anchor5) => {
+                  var fragment_15 = root_42();
+                  next(2);
+                  append($$anchor5, fragment_15);
+                };
+                if_block(node_11, ($$render) => {
+                  if (get(d_1)) $$render(consequent_12);
+                  else if (get(d_6)) $$render(consequent_23, 1);
+                  else if (deep_read_state(get(release)), untrack(() => get(release).env_groups && get(release).env_groups.length > 0)) $$render(consequent_28, 2);
+                  else $$render(alternate_4, -1);
+                });
+              }
+              next(2);
+              reset(summary_1);
+              var div_15 = sibling(summary_1, 2);
+              var node_24 = child(div_15);
+              {
+                var consequent_29 = ($$anchor5) => {
+                  const desc = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(get(release)), untrack(() => get(release).description)));
+                  var p_1 = root_43();
+                  var text_15 = child(p_1, true);
+                  reset(p_1);
+                  template_effect(
+                    ($0) => {
+                      set_attribute(p_1, "title", get(desc));
+                      set_text(text_15, $0);
+                    },
+                    [
+                      () => (deep_read_state(get(desc)), untrack(() => get(desc).length > 400 ? get(desc).slice(0, 400) + "…" : get(desc)))
+                    ]
+                  );
+                  append($$anchor5, p_1);
+                };
+                if_block(node_24, ($$render) => {
+                  if (deep_read_state(get(release)), untrack(() => get(release).description)) $$render(consequent_29);
+                });
+              }
+              var div_16 = sibling(node_24, 2);
+              var span_13 = child(div_16);
+              var text_16 = child(span_13, true);
+              reset(span_13);
+              var node_25 = sibling(span_13, 2);
+              {
+                var consequent_30 = ($$anchor5) => {
+                  var span_14 = root_44();
+                  var text_17 = child(span_14, true);
+                  reset(span_14);
+                  template_effect(() => set_text(text_17, (deep_read_state(get(release)), untrack(() => get(release).version))));
+                  append($$anchor5, span_14);
+                };
+                if_block(node_25, ($$render) => {
+                  if (deep_read_state(get(release)), untrack(() => get(release).version)) $$render(consequent_30);
+                });
+              }
+              reset(div_16);
+              reset(div_15);
+              var node_26 = sibling(div_15, 2);
+              {
+                var consequent_44 = ($$anchor5) => {
+                  var div_17 = root_45();
+                  each(
+                    div_17,
+                    7,
+                    () => (deep_read_state(get(release)), untrack(() => get(release).pipeline_stages)),
+                    (stage, i) => stage.id || `${stage.stage_type}-${stage.environment}-${i}`,
+                    ($$anchor6, stage, i) => {
+                      const stageStatus = /* @__PURE__ */ derived_safe_equal(() => (get(stage), untrack(() => effectiveStatus(get(stage)))));
+                      var fragment_16 = root_46();
+                      var div_18 = first_child(fragment_16);
+                      var node_27 = child(div_18);
+                      {
+                        var consequent_31 = ($$anchor7) => {
+                          var svg_8 = root_47();
+                          append($$anchor7, svg_8);
+                        };
+                        var consequent_32 = ($$anchor7) => {
+                          var span_15 = root_48();
+                          append($$anchor7, span_15);
+                        };
+                        var consequent_33 = ($$anchor7) => {
+                          var svg_9 = root_49();
+                          append($$anchor7, svg_9);
+                        };
+                        var consequent_34 = ($$anchor7) => {
+                          var svg_10 = root_50();
+                          append($$anchor7, svg_10);
+                        };
+                        var consequent_35 = ($$anchor7) => {
+                          var svg_11 = root_51();
+                          append($$anchor7, svg_11);
+                        };
+                        var alternate_5 = ($$anchor7) => {
+                          var svg_12 = root_52();
+                          append($$anchor7, svg_12);
+                        };
+                        if_block(node_27, ($$render) => {
+                          if (get(stageStatus) === "SUCCEEDED") $$render(consequent_31);
+                          else if (get(stageStatus) === "RUNNING") $$render(consequent_32, 1);
+                          else if (get(stageStatus) === "QUEUED") $$render(consequent_33, 2);
+                          else if (get(stageStatus) === "FAILED") $$render(consequent_34, 3);
+                          else if (get(stageStatus) === "AWAITING_APPROVAL") $$render(consequent_35, 4);
+                          else $$render(alternate_5, -1);
+                        });
+                      }
+                      var node_28 = sibling(node_27, 2);
+                      {
+                        var consequent_36 = ($$anchor7) => {
+                          const badge = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(envBadgeClasses), get(stage), untrack(() => envBadgeClasses(get(stage).environment || ""))));
+                          var fragment_17 = root_53();
+                          var span_16 = first_child(fragment_17);
+                          var text_18 = child(span_16, true);
+                          reset(span_16);
+                          var span_17 = sibling(span_16, 2);
+                          var text_19 = child(span_17);
+                          var span_18 = sibling(text_19);
+                          reset(span_17);
+                          template_effect(
+                            ($0) => {
                               set_class(
-                                span_5,
+                                span_16,
+                                1,
+                                `text-sm ${(get(stage), untrack(() => get(stage).status === "SUCCEEDED" ? "text-gray-700" : get(stage).status === "RUNNING" ? "text-yellow-700" : get(stage).status === "FAILED" ? "text-red-700" : "text-gray-400")) ?? ""}`,
+                                "svelte-4kxpm1"
+                              );
+                              set_text(text_18, $0);
+                              set_class(
+                                span_17,
                                 1,
                                 `inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${(deep_read_state(get(badge)), untrack(() => get(badge).bg)) ?? ""}`,
                                 "svelte-4kxpm1"
                               );
-                              set_text(text_10, `${(get(stage), untrack(() => get(stage).environment)) ?? ""} `);
-                              set_class(span_6, 1, `w-1.5 h-1.5 rounded-full ${get(dot) ?? ""}`, "svelte-4kxpm1");
+                              set_text(text_19, `${(get(stage), untrack(() => get(stage).environment)) ?? ""} `);
+                              set_class(
+                                span_18,
+                                1,
+                                `w-1.5 h-1.5 rounded-full ${(deep_read_state(get(badge)), untrack(() => get(badge).dot)) ?? ""}`,
+                                "svelte-4kxpm1"
+                              );
+                            },
+                            [
+                              () => (deep_read_state(deployStageLabel), get(stage), untrack(() => deployStageLabel(get(stage).status)))
+                            ]
+                          );
+                          append($$anchor7, fragment_17);
+                        };
+                        var consequent_37 = ($$anchor7) => {
+                          var span_19 = root_54();
+                          var text_20 = child(span_19);
+                          reset(span_19);
+                          template_effect(
+                            ($0) => {
+                              set_class(
+                                span_19,
+                                1,
+                                `text-sm ${(get(stage), untrack(() => get(stage).status === "SUCCEEDED" ? "text-gray-700" : get(stage).status === "RUNNING" ? "text-yellow-700" : "text-gray-400")) ?? ""}`,
+                                "svelte-4kxpm1"
+                              );
+                              set_text(text_20, `${$0 ?? ""} ${(get(stage), untrack(() => get(stage).duration_seconds)) ?? ""}s`);
+                            },
+                            [
+                              () => (deep_read_state(waitStageLabel), get(stage), untrack(() => waitStageLabel(get(stage).status)))
+                            ]
+                          );
+                          append($$anchor7, span_19);
+                        };
+                        var consequent_40 = ($$anchor7) => {
+                          const planBadge = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(envBadgeClasses), get(stage), untrack(() => envBadgeClasses(get(stage).environment || ""))));
+                          var fragment_18 = root_55();
+                          var span_20 = first_child(fragment_18);
+                          var text_21 = child(span_20, true);
+                          reset(span_20);
+                          var span_21 = sibling(span_20, 2);
+                          var text_22 = child(span_21);
+                          var span_22 = sibling(text_22);
+                          reset(span_21);
+                          var node_29 = sibling(span_21, 2);
+                          {
+                            var consequent_38 = ($$anchor8) => {
+                              var fragment_19 = root_56();
+                              var button_5 = first_child(fragment_19);
+                              var button_6 = sibling(button_5, 2);
+                              template_effect(
+                                ($0, $1) => {
+                                  button_5.disabled = $0;
+                                  button_6.disabled = $1;
+                                },
+                                [
+                                  () => (get(approving), deep_read_state(get(release)), get(stage), untrack(() => get(approving).has(`plan:${get(release).release_intent_id}:${get(stage).id}`))),
+                                  () => (get(approving), deep_read_state(get(release)), get(stage), untrack(() => get(approving).has(`plan:${get(release).release_intent_id}:${get(stage).id}`)))
+                                ]
+                              );
+                              event("click", button_5, stopPropagation(() => approvePlanStage(get(release), get(stage))));
+                              event("click", button_6, stopPropagation(() => {
+                                if (confirm("Reject this plan?")) approvePlanStage(get(release), get(stage), true);
+                              }));
+                              append($$anchor8, fragment_19);
+                            };
+                            if_block(node_29, ($$render) => {
+                              if (deep_read_state(get(stageStatus)), deep_read_state(get(release)), deep_read_state(csrf()), untrack(() => get(stageStatus) === "AWAITING_APPROVAL" && get(release).release_intent_id && csrf())) $$render(consequent_38);
                             });
-                            append($$anchor7, span_5);
-                          };
-                          var d_2 = /* @__PURE__ */ user_derived(() => (get(stage), deep_read_state(get(summary)), untrack(() => get(stage).stage_type === "deploy" && summaryShowsStage(get(summary), get(stage).status))));
-                          if_block(node_15, ($$render) => {
-                            if (get(d_2)) $$render(consequent_18);
-                          });
-                        }
-                        var node_16 = sibling(node_15, 2);
-                        {
-                          var consequent_19 = ($$anchor7) => {
-                            var fragment_8 = root_29();
-                            var span_7 = first_child(fragment_8);
-                            var text_11 = child(span_7);
-                            next();
-                            reset(span_7);
-                            var button_2 = sibling(span_7, 2);
-                            template_effect(
-                              ($0) => {
-                                set_text(text_11, `${(get(stage), untrack(() => get(stage).environment)) ?? ""} plan `);
-                                button_2.disabled = $0;
-                              },
-                              [
-                                () => (get(approving), deep_read_state(get(release)), get(stage), untrack(() => get(approving).has(`plan:${get(release).release_intent_id}:${get(stage).id}`)))
-                              ]
-                            );
-                            event("click", button_2, stopPropagation(() => approvePlanStage(get(release), get(stage))));
-                            append($$anchor7, fragment_8);
-                          };
-                          var d_3 = /* @__PURE__ */ user_derived(() => (get(stage), deep_read_state(get(release)), deep_read_state(csrf()), untrack(() => get(stage).stage_type === "plan" && isPlanAwaiting(get(stage)) && get(release).release_intent_id && csrf())));
-                          if_block(node_16, ($$render) => {
-                            if (get(d_3)) $$render(consequent_19);
-                          });
-                        }
-                        var node_17 = sibling(node_16, 2);
-                        {
-                          var consequent_22 = ($$anchor7) => {
-                            var fragment_9 = comment();
-                            var node_18 = first_child(fragment_9);
-                            {
-                              var consequent_20 = ($$anchor8) => {
-                                var button_3 = root_31();
-                                template_effect(($0) => button_3.disabled = $0, [
-                                  () => (get(approving), deep_read_state(get(release)), get(stage), untrack(() => get(approving).has(`${get(release).release_intent_id}:${get(stage).environment}`)))
-                                ]);
-                                event("click", button_3, stopPropagation(() => {
-                                  if (confirm("You are the release author. Bypass approval?")) approveRelease(get(release), get(stage), true);
-                                }));
-                                append($$anchor8, button_3);
-                              };
-                              var d_4 = /* @__PURE__ */ user_derived(() => (deep_read_state(get(release)), untrack(() => isAuthor(get(release)) && isAdmin())));
-                              var consequent_21 = ($$anchor8) => {
-                                var button_4 = root_32();
-                                template_effect(($0) => button_4.disabled = $0, [
-                                  () => (get(approving), deep_read_state(get(release)), get(stage), untrack(() => get(approving).has(`${get(release).release_intent_id}:${get(stage).environment}`)))
-                                ]);
-                                event("click", button_4, stopPropagation(() => approveRelease(get(release), get(stage))));
-                                append($$anchor8, button_4);
-                              };
-                              var d_5 = /* @__PURE__ */ user_derived(() => (deep_read_state(get(release)), untrack(() => !isAuthor(get(release)))));
-                              if_block(node_18, ($$render) => {
-                                if (get(d_4)) $$render(consequent_20);
-                                else if (get(d_5)) $$render(consequent_21, 1);
-                              });
-                            }
-                            append($$anchor7, fragment_9);
-                          };
-                          if_block(node_17, ($$render) => {
-                            if (get(stage), deep_read_state(get(release)), deep_read_state(csrf()), untrack(() => get(stage).blocked_by && get(release).release_intent_id && csrf())) $$render(consequent_22);
-                          });
-                        }
-                        append($$anchor6, fragment_7);
-                      }
-                    );
-                    var span_8 = sibling(node_14, 2);
-                    var text_12 = child(span_8);
-                    reset(span_8);
-                    template_effect(() => {
-                      set_class(
-                        span_4,
-                        1,
-                        `${(deep_read_state(get(summary)), untrack(() => get(summary).color)) ?? ""} text-sm`,
-                        "svelte-4kxpm1"
-                      );
-                      set_text(text_9, (deep_read_state(get(summary)), untrack(() => get(summary).label)));
-                      set_text(text_12, `${(deep_read_state(get(summary)), untrack(() => get(summary).done)) ?? ""}/${(deep_read_state(get(summary)), untrack(() => get(summary).total)) ?? ""}`);
-                    });
-                    append($$anchor5, fragment_6);
-                  };
-                  var d_6 = /* @__PURE__ */ user_derived(() => (deep_read_state(get(release)), deep_read_state(pipelineSummary), untrack(() => get(release).has_pipeline && pipelineSummary(get(release).pipeline_stages))));
-                  var consequent_28 = ($$anchor5) => {
-                    const allSucceeded = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(get(release)), untrack(() => get(release).env_groups.every((g) => g.status === "SUCCEEDED"))));
-                    var fragment_10 = comment();
-                    var node_19 = first_child(fragment_10);
-                    {
-                      var consequent_24 = ($$anchor6) => {
-                        var fragment_11 = root_34();
-                        next(2);
-                        append($$anchor6, fragment_11);
-                      };
-                      var alternate_3 = ($$anchor6) => {
-                        var fragment_12 = comment();
-                        var node_20 = first_child(fragment_12);
-                        each(
-                          node_20,
-                          1,
-                          () => (deep_read_state(get(release)), untrack(() => get(release).env_groups)),
-                          index,
-                          ($$anchor7, group) => {
-                            var fragment_13 = comment();
-                            var node_21 = first_child(fragment_13);
-                            {
-                              var consequent_27 = ($$anchor8) => {
-                                const cfg = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(STATUS_CONFIG), get(group), untrack(() => STATUS_CONFIG[get(group).status] || STATUS_CONFIG.SUCCEEDED)));
-                                var fragment_14 = root_37();
-                                var node_22 = first_child(fragment_14);
-                                {
-                                  var consequent_25 = ($$anchor9) => {
-                                    var span_9 = root_38();
-                                    append($$anchor9, span_9);
-                                  };
-                                  var consequent_26 = ($$anchor9) => {
-                                    var svg_6 = root_39();
-                                    template_effect(() => set_class(
-                                      svg_6,
-                                      0,
-                                      `w-4 h-4 ${(deep_read_state(get(cfg)), untrack(() => get(cfg).iconColor)) ?? ""} shrink-0`,
-                                      "svelte-4kxpm1"
-                                    ));
-                                    append($$anchor9, svg_6);
-                                  };
-                                  var alternate_2 = ($$anchor9) => {
-                                    var svg_7 = root_40();
-                                    template_effect(() => set_class(
-                                      svg_7,
-                                      0,
-                                      `w-4 h-4 ${(deep_read_state(get(cfg)), untrack(() => get(cfg).iconColor)) ?? ""} shrink-0`,
-                                      "svelte-4kxpm1"
-                                    ));
-                                    append($$anchor9, svg_7);
-                                  };
-                                  if_block(node_22, ($$render) => {
-                                    if (deep_read_state(get(cfg)), untrack(() => get(cfg).icon === "pulse")) $$render(consequent_25);
-                                    else if (deep_read_state(get(cfg)), untrack(() => get(cfg).icon === "check-circle")) $$render(consequent_26, 1);
-                                    else $$render(alternate_2, -1);
-                                  });
-                                }
-                                var span_10 = sibling(node_22, 2);
-                                var text_13 = child(span_10, true);
-                                reset(span_10);
-                                var node_23 = sibling(span_10, 2);
-                                each(node_23, 1, () => (get(group), untrack(() => get(group).envs)), (env) => env, ($$anchor9, env) => {
-                                  const badge = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(envBadgeClasses), get(env), untrack(() => envBadgeClasses(get(env)))));
-                                  var span_11 = root_41();
-                                  var text_14 = child(span_11);
-                                  var span_12 = sibling(text_14);
-                                  reset(span_11);
-                                  template_effect(() => {
-                                    set_class(
-                                      span_11,
-                                      1,
-                                      `inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${(deep_read_state(get(badge)), untrack(() => get(badge).bg)) ?? ""}`,
-                                      "svelte-4kxpm1"
-                                    );
-                                    set_text(text_14, `${get(env) ?? ""} `);
-                                    set_class(
-                                      span_12,
-                                      1,
-                                      `w-1.5 h-1.5 rounded-full ${(deep_read_state(get(badge)), untrack(() => get(badge).dot)) ?? ""}`,
-                                      "svelte-4kxpm1"
-                                    );
-                                  });
-                                  append($$anchor9, span_11);
-                                });
-                                template_effect(() => {
-                                  set_class(
-                                    span_10,
-                                    1,
-                                    `${(deep_read_state(get(cfg)), untrack(() => get(cfg).color)) ?? ""} text-sm`,
-                                    "svelte-4kxpm1"
-                                  );
-                                  set_text(text_13, (deep_read_state(get(cfg)), untrack(() => get(cfg).label)));
-                                });
-                                append($$anchor8, fragment_14);
-                              };
-                              if_block(node_21, ($$render) => {
-                                if (get(group), untrack(() => get(group).status !== "SUCCEEDED")) $$render(consequent_27);
-                              });
-                            }
-                            append($$anchor7, fragment_13);
                           }
-                        );
-                        append($$anchor6, fragment_12);
-                      };
-                      if_block(node_19, ($$render) => {
-                        if (get(allSucceeded)) $$render(consequent_24);
-                        else $$render(alternate_3, -1);
-                      });
-                    }
-                    append($$anchor5, fragment_10);
-                  };
-                  var alternate_4 = ($$anchor5) => {
-                    var fragment_15 = root_42();
-                    next(2);
-                    append($$anchor5, fragment_15);
-                  };
-                  if_block(node_11, ($$render) => {
-                    if (get(d_1)) $$render(consequent_12);
-                    else if (get(d_6)) $$render(consequent_23, 1);
-                    else if (deep_read_state(get(release)), untrack(() => get(release).env_groups && get(release).env_groups.length > 0)) $$render(consequent_28, 2);
-                    else $$render(alternate_4, -1);
-                  });
-                }
-                next(2);
-                reset(summary_1);
-                var div_15 = sibling(summary_1, 2);
-                var node_24 = child(div_15);
-                {
-                  var consequent_29 = ($$anchor5) => {
-                    const desc = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(get(release)), untrack(() => get(release).description)));
-                    var p_1 = root_43();
-                    var text_15 = child(p_1, true);
-                    reset(p_1);
-                    template_effect(
-                      ($0) => {
-                        set_attribute(p_1, "title", get(desc));
-                        set_text(text_15, $0);
-                      },
-                      [
-                        () => (deep_read_state(get(desc)), untrack(() => get(desc).length > 400 ? get(desc).slice(0, 400) + "…" : get(desc)))
-                      ]
-                    );
-                    append($$anchor5, p_1);
-                  };
-                  if_block(node_24, ($$render) => {
-                    if (deep_read_state(get(release)), untrack(() => get(release).description)) $$render(consequent_29);
-                  });
-                }
-                var div_16 = sibling(node_24, 2);
-                var span_13 = child(div_16);
-                var text_16 = child(span_13, true);
-                reset(span_13);
-                var node_25 = sibling(span_13, 2);
-                {
-                  var consequent_30 = ($$anchor5) => {
-                    var span_14 = root_44();
-                    var text_17 = child(span_14, true);
-                    reset(span_14);
-                    template_effect(() => set_text(text_17, (deep_read_state(get(release)), untrack(() => get(release).version))));
-                    append($$anchor5, span_14);
-                  };
-                  if_block(node_25, ($$render) => {
-                    if (deep_read_state(get(release)), untrack(() => get(release).version)) $$render(consequent_30);
-                  });
-                }
-                reset(div_16);
-                reset(div_15);
-                var node_26 = sibling(div_15, 2);
-                {
-                  var consequent_44 = ($$anchor5) => {
-                    var div_17 = root_45();
-                    each(
-                      div_17,
-                      7,
-                      () => (deep_read_state(get(release)), untrack(() => get(release).pipeline_stages)),
-                      (stage, i) => stage.id || `${stage.stage_type}-${stage.environment}-${i}`,
-                      ($$anchor6, stage, i) => {
-                        const stageStatus = /* @__PURE__ */ derived_safe_equal(() => (get(stage), untrack(() => effectiveStatus(get(stage)))));
-                        var fragment_16 = root_46();
-                        var div_18 = first_child(fragment_16);
-                        var node_27 = child(div_18);
-                        {
-                          var consequent_31 = ($$anchor7) => {
-                            var svg_8 = root_47();
-                            append($$anchor7, svg_8);
-                          };
-                          var consequent_32 = ($$anchor7) => {
-                            var span_15 = root_48();
-                            append($$anchor7, span_15);
-                          };
-                          var consequent_33 = ($$anchor7) => {
-                            var svg_9 = root_49();
-                            append($$anchor7, svg_9);
-                          };
-                          var consequent_34 = ($$anchor7) => {
-                            var svg_10 = root_50();
-                            append($$anchor7, svg_10);
-                          };
-                          var consequent_35 = ($$anchor7) => {
-                            var svg_11 = root_51();
-                            append($$anchor7, svg_11);
-                          };
-                          var alternate_5 = ($$anchor7) => {
-                            var svg_12 = root_52();
-                            append($$anchor7, svg_12);
-                          };
-                          if_block(node_27, ($$render) => {
-                            if (get(stageStatus) === "SUCCEEDED") $$render(consequent_31);
-                            else if (get(stageStatus) === "RUNNING") $$render(consequent_32, 1);
-                            else if (get(stageStatus) === "QUEUED") $$render(consequent_33, 2);
-                            else if (get(stageStatus) === "FAILED") $$render(consequent_34, 3);
-                            else if (get(stageStatus) === "AWAITING_APPROVAL") $$render(consequent_35, 4);
-                            else $$render(alternate_5, -1);
-                          });
-                        }
-                        var node_28 = sibling(node_27, 2);
-                        {
-                          var consequent_36 = ($$anchor7) => {
-                            const badge = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(envBadgeClasses), get(stage), untrack(() => envBadgeClasses(get(stage).environment || ""))));
-                            var fragment_17 = root_53();
-                            var span_16 = first_child(fragment_17);
-                            var text_18 = child(span_16, true);
-                            reset(span_16);
-                            var span_17 = sibling(span_16, 2);
-                            var text_19 = child(span_17);
-                            var span_18 = sibling(text_19);
-                            reset(span_17);
-                            template_effect(
-                              ($0) => {
-                                set_class(
-                                  span_16,
-                                  1,
-                                  `text-sm ${(get(stage), untrack(() => get(stage).status === "SUCCEEDED" ? "text-gray-700" : get(stage).status === "RUNNING" ? "text-yellow-700" : get(stage).status === "FAILED" ? "text-red-700" : "text-gray-400")) ?? ""}`,
-                                  "svelte-4kxpm1"
-                                );
-                                set_text(text_18, $0);
-                                set_class(
-                                  span_17,
-                                  1,
-                                  `inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${(deep_read_state(get(badge)), untrack(() => get(badge).bg)) ?? ""}`,
-                                  "svelte-4kxpm1"
-                                );
-                                set_text(text_19, `${(get(stage), untrack(() => get(stage).environment)) ?? ""} `);
-                                set_class(
-                                  span_18,
-                                  1,
-                                  `w-1.5 h-1.5 rounded-full ${(deep_read_state(get(badge)), untrack(() => get(badge).dot)) ?? ""}`,
-                                  "svelte-4kxpm1"
-                                );
-                              },
-                              [
-                                () => (deep_read_state(deployStageLabel), get(stage), untrack(() => deployStageLabel(get(stage).status)))
-                              ]
-                            );
-                            append($$anchor7, fragment_17);
-                          };
-                          var consequent_37 = ($$anchor7) => {
-                            var span_19 = root_54();
-                            var text_20 = child(span_19);
-                            reset(span_19);
-                            template_effect(
-                              ($0) => {
-                                set_class(
-                                  span_19,
-                                  1,
-                                  `text-sm ${(get(stage), untrack(() => get(stage).status === "SUCCEEDED" ? "text-gray-700" : get(stage).status === "RUNNING" ? "text-yellow-700" : "text-gray-400")) ?? ""}`,
-                                  "svelte-4kxpm1"
-                                );
-                                set_text(text_20, `${$0 ?? ""} ${(get(stage), untrack(() => get(stage).duration_seconds)) ?? ""}s`);
-                              },
-                              [
-                                () => (deep_read_state(waitStageLabel), get(stage), untrack(() => waitStageLabel(get(stage).status)))
-                              ]
-                            );
-                            append($$anchor7, span_19);
-                          };
-                          var consequent_40 = ($$anchor7) => {
-                            const planBadge = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(envBadgeClasses), get(stage), untrack(() => envBadgeClasses(get(stage).environment || ""))));
-                            var fragment_18 = root_55();
-                            var span_20 = first_child(fragment_18);
-                            var text_21 = child(span_20, true);
-                            reset(span_20);
-                            var span_21 = sibling(span_20, 2);
-                            var text_22 = child(span_21);
-                            var span_22 = sibling(text_22);
-                            reset(span_21);
-                            var node_29 = sibling(span_21, 2);
-                            {
-                              var consequent_38 = ($$anchor8) => {
-                                var fragment_19 = root_56();
-                                var button_5 = first_child(fragment_19);
-                                var button_6 = sibling(button_5, 2);
-                                template_effect(
-                                  ($0, $1) => {
-                                    button_5.disabled = $0;
-                                    button_6.disabled = $1;
-                                  },
-                                  [
-                                    () => (get(approving), deep_read_state(get(release)), get(stage), untrack(() => get(approving).has(`plan:${get(release).release_intent_id}:${get(stage).id}`))),
-                                    () => (get(approving), deep_read_state(get(release)), get(stage), untrack(() => get(approving).has(`plan:${get(release).release_intent_id}:${get(stage).id}`)))
-                                  ]
-                                );
-                                event("click", button_5, stopPropagation(() => approvePlanStage(get(release), get(stage))));
-                                event("click", button_6, stopPropagation(() => {
-                                  if (confirm("Reject this plan?")) approvePlanStage(get(release), get(stage), true);
-                                }));
-                                append($$anchor8, fragment_19);
-                              };
-                              if_block(node_29, ($$render) => {
-                                if (deep_read_state(get(stageStatus)), deep_read_state(get(release)), deep_read_state(csrf()), untrack(() => get(stageStatus) === "AWAITING_APPROVAL" && get(release).release_intent_id && csrf())) $$render(consequent_38);
-                              });
-                            }
-                            var node_30 = sibling(node_29, 2);
-                            {
-                              var consequent_39 = ($$anchor8) => {
-                                var button_7 = root_57();
-                                var text_23 = child(button_7, true);
-                                reset(button_7);
-                                template_effect(
-                                  ($0) => {
-                                    button_7.disabled = $0;
-                                    set_text(text_23, (get(planOutputs), deep_read_state(get(release)), get(stage), untrack(() => get(planOutputs)[`${get(release).release_intent_id}:${get(stage).id}`] ? "Hide plan" : "View plan")));
-                                  },
-                                  [
-                                    () => (get(planOutputLoading), deep_read_state(get(release)), get(stage), untrack(() => get(planOutputLoading).has(`${get(release).release_intent_id}:${get(stage).id}`)))
-                                  ]
-                                );
-                                event("click", button_7, stopPropagation(() => viewPlanOutput(get(release), get(stage))));
-                                append($$anchor8, button_7);
-                              };
-                              if_block(node_30, ($$render) => {
-                                if (deep_read_state(get(stageStatus)), deep_read_state(get(release)), untrack(() => (get(stageStatus) === "AWAITING_APPROVAL" || get(stageStatus) === "SUCCEEDED" || get(stageStatus) === "FAILED") && get(release).release_intent_id)) $$render(consequent_39);
-                              });
-                            }
-                            template_effect(
-                              ($0) => {
-                                set_class(
-                                  span_20,
-                                  1,
-                                  `text-sm ${get(stageStatus) === "AWAITING_APPROVAL" ? "text-purple-700" : get(stageStatus) === "SUCCEEDED" ? "text-gray-700" : get(stageStatus) === "RUNNING" ? "text-yellow-700" : get(stageStatus) === "FAILED" ? "text-red-700" : "text-gray-400"}`,
-                                  "svelte-4kxpm1"
-                                );
-                                set_text(text_21, $0);
-                                set_class(
-                                  span_21,
-                                  1,
-                                  `inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${(deep_read_state(get(planBadge)), untrack(() => get(planBadge).bg)) ?? ""}`,
-                                  "svelte-4kxpm1"
-                                );
-                                set_text(text_22, `${(get(stage), untrack(() => get(stage).environment)) ?? ""} `);
-                                set_class(
-                                  span_22,
-                                  1,
-                                  `w-1.5 h-1.5 rounded-full ${(deep_read_state(get(planBadge)), untrack(() => get(planBadge).dot)) ?? ""}`,
-                                  "svelte-4kxpm1"
-                                );
-                              },
-                              [
-                                () => (deep_read_state(planStageLabel), deep_read_state(get(stageStatus)), untrack(() => planStageLabel(get(stageStatus))))
-                              ]
-                            );
-                            append($$anchor7, fragment_18);
-                          };
-                          if_block(node_28, ($$render) => {
-                            if (get(stage), untrack(() => get(stage).stage_type === "deploy")) $$render(consequent_36);
-                            else if (get(stage), untrack(() => get(stage).stage_type === "wait")) $$render(consequent_37, 1);
-                            else if (get(stage), untrack(() => get(stage).stage_type === "plan")) $$render(consequent_40, 2);
-                          });
-                        }
-                        var node_31 = sibling(node_28, 2);
-                        {
-                          var consequent_41 = ($$anchor7) => {
-                            var span_23 = root_58();
-                            var text_24 = child(span_23, true);
-                            reset(span_23);
-                            template_effect(($0) => set_text(text_24, $0), [
-                              () => (get(stage), untrack(() => elapsedStr(get(stage).started_at, get(stage).completed_at, get(stage).status)))
-                            ]);
-                            append($$anchor7, span_23);
-                          };
-                          if_block(node_31, ($$render) => {
-                            if (get(stage), deep_read_state(get(stageStatus)), untrack(() => get(stage).started_at && (get(stageStatus) === "RUNNING" || get(stageStatus) === "QUEUED" || get(stageStatus) === "AWAITING_APPROVAL" || get(stage).completed_at))) $$render(consequent_41);
-                          });
-                        }
-                        next(2);
-                        reset(div_18);
-                        var node_32 = sibling(div_18, 2);
-                        {
-                          var consequent_43 = ($$anchor7) => {
-                            const planData = /* @__PURE__ */ derived_safe_equal(() => (get(planOutputs), deep_read_state(get(release)), get(stage), untrack(() => get(planOutputs)[`${get(release).release_intent_id}:${get(stage).id}`])));
-                            var div_19 = root_59();
-                            var div_20 = child(div_19);
-                            var span_24 = sibling(child(div_20), 2);
-                            var text_25 = child(span_24, true);
-                            reset(span_24);
-                            reset(div_20);
-                            var node_33 = sibling(div_20, 2);
-                            {
-                              var consequent_42 = ($$anchor8) => {
-                                var fragment_20 = comment();
-                                var node_34 = first_child(fragment_20);
-                                each(
-                                  node_34,
-                                  1,
-                                  () => (deep_read_state(get(planData)), untrack(() => get(planData).outputs)),
-                                  (destOutput) => destOutput.destination_id,
-                                  ($$anchor9, destOutput) => {
-                                    var div_21 = root_61();
-                                    var div_22 = child(div_21);
-                                    var span_25 = child(div_22);
-                                    var text_26 = child(span_25, true);
-                                    reset(span_25);
-                                    var span_26 = sibling(span_25, 2);
-                                    var text_27 = child(span_26, true);
-                                    reset(span_26);
-                                    reset(div_22);
-                                    var pre = sibling(div_22, 2);
-                                    var text_28 = child(pre, true);
-                                    reset(pre);
-                                    reset(div_21);
-                                    template_effect(() => {
-                                      set_text(text_26, (get(destOutput), untrack(() => get(destOutput).destination_name)));
-                                      set_text(text_27, (get(destOutput), untrack(() => get(destOutput).status)));
-                                      set_text(text_28, (get(destOutput), untrack(() => get(destOutput).plan_output || "(no output)")));
-                                    });
-                                    append($$anchor9, div_21);
-                                  }
-                                );
-                                append($$anchor8, fragment_20);
-                              };
-                              var alternate_6 = ($$anchor8) => {
-                                var pre_1 = root_62();
-                                var text_29 = child(pre_1, true);
-                                reset(pre_1);
-                                template_effect(() => set_text(text_29, (deep_read_state(get(planData)), untrack(() => get(planData).plan_output || "(no output)"))));
-                                append($$anchor8, pre_1);
-                              };
-                              if_block(node_33, ($$render) => {
-                                if (deep_read_state(get(planData)), untrack(() => get(planData).outputs && get(planData).outputs.length > 0)) $$render(consequent_42);
-                                else $$render(alternate_6, -1);
-                              });
-                            }
-                            reset(div_19);
-                            template_effect(() => set_text(text_25, (deep_read_state(get(planData)), untrack(() => get(planData).status))));
-                            append($$anchor7, div_19);
-                          };
-                          if_block(node_32, ($$render) => {
-                            if (get(stage), get(planOutputs), deep_read_state(get(release)), untrack(() => get(stage).stage_type === "plan" && get(planOutputs)[`${get(release).release_intent_id}:${get(stage).id}`])) $$render(consequent_43);
-                          });
-                        }
-                        template_effect(() => set_class(
-                          div_18,
-                          1,
-                          `px-4 py-2.5 flex items-center gap-3 text-sm ${(deep_read_state(get(i)), deep_read_state(get(release)), untrack(() => get(i) < get(release).pipeline_stages.length - 1 ? "border-b border-gray-50" : "")) ?? ""} ${get(stageStatus) === "PENDING" ? "opacity-50" : ""}`,
-                          "svelte-4kxpm1"
-                        ));
-                        append($$anchor6, fragment_16);
+                          var node_30 = sibling(node_29, 2);
+                          {
+                            var consequent_39 = ($$anchor8) => {
+                              var button_7 = root_57();
+                              var text_23 = child(button_7, true);
+                              reset(button_7);
+                              template_effect(
+                                ($0) => {
+                                  button_7.disabled = $0;
+                                  set_text(text_23, (get(planOutputs), deep_read_state(get(release)), get(stage), untrack(() => get(planOutputs)[`${get(release).release_intent_id}:${get(stage).id}`] ? "Hide plan" : "View plan")));
+                                },
+                                [
+                                  () => (get(planOutputLoading), deep_read_state(get(release)), get(stage), untrack(() => get(planOutputLoading).has(`${get(release).release_intent_id}:${get(stage).id}`)))
+                                ]
+                              );
+                              event("click", button_7, stopPropagation(() => viewPlanOutput(get(release), get(stage))));
+                              append($$anchor8, button_7);
+                            };
+                            if_block(node_30, ($$render) => {
+                              if (deep_read_state(get(stageStatus)), deep_read_state(get(release)), untrack(() => (get(stageStatus) === "AWAITING_APPROVAL" || get(stageStatus) === "SUCCEEDED" || get(stageStatus) === "FAILED") && get(release).release_intent_id)) $$render(consequent_39);
+                            });
+                          }
+                          template_effect(
+                            ($0) => {
+                              set_class(
+                                span_20,
+                                1,
+                                `text-sm ${get(stageStatus) === "AWAITING_APPROVAL" ? "text-purple-700" : get(stageStatus) === "SUCCEEDED" ? "text-gray-700" : get(stageStatus) === "RUNNING" ? "text-yellow-700" : get(stageStatus) === "FAILED" ? "text-red-700" : "text-gray-400"}`,
+                                "svelte-4kxpm1"
+                              );
+                              set_text(text_21, $0);
+                              set_class(
+                                span_21,
+                                1,
+                                `inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${(deep_read_state(get(planBadge)), untrack(() => get(planBadge).bg)) ?? ""}`,
+                                "svelte-4kxpm1"
+                              );
+                              set_text(text_22, `${(get(stage), untrack(() => get(stage).environment)) ?? ""} `);
+                              set_class(
+                                span_22,
+                                1,
+                                `w-1.5 h-1.5 rounded-full ${(deep_read_state(get(planBadge)), untrack(() => get(planBadge).dot)) ?? ""}`,
+                                "svelte-4kxpm1"
+                              );
+                            },
+                            [
+                              () => (deep_read_state(planStageLabel), deep_read_state(get(stageStatus)), untrack(() => planStageLabel(get(stageStatus))))
+                            ]
+                          );
+                          append($$anchor7, fragment_18);
+                        };
+                        if_block(node_28, ($$render) => {
+                          if (get(stage), untrack(() => get(stage).stage_type === "deploy")) $$render(consequent_36);
+                          else if (get(stage), untrack(() => get(stage).stage_type === "wait")) $$render(consequent_37, 1);
+                          else if (get(stage), untrack(() => get(stage).stage_type === "plan")) $$render(consequent_40, 2);
+                        });
                       }
+                      var node_31 = sibling(node_28, 2);
+                      {
+                        var consequent_41 = ($$anchor7) => {
+                          var span_23 = root_58();
+                          var text_24 = child(span_23, true);
+                          reset(span_23);
+                          template_effect(($0) => set_text(text_24, $0), [
+                            () => (get(stage), untrack(() => elapsedStr(get(stage).started_at, get(stage).completed_at, get(stage).status)))
+                          ]);
+                          append($$anchor7, span_23);
+                        };
+                        if_block(node_31, ($$render) => {
+                          if (get(stage), deep_read_state(get(stageStatus)), untrack(() => get(stage).started_at && (get(stageStatus) === "RUNNING" || get(stageStatus) === "QUEUED" || get(stageStatus) === "AWAITING_APPROVAL" || get(stage).completed_at))) $$render(consequent_41);
+                        });
+                      }
+                      next(2);
+                      reset(div_18);
+                      var node_32 = sibling(div_18, 2);
+                      {
+                        var consequent_43 = ($$anchor7) => {
+                          const planData = /* @__PURE__ */ derived_safe_equal(() => (get(planOutputs), deep_read_state(get(release)), get(stage), untrack(() => get(planOutputs)[`${get(release).release_intent_id}:${get(stage).id}`])));
+                          var div_19 = root_59();
+                          var div_20 = child(div_19);
+                          var span_24 = sibling(child(div_20), 2);
+                          var text_25 = child(span_24, true);
+                          reset(span_24);
+                          reset(div_20);
+                          var node_33 = sibling(div_20, 2);
+                          {
+                            var consequent_42 = ($$anchor8) => {
+                              var fragment_20 = comment();
+                              var node_34 = first_child(fragment_20);
+                              each(
+                                node_34,
+                                1,
+                                () => (deep_read_state(get(planData)), untrack(() => get(planData).outputs)),
+                                (destOutput) => destOutput.destination_id,
+                                ($$anchor9, destOutput) => {
+                                  var div_21 = root_61();
+                                  var div_22 = child(div_21);
+                                  var span_25 = child(div_22);
+                                  var text_26 = child(span_25, true);
+                                  reset(span_25);
+                                  var span_26 = sibling(span_25, 2);
+                                  var text_27 = child(span_26, true);
+                                  reset(span_26);
+                                  reset(div_22);
+                                  var pre = sibling(div_22, 2);
+                                  var text_28 = child(pre, true);
+                                  reset(pre);
+                                  reset(div_21);
+                                  template_effect(() => {
+                                    set_text(text_26, (get(destOutput), untrack(() => get(destOutput).destination_name)));
+                                    set_text(text_27, (get(destOutput), untrack(() => get(destOutput).status)));
+                                    set_text(text_28, (get(destOutput), untrack(() => get(destOutput).plan_output || "(no output)")));
+                                  });
+                                  append($$anchor9, div_21);
+                                }
+                              );
+                              append($$anchor8, fragment_20);
+                            };
+                            var alternate_6 = ($$anchor8) => {
+                              var pre_1 = root_62();
+                              var text_29 = child(pre_1, true);
+                              reset(pre_1);
+                              template_effect(() => set_text(text_29, (deep_read_state(get(planData)), untrack(() => get(planData).plan_output || "(no output)"))));
+                              append($$anchor8, pre_1);
+                            };
+                            if_block(node_33, ($$render) => {
+                              if (deep_read_state(get(planData)), untrack(() => get(planData).outputs && get(planData).outputs.length > 0)) $$render(consequent_42);
+                              else $$render(alternate_6, -1);
+                            });
+                          }
+                          reset(div_19);
+                          template_effect(() => set_text(text_25, (deep_read_state(get(planData)), untrack(() => get(planData).status))));
+                          append($$anchor7, div_19);
+                        };
+                        if_block(node_32, ($$render) => {
+                          if (get(stage), get(planOutputs), deep_read_state(get(release)), untrack(() => get(stage).stage_type === "plan" && get(planOutputs)[`${get(release).release_intent_id}:${get(stage).id}`])) $$render(consequent_43);
+                        });
+                      }
+                      template_effect(() => set_class(
+                        div_18,
+                        1,
+                        `px-4 py-2.5 flex items-center gap-3 text-sm ${(deep_read_state(get(i)), deep_read_state(get(release)), untrack(() => get(i) < get(release).pipeline_stages.length - 1 ? "border-b border-gray-50" : "")) ?? ""} ${get(stageStatus) === "PENDING" ? "opacity-50" : ""}`,
+                        "svelte-4kxpm1"
+                      ));
+                      append($$anchor6, fragment_16);
+                    }
+                  );
+                  reset(div_17);
+                  append($$anchor5, div_17);
+                };
+                if_block(node_26, ($$render) => {
+                  if (deep_read_state(get(release)), untrack(() => get(release).has_pipeline)) $$render(consequent_44);
+                });
+              }
+              var node_35 = sibling(node_26, 2);
+              each(
+                node_35,
+                3,
+                () => (deep_read_state(get(release)), untrack(() => get(release).destinations)),
+                (dest) => dest.name,
+                ($$anchor5, dest, i) => {
+                  const destBadge = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(envBadgeClasses), get(dest), untrack(() => envBadgeClasses(get(dest).environment || ""))));
+                  var div_23 = root_63();
+                  var node_36 = child(div_23);
+                  {
+                    var consequent_45 = ($$anchor6) => {
+                      var svg_13 = root_64();
+                      append($$anchor6, svg_13);
+                    };
+                    var consequent_46 = ($$anchor6) => {
+                      var span_27 = root_65();
+                      append($$anchor6, span_27);
+                    };
+                    var consequent_47 = ($$anchor6) => {
+                      var svg_14 = root_66();
+                      append($$anchor6, svg_14);
+                    };
+                    var consequent_48 = ($$anchor6) => {
+                      var svg_15 = root_67();
+                      append($$anchor6, svg_15);
+                    };
+                    var alternate_7 = ($$anchor6) => {
+                      var svg_16 = root_68();
+                      append($$anchor6, svg_16);
+                    };
+                    if_block(node_36, ($$render) => {
+                      if (get(dest), untrack(() => get(dest).status === "SUCCEEDED")) $$render(consequent_45);
+                      else if (get(dest), untrack(() => get(dest).status === "RUNNING" || get(dest).status === "ASSIGNED")) $$render(consequent_46, 1);
+                      else if (get(dest), untrack(() => get(dest).status === "QUEUED")) $$render(consequent_47, 2);
+                      else if (get(dest), untrack(() => get(dest).status === "FAILED")) $$render(consequent_48, 3);
+                      else $$render(alternate_7, -1);
+                    });
+                  }
+                  var span_28 = sibling(node_36, 2);
+                  var text_30 = child(span_28);
+                  var span_29 = sibling(text_30);
+                  reset(span_28);
+                  var span_30 = sibling(span_28, 2);
+                  var text_31 = child(span_30, true);
+                  reset(span_30);
+                  var node_37 = sibling(span_30, 2);
+                  {
+                    var consequent_49 = ($$anchor6) => {
+                      var span_31 = root_69();
+                      append($$anchor6, span_31);
+                    };
+                    var consequent_50 = ($$anchor6) => {
+                      var span_32 = root_70();
+                      append($$anchor6, span_32);
+                    };
+                    var consequent_51 = ($$anchor6) => {
+                      var span_33 = root_71();
+                      var text_32 = child(span_33);
+                      reset(span_33);
+                      template_effect(() => set_text(text_32, `Queued${(get(dest), untrack(() => get(dest).queue_position ? ` #${get(dest).queue_position}` : "")) ?? ""}`));
+                      append($$anchor6, span_33);
+                    };
+                    var consequent_52 = ($$anchor6) => {
+                      var span_34 = root_72();
+                      append($$anchor6, span_34);
+                    };
+                    if_block(node_37, ($$render) => {
+                      if (get(dest), untrack(() => get(dest).status === "SUCCEEDED")) $$render(consequent_49);
+                      else if (get(dest), untrack(() => get(dest).status === "RUNNING")) $$render(consequent_50, 1);
+                      else if (get(dest), untrack(() => get(dest).status === "QUEUED")) $$render(consequent_51, 2);
+                      else if (get(dest), untrack(() => get(dest).status === "FAILED")) $$render(consequent_52, 3);
+                    });
+                  }
+                  var node_38 = sibling(node_37, 2);
+                  {
+                    var consequent_53 = ($$anchor6) => {
+                      var time_1 = root_73();
+                      var text_33 = child(time_1, true);
+                      reset(time_1);
+                      template_effect(($0) => set_text(text_33, $0), [
+                        () => (deep_read_state(timeAgo), get(dest), untrack(() => timeAgo(get(dest).completed_at)))
+                      ]);
+                      append($$anchor6, time_1);
+                    };
+                    if_block(node_38, ($$render) => {
+                      if (get(dest), untrack(() => get(dest).completed_at)) $$render(consequent_53);
+                    });
+                  }
+                  reset(div_23);
+                  template_effect(() => {
+                    set_class(
+                      div_23,
+                      1,
+                      `px-4 py-2 flex items-center gap-3 text-sm ${(deep_read_state(get(i)), deep_read_state(get(release)), untrack(() => get(i) < get(release).destinations.length - 1 ? "border-b border-gray-50" : "")) ?? ""} border-t border-gray-100`,
+                      "svelte-4kxpm1"
                     );
-                    reset(div_17);
-                    append($$anchor5, div_17);
+                    set_class(
+                      span_28,
+                      1,
+                      `inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${(deep_read_state(get(destBadge)), untrack(() => get(destBadge).bg)) ?? ""}`,
+                      "svelte-4kxpm1"
+                    );
+                    set_text(text_30, `${(get(dest), untrack(() => get(dest).environment)) ?? ""} `);
+                    set_class(
+                      span_29,
+                      1,
+                      `w-1.5 h-1.5 rounded-full ${(deep_read_state(get(destBadge)), untrack(() => get(destBadge).dot)) ?? ""}`,
+                      "svelte-4kxpm1"
+                    );
+                    set_text(text_31, (get(dest), untrack(() => get(dest).name)));
+                  });
+                  append($$anchor5, div_23);
+                }
+              );
+              reset(details);
+              reset(div_11);
+              template_effect(
+                ($0, $1) => {
+                  set_attribute(div_11, "data-envs", (deep_read_state(get(release)), untrack(() => get(release).dest_envs)));
+                  set_attribute(a_1, "href", `/orgs/${org() ?? ""}/projects/${(deep_read_state(get(release)), deep_read_state(project()), untrack(() => get(release).project_name || project())) ?? ""}/releases/${(deep_read_state(get(release)), untrack(() => get(release).slug)) ?? ""}`);
+                  set_attribute(a_1, "title", (deep_read_state(get(release)), untrack(() => get(release).title)));
+                  set_text(text_3, $0);
+                  set_text(text_6, $1);
+                  set_text(text_16, (deep_read_state(get(release)), untrack(() => get(release).slug)));
+                },
+                [
+                  () => (deep_read_state(get(release)), untrack(() => {
+                    var _a2;
+                    return ((_a2 = get(release).title) == null ? void 0 : _a2.length) > 80 ? get(release).title.slice(0, 80) + "…" : get(release).title;
+                  })),
+                  () => (deep_read_state(timeAgo), deep_read_state(get(release)), untrack(() => timeAgo(get(release).created_at)))
+                ]
+              );
+              event("toggle", details, scheduleComputeLaneBars);
+              append($$anchor4, div_11);
+            };
+            var consequent_56 = ($$anchor4) => {
+              var details_1 = root_74();
+              var summary_2 = child(details_1);
+              var text_34 = sibling(child(summary_2));
+              var span_35 = sibling(text_34, 3);
+              var text_35 = child(span_35);
+              reset(span_35);
+              var span_36 = sibling(span_35, 2);
+              var text_36 = child(span_36);
+              reset(span_36);
+              reset(summary_2);
+              var div_24 = sibling(summary_2, 2);
+              each(div_24, 5, () => (get(item), untrack(() => get(item).releases || [])), (release) => release.slug, ($$anchor5, release) => {
+                var div_25 = root_75();
+                var div_26 = child(div_25);
+                var div_27 = child(div_26);
+                var a_4 = sibling(child(div_27), 2);
+                var text_37 = child(a_4, true);
+                reset(a_4);
+                reset(div_27);
+                var div_28 = sibling(div_27, 2);
+                var node_39 = child(div_28);
+                {
+                  var consequent_55 = ($$anchor6) => {
+                    var span_37 = root_76();
+                    var text_38 = child(span_37, true);
+                    reset(span_37);
+                    template_effect(($0) => set_text(text_38, $0), [
+                      () => (get(release), untrack(() => get(release).commit_sha.slice(0, 7)))
+                    ]);
+                    append($$anchor6, span_37);
                   };
-                  if_block(node_26, ($$render) => {
-                    if (deep_read_state(get(release)), untrack(() => get(release).has_pipeline)) $$render(consequent_44);
+                  if_block(node_39, ($$render) => {
+                    if (get(release), untrack(() => get(release).commit_sha)) $$render(consequent_55);
                   });
                 }
-                var node_35 = sibling(node_26, 2);
-                each(
-                  node_35,
-                  3,
-                  () => (deep_read_state(get(release)), untrack(() => get(release).destinations)),
-                  (dest) => dest.name,
-                  ($$anchor5, dest, i) => {
-                    const destBadge = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(envBadgeClasses), get(dest), untrack(() => envBadgeClasses(get(dest).environment || ""))));
-                    var div_23 = root_63();
-                    var node_36 = child(div_23);
-                    {
-                      var consequent_45 = ($$anchor6) => {
-                        var svg_13 = root_64();
-                        append($$anchor6, svg_13);
-                      };
-                      var consequent_46 = ($$anchor6) => {
-                        var span_27 = root_65();
-                        append($$anchor6, span_27);
-                      };
-                      var consequent_47 = ($$anchor6) => {
-                        var svg_14 = root_66();
-                        append($$anchor6, svg_14);
-                      };
-                      var consequent_48 = ($$anchor6) => {
-                        var svg_15 = root_67();
-                        append($$anchor6, svg_15);
-                      };
-                      var alternate_7 = ($$anchor6) => {
-                        var svg_16 = root_68();
-                        append($$anchor6, svg_16);
-                      };
-                      if_block(node_36, ($$render) => {
-                        if (get(dest), untrack(() => get(dest).status === "SUCCEEDED")) $$render(consequent_45);
-                        else if (get(dest), untrack(() => get(dest).status === "RUNNING" || get(dest).status === "ASSIGNED")) $$render(consequent_46, 1);
-                        else if (get(dest), untrack(() => get(dest).status === "QUEUED")) $$render(consequent_47, 2);
-                        else if (get(dest), untrack(() => get(dest).status === "FAILED")) $$render(consequent_48, 3);
-                        else $$render(alternate_7, -1);
-                      });
-                    }
-                    var span_28 = sibling(node_36, 2);
-                    var text_30 = child(span_28);
-                    var span_29 = sibling(text_30);
-                    reset(span_28);
-                    var span_30 = sibling(span_28, 2);
-                    var text_31 = child(span_30, true);
-                    reset(span_30);
-                    var node_37 = sibling(span_30, 2);
-                    {
-                      var consequent_49 = ($$anchor6) => {
-                        var span_31 = root_69();
-                        append($$anchor6, span_31);
-                      };
-                      var consequent_50 = ($$anchor6) => {
-                        var span_32 = root_70();
-                        append($$anchor6, span_32);
-                      };
-                      var consequent_51 = ($$anchor6) => {
-                        var span_33 = root_71();
-                        var text_32 = child(span_33);
-                        reset(span_33);
-                        template_effect(() => set_text(text_32, `Queued${(get(dest), untrack(() => get(dest).queue_position ? ` #${get(dest).queue_position}` : "")) ?? ""}`));
-                        append($$anchor6, span_33);
-                      };
-                      var consequent_52 = ($$anchor6) => {
-                        var span_34 = root_72();
-                        append($$anchor6, span_34);
-                      };
-                      if_block(node_37, ($$render) => {
-                        if (get(dest), untrack(() => get(dest).status === "SUCCEEDED")) $$render(consequent_49);
-                        else if (get(dest), untrack(() => get(dest).status === "RUNNING")) $$render(consequent_50, 1);
-                        else if (get(dest), untrack(() => get(dest).status === "QUEUED")) $$render(consequent_51, 2);
-                        else if (get(dest), untrack(() => get(dest).status === "FAILED")) $$render(consequent_52, 3);
-                      });
-                    }
-                    var node_38 = sibling(node_37, 2);
-                    {
-                      var consequent_53 = ($$anchor6) => {
-                        var time_1 = root_73();
-                        var text_33 = child(time_1, true);
-                        reset(time_1);
-                        template_effect(($0) => set_text(text_33, $0), [
-                          () => (deep_read_state(timeAgo), get(dest), untrack(() => timeAgo(get(dest).completed_at)))
-                        ]);
-                        append($$anchor6, time_1);
-                      };
-                      if_block(node_38, ($$render) => {
-                        if (get(dest), untrack(() => get(dest).completed_at)) $$render(consequent_53);
-                      });
-                    }
-                    reset(div_23);
-                    template_effect(() => {
-                      set_class(
-                        div_23,
-                        1,
-                        `px-4 py-2 flex items-center gap-3 text-sm ${(deep_read_state(get(i)), deep_read_state(get(release)), untrack(() => get(i) < get(release).destinations.length - 1 ? "border-b border-gray-50" : "")) ?? ""} border-t border-gray-100`,
-                        "svelte-4kxpm1"
-                      );
-                      set_class(
-                        span_28,
-                        1,
-                        `inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${(deep_read_state(get(destBadge)), untrack(() => get(destBadge).bg)) ?? ""}`,
-                        "svelte-4kxpm1"
-                      );
-                      set_text(text_30, `${(get(dest), untrack(() => get(dest).environment)) ?? ""} `);
-                      set_class(
-                        span_29,
-                        1,
-                        `w-1.5 h-1.5 rounded-full ${(deep_read_state(get(destBadge)), untrack(() => get(destBadge).dot)) ?? ""}`,
-                        "svelte-4kxpm1"
-                      );
-                      set_text(text_31, (get(dest), untrack(() => get(dest).name)));
-                    });
-                    append($$anchor5, div_23);
-                  }
-                );
-                reset(details);
-                reset(div_11);
+                var time_2 = sibling(node_39, 2);
+                var text_39 = child(time_2, true);
+                reset(time_2);
+                reset(div_28);
+                reset(div_26);
+                reset(div_25);
                 template_effect(
                   ($0, $1) => {
-                    set_attribute(div_11, "data-envs", (deep_read_state(get(release)), untrack(() => get(release).dest_envs)));
-                    set_attribute(a_1, "href", `/orgs/${org() ?? ""}/projects/${(deep_read_state(get(release)), deep_read_state(project()), untrack(() => get(release).project_name || project())) ?? ""}/releases/${(deep_read_state(get(release)), untrack(() => get(release).slug)) ?? ""}`);
-                    set_attribute(a_1, "title", (deep_read_state(get(release)), untrack(() => get(release).title)));
-                    set_text(text_3, $0);
-                    set_text(text_6, $1);
-                    set_text(text_16, (deep_read_state(get(release)), untrack(() => get(release).slug)));
+                    set_attribute(a_4, "href", `/orgs/${org() ?? ""}/projects/${(get(release), deep_read_state(project()), untrack(() => get(release).project_name || project())) ?? ""}/releases/${(get(release), untrack(() => get(release).slug)) ?? ""}`);
+                    set_attribute(a_4, "title", (get(release), untrack(() => get(release).title)));
+                    set_text(text_37, $0);
+                    set_text(text_39, $1);
                   },
                   [
-                    () => (deep_read_state(get(release)), untrack(() => {
+                    () => (get(release), untrack(() => {
                       var _a2;
                       return ((_a2 = get(release).title) == null ? void 0 : _a2.length) > 80 ? get(release).title.slice(0, 80) + "…" : get(release).title;
                     })),
-                    () => (deep_read_state(timeAgo), deep_read_state(get(release)), untrack(() => timeAgo(get(release).created_at)))
+                    () => (deep_read_state(timeAgo), get(release), untrack(() => timeAgo(get(release).created_at)))
                   ]
                 );
-                event("toggle", details, scheduleComputeLaneBars);
-                append($$anchor4, div_11);
-              };
-              var consequent_56 = ($$anchor4) => {
-                var details_1 = root_74();
-                var summary_2 = child(details_1);
-                var text_34 = sibling(child(summary_2));
-                var span_35 = sibling(text_34, 3);
-                var text_35 = child(span_35);
-                reset(span_35);
-                var span_36 = sibling(span_35, 2);
-                var text_36 = child(span_36);
-                reset(span_36);
-                reset(summary_2);
-                var div_24 = sibling(summary_2, 2);
-                each(div_24, 5, () => (get(item), untrack(() => get(item).releases || [])), (release) => release.slug, ($$anchor5, release) => {
-                  var div_25 = root_75();
-                  var div_26 = child(div_25);
-                  var div_27 = child(div_26);
-                  var a_4 = sibling(child(div_27), 2);
-                  var text_37 = child(a_4, true);
-                  reset(a_4);
-                  reset(div_27);
-                  var div_28 = sibling(div_27, 2);
-                  var node_39 = child(div_28);
-                  {
-                    var consequent_55 = ($$anchor6) => {
-                      var span_37 = root_76();
-                      var text_38 = child(span_37, true);
-                      reset(span_37);
-                      template_effect(($0) => set_text(text_38, $0), [
-                        () => (get(release), untrack(() => get(release).commit_sha.slice(0, 7)))
-                      ]);
-                      append($$anchor6, span_37);
-                    };
-                    if_block(node_39, ($$render) => {
-                      if (get(release), untrack(() => get(release).commit_sha)) $$render(consequent_55);
-                    });
-                  }
-                  var time_2 = sibling(node_39, 2);
-                  var text_39 = child(time_2, true);
-                  reset(time_2);
-                  reset(div_28);
-                  reset(div_26);
-                  reset(div_25);
-                  template_effect(
-                    ($0, $1) => {
-                      set_attribute(a_4, "href", `/orgs/${org() ?? ""}/projects/${(get(release), deep_read_state(project()), untrack(() => get(release).project_name || project())) ?? ""}/releases/${(get(release), untrack(() => get(release).slug)) ?? ""}`);
-                      set_attribute(a_4, "title", (get(release), untrack(() => get(release).title)));
-                      set_text(text_37, $0);
-                      set_text(text_39, $1);
-                    },
-                    [
-                      () => (get(release), untrack(() => {
-                        var _a2;
-                        return ((_a2 = get(release).title) == null ? void 0 : _a2.length) > 80 ? get(release).title.slice(0, 80) + "…" : get(release).title;
-                      })),
-                      () => (deep_read_state(timeAgo), get(release), untrack(() => timeAgo(get(release).created_at)))
-                    ]
-                  );
-                  append($$anchor5, div_25);
-                });
-                reset(div_24);
-                reset(details_1);
-                template_effect(() => {
-                  set_text(text_34, ` ${(get(item), untrack(() => get(item).count)) ?? ""} hidden commit${(get(item), untrack(() => get(item).count !== 1 ? "s" : "")) ?? ""} `);
-                  set_text(text_35, `Show commit${(get(item), untrack(() => get(item).count !== 1 ? "s" : "")) ?? ""}`);
-                  set_text(text_36, `Hide commit${(get(item), untrack(() => get(item).count !== 1 ? "s" : "")) ?? ""}`);
-                });
-                event("toggle", details_1, scheduleComputeLaneBars);
-                append($$anchor4, details_1);
-              };
-              if_block(node_6, ($$render) => {
-                if (get(item), untrack(() => get(item).kind === "release" && get(item).release)) $$render(consequent_54);
-                else if (get(item), untrack(() => get(item).kind === "hidden")) $$render(consequent_56, 1);
+                append($$anchor5, div_25);
               });
-            }
-            append($$anchor3, fragment_2);
+              reset(div_24);
+              reset(details_1);
+              template_effect(() => {
+                set_text(text_34, ` ${(get(item), untrack(() => get(item).count)) ?? ""} hidden commit${(get(item), untrack(() => get(item).count !== 1 ? "s" : "")) ?? ""} `);
+                set_text(text_35, `Show commit${(get(item), untrack(() => get(item).count !== 1 ? "s" : "")) ?? ""}`);
+                set_text(text_36, `Hide commit${(get(item), untrack(() => get(item).count !== 1 ? "s" : "")) ?? ""}`);
+              });
+              event("toggle", details_1, scheduleComputeLaneBars);
+              append($$anchor4, details_1);
+            };
+            if_block(node_6, ($$render) => {
+              if (get(item), untrack(() => get(item).kind === "release" && get(item).release)) $$render(consequent_54);
+              else if (get(item), untrack(() => get(item).kind === "hidden")) $$render(consequent_56, 1);
+            });
           }
-        );
+          append($$anchor3, fragment_2);
+        });
         reset(div_10);
         bind_this(div_10, ($$value) => set(timelineEl, $$value), () => get(timelineEl));
         var div_29 = sibling(div_10, 2);
-        each(div_29, 5, () => get(lanes), (lane) => lane.name, ($$anchor3, lane) => {
+        each(div_29, 5, () => get(displayedLanes), (lane) => lane.name, ($$anchor3, lane) => {
+          const bar = /* @__PURE__ */ derived_safe_equal(() => (get(laneBarData), get(lane), untrack(() => get(laneBarData)[get(lane).name])));
+          const computed_const_1 = /* @__PURE__ */ derived_safe_equal(() => {
+            const [barColor] = (deep_read_state(get(bar)), deep_read_state(envColors), get(lane), untrack(() => {
+              var _a2;
+              return ((_a2 = get(bar)) == null ? void 0 : _a2.color) || envColors(get(lane).name);
+            }));
+            return { barColor };
+          });
           var div_30 = root_77();
           set_style(div_30, "width: 20px; margin-right: 4px; display: flex; justify-content: center;");
           var span_38 = child(div_30);
@@ -6781,14 +6855,14 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
           reset(span_38);
           reset(div_30);
           template_effect(() => {
-            set_style(span_38, `writing-mode: vertical-rl; transform: rotate(180deg); font-size: 10px; font-weight: 500; color: ${(get(lane), untrack(() => get(lane).color)) ?? ""}; white-space: nowrap;`);
+            set_style(span_38, `color: ${get(computed_const_1).barColor ?? ""};`);
             set_text(text_40, (get(lane), untrack(() => get(lane).name)));
           });
           append($$anchor3, div_30);
         });
         reset(div_29);
         reset(div_4);
-        template_effect(() => set_style(div_4, `grid-template-columns: ${get(gutterWidth) ?? ""}px 1fr; grid-template-rows: 1fr auto;`));
+        template_effect(() => set_style(div_4, `grid-template-columns: ${get(gutterWidth) ?? ""}px minmax(0, 1fr); grid-template-rows: 1fr auto;`));
         append($$anchor2, div_4);
       };
       if_block(node_1, ($$render) => {

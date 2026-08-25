@@ -29,12 +29,17 @@
   // DOM refs for swim lane positioning
   let timelineEl = null;
   let laneBarData = {};
+  let laneBarRaf = null;
+  let laneBarScheduled = false;
+  let laneBarRetryCount = 0;
 
   const BAR_WIDTH = 20;
   const BAR_GAP = 4;
   const DOT_SIZE = 12;
+  const MAX_LANE_BAR_RETRIES = 8;
   const IN_FLIGHT = new Set(["QUEUED", "RUNNING", "ASSIGNED"]);
   const DEPLOYED = new Set(["SUCCEEDED"]);
+  const STOPPED = new Set(["FAILED", "TIMED_OUT", "CANCELLED"]);
 
   // ── Approval action ──────────────────────────────────────────────
 
@@ -372,28 +377,49 @@
     });
   }
 
-  // Debounce lane bar computation to one per frame
-  let laneBarRaf = null;
+  // Debounce lane bar computation to one per frame. Waiting for Svelte's
+  // flush before rAF keeps measurements out of first-paint zero-size races.
   function scheduleComputeLaneBars() {
-    if (laneBarRaf) return;
-    laneBarRaf = requestAnimationFrame(() => {
-      laneBarRaf = null;
-      tick().then(computeLaneBars);
+    if (laneBarScheduled) return;
+    laneBarScheduled = true;
+    tick().then(() => {
+      laneBarRaf = requestAnimationFrame(() => {
+        laneBarRaf = null;
+        laneBarScheduled = false;
+        computeLaneBars();
+      });
     });
   }
 
-  function computeLaneBars() {
-    if (!timelineEl) return;
-    const timelineRect = timelineEl.getBoundingClientRect();
-    if (timelineRect.height === 0) return;
-    const timelineH = timelineRect.height;
+  function retryComputeLaneBars() {
+    if (laneBarRetryCount >= MAX_LANE_BAR_RETRIES) return;
+    laneBarRetryCount += 1;
+    scheduleComputeLaneBars();
+  }
 
+  function computeLaneBars() {
+    if (!displayedLanes.length) {
+      laneBarData = {};
+      laneBarRetryCount = 0;
+      return;
+    }
+    if (!timelineEl) {
+      retryComputeLaneBars();
+      return;
+    }
+
+    const timelineRect = timelineEl.getBoundingClientRect();
     const cards = Array.from(timelineEl.querySelectorAll("[data-release]"));
+    if (timelineRect.height === 0 || cards.length === 0) {
+      retryComputeLaneBars();
+      return;
+    }
+    const timelineH = timelineRect.height;
     const newBarData = {};
 
-    for (const lane of lanes) {
+    for (const lane of displayedLanes) {
       const env = lane.name;
-      let deployedCard = null, flightCard = null;
+      let deployedCard = null, flightCard = null, stoppedCard = null;
       let deployedIdx = -1, flightIdx = -1;
 
       for (let i = 0; i < cards.length; i++) {
@@ -402,17 +428,21 @@
           if (entry.env !== env) continue;
           if (DEPLOYED.has(entry.status) && !deployedCard) { deployedCard = cards[i]; deployedIdx = i; }
           if (IN_FLIGHT.has(entry.status) && !flightCard) { flightCard = cards[i]; flightIdx = i; }
+          if (STOPPED.has(entry.status) && !stoppedCard) stoppedCard = cards[i];
         }
       }
 
       const deployedTop = deployedCard ? deployedCard.getBoundingClientRect().top - timelineRect.top : null;
       const flightTop = flightCard ? flightCard.getBoundingClientRect().top - timelineRect.top : null;
+      const stoppedTop = stoppedCard ? stoppedCard.getBoundingClientRect().top - timelineRect.top : null;
 
       let solidH = 0;
       if (deployedTop !== null && flightTop !== null) {
         solidH = timelineH - Math.max(deployedTop, flightTop);
       } else if (deployedTop !== null) {
         solidH = timelineH - deployedTop;
+      } else if (stoppedTop !== null) {
+        solidH = timelineH - stoppedTop;
       }
 
       const hasHatch = !!flightCard;
@@ -439,6 +469,7 @@
       newBarData[env] = { solidH, hasHatch, hatchTop, hatchH, isForward, dots, color: envColors(env) };
     }
 
+    laneBarRetryCount = 0;
     laneBarData = newBarData;
   }
 
@@ -470,6 +501,7 @@
     if (timerInterval) clearInterval(timerInterval);
     if (refetchTimer) clearTimeout(refetchTimer);
     if (laneBarRaf) cancelAnimationFrame(laneBarRaf);
+    laneBarScheduled = false;
   });
 
   // Connect SSE after first data load
@@ -478,6 +510,7 @@
   }
 
   // Recompute lane bars on window resize (debounced via rAF)
+  $: if (!initialLoading && renderedTimeline.length && laneCount > 0) scheduleComputeLaneBars();
   function handleResize() { scheduleComputeLaneBars(); }
 
   // ── Helpers for template ─────────────────────────────────────────
@@ -529,8 +562,23 @@
     return stage.stage_type === "plan" && effectiveStatus(stage) === "AWAITING_APPROVAL";
   }
 
-  $: laneCount = lanes.length;
-  $: gutterWidth = laneCount * (BAR_WIDTH + BAR_GAP) + 8;
+  function laneNamesInTimeline(items) {
+    const names = new Set();
+    for (const item of items) {
+      if (item.kind !== "release" || !item.release) continue;
+      for (const entry of parseEnvs(item.release.dest_envs)) {
+        if (entry.status !== "PENDING") names.add(entry.env);
+      }
+    }
+    return names;
+  }
+
+  $: renderedTimeline = limit && Number(limit) > 0 ? timeline.slice(0, Number(limit)) : timeline;
+  $: renderedLaneNames = laneNamesInTimeline(renderedTimeline);
+  $: displayedLanes = lanes.filter(lane => renderedLaneNames.has(lane.name));
+
+  $: laneCount = displayedLanes.length;
+  $: gutterWidth = laneCount > 0 ? laneCount * (BAR_WIDTH + BAR_GAP) + 8 : 0;
 </script>
 
 <svelte:window on:resize={handleResize} />
@@ -539,7 +587,7 @@
   <div class="max-w-5xl mx-auto mb-4 px-4 py-3 border border-red-200 bg-red-50 rounded-lg flex items-center gap-2 text-sm text-red-700">
     <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
     {approvalError}
-    <button class="ml-auto text-red-400 hover:text-red-600" on:click={() => approvalError = null}>
+    <button class="ml-auto text-red-400 hover:text-red-600" aria-label="Dismiss approval error" on:click={() => approvalError = null}>
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
     </button>
   </div>
@@ -561,13 +609,13 @@
     <p class="text-sm text-gray-400 mt-2">Create a release with <code class="bg-gray-100 px-1 rounded">forest release create</code></p>
   </div>
 {:else}
-  <div class="max-w-5xl mx-auto grid" style="grid-template-columns: {gutterWidth}px 1fr; grid-template-rows: 1fr auto;">
+  <div class="max-w-5xl mx-auto grid" style="grid-template-columns: {gutterWidth}px minmax(0, 1fr); grid-template-rows: 1fr auto;">
     <!-- Swim lane gutter -->
-    <div class="flex" style="grid-row: 1;">
-      {#each lanes as lane (lane.name)}
+    <div class="swim-lane-gutter flex" style="grid-row: 1; grid-column: 1;">
+      {#each displayedLanes as lane (lane.name)}
         {@const bar = laneBarData[lane.name]}
-        {@const [barColor, lightColor] = bar?.color || [lane.color, "#e5e7eb"]}
-        <div style="width: {BAR_WIDTH}px; margin-right: {BAR_GAP}px; position: relative;">
+        {@const [barColor, lightColor] = bar?.color || envColors(lane.name)}
+        <div class="swim-lane" style="width: {BAR_WIDTH}px; margin-right: {BAR_GAP}px;">
           {#if bar}
             {#if bar.hasHatch}
               <div class="lane-bar lane-pulse" style="position: absolute; left: 0; width: 100%; top: {bar.hatchTop}px; height: {bar.hatchH + (bar.solidH > 0 ? BAR_WIDTH / 2 : 0)}px; background-image: {bar.isForward ? hatchPattern(barColor, lightColor) : hatchPattern('#f59e0b', '#fef3c7')}; background-size: 8px 8px; background-repeat: repeat; border-radius: 9999px; z-index: 0;"></div>
@@ -586,8 +634,8 @@
     <!-- Timeline cards. When `limit` is set (Overview summary use case),
          render only the first N items; the rest are accessible via the
          full Releases tab. -->
-    <div bind:this={timelineEl} class="space-y-3 min-w-0" style="grid-row: 1;">
-      {#each (limit && Number(limit) > 0 ? timeline.slice(0, Number(limit)) : timeline) as item (itemKey(item))}
+    <div bind:this={timelineEl} class="space-y-3 min-w-0" style="grid-row: 1; grid-column: 2;">
+      {#each renderedTimeline as item (itemKey(item))}
         {#if item.kind === "release" && item.release}
           {@const release = item.release}
           <div data-release data-envs={release.dest_envs} class="border border-gray-200 rounded-lg overflow-hidden">
@@ -916,17 +964,43 @@
     </div>
 
     <!-- Lane labels (row 2, column 1) -->
-    <div class="flex pt-1" style="grid-row: 2; grid-column: 1; height: 56px;">
-      {#each lanes as lane (lane.name)}
+    <div class="swim-lane-labels flex pt-1" style="grid-row: 2; grid-column: 1;">
+      {#each displayedLanes as lane (lane.name)}
+        {@const bar = laneBarData[lane.name]}
+        {@const [barColor] = bar?.color || envColors(lane.name)}
         <div style="width: {BAR_WIDTH}px; margin-right: {BAR_GAP}px; display: flex; justify-content: center;">
-          <span style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: 10px; font-weight: 500; color: {lane.color}; white-space: nowrap;">{lane.name}</span>
+          <span class="lane-label" style="color: {barColor};">{lane.name}</span>
         </div>
       {/each}
     </div>
+
   </div>
 {/if}
 
 <style>
+  :global(.swim-lane-gutter) {
+    align-self: stretch;
+  }
+
+  :global(.swim-lane) {
+    position: relative;
+    min-height: 100%;
+  }
+
+  :global(.swim-lane-labels) {
+    min-height: 56px;
+  }
+
+  :global(.lane-label) {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
   @keyframes lane-pulse {
     0%, 100% { opacity: 0.6; }
     50% { opacity: 1; }
