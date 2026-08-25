@@ -2026,6 +2026,8 @@ struct TimelineData {
     lanes: Vec<minijinja::Value>,
 }
 
+const RELEASE_TIMELINE_CONTEXT_LIMIT: usize = 20;
+
 /// Pipeline info indexed by project name, for overlaying onto releases.
 type PipelinesByProject = std::collections::HashMap<String, Vec<forage_core::platform::ReleasePipeline>>;
 
@@ -2372,14 +2374,15 @@ fn build_timeline(
             .collect()
     };
 
-    // Truncate: keep everything up to the last deployed release, plus 3
-    // older items for context.
+    // Truncate: keep everything up to the last deployed release, plus enough
+    // older items for the full Releases page. The Overview component still
+    // renders only its own `limit="3"` subset.
     let last_deployed_idx = raw_releases
         .iter()
         .rposition(|r| r.has_dests)
         .map(|i| i + 1)
         .unwrap_or(0);
-    let keep = last_deployed_idx + 3;
+    let keep = last_deployed_idx + RELEASE_TIMELINE_CONTEXT_LIMIT;
     if keep < raw_releases.len() {
         raw_releases.truncate(keep);
     }
@@ -2814,13 +2817,15 @@ fn build_timeline_json(
             .collect()
     };
 
-    // Truncate: keep up to last deployed + 3.
+    // Truncate: keep everything up to the last deployed release, plus enough
+    // older items for the full Releases page. The Overview component still
+    // renders only its own `limit="3"` subset.
     let last_deployed_idx = raw_releases
         .iter()
         .rposition(|r| r.has_dests)
         .map(|i| i + 1)
         .unwrap_or(0);
-    let keep = last_deployed_idx + 3;
+    let keep = last_deployed_idx + RELEASE_TIMELINE_CONTEXT_LIMIT;
     if keep < raw_releases.len() {
         raw_releases.truncate(keep);
     }
