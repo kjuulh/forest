@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.18](https://github.com/understory-io/forest/compare/v0.2.17...v0.2.18) (2026-08-25)
+
+
+### Features
+
+* **oauth:** expose grant types in the UI, and let them be changed ([#165](https://github.com/understory-io/forest/issues/165)) ([91b4082](https://github.com/understory-io/forest/commit/91b4082edd24d380e3572fac693e0c3fa05330cd))
+
+
+### Bug Fixes
+
+* **release:** finalize the intent when a release is reported failed ([#164](https://github.com/understory-io/forest/issues/164)) ([b03f0b1](https://github.com/understory-io/forest/commit/b03f0b186c23e34852b7905dab4f43c6299bb475))
+
 ## [0.2.17](https://github.com/understory-io/forest/compare/v0.2.16...v0.2.17) (2026-08-25)
 
 
