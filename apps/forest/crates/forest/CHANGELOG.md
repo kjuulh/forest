@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.17](https://github.com/understory-io/forest/compare/v0.2.16...v0.2.17) (2026-08-25)
+
+
+### Bug Fixes
+
+* **destination:** mark reconcile_url sensitive; point db:prepare at the cache CI reads ([#154](https://github.com/understory-io/forest/issues/154)) ([afe424e](https://github.com/understory-io/forest/commit/afe424e075c4a47fd268bb8fbe6a5b06339e34a7))
+* **oauth:** enforce grant_types on the authorization-code flow too ([#161](https://github.com/understory-io/forest/issues/161)) ([4836bd0](https://github.com/understory-io/forest/commit/4836bd0979dda5c7528ac98858925af5991c1b47))
+* **release:** record a failed external deploy as a release, not a notification ([#163](https://github.com/understory-io/forest/issues/163)) ([40fe966](https://github.com/understory-io/forest/commit/40fe96665e33f4ef025d93b289bd76e32c380725))
+
 ## [0.2.16](https://github.com/understory-io/forest/compare/v0.2.15...v0.2.16) (2026-08-24)
 
 
