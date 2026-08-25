@@ -634,3 +634,112 @@ async fn merging_an_empty_overlay_changes_no_metadata() {
         "the value must be withheld, not deleted or leaked"
     );
 }
+
+/// The blocker behind DATA-575's tail: `destinations` predates the event store,
+/// so rows created before it have no stream. `load_or_default` reported
+/// `NonExistent` and every write bailed with "destination does not exist" — the
+/// destination was plainly listed, and nothing could mark its credentials
+/// sensitive, by CLI or UI.
+///
+/// Simulated the way prod actually looks: create normally, then delete the
+/// stream out from under the row.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_destination_with_no_event_stream_can_still_be_updated() {
+    let fixture = fixture().await.expect("fixture");
+    let token = register_user(&fixture).await;
+    let org = create_org(&fixture, &token).await;
+    let env = create_env(&fixture, &token, &org).await;
+    let dest = format!("legacy-{}", uuid::Uuid::now_v7());
+
+    fixture
+        .destinations()
+        .create_destination(authed_request(
+            &token,
+            CreateDestinationRequest {
+                organisation: org.clone(),
+                name: dest.clone(),
+                environment: env,
+                metadata: [
+                    ("tf_workspace".to_string(), "platform-dev".to_string()),
+                    ("aws_secret_access_key".to_string(), "live-secret".to_string()),
+                ]
+                .into(),
+                r#type: Some(terraform_type()),
+                sensitive_keys: vec![],
+            },
+        ))
+        .await
+        .expect("create destination");
+
+    // Strip the stream, leaving only the projection row: a pre-event-store
+    // destination.
+    // Category-prefixed, the way EventStore builds it: `destination-{org}/{name}`.
+    let stream_id = format!("destination-{org}/{dest}");
+    sqlx::query("DELETE FROM es_events WHERE stream_id = $1")
+        .bind(&stream_id)
+        .execute(&fixture.db)
+        .await
+        .expect("delete events");
+    sqlx::query("DELETE FROM es_streams WHERE stream_id = $1")
+        .bind(&stream_id)
+        .execute(&fixture.db)
+        .await
+        .expect("delete stream");
+
+    // The row is still there and still readable.
+    let found = fetch_destination(&fixture, &token, &org, &dest).await;
+    assert_eq!(
+        found.metadata.get("tf_workspace").map(String::as_str),
+        Some("platform-dev")
+    );
+
+    // This used to fail with "destination does not exist".
+    fixture
+        .destinations()
+        .update_destination(authed_request(
+            &token,
+            UpdateDestinationRequest {
+                organisation: org.clone(),
+                name: dest.clone(),
+                metadata: Default::default(),
+                sensitive_keys: vec!["aws_secret_access_key".into()],
+                set_sensitive_keys: true,
+                merge_metadata: true,
+            },
+        ))
+        .await
+        .expect("a destination with no stream must still be updatable");
+
+    let found = fetch_destination(&fixture, &token, &org, &dest).await;
+
+    // The credential is withheld now, and nothing else was disturbed.
+    assert_eq!(found.sensitive_keys, vec!["aws_secret_access_key".to_string()]);
+    assert_eq!(
+        found.metadata.get("tf_workspace").map(String::as_str),
+        Some("platform-dev")
+    );
+    assert!(
+        !format!("{found:?}").contains("live-secret"),
+        "the value must be withheld, not leaked"
+    );
+
+    // The seeded stream reused the row's id rather than minting a new one:
+    // releases reference destination_id, and a fresh one would orphan them.
+    let row_id: uuid::Uuid =
+        sqlx::query_scalar("SELECT id FROM destinations WHERE organisation = $1 AND name = $2")
+            .bind(&org)
+            .bind(&dest)
+            .fetch_one(&fixture.db)
+            .await
+            .expect("projection row");
+    let event_ids: Vec<String> =
+        sqlx::query_scalar("SELECT data::text FROM es_events WHERE stream_id = $1 ORDER BY stream_version")
+            .bind(&stream_id)
+            .fetch_all(&fixture.db)
+            .await
+            .expect("seeded events");
+    assert!(
+        event_ids.first().is_some_and(|d| d.contains(&row_id.to_string())),
+        "the rebuilt stream must carry the projection's id, got: {event_ids:?}"
+    );
+}

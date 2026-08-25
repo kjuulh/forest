@@ -125,6 +125,84 @@ impl DestinationAggregateService {
         Ok(destination_id)
     }
 
+    /// Gives a pre-aggregate destination its stream back, so writes stop bailing.
+    ///
+    /// The `destinations` table is older than the event store, so destinations
+    /// created before it have a row and no stream. `load_or_default` then reports
+    /// `NonExistent` and every write fails with "destination does not exist" —
+    /// the destination is plainly there, and nothing can touch it.
+    ///
+    /// Rather than a one-off backfill, the stream is seeded the first time such a
+    /// destination is written to. The row is the source of truth for what the
+    /// events should say, and it is left untouched here because it is already
+    /// correct.
+    ///
+    /// A missing row is not this function's error to raise: the caller's own
+    /// write bails with the right message. This only fills a gap it can see.
+    async fn ensure_stream(&self, organisation: &str, name: &str) -> anyhow::Result<()> {
+        let key = destination::stream_key(organisation, name);
+        let mut root = self
+            .event_store
+            .load_or_default::<DestinationAggregate>(&key)
+            .await?;
+
+        if !matches!(
+            root.state.status,
+            destination::DestinationStatus::NonExistent
+        ) {
+            return Ok(());
+        }
+
+        let rec = sqlx::query!(
+            "
+                SELECT id, environment, environment_id, metadata, sensitive_keys,
+                       type_organisation, type_name, type_version
+                FROM destinations
+                WHERE organisation = $1 AND name = $2
+                LIMIT 1;
+            ",
+            organisation,
+            name
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("look up destination projection")?;
+
+        let Some(rec) = rec else { return Ok(()) };
+
+        DestinationAggregate::restore(
+            &mut root,
+            CreateDestinationParams {
+                organisation: organisation.to_string(),
+                name: name.to_string(),
+                environment: rec.environment,
+                environment_id: rec.environment_id,
+                metadata: serde_json::from_value(rec.metadata).context("metadata is invalid")?,
+                sensitive_keys: serde_json::from_value(rec.sensitive_keys)
+                    .context("sensitive_keys is invalid")?,
+                type_organisation: rec.type_organisation,
+                type_name: rec.type_name,
+                type_version: rec.type_version as u32,
+            },
+            rec.id,
+        )?;
+
+        // Events only: the projection already holds exactly this.
+        self.event_store
+            .save_with(&mut root, move |_events, _tx| {
+                Box::pin(async move { Ok(()) })
+            })
+            .await?;
+
+        tracing::info!(
+            organisation = %organisation,
+            destination = %name,
+            "seeded event stream for a destination that predates the event store"
+        );
+
+        Ok(())
+    }
+
     /// `merge` overlays `metadata` onto what is stored instead of replacing it,
     /// so a caller that names two keys does not delete the rest. The overlay is
     /// computed here rather than in the client because the client cannot see
@@ -136,6 +214,8 @@ impl DestinationAggregateService {
         metadata: HashMap<String, String>,
         merge: bool,
     ) -> anyhow::Result<()> {
+        self.ensure_stream(organisation, name).await?;
+
         let key = destination::stream_key(organisation, name);
         let mut root = self
             .event_store
@@ -186,6 +266,8 @@ impl DestinationAggregateService {
         name: &str,
         sensitive_keys: Vec<String>,
     ) -> anyhow::Result<()> {
+        self.ensure_stream(organisation, name).await?;
+
         let key = destination::stream_key(organisation, name);
         let mut root = self
             .event_store
@@ -226,6 +308,8 @@ impl DestinationAggregateService {
     }
 
     pub async fn delete_destination(&self, organisation: &str, name: &str) -> anyhow::Result<()> {
+        self.ensure_stream(organisation, name).await?;
+
         let key = destination::stream_key(organisation, name);
         let mut root = self
             .event_store

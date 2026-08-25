@@ -42,6 +42,8 @@ When adding a new aggregate:
   leaves the real cache stale, so the query compiles locally (live `DATABASE_URL`)
   and then fails the Docker build, which sets `SQLX_OFFLINE=true`.
 - To check the cache is current without rewriting it, from `crates/forest-server`:
-  `cargo sqlx prepare --check`
+  `cargo sqlx prepare --check -- --all-targets`. The `-- --all-targets` matters:
+  without it the prepare only walks the lib and bin and deletes the test
+  targets' cached queries, which breaks `SQLX_OFFLINE=true cargo test`.
 - After adding/changing migrations: `sqlx migrate run --source crates/forest-server/migrations`
 - Proto codegen: `buf generate`

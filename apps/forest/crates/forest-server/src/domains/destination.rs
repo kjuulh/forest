@@ -179,21 +179,40 @@ impl DestinationAggregate {
         }
 
         let destination_id = Uuid::now_v7();
-
-        root.record(DestinationEvent::Created {
-            destination_id,
-            organisation: params.organisation,
-            name: params.name,
-            environment: params.environment,
-            environment_id: params.environment_id,
-            metadata: params.metadata,
-            type_organisation: params.type_organisation,
-            type_name: params.type_name,
-            type_version: params.type_version,
-            sensitive_keys: normalise_keys(params.sensitive_keys),
-        });
+        record_created(root, params, destination_id);
 
         Ok(destination_id)
+    }
+
+    /// Rebuilds the stream for a destination that predates this aggregate.
+    ///
+    /// The `destinations` table is older than the event store, so rows created
+    /// before it exist with no stream at all. `load_or_default` then reports
+    /// `NonExistent` and every write bails with "destination does not exist" —
+    /// the destination is plainly there, and nothing can touch it.
+    ///
+    /// The recorded event is a late reconstruction of what the row already says,
+    /// so it must reuse the row's own id: releases reference `destination_id`,
+    /// and minting a fresh one would orphan them.
+    pub fn restore(
+        root: &mut AggregateRoot<Self>,
+        params: CreateDestinationParams,
+        destination_id: Uuid,
+    ) -> anyhow::Result<()> {
+        match root.state.status {
+            DestinationStatus::NonExistent => {}
+            DestinationStatus::Active | DestinationStatus::Deleted => {
+                bail!(
+                    "destination {}/{} already has a stream",
+                    params.organisation,
+                    params.name
+                );
+            }
+        }
+
+        record_created(root, params, destination_id);
+
+        Ok(())
     }
 
     pub fn update_metadata(
@@ -254,6 +273,27 @@ impl DestinationAggregate {
 
         Ok(())
     }
+}
+
+/// The one place a `Created` event is built, so a stream rebuilt by `restore`
+/// cannot drift from one written by `create`.
+fn record_created(
+    root: &mut AggregateRoot<DestinationAggregate>,
+    params: CreateDestinationParams,
+    destination_id: Uuid,
+) {
+    root.record(DestinationEvent::Created {
+        destination_id,
+        organisation: params.organisation,
+        name: params.name,
+        environment: params.environment,
+        environment_id: params.environment_id,
+        metadata: params.metadata,
+        type_organisation: params.type_organisation,
+        type_name: params.type_name,
+        type_version: params.type_version,
+        sensitive_keys: normalise_keys(params.sensitive_keys),
+    });
 }
 
 /// Sorted and de-duplicated, so the stored set has one canonical form and

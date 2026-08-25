@@ -120,7 +120,10 @@ depends = ["db:migrate"]
 # compiles fine locally (live DATABASE_URL) and fails the Docker build, which
 # sets SQLX_OFFLINE=true. See apps/forest/Dockerfile.
 dir = "./crates/forest-server"
-run = "cargo sqlx prepare"
+# `-- --all-targets` so the tests' queries stay in the cache. Without it the
+# prepare only walks the lib and bin, and silently *deletes* the entries the
+# test targets need — the offline build of `cargo test` then stops compiling.
+run = "cargo sqlx prepare -- --all-targets"
 
 [tasks."k8s:up"]
 run = "./scripts/k3d-manager.sh create"
