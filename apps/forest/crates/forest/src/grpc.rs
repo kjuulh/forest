@@ -1948,6 +1948,7 @@ impl GrpcClient {
         name: &str,
         metadata: HashMap<String, String>,
         sensitive_keys: Option<Vec<String>>,
+        merge_metadata: bool,
     ) -> anyhow::Result<()> {
         self.destination_client()
             .await?
@@ -1957,6 +1958,7 @@ impl GrpcClient {
                 organisation: organisation.to_string(),
                 set_sensitive_keys: sensitive_keys.is_some(),
                 sensitive_keys: sensitive_keys.unwrap_or_default(),
+                merge_metadata,
             })
             .await
             .map_err(grpc_err)

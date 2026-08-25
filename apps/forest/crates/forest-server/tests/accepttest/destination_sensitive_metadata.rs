@@ -427,6 +427,7 @@ async fn update_preserves_sensitive_keys_unless_explicitly_set() {
                 .into(),
                 sensitive_keys: vec![],
                 set_sensitive_keys: false,
+                merge_metadata: false,
             },
         ))
         .await
@@ -447,6 +448,7 @@ async fn update_preserves_sensitive_keys_unless_explicitly_set() {
                 metadata: [("cloudflare_token".to_string(), "cf_rotated".to_string())].into(),
                 sensitive_keys: vec![],
                 set_sensitive_keys: true,
+                merge_metadata: false,
             },
         ))
         .await
@@ -498,5 +500,137 @@ async fn list_destination_types_reports_which_fields_are_sensitive() {
             .iter()
             .any(|f| f.name == "cluster_name" && !f.sensitive),
         "cluster_name must stay non-sensitive"
+    );
+}
+
+/// The trap this closes: a caller that names one key used to send a one-entry
+/// map, and the server stored metadata as one document, so everything else was
+/// deleted. `forest destination update --metadata reconcile_url=...` — the exact
+/// command the flux guide documents — wiped cluster_name and namespace with it.
+#[tokio::test(flavor = "multi_thread")]
+async fn merging_metadata_leaves_unnamed_keys_alone() {
+    let fixture = fixture().await.expect("fixture");
+    let token = register_user(&fixture).await;
+    let org = create_org(&fixture, &token).await;
+    let env = create_env(&fixture, &token, &org).await;
+    let dest = format!("flux-{}", uuid::Uuid::now_v7());
+
+    let local_path = format!("/tmp/forest-merge-test-{}", uuid::Uuid::now_v7());
+    std::fs::create_dir_all(&local_path).expect("create local path");
+
+    fixture
+        .destinations()
+        .create_destination(authed_request(
+            &token,
+            CreateDestinationRequest {
+                organisation: org.clone(),
+                name: dest.clone(),
+                environment: env,
+                metadata: [
+                    ("cluster_name".to_string(), "prod-eu".to_string()),
+                    ("namespace".to_string(), "flux-system".to_string()),
+                    ("local_path".to_string(), local_path),
+                ]
+                .into(),
+                r#type: Some(flux_type()),
+                sensitive_keys: vec![],
+            },
+        ))
+        .await
+        .expect("create destination");
+
+    fixture
+        .destinations()
+        .update_destination(authed_request(
+            &token,
+            UpdateDestinationRequest {
+                organisation: org.clone(),
+                name: dest.clone(),
+                metadata: [(
+                    "reconcile_url".to_string(),
+                    "http://webhook-receiver.flux-system/hook/abc".to_string(),
+                )]
+                .into(),
+                sensitive_keys: vec![],
+                set_sensitive_keys: false,
+                merge_metadata: true,
+            },
+        ))
+        .await
+        .expect("update destination");
+
+    let found = fetch_destination(&fixture, &token, &org, &dest).await;
+
+    // The neighbours survived.
+    assert_eq!(
+        found.metadata.get("cluster_name").map(String::as_str),
+        Some("prod-eu")
+    );
+    assert_eq!(
+        found.metadata.get("namespace").map(String::as_str),
+        Some("flux-system")
+    );
+    // And the new key took effect — withheld, because the flux type declares it.
+    assert!(found.sensitive_keys.iter().any(|k| k == "reconcile_url"));
+}
+
+/// A merge that names nothing must be a no-op, so a caller that only means to
+/// change the sensitive-key set does not have to send metadata it cannot see.
+#[tokio::test(flavor = "multi_thread")]
+async fn merging_an_empty_overlay_changes_no_metadata() {
+    let fixture = fixture().await.expect("fixture");
+    let token = register_user(&fixture).await;
+    let org = create_org(&fixture, &token).await;
+    let env = create_env(&fixture, &token, &org).await;
+    let dest = format!("tf-{}", uuid::Uuid::now_v7());
+
+    fixture
+        .destinations()
+        .create_destination(authed_request(
+            &token,
+            CreateDestinationRequest {
+                organisation: org.clone(),
+                name: dest.clone(),
+                environment: env,
+                metadata: [
+                    ("tf_workspace".to_string(), "platform-dev".to_string()),
+                    ("aws_secret_access_key".to_string(), "live-secret".to_string()),
+                ]
+                .into(),
+                r#type: Some(terraform_type()),
+                sensitive_keys: vec![],
+            },
+        ))
+        .await
+        .expect("create destination");
+
+    // Exactly what `forest destination update --sensitive <key>` now sends.
+    fixture
+        .destinations()
+        .update_destination(authed_request(
+            &token,
+            UpdateDestinationRequest {
+                organisation: org.clone(),
+                name: dest.clone(),
+                metadata: Default::default(),
+                sensitive_keys: vec!["aws_secret_access_key".into()],
+                set_sensitive_keys: true,
+                merge_metadata: true,
+            },
+        ))
+        .await
+        .expect("update destination");
+
+    let found = fetch_destination(&fixture, &token, &org, &dest).await;
+
+    // Nothing was blanked, and the credential is now withheld rather than lost.
+    assert_eq!(
+        found.metadata.get("tf_workspace").map(String::as_str),
+        Some("platform-dev")
+    );
+    assert_eq!(found.sensitive_keys, vec!["aws_secret_access_key".to_string()]);
+    assert!(
+        !format!("{found:?}").contains("live-secret"),
+        "the value must be withheld, not deleted or leaked"
     );
 }

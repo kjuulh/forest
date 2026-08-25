@@ -228,6 +228,10 @@ pub struct CreateDestinationResponse {
 pub struct UpdateDestinationRequest {
     #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
+    /// Replaces the stored metadata wholesale, unless `merge_metadata` is set.
+    /// Wholesale is the right shape for an editor that renders every key at once
+    /// (removing a row has to delete the key), and the wrong shape for a caller
+    /// that only names the pairs it cares about.
     #[prost(map="string, string", tag="2")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     #[prost(string, tag="3")]
@@ -238,6 +242,12 @@ pub struct UpdateDestinationRequest {
     pub sensitive_keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(bool, tag="5")]
     pub set_sensitive_keys: bool,
+    /// Overlay `metadata` onto what is stored instead of replacing it: keys not
+    /// named are left alone. An empty map then means "change nothing", which is
+    /// what a caller that only touches sensitive_keys sends. Defaults to false so
+    /// existing clients keep replacing.
+    #[prost(bool, tag="6")]
+    pub merge_metadata: bool,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateDestinationResponse {

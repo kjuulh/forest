@@ -64,7 +64,7 @@ forest destination update --name "flux-dev/home/001" \
 | `git_branch` | Branch to commit to | `main` |
 | `git_author_name` | Git commit author name | `forest-release` |
 | `git_author_email` | Git commit author email | `forest@release.local` |
-| `reconcile_url` | Flux Receiver webhook URL for immediate reconciliation | _(none — flux polls)_ |
+| `reconcile_url` | Flux Receiver webhook URL for immediate reconciliation. Withheld from `destination list` — the URL embeds the Receiver's webhook path, which acts as a bearer token | _(none — flux polls)_ |
 | `webhook_secret` | HMAC secret for Flux Alert notifications back to forest | _(none)_ |
 | `forest_webhook_url` | Forest webhook URL for Flux notifications | _(none)_ |
 | `flux_git_repository_name` | Name of the Flux GitRepository CR | `flux-system` |
@@ -130,12 +130,25 @@ http://webhook-receiver.flux-system<webhook-path>
 
 ### Configure the Destination
 
-Add the `reconcile_url` to your destination metadata:
+Add the `reconcile_url` to your destination metadata. `--metadata` only adds and
+overwrites the keys you name, so the rest of the destination's configuration is
+left alone:
 
 ```bash
 forest destination update --name "flux-dev/home/001" \
   --metadata "reconcile_url=http://webhook-receiver.flux-system/hook/8e8cf5f4..."
 ```
+
+:::warning
+
+`--replace-metadata` makes `--metadata` the destination's *entire* metadata and
+deletes every key you did not name. You almost never want it here.
+
+:::
+
+The value is treated as a credential from this point on: `destination list`
+shows it as `••••••••`, and reading it back takes an explicit
+`forest destination reveal --org <org> --name <dest> --key reconcile_url`.
 
 Now `forest release create` will trigger immediate reconciliation after pushing manifests. Deployments apply within seconds instead of waiting for the poll interval.
 

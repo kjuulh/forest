@@ -12,8 +12,15 @@ pub struct UpdateCommand {
     #[arg(long)]
     name: String,
 
+    /// Set a metadata key, as `key=value`. Repeatable. Keys you do not name are
+    /// left alone; pass `--replace-metadata` to make this the whole set instead.
     #[arg(long = "metadata")]
     metadata: Vec<String>,
+
+    /// Treat `--metadata` as the destination's entire metadata, deleting every
+    /// key not named. Without this, `--metadata` only adds and overwrites.
+    #[arg(long)]
+    replace_metadata: bool,
 
     /// Replace the destination's sensitive-key set. Repeatable. Omit the flag
     /// entirely to leave the existing set alone; pass `--clear-sensitive` to
@@ -49,9 +56,26 @@ impl UpdateCommand {
             Some(self.sensitive.clone())
         };
 
+        // Replacing is opt-in. The server stores metadata as one document, so a
+        // plain `--metadata k=v` used to send a one-entry map and delete
+        // everything else — including credentials this client is never shown and
+        // so could not have put back.
+        if self.replace_metadata && metadata.is_empty() {
+            anyhow::bail!(
+                "--replace-metadata with no --metadata would delete every key; \
+                 pass the keys to keep, or drop the flag"
+            );
+        }
+
         state
             .grpc_client()
-            .update_destination(&self.organisation, &self.name, metadata, sensitive_keys)
+            .update_destination(
+                &self.organisation,
+                &self.name,
+                metadata,
+                sensitive_keys,
+                !self.replace_metadata,
+            )
             .await
             .context("update destination")?;
 

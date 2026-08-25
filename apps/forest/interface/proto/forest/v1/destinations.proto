@@ -17,12 +17,21 @@ message CreateDestinationResponse {}
 
 message UpdateDestinationRequest {
   string name = 1;
+  // Replaces the stored metadata wholesale, unless `merge_metadata` is set.
+  // Wholesale is the right shape for an editor that renders every key at once
+  // (removing a row has to delete the key), and the wrong shape for a caller
+  // that only names the pairs it cares about.
   map<string, string> metadata = 2;
   string organisation = 3;
   // Replaces the destination's sensitive-key set when `set_sensitive_keys`
   // is true. Ignored otherwise, so older clients keep the existing set.
   repeated string sensitive_keys = 4;
   bool set_sensitive_keys = 5;
+  // Overlay `metadata` onto what is stored instead of replacing it: keys not
+  // named are left alone. An empty map then means "change nothing", which is
+  // what a caller that only touches sensitive_keys sends. Defaults to false so
+  // existing clients keep replacing.
+  bool merge_metadata = 6;
 }
 message UpdateDestinationResponse {}
 

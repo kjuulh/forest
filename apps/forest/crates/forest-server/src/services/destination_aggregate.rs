@@ -125,17 +125,30 @@ impl DestinationAggregateService {
         Ok(destination_id)
     }
 
+    /// `merge` overlays `metadata` onto what is stored instead of replacing it,
+    /// so a caller that names two keys does not delete the rest. The overlay is
+    /// computed here rather than in the client because the client cannot see
+    /// withheld values and would drop them from the map it sent back.
     pub async fn update_metadata(
         &self,
         organisation: &str,
         name: &str,
         metadata: HashMap<String, String>,
+        merge: bool,
     ) -> anyhow::Result<()> {
         let key = destination::stream_key(organisation, name);
         let mut root = self
             .event_store
             .load_or_default::<DestinationAggregate>(&key)
             .await?;
+
+        let metadata = if merge {
+            let mut merged = root.state.metadata.clone();
+            merged.extend(metadata);
+            merged
+        } else {
+            metadata
+        };
 
         DestinationAggregate::update_metadata(&mut root, metadata.clone())?;
 

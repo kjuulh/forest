@@ -328,7 +328,29 @@ forest destination create --organisation <ORG> --name <NAME> --environment <ENV>
 ### `forest destination update`
 
 ```bash
-forest destination update --organisation <ORG> --name <NAME>
+forest destination update --organisation <ORG> --name <NAME> \
+  --metadata "key=value" \
+  --sensitive <KEY>
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--metadata key=value` | Set one metadata key. Repeatable. Keys you do not name are left alone. |
+| `--replace-metadata` | Make `--metadata` the destination's *entire* metadata, deleting every key not named. |
+| `--sensitive <KEY>` | Replace the destination's sensitive-key set. Repeatable. Omit to leave the set as it is. |
+| `--clear-sensitive` | Empty the destination-declared sensitive set. Keys the destination *type* declares sensitive stay hidden regardless. |
+
+Marking a key sensitive withholds its value from `destination list` and from
+every API client; the value itself is kept, and deploys still receive it. Read
+one back with `forest destination reveal`.
+
+### `forest destination reveal`
+
+Print one withheld metadata value. Deliberately per-key — there is no call that
+returns every credential on a destination at once.
+
+```bash
+forest destination reveal --organisation <ORG> --name <NAME> --key <KEY>
 ```
 
 ### `forest destination delete`

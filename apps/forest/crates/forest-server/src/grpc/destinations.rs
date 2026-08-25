@@ -109,12 +109,22 @@ impl DestinationService for DestinationServer {
         )
         .await?;
 
-        self.state
-            .destination_aggregate_service()
-            .update_metadata(&req.organisation, &req.name, req.metadata)
-            .await
-            .context("update destination")
-            .to_internal_error()?;
+        // Merging an empty overlay changes nothing, so skip the write rather
+        // than record an event that says the metadata stayed the same. This is
+        // the shape a caller sends when it only means to touch sensitive_keys.
+        if !(req.merge_metadata && req.metadata.is_empty()) {
+            self.state
+                .destination_aggregate_service()
+                .update_metadata(
+                    &req.organisation,
+                    &req.name,
+                    req.metadata,
+                    req.merge_metadata,
+                )
+                .await
+                .context("update destination")
+                .to_internal_error()?;
+        }
 
         // Guarded by an explicit flag so older clients, which cannot send the
         // field, don't silently clear an existing set.

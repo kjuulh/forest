@@ -1876,6 +1876,9 @@ impl ForestPlatform for GrpcForestClient {
                 organisation: organisation.into(),
                 set_sensitive_keys: sensitive_keys.is_some(),
                 sensitive_keys: sensitive_keys.unwrap_or_default().to_vec(),
+                // The editor renders every key at once, so removing a row has to
+                // delete it. That only works if this replaces rather than merges.
+                merge_metadata: false,
             },
         )?;
         self.dest_client()
