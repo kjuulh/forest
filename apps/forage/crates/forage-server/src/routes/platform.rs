@@ -3497,11 +3497,16 @@ async fn destination_detail(
     let current_org = require_org_membership(&state, orgs, &org)?;
     let is_admin = current_org.role == "owner" || current_org.role == "admin";
 
-    let destinations = state
-        .platform_client
-        .list_destinations(&session.access_token, &org)
-        .await
-        .map_err(|e| internal_error(&state, "list_destinations", &e))?;
+    let (destinations, dest_types) = tokio::join!(
+        state
+            .platform_client
+            .list_destinations(&session.access_token, &org),
+        state
+            .platform_client
+            .list_destination_types(&session.access_token),
+    );
+    let destinations = destinations.map_err(|e| internal_error(&state, "list_destinations", &e))?;
+    let dest_types = warn_default("list_destination_types", dest_types);
 
     let dest = destinations
         .iter()
@@ -3515,17 +3520,53 @@ async fn destination_detail(
             )
         })?;
 
+    // A withheld key is hidden for one of two reasons, and the page has to tell
+    // them apart. Keys the *type* declares sensitive are hidden for every
+    // destination of that type and are not the destination's to give up, so the
+    // form must never echo them back into its own sensitive set. What is left is
+    // what this destination declared, and that is what the form resubmits.
+    let type_sensitive_keys: std::collections::BTreeSet<&str> = dest
+        .dest_type
+        .as_ref()
+        .and_then(|dt| {
+            dest_types
+                .iter()
+                .find(|t| t.organisation == dt.organisation && t.name == dt.name)
+        })
+        .map(|t| {
+            t.fields
+                .iter()
+                .filter(|f| f.sensitive)
+                .map(|f| f.name.as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let declared_sensitive_keys: Vec<&String> = dest
+        .sensitive_keys
+        .iter()
+        .filter(|k| !type_sensitive_keys.contains(k.as_str()))
+        .collect();
+
     // Withheld keys carry no value: the platform did not send one. They render
     // as a masked row with a reveal control instead.
     let mut meta_entries: Vec<minijinja::Value> = dest
         .metadata
         .iter()
-        .map(|(k, v)| context! { key => k, value => v, sensitive => false })
-        .chain(
-            dest.sensitive_keys
-                .iter()
-                .map(|k| context! { key => k, value => "", sensitive => true }),
-        )
+        .map(|(k, v)| context! {
+            key => k,
+            value => v,
+            sensitive => false,
+            type_sensitive => false,
+        })
+        .chain(dest.sensitive_keys.iter().map(|k| {
+            context! {
+                key => k,
+                value => "",
+                sensitive => true,
+                type_sensitive => type_sensitive_keys.contains(k.as_str()),
+            }
+        }))
         .collect();
     meta_entries.sort_by_key(|e| {
         e.get_attr("key")
@@ -3555,6 +3596,9 @@ async fn destination_detail(
                 dest_type_version => dest.dest_type.as_ref().map(|t| t.version),
                 metadata => meta_entries,
                 sensitive_keys => &dest.sensitive_keys,
+                declared_sensitive_keys_json =>
+                    serde_json::to_string(&declared_sensitive_keys)
+                        .unwrap_or_else(|_| "[]".to_string()),
             },
         )
         .map_err(|e| {

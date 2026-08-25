@@ -67,7 +67,8 @@
         </div>
 
         {% if is_admin %}
-        <form method="post" action="/orgs/{{ org_name }}/destinations/detail/update?name={{ dest_name | urlencode }}" id="metadata-form">
+        <form method="post" action="/orgs/{{ org_name }}/destinations/detail/update?name={{ dest_name | urlencode }}" id="metadata-form"
+              data-declared-sensitive='{{ declared_sensitive_keys_json }}'>
             <input type="hidden" name="_csrf" value="{{ csrf_token }}">
             <div class="divide-y divide-gray-100" id="metadata-rows">
                 {% for entry in metadata %}
@@ -87,10 +88,18 @@
                         <button type="button" class="reveal-btn shrink-0 text-xs px-2 py-1 border border-gray-200 rounded-md text-gray-500 hover:text-gray-900 hover:border-gray-300 transition-colors"
                             data-key="{{ entry.key }}" title="Fetch and show this value">Reveal</button>
                     </div>
+                    {% if entry.type_sensitive %}
+                    <span class="shrink-0 text-xs text-gray-400" title="The {{ dest_type_name }} destination type declares this key a credential, so it is hidden for every destination of this type.">by type</span>
+                    {% else %}
+                    <span class="shrink-0 text-xs text-gray-400" title="Marked a credential on this destination. Un-hiding it is deliberate: use `forest destination update --clear-sensitive`.">secret</span>
+                    {% endif %}
                     {% else %}
                     <input type="text" name="metadata_values" value="{{ entry.value }}"
                         placeholder="value"
                         class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+                    <label class="shrink-0 flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 cursor-pointer" title="Mark as a credential: the value is hidden after saving. This cannot be undone from the UI.">
+                        <input type="checkbox" class="meta-sensitive accent-green-600">secret
+                    </label>
                     {% endif %}
                     <button type="button" onclick="this.closest('.metadata-row').remove()"
                         class="text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row">
@@ -104,6 +113,9 @@
                         class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
                     <input type="text" name="metadata_values" placeholder="value"
                         class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+                    <label class="shrink-0 flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 cursor-pointer" title="Mark as a credential: the value is hidden after saving. This cannot be undone from the UI.">
+                        <input type="checkbox" class="meta-sensitive accent-green-600">secret
+                    </label>
                     <button type="button" onclick="this.closest('.metadata-row').remove()"
                         class="text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -194,12 +206,54 @@ document.getElementById('add-row-btn')?.addEventListener('click', function() {
             class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
         <input type="text" name="metadata_values" placeholder="value"
             class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
+        <label class="shrink-0 flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 cursor-pointer" title="Mark as a credential: the value is hidden after saving. This cannot be undone from the UI.">
+            <input type="checkbox" class="meta-sensitive accent-green-600">secret
+        </label>
         <button type="button" onclick="this.closest('.metadata-row').remove()"
             class="text-gray-300 hover:text-red-500 transition-colors p-1" title="Remove row">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
         </button>`;
     container.appendChild(row);
     row.querySelector('input').focus();
+});
+
+// Promoting a key to sensitive is one-way here. The platform treats
+// `sensitive_keys` as a replacement for the destination's own set, so the form
+// resubmits everything already declared alongside whatever was just ticked —
+// otherwise saving one new credential would silently un-hide the rest. Keys the
+// *type* declares sensitive are left out on purpose: they are hidden by the type
+// and are not this destination's to claim. When nothing is ticked the fields are
+// omitted entirely, which the platform reads as "leave the set alone".
+document.getElementById('metadata-form')?.addEventListener('submit', function() {
+    const form = this;
+    form.querySelectorAll('input[name="sensitive_keys"], input[name="set_sensitive_keys"]')
+        .forEach(function(el) { el.remove(); });
+
+    const promoted = [];
+    form.querySelectorAll('.metadata-row').forEach(function(row) {
+        const box = row.querySelector('.meta-sensitive');
+        const keyInput = row.querySelector('input[name="metadata_keys"]');
+        if (!box || !box.checked || !keyInput || !keyInput.value.trim()) return;
+        promoted.push(keyInput.value.trim());
+    });
+    if (promoted.length === 0) return;
+
+    let declared = [];
+    try { declared = JSON.parse(form.dataset.declaredSensitive || '[]'); } catch (e) { declared = []; }
+
+    const marker = document.createElement('input');
+    marker.type = 'hidden';
+    marker.name = 'set_sensitive_keys';
+    marker.value = '1';
+    form.appendChild(marker);
+
+    Array.from(new Set(declared.concat(promoted))).forEach(function(key) {
+        const hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = 'sensitive_keys';
+        hidden.value = key;
+        form.appendChild(hidden);
+    });
 });
 </script>
 {% endblock %}

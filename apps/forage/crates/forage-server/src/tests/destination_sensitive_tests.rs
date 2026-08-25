@@ -259,3 +259,158 @@ async fn non_admin_detail_view_shows_a_mask_instead_of_the_value() {
     assert!(html.contains("aws_secret_access_key"), "key name should still show");
     assert!(!html.contains("revealed-aws_secret_access_key"));
 }
+
+/// A flux destination whose *type* declares `reconcile_url` a credential
+/// (DATA-575's follow-up), alongside one key this destination declared itself.
+/// The two are hidden for different reasons and the page has to keep them apart.
+fn flux_destination_with_both_kinds() -> Destination {
+    Destination {
+        name: "flux-prod".into(),
+        environment: "prod".into(),
+        organisation: "testorg".into(),
+        metadata: [("cluster_name".to_string(), "prod-eu".to_string())].into(),
+        // The platform sends the union of both kinds; it does not say which is
+        // which. That is what the type schema below is cross-referenced for.
+        sensitive_keys: vec!["reconcile_url".into(), "extra_api_key".into()],
+        dest_type: Some(forage_core::platform::DestinationType {
+            organisation: "forest".into(),
+            name: "flux".into(),
+            version: 1,
+        }),
+    }
+}
+
+fn flux_type_info() -> forage_core::platform::DestinationTypeInfo {
+    let field = |name: &str, sensitive: bool| forage_core::platform::MetadataFieldDef {
+        name: name.into(),
+        label: name.into(),
+        description: String::new(),
+        required: false,
+        field_type: "text".into(),
+        default_value: String::new(),
+        sensitive,
+    };
+    forage_core::platform::DestinationTypeInfo {
+        organisation: "forest".into(),
+        name: "flux".into(),
+        version: 1,
+        description: String::new(),
+        fields: vec![
+            field("cluster_name", false),
+            field("reconcile_url", true),
+        ],
+    }
+}
+
+fn state_with_flux_destination() -> (
+    crate::state::AppState,
+    std::sync::Arc<forage_core::session::InMemorySessionStore>,
+) {
+    test_state_with(
+        MockForestClient::new(),
+        MockPlatformClient::with_behavior(MockPlatformBehavior {
+            list_destinations_result: Some(Ok(vec![flux_destination_with_both_kinds()])),
+            list_destination_types_result: Some(Ok(vec![flux_type_info()])),
+            list_environments_result: Some(Ok(vec![forage_core::platform::Environment {
+                id: "env-prod".into(),
+                organisation: "testorg".into(),
+                name: "prod".into(),
+                description: None,
+                sort_order: 0,
+                created_at: "2026-03-08T00:00:00Z".into(),
+            }])),
+            ..Default::default()
+        }),
+    )
+}
+
+async fn detail_html(
+    state: crate::state::AppState,
+    cookie: &str,
+    dest: &str,
+) -> String {
+    let response = build_router(state)
+        .oneshot(
+            Request::builder()
+                .uri(format!("/orgs/testorg/destinations/detail?name={dest}"))
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    body_of(response).await
+}
+
+/// Promoting a key is offered only where it means something: on keys that are
+/// still visible. An already-hidden key gets no control, because taking the mark
+/// back is deliberate and does not belong in a checkbox.
+#[tokio::test]
+async fn only_visible_keys_offer_the_promote_control() {
+    let (state, sessions) = state_with_destination();
+    let cookie = create_test_session(&sessions).await;
+    let html = detail_html(state, &cookie, "platform-dev").await;
+
+    // Count only the rendered rows: the page's script also mentions the class,
+    // both in its row template and in the submit handler's selector.
+    let markup = &html[..html.find("<script>").unwrap_or(html.len())];
+
+    // Two visible keys (tf_workspace, aws_account_id) plus the starter blank
+    // row. The two withheld keys must not contribute one.
+    assert_eq!(
+        markup.matches("meta-sensitive").count(),
+        3,
+        "expected a promote control per visible key plus the blank row, and none \
+         on the withheld rows"
+    );
+    assert!(
+        html.contains("cannot be undone from the UI"),
+        "the control should say the promotion is one-way"
+    );
+}
+
+/// The form resubmits the destination's own sensitive keys so that saving one
+/// new credential cannot silently un-hide the others. Keys the *type* declares
+/// are deliberately left out: they are not this destination's to claim.
+#[tokio::test]
+async fn resubmitted_set_carries_destination_keys_but_not_type_declared_ones() {
+    let (state, sessions) = state_with_flux_destination();
+    let cookie = create_test_session(&sessions).await;
+    let html = detail_html(state, &cookie, "flux-prod").await;
+
+    let attr_start = html
+        .find("data-declared-sensitive='")
+        .expect("expected the declared-sensitive attribute on the form");
+    let rest = &html[attr_start + "data-declared-sensitive='".len()..];
+    let declared = &rest[..rest.find('\'').expect("unterminated attribute")];
+
+    assert!(
+        declared.contains("extra_api_key"),
+        "the destination's own key must be resubmitted, got: {declared}"
+    );
+    assert!(
+        !declared.contains("reconcile_url"),
+        "a type-declared key must not be copied into the destination's set, got: {declared}"
+    );
+
+    // And the page explains why reconcile_url has no control of its own.
+    assert!(
+        html.contains("by type"),
+        "expected type-declared keys to be labelled as such"
+    );
+}
+
+/// Guard against the regression that would matter most: the type schema being
+/// unavailable must not cause a type-declared key to be claimed by the
+/// destination. With no types, nothing is known to be type-declared, so the
+/// page falls back to treating every withheld key as the destination's own.
+#[tokio::test]
+async fn detail_page_still_renders_when_the_type_schema_is_unavailable() {
+    let (state, sessions) = state_with_destination();
+    let cookie = create_test_session(&sessions).await;
+    let html = detail_html(state, &cookie, "platform-dev").await;
+
+    assert!(html.contains("data-declared-sensitive="));
+    assert!(html.contains("aws_secret_access_key"));
+}
