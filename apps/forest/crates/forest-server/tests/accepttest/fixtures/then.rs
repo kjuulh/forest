@@ -14,6 +14,8 @@ fn authed_request<T>(token: &str, inner: T) -> tonic::Request<T> {
 
 pub trait ThenReleaseFlow {
     async fn release_is_in_terminal_state(self) -> anyhow::Result<Then<ReleaseFlowData>>;
+    async fn a_failed_release_is_recorded(self) -> anyhow::Result<Then<ReleaseFlowData>>;
+    async fn the_intent_is_finalized_failed(self) -> anyhow::Result<Then<ReleaseFlowData>>;
     async fn artifact_is_retrievable_by_slug(self) -> anyhow::Result<Then<ReleaseFlowData>>;
     async fn artifact_is_listed_in_project(self) -> anyhow::Result<Then<ReleaseFlowData>>;
 }
@@ -29,6 +31,50 @@ impl ThenReleaseFlow for Then<ReleaseFlowData> {
             "release should be in terminal state, got: {}",
             status
         );
+        Ok(self)
+    }
+
+    /// A reported failure has to leave a release behind, not just a
+    /// notification: a project whose successes are releases and whose failures
+    /// are nothing under-reports itself everywhere (DATA-637).
+    async fn a_failed_release_is_recorded(self) -> anyhow::Result<Self> {
+        let artifact_id: uuid::Uuid = self.data().artifact_id.parse()?;
+
+        let states = sqlx::query_scalar!(
+            r#"SELECT status FROM release_states WHERE artifact_id = $1"#,
+            artifact_id,
+        )
+        .fetch_all(&self.fixture().db)
+        .await?;
+
+        assert_eq!(
+            states,
+            vec!["FAILED".to_string()],
+            "expected exactly one FAILED release for the artifact"
+        );
+
+        Ok(self)
+    }
+
+    /// And the intent has to be closed out. These releases are written terminal
+    /// rather than transitioned into it, so they never pass through the event
+    /// store's finalizer — forgetting to call it left the intent ACTIVE forever
+    /// and made a dead deploy look permanently in flight.
+    async fn the_intent_is_finalized_failed(self) -> anyhow::Result<Self> {
+        let artifact_id: uuid::Uuid = self.data().artifact_id.parse()?;
+
+        let status = sqlx::query_scalar!(
+            r#"SELECT ri.status FROM release_intents ri WHERE ri.artifact = $1"#,
+            artifact_id,
+        )
+        .fetch_one(&self.fixture().db)
+        .await?;
+
+        assert_eq!(
+            status, "FAILED",
+            "intent should be finalized FAILED, not left ACTIVE"
+        );
+
         Ok(self)
     }
 

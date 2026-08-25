@@ -15,6 +15,10 @@ fn authed_request<T>(token: &str, inner: T) -> tonic::Request<T> {
 pub trait WhenReleaseFlow {
     async fn release_is_triggered(self) -> anyhow::Result<When<ReleaseFlowData>>;
     async fn release_reaches_terminal_state(self) -> anyhow::Result<When<ReleaseFlowData>>;
+    async fn release_is_reported_failed(
+        self,
+        reason: &str,
+    ) -> anyhow::Result<When<ReleaseFlowData>>;
 }
 
 impl WhenReleaseFlow for When<ReleaseFlowData> {
@@ -47,6 +51,36 @@ impl WhenReleaseFlow for When<ReleaseFlowData> {
         if let Some(intent) = intents.first() {
             self.data_mut().release_intent_id = intent.release_intent_id.clone();
         }
+
+        Ok(self)
+    }
+
+    /// The announce-only failure path: CI deployed elsewhere, it failed, and it
+    /// says so against the annotation rather than through a destination.
+    async fn release_is_reported_failed(mut self, reason: &str) -> anyhow::Result<Self> {
+        let mut release_client = self.fixture().releases();
+        let (token, slug, destination) = {
+            let data = self.data();
+            (
+                data.auth_token.clone(),
+                data.slug.clone(),
+                data.destination_name.clone(),
+            )
+        };
+
+        release_client
+            .report_release_failed(authed_request(
+                &token,
+                ReportReleaseFailedRequest {
+                    slug,
+                    reason: reason.into(),
+                    destination: Some(destination),
+                    environment: None,
+                },
+            ))
+            .await?;
+
+        self.data_mut().terminal_status = "FAILED".into();
 
         Ok(self)
     }

@@ -491,6 +491,16 @@ impl ReleaseRegistry {
             });
         }
 
+        // Close the intent out. Every other terminal release reaches this
+        // through `emit_event`; these never do, because they are written
+        // terminal rather than transitioned into it. Skipping it leaves the
+        // intent ACTIVE with nothing left to run, so a failed deploy reads as
+        // permanently in-flight to anything looking at intents rather than at
+        // release states.
+        event_store
+            .try_finalize_direct_intent(&release_intent.id)
+            .await;
+
         Ok(CreatedReleaseIntent {
             release_intent_id: release_intent.id,
             releases: created_releases,

@@ -471,7 +471,14 @@ impl ReleaseEventStore {
     }
 
     /// Finalize a direct (non-pipeline) intent when all child releases are terminal.
-    async fn try_finalize_direct_intent(&self, intent_id: &Uuid) {
+    ///
+    /// Normally reached through `emit_event`, which is how every release that
+    /// transitions into a terminal state gets its intent closed. `create_failed_release`
+    /// writes its terminal state directly and so never passes through there, so
+    /// `release_failed` calls this itself — otherwise an intent whose only release
+    /// is FAILED would sit ACTIVE forever, and a project's failed deploys would
+    /// look permanently in-flight to anything reading intents (DATA-637).
+    pub(crate) async fn try_finalize_direct_intent(&self, intent_id: &Uuid) {
         let result: Result<_, anyhow::Error> = async {
             // Check if this is a direct intent (no stages) that's still ACTIVE
             let intent = sqlx::query!(
