@@ -111,6 +111,9 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
+                // Deliberately not sensitive: this is a filesystem path, not key
+                // material. The key itself never enters metadata, and hiding the
+                // path only makes a misconfigured runner harder to debug.
                 sensitive: false,
             },
             forest_models::MetadataFieldSchema {
@@ -162,12 +165,15 @@ impl DestinationEdge for FluxV1Destination {
             forest_models::MetadataFieldSchema {
                 name: "reconcile_url".into(),
                 label: "Reconcile URL".into(),
-                description: "Optional Flux Receiver webhook URL to trigger immediate reconciliation after push."
+                description: "Optional Flux Receiver webhook URL to trigger immediate reconciliation after push. Contains the Receiver's generated webhook path, which acts as a bearer token."
                     .into(),
                 required: false,
                 field_type: "url".into(),
                 default_value: String::new(),
-                sensitive: false,
+                // The URL embeds the Receiver's `.status.webhookPath`, and
+                // anyone holding it can trigger reconciliation. Cluster-internal
+                // in practice, but it is a capability, not configuration.
+                sensitive: true,
             },
             forest_models::MetadataFieldSchema {
                 name: "webhook_secret".into(),

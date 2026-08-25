@@ -114,7 +114,13 @@ run = "cargo sqlx migrate run --source ./crates/forest-server/migrations/"
 
 [tasks."db:prepare"]
 depends = ["db:migrate"]
-run = "cargo sqlx prepare --workspace"
+# Must run inside the crate, NOT `--workspace`. The offline cache the release
+# build reads lives at crates/forest-server/.sqlx/, but `--workspace` writes to
+# the workspace root instead — leaving the real cache stale. A query change then
+# compiles fine locally (live DATABASE_URL) and fails the Docker build, which
+# sets SQLX_OFFLINE=true. See apps/forest/Dockerfile.
+dir = "./crates/forest-server"
+run = "cargo sqlx prepare"
 
 [tasks."k8s:up"]
 run = "./scripts/k3d-manager.sh create"

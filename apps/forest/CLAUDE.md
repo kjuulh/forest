@@ -36,6 +36,12 @@ When adding a new aggregate:
 ## Build
 
 - `SQLX_OFFLINE=true` for compilation without a live database (uses `.sqlx/` cache)
-- After adding/changing SQL queries: `SQLX_OFFLINE=false cargo sqlx prepare --workspace`
+- After adding/changing SQL queries: `mise run db:prepare`. The offline cache the
+  release build reads lives at `crates/forest-server/.sqlx/`. Do **not** use
+  `cargo sqlx prepare --workspace` — it writes to the workspace root instead and
+  leaves the real cache stale, so the query compiles locally (live `DATABASE_URL`)
+  and then fails the Docker build, which sets `SQLX_OFFLINE=true`.
+- To check the cache is current without rewriting it, from `crates/forest-server`:
+  `cargo sqlx prepare --check`
 - After adding/changing migrations: `sqlx migrate run --source crates/forest-server/migrations`
 - Proto codegen: `buf generate`

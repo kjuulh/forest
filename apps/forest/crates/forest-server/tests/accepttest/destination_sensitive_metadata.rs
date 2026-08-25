@@ -136,6 +136,10 @@ async fn type_declared_sensitive_fields_are_withheld_from_the_list_response() {
                     ("git_token".to_string(), "ghp_live_token".to_string()),
                     ("webhook_secret".to_string(), "hmac-live".to_string()),
                     (
+                        "reconcile_url".to_string(),
+                        "http://webhook-receiver.flux-system/hook/live-webhook-path".to_string(),
+                    ),
+                    (
                         "forest_webhook_url".to_string(),
                         "https://forest.example.com/webhooks/flux".to_string(),
                     ),
@@ -159,13 +163,18 @@ async fn type_declared_sensitive_fields_are_withheld_from_the_list_response() {
     // Sensitive fields: key names only, values gone.
     let mut withheld = found.sensitive_keys.clone();
     withheld.sort();
-    assert_eq!(withheld, vec!["git_token", "webhook_secret"]);
+    assert_eq!(withheld, vec!["git_token", "reconcile_url", "webhook_secret"]);
     assert!(!found.metadata.contains_key("git_token"));
     assert!(!found.metadata.contains_key("webhook_secret"));
+    // The Receiver webhook path is a capability, not configuration: holding the
+    // URL is enough to trigger reconciliation, so it withholds like a credential.
+    assert!(!found.metadata.contains_key("reconcile_url"));
 
     let serialised = format!("{found:?}");
     assert!(
-        !serialised.contains("ghp_live_token") && !serialised.contains("hmac-live"),
+        !serialised.contains("ghp_live_token")
+            && !serialised.contains("hmac-live")
+            && !serialised.contains("live-webhook-path"),
         "credential survived onto the wire: {serialised}"
     );
 }
@@ -481,7 +490,7 @@ async fn list_destination_types_reports_which_fields_are_sensitive() {
         v.sort();
         v
     };
-    assert_eq!(sensitive, vec!["git_token", "webhook_secret"]);
+    assert_eq!(sensitive, vec!["git_token", "reconcile_url", "webhook_secret"]);
 
     // And plain config fields are not swept up.
     assert!(
