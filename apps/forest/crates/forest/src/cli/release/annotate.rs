@@ -4,6 +4,8 @@ use std::{
 };
 
 use anyhow::Context;
+use serde::Serialize;
+use tabled::Tabled;
 
 use crate::{grpc::GrpcClientState, models::source::Source, state::State};
 
@@ -134,7 +136,7 @@ pub struct AnnotateCommand {
 
 impl AnnotateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
-        let slug = annotate(
+        let annotated = annotate(
             state,
             &AnnotateParams {
                 metadata: self.metadata.clone(),
@@ -161,7 +163,17 @@ impl AnnotateCommand {
         )
         .await?;
 
-        eprintln!("published artifact: {slug}\n");
+        // The result goes to stdout, the narration to stderr. Everything this
+        // command said used to be narration, which left `--format` with nothing
+        // to apply to and scripts scraping the slug out of a prose line
+        // (DATA-637). `--format name` now prints the slug alone.
+        let slug = annotated.slug.clone();
+        print!(
+            "{}",
+            crate::cli::output::render(&state.config.format, &[annotated])
+        );
+
+        eprintln!();
         eprintln!("$ forest release {slug} --destination <prod/k8s/eu-west-1/001>");
 
         Ok(())
@@ -193,7 +205,22 @@ pub struct AnnotateParams {
 }
 
 /// Core annotate logic. Returns the artifact slug on success.
-pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<String> {
+/// What an annotation produced, for callers that need to act on it.
+///
+/// `slug` first, deliberately: `--format name` prints the first column, so
+/// `forest release annotate --format name` is the slug and nothing else, which
+/// is what a CI script wants to capture (DATA-637).
+#[derive(Tabled, Serialize)]
+pub struct AnnotatedRelease {
+    /// Human-friendly handle for the release — what `forest release <slug>` takes.
+    pub slug: String,
+
+    /// The artifact the annotation was made against.
+    #[tabled(rename = "artifact id")]
+    pub artifact_id: String,
+}
+
+pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<AnnotatedRelease> {
     let grpc = state.grpc_client();
 
     let upload_handle = grpc
@@ -375,12 +402,49 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
         .await
         .context("annotate artifact")?;
 
-    Ok(slug)
+    Ok(AnnotatedRelease {
+        slug,
+        artifact_id: artifact_id.to_string(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The contract CI depends on: `--format name` prints the first column, so
+    /// the slug has to be first. A script capturing `$(forest release annotate
+    /// --format name)` gets the slug and nothing else — that is what replaced
+    /// scraping it out of a prose line (DATA-637).
+    #[test]
+    fn format_name_yields_the_slug_alone() {
+        let row = AnnotatedRelease {
+            slug: "humbly-handsome-emu".into(),
+            artifact_id: "0de05556-c9f4-4532-bc6b-5a3e29ba6a16".into(),
+        };
+
+        let out = crate::cli::output::render(&crate::cli::output::OutputFormat::Name, &[row]);
+
+        assert_eq!(out, "humbly-handsome-emu\n");
+    }
+
+    /// And json stays machine-readable, with both fields.
+    #[test]
+    fn format_json_carries_slug_and_artifact_id() {
+        let row = AnnotatedRelease {
+            slug: "humbly-handsome-emu".into(),
+            artifact_id: "0de05556-c9f4-4532-bc6b-5a3e29ba6a16".into(),
+        };
+
+        let out = crate::cli::output::render(&crate::cli::output::OutputFormat::Json, &[row]);
+        let parsed: serde_json::Value = serde_json::from_str(&out).expect("valid json");
+
+        assert_eq!(parsed[0]["slug"], "humbly-handsome-emu");
+        assert_eq!(
+            parsed[0]["artifact_id"],
+            "0de05556-c9f4-4532-bc6b-5a3e29ba6a16"
+        );
+    }
 
     /// The regression: a project with nothing to deploy. `WalkDir` surfaces the
     /// missing root as an error on the first item, which used to abort the whole

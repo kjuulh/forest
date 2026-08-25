@@ -199,7 +199,7 @@ impl CreateCommand {
             metadata.push(format!("override.{i}={kv}"));
         }
 
-        let slug = annotate::annotate(
+        let annotated = annotate::annotate(
             state,
             &AnnotateParams {
                 metadata,
@@ -227,6 +227,7 @@ impl CreateCommand {
         .await
         .context("annotate")?;
 
+        let slug = annotated.slug;
         eprintln!("published artifact: {slug}");
 
         // ── 3. Release ───────────────────────────────────────────────

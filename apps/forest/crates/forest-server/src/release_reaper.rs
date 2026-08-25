@@ -17,6 +17,7 @@ pub struct ReleaseReaper {
     assigned_timeout: Duration,
     running_timeout: Duration,
     heartbeat_timeout: Duration,
+    intent_finalize_grace: Duration,
 }
 
 impl ReleaseReaper {
@@ -28,6 +29,10 @@ impl ReleaseReaper {
             running_timeout: Duration::from_secs(60 * 60),
             // 3 missed heartbeats (30s each) = 90s threshold
             heartbeat_timeout: Duration::from_secs(90),
+            // Long enough that an intent still having its releases created
+            // cannot be mistaken for one that is finished. Nothing takes
+            // minutes to insert a handful of rows.
+            intent_finalize_grace: Duration::from_secs(2 * 60),
         }
     }
 
@@ -106,6 +111,24 @@ impl ReleaseReaper {
                     "failed to reap release (likely already transitioned): {e}"
                 );
             }
+        }
+
+        // Reconcile intents whose releases all finished but which were never
+        // closed out. `emit_event` does this for anything that transitions into
+        // a terminal state; this catches whatever wrote one directly instead.
+        let orphaned = self
+            .release_event_store
+            .find_orphaned_active_intents(self.intent_finalize_grace.as_secs() as i64)
+            .await?;
+
+        for intent_id in orphaned {
+            tracing::warn!(
+                %intent_id,
+                "finalizing an ACTIVE intent whose releases are all terminal"
+            );
+            self.release_event_store
+                .try_finalize_direct_intent(&intent_id)
+                .await;
         }
 
         self.runner_manager.reap_stale(self.assigned_timeout).await;

@@ -470,6 +470,50 @@ impl ReleaseEventStore {
         Ok(())
     }
 
+    /// Direct intents still ACTIVE whose every release has already finished.
+    ///
+    /// Normally impossible: `emit_event` finalizes an intent the moment its last
+    /// release goes terminal. It becomes possible whenever something writes a
+    /// terminal release *without* going through there — which
+    /// `create_failed_release` does deliberately, and which the next such
+    /// shortcut will do accidentally. The cost of missing one is an intent that
+    /// looks in flight forever, so the reaper reconciles rather than trusting
+    /// every writer to remember (DATA-637).
+    ///
+    /// `min_age_secs` keeps it off intents that are still being built: a release
+    /// created terminal is briefly the only child of an intent whose remaining
+    /// destinations have not been inserted yet, and finalizing there would close
+    /// an intent that is still growing.
+    pub async fn find_orphaned_active_intents(
+        &self,
+        min_age_secs: i64,
+    ) -> anyhow::Result<Vec<Uuid>> {
+        let ids = sqlx::query_scalar!(
+            r#"
+            SELECT ri.id AS "id!"
+            FROM release_intents ri
+            WHERE ri.status = 'ACTIVE'
+              AND ri.stages IS NULL
+              AND ri.created < now() - make_interval(secs => $1::double precision)
+              AND EXISTS (
+                    SELECT 1 FROM release_states rs
+                    WHERE rs.release_intent_id = ri.id
+              )
+              AND NOT EXISTS (
+                    SELECT 1 FROM release_states rs
+                    WHERE rs.release_intent_id = ri.id
+                      AND rs.status NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT')
+              )
+            "#,
+            min_age_secs as f64,
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("find orphaned active intents")?;
+
+        Ok(ids)
+    }
+
     /// Finalize a direct (non-pipeline) intent when all child releases are terminal.
     ///
     /// Normally reached through `emit_event`, which is how every release that

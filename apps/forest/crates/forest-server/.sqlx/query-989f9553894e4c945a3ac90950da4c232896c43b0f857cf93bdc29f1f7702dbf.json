@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT ri.id AS \"id!\"\n            FROM release_intents ri\n            WHERE ri.status = 'ACTIVE'\n              AND ri.stages IS NULL\n              AND ri.created < now() - make_interval(secs => $1::double precision)\n              AND EXISTS (\n                    SELECT 1 FROM release_states rs\n                    WHERE rs.release_intent_id = ri.id\n              )\n              AND NOT EXISTS (\n                    SELECT 1 FROM release_states rs\n                    WHERE rs.release_intent_id = ri.id\n                      AND rs.status NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT')\n              )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "989f9553894e4c945a3ac90950da4c232896c43b0f857cf93bdc29f1f7702dbf"
+}
