@@ -177,3 +177,44 @@ impl TemplateEngine {
             .with_context(|| format!("failed to render template: {template}"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every page template parses.
+    ///
+    /// `path_loader` is lazy: a template is parsed the first time it is
+    /// rendered, not at startup. Nothing else in the suite renders most
+    /// of these pages, so without this a syntax error ships and is only
+    /// found by whoever opens that page in production. Parsing is cheap
+    /// and catches the whole class.
+    #[test]
+    fn every_page_template_parses() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("templates");
+        let engine = TemplateEngine::from_path(&root).expect("load templates");
+
+        let pages = root.join("pages");
+        let mut checked = 0;
+        let mut failures = Vec::new();
+        for entry in std::fs::read_dir(&pages).expect("read pages dir") {
+            let path = entry.expect("dir entry").path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !name.ends_with(".jinja") {
+                continue;
+            }
+            let rel = format!("pages/{name}");
+            if let Err(e) = engine.env.get_template(&rel) {
+                failures.push(format!("{rel}: {e}"));
+            }
+            checked += 1;
+        }
+
+        assert!(checked > 0, "found no page templates under {pages:?}");
+        assert!(failures.is_empty(), "templates failed to parse:\n{failures:#?}");
+    }
+}
