@@ -190,26 +190,38 @@ impl PreflightCheck for C6BinaryArtifactExists {
             return Ok(());
         }
 
-        // The project promised a binary. resolve_binary applies the
-        // same path-search logic the publish flow uses; if it can't
-        // find one, neither will the publish step.
-        if crate::services::component_binary::resolve_binary(&ctx.current_dir, &ctx.component_name)
-            .is_none()
+        // The project promised a binary. This must apply *exactly* the
+        // resolution the publish flow uses, or the gate is worse than
+        // useless: DATA-654 — with `resolve_binary` here, a stray
+        // `target/debug/<name>` satisfied C6 while publish (which only
+        // reads `.forest/component/output/`) found nothing, so the
+        // publish fell through to a CUE-only shape and shipped the ghost
+        // version this check exists to prevent.
+        if crate::services::component_binary::resolve_publishable_binary(
+            &ctx.current_dir,
+            &ctx.component_name,
+            Some(&ctx.organisation),
+            Some(&ctx.component_name),
+            Some(&ctx.version),
+        )
+        .is_none()
         {
             return Err(CheckFailure {
                 id: "C6",
                 message: format!(
                     "forest.component declared a binary upload but no built artifact \
-                     for `{}` was found",
+                     for `{}` was staged in `.forest/component/output/`",
                     ctx.component_name
                 ),
                 hint: "Run your build first (e.g. `forest run build`, or your build tool \
-                       directly). The artifact must land where forest looks for it: a \
-                       file named after the component, executable, on the current \
-                       platform. Forest is build-tool agnostic — whatever you use \
+                       directly). The artifact must land where forest publishes from: \
+                       `.forest/component/output/<os>/<arch>/<name>`, named after the \
+                       component. Forest is build-tool agnostic — whatever you use \
                        (cargo, go build, dotnet publish, make, shell script), the \
-                       contract is the same: produce the artifact at the expected \
-                       path. If your build succeeded but forest still can't find it, \
+                       contract is the same: stage the artifact at that path. A binary \
+                       sitting in a cargo `target/debug` or `target/release` directory \
+                       is deliberately not used — publishing those shipped stale debug \
+                       builds. If your build succeeded but forest still can't find it, \
                        the artifact's name doesn't match the component's name."
                     .into(),
             });
@@ -444,6 +456,47 @@ mod tests {
         // language-agnostic message lists several as examples but
         // doesn't single out one.
         assert!(err.hint.contains("build-tool agnostic"));
+    }
+
+    /// DATA-654. C6 used to call `resolve_binary`, which walks up to the
+    /// cargo workspace root and probes `target/debug/<name>`. A stale debug
+    /// build sitting there satisfied the gate, publish then found nothing in
+    /// `.forest/component/output/` and — before this change — uploaded the
+    /// decoy; after it, publish would refuse *after* the preflight had passed.
+    /// Either way C6 has to be the one that says no, and say why.
+    #[test]
+    fn c6_is_not_satisfied_by_a_cargo_target_binary() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+        let decoy_dir = tmp.path().join("target/debug");
+        std::fs::create_dir_all(&decoy_dir).unwrap();
+        std::fs::write(decoy_dir.join("widget"), b"stale debug build").unwrap();
+
+        let component_dir = tmp.path().join("components/widget");
+        std::fs::create_dir_all(&component_dir).unwrap();
+
+        let doc = serde_json::json!({
+            "forest": {
+                "component": {
+                    "name": "widget",
+                    "upload": {
+                        "architectures": { "macos": { "arm64": {} } }
+                    }
+                }
+            }
+        });
+        let mut ctx = ctx_with(doc, "0.1.0");
+        ctx.current_dir = component_dir;
+
+        let err = C6BinaryArtifactExists
+            .run(&ctx)
+            .expect_err("a target/ binary must not satisfy the binary-artifact gate");
+        assert_eq!(err.id, "C6");
+        assert!(
+            err.message.contains(".forest/component/output/"),
+            "the failure should name where the artifact belongs: {}",
+            err.message
+        );
     }
 
     // --- C8 -------------------------------------------------------

@@ -86,8 +86,13 @@ pub fn resolve_meta_json(
 ///
 /// Reads the layout the build component writes,
 /// `.forest/component/output/<os>/<arch>/<name>`, so it needs no manifest and
-/// stays correct for whatever subset actually built. Empty means fall back to the
-/// single-binary resolution below (cargo target dirs, registry cache).
+/// stays correct for whatever subset actually built.
+///
+/// DATA-654: this is publish's source of truth, not a preference. Empty means
+/// the build has not run, which publish reports as an error rather than papering
+/// over with something found in `target/`. Since DATA-654 no resolver in forest
+/// reads a cargo target directory at all — the host-platform equivalent of this
+/// function is [`staged_output_binary`].
 pub fn discover_output_binaries(
     component_dir: &Path,
     component_name: &str,
@@ -145,12 +150,27 @@ pub fn resolve_binary_with_meta(
     version: Option<&str>,
 ) -> Option<PathBuf> {
     // 1. Try to find a locally-built binary and sync to cache if changed
-    if let Some(local_binary) = find_local_binary(component_dir, component_name) {
+    if let Some(local_binary) = staged_output_binary(component_dir, component_name) {
         let meta_path = resolve_meta_for_sync(component_dir, organisation, name, version);
         return sync_local_binary_to_cache_at(component_dir, &local_binary, meta_path.as_deref());
     }
 
     // 2. Fall back to meta.json → content-addressable cache (registry deps)
+    resolve_cached_binary(component_dir, organisation, name, version)
+}
+
+/// Resolve this platform's binary through `meta.json` → the content-addressable
+/// cache. Used for registry deps, whose binary never exists in the working tree.
+///
+/// Not reachable from `forest publish`: it records only the *host* platform and only
+/// whatever was cached last, so it is right for a registry dep and wrong for a
+/// publish. See [`resolve_publishable_binary`].
+fn resolve_cached_binary(
+    component_dir: &Path,
+    organisation: Option<&str>,
+    name: Option<&str>,
+    version: Option<&str>,
+) -> Option<PathBuf> {
     let meta_path = if let (Some(org), Some(n), Some(v)) = (organisation, name, version) {
         resolve_meta_json(component_dir, org, n, v)
     } else {
@@ -181,6 +201,47 @@ pub fn resolve_binary_with_meta(
     resolve_binary_from_hash(sha256)
 }
 
+/// The host-platform binary `forest publish` may upload, or `None`.
+///
+/// DATA-654. Exactly one source: `.forest/component/output/<os>/<arch>/<name>`,
+/// what the build components write.
+///
+/// Not [`resolve_binary`], which still falls back to `meta.json` → the
+/// content-addressable cache. That fallback is right for a registry dep, whose
+/// binary never exists in the working tree, and wrong for a publish twice over:
+/// `meta.json` records only the *host* platform, so honouring it would ship a
+/// single-platform manifest for a project whose matrix names four (the DATA-312
+/// bug), and the blob it names is whatever was cached last rather than what this
+/// tree just built.
+///
+/// The `target/` probe that used to sit behind this — walking up to the cargo
+/// workspace root for `target/debug/<name>` *before* `target/release/<name>* —
+/// is gone from forest entirely, so there is no longer a way for a debug build
+/// to reach `meta.json` either. See [`staged_output_binary`].
+///
+/// Returning the host platform's artifact specifically is what the publish flow
+/// needs: it runs this binary's `_meta/describe` to derive the manifest. Every
+/// *other* platform in the matrix is picked up by [`discover_output_binaries`].
+pub fn resolve_publishable_binary(
+    component_dir: &Path,
+    component_name: &str,
+    organisation: Option<&str>,
+    name: Option<&str>,
+    version: Option<&str>,
+) -> Option<PathBuf> {
+    let staged = staged_output_binary(component_dir, component_name)?;
+
+    // Sync to the content-addressable cache exactly as the run/validate paths
+    // do, so meta.json stays current for consumers. Falling back to the staged
+    // path keeps publish working if the cache is unwritable — it is still the
+    // artifact the build produced.
+    let meta_path = resolve_meta_for_sync(component_dir, organisation, name, version);
+    Some(
+        sync_local_binary_to_cache_at(component_dir, &staged, meta_path.as_deref())
+            .unwrap_or(staged),
+    )
+}
+
 /// Resolve the meta.json path for sync operations.
 fn resolve_meta_for_sync(
     component_dir: &Path,
@@ -203,46 +264,43 @@ fn resolve_meta_for_sync(
     }
 }
 
-/// Find a locally-built binary for a component (Cargo workspace or standalone).
-fn find_local_binary(component_dir: &Path, binary_name: &str) -> Option<PathBuf> {
-    // DATA-312: the build component (`forest run build`) writes artifacts to
-    // `.forest/component/output/<os>/<arch>/<name>`. Prefer that — it's the
-    // deterministic, toolchain-agnostic location, independent of cargo's
-    // per-triple `target/<triple>/release` layout (which a plain
-    // `target/release` probe misses for cross/explicit-target builds).
+/// The one place forest looks on disk for a locally-built component binary:
+/// `.forest/component/output/<os>/<arch>/<name>`.
+///
+/// DATA-312 put the artifact here — the deterministic, toolchain-agnostic
+/// location, independent of cargo's per-triple `target/<triple>/release` layout
+/// (which a plain `target/release` probe misses for cross/explicit-target
+/// builds).
+///
+/// DATA-654 made it the *only* one. There used to be a second source behind
+/// this: a walk up to the cargo workspace root probing `target/debug/<name>`
+/// before `target/release/<name>`. `forest publish` fell through to it whenever
+/// the output tree was empty and uploaded stale debug builds to the registry —
+/// and because this result is what `sync_local_binary_to_cache_at` records in
+/// `meta.json`, a single `forest run` was enough to put a debug binary's hash
+/// into the content-addressable cache as well. Deleting the probe closes both
+/// at once, so nothing downstream has to defend against a hash-verified debug
+/// build: one can no longer be recorded.
+///
+/// The cost is the bootstrap case — forest's own build components cannot build
+/// themselves, so `cargo build` alone no longer makes them runnable. Stage them
+/// with `mise run contrib:stage`, the same recipe `publish-build-component.yml`
+/// uses in CI. Every other component arrives here via `forest run build`, which
+/// writes this layout by construction.
+fn staged_output_binary(component_dir: &Path, binary_name: &str) -> Option<PathBuf> {
     let (os, arch) = current_platform();
-    let forest_artifact = component_dir
+    let dir = component_dir
         .join(".forest/component/output")
         .join(os)
-        .join(arch)
-        .join(binary_name);
-    if forest_artifact.is_file() {
-        return Some(forest_artifact);
-    }
-
-    // Walk up to find workspace root with target/debug/{name}
-    let mut dir = component_dir.to_path_buf();
-    loop {
-        let cargo_toml = dir.join("Cargo.toml");
-        if cargo_toml.exists() {
-            if let Ok(content) = std::fs::read_to_string(&cargo_toml) {
-                if content.contains("[workspace]") {
-                    let candidate = dir.join("target").join("debug").join(binary_name);
-                    if candidate.is_file() {
-                        return Some(candidate);
-                    }
-                    let candidate = dir.join("target").join("release").join(binary_name);
-                    if candidate.is_file() {
-                        return Some(candidate);
-                    }
-                    return None;
-                }
-            }
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
+        .join(arch);
+    // Windows builds carry .exe; everything else is bare. Matches
+    // `discover_output_binaries` and `forest_build_core::output_filename`.
+    [
+        dir.join(binary_name),
+        dir.join(format!("{binary_name}.exe")),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_file())
 }
 
 /// Hash a local binary, compare to meta.json, update cache if changed.
@@ -1247,5 +1305,101 @@ mod discover_tests {
         let tmp = tempfile::tempdir().unwrap();
         write_binary(tmp.path(), "linux", "amd64", "somethingelse");
         assert!(discover_output_binaries(tmp.path(), "mytool").is_empty());
+    }
+}
+
+/// DATA-654 — no resolver in forest sees the cargo target directory any more.
+///
+/// The decoy in each of these is a `target/debug/<name>` inside a real cargo
+/// workspace layout: exactly what publish used to upload, and what a single
+/// `forest run` used to launder into `meta.json` and the content-addressable
+/// cache.
+#[cfg(test)]
+mod publishable_resolution_tests {
+    use super::*;
+
+    /// A cargo workspace root with a component subdirectory and a decoy
+    /// `target/debug/<name>` — the stale debug build that used to get
+    /// published.
+    fn workspace_with_decoy(name: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+
+        let decoy_dir = tmp.path().join("target/debug");
+        std::fs::create_dir_all(&decoy_dir).unwrap();
+        let decoy = decoy_dir.join(name);
+        std::fs::write(&decoy, b"stale debug build").unwrap();
+
+        let component = tmp.path().join("components").join(name);
+        std::fs::create_dir_all(&component).unwrap();
+        (tmp, component, decoy)
+    }
+
+    #[test]
+    fn publish_ignores_a_cargo_target_binary() {
+        let (_tmp, component, _decoy) = workspace_with_decoy("mytool");
+
+        assert!(
+            resolve_publishable_binary(&component, "mytool", None, None, None).is_none(),
+            "publish resolved a binary from the cargo target directory",
+        );
+    }
+
+    /// The probe is gone from the general-purpose resolver too, not just from
+    /// publish. `forest run` on a component whose build has not been staged
+    /// gets nothing rather than a debug binary.
+    #[test]
+    fn local_resolution_no_longer_finds_a_cargo_target_binary() {
+        let (_tmp, component, _decoy) = workspace_with_decoy("mytool");
+
+        assert_eq!(staged_output_binary(&component, "mytool"), None);
+    }
+
+    #[test]
+    fn publish_takes_the_staged_output() {
+        let (_tmp, component, _decoy) = workspace_with_decoy("mytool");
+        let (os, arch) = current_platform();
+        let staged_dir = component
+            .join(".forest/component/output")
+            .join(os)
+            .join(arch);
+        std::fs::create_dir_all(&staged_dir).unwrap();
+        std::fs::write(staged_dir.join("mytool"), b"release build").unwrap();
+
+        let resolved = resolve_publishable_binary(&component, "mytool", None, None, None)
+            .expect("staged artifact should resolve");
+        assert!(
+            !resolved.components().any(|c| c.as_os_str() == "target"),
+            "resolved a target/ path: {}",
+            resolved.display(),
+        );
+    }
+
+    /// Closing the probe closes the laundering path with it: because
+    /// `meta.json` is written from [`staged_output_binary`]'s result, a decoy in
+    /// `target/` can no longer reach the content-addressable cache at all.
+    /// Nothing downstream has to defend against a hash-verified debug build,
+    /// because one can no longer be recorded.
+    #[test]
+    fn a_target_build_can_no_longer_be_synced_into_the_cache() {
+        let (_tmp, component, decoy) = workspace_with_decoy("mytool");
+        assert!(decoy.is_file(), "precondition: the decoy exists");
+
+        assert!(
+            resolve_binary(&component, "mytool").is_none(),
+            "the local resolver still reaches the cargo target directory",
+        );
+        assert!(
+            !component.join(".forest/component/meta.json").exists(),
+            "a target/ build was recorded in meta.json",
+        );
+    }
+
+    /// Nothing built at all: no staged output, no meta.json. Publish gets
+    /// `None` and reports it rather than guessing.
+    #[test]
+    fn publish_resolves_nothing_when_nothing_was_built() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(resolve_publishable_binary(tmp.path(), "mytool", None, None, None).is_none());
     }
 }

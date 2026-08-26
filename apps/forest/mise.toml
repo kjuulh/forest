@@ -57,6 +57,47 @@ run = "cargo run -p forest-server -- serve"
 [tasks."build"]
 run = "cargo build --release"
 
+# Bootstrap the forest-contrib build components (DATA-654).
+#
+# They cannot build themselves: `build-rust` exposes `commands/build` for
+# *other* projects and has no build command of its own, so there is no
+# `forest run build` that produces it. Since forest resolves a local component
+# only from `.forest/component/output/<os>/<arch>/<name>`, a plain `cargo build`
+# no longer makes them runnable — the artifact has to be staged there.
+#
+# Same recipe `.github/workflows/publish-build-component.yml` uses to bootstrap
+# them in CI, just from a debug build: the output tree is a plain filesystem
+# contract, so a plain cargo build can stand in for the component that cannot
+# build itself.
+#
+# Run this once after a fresh clone (or after `cargo clean`) if `forest run` in
+# an example reports no build command.
+[tasks."contrib:stage"]
+description = "Stage the forest-contrib build components so `forest run build` works locally"
+run = """
+set -euo pipefail
+
+case "$(uname -s)" in
+  Darwin) os=macos ;;
+  Linux)  os=linux ;;
+  *) echo "unsupported host os: $(uname -s)" >&2; exit 1 ;;
+esac
+case "$(uname -m)" in
+  arm64|aarch64) arch=arm64 ;;
+  x86_64|amd64)  arch=amd64 ;;
+  *) echo "unsupported host arch: $(uname -m)" >&2; exit 1 ;;
+esac
+
+for c in build-rust build-go build-docker; do
+  cargo build -p "$c"
+  out="components/forest-contrib/$c/.forest/component/output/$os/$arch"
+  mkdir -p "$out"
+  cp "target/debug/$c" "$out/$c"
+  chmod +x "$out/$c"
+  echo "staged $c -> $out/$c"
+done
+"""
+
 [tasks."forest:docker:build"]
 run = "docker build -f ./templates/forest.Dockerfile -t docker.io/kasperhermansen/forest:local ."
 

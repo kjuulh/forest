@@ -81,29 +81,162 @@ fn derive_summary_shape(kind: &str, has_tool: bool, has_methods: bool) -> &'stat
     }
 }
 
-/// The binaries to publish, newest-build-layout first.
+/// The binaries to publish: everything under `.forest/component/output/`, and
+/// nothing else.
 ///
-/// Prefers everything under `.forest/component/output/`, which is what the build
-/// components write and therefore covers the whole cross-compile matrix. Falls
-/// back to the single resolved binary for layouts that predate it (a cargo target
-/// directory, or a binary restored from the registry cache), so behaviour is
-/// unchanged for projects that only ever produced one.
+/// DATA-654. That directory is what the build components write
+/// (`forest run build`), it covers the whole cross-compile matrix, and it holds
+/// *release* artifacts. Before this it was only a preference: an empty output
+/// tree fell back to `component_binary::resolve_binary`, which walks up to the
+/// cargo workspace root and probes `target/debug/<name>` *before*
+/// `target/release/<name>`. Publish then shipped whatever happened to be in
+/// `target/` — in practice a stale debug build, more than once.
+///
+/// There is no fallback now, not even the content-addressable cache: `meta.json`
+/// records whatever the *local* resolver last synced, and `forest run` syncs
+/// `target/debug` builds into it, so honouring the cache would upload the same
+/// stale binary with a hash check in front of it. See
+/// `component_binary::resolve_publishable_binary`.
+///
+/// An empty output tree is an error, loudly, rather than a quiet mis-upload.
 fn publishable_binaries(
     current_dir: &std::path::Path,
     name: &str,
-    resolved: Option<&std::path::Path>,
-) -> Vec<(String, String, std::path::PathBuf)> {
+) -> anyhow::Result<Vec<(String, String, std::path::PathBuf)>> {
     let discovered = component_binary::discover_output_binaries(current_dir, name);
     if !discovered.is_empty() {
-        return discovered;
+        return Ok(discovered);
     }
 
-    match resolved {
-        Some(path) => {
-            let (os, arch) = component_binary::current_platform();
-            vec![(os.to_string(), arch.to_string(), path.to_path_buf())]
-        }
-        None => Vec::new(),
+    anyhow::bail!(
+        "no staged artifact in `.forest/component/output/` for `{name}` — run the build \
+         (`forest run build`) before publishing.\n\
+         \n\
+         forest publishes only what the build stages there. It deliberately does not \
+         pick up a binary found elsewhere in the working tree (a cargo `target/debug` \
+         or `target/release` build), because doing so uploaded stale debug binaries to \
+         the registry."
+    )
+}
+
+/// DATA-654 — `.forest` is the only place a publish takes artifacts from.
+///
+/// The decoy in every one of these is a `target/debug/<name>` inside a real
+/// cargo workspace layout, i.e. exactly what `find_local_binary` used to hand
+/// the publish flow and what got uploaded to the registry as a stale debug
+/// build. It must never appear in the result.
+#[cfg(test)]
+mod publishable_binaries_tests {
+    use super::*;
+
+    /// A cargo workspace root with a component subdirectory, plus a decoy
+    /// `target/debug/<name>` that the old resolver would have found by
+    /// walking up from the component.
+    fn workspace_with_decoy(name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+
+        let decoy_dir = tmp.path().join("target/debug");
+        std::fs::create_dir_all(&decoy_dir).unwrap();
+        std::fs::write(decoy_dir.join(name), b"stale debug build").unwrap();
+
+        let component = tmp.path().join("components").join(name);
+        std::fs::create_dir_all(&component).unwrap();
+        (tmp, component)
+    }
+
+    fn stage(component: &std::path::Path, os: &str, arch: &str, name: &str) {
+        let d = component
+            .join(".forest/component/output")
+            .join(os)
+            .join(arch);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join(name), b"release build").unwrap();
+    }
+
+    #[test]
+    fn publishes_every_staged_platform_and_nothing_from_target() {
+        let (_tmp, component) = workspace_with_decoy("mytool");
+        stage(&component, "linux", "amd64", "mytool");
+        stage(&component, "linux", "arm64", "mytool");
+        stage(&component, "macos", "arm64", "mytool");
+
+        let found = publishable_binaries(&component, "mytool").unwrap();
+
+        let keys: Vec<String> = found
+            .iter()
+            .map(|(os, arch, _)| format!("{os}/{arch}"))
+            .collect();
+        assert_eq!(keys, vec!["linux/amd64", "linux/arm64", "macos/arm64"]);
+        assert!(
+            found
+                .iter()
+                .all(|(_, _, p)| !p.components().any(|c| c.as_os_str() == "target")),
+            "a target/ path reached the publish set: {found:?}",
+        );
+    }
+
+    /// The regression this whole change exists for: nothing staged, a stale
+    /// debug binary sitting in target/. Publish must refuse, not upload it.
+    #[test]
+    fn empty_forest_dir_fails_loudly_instead_of_falling_back_to_target() {
+        let (_tmp, component) = workspace_with_decoy("mytool");
+
+        let err = publishable_binaries(&component, "mytool")
+            .expect_err("an unpopulated .forest must not resolve to the target/ decoy");
+        let msg = format!("{err}");
+
+        assert!(
+            msg.contains(".forest/component/output/"),
+            "error should name the directory the build stages into: {msg}",
+        );
+        assert!(
+            msg.contains("forest run build"),
+            "error should tell the user how to fix it: {msg}",
+        );
+    }
+
+    /// A `meta.json` naming a cached blob — the shape a "registry cache
+    /// restore" would take — is not a fallback either. That file records
+    /// whatever the *local* resolver last synced, and `forest run` fills it
+    /// from `target/debug`, so it cannot vouch for the build profile.
+    #[test]
+    fn a_cached_blob_is_not_a_fallback_for_an_empty_forest_dir() {
+        let (_tmp, component) = workspace_with_decoy("mytool");
+
+        let meta_dir = component.join(".forest/component");
+        std::fs::create_dir_all(&meta_dir).unwrap();
+        let (os, arch) = component_binary::current_platform();
+        std::fs::write(
+            meta_dir.join("meta.json"),
+            format!(
+                r#"{{"platforms":{{"{os}_{arch}":{{"sha256":"{}","size":17}}}}}}"#,
+                "0".repeat(64)
+            ),
+        )
+        .unwrap();
+
+        assert!(
+            publishable_binaries(&component, "mytool").is_err(),
+            "a cached blob must not stand in for a staged build artifact",
+        );
+    }
+
+    /// A partial matrix still publishes what built. Cross-compiling is not
+    /// always possible on one runner (DATA-583), so "some platforms staged"
+    /// must stay a success, not become the new failure mode.
+    #[test]
+    fn a_partial_matrix_publishes_the_platforms_that_built() {
+        let (_tmp, component) = workspace_with_decoy("mytool");
+        stage(&component, "linux", "amd64", "mytool");
+
+        let found = publishable_binaries(&component, "mytool").unwrap();
+        assert_eq!(found.len(), 1);
+        assert!(
+            found[0]
+                .2
+                .ends_with(".forest/component/output/linux/amd64/mytool")
+        );
     }
 }
 
@@ -521,7 +654,18 @@ impl PublishCommand {
         }
 
         // 2. Check for binary (optional — CUE-only / Deno components don't need one)
-        let binary_path = component_binary::resolve_binary(&current_dir, name);
+        //
+        // DATA-654: resolve through the publish-only resolver, not
+        // `resolve_binary`. The latter also probes the cargo target directory,
+        // which would let a stray `target/debug/<name>` answer "yes, this is a
+        // binary component" here and then be uploaded below.
+        let binary = component_binary::resolve_publishable_binary(
+            &current_dir,
+            name,
+            Some(organisation),
+            Some(name),
+            Some(version),
+        );
 
         // Detect Deno components: forest.cue declares `upload.type = "deno"`
         // *or* the working dir has the Deno shape (deno.json + src/main.ts).
@@ -541,7 +685,7 @@ impl PublishCommand {
             || (current_dir.join("deno.json").exists()
                 && current_dir.join("src").join("main.ts").exists());
 
-        let (descriptor, kind) = if let Some(ref bp) = binary_path {
+        let (descriptor, kind) = if let Some(bp) = binary.as_ref() {
             let desc = if let Some(cached) = component_binary::load_cached_descriptor(&current_dir)
             {
                 cached
@@ -589,12 +733,10 @@ impl PublishCommand {
             // `platforms` is binary-only metadata: per-OS/arch hashes for
             // the downloader. Deno components run via the source bundle
             // we upload separately and have no `platforms` map.
-            if binary_path.is_some() {
+            if binary.is_some() {
                 // Every platform the build produced, not just the host's.
                 let mut platforms = serde_json::Map::new();
-                for (os, arch, path) in
-                    publishable_binaries(&current_dir, name, binary_path.as_deref())
-                {
+                for (os, arch, path) in publishable_binaries(&current_dir, name)? {
                     // forest-manifest's validator accepts "darwin", not "macos";
                     // the on-disk layout uses "macos", so translate at the
                     // manifest boundary.
@@ -644,22 +786,21 @@ impl PublishCommand {
                 .as_ref()
                 .map(|d| !d.methods.is_empty())
                 .unwrap_or(false);
-            let platform = if binary_path.is_some() {
+            let platform = if binary.is_some() {
                 // Report every platform that would be uploaded. Summarising only
                 // the host's was how a single-platform publish went unnoticed:
                 // the dry-run agreed with the mistake.
-                let listed: Vec<String> =
-                    publishable_binaries(&current_dir, name, binary_path.as_deref())
-                        .into_iter()
-                        .map(|(os, arch, _)| {
-                            let os = if os == "macos" {
-                                "darwin".to_string()
-                            } else {
-                                os
-                            };
-                            format!("{os}_{arch}")
-                        })
-                        .collect();
+                let listed: Vec<String> = publishable_binaries(&current_dir, name)?
+                    .into_iter()
+                    .map(|(os, arch, _)| {
+                        let os = if os == "macos" {
+                            "darwin".to_string()
+                        } else {
+                            os
+                        };
+                        format!("{os}_{arch}")
+                    })
+                    .collect();
                 if listed.is_empty() {
                     "no-platform".to_string()
                 } else {
@@ -690,9 +831,8 @@ impl PublishCommand {
         let abort_guard = AbortOnDrop::new(client.clone(), &upload_context);
 
         // 5. Upload binary (if present)
-        if binary_path.is_some() {
-            for (os, arch, path) in publishable_binaries(&current_dir, name, binary_path.as_deref())
-            {
+        if binary.is_some() {
+            for (os, arch, path) in publishable_binaries(&current_dir, name)? {
                 // Align the upload os with what the manifest validator +
                 // resolver expect ("darwin" not "macos").
                 let upload_os = if os == "macos" { "darwin" } else { os.as_str() };
@@ -797,7 +937,7 @@ impl PublishCommand {
             .as_ref()
             .map(|d| !d.methods.is_empty())
             .unwrap_or(false);
-        let platform = if binary_path.is_some() {
+        let platform = if binary.is_some() {
             let (os, arch) = component_binary::current_platform();
             let platform_os = if os == "macos" { "darwin" } else { os };
             format!("{platform_os}_{arch}")
