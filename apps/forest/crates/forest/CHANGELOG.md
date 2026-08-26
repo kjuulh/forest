@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.3.0](https://github.com/understory-io/forest/compare/v0.2.20...v0.3.0) (2026-08-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **publish:** `forest publish` now fails when `.forest/component/output/` is empty instead of falling back to a binary found elsewhere in the working tree, and `forest run` / `forest validate` no longer resolve a component from a cargo `target/debug` or `target/release` build. Run `forest run build` first; for the forest-contrib build components, `mise run contrib:stage`.
+
+### Features
+
+* **directory:** machine-facing lookup from external identity to linked accounts ([#181](https://github.com/understory-io/forest/issues/181)) ([975a0b0](https://github.com/understory-io/forest/commit/975a0b04550671d97765b160ae071d2de6c5eca4))
+* **forage:** Releases view shows last 20 with "Show more" (DATA-659) ([#185](https://github.com/understory-io/forest/issues/185)) ([b176a35](https://github.com/understory-io/forest/commit/b176a353b20d99483f23edeaebc231e4d21f1d30))
+* **forage:** tell live, in-flight and past deploys apart on the lanes (DATA-661) ([#187](https://github.com/understory-io/forest/issues/187)) ([19bd7ec](https://github.com/understory-io/forest/commit/19bd7ec44e20c9c8c4fe4cc6a960e664ad5e0b18))
+
+
+### Bug Fixes
+
+* **destination:** let a destination that predates the event store be updated ([#180](https://github.com/understory-io/forest/issues/180)) ([d996b66](https://github.com/understory-io/forest/commit/d996b66302ae4cd3cfd8cf8a7ef62bcc5b88d97c))
+* **directory:** match either provider spelling, whichever the row has ([#184](https://github.com/understory-io/forest/issues/184)) ([b6c13f9](https://github.com/understory-io/forest/commit/b6c13f99a249d68fea56a5f6b413016f8724e32a))
+* **directory:** match the provider spelling the write path actually stores ([#183](https://github.com/understory-io/forest/issues/183)) ([24febc4](https://github.com/understory-io/forest/commit/24febc46f86988d13d1a8bdd8df3d29b2e5b54a9))
+* **forage:** keep superseded releases on the timeline (DATA-660) ([#186](https://github.com/understory-io/forest/issues/186)) ([5d957d2](https://github.com/understory-io/forest/commit/5d957d2ab30d188a33f10cd209d3b079329c1faf))
+* **forest:** return a project's whole release history, not the last 50 (DATA-662) ([#188](https://github.com/understory-io/forest/issues/188)) ([530dda8](https://github.com/understory-io/forest/commit/530dda81d49107b0f5f108193eb018be73333c62))
+* **publish:** publish only from `.forest`, and delete the cargo `target/` probe (DATA-654) ([#175](https://github.com/understory-io/forest/issues/175)) ([39e07f9](https://github.com/understory-io/forest/commit/39e07f9218c4127e36afeec24c4de880d6af120d))
+
 ## [0.2.20](https://github.com/understory-io/forest/compare/v0.2.19...v0.2.20) (2026-08-25)
 
 
