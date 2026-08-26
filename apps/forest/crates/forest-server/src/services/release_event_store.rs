@@ -845,14 +845,38 @@ impl ReleaseEventStore {
         Ok(rows)
     }
 
+    /// How many intents an org-wide lookup returns. Spanning every project,
+    /// it is a recent-activity feed rather than a history, so it stays capped.
+    /// A project-scoped lookup is not — see below.
+    const ORG_INTENT_LIMIT: i64 = 50;
+
     /// Get release intent states: a release-centric view that returns
     /// intent metadata, pipeline stages, and all release steps.
+    ///
+    /// A project-scoped lookup returns that project's **whole** history. It
+    /// used to be capped at 50 like the org-wide one, which quietly broke the
+    /// Releases timeline: forage rebuilds each release's destinations from
+    /// these steps, so a release past the cap had none, fell back to the
+    /// current-state-per-destination view, matched nothing, and rendered as an
+    /// undeployed commit with a blank swim lane — the DATA-660 bug returning
+    /// for anything old enough (DATA-662).
+    ///
+    /// Uncapping is safe here because the result is already bounded by the
+    /// project's own release count — the same bound as the artifact list this
+    /// gets joined against, which that caller fetches unbounded too — and the
+    /// steps below are one batched query rather than one per intent.
     pub async fn get_release_intent_states(
         &self,
         organisation: &str,
         project_id: Option<&Uuid>,
         include_completed: bool,
     ) -> anyhow::Result<Vec<(ReleaseIntentRow, Vec<ReleaseStepRow>)>> {
+        // Postgres treats `LIMIT NULL` as no limit, so this binds the choice
+        // rather than branching into two near-identical queries.
+        let limit: Option<i64> = match project_id {
+            Some(_) => None,
+            None => Some(Self::ORG_INTENT_LIMIT),
+        };
         // Fetch release intents
         let intents = sqlx::query_as!(
             ReleaseIntentRow,
@@ -884,10 +908,11 @@ impl ReleaseEventStore {
                   )
               )
             ORDER BY ri.created DESC
-            LIMIT 50"#,
+            LIMIT $4::bigint"#,
             organisation,
             project_id,
             include_completed,
+            limit,
         )
         .fetch_all(&self.db)
         .await
