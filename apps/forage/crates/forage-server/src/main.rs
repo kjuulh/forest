@@ -1,5 +1,6 @@
 mod auth;
 mod build_info;
+mod checks;
 mod compute_grpc;
 mod email_consumer;
 mod forest_client;
@@ -78,6 +79,15 @@ pub fn build_router(state: AppState) -> Router {
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+        // /health, /health/ready, /health/live — see `checks` for which is
+        // which and what each one is allowed to affect.
+        //
+        // Merged after `with_state` because these routes carry their own
+        // state, which also puts them outside the layers above. That is what
+        // we want: a probe every 30s should not run page-timing placeholder
+        // substitution, should not be gzipped, and should not spend a tracing
+        // span. They are plain status codes.
+        .merge(nostatus::axum_routes(nostatus::global()))
 }
 
 #[tokio::main]
@@ -128,11 +138,14 @@ async fn main() -> anyhow::Result<()> {
         Option<Arc<dyn forage_core::auth::oauth_state::OAuthStateStore>>,
     );
     let state_profile_pictures: Option<Arc<forage_db::PgProfilePictureStore>>;
+    let health_db: Option<sqlx::PgPool>;
 
     if let Ok(database_url) = std::env::var("DATABASE_URL") {
         tracing::info!("using PostgreSQL session store");
         let pool = sqlx::PgPool::connect(&database_url).await?;
         forage_db::migrate(&pool).await?;
+
+        health_db = Some(pool.clone());
 
         let pg_store = Arc::new(PgSessionStore::new(pool.clone()));
 
@@ -189,7 +202,10 @@ async fn main() -> anyhow::Result<()> {
             forage_core::auth::oauth_state::InMemoryOAuthStateStore::new(),
         ));
         state_profile_pictures = None;
+        health_db = None;
     };
+
+    mad.add(checks::Checks { db: health_db });
 
     let forest_client = Arc::new(forest_client);
 

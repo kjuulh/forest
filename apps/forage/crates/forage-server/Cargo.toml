@@ -39,6 +39,7 @@ reqwest.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 notmad.workspace = true
+nostatus.workspace = true
 tokio-util.workspace = true
 async-nats.workspace = true
 async-stream = "0.3"
