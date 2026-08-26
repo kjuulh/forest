@@ -24,6 +24,14 @@ run = "cargo build --release"
 
 [tasks.test]
 description = "Run all tests"
+depends = ["frontend:test"]
+run = "cargo test --workspace"
+
+# Everything, including the browser layer. Kept separate from `test` so the
+# common case stays fast and needs no browser download.
+[tasks."test:all"]
+description = "Run all tests including rendered component states"
+depends = ["frontend:test", "frontend:test:render"]
 run = "cargo test --workspace"
 
 [tasks.check]
@@ -135,6 +143,31 @@ sources = [
 ]
 outputs = ["static/js/components/forage-components.js"]
 run = "npm run build"
+
+# The Svelte components carry logic that decides what the UI *asserts* about a
+# release — whether it is finished, whether it needs you. Getting that wrong is
+# silent: the page still renders, it just says the wrong thing. So it is tested,
+# and the tests run with the rest.
+[tasks."frontend:test"]
+description = "Unit-test the Svelte component logic"
+depends = ["frontend:install"]
+dir = "frontend"
+run = "npm test"
+
+# Mounts the real components in Chromium and asserts what the DOM actually
+# shows. Separate from frontend:test because it needs a browser: `frontend:test`
+# stays runnable anywhere, and this one is skipped rather than failing when
+# Playwright's browsers are not installed.
+[tasks."frontend:test:render"]
+description = "Assert rendered component states in a real browser"
+depends = ["frontend:install"]
+dir = "frontend"
+run = """
+if ! npx playwright install chromium --dry-run >/dev/null 2>&1; then
+  echo "playwright unavailable — skipping render tests"; exit 0
+fi
+npm run gallery:capture
+"""
 
 [tasks."frontend:watch"]
 description = "Watch and rebuild Svelte components"

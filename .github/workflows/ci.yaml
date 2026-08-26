@@ -11,6 +11,65 @@ permissions:
   packages: write
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Frontend tests.
+  #
+  # The Svelte components decide what the UI asserts about a release — whether it
+  # is finished, whether it needs you. Getting that wrong is silent: the page
+  # still renders, it just says the wrong thing, and nobody notices until someone
+  # acts on it. These ran nowhere before; now they gate the build.
+  #
+  # Two layers, because they catch different failures. `frontend:test` checks the
+  # state logic and needs no browser. `frontend:test:render` mounts the real
+  # components in Chromium and asserts what the DOM actually shows — which is
+  # where the bug in spec 014 lived: the logic was right about the state and the
+  # rendering was wrong about it.
+  frontend-tests:
+    name: frontend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/forage/frontend
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/forage/frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      # Only chromium, and only its own dependencies — the full `--with-deps`
+      # for every engine is minutes of apt for a suite that opens one browser.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Starts its own vite server; no separate step to keep in sync.
+      #
+      # Timed out deliberately. This is a seven-second job, and the failure mode
+      # it already hit once was not a red test but a hang — a server child that
+      # outlived the script and kept node alive. A wedged step should cost a
+      # minute, not the runner's default hour.
+      - name: Rendered component states
+        timeout-minutes: 5
+        run: npm run gallery:capture
+
+      # The screenshots are the readable half of a failure — a diff in words
+      # tells you a state changed, these tell you what it now looks like.
+      - name: Upload state screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lane-state-screenshots
+          path: apps/forage/frontend/gallery/shots/*.png
+          if-no-files-found: warn
+
   build-and-push:
     name: build and push ${{ matrix.app }}
     runs-on:

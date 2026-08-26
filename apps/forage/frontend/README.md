@@ -29,16 +29,21 @@ in words. The unit tests cannot cover this, and it is where the bug in
 [spec 014](../specs/features/014-release-lane-states.md) actually lived — the
 logic said `pending`, and `pending` happened to look finished.
 
-Needs the gallery served first:
-
-```sh
-npm run gallery &          # :5178
-npm run gallery:capture
-```
+It starts its own vite server, so it is one command — requiring a second
+terminal is the kind of friction that stops a suite from being run.
 
 Both suites were confirmed non-vacuous by reverting the fix and watching them
 fail — 8 unit tests and 9 rendered assertions. A suite that has never failed has
 not been shown to test anything.
 
-> These are not yet wired into `mise run test` (`cargo test --workspace`).
-> Running them is a manual step.
+Both are wired in:
+
+```sh
+mise run test        # cargo test --workspace + frontend unit tests
+mise run test:all    # the above + the rendered-state suite
+```
+
+`test` deliberately excludes the browser layer so the common case stays fast and
+needs no browser download; `test:all` includes it. CI runs both on every push,
+and uploads the state screenshots as a build artifact — a diff in words tells you
+a state changed, the screenshots tell you what it now looks like.

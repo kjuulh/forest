@@ -7,10 +7,14 @@
  * distinguishably — which is where the original bug lived: the logic said
  * "pending", and pending happened to look finished.
  *
- *   npm run gallery            # serve (separate terminal)
- *   node gallery/capture.mjs   # assert + screenshot
+ *   npm run gallery:capture
+ *
+ * Starts the gallery server itself unless GALLERY_URL points at one already, so
+ * it is a single command locally and in CI. Requiring a second terminal is the
+ * kind of friction that keeps a suite from being run.
  */
 import { chromium } from "playwright";
+import { spawn } from "node:child_process";
 import { FIXTURES } from "../src/lib/fixtures.js";
 import { isUnfinished } from "../src/lib/lane-states.js";
 import { mkdirSync } from "node:fs";
@@ -19,9 +23,56 @@ import { dirname, join } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SHOTS = join(HERE, "shots");
-const URL = process.env.GALLERY_URL || "http://localhost:5178/";
+const EXTERNAL = process.env.GALLERY_URL;
+const URL = EXTERNAL || "http://localhost:5178/";
 
 mkdirSync(SHOTS, { recursive: true });
+
+async function reachable(url, ms) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(1500) });
+      if (res.ok) return true;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
+}
+
+// Start the server unless one is already there. `vite` writes to stderr on
+// startup, so its output is only surfaced when it fails to come up.
+let server = null;
+if (!EXTERNAL && !(await reachable(URL, 1000))) {
+  // The vite binary directly, not `npx vite`. Through npx, vite is a
+  // *grandchild*: killing the child kills npx and leaves vite running, holding
+  // its piped stdio open, and node then never exits. That hung a CI job for
+  // eleven minutes on a seven-second task — and did not reproduce on macOS,
+  // where the process tree collapses differently.
+  //
+  // `detached` puts it in its own process group so the whole group can be
+  // signalled, in case vite ever spawns children of its own.
+  const vite = join(HERE, "..", "node_modules", ".bin", "vite");
+  server = spawn(vite, ["--config", "vite.gallery.config.js"], {
+    cwd: join(HERE, ".."), stdio: ["ignore", "pipe", "pipe"], detached: true,
+  });
+  const log = [];
+  server.stdout.on("data", (d) => log.push(d.toString()));
+  server.stderr.on("data", (d) => log.push(d.toString()));
+  if (!(await reachable(URL, 30000))) {
+    server.kill();
+    console.error(`gallery server never came up at ${URL}\n${log.join("")}`);
+    process.exit(1);
+  }
+}
+const stopServer = () => {
+  if (!server || server.killed) return;
+  try {
+    process.kill(-server.pid, "SIGTERM");  // the group, not just the leader
+  } catch {
+    server.kill("SIGTERM");
+  }
+};
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1180, height: 900 }, deviceScaleFactor: 2 });
@@ -87,6 +138,7 @@ try {
   }
 } finally {
   await browser.close();
+  stopServer();
 }
 
 if (failures.length) {
@@ -95,3 +147,5 @@ if (failures.length) {
   process.exit(1);
 }
 console.log(`\nall ${FIXTURES.length} states render distinguishably; screenshots in gallery/shots/`);
+// Explicit: a stray handle must not turn a passing run into a hung job.
+process.exit(0);
