@@ -127,6 +127,21 @@ pub enum ApprovalStatus {
     Rejected,
 }
 
+impl ApprovalStatus {
+    /// The wire spelling. Deliberately not `format!("{:?}")` — `Debug` renders
+    /// the Rust variant name (`AwaitingApproval` → `AWAITINGAPPROVAL`), which
+    /// disagreed with both the value serde persists in `stage_states` and the
+    /// value `PipelineStageState.approval_status` is documented to carry.
+    /// Clients comparing against `AWAITING_APPROVAL` never matched.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::AwaitingApproval => "AWAITING_APPROVAL",
+            Self::Approved => "APPROVED",
+            Self::Rejected => "REJECTED",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StageStatus {
@@ -488,6 +503,25 @@ impl ReleasePipelineRegistryState for State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approval_status_wire_spelling_is_screaming_snake_case() {
+        // Must match what serde persists in `stage_states` and what
+        // PipelineStageState.approval_status is documented to carry. `Debug`
+        // would render "AwaitingApproval" and clients would never match.
+        assert_eq!(ApprovalStatus::AwaitingApproval.as_str(), "AWAITING_APPROVAL");
+        assert_eq!(ApprovalStatus::Approved.as_str(), "APPROVED");
+        assert_eq!(ApprovalStatus::Rejected.as_str(), "REJECTED");
+
+        for status in [
+            ApprovalStatus::AwaitingApproval,
+            ApprovalStatus::Approved,
+            ApprovalStatus::Rejected,
+        ] {
+            let json = serde_json::to_string(&status).unwrap();
+            assert_eq!(json.trim_matches('"'), status.as_str());
+        }
+    }
 
     #[test]
     fn test_validate_pipeline_simple() {

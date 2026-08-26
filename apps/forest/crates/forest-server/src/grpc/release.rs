@@ -740,8 +740,22 @@ impl ReleaseService for ReleaseServer {
                 .await;
         }
 
-        Ok(Response::new(ReleaseResponse {
-            intents: created
+        // A pipeline release is created with every stage PENDING — the
+        // coordinator activates the first one on its next sweep — so there are
+        // no `releases` rows yet and this list would come back empty. Callers
+        // read the intent id out of here, so an empty list left `forest release
+        // create --pipeline` failing with "no intents returned" on a pipeline
+        // that had in fact started correctly, and with no handle to approve it
+        // by. Surface the intent itself instead; destination and environment
+        // are genuinely not known yet, and are left blank rather than invented.
+        let intents: Vec<ReleaseIntent> = if created.releases.is_empty() {
+            vec![ReleaseIntent {
+                release_intent_id: created.release_intent_id.to_string(),
+                destination: String::new(),
+                environment: String::new(),
+            }]
+        } else {
+            created
                 .releases
                 .into_iter()
                 .map(|r| ReleaseIntent {
@@ -749,8 +763,10 @@ impl ReleaseService for ReleaseServer {
                     destination: r.destination,
                     environment: r.environment,
                 })
-                .collect(),
-        }))
+                .collect()
+        };
+
+        Ok(Response::new(ReleaseResponse { intents }))
     }
 
     type WaitReleaseStream = ReceiverStream<Result<WaitReleaseEvent, tonic::Status>>;
@@ -881,7 +897,7 @@ impl ReleaseService for ReleaseServer {
                                             error_message: state.error_message.clone(),
                                             approval_status: state
                                                 .approval_status
-                                                .map(|a| format!("{:?}", a).to_uppercase()),
+                                                .map(|a| a.as_str().to_string()),
                                         },
                                     )),
                                 };
@@ -1938,7 +1954,7 @@ fn intent_to_stage_states(
                     s.error_message.clone(),
                     s.wait_until.clone(),
                     s.release_ids.clone().unwrap_or_default(),
-                    s.approval_status.map(|a| format!("{:?}", a).to_uppercase()),
+                    s.approval_status.map(|a| a.as_str().to_string()),
                 )
             } else {
                 (
@@ -2017,7 +2033,7 @@ fn pipeline_run_to_proto(
                     s.error_message.clone(),
                     s.wait_until.clone(),
                     s.release_ids.clone().unwrap_or_default(),
-                    s.approval_status.map(|a| format!("{:?}", a).to_uppercase()),
+                    s.approval_status.map(|a| a.as_str().to_string()),
                 )
             } else {
                 (

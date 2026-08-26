@@ -175,16 +175,16 @@ impl ShowCommand {
     }
 }
 
-struct ResolvedRelease {
-    annotation: ReleaseAnnotation,
-    project: Project,
-    intent_id: Uuid,
-    intent_state: forest_grpc_interface::ReleaseIntentState,
+pub(crate) struct ResolvedRelease {
+    pub(crate) annotation: ReleaseAnnotation,
+    pub(crate) project: Project,
+    pub(crate) intent_id: Uuid,
+    pub(crate) intent_state: forest_grpc_interface::ReleaseIntentState,
 }
 
 /// Treat the target as a release-intent UUID first; fall back to slug.
 /// UUIDs are unambiguous so the order avoids accidental collisions.
-async fn resolve_target(
+pub(crate) async fn resolve_target(
     state: &State,
     target: &str,
     organisation_hint: Option<&str>,
@@ -260,7 +260,7 @@ async fn resolve_target(
     })
 }
 
-async fn pick_release_interactive(
+pub(crate) async fn pick_release_interactive(
     state: &State,
     organisation_hint: Option<&str>,
     project_hint: Option<&str>,

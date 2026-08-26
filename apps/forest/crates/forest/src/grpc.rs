@@ -2041,6 +2041,49 @@ impl GrpcClient {
         Ok(resp.into_inner())
     }
 
+    /// Approve a plan stage that is parked in `AWAITING_APPROVAL`.
+    ///
+    /// The server-side half of plan-before-apply has existed since the plan
+    /// stage landed; this is the CLI reaching it. Without it a pipeline with
+    /// `auto_approve: false` can be started and planned but never finished
+    /// from a terminal (DATA-655).
+    pub async fn approve_plan_stage(
+        &self,
+        release_intent_id: Uuid,
+        stage_id: &str,
+    ) -> anyhow::Result<()> {
+        let mut client = self.release_client().await?;
+        client
+            .approve_plan_stage(forest_grpc_interface::ApprovePlanStageRequest {
+                release_intent_id: release_intent_id.to_string(),
+                stage_id: stage_id.to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("approve plan stage (grpc)")?;
+        Ok(())
+    }
+
+    /// Reject a plan stage, cancelling it and everything downstream of it.
+    pub async fn reject_plan_stage(
+        &self,
+        release_intent_id: Uuid,
+        stage_id: &str,
+        reason: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let mut client = self.release_client().await?;
+        client
+            .reject_plan_stage(forest_grpc_interface::RejectPlanStageRequest {
+                release_intent_id: release_intent_id.to_string(),
+                stage_id: stage_id.to_string(),
+                reason: reason.map(|r| r.to_string()),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("reject plan stage (grpc)")?;
+        Ok(())
+    }
+
     /// Same WaitRelease stream as `wait_release`, but routes every event
     /// through `on_event` instead of printing directly. Used by
     /// `forest release show` so it can render history into structured

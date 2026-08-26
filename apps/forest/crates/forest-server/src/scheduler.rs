@@ -375,8 +375,19 @@ impl SchedulerInner {
 
         let result = async {
             if is_plan_mode {
-                // Plan mode: run the plan phase only, capture output
-                dest_svc.prepare(&logger, &release_item, &dest).await?;
+                // Plan mode: run the plan phase only, capture output.
+                //
+                // `prepare` is only needed for destination types whose `plan`
+                // is a no-op — for those, prepare *is* the dry-run. Where
+                // `supports_plan()` holds, `plan` is self-sufficient and doing
+                // both ran the dry-run twice and discarded the first result:
+                // for forest/terraform@1 both hooks are `terraform init` +
+                // `terraform plan`, so every plan stage paid double the wall
+                // clock and double the provider API calls, and printed the
+                // plan twice in the release log.
+                if !dest_svc.supports_plan() {
+                    dest_svc.prepare(&logger, &release_item, &dest).await?;
+                }
                 let plan_output = dest_svc.plan(&logger, &release_item, &dest).await?;
                 if let Some(output) = plan_output {
                     sqlx::query!(
