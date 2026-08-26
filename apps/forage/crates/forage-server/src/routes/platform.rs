@@ -1568,6 +1568,53 @@ fn parse_description_metadata(desc: &str) -> std::collections::HashMap<String, S
     meta
 }
 
+/// Destination states for one release, rebuilt from that release's own
+/// deploy steps.
+///
+/// `get_destination_states` answers "what is on each destination *now*" —
+/// `DISTINCT ON (destination_id)`, one row per destination, naming whichever
+/// artifact currently occupies it. So the moment a later release takes over a
+/// destination, the earlier one matches nothing: `has_dests` goes false, it
+/// gets collapsed into the "N hidden commits" group, and `dest_envs` comes out
+/// empty so the swim lane draws no dot — even though it really did deploy
+/// (DATA-660).
+///
+/// A release intent's steps are the per-release history, so they are the right
+/// source. Queue position exists only on the live rows (it is a property of the
+/// queue, not of a past deploy), so carry it across where the destination still
+/// holds this release.
+fn steps_to_destination_states(
+    steps: &[&forage_core::platform::ReleaseStepState],
+    live: &[&forage_core::platform::DestinationState],
+    artifact_id: &str,
+) -> Vec<forage_core::platform::DestinationState> {
+    steps
+        .iter()
+        .map(|s| {
+            let live_match = live
+                .iter()
+                .find(|ds| ds.destination_name == s.destination_name);
+            forage_core::platform::DestinationState {
+                destination_id: live_match
+                    .map(|ds| ds.destination_id.clone())
+                    .unwrap_or_default(),
+                destination_name: s.destination_name.clone(),
+                environment: s.environment.clone(),
+                release_id: Some(s.release_id.clone()),
+                artifact_id: Some(artifact_id.to_string()),
+                status: Some(s.status.clone()),
+                error_message: s.error_message.clone(),
+                queued_at: s.queued_at.clone(),
+                completed_at: s.completed_at.clone(),
+                queue_position: live_match.and_then(|ds| ds.queue_position),
+                // A step that was assigned but never recorded a start is
+                // still under way; `assigned_at` is the best start we have.
+                started_at: s.started_at.clone().or_else(|| s.assigned_at.clone()),
+            }
+        })
+        .collect()
+}
+
 /// Build env groups for display (grouped by best status).
 /// Reduce to one entry per destination_id, keeping the most recent state.
 /// Forest's release_states retains terminal rows alongside new in-flight
@@ -2548,10 +2595,25 @@ fn build_timeline_json(
     > = std::collections::HashMap::new();
     let mut intent_id_by_artifact: std::collections::HashMap<&str, &str> =
         std::collections::HashMap::new();
+    // Deploy steps per artifact — the release-centric deploy history, which is
+    // what the timeline needs rather than the current-state-per-destination
+    // view. Accumulated across intents: re-releasing the same artifact opens a
+    // second intent, and `dedupe_destinations` picks the most recent state per
+    // destination from the union.
+    let mut steps_by_artifact: std::collections::HashMap<
+        &str,
+        Vec<&forage_core::platform::ReleaseStepState>,
+    > = std::collections::HashMap::new();
     for ri in release_intents {
         if !ri.stages.is_empty() {
             intent_stages_by_artifact.insert(ri.artifact_id.as_str(), &ri.stages);
             intent_id_by_artifact.insert(ri.artifact_id.as_str(), ri.release_intent_id.as_str());
+        }
+        if !ri.steps.is_empty() {
+            steps_by_artifact
+                .entry(ri.artifact_id.as_str())
+                .or_default()
+                .extend(ri.steps.iter());
         }
     }
 
@@ -2578,10 +2640,25 @@ fn build_timeline_json(
         let artifact = item.artifact;
         let project = item.project_name;
 
-        let matching_states = states_by_artifact
+        // What is on the destinations right now, and what this release itself
+        // deployed. Prefer the latter — see `steps_to_destination_states`. A
+        // release with no steps recorded (older than the intent window, or
+        // never released) falls back to the live view, which is what every
+        // release used to get.
+        let live_states = states_by_artifact
             .get(artifact.artifact_id.as_str())
             .cloned()
             .unwrap_or_default();
+        let step_states = steps_by_artifact
+            .get(artifact.artifact_id.as_str())
+            .map(|steps| steps_to_destination_states(steps, &live_states, &artifact.artifact_id))
+            .unwrap_or_default();
+        let matching_states: Vec<&forage_core::platform::DestinationState> =
+            if step_states.is_empty() {
+                live_states
+            } else {
+                step_states.iter().collect()
+            };
 
         let mut release_envs: Vec<String> = Vec::new();
         let mut release_env_statuses: Vec<String> = Vec::new();

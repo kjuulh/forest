@@ -89,6 +89,13 @@ pub(crate) struct MockPlatformBehavior {
         Option<Result<forage_core::platform::VerifyDomainOutcome, PlatformError>>,
     pub list_join_offers_result: Option<Result<Vec<forage_core::platform::JoinOffer>, PlatformError>>,
     pub accept_join_offer_result: Option<Result<OrgMember, PlatformError>>,
+    // DATA-660 — the timeline needs both the current-state-per-destination
+    // view and the per-release deploy history to tell a superseded release
+    // from one that never deployed.
+    pub get_destination_states_result:
+        Option<Result<forage_core::platform::DeploymentStates, PlatformError>>,
+    pub get_release_intent_states_result:
+        Option<Result<Vec<forage_core::platform::ReleaseIntentState>, PlatformError>>,
 }
 
 pub(crate) fn ok_tokens() -> AuthTokens {
@@ -709,9 +716,12 @@ impl ForestPlatform for MockPlatformClient {
         _organisation: &str,
         _project: Option<&str>,
     ) -> Result<forage_core::platform::DeploymentStates, PlatformError> {
-        Ok(forage_core::platform::DeploymentStates {
-            destinations: vec![],
-        })
+        let b = self.behavior.lock().unwrap();
+        b.get_destination_states_result.clone().unwrap_or(Ok(
+            forage_core::platform::DeploymentStates {
+                destinations: vec![],
+            },
+        ))
     }
 
     async fn get_release_intent_states(
@@ -721,7 +731,10 @@ impl ForestPlatform for MockPlatformClient {
         _project: Option<&str>,
         _include_completed: bool,
     ) -> Result<Vec<forage_core::platform::ReleaseIntentState>, PlatformError> {
-        Ok(vec![])
+        let b = self.behavior.lock().unwrap();
+        b.get_release_intent_states_result
+            .clone()
+            .unwrap_or(Ok(vec![]))
     }
 
     async fn release_artifact(

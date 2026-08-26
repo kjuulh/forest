@@ -2269,3 +2269,185 @@ async fn org_notifications_non_member_returns_403() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
+
+// ─── DATA-660: superseded releases keep their deploy history ────────
+//
+// `get_destination_states` is a current-state-per-destination view: one row
+// per destination, naming whichever artifact sits on it now. Once a newer
+// release takes a destination over, the older one matches nothing there. It
+// used to fall out of the timeline as an undeployed commit — collapsed into
+// the "N hidden commits" group with a blank swim lane — even though it had
+// deployed successfully. Its own release-intent steps are the history that
+// keeps it a release.
+
+/// Two artifacts, `art-old` then `art-new`, both deployed to the same
+/// destination. Only `art-new` holds it now, so only it appears in the
+/// destination-state view; both have their own intent steps.
+fn superseded_release_fixture() -> MockPlatformBehavior {
+    use forage_core::platform::{
+        DeploymentStates, DestinationState, ReleaseIntentState, ReleaseStepState,
+    };
+
+    let artifact = |id: &str, slug: &str, title: &str, created: &str| Artifact {
+        artifact_id: id.into(),
+        slug: slug.into(),
+        context: ArtifactContext {
+            title: title.into(),
+            description: None,
+            web: None,
+            pr: None,
+        },
+        source: None,
+        git_ref: None,
+        destinations: vec![],
+        created_at: created.into(),
+    };
+
+    let step = |release: &str, status: &str, completed: &str| ReleaseStepState {
+        release_id: release.into(),
+        stage_id: None,
+        destination_name: "prod-cluster".into(),
+        environment: "prod".into(),
+        status: status.into(),
+        queued_at: Some(completed.into()),
+        assigned_at: None,
+        started_at: Some(completed.into()),
+        completed_at: Some(completed.into()),
+        error_message: None,
+    };
+
+    let intent = |intent_id: &str, artifact_id: &str, created: &str, step: ReleaseStepState| {
+        ReleaseIntentState {
+            release_intent_id: intent_id.into(),
+            artifact_id: artifact_id.into(),
+            project: "my-api".into(),
+            created_at: created.into(),
+            stages: vec![],
+            steps: vec![step],
+        }
+    };
+
+    MockPlatformBehavior {
+        list_projects_result: Some(Ok(vec!["my-api".into()])),
+        // Newest first, the order the timeline renders in.
+        list_artifacts_result: Some(Ok(vec![
+            artifact(
+                "art-new",
+                "my-api-new",
+                "the one on prod now",
+                "2026-03-08T12:00:00Z",
+            ),
+            artifact(
+                "art-old",
+                "my-api-old",
+                "deployed, then superseded",
+                "2026-03-07T12:00:00Z",
+            ),
+        ])),
+        // Only the current occupant of prod-cluster.
+        get_destination_states_result: Some(Ok(DeploymentStates {
+            destinations: vec![DestinationState {
+                destination_id: "dest-1".into(),
+                destination_name: "prod-cluster".into(),
+                environment: "prod".into(),
+                release_id: Some("rel-new".into()),
+                artifact_id: Some("art-new".into()),
+                status: Some("SUCCEEDED".into()),
+                error_message: None,
+                queued_at: Some("2026-03-08T12:00:00Z".into()),
+                completed_at: Some("2026-03-08T12:05:00Z".into()),
+                queue_position: None,
+                started_at: Some("2026-03-08T12:01:00Z".into()),
+            }],
+        })),
+        get_release_intent_states_result: Some(Ok(vec![
+            intent(
+                "intent-new",
+                "art-new",
+                "2026-03-08T12:00:00Z",
+                step("rel-new", "SUCCEEDED", "2026-03-08T12:05:00Z"),
+            ),
+            intent(
+                "intent-old",
+                "art-old",
+                "2026-03-07T12:00:00Z",
+                step("rel-old", "SUCCEEDED", "2026-03-07T12:05:00Z"),
+            ),
+        ])),
+        ..Default::default()
+    }
+}
+
+async fn timeline_json(behavior: MockPlatformBehavior) -> serde_json::Value {
+    let platform = MockPlatformClient::with_behavior(behavior);
+    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/orgs/testorg/projects/my-api/timeline")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    serde_json::from_slice(&body).unwrap()
+}
+
+#[tokio::test]
+async fn superseded_release_stays_a_release_not_a_hidden_commit() {
+    let json = timeline_json(superseded_release_fixture()).await;
+    let items = json["timeline"].as_array().unwrap();
+
+    assert!(
+        items.iter().all(|i| i["kind"] == "release"),
+        "no item should be collapsed as a hidden commit, got: {items:#?}"
+    );
+    let slugs: Vec<&str> = items
+        .iter()
+        .map(|i| i["release"]["slug"].as_str().unwrap())
+        .collect();
+    assert_eq!(slugs, vec!["my-api-new", "my-api-old"]);
+}
+
+#[tokio::test]
+async fn superseded_release_keeps_its_swimlane_dot() {
+    let json = timeline_json(superseded_release_fixture()).await;
+    let old = json["timeline"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["release"]["slug"] == "my-api-old")
+        .expect("superseded release should be on the timeline");
+
+    // `dest_envs` is what the Svelte component parses to place lane dots —
+    // empty means no bubble.
+    assert_eq!(old["release"]["dest_envs"], "prod:SUCCEEDED");
+    assert_eq!(old["release"]["summary_status"], "SUCCEEDED");
+    assert_eq!(old["release"]["destinations"][0]["name"], "prod-cluster");
+    assert_eq!(old["release"]["destinations"][0]["status"], "SUCCEEDED");
+}
+
+#[tokio::test]
+async fn release_without_steps_falls_back_to_destination_states() {
+    // A release with no intent recorded (older than the intent window) still
+    // gets whatever the current-state view knows — the pre-DATA-660 behaviour.
+    let mut behavior = superseded_release_fixture();
+    behavior.get_release_intent_states_result = Some(Ok(vec![]));
+    let json = timeline_json(behavior).await;
+
+    let new = json["timeline"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["release"]["slug"] == "my-api-new")
+        .expect("current release should be on the timeline");
+    assert_eq!(new["release"]["dest_envs"], "prod:SUCCEEDED");
+}
