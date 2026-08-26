@@ -127,10 +127,16 @@ exists (cached 24h; suppress with `FOREST_NO_UPDATE_CHECK=1` or `CI=true`).
 ## Deploying forest and forage
 
 Pushes to `main` build `ghcr.io/understory-io/{forest,forage}:latest` and then
-force a new deployment of the matching ECS services in the `platform-prod`
-account (`462774209206`, `eu-west-1`). Both jobs live in
+force a new deployment of the matching ECS services in **both** platform
+accounts — `platform-dev` (`618060699933`) and `platform-prod`
+(`462774209206`), `eu-west-1`. Both jobs live in
 [`.github/workflows/ci.yaml`](.github/workflows/ci.yaml); the deploy job waits
 for both image builds, so the two services never roll onto mismatched images.
+
+Both accounts pin `:latest`, and this job is the only thing that moves it, so
+deploying both is what keeps them in step. dev was manual until DATA-668 and
+drifted far enough that tightening a health check against a prod-verified image
+took dev out of rotation — the images were simply older there.
 
 ```sh
 aws ecs update-service \
@@ -160,9 +166,15 @@ mirroring `infrastructure-data`.
 | Name | Kind | Source |
 |---|---|---|
 | `HB_GITHUB_SSH_KEY` | secret (org) | Existing deploy key for private Rust git deps during the Docker build |
-| `PLATFORM_DEPLOYMENT_AWS_ACCESS_KEY_ID` | secret | `production/ecs-deployer/credentials` in platform-prod Secrets Manager |
+| `PLATFORM_DEPLOYMENT_AWS_ACCESS_KEY_ID` | secret | `production/ecs-deployer/credentials` in platform-**prod** Secrets Manager |
 | `PLATFORM_DEPLOYMENT_AWS_SECRET_ACCESS_KEY` | secret | same secret, `aws_secret_access_key` field |
-| `PLATFORM_DEPLOYMENT_ROLE_ARN` | variable | Terraform output `ecs_deployer_role_arn` (`arn:aws:iam::462774209206:role/ecs-deployer`) |
+| `PLATFORM_DEPLOYMENT_ROLE_ARN` | variable | `arn:aws:iam::462774209206:role/ecs-deployer` |
+| `PLATFORM_DEV_DEPLOYMENT_AWS_ACCESS_KEY_ID` | secret | `development/ecs-deployer/credentials` in platform-**dev** Secrets Manager |
+| `PLATFORM_DEV_DEPLOYMENT_AWS_SECRET_ACCESS_KEY` | secret | same secret, `aws_secret_access_key` field |
+| `PLATFORM_DEV_DEPLOYMENT_ROLE_ARN` | variable | `arn:aws:iam::618060699933:role/ecs-deployer` |
+
+The prod pair is unprefixed because it predates the dev one. The workflow passes
+secret *names* through the matrix rather than renaming live credentials.
 
 Populate them only after the `infrastructure-platform` apply lands. Read the
 values straight out of Secrets Manager and pipe them in — never print, paste
@@ -183,9 +195,6 @@ unset creds
 Rotating is the same three commands after a `terraform taint
 aws_iam_access_key.ecs_deployer` + apply.
 
-### Deploying to platform-dev
-
-The same Terraform creates a deployer in `platform-dev` (`618060699933`), which
-also runs `forest` and `forage` off `:latest`. It is deliberately not wired up
-yet — enabling it means adding that account's two secrets and a second matrix
-dimension to the deploy job, not a redesign.
+Swap `--profile understory-platform-prod` / `production/…` for
+`understory-platform-dev` / `development/…` and the `PLATFORM_DEV_` names to
+rotate the dev pair.

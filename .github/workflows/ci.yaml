@@ -121,7 +121,7 @@ jobs:
   # redesign. See README "Deploying forest and forage".
   # ---------------------------------------------------------------------------
   deploy:
-    name: deploy ${{ matrix.service }}
+    name: deploy ${{ matrix.environment.name }}/${{ matrix.service }}
     needs: build-and-push
     # Fork PRs get no secrets; the repository guard makes that a clean skip
     # rather than a red X on someone's fork.
@@ -131,15 +131,37 @@ jobs:
     # Job-level, so a queued deploy waits for the running one instead of
     # cancelling it — two overlapping force-new-deployments on one service is
     # how you get a half-rolled cluster. The build job above stays
-    # uncancellable.
+    # uncancellable. Keyed by account as well as service: dev and prod are
+    # different clusters and must not serialise against each other.
     concurrency:
-      group: platform-prod-deploy-${{ matrix.service }}
+      group: platform-${{ matrix.environment.name }}-deploy-${{ matrix.service }}
       cancel-in-progress: false
 
     strategy:
-      # One service failing to stabilise should not hide the other's result.
+      # One leg failing to stabilise should not hide the others' results.
       fail-fast: false
       matrix:
+        # Both accounts, because both pin `:latest` and this job is the only
+        # thing that moves it. dev was manual until DATA-668, and it drifted:
+        # tightening forest's gRPC health-check matcher against a prod-verified
+        # image took dev's target group unhealthy, because dev was still on an
+        # older digest that nothing had replaced. Deploying both from main is
+        # what keeps that from recurring.
+        #
+        # Secret *names* travel in the matrix rather than the values — the
+        # prod pair predates the dev one and is unprefixed, and renaming live
+        # credentials is not worth the window where neither name resolves.
+        environment:
+          - name: dev
+            account: "618060699933"
+            key_id_secret: PLATFORM_DEV_DEPLOYMENT_AWS_ACCESS_KEY_ID
+            secret_key_secret: PLATFORM_DEV_DEPLOYMENT_AWS_SECRET_ACCESS_KEY
+            role_arn_var: PLATFORM_DEV_DEPLOYMENT_ROLE_ARN
+          - name: prod
+            account: "462774209206"
+            key_id_secret: PLATFORM_DEPLOYMENT_AWS_ACCESS_KEY_ID
+            secret_key_secret: PLATFORM_DEPLOYMENT_AWS_SECRET_ACCESS_KEY
+            role_arn_var: PLATFORM_DEPLOYMENT_ROLE_ARN
         service:
           - forest
           - forage
@@ -152,12 +174,24 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          aws-access-key-id: ${{ secrets.PLATFORM_DEPLOYMENT_AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.PLATFORM_DEPLOYMENT_AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets[matrix.environment.key_id_secret] }}
+          aws-secret-access-key: ${{ secrets[matrix.environment.secret_key_secret] }}
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ vars.PLATFORM_DEPLOYMENT_ROLE_ARN }}
+          role-to-assume: ${{ vars[matrix.environment.role_arn_var] }}
           role-session-name: forest-ci-deploy
           role-duration-seconds: "3600"
+
+      - name: Verify the target account
+        # The two accounts run identically-named clusters and services, so a
+        # crossed secret would deploy somewhere plausible and wrong. Cheap to
+        # assert, and the failure is unambiguous.
+        run: |
+          actual=$(aws sts get-caller-identity --query Account --output text)
+          if [ "$actual" != "${{ matrix.environment.account }}" ]; then
+            echo "::error::expected account ${{ matrix.environment.account }} (${{ matrix.environment.name }}), got $actual"
+            exit 1
+          fi
+          echo "authenticated to ${{ matrix.environment.name }} ($actual)"
 
       - name: Force new deployment
         run: |
