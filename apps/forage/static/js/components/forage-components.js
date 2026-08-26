@@ -5136,8 +5136,9 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
   var root_76 = /* @__PURE__ */ from_html(`<span class="font-mono svelte-4kxpm1"> </span>`);
   var root_75 = /* @__PURE__ */ from_html(`<div data-release="" data-envs="" class="border border-gray-200 rounded-lg overflow-hidden opacity-75 svelte-4kxpm1"><div class="px-4 py-3 flex items-center gap-3 flex-wrap svelte-4kxpm1"><div class="flex items-center gap-2 min-w-0 flex-1 svelte-4kxpm1"><span class="inline-block w-6 h-6 rounded-full bg-gray-200 shrink-0 svelte-4kxpm1" data-avatar=""></span> <a class="font-medium text-gray-900 hover:text-black truncate svelte-4kxpm1"> </a></div> <div class="flex items-center gap-4 text-xs text-gray-500 shrink-0 svelte-4kxpm1"><!> <time class="svelte-4kxpm1"> </time></div></div></div>`);
   var root_74 = /* @__PURE__ */ from_html(`<details class="group svelte-4kxpm1"><summary class="flex items-center gap-2 py-2 px-1 text-sm text-gray-400 cursor-pointer hover:text-gray-600 list-none svelte-4kxpm1"><svg class="w-3 h-3 transition-transform group-open:rotate-90 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" class="svelte-4kxpm1"></path></svg> <span class="text-gray-300 svelte-4kxpm1">&middot;</span> <span class="group-open:hidden svelte-4kxpm1"> </span> <span class="hidden group-open:inline svelte-4kxpm1"> </span></summary> <div class="space-y-3 mt-1 svelte-4kxpm1"></div></details>`);
-  var root_77 = /* @__PURE__ */ from_html(`<div class="svelte-4kxpm1"><span class="lane-label svelte-4kxpm1"> </span></div>`);
-  var root_5$1 = /* @__PURE__ */ from_html(`<div class="max-w-5xl mx-auto grid svelte-4kxpm1"><div class="swim-lane-gutter flex svelte-4kxpm1" style="grid-row: 1; grid-column: 1;"></div> <div class="space-y-3 min-w-0 svelte-4kxpm1" style="grid-row: 1; grid-column: 2;"></div> <div class="swim-lane-labels flex pt-1 svelte-4kxpm1" style="grid-row: 2; grid-column: 1;"></div></div>`);
+  var root_77 = /* @__PURE__ */ from_html(`<div class="pt-3 svelte-4kxpm1" style="grid-row: 2; grid-column: 2;"><button type="button" class="w-full py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:text-gray-900 hover:border-gray-300 svelte-4kxpm1">Show more</button></div>`);
+  var root_78 = /* @__PURE__ */ from_html(`<div class="svelte-4kxpm1"><span class="lane-label svelte-4kxpm1"> </span></div>`);
+  var root_5$1 = /* @__PURE__ */ from_html(`<div class="max-w-5xl mx-auto grid svelte-4kxpm1"><div class="swim-lane-gutter flex svelte-4kxpm1" style="grid-row: 1; grid-column: 1;"></div> <div class="space-y-3 min-w-0 svelte-4kxpm1" style="grid-row: 1; grid-column: 2;"></div> <!> <div class="swim-lane-labels flex pt-1 svelte-4kxpm1" style="grid-row: 2; grid-column: 1;"></div></div>`);
   var root$2 = /* @__PURE__ */ from_html(`<!> <!>`, 1);
   const $$css$2 = {
     hash: "svelte-4kxpm1",
@@ -5146,7 +5147,10 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
   function ReleaseTimeline($$anchor, $$props) {
     push($$props, false);
     append_styles($$anchor, $$css$2);
+    const hardLimit = /* @__PURE__ */ mutable_source();
     const renderedTimeline = /* @__PURE__ */ mutable_source();
+    const renderedReleaseCount = /* @__PURE__ */ mutable_source();
+    const hasMore = /* @__PURE__ */ mutable_source();
     const renderedLaneNames = /* @__PURE__ */ mutable_source();
     const displayedLanes = /* @__PURE__ */ mutable_source();
     const laneCount = /* @__PURE__ */ mutable_source();
@@ -5687,6 +5691,24 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
       }
       return names;
     }
+    const PAGE_SIZE = 20;
+    let visibleReleases = /* @__PURE__ */ mutable_source(PAGE_SIZE);
+    function itemReleaseCount(item) {
+      if (item.kind !== "hidden") return 1;
+      return item.count ?? (item.releases || []).length;
+    }
+    function takeReleases(items, target) {
+      let count = 0;
+      for (let i = 0; i < items.length; i++) {
+        count += itemReleaseCount(items[i]);
+        if (count >= target) return items.slice(0, i + 1);
+      }
+      return items;
+    }
+    function showMore() {
+      set(visibleReleases, get(renderedReleaseCount) + PAGE_SIZE);
+      scheduleComputeLaneBars();
+    }
     legacy_pre_effect(
       () => (get(initialLoading), get(error), deep_read_state(org()), get(disconnectSSE), deep_read_state(project())),
       () => {
@@ -5695,8 +5717,11 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
         }
       }
     );
-    legacy_pre_effect(() => (deep_read_state(limit()), get(timeline)), () => {
-      set(renderedTimeline, limit() && Number(limit()) > 0 ? get(timeline).slice(0, Number(limit())) : get(timeline));
+    legacy_pre_effect(() => deep_read_state(limit()), () => {
+      set(hardLimit, limit() && Number(limit()) > 0 ? Number(limit()) : 0);
+    });
+    legacy_pre_effect(() => (get(hardLimit), get(timeline), get(visibleReleases)), () => {
+      set(renderedTimeline, get(hardLimit) ? get(timeline).slice(0, get(hardLimit)) : takeReleases(get(timeline), get(visibleReleases)));
     });
     legacy_pre_effect(() => get(renderedTimeline), () => {
       set(renderedLaneNames, laneNamesInTimeline(get(renderedTimeline)));
@@ -5713,6 +5738,12 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
         if (!get(initialLoading) && get(renderedTimeline).length && get(laneCount) > 0) scheduleComputeLaneBars();
       }
     );
+    legacy_pre_effect(() => get(renderedTimeline), () => {
+      set(renderedReleaseCount, get(renderedTimeline).reduce((n, item) => n + itemReleaseCount(item), 0));
+    });
+    legacy_pre_effect(() => (get(hardLimit), get(renderedTimeline), get(timeline)), () => {
+      set(hasMore, !get(hardLimit) && get(renderedTimeline).length < get(timeline).length);
+    });
     legacy_pre_effect(() => get(laneCount), () => {
       set(gutterWidth, get(laneCount) > 0 ? get(laneCount) * (BAR_WIDTH + BAR_GAP) + 8 : 0);
     });
@@ -6838,8 +6869,21 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
         });
         reset(div_10);
         bind_this(div_10, ($$value) => set(timelineEl, $$value), () => get(timelineEl));
-        var div_29 = sibling(div_10, 2);
-        each(div_29, 5, () => get(displayedLanes), (lane) => lane.name, ($$anchor3, lane) => {
+        var node_40 = sibling(div_10, 2);
+        {
+          var consequent_57 = ($$anchor3) => {
+            var div_29 = root_77();
+            var button_8 = child(div_29);
+            reset(div_29);
+            event("click", button_8, showMore);
+            append($$anchor3, div_29);
+          };
+          if_block(node_40, ($$render) => {
+            if (get(hasMore)) $$render(consequent_57);
+          });
+        }
+        var div_30 = sibling(node_40, 2);
+        each(div_30, 5, () => get(displayedLanes), (lane) => lane.name, ($$anchor3, lane) => {
           const bar = /* @__PURE__ */ derived_safe_equal(() => (get(laneBarData), get(lane), untrack(() => get(laneBarData)[get(lane).name])));
           const computed_const_1 = /* @__PURE__ */ derived_safe_equal(() => {
             const [barColor] = (deep_read_state(get(bar)), deep_read_state(envColors), get(lane), untrack(() => {
@@ -6848,19 +6892,19 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
             }));
             return { barColor };
           });
-          var div_30 = root_77();
-          set_style(div_30, "width: 20px; margin-right: 4px; display: flex; justify-content: center;");
-          var span_38 = child(div_30);
+          var div_31 = root_78();
+          set_style(div_31, "width: 20px; margin-right: 4px; display: flex; justify-content: center;");
+          var span_38 = child(div_31);
           var text_40 = child(span_38, true);
           reset(span_38);
-          reset(div_30);
+          reset(div_31);
           template_effect(() => {
             set_style(span_38, `color: ${get(computed_const_1).barColor ?? ""};`);
             set_text(text_40, (get(lane), untrack(() => get(lane).name)));
           });
-          append($$anchor3, div_30);
+          append($$anchor3, div_31);
         });
-        reset(div_29);
+        reset(div_30);
         reset(div_4);
         template_effect(() => set_style(div_4, `grid-template-columns: ${get(gutterWidth) ?? ""}px minmax(0, 1fr); grid-template-rows: 1fr auto;`));
         append($$anchor2, div_4);

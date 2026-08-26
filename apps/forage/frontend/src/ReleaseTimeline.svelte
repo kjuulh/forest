@@ -12,9 +12,11 @@
   export let csrf = "";
   export let username = "";
   export let role = "";
-  // Cap how many releases the timeline renders. Empty string / "0" /
-  // missing → render all. Used by the project Overview to show a top-3
-  // summary linked to the full Releases tab.
+  // Hard cap on how many timeline items to render, with no way to see
+  // more. Used by the project Overview for its top-3 summary linked to
+  // the full Releases tab. Empty string / "0" / missing → the full
+  // views (Releases tab, org-wide releases), which instead reveal
+  // PAGE_SIZE releases at a time behind a "Show more" control.
   export let limit = "";
 
   // Reactive state
@@ -573,7 +575,53 @@
     return names;
   }
 
-  $: renderedTimeline = limit && Number(limit) > 0 ? timeline.slice(0, Number(limit)) : timeline;
+  // ── Progressive reveal ───────────────────────────────────────────
+  //
+  // The full views start at the most recent PAGE_SIZE releases and grow
+  // by PAGE_SIZE on each "Show more". The timeline is served whole (the
+  // platform's artifact listing has no paging), so this is a pure
+  // client-side reveal — nothing to fetch, nothing to wait for.
+
+  const PAGE_SIZE = 20;
+  let visibleReleases = PAGE_SIZE;
+
+  // How many releases an item stands for. A "hidden" item collapses a
+  // run of undeployed commits, so the window counts releases rather
+  // than cards — 20 means 20 releases, not 20 disclosure widgets.
+  function itemReleaseCount(item) {
+    if (item.kind !== "hidden") return 1;
+    return item.count ?? (item.releases || []).length;
+  }
+
+  // Take whole items until `target` releases are covered. A hidden
+  // group straddling the boundary is taken whole rather than split —
+  // splitting one would misreport its "N hidden commits" count.
+  function takeReleases(items, target) {
+    let count = 0;
+    for (let i = 0; i < items.length; i++) {
+      count += itemReleaseCount(items[i]);
+      if (count >= target) return items.slice(0, i + 1);
+    }
+    return items;
+  }
+
+  // Grow from the releases actually on screen, not from the previous
+  // target. Taking hidden groups whole means the window can overshoot
+  // its target, and counting from the target would leave clicks that
+  // reveal nothing — a single group of 50 would swallow two rounds.
+  function showMore() {
+    visibleReleases = renderedReleaseCount + PAGE_SIZE;
+    // The card list just got taller; re-measure the swim lane bars
+    // against the new height.
+    scheduleComputeLaneBars();
+  }
+
+  $: hardLimit = limit && Number(limit) > 0 ? Number(limit) : 0;
+  $: renderedTimeline = hardLimit
+    ? timeline.slice(0, hardLimit)
+    : takeReleases(timeline, visibleReleases);
+  $: renderedReleaseCount = renderedTimeline.reduce((n, item) => n + itemReleaseCount(item), 0);
+  $: hasMore = !hardLimit && renderedTimeline.length < timeline.length;
   $: renderedLaneNames = laneNamesInTimeline(renderedTimeline);
   $: displayedLanes = lanes.filter(lane => renderedLaneNames.has(lane.name));
 
@@ -633,7 +681,9 @@
 
     <!-- Timeline cards. When `limit` is set (Overview summary use case),
          render only the first N items; the rest are accessible via the
-         full Releases tab. -->
+         full Releases tab. Otherwise render the revealed window — see
+         "Show more" below. Note this element is what the lane bars
+         measure against, so nothing but cards belongs inside it. -->
     <div bind:this={timelineEl} class="space-y-3 min-w-0" style="grid-row: 1; grid-column: 2;">
       {#each renderedTimeline as item (itemKey(item))}
         {#if item.kind === "release" && item.release}
@@ -962,6 +1012,20 @@
         {/if}
       {/each}
     </div>
+
+    <!-- Show more (row 2, column 2). Deliberately outside the measured
+         card list so revealing more doesn't skew the lane geometry. -->
+    {#if hasMore}
+      <div class="pt-3" style="grid-row: 2; grid-column: 2;">
+        <button
+          type="button"
+          class="w-full py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:text-gray-900 hover:border-gray-300"
+          on:click={showMore}
+        >
+          Show more
+        </button>
+      </div>
+    {/if}
 
     <!-- Lane labels (row 2, column 1) -->
     <div class="swim-lane-labels flex pt-1" style="grid-row: 2; grid-column: 1;">
