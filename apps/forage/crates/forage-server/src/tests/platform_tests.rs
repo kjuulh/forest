@@ -2451,3 +2451,28 @@ async fn release_without_steps_falls_back_to_destination_states() {
         .expect("current release should be on the timeline");
     assert_eq!(new["release"]["dest_envs"], "prod:SUCCEEDED");
 }
+
+#[tokio::test]
+async fn is_current_marks_only_the_release_the_destination_still_holds() {
+    // DATA-661: the swim lane needs "live here now" separated from "was
+    // released here". Both releases below deployed to prod-cluster; only
+    // `art-new` still occupies it.
+    let json = timeline_json(superseded_release_fixture()).await;
+    let items = json["timeline"].as_array().unwrap();
+
+    let current_of = |slug: &str| -> bool {
+        items
+            .iter()
+            .find(|i| i["release"]["slug"] == slug)
+            .unwrap_or_else(|| panic!("{slug} should be on the timeline"))["release"]["destinations"]
+            [0]["is_current"]
+            .as_bool()
+            .expect("is_current should be serialised")
+    };
+
+    assert!(current_of("my-api-new"), "the current occupant is live");
+    assert!(
+        !current_of("my-api-old"),
+        "the superseded release deployed here, but is no longer live"
+    );
+}

@@ -2533,6 +2533,11 @@ pub struct ApiDestinationState {
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub queue_position: Option<i32>,
+    /// Whether this destination still holds this release — i.e. this is what
+    /// is deployed there now, rather than something a later release replaced.
+    /// Per destination, not per release: a release can still be live on prod
+    /// while already superseded on dev.
+    pub is_current: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -2653,6 +2658,14 @@ fn build_timeline_json(
             .get(artifact.artifact_id.as_str())
             .map(|steps| steps_to_destination_states(steps, &live_states, &artifact.artifact_id))
             .unwrap_or_default();
+        // Destinations this release still holds. `get_destination_states` is
+        // the current-state-per-destination view — the wrong source for
+        // history (DATA-660), and exactly the right one for currency: a name
+        // in here means the destination has not moved on to a later release.
+        let live_dest_names: std::collections::HashSet<&str> = live_states
+            .iter()
+            .map(|ds| ds.destination_name.as_str())
+            .collect();
         let matching_states: Vec<&forage_core::platform::DestinationState> =
             if step_states.is_empty() {
                 live_states
@@ -2680,6 +2693,7 @@ fn build_timeline_json(
                     started_at: ds.started_at.clone(),
                     completed_at: ds.completed_at.clone(),
                     queue_position: ds.queue_position,
+                    is_current: live_dest_names.contains(ds.destination_name.as_str()),
                 }
             })
             .collect();

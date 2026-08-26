@@ -379,6 +379,64 @@
     });
   }
 
+  // ── Lane dot state ───────────────────────────────────────────────
+  //
+  // What a release is to one environment, which is not the same question as
+  // "did it deploy". Four answers worth telling apart in the gutter:
+  //
+  //   live    it is on that environment right now
+  //   flight  a deploy is queued, assigned or running
+  //   pending it is headed there but has not started — awaiting approval, or
+  //           an upstream stage has not finished
+  //   past    it was released there, and a later release has since taken over
+  //
+  // Terminal failures render as `past` — "not live here", which is true. The
+  // failure itself is carried by the card and by the lane bar, as before.
+  const DOT_PRIORITY = { flight: 5, live: 4, stopped: 3, pending: 2, past: 1 };
+
+  function releaseEnvStates(release) {
+    const byEnv = new Map();
+    const put = (env, kind) => {
+      if (!env) return;
+      const prev = byEnv.get(env);
+      if (prev === undefined || DOT_PRIORITY[kind] > DOT_PRIORITY[prev]) byEnv.set(env, kind);
+    };
+
+    // Destination rows are authoritative wherever they exist.
+    const dests = release.destinations || [];
+    const liveEnvs = new Set(
+      dests.filter(d => d.is_current && DEPLOYED.has(d.status)).map(d => d.environment)
+    );
+    for (const d of dests) {
+      const status = d.status || "PENDING";
+      if (IN_FLIGHT.has(status)) put(d.environment, "flight");
+      else if (DEPLOYED.has(status)) put(d.environment, liveEnvs.has(d.environment) ? "live" : "past");
+      else if (STOPPED.has(status)) put(d.environment, "past");
+      else put(d.environment, "pending");
+    }
+
+    // Deploy stages fill in environments the release is headed for but has not
+    // reached — a freshly queued or approval-blocked release has a pipeline
+    // stage naming the environment before any release_states row exists, and
+    // without this it would sit on the timeline with no bubble at all.
+    for (const s of release.pipeline_stages || []) {
+      if (s.stage_type !== "deploy" || !s.environment) continue;
+      if (byEnv.has(s.environment)) continue;
+      const status = effectiveStatus(s);
+      if (IN_FLIGHT.has(status)) put(s.environment, "flight");
+      else if (STOPPED.has(status)) put(s.environment, "past");
+      else if (status === "PENDING" || status === "AWAITING_APPROVAL") put(s.environment, "pending");
+    }
+
+    return [...byEnv].map(([env, kind]) => ({ env, kind }));
+  }
+
+  function laneStatesAttr(release) {
+    return releaseEnvStates(release)
+      .map(({ env, kind }) => `${env}:${kind}`)
+      .join(",");
+  }
+
   // Debounce lane bar computation to one per frame. Waiting for Svelte's
   // flush before rAF keeps measurements out of first-paint zero-size races.
   function scheduleComputeLaneBars() {
@@ -460,12 +518,14 @@
 
       const dots = [];
       for (const card of cards) {
-        const entries = parseEnvs(card.dataset.envs);
-        if (!entries.find(e => e.env === env)) continue;
+        // `data-lane-states` already carries the resolved per-env state — see
+        // `releaseEnvStates`. Reuses the `env:value` encoding parseEnvs reads.
+        const entry = parseEnvs(card.dataset.laneStates).find(e => e.env === env);
+        if (!entry) continue;
         const avatar = card.querySelector("[data-avatar]");
         const anchor = avatar || card;
         const r = anchor.getBoundingClientRect();
-        dots.push(r.top + r.height / 2 - timelineRect.top);
+        dots.push({ y: r.top + r.height / 2 - timelineRect.top, kind: entry.status });
       }
 
       newBarData[env] = { solidH, hasHatch, hatchTop, hatchH, isForward, dots, color: envColors(env) };
@@ -564,12 +624,16 @@
     return stage.stage_type === "plan" && effectiveStatus(stage) === "AWAITING_APPROVAL";
   }
 
+  // Lanes to show. Driven by the same resolver as the dots, so a lane exists
+  // exactly when something in it does — previously this read `dest_envs` and
+  // dropped PENDING, which hid a pending deploy precisely when it mattered
+  // most: an environment awaiting its first release had no lane to show it on.
   function laneNamesInTimeline(items) {
     const names = new Set();
     for (const item of items) {
       if (item.kind !== "release" || !item.release) continue;
-      for (const entry of parseEnvs(item.release.dest_envs)) {
-        if (entry.status !== "PENDING") names.add(entry.env);
+      for (const { env } of releaseEnvStates(item.release)) {
+        names.add(env);
       }
     }
     return names;
@@ -671,8 +735,19 @@
             {#if bar.solidH > 0}
               <div class="lane-bar" style="position: absolute; bottom: 0; left: 0; width: 100%; height: {bar.solidH + (bar.hasHatch ? BAR_WIDTH / 2 : 0)}px; background: {barColor}; border-radius: 9999px; z-index: 1;"></div>
             {/if}
-            {#each bar.dots as dotY, di (di)}
-              <div class="lane-dot" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dotY - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: #fff; border: 2px solid {barColor}; z-index: 2;"></div>
+            {#each bar.dots as dot, di (di)}
+              {#if dot.kind === "live"}
+                <!-- On that environment now: a filled pip, ringed in white so
+                     it reads against the solid bar behind it. -->
+                <div class="lane-dot" title="Live on {lane.name}" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dot.y - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: {barColor}; border: 2px solid #fff; box-shadow: 0 0 0 1.5px {barColor}; z-index: 3;"></div>
+              {:else if dot.kind === "flight"}
+                <div class="lane-dot lane-pulse" title="Deploying to {lane.name}" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dot.y - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: #fff; border: 2px solid {barColor}; z-index: 2;"></div>
+              {:else if dot.kind === "pending"}
+                <!-- Headed there, not started. Dashed and faded: provisional. -->
+                <div class="lane-dot" title="Pending on {lane.name}" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dot.y - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: #fff; border: 2px dashed {barColor}; opacity: 0.55; z-index: 2;"></div>
+              {:else}
+                <div class="lane-dot" title="Previously released to {lane.name}" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dot.y - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: #fff; border: 2px solid {barColor}; z-index: 2;"></div>
+              {/if}
             {/each}
           {/if}
         </div>
@@ -688,7 +763,7 @@
       {#each renderedTimeline as item (itemKey(item))}
         {#if item.kind === "release" && item.release}
           {@const release = item.release}
-          <div data-release data-envs={release.dest_envs} class="border border-gray-200 rounded-lg overflow-hidden">
+          <div data-release data-envs={release.dest_envs} data-lane-states={laneStatesAttr(release)} class="border border-gray-200 rounded-lg overflow-hidden">
             <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
               <div class="flex items-center gap-2 min-w-0 flex-1">
                 <span class="inline-block w-6 h-6 rounded-full bg-gray-200 shrink-0" data-avatar></span>
@@ -990,7 +1065,7 @@
             </summary>
             <div class="space-y-3 mt-1">
               {#each item.releases || [] as release (release.slug)}
-                <div data-release data-envs="" class="border border-gray-200 rounded-lg overflow-hidden opacity-75">
+                <div data-release data-envs="" data-lane-states="" class="border border-gray-200 rounded-lg overflow-hidden opacity-75">
                   <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
                     <div class="flex items-center gap-2 min-w-0 flex-1">
                       <span class="inline-block w-6 h-6 rounded-full bg-gray-200 shrink-0" data-avatar></span>
