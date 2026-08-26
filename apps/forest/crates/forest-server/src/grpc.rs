@@ -66,9 +66,27 @@ impl GrpcServer {
             .layer(auth_layer::AuthMiddlewareLayer::new(self.state.clone()))
             .into_inner();
 
+        // Standard gRPC health protocol, for the ALB target group fronting 4040.
+        //
+        // Until this existed the probe hit an unregistered method and got back
+        // UNIMPLEMENTED, which the target group's matcher was widened to `0-99`
+        // to tolerate — so the check passed on any response at all and proved
+        // nothing beyond "the HTTP/2 stack answers". With a real service
+        // registered, a passing check means the server accepted a request and
+        // routed it through tonic end to end.
+        //
+        // Reports SERVING unconditionally, which makes this a liveness signal
+        // rather than a readiness one. That is deliberate: forest's readiness
+        // aggregates Aurora reachability, and wiring it in here would let one
+        // database blip pull every forest target out of the load balancer
+        // simultaneously — turning a degraded service into a total outage.
+        // Readiness belongs on the HTTP target group, which already probes it.
+        let (_health_reporter, health_service) = tonic_health::server::health_reporter();
+
         tonic::transport::Server::builder()
             .trace_fn(|_request| tracing::info_span!("grpc"))
             .layer(layer)
+            .add_service(health_service)
             .add_service(StatusServiceServer::new(StatusServer {
                 state: self.state.clone(),
             }))
