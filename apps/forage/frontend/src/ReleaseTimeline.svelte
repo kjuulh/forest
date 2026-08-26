@@ -4,6 +4,10 @@
   import { onMount, onDestroy, tick } from "svelte";
   import { fetchTimeline, connectSSE, formatElapsed, timeAgo } from "./lib/api.js";
   import { envColors, envLaneColor, envBadgeClasses, statusDotColor } from "./lib/colors.js";
+  import {
+    IN_FLIGHT, DEPLOYED, STOPPED,
+    effectiveStatus, isPlanAwaiting, releaseEnvStates, laneStatesAttr, isUnfinished,
+  } from "./lib/lane-states.js";
   import { pipelineSummary, deployStageLabel, waitStageLabel, planStageLabel, STATUS_CONFIG } from "./lib/status.js";
 
   // Props from attributes
@@ -39,9 +43,6 @@
   const BAR_GAP = 4;
   const DOT_SIZE = 12;
   const MAX_LANE_BAR_RETRIES = 8;
-  const IN_FLIGHT = new Set(["QUEUED", "RUNNING", "ASSIGNED"]);
-  const DEPLOYED = new Set(["SUCCEEDED"]);
-  const STOPPED = new Set(["FAILED", "TIMED_OUT", "CANCELLED"]);
 
   // ── Approval action ──────────────────────────────────────────────
 
@@ -391,51 +392,7 @@
   //   past    it was released there, and a later release has since taken over
   //
   // Terminal failures render as `past` — "not live here", which is true. The
-  // failure itself is carried by the card and by the lane bar, as before.
-  const DOT_PRIORITY = { flight: 5, live: 4, stopped: 3, pending: 2, past: 1 };
 
-  function releaseEnvStates(release) {
-    const byEnv = new Map();
-    const put = (env, kind) => {
-      if (!env) return;
-      const prev = byEnv.get(env);
-      if (prev === undefined || DOT_PRIORITY[kind] > DOT_PRIORITY[prev]) byEnv.set(env, kind);
-    };
-
-    // Destination rows are authoritative wherever they exist.
-    const dests = release.destinations || [];
-    const liveEnvs = new Set(
-      dests.filter(d => d.is_current && DEPLOYED.has(d.status)).map(d => d.environment)
-    );
-    for (const d of dests) {
-      const status = d.status || "PENDING";
-      if (IN_FLIGHT.has(status)) put(d.environment, "flight");
-      else if (DEPLOYED.has(status)) put(d.environment, liveEnvs.has(d.environment) ? "live" : "past");
-      else if (STOPPED.has(status)) put(d.environment, "past");
-      else put(d.environment, "pending");
-    }
-
-    // Deploy stages fill in environments the release is headed for but has not
-    // reached — a freshly queued or approval-blocked release has a pipeline
-    // stage naming the environment before any release_states row exists, and
-    // without this it would sit on the timeline with no bubble at all.
-    for (const s of release.pipeline_stages || []) {
-      if (s.stage_type !== "deploy" || !s.environment) continue;
-      if (byEnv.has(s.environment)) continue;
-      const status = effectiveStatus(s);
-      if (IN_FLIGHT.has(status)) put(s.environment, "flight");
-      else if (STOPPED.has(status)) put(s.environment, "past");
-      else if (status === "PENDING" || status === "AWAITING_APPROVAL") put(s.environment, "pending");
-    }
-
-    return [...byEnv].map(([env, kind]) => ({ env, kind }));
-  }
-
-  function laneStatesAttr(release) {
-    return releaseEnvStates(release)
-      .map(({ env, kind }) => `${env}:${kind}`)
-      .join(",");
-  }
 
   // Debounce lane bar computation to one per frame. Waiting for Svelte's
   // flush before rAF keeps measurements out of first-paint zero-size races.
@@ -483,6 +440,16 @@
       let deployedIdx = -1, flightIdx = -1;
 
       for (let i = 0; i < cards.length; i++) {
+        // The resolved lane state is the authority on "is this release still
+        // going?", because it is the only place that knows a plan is parked on
+        // approval — `data-envs` carries destination status, which for an
+        // approval-gated environment is just PENDING.
+        const laneState = parseEnvs(cards[i].dataset.laneStates).find(e => e.env === env);
+        if (laneState && isUnfinished(laneState.status) && !flightCard) {
+          flightCard = cards[i];
+          flightIdx = i;
+        }
+
         const entries = parseEnvs(cards[i].dataset.envs);
         for (const entry of entries) {
           if (entry.env !== env) continue;
@@ -609,21 +576,6 @@
     }
   }
 
-  // Normalize plan stage status: the API returns status="RUNNING" with
-  // approval_status="AWAITINGAPPROVAL" (no underscore, Debug format from Rust).
-  // Map this to a single effective status for template rendering.
-  function effectiveStatus(stage) {
-    if (stage.stage_type === "plan" && stage.approval_status &&
-        (stage.approval_status === "AWAITINGAPPROVAL" || stage.approval_status === "AWAITING_APPROVAL")) {
-      return "AWAITING_APPROVAL";
-    }
-    return stage.status;
-  }
-
-  function isPlanAwaiting(stage) {
-    return stage.stage_type === "plan" && effectiveStatus(stage) === "AWAITING_APPROVAL";
-  }
-
   // Lanes to show. Driven by the same resolver as the dots, so a lane exists
   // exactly when something in it does — previously this read `dest_envs` and
   // dropped PENDING, which hid a pending deploy precisely when it mattered
@@ -742,6 +694,11 @@
                 <div class="lane-dot" title="Live on {lane.name}" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dot.y - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: {barColor}; border: 2px solid #fff; box-shadow: 0 0 0 1.5px {barColor}; z-index: 3;"></div>
               {:else if dot.kind === "flight"}
                 <div class="lane-dot lane-pulse" title="Deploying to {lane.name}" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dot.y - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: #fff; border: 2px solid {barColor}; z-index: 2;"></div>
+              {:else if dot.kind === "awaiting"}
+                <!-- Parked on a person. Pulses like an in-flight deploy, because
+                     the pipeline genuinely has not finished — but ringed rather
+                     than hollow so it reads as "blocked", not "working". -->
+                <div class="lane-dot lane-pulse" title="Awaiting approval for {lane.name}" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dot.y - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: #fff; border: 2px solid {barColor}; box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px {barColor}; z-index: 3;"></div>
               {:else if dot.kind === "pending"}
                 <!-- Headed there, not started. Dashed and faded: provisional. -->
                 <div class="lane-dot" title="Pending on {lane.name}" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dot.y - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: #fff; border: 2px dashed {barColor}; opacity: 0.55; z-index: 2;"></div>
