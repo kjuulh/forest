@@ -97,3 +97,81 @@ jobs:
             default=${{ env.SSH_AUTH_SOCK }}
           cache-from: type=gha,scope=${{ matrix.app }}
           cache-to: type=gha,scope=${{ matrix.app }},mode=max
+
+  # ---------------------------------------------------------------------------
+  # Roll the freshly-pushed images onto the platform ECS cluster.
+  #
+  # The task definitions in infrastructure-platform pin
+  # `ghcr.io/understory-io/{forest,forage}:latest`, and the build job above is
+  # the only thing that moves that tag — and only on main. So a deploy here is
+  # never "some other build's image": `needs: build-and-push` waits for BOTH
+  # matrix legs, so forest and forage are both current before either service
+  # restarts. Force-new-deployment then re-pulls `:latest` behind the existing
+  # task definition; nothing registers a new one, which is why the deploy role
+  # needs neither RegisterTaskDefinition nor iam:PassRole.
+  #
+  # Credentials are the two-legged chain from infrastructure-platform's
+  # `ecs-deploy.tf`: a long-lived key for the `platform-deployment` IAM user
+  # whose only permission is assuming `ecs-deployer`, plus that role's ARN.
+  # configure-aws-credentials does the sts:AssumeRole, so what actually touches
+  # ECS is a one-hour session scoped to this cluster's services.
+  #
+  # Deploys prod only. The same Terraform creates a deployer in platform-dev,
+  # so enabling dev is adding its two secrets + a matrix dimension here — not a
+  # redesign. See README "Deploying forest and forage".
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: deploy ${{ matrix.service }}
+    needs: build-and-push
+    # Fork PRs get no secrets; the repository guard makes that a clean skip
+    # rather than a red X on someone's fork.
+    if: github.repository == 'understory-io/forest' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    # Job-level, so a queued deploy waits for the running one instead of
+    # cancelling it — two overlapping force-new-deployments on one service is
+    # how you get a half-rolled cluster. The build job above stays
+    # uncancellable.
+    concurrency:
+      group: platform-prod-deploy-${{ matrix.service }}
+      cancel-in-progress: false
+
+    strategy:
+      # One service failing to stabilise should not hide the other's result.
+      fail-fast: false
+      matrix:
+        service:
+          - forest
+          - forage
+
+    env:
+      AWS_REGION: eu-west-1
+      ECS_CLUSTER: infrastructure-platform
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.PLATFORM_DEPLOYMENT_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.PLATFORM_DEPLOYMENT_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.PLATFORM_DEPLOYMENT_ROLE_ARN }}
+          role-session-name: forest-ci-deploy
+          role-duration-seconds: "3600"
+
+      - name: Force new deployment
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "${{ matrix.service }}" \
+            --force-new-deployment \
+            --region "$AWS_REGION" \
+            --query 'service.deployments[0].[id,status,taskDefinition]' \
+            --output text
+
+      - name: Wait for service stability
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "${{ matrix.service }}" \
+            --region "$AWS_REGION"

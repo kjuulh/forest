@@ -123,3 +123,69 @@ exists (cached 24h; suppress with `FOREST_NO_UPDATE_CHECK=1` or `CI=true`).
 
 - [`apps/forest/`](apps/forest/) — the `forest` CLI and supporting libraries
 - [`apps/forage/`](apps/forage/) — the managed web UI ([forest.understory.sh](https://forest.understory.sh)). Directory name remains `forage` for now; the crate hasn't been renamed.
+
+## Deploying forest and forage
+
+Pushes to `main` build `ghcr.io/understory-io/{forest,forage}:latest` and then
+force a new deployment of the matching ECS services in the `platform-prod`
+account (`462774209206`, `eu-west-1`). Both jobs live in
+[`.github/workflows/ci.yaml`](.github/workflows/ci.yaml); the deploy job waits
+for both image builds, so the two services never roll onto mismatched images.
+
+```sh
+aws ecs update-service \
+  --cluster infrastructure-platform \
+  --service forest \
+  --force-new-deployment \
+  --region eu-west-1
+aws ecs wait services-stable \
+  --cluster infrastructure-platform \
+  --services forest \
+  --region eu-west-1
+```
+
+The task definitions pin `:latest`, so nothing registers a new task definition
+— which is why the deploy identity needs neither `ecs:RegisterTaskDefinition`
+nor `iam:PassRole`.
+
+### Credentials
+
+CI authenticates as the `platform-deployment` IAM user, whose *only* permission
+is `sts:AssumeRole` on the `ecs-deployer` role. That role is scoped to
+`ecs:UpdateService` / `DescribeServices` / `ListTasks` / `DescribeTasks` on the
+`infrastructure-platform` cluster's services and nothing else. Both are defined
+in [`infrastructure-platform/ecs-deploy.tf`](https://github.com/understory-io/infrastructure-platform/blob/dev/ecs-deploy.tf),
+mirroring `infrastructure-data`.
+
+| Name | Kind | Source |
+|---|---|---|
+| `HB_GITHUB_SSH_KEY` | secret (org) | Existing deploy key for private Rust git deps during the Docker build |
+| `PLATFORM_DEPLOYMENT_AWS_ACCESS_KEY_ID` | secret | `production/ecs-deployer/credentials` in platform-prod Secrets Manager |
+| `PLATFORM_DEPLOYMENT_AWS_SECRET_ACCESS_KEY` | secret | same secret, `aws_secret_access_key` field |
+| `PLATFORM_DEPLOYMENT_ROLE_ARN` | variable | Terraform output `ecs_deployer_role_arn` (`arn:aws:iam::462774209206:role/ecs-deployer`) |
+
+Populate them only after the `infrastructure-platform` apply lands. Read the
+values straight out of Secrets Manager and pipe them in — never print, paste
+into a PR comment, or commit them:
+
+```sh
+creds=$(aws secretsmanager get-secret-value \
+  --profile understory-platform-prod --region eu-west-1 \
+  --secret-id production/ecs-deployer/credentials \
+  --query SecretString --output text)
+
+jq -r .aws_access_key_id     <<<"$creds" | gh secret set PLATFORM_DEPLOYMENT_AWS_ACCESS_KEY_ID     --repo understory-io/forest
+jq -r .aws_secret_access_key <<<"$creds" | gh secret set PLATFORM_DEPLOYMENT_AWS_SECRET_ACCESS_KEY --repo understory-io/forest
+jq -r .role_arn              <<<"$creds" | gh variable set PLATFORM_DEPLOYMENT_ROLE_ARN            --repo understory-io/forest
+unset creds
+```
+
+Rotating is the same three commands after a `terraform taint
+aws_iam_access_key.ecs_deployer` + apply.
+
+### Deploying to platform-dev
+
+The same Terraform creates a deployer in `platform-dev` (`618060699933`), which
+also runs `forest` and `forage` off `:latest`. It is deliberately not wired up
+yet — enabling it means adding that account's two secrets and a second matrix
+dimension to the deploy job, not a redesign.
