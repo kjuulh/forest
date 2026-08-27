@@ -19,6 +19,10 @@ const BASELINE = {
   release: {
     slug: "baseline",
     title: "Earlier release (already live)",
+    // Two deployers on purpose: kjuulh has a picture behind the stub avatar
+    // endpoint, octobot does not, so every shot carries both halves of the
+    // avatar slot — the image and the initial it falls back to.
+    source_user: "kjuulh",
     version: "main-0000000",
     has_pipeline: true,
     created_at: new Date(Date.UTC(2026, 7, 26, 9, 0, 0)).toISOString(),
@@ -40,6 +44,7 @@ function payloadFor(fixture) {
   const r = {
     title: fixture.title,
     version: "main-1111111",
+    source_user: "octobot",
     created_at: new Date(Date.UTC(2026, 7, 26, 13, 30, 0)).toISOString(),
     dest_envs: (fixture.release.destinations || [])
       .map((d) => `${d.environment}:${d.status || "PENDING"}`)

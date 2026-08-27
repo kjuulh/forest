@@ -98,6 +98,13 @@ try {
         hatched: [...(sr?.querySelectorAll(".lane-bar") ?? [])]
           .filter((b) => (b.style.backgroundImage || "").includes("svg")).length,
         pulsing: (sr?.querySelectorAll(".lane-pulse") ?? []).length,
+        // What each card put in its avatar slot. The lane dots anchor to
+        // [data-avatar], so the tag matters less than the fact that every card
+        // still has one — see the assertion below.
+        avatars: cards.map((c) => {
+          const a = c.querySelector("[data-avatar]");
+          return a ? a.tagName.toLowerCase() : null;
+        }),
       };
     }
     return out;
@@ -124,7 +131,18 @@ try {
       failures.push(`${f.key}: finished but something animates (hatched=${o.hatched} pulsing=${o.pulsing})`);
     }
 
-    // 3. An awaiting state must say so, in words, on hover.
+    // 3. Every card keeps a [data-avatar] anchor, and the slot renders both
+    //    ways: kjuulh's picture as an <img>, octobot's missing one as the
+    //    <span> holding their initial. Losing the anchor does not look broken
+    //    — the lane dots quietly re-anchor to the whole card and drift.
+    if (o.avatars.includes(null)) {
+      failures.push(`${f.key}: a card has no [data-avatar] lane anchor — got ${JSON.stringify(o.avatars)}`);
+    }
+    if (!o.avatars.includes("img") || !o.avatars.includes("span")) {
+      failures.push(`${f.key}: expected both a picture and a fallback avatar, got ${JSON.stringify(o.avatars)}`);
+    }
+
+    // 4. An awaiting state must say so, in words, on hover.
     if (Object.values(f.expect).includes("awaiting")) {
       if (!o.dotTitles.some((t) => (t || "").startsWith("Awaiting approval for"))) {
         failures.push(`${f.key}: no "Awaiting approval" dot title — got ${JSON.stringify(o.dotTitles)}`);

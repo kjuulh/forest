@@ -1,6 +1,7 @@
 mod account_link_tests;
 mod account_tests;
 mod auth_tests;
+mod avatar_tests;
 mod developer_tests;
 mod directory_tests;
 mod destination_sensitive_tests;

@@ -544,6 +544,33 @@
 
   // ── Helpers for template ─────────────────────────────────────────
 
+  // ── Deployer avatar ──────────────────────────────────────────────
+  //
+  // A release names whoever deployed it by username (`source_user`), and
+  // `/avatars/` resolves that to the picture on their account — an upload, or
+  // the one Google/GitHub handed us at sign-in. Anyone without a resolvable
+  // picture falls back to their initial, so the slot is never a broken image.
+  //
+  // Whatever renders here must keep the `data-avatar` attribute:
+  // `computeLaneBars()` anchors each swim-lane dot to it.
+  let avatarFailed = new Set();
+
+  function avatarSrc(user) {
+    return `/avatars/${encodeURIComponent(user)}`;
+  }
+
+  // A user with no picture 404s, and the browser would draw a broken image.
+  // Remember the miss instead and render the initial from then on — the whole
+  // list shares one entry per user, so one 404 settles every card they deployed.
+  function avatarMissing(user) {
+    if (!user || avatarFailed.has(user)) return;
+    avatarFailed = new Set(avatarFailed).add(user);
+  }
+
+  function initial(user) {
+    return user ? user.slice(0, 1).toUpperCase() : "";
+  }
+
   function elapsedStr(startedAt, completedAt, status) {
     if (!startedAt) return "";
     const start = new Date(startedAt).getTime();
@@ -723,7 +750,22 @@
           <div data-release data-envs={release.dest_envs} data-lane-states={laneStatesAttr(release)} class="border border-gray-200 rounded-lg overflow-hidden">
             <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
               <div class="flex items-center gap-2 min-w-0 flex-1">
-                <span class="inline-block w-6 h-6 rounded-full bg-gray-200 shrink-0" data-avatar></span>
+                {#if release.source_user && !avatarFailed.has(release.source_user)}
+                  <img
+                    data-avatar
+                    src={avatarSrc(release.source_user)}
+                    alt={release.source_user}
+                    title="Deployed by {release.source_user}"
+                    class="inline-block w-6 h-6 rounded-full object-cover bg-gray-200 shrink-0"
+                    on:error={() => avatarMissing(release.source_user)}
+                  />
+                {:else}
+                  <span
+                    data-avatar
+                    title={release.source_user ? `Deployed by ${release.source_user}` : undefined}
+                    class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-200 text-[10px] font-semibold text-gray-500 shrink-0"
+                  >{initial(release.source_user)}</span>
+                {/if}
                 <a href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}" class="font-medium text-gray-900 hover:text-black truncate" title={release.title}>
                   {release.title?.length > 80 ? release.title.slice(0, 80) + "…" : release.title}
                 </a>
@@ -1025,7 +1067,22 @@
                 <div data-release data-envs="" data-lane-states="" class="border border-gray-200 rounded-lg overflow-hidden opacity-75">
                   <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
                     <div class="flex items-center gap-2 min-w-0 flex-1">
-                      <span class="inline-block w-6 h-6 rounded-full bg-gray-200 shrink-0" data-avatar></span>
+                      {#if release.source_user && !avatarFailed.has(release.source_user)}
+                        <img
+                          data-avatar
+                          src={avatarSrc(release.source_user)}
+                          alt={release.source_user}
+                          title="Deployed by {release.source_user}"
+                          class="inline-block w-6 h-6 rounded-full object-cover bg-gray-200 shrink-0"
+                          on:error={() => avatarMissing(release.source_user)}
+                        />
+                      {:else}
+                        <span
+                          data-avatar
+                          title={release.source_user ? `Deployed by ${release.source_user}` : undefined}
+                          class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-200 text-[10px] font-semibold text-gray-500 shrink-0"
+                        >{initial(release.source_user)}</span>
+                      {/if}
                       <a href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}" class="font-medium text-gray-900 hover:text-black truncate" title={release.title}>
                         {release.title?.length > 80 ? release.title.slice(0, 80) + "…" : release.title}
                       </a>

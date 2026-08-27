@@ -74,7 +74,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/settings/account/picture", post(upload_picture_submit))
         .route("/settings/account/picture/remove", post(remove_picture_submit))
-        .route("/avatars/{user_id}", get(serve_avatar))
+        .route("/avatars/{identifier}", get(serve_avatar))
         .route("/auth/google", get(google_oauth_start))
         .route("/auth/google/callback", get(google_oauth_callback))
         .route("/auth/github", get(github_oauth_start))
@@ -3000,36 +3000,100 @@ async fn remove_picture_submit(
     Ok(Redirect::to("/settings/account").into_response())
 }
 
+/// Serve a user's avatar, by user id *or* by username.
+///
+/// Uploaded pictures are keyed by user id, which is what `profile_picture_url`
+/// points back at after an upload — that stays the fast path. But the views
+/// that want to show a face usually only know a username: the release timeline
+/// knows who deployed a release as `source_user`, not as an id. So a username
+/// is resolved to its account here, and a user who signed in with Google or
+/// GitHub — who has no upload at all, only the URL their provider gave us — is
+/// redirected on to that picture rather than 404ing.
 async fn serve_avatar(
     State(state): State<AppState>,
-    Path(user_id): Path<String>,
+    maybe: MaybeSession,
+    Path(identifier): Path<String>,
 ) -> Response {
-    let store = match state.profile_picture_store.as_ref() {
+    if let Some(pic) = stored_avatar(&state, &identifier).await {
+        return avatar_response(pic);
+    }
+
+    // Resolving a name needs the caller's token, which also keeps lookups by
+    // username behind the same login as the pages that ask for them.
+    let session = match maybe.session {
         Some(s) => s,
         None => return StatusCode::NOT_FOUND.into_response(),
     };
+    if validate_username(&identifier).is_err() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
 
-    match store.get(&user_id).await {
-        Ok(Some(pic)) => {
-            let headers = [
-                (axum::http::header::CONTENT_TYPE, pic.content_type),
-                (
+    let profile = match state
+        .forest_client
+        .get_user_by_username(&session.access_token, &identifier)
+        .await
+    {
+        Ok(p) => p,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    if let Some(pic) = stored_avatar(&state, &profile.user_id).await {
+        return avatar_response(pic);
+    }
+
+    match profile.profile_picture_url.as_deref() {
+        // Only ever hand the browser on to an external http(s) picture. A URL
+        // pointing back at our own /avatars/ would loop: the upload it names is
+        // exactly what the store lookup above already came up empty for.
+        Some(url)
+            if (url.starts_with("https://") || url.starts_with("http://"))
+                && !url.contains("/avatars/") =>
+        {
+            // A timeline shows the same handful of deployers over and over, and
+            // every card asking costs a user lookup. Let the browser hold the
+            // answer briefly — privately, since where it points is personal.
+            (
+                [(
                     axum::http::header::CACHE_CONTROL,
-                    "public, max-age=3600".to_string(),
-                ),
-                (
-                    axum::http::header::CONTENT_SECURITY_POLICY,
-                    "default-src 'none'; style-src 'unsafe-inline'".to_string(),
-                ),
-                (
-                    axum::http::header::X_CONTENT_TYPE_OPTIONS,
-                    "nosniff".to_string(),
-                ),
-            ];
-            (headers, pic.data).into_response()
+                    "private, max-age=300",
+                )],
+                Redirect::temporary(url),
+            )
+                .into_response()
         }
         _ => StatusCode::NOT_FOUND.into_response(),
     }
+}
+
+/// The uploaded picture for a user id, if there is a store and it holds one.
+async fn stored_avatar(state: &AppState, user_id: &str) -> Option<forage_db::ProfilePicture> {
+    let store = state.profile_picture_store.as_ref()?;
+    match store.get(user_id).await {
+        Ok(pic) => pic,
+        Err(e) => {
+            tracing::warn!("profile picture lookup for {user_id} failed: {e:#}");
+            None
+        }
+    }
+}
+
+fn avatar_response(pic: forage_db::ProfilePicture) -> Response {
+    let headers = [
+        (axum::http::header::CONTENT_TYPE, pic.content_type),
+        (
+            axum::http::header::CACHE_CONTROL,
+            "public, max-age=3600".to_string(),
+        ),
+        (
+            axum::http::header::CONTENT_SECURITY_POLICY,
+            "default-src 'none'; style-src 'unsafe-inline'".to_string(),
+        ),
+        (
+            axum::http::header::X_CONTENT_TYPE_OPTIONS,
+            "nosniff".to_string(),
+        ),
+    ];
+    (headers, pic.data).into_response()
 }
 
 // ─── Email verification (signup + add_email) ─────────────────────────

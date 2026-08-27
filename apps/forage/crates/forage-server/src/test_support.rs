@@ -29,6 +29,7 @@ pub(crate) struct MockBehavior {
     pub login_result: Option<Result<LoginResult, AuthError>>,
     pub refresh_result: Option<Result<AuthTokens, AuthError>>,
     pub get_user_result: Option<Result<User, AuthError>>,
+    pub get_user_by_username_result: Option<Result<UserProfile, AuthError>>,
     pub list_tokens_result: Option<Result<Vec<PersonalAccessToken>, AuthError>>,
     pub create_token_result: Option<Result<CreatedToken, AuthError>>,
     pub delete_token_result: Option<Result<(), AuthError>>,
@@ -329,12 +330,17 @@ impl ForestAuth for MockForestClient {
         _access_token: &str,
         username: &str,
     ) -> Result<UserProfile, AuthError> {
-        Ok(UserProfile {
-            user_id: "user-123".into(),
-            username: username.into(),
-            profile_picture_url: None,
-            created_at: Some("2025-01-15T10:00:00Z".into()),
-        })
+        let b = self.behavior.lock().unwrap();
+        b.get_user_by_username_result
+            .clone()
+            .unwrap_or_else(|| {
+                Ok(UserProfile {
+                    user_id: "user-123".into(),
+                    username: username.into(),
+                    profile_picture_url: None,
+                    created_at: Some("2025-01-15T10:00:00Z".into()),
+                })
+            })
     }
 
     async fn get_user_by_email(
