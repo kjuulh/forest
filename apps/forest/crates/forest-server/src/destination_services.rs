@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use crate::{
     State,
-    destinations::{DestinationIndex, DestinationService},
+    destinations::{
+        DestinationIndex, DestinationService,
+        external::{self, ExternalDestination},
+    },
     services::release_logs_registry::ReleaseLogsRegistryState,
 };
 
@@ -58,13 +61,37 @@ pub trait DestinationServicesState {
 impl DestinationServicesState for State {
     fn destination_services(&self) -> DestinationServices {
         let release_logs_registry = self.release_logs_registry();
+        let mut services = vec![
+            DestinationService::new_flux_v1(self, release_logs_registry.clone()),
+            DestinationService::new_kubernetes_v1(release_logs_registry.clone()),
+            DestinationService::new_forage_v1(release_logs_registry.clone()),
+            DestinationService::new_terraform_v1(self, release_logs_registry.clone()),
+        ];
+
+        // Types implemented by a runner rather than by forest. They carry a
+        // metadata schema so destinations can be created and validated, but no
+        // implementation — the scheduler dispatches them to whichever runner
+        // registers the matching capability.
+        for spec in external::declared() {
+            if services.iter().any(|s| s.name() == spec.index()) {
+                // A built-in of the same name wins; overriding a compiled-in
+                // implementation from a config file is not something a
+                // deployment should be able to do by accident.
+                tracing::warn!(
+                    destination_type = %spec.index(),
+                    "ignoring externally-declared destination type: a built-in of the same name exists",
+                );
+                continue;
+            }
+
+            services.push(DestinationService::new(
+                ExternalDestination { spec: spec.clone() },
+                release_logs_registry.clone(),
+            ));
+        }
+
         DestinationServices {
-            services: Arc::new(vec![
-                DestinationService::new_flux_v1(self, release_logs_registry.clone()),
-                DestinationService::new_kubernetes_v1(release_logs_registry.clone()),
-                DestinationService::new_forage_v1(release_logs_registry.clone()),
-                DestinationService::new_terraform_v1(self, release_logs_registry),
-            ]),
+            services: Arc::new(services),
         }
     }
 }

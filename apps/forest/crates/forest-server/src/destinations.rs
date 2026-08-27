@@ -18,6 +18,7 @@ use crate::{
     temp_dir::TempDirectoriesState,
 };
 
+pub mod external;
 pub mod fluxv1;
 pub mod foragev1;
 pub mod in_process_backend;

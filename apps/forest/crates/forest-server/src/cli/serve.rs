@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use crate::{
-    checks::Checks, destinations::terraformv1::TerraformV1ServerState, grpc,
+    checks::Checks, destinations::external, destinations::terraformv1::TerraformV1ServerState, grpc,
     intent_coordinator::IntentCoordinator, release_reaper::ReleaseReaper,
     runner_manager::RunnerManager, scheduler::SchedulerState, servehttp::ServeHttp, state::State,
 };
@@ -29,6 +29,11 @@ pub struct ServeCommand {
 
 impl ServeCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        // Parse externally-declared destination types up front. A malformed file
+        // should fail startup rather than leave every external destination
+        // quietly un-creatable with no indication why.
+        external::load()?;
+
         let runner_manager = RunnerManager::new();
 
         notmad::Mad::builder()
