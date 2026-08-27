@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/understory-io/forest/compare/v0.3.1...v0.3.2) (2026-08-27)
+
+
+### Features
+
+* **publish:** warn when a tool ships only one platform ([#125](https://github.com/understory-io/forest/issues/125)) ([1f62387](https://github.com/understory-io/forest/commit/1f623878e31072bfa0bfac24caeeb269e5fe54a0))
+
 ## [0.3.1](https://github.com/understory-io/forest/compare/v0.3.0...v0.3.1) (2026-08-27)
 
 
