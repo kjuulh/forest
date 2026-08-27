@@ -299,6 +299,9 @@ pub struct MetadataFieldSchema {
     pub field_type: ::prost::alloc::string::String,
     #[prost(string, tag="6")]
     pub default_value: ::prost::alloc::string::String,
+    /// Credential fields. Redacted in API responses and never logged.
+    #[prost(bool, tag="7")]
+    pub sensitive: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Environment {

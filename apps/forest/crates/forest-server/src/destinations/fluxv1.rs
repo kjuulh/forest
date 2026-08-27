@@ -76,6 +76,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: true,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "namespace".into(),
@@ -84,6 +85,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: true,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_url".into(),
@@ -93,6 +95,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "url".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_branch".into(),
@@ -101,6 +104,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: "main".into(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_ssh_key_path".into(),
@@ -109,6 +113,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_username".into(),
@@ -117,6 +122,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_token".into(),
@@ -125,6 +131,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_author_name".into(),
@@ -133,6 +140,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: "forest-release".into(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "git_author_email".into(),
@@ -141,6 +149,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: "forest@release.local".into(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "local_path".into(),
@@ -150,6 +159,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "reconcile_url".into(),
@@ -159,6 +169,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "url".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "webhook_secret".into(),
@@ -167,6 +178,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "forest_webhook_url".into(),
@@ -175,6 +187,7 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "url".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "flux_git_repository_name".into(),
@@ -183,11 +196,12 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: "flux-system".into(),
+                sensitive: false,
             },
         ]
     }
 
-    fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
+    async fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
         FluxV1Handler::validate_metadata(metadata)
     }
 

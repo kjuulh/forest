@@ -67,4 +67,6 @@ message MetadataFieldSchema {
   bool required = 4;
   string field_type = 5;
   string default_value = 6;
+  // Credential fields. Redacted in API responses and never logged.
+  bool sensitive = 7;
 }

@@ -124,6 +124,8 @@ pub struct MetadataFieldSchema {
     pub required: bool,
     pub field_type: String,
     pub default_value: String,
+    /// Credential fields. Redacted in API responses and never logged.
+    pub sensitive: bool,
 }
 
 pub struct DestinationType {
@@ -149,6 +151,7 @@ impl From<MetadataFieldSchema> for forest_grpc_interface::MetadataFieldSchema {
             required: value.required,
             field_type: value.field_type,
             default_value: value.default_value,
+            sensitive: value.sensitive,
         }
     }
 }

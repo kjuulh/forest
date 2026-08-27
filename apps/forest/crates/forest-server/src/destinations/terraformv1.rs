@@ -779,6 +779,7 @@ impl DestinationEdge for TerraformV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "tf_parallelism".into(),
@@ -788,6 +789,7 @@ impl DestinationEdge for TerraformV1Destination {
                 required: false,
                 field_type: "number".into(),
                 default_value: "10".into(),
+                sensitive: false,
             },
         ]
     }

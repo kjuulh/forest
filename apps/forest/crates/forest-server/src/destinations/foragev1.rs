@@ -42,6 +42,7 @@ impl DestinationEdge for ForageV1Destination {
                 required: true,
                 field_type: "url".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "namespace".into(),
@@ -51,6 +52,7 @@ impl DestinationEdge for ForageV1Destination {
                 required: true,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "region".into(),
@@ -59,6 +61,7 @@ impl DestinationEdge for ForageV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: "eu-west-1".into(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "image".into(),
@@ -68,6 +71,7 @@ impl DestinationEdge for ForageV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
+                sensitive: false,
             },
             forest_models::MetadataFieldSchema {
                 name: "replicas".into(),
@@ -76,11 +80,12 @@ impl DestinationEdge for ForageV1Destination {
                 required: false,
                 field_type: "number".into(),
                 default_value: "1".into(),
+                sensitive: false,
             },
         ]
     }
 
-    fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
+    async fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
         ForageV1Metadata::validate(metadata)
     }
 
