@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/understory-io/forest/compare/v0.3.0...v0.3.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **forage:** clear a superseded lane warning once a newer release goes live ([#197](https://github.com/understory-io/forest/issues/197)) ([089b92f](https://github.com/understory-io/forest/commit/089b92ff2bc7b83e00f021521ab5e6e2bce02c64))
+
 ## [0.3.0](https://github.com/understory-io/forest/compare/v0.2.20...v0.3.0) (2026-08-26)
 
 
