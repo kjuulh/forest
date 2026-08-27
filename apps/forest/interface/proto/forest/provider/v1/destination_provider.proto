@@ -1,0 +1,145 @@
+syntax = "proto3";
+
+// A destination provider is an external service that implements a forest
+// destination type. forest dials it; the provider needs no forest code and no
+// forest dependency — only this file, which is deliberately self-contained so it
+// can be vendored on its own and generated for any language.
+//
+// The type a provider implements is reached through forest's built-in
+// `forest/generic@1` destination: a destination of that type carries
+// `provider_url` in its metadata, and every other metadata key is passed
+// through to the provider untouched.
+//
+// Two calls, and forest drives both:
+//
+//   Describe  — at destination-creation time, so the metadata schema lives with
+//               the implementation rather than being mirrored into forest's
+//               configuration. forest validates the destination's metadata
+//               against what comes back, and renders a form from it.
+//   Execute   — to run a release. Log lines stream back as they happen and are
+//               written to the release log; the final event carries the outcome.
+//
+// Authentication: when the destination sets `provider_token`, forest sends it on
+// every call as the gRPC metadata header `authorization: Bearer <token>`.
+// Providers reachable only on an internal network may ignore it, but anything
+// that can act on production should not.
+package forest.provider.v1;
+
+service DestinationProvider {
+  // Describe the destination type this provider implements.
+  //
+  // Called when a destination is created or updated, and again as a
+  // reachability check before each release. Must be side-effect free.
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+
+  // Execute a release, streaming progress.
+  //
+  // The stream must end with exactly one `outcome` event. A stream that ends
+  // without one is treated as a failure — a provider that dies mid-release has
+  // not succeeded, and forest will not guess otherwise.
+  rpc Execute(ExecuteRequest) returns (stream ExecuteEvent);
+}
+
+message DescribeRequest {}
+
+message DescribeResponse {
+  // Human-readable summary of what this provider releases to, shown next to the
+  // destination in forest.
+  string description = 1;
+
+  // Metadata this provider accepts, beyond `generic`'s own `provider_url` and
+  // `provider_token`. forest enforces `required` at destination-creation time;
+  // everything else is for rendering and for the provider's own validation.
+  repeated MetadataField fields = 2;
+
+  // Whether Execute handles RELEASE_MODE_PLAN. When false, forest does not offer
+  // a plan for destinations backed by this provider.
+  bool supports_plan = 3;
+
+  // Optional identifier for the type being implemented, e.g. "understory/ecs@1".
+  // Logged with each release so it is clear which provider served it.
+  string type_name = 4;
+}
+
+message MetadataField {
+  string name = 1;
+  string label = 2;
+  string description = 3;
+  bool required = 4;
+  // Rendering hint: "text", "url", "number", "password", …
+  string field_type = 5;
+  string default_value = 6;
+  // Credentials. forest redacts these in API responses and never logs them.
+  bool sensitive = 7;
+}
+
+enum ReleaseMode {
+  RELEASE_MODE_UNSPECIFIED = 0;
+  // Execute the release.
+  RELEASE_MODE_DEPLOY = 1;
+  // Dry run. Make no change; report what a deploy would do in
+  // `Outcome.plan_output`, which is what a reviewer approves.
+  RELEASE_MODE_PLAN = 2;
+}
+
+message ExecuteRequest {
+  ReleaseMode mode = 1;
+  Destination destination = 2;
+  Release release = 3;
+
+  // A scoped, short-lived token plus the address to use it against. A provider
+  // that needs the release's rendered artifacts calls
+  // `forest.v1.RunnerService/GetReleaseFiles` (or `GetSpecFiles`) with them.
+  //
+  // Most providers act on infrastructure that already exists and need neither;
+  // both can be ignored. The token is scoped to this release alone and expires
+  // with it.
+  string release_token = 4;
+  string forest_addr = 5;
+}
+
+message Destination {
+  string name = 1;
+  string environment = 2;
+  string organisation = 3;
+
+  // The destination's metadata with `generic`'s own `provider_*` keys removed,
+  // so a provider sees only its own configuration.
+  map<string, string> metadata = 4;
+}
+
+message Release {
+  string release_id = 1;
+  string project = 2;
+  string slug = 3;
+
+  // Empty when the release has no source reference. A provider that pins an
+  // immutable artifact from the commit should fail rather than invent one.
+  string reference_commit_sha = 4;
+  string reference_commit_branch = 5;
+  string reference_version = 6;
+}
+
+message ExecuteEvent {
+  oneof event {
+    LogLine log = 1;
+    Outcome outcome = 2;
+  }
+}
+
+message LogLine {
+  // "stdout" or "stderr". Anything else is treated as stdout.
+  string channel = 1;
+  string line = 2;
+}
+
+message Outcome {
+  bool success = 1;
+
+  // Why it failed. Surfaced as the release's failure message, so it should say
+  // what went wrong and where — this is what someone reads at 3am.
+  string error_message = 2;
+
+  // Plan text, for RELEASE_MODE_PLAN.
+  string plan_output = 3;
+}

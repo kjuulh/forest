@@ -7,6 +7,7 @@ use crate::{
     destinations::{
         fluxv1::FluxV1Destination,
         foragev1::ForageV1Destination,
+        genericv1::GenericV1Destination,
         kubernetesv1::KubernetesV1Destination,
         logger::DestinationLogger,
         terraformv1::{TerraformStateStoreState, TerraformV1Destination},
@@ -14,12 +15,14 @@ use crate::{
     services::{
         artifact_staging_registry::ArtifactStagingRegistryState,
         release_logs_registry::ReleaseLogsRegistry, release_registry::ReleaseItem,
+        release_token_registry::ReleaseTokenRegistryState,
     },
     temp_dir::TempDirectoriesState,
 };
 
 pub mod fluxv1;
 pub mod foragev1;
+pub mod genericv1;
 pub mod in_process_backend;
 pub mod kubernetesv1;
 pub mod terraformv1;
@@ -61,6 +64,16 @@ impl DestinationService {
         Self::new(ForageV1Destination {}, release_logs_registry)
     }
 
+    pub fn new_generic_v1(state: &State, release_logs_registry: ReleaseLogsRegistry) -> Self {
+        Self::new(
+            GenericV1Destination {
+                release_tokens: state.release_token_registry(),
+                external_host: state.config.external_host.clone(),
+            },
+            release_logs_registry,
+        )
+    }
+
     pub fn new_terraform_v1(state: &State, release_logs_registry: ReleaseLogsRegistry) -> Self {
         Self::new(
             TerraformV1Destination {
@@ -85,8 +98,11 @@ impl DestinationService {
         self.inner.metadata_schema()
     }
 
-    pub fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
-        self.inner.validate_metadata(metadata)
+    pub async fn validate_metadata(
+        &self,
+        metadata: &HashMap<String, String>,
+    ) -> anyhow::Result<()> {
+        self.inner.validate_metadata(metadata).await
     }
 
     pub(crate) async fn prepare(
@@ -155,8 +171,12 @@ pub trait DestinationEdge {
 
     /// Validate that the given metadata contains all required fields for this
     /// destination type. Called during destination creation.
+    ///
+    /// Async because a type whose schema lives outside forest — `generic`, whose
+    /// provider declares its own fields — has to go and ask before it can say
+    /// whether the metadata is valid.
     #[allow(unused_variables)]
-    fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
+    async fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
         Ok(())
     }
 
