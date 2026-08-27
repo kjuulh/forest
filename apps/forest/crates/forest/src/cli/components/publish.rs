@@ -81,6 +81,47 @@ fn derive_summary_shape(kind: &str, has_tool: bool, has_methods: bool) -> &'stat
     }
 }
 
+/// Warn when a *tool* is about to be published for a single platform.
+///
+/// A component with a tool facet is installable with `forest global add`, so a
+/// colleague on any other OS/arch gets a hard failure:
+///
+/// ```text
+/// tool understory/fungus@0.1.28 not available for linux/amd64; published for: darwin/arm64
+/// ```
+///
+/// This is easy to do by accident and invisible at publish time, because a
+/// `type: "rust"` / `"go"` component is compiled on whichever host runs publish
+/// — so a publish from a Mac contributes darwin/arm64 and nothing else, no
+/// matter what the `architectures` matrix promises. fungus shipped four
+/// versions that way before anyone on Linux tried to run it.
+///
+/// Returns the message to show, or `None` when there is nothing to warn about:
+/// a non-tool component (a library is not installed per-platform), or a tool
+/// that already ships more than one platform.
+fn single_platform_tool_warning(
+    has_tool: bool,
+    platforms: &[String],
+    upload_type: Option<&str>,
+) -> Option<String> {
+    if !has_tool || platforms.len() != 1 {
+        return None;
+    }
+    let only = &platforms[0];
+    let remedy = if upload_type == Some("prebuilt") {
+        "add the other platforms to `upload.prebuilt` in forest.cue"
+    } else {
+        // The built path physically cannot do better than the host, so pointing
+        // at the architectures matrix would be misleading advice.
+        "switch to `upload.type: \"prebuilt\"` and build each platform up front \
+(a built component only ever publishes the host's platform)"
+    };
+    Some(format!(
+        "publishing a tool for {only} only — `forest global add` will fail for every other \
+platform; {remedy}"
+    ))
+}
+
 /// The binaries to publish: everything under `.forest/component/output/`, and
 /// nothing else.
 ///
@@ -786,11 +827,15 @@ impl PublishCommand {
                 .as_ref()
                 .map(|d| !d.methods.is_empty())
                 .unwrap_or(false);
-            let platform = if binary.is_some() {
-                // Report every platform that would be uploaded. Summarising only
-                // the host's was how a single-platform publish went unnoticed:
-                // the dry-run agreed with the mistake.
-                let listed: Vec<String> = publishable_binaries(&current_dir, name)?
+            // Report every platform that would be uploaded. Summarising only
+            // the host's was how a single-platform publish went unnoticed:
+            // the dry-run agreed with the mistake.
+            //
+            // Computed once and shared with the single-platform warning below —
+            // it needs the same list, and walking the output tree twice to
+            // rebuild it invites the two disagreeing.
+            let listed: Vec<String> = if binary.is_some() {
+                publishable_binaries(&current_dir, name)?
                     .into_iter()
                     .map(|(os, arch, _)| {
                         let os = if os == "macos" {
@@ -800,16 +845,19 @@ impl PublishCommand {
                         };
                         format!("{os}_{arch}")
                     })
-                    .collect();
-                if listed.is_empty() {
-                    "no-platform".to_string()
-                } else {
-                    listed.join(", ")
-                }
+                    .collect()
             } else {
+                Vec::new()
+            };
+            let platform = if listed.is_empty() {
                 "no-platform".to_string()
+            } else {
+                listed.join(", ")
             };
             let shape = derive_summary_shape(kind, has_tool, has_methods);
+            if let Some(msg) = single_platform_tool_warning(has_tool, &listed, upload_type) {
+                crate::ui::warn(msg);
+            }
             eprintln!(
                 "dry-run: would publish {}/{}@{} as shape={} [{}] {}",
                 organisation, name, version, shape, kind, platform,
@@ -832,7 +880,24 @@ impl PublishCommand {
 
         // 5. Upload binary (if present)
         if binary.is_some() {
-            for (os, arch, path) in publishable_binaries(&current_dir, name)? {
+            let to_upload = publishable_binaries(&current_dir, name)?;
+            if let Some(msg) = single_platform_tool_warning(
+                descriptor
+                    .as_ref()
+                    .and_then(describe_response_tool_facet)
+                    .is_some(),
+                &to_upload
+                    .iter()
+                    .map(|(os, arch, _)| {
+                        let os = if os == "macos" { "darwin" } else { os.as_str() };
+                        format!("{os}_{arch}")
+                    })
+                    .collect::<Vec<_>>(),
+                upload_type,
+            ) {
+                crate::ui::warn(msg);
+            }
+            for (os, arch, path) in to_upload {
                 // Align the upload os with what the manifest validator +
                 // resolver expect ("darwin" not "macos").
                 let upload_os = if os == "macos" { "darwin" } else { os.as_str() };
@@ -1466,6 +1531,20 @@ async fn publish_prebuilt(
         uploads.len(),
     );
 
+    // A prebuilt block *can* express every platform, so a single-platform one
+    // is a declaration gap rather than a toolchain limit — worth saying so
+    // before the upload rather than after someone on Linux hits it.
+    if let Some(msg) = single_platform_tool_warning(
+        !tool_facet.is_null(),
+        &uploads
+            .iter()
+            .map(|(os, arch, _, _)| format!("{os}_{arch}"))
+            .collect::<Vec<_>>(),
+        Some("prebuilt"),
+    ) {
+        crate::ui::warn(msg);
+    }
+
     // Honour --dry-run here too. The prebuilt path returns long before the
     // dry-run check on the built path, so `--dry-run` used to publish for real
     // against a flag documented as "do not contact the registry".
@@ -1893,5 +1972,83 @@ mod include_tests {
         assert!(looks_secret("AWS_SECRET_ACCESS_KEY"));
         assert!(!looks_secret("FUNGUS_SERVER"));
         assert!(!looks_secret("RUST_LOG"));
+    }
+
+}
+
+/// Guards the single-platform tool warning — the check that would have caught
+/// fungus shipping darwin/arm64-only across four versions.
+#[cfg(test)]
+mod platform_guard_tests {
+    use super::single_platform_tool_warning;
+
+    fn plats(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn warns_when_a_built_tool_ships_only_the_host_platform() {
+        // The fungus case: type: "rust", published from a Mac, four versions
+        // that nobody on Linux could install.
+        let msg = single_platform_tool_warning(true, &plats(&["darwin_arm64"]), Some("rust"))
+            .expect("a single-platform tool must warn");
+        assert!(msg.contains("darwin_arm64"), "{msg}");
+        assert!(
+            msg.contains("prebuilt"),
+            "must point at the fix, not just the problem: {msg}"
+        );
+        assert!(
+            msg.contains("only ever publishes the host"),
+            "must explain why the architectures matrix won't help: {msg}"
+        );
+    }
+
+    #[test]
+    fn warns_for_a_single_platform_prebuilt_tool_but_advises_differently() {
+        // A prebuilt block can express every platform, so the remedy is to
+        // declare them — telling the author to "switch to prebuilt" would be
+        // nonsense when they already have.
+        let msg = single_platform_tool_warning(true, &plats(&["linux_amd64"]), Some("prebuilt"))
+            .expect("still a single-platform tool");
+        assert!(msg.contains("upload.prebuilt"), "{msg}");
+        assert!(
+            !msg.contains("switch to"),
+            "must not tell a prebuilt author to switch to prebuilt: {msg}"
+        );
+    }
+
+    #[test]
+    fn stays_quiet_for_a_multi_platform_tool() {
+        assert_eq!(
+            single_platform_tool_warning(
+                true,
+                &plats(&["darwin_arm64", "darwin_amd64", "linux_amd64", "linux_arm64"]),
+                Some("prebuilt"),
+            ),
+            None
+        );
+        // Two is enough to be deliberate.
+        assert_eq!(
+            single_platform_tool_warning(true, &plats(&["darwin_arm64", "linux_amd64"]), Some("rust")),
+            None
+        );
+    }
+
+    #[test]
+    fn stays_quiet_for_a_non_tool_component() {
+        // A library or plain component is not installed per-platform, so a
+        // single binary is entirely normal and warning would be noise on every
+        // publish.
+        assert_eq!(
+            single_platform_tool_warning(false, &plats(&["darwin_arm64"]), Some("rust")),
+            None
+        );
+    }
+
+    #[test]
+    fn stays_quiet_when_there_are_no_platforms_at_all() {
+        // Nothing to say here — a separate error already covers it, and this
+        // guard must not turn "no binary" into a confusing platform warning.
+        assert_eq!(single_platform_tool_warning(true, &[], Some("rust")), None);
     }
 }

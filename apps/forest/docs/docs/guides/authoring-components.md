@@ -255,6 +255,91 @@ This uploads:
 
 The component is now available in the registry for other projects to consume.
 
+## Publishing a Tool for Every Platform
+
+A component with a **tool facet** is installed with `forest global add` and runs
+on colleagues' machines, so it has to carry a binary for every platform they
+use. Miss one and they get a hard failure:
+
+```
+tool understory/fungus@0.1.28 not available for linux/amd64; published for: darwin/arm64
+```
+
+### A built component only ever publishes the host's platform
+
+`upload.type: "rust"` (or `"go"`, `"docker"`) compiles during publish, on
+whichever machine runs it. Publishing from a Mac therefore contributes
+`darwin/arm64` and nothing else — **declaring more entries under
+`architectures` does not change this**, because nothing cross-compiles the
+others. This is easy to miss: the publish succeeds and looks healthy.
+
+`forest publish` warns when it happens:
+
+```
+! publishing a tool for darwin_arm64 only — `forest global add` will fail for
+  every other platform; switch to `upload.type: "prebuilt"` ...
+```
+
+### Ship every platform with `prebuilt`
+
+The `prebuilt` path loops over os → arch and reads one binary per platform off
+disk, so a single publish carries them all:
+
+```cue
+upload: {
+	source: "."
+	type:   "prebuilt"
+	prebuilt: {
+		macos: {
+			arm64: "dist/macos/arm64/mytool"
+			amd64: "dist/macos/amd64/mytool"
+		}
+		linux: {
+			amd64: "dist/linux/amd64/mytool"
+			arm64: "dist/linux/arm64/mytool"
+		}
+	}
+}
+```
+
+Build them before publishing, conventionally with a `mise run dist` task.
+
+**Go** cross-compiles with `GOOS`/`GOARCH` and needs nothing extra.
+
+**Rust** needs the targets installed
+(`rustup target add x86_64-unknown-linux-gnu …`), and Apple's toolchain already
+covers both macOS arches. Linux targets need a C cross-compiler if any
+dependency builds C — `tonic`'s `tls-aws-lc` feature pulls in `aws-lc-sys`, for
+example. [`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild)
+supplies one via `zig cc` without installing a per-target GCC:
+
+```bash
+cargo build     --release --bin mytool --target aarch64-apple-darwin
+cargo build     --release --bin mytool --target x86_64-apple-darwin
+cargo zigbuild  --release --bin mytool --target x86_64-unknown-linux-gnu
+cargo zigbuild  --release --bin mytool --target aarch64-unknown-linux-gnu
+```
+
+If the project pins its toolchain through mise, add the targets to *that*
+toolchain — `mise exec -- rustup target add …`. `mise run` activates its own
+Rust, so targets added only to rustup's default will appear to work until a
+change forces a real recompile.
+
+### Keep the binary's version and the component version in lockstep
+
+A Rust or Go binary usually reports `CARGO_PKG_VERSION` / its own constant,
+while the registry serves `forest.component.version`. They are separate
+numbers. If they drift, the registry serves 0.1.31 and the binary inside
+claims 0.1.29 — the correlation problem that build-version stamping exists to
+prevent. Either read the stamped value:
+
+```rust
+// FOREST_COMPONENT_VERSION is set by the build; fall back for local builds.
+option_env!("FOREST_COMPONENT_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+```
+
+…or have the `dist` task fail when the two disagree, before it publishes.
+
 ## Shipping shell integration
 
 If your tool prints an rc-file snippet — completions, a wrapper function, a
