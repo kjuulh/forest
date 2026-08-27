@@ -85,7 +85,7 @@ impl DestinationEdge for ForageV1Destination {
         ]
     }
 
-    fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
+    async fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
         ForageV1Metadata::validate(metadata)
     }
 

@@ -66,6 +66,7 @@ impl DestinationServicesState for State {
                 // Announce-only. Runs in-process, deploys nothing, and exists so
                 // a service forest does not deploy can still have forest's
                 // release lifecycle and notifications (DATA-637).
+                DestinationService::new_generic_v1(self, release_logs_registry.clone()),
                 DestinationService::new_noop_v1(release_logs_registry.clone()),
                 DestinationService::new_terraform_v1(self, release_logs_registry),
             ]),

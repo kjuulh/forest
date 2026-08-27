@@ -205,7 +205,7 @@ impl DestinationEdge for FluxV1Destination {
         ]
     }
 
-    fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
+    async fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
         FluxV1Handler::validate_metadata(metadata)
     }
 

@@ -104,12 +104,12 @@ mod tests {
 
     /// The whole contract: no required metadata, so a destination of this type
     /// can be created without handing forest a single credential.
-    #[test]
-    fn it_requires_no_metadata() {
+    #[tokio::test]
+    async fn it_requires_no_metadata() {
         let dest = NoopV1Destination {};
 
         assert!(dest.metadata_schema().is_empty());
-        assert!(dest.validate_metadata(&HashMap::new()).is_ok());
+        assert!(dest.validate_metadata(&HashMap::new()).await.is_ok());
     }
 
     /// And it declines the plan phase rather than reporting an empty plan, which

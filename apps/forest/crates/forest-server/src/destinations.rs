@@ -7,6 +7,7 @@ use crate::{
     destinations::{
         fluxv1::FluxV1Destination,
         foragev1::ForageV1Destination,
+        genericv1::GenericV1Destination,
         kubernetesv1::KubernetesV1Destination,
         logger::DestinationLogger,
         noopv1::NoopV1Destination,
@@ -15,12 +16,14 @@ use crate::{
     services::{
         artifact_staging_registry::ArtifactStagingRegistryState,
         release_logs_registry::ReleaseLogsRegistry, release_registry::ReleaseItem,
+        release_token_registry::ReleaseTokenRegistryState,
     },
     temp_dir::TempDirectoriesState,
 };
 
 pub mod fluxv1;
 pub mod foragev1;
+pub mod genericv1;
 pub mod in_process_backend;
 pub mod kubernetesv1;
 pub mod noopv1;
@@ -63,6 +66,16 @@ impl DestinationService {
         Self::new(ForageV1Destination {}, release_logs_registry)
     }
 
+    pub fn new_generic_v1(state: &State, release_logs_registry: ReleaseLogsRegistry) -> Self {
+        Self::new(
+            GenericV1Destination {
+                release_tokens: state.release_token_registry(),
+                external_host: state.config.external_host.clone(),
+            },
+            release_logs_registry,
+        )
+    }
+
     pub fn new_noop_v1(release_logs_registry: ReleaseLogsRegistry) -> Self {
         Self::new(NoopV1Destination {}, release_logs_registry)
     }
@@ -91,8 +104,11 @@ impl DestinationService {
         self.inner.metadata_schema()
     }
 
-    pub fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
-        self.inner.validate_metadata(metadata)
+    pub async fn validate_metadata(
+        &self,
+        metadata: &HashMap<String, String>,
+    ) -> anyhow::Result<()> {
+        self.inner.validate_metadata(metadata).await
     }
 
     pub(crate) async fn prepare(
@@ -160,7 +176,7 @@ pub trait DestinationEdge {
     /// Validate that the given metadata contains all required fields for this
     /// destination type. Called during destination creation.
     #[allow(unused_variables)]
-    fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
+    async fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
         Ok(())
     }
 

@@ -58,6 +58,7 @@ impl DestinationService for DestinationServer {
 
         dest_svc
             .validate_metadata(&req.metadata)
+            .await
             .context("invalid destination metadata")
             .to_internal_error()?;
 
