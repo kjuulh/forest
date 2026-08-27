@@ -94,6 +94,9 @@ try {
       const cards = [...(sr?.querySelectorAll("[data-release]") ?? [])];
       out[s.dataset.fixture] = {
         laneStates: cards[0]?.dataset.laneStates ?? "",
+        // Every card, top to bottom: a superseded state only exists relative to
+        // what is above it, so the cards below are the interesting ones.
+        allLaneStates: cards.map((c) => c.dataset.laneStates ?? ""),
         dotTitles: [...(sr?.querySelectorAll(".lane-dot") ?? [])].map((d) => d.getAttribute("title")),
         hatched: [...(sr?.querySelectorAll(".lane-bar") ?? [])]
           .filter((b) => (b.style.backgroundImage || "").includes("svg")).length,
@@ -121,9 +124,25 @@ try {
       }
     }
 
+    // 1b. Cards *below* the fixture carry their resolved state too — this is
+    //     where supersession shows up: an older parked leg reading `past`
+    //     because a newer release took the environment over.
+    for (const [i, exp] of (f.expectBelow || []).entries()) {
+      const got = o.allLaneStates[i + 1] ?? "";
+      for (const [env, kind] of Object.entries(exp)) {
+        if (!got.split(",").includes(`${env}:${kind}`)) {
+          failures.push(`${f.key}: card ${i + 1} expected ${env}:${kind}, got "${got}"`);
+        }
+      }
+    }
+
     // 2. Unfinished states animate; finished ones do not. This is the invariant
-    //    the bug violated — a parked pipeline that rendered as settled.
-    const wantsMotion = Object.values(f.expect).some(isUnfinished);
+    //    the bug violated — a parked pipeline that rendered as settled. The
+    //    second bug it catches is the mirror image: a lane that keeps animating
+    //    for an older release a newer one has already superseded.
+    const wantsMotion = [f.expect, ...(f.expectBelow || [])]
+      .flatMap((e) => Object.values(e))
+      .some(isUnfinished);
     if (wantsMotion && (o.hatched === 0 || o.pulsing === 0)) {
       failures.push(`${f.key}: unfinished but nothing animates (hatched=${o.hatched} pulsing=${o.pulsing})`);
     }

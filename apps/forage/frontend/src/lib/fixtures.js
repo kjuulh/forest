@@ -8,6 +8,12 @@
  * Shapes mirror the `/timeline` payload — see `platform.rs`, which sends
  * destination rows plus pipeline stages, with plan stages carrying
  * approval_status in Rust's Debug spelling ("AWAITINGAPPROVAL").
+ *
+ * `release` + `expect` is one release resolved on its own. A fixture may also
+ * carry `below` — older releases rendered underneath it, newest first — plus
+ * `expectBelow`, one expectation object each. Those exist because the gutter
+ * resolves lane states *across* releases: what sits below a release changes
+ * what the rail draws for it, and a fixture of one release cannot show that.
  */
 
 const plan = (env, status, approval) => ({
@@ -135,6 +141,66 @@ export const FIXTURES = [
       destinations: [],
       pipeline_stages: [plan("prod", "CANCELLED"), deploy("prod", "CANCELLED")],
     },
+  },
+  {
+    key: "superseded-awaiting",
+    title: "Superseded — an older release is still awaiting approval",
+    why:
+      "THE BUG. This release is live on dev and prod. The one below it never " +
+      "got its prod approval, so on its own it resolves `awaiting` forever — " +
+      "and the gutter kept drawing the amber went-backwards hatch down to it, " +
+      "so a healthy prod read as broken. prod has moved on: the lane must be " +
+      "settled, while the card below keeps saying what happened to it.",
+    expect: { dev: "live", prod: "live" },
+    release: {
+      slug: "superseded-awaiting", has_pipeline: true,
+      destinations: [dest("dev", "SUCCEEDED", true), dest("prod", "SUCCEEDED", true)],
+      pipeline_stages: [
+        plan("dev", "SUCCEEDED"), deploy("dev", "SUCCEEDED"),
+        plan("prod", "SUCCEEDED"), deploy("prod", "SUCCEEDED"),
+      ],
+    },
+    below: [
+      {
+        slug: "superseded-awaiting-stale", has_pipeline: true, release_intent_id: "ri-4",
+        title: "Older release, prod approval never granted",
+        destinations: [dest("dev", "SUCCEEDED", false)],
+        pipeline_stages: [
+          plan("dev", "SUCCEEDED"), deploy("dev", "SUCCEEDED"),
+          plan("prod", "RUNNING", "AWAITINGAPPROVAL"), deploy("prod", "PENDING"),
+        ],
+      },
+    ],
+    expectBelow: [{ dev: "past", prod: "past" }],
+  },
+  {
+    key: "broken-now",
+    title: "Broken now — nothing has superseded the failure",
+    why:
+      "The other half of the supersession rule. prod's newest release is " +
+      "parked on approval and no later release has taken prod over, so the " +
+      "lane must still warn. Over-suppressing here would hide a live problem.",
+    expect: { dev: "live", prod: "awaiting" },
+    release: {
+      slug: "broken-now", has_pipeline: true, release_intent_id: "ri-5",
+      destinations: [dest("dev", "SUCCEEDED", true)],
+      pipeline_stages: [
+        plan("dev", "SUCCEEDED"), deploy("dev", "SUCCEEDED"),
+        plan("prod", "RUNNING", "AWAITINGAPPROVAL"), deploy("prod", "PENDING"),
+      ],
+    },
+    below: [
+      {
+        slug: "broken-now-older", has_pipeline: true,
+        title: "Older release, failed on prod",
+        destinations: [dest("dev", "SUCCEEDED", false), dest("prod", "FAILED")],
+        pipeline_stages: [
+          plan("dev", "SUCCEEDED"), deploy("dev", "SUCCEEDED"),
+          plan("prod", "SUCCEEDED"), deploy("prod", "FAILED"),
+        ],
+      },
+    ],
+    expectBelow: [{ dev: "past", prod: "past" }],
   },
 ];
 

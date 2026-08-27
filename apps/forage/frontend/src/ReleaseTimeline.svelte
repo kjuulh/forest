@@ -6,7 +6,8 @@
   import { envColors, envLaneColor, envBadgeClasses, statusDotColor } from "./lib/colors.js";
   import {
     IN_FLIGHT, DEPLOYED, STOPPED,
-    effectiveStatus, isPlanAwaiting, releaseEnvStates, laneStatesAttr, isUnfinished,
+    effectiveStatus, isPlanAwaiting, releaseEnvStates, laneStatesAttr,
+    timelineLaneStatesAttrs, isUnfinished,
   } from "./lib/lane-states.js";
   import { pipelineSummary, deployStageLabel, waitStageLabel, planStageLabel, STATUS_CONFIG } from "./lib/status.js";
 
@@ -450,11 +451,18 @@
           flightIdx = i;
         }
 
+        // `past` on a card whose *destination* still reads QUEUED/RUNNING only
+        // happens one way: `timelineLaneStatesAttrs` superseded it because a
+        // newer release went live here. Without this gate the raw destination
+        // status below would put the amber hatch straight back on a healthy
+        // lane — the resolved state is the authority, so honour it here too.
+        const superseded = laneState?.status === "past";
+
         const entries = parseEnvs(cards[i].dataset.envs);
         for (const entry of entries) {
           if (entry.env !== env) continue;
           if (DEPLOYED.has(entry.status) && !deployedCard) { deployedCard = cards[i]; deployedIdx = i; }
-          if (IN_FLIGHT.has(entry.status) && !flightCard) { flightCard = cards[i]; flightIdx = i; }
+          if (!superseded && IN_FLIGHT.has(entry.status) && !flightCard) { flightCard = cards[i]; flightIdx = i; }
           if (STOPPED.has(entry.status) && !stoppedCard) stoppedCard = cards[i];
         }
       }
@@ -618,6 +626,23 @@
     return names;
   }
 
+  // Lane states for every rendered release, resolved *across* the list rather
+  // than one release at a time — see `timelineEnvStates`. A release whose prod
+  // leg is parked on approval, or failed, is superseded once a newer release is
+  // live on prod, and the gutter has to say so; the card keeps its own history.
+  //
+  // Keyed by slug because the card loop walks timeline *items*, and a "hidden"
+  // group is one item standing for many releases. Hidden releases are excluded
+  // for the same reason they render `data-lane-states=""` today: they are
+  // undeployed commits with no environments to supersede anything on.
+  function resolveLaneStates(items) {
+    const releases = items.filter(i => i.kind === "release" && i.release).map(i => i.release);
+    const attrs = timelineLaneStatesAttrs(releases);
+    const bySlug = new Map();
+    releases.forEach((r, i) => bySlug.set(r.slug, attrs[i]));
+    return bySlug;
+  }
+
   // ── Progressive reveal ───────────────────────────────────────────
   //
   // The full views start at the most recent PAGE_SIZE releases and grow
@@ -666,6 +691,7 @@
   $: renderedReleaseCount = renderedTimeline.reduce((n, item) => n + itemReleaseCount(item), 0);
   $: hasMore = !hardLimit && renderedTimeline.length < timeline.length;
   $: renderedLaneNames = laneNamesInTimeline(renderedTimeline);
+  $: laneStatesBySlug = resolveLaneStates(renderedTimeline);
   $: displayedLanes = lanes.filter(lane => renderedLaneNames.has(lane.name));
 
   $: laneCount = displayedLanes.length;
@@ -747,7 +773,7 @@
       {#each renderedTimeline as item (itemKey(item))}
         {#if item.kind === "release" && item.release}
           {@const release = item.release}
-          <div data-release data-envs={release.dest_envs} data-lane-states={laneStatesAttr(release)} class="border border-gray-200 rounded-lg overflow-hidden">
+          <div data-release data-envs={release.dest_envs} data-lane-states={laneStatesBySlug.get(release.slug) ?? laneStatesAttr(release)} class="border border-gray-200 rounded-lg overflow-hidden">
             <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
               <div class="flex items-center gap-2 min-w-0 flex-1">
                 {#if release.source_user && !avatarFailed.has(release.source_user)}

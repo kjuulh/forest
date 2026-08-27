@@ -1,13 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import {
-  releaseEnvStates, laneStatesAttr, isUnfinished,
-  effectiveStatus, isPlanAwaiting, DOT_PRIORITY,
+  releaseEnvStates, laneStatesAttr, timelineEnvStates, timelineLaneStatesAttrs,
+  isUnfinished, effectiveStatus, isPlanAwaiting, DOT_PRIORITY,
 } from "./lane-states.js";
 import { FIXTURES, byKey } from "./fixtures.js";
 
 const stateOf = (release, env) =>
   releaseEnvStates(release).find((e) => e.env === env)?.kind;
+
+// Newest first, the order the timeline renders in.
+const timelineOf = (releases, env) =>
+  timelineEnvStates(releases).map((states) => states.find((e) => e.env === env)?.kind);
 
 describe("fixtures resolve to their documented lane states", () => {
   for (const f of FIXTURES) {
@@ -123,6 +127,152 @@ describe("laneStatesAttr encoding", () => {
   });
 });
 
+describe("fixtures with `below` resolve across the timeline", () => {
+  // Same fixtures the gallery renders, so the words and the pixels cannot
+  // drift: `expect` is the top card, `expectBelow` the older cards under it.
+  for (const f of FIXTURES.filter((x) => x.below)) {
+    it(`${f.key}: ${f.title}`, () => {
+      const resolved = timelineEnvStates([f.release, ...f.below]);
+      const wanted = [f.expect, ...f.expectBelow];
+      expect(resolved).toHaveLength(wanted.length);
+      wanted.forEach((exp, i) => {
+        for (const [env, kind] of Object.entries(exp)) {
+          expect(resolved[i].find((e) => e.env === env)?.kind, `${f.key} / card ${i} / ${env}`)
+            .toBe(kind);
+        }
+      });
+    });
+  }
+});
+
+describe("a newer release supersedes an older leg on the same environment", () => {
+  // The screenshot: prod's newest release is complete, and two older ones below
+  // it never finished prod — one parked on approval, one failed. The gutter kept
+  // drawing the amber "went backwards" hatch down to them, so a healthy prod
+  // read as broken.
+  const live = byKey("complete").release;
+  const awaiting = byKey("awaiting-plan").release;
+  const failed = byKey("failed").release;
+  const stale = byKey("queued").release;
+
+  it("demotes an older `awaiting` leg to `past`", () => {
+    expect(timelineOf([live, awaiting], "prod")).toEqual(["live", "past"]);
+  });
+
+  it("demotes an older `pending` leg to `past`", () => {
+    expect(timelineOf([live, stale], "prod")).toEqual(["live", "past"]);
+  });
+
+  it("demotes an older in-flight leg to `past`", () => {
+    expect(timelineOf([live, byKey("deploying").release], "prod")).toEqual(["live", "past"]);
+  });
+
+  it("leaves an already-terminal older leg alone", () => {
+    expect(timelineOf([live, failed], "prod")).toEqual(["live", "past"]);
+  });
+
+  it("reproduces the screenshot's whole prod column as healthy", () => {
+    // newest → oldest: complete, superseded-success, failed, complete, failed
+    const column = timelineOf(
+      [live, byKey("superseded").release, failed, byKey("awaiting-plan").release, failed],
+      "prod",
+    );
+    expect(column).toEqual(["live", "past", "past", "past", "past"]);
+    expect(column.filter(isUnfinished)).toEqual([]);
+  });
+
+  it("does not leak across environments", () => {
+    // `awaiting-plan` is live on dev and parked on prod. A newer release that is
+    // live on prod only must not settle dev.
+    const prodOnly = {
+      destinations: [{ environment: "prod", status: "SUCCEEDED", is_current: true }],
+      pipeline_stages: [],
+    };
+    const dev = {
+      destinations: [],
+      pipeline_stages: [
+        { stage_type: "plan", environment: "dev", status: "RUNNING", approval_status: "AWAITINGAPPROVAL" },
+      ],
+    };
+    expect(timelineOf([prodOnly, dev], "dev")).toEqual([undefined, "awaiting"]);
+  });
+});
+
+describe("supersession must not over-suppress", () => {
+  const older = byKey("superseded").release;
+
+  it("keeps the newest release's own `awaiting` — nothing has superseded it", () => {
+    expect(timelineOf([byKey("awaiting-plan").release, older], "prod")).toEqual(["awaiting", "past"]);
+  });
+
+  it("keeps the newest release's own in-flight leg", () => {
+    expect(timelineOf([byKey("deploying").release, older], "prod")).toEqual(["flight", "past"]);
+  });
+
+  it("an older release that is still what prod runs stays `live`", () => {
+    // Not a contradiction: the newest release is parked on prod approval, so
+    // prod is genuinely still on the release below it. Demoting that to `past`
+    // would leave the lane claiming prod runs nothing at all.
+    expect(timelineOf([byKey("awaiting-plan").release, byKey("complete").release], "prod"))
+      .toEqual(["awaiting", "live"]);
+  });
+
+  it("only `live` supersedes — a newer failure does not settle the lane", () => {
+    // prod is genuinely broken: the newest release failed, and the one below it
+    // is still parked. Neither leg may be swallowed.
+    const column = timelineOf([byKey("failed").release, byKey("awaiting-plan").release], "prod");
+    expect(column).toEqual(["past", "awaiting"]);
+    expect(column.some(isUnfinished)).toBe(true);
+  });
+
+  it("a newer in-flight release does not supersede the leg below it", () => {
+    expect(timelineOf([byKey("deploying").release, byKey("awaiting-plan").release], "prod"))
+      .toEqual(["flight", "awaiting"]);
+  });
+
+  it("an environment with no live release anywhere keeps every leg", () => {
+    expect(timelineOf([byKey("awaiting-underscore").release, byKey("queued").release], "prod"))
+      .toEqual(["awaiting", "pending"]);
+  });
+});
+
+describe("supersession leaves per-release history intact", () => {
+  // Scope guard: the *card* must keep reporting its own outcome. Only the
+  // aggregate gutter goes quiet.
+  it("releaseEnvStates is unchanged by what sits above a release", () => {
+    const awaiting = byKey("awaiting-plan").release;
+    expect(stateOf(awaiting, "prod")).toBe("awaiting");
+    timelineEnvStates([byKey("complete").release, awaiting]);
+    expect(stateOf(awaiting, "prod")).toBe("awaiting");
+  });
+
+  it("does not mutate the release objects it is given", () => {
+    const awaiting = byKey("awaiting-plan").release;
+    const before = JSON.stringify(awaiting);
+    timelineEnvStates([byKey("complete").release, awaiting]);
+    expect(JSON.stringify(awaiting)).toBe(before);
+  });
+});
+
+describe("timelineLaneStatesAttrs", () => {
+  it("encodes one attribute per release, in order, superseded", () => {
+    expect(timelineLaneStatesAttrs([byKey("complete").release, byKey("awaiting-plan").release]))
+      .toEqual(["dev:live,prod:live", "dev:past,prod:past"]);
+  });
+
+  it("agrees with laneStatesAttr when nothing supersedes anything", () => {
+    const r = byKey("awaiting-plan").release;
+    expect(timelineLaneStatesAttrs([r])).toEqual([laneStatesAttr(r)]);
+  });
+
+  it("survives holes and missing input rather than throwing", () => {
+    // The timeline renders optimistically from SSE deltas.
+    expect(timelineLaneStatesAttrs([])).toEqual([]);
+    expect(timelineLaneStatesAttrs(undefined)).toEqual([]);
+    expect(timelineLaneStatesAttrs([null, {}])).toEqual(["", ""]);
+  });
+});
+
 describe("every lane state has a rendering", () => {
   // Guards the seam the original bug fell through: the resolver gained a state
   // the template did not handle, so it fell to the `{:else}` branch and rendered
@@ -144,5 +294,13 @@ describe("every lane state has a rendering", () => {
   it("the rail's unfinished check is driven by isUnfinished, not a local list", () => {
     const src = componentSrc();
     expect(src).toContain("isUnfinished(laneState.status)");
+  });
+
+  it("the gutter reads lane states resolved across the timeline, not per release", () => {
+    // `laneStatesAttr(release)` alone cannot see that prod has moved on, and
+    // wiring the attribute back to it would silently restore the stale warning.
+    const src = componentSrc();
+    expect(src).toContain("timelineLaneStatesAttrs");
+    expect(src).toContain("data-lane-states={laneStatesBySlug.get(release.slug)");
   });
 });

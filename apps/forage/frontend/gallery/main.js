@@ -40,18 +40,37 @@ const BASELINE = {
   },
 };
 
-function payloadFor(fixture) {
-  const r = {
-    title: fixture.title,
-    version: "main-1111111",
-    source_user: "octobot",
-    created_at: new Date(Date.UTC(2026, 7, 26, 13, 30, 0)).toISOString(),
-    dest_envs: (fixture.release.destinations || [])
+// `dest_envs` is a server-side string the rail reads back off `data-envs`;
+// derive it from the destinations so a fixture only has to state them once.
+//
+// `source_user` picks which half of the avatar slot a card exercises: octobot
+// has no picture behind the stub endpoint and falls back to an initial, kjuulh
+// has one. BASELINE is kjuulh, so every shot carries both.
+function withDefaults(release, title, version, minutesAgo, sourceUser) {
+  return {
+    title,
+    version,
+    source_user: sourceUser,
+    created_at: new Date(Date.UTC(2026, 7, 26, 13, 30 - minutesAgo, 0)).toISOString(),
+    dest_envs: (release.destinations || [])
       .map((d) => `${d.environment}:${d.status || "PENDING"}`)
       .join(","),
-    ...fixture.release,
+    ...release,
   };
-  return { timeline: [{ kind: "release", release: r }, BASELINE], lanes: LANES };
+}
+
+function payloadFor(fixture) {
+  const r = withDefaults(fixture.release, fixture.title, "main-1111111", 0, "octobot");
+  // Older releases the fixture wants underneath it, newest first. The gutter
+  // resolves lane states across the whole list, so a superseded state only
+  // exists when there is something above it to do the superseding.
+  const below = (fixture.below || []).map((rel, i) => ({
+    kind: "release",
+    release: withDefaults(
+      rel, rel.title || "Earlier release", `main-22222${i}2`, 30 * (i + 1), "kjuulh",
+    ),
+  }));
+  return { timeline: [{ kind: "release", release: r }, ...below, BASELINE], lanes: LANES };
 }
 
 // Stub the network. The component calls fetch() for the timeline and opens an

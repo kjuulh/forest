@@ -109,10 +109,63 @@ export function releaseEnvStates(release) {
   return [...byEnv].map(([env, kind]) => ({ env, kind }));
 }
 
+/**
+ * Apply "the latest release per environment wins" across an ordered timeline.
+ *
+ * `releaseEnvStates` sees one release at a time, so it cannot know that an
+ * environment has moved on since. An older release whose prod leg is
+ * `awaiting`, `pending` or `flight` is telling the truth about *itself* — that
+ * pipeline never finished, and its card should keep saying so — but the
+ * swim-lane aggregates across releases, and once a newer release is live on
+ * prod that older leg is history. Left alone it keeps the rail's amber
+ * "went backwards" hatch, and a dashed pending dot, on a healthy environment.
+ *
+ * Walks newest → oldest and demotes every leg for an environment some newer
+ * release is already `live` on to `past` — the state that already means
+ * exactly this: "not live here, a later release took over".
+ *
+ * Only `live` supersedes. A newer release that failed, or is still in flight,
+ * has not taken the environment over, so it leaves the legs below it alone —
+ * an environment that is genuinely broken right now must still warn.
+ *
+ * Ordering is the caller's timeline order, which is also the order the cards
+ * are painted in and the order `computeLaneBars` measures, so the rail and the
+ * dots cannot disagree about which release is newer.
+ *
+ * @param {Array<object|null|undefined>} releases newest first; holes tolerated
+ * @returns {Array<Array<{env: string, kind: string}>>} one entry per input
+ */
+export function timelineEnvStates(releases) {
+  const supersedes = new Set();
+  return (releases || []).map((release) => {
+    const states = release ? releaseEnvStates(release) : [];
+    const resolved = states.map(({ env, kind }) =>
+      supersedes.has(env) && kind !== "past" ? { env, kind: "past" } : { env, kind },
+    );
+    for (const { env, kind } of resolved) {
+      if (kind === "live") supersedes.add(env);
+    }
+    return resolved;
+  });
+}
+
+function encodeLaneStates(states) {
+  return states.map(({ env, kind }) => `${env}:${kind}`).join(",");
+}
+
 export function laneStatesAttr(release) {
-  return releaseEnvStates(release)
-    .map(({ env, kind }) => `${env}:${kind}`)
-    .join(",");
+  return encodeLaneStates(releaseEnvStates(release));
+}
+
+/**
+ * `laneStatesAttr` for a whole timeline, with supersession applied.
+ *
+ * The lane rail reads its per-release state back off `data-lane-states`, so
+ * this is where the cross-release view has to land: one attribute per release,
+ * in the same order, already resolved.
+ */
+export function timelineLaneStatesAttrs(releases) {
+  return timelineEnvStates(releases).map(encodeLaneStates);
 }
 
 /**

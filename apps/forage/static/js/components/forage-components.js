@@ -5030,8 +5030,27 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
     }
     return [...byEnv].map(([env, kind]) => ({ env, kind }));
   }
+  function timelineEnvStates(releases) {
+    const supersedes = /* @__PURE__ */ new Set();
+    return (releases || []).map((release) => {
+      const states = release ? releaseEnvStates(release) : [];
+      const resolved = states.map(
+        ({ env, kind }) => supersedes.has(env) && kind !== "past" ? { env, kind: "past" } : { env, kind }
+      );
+      for (const { env, kind } of resolved) {
+        if (kind === "live") supersedes.add(env);
+      }
+      return resolved;
+    });
+  }
+  function encodeLaneStates(states) {
+    return states.map(({ env, kind }) => `${env}:${kind}`).join(",");
+  }
   function laneStatesAttr(release) {
-    return releaseEnvStates(release).map(({ env, kind }) => `${env}:${kind}`).join(",");
+    return encodeLaneStates(releaseEnvStates(release));
+  }
+  function timelineLaneStatesAttrs(releases) {
+    return timelineEnvStates(releases).map(encodeLaneStates);
   }
   function isUnfinished(kind) {
     return kind === "flight" || kind === "awaiting";
@@ -5210,6 +5229,7 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
     const renderedReleaseCount = /* @__PURE__ */ mutable_source();
     const hasMore = /* @__PURE__ */ mutable_source();
     const renderedLaneNames = /* @__PURE__ */ mutable_source();
+    const laneStatesBySlug = /* @__PURE__ */ mutable_source();
     const displayedLanes = /* @__PURE__ */ mutable_source();
     const laneCount = /* @__PURE__ */ mutable_source();
     const gutterWidth = /* @__PURE__ */ mutable_source();
@@ -5613,6 +5633,7 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
             flightCard = cards[i];
             flightIdx = i;
           }
+          const superseded = (laneState == null ? void 0 : laneState.status) === "past";
           const entries = parseEnvs(cards[i].dataset.envs);
           for (const entry of entries) {
             if (entry.env !== env) continue;
@@ -5620,7 +5641,7 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
               deployedCard = cards[i];
               deployedIdx = i;
             }
-            if (IN_FLIGHT.has(entry.status) && !flightCard) {
+            if (!superseded && IN_FLIGHT.has(entry.status) && !flightCard) {
               flightCard = cards[i];
               flightIdx = i;
             }
@@ -5756,6 +5777,13 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
       }
       return names;
     }
+    function resolveLaneStates(items) {
+      const releases = items.filter((i) => i.kind === "release" && i.release).map((i) => i.release);
+      const attrs = timelineLaneStatesAttrs(releases);
+      const bySlug = /* @__PURE__ */ new Map();
+      releases.forEach((r, i) => bySlug.set(r.slug, attrs[i]));
+      return bySlug;
+    }
     const PAGE_SIZE = 20;
     let visibleReleases = /* @__PURE__ */ mutable_source(PAGE_SIZE);
     function itemReleaseCount(item) {
@@ -5808,6 +5836,9 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
     });
     legacy_pre_effect(() => (get(hardLimit), get(renderedTimeline), get(timeline)), () => {
       set(hasMore, !get(hardLimit) && get(renderedTimeline).length < get(timeline).length);
+    });
+    legacy_pre_effect(() => get(renderedTimeline), () => {
+      set(laneStatesBySlug, resolveLaneStates(get(renderedTimeline)));
     });
     legacy_pre_effect(() => get(laneCount), () => {
       set(gutterWidth, get(laneCount) > 0 ? get(laneCount) * (BAR_WIDTH + BAR_GAP) + 8 : 0);
@@ -6934,7 +6965,7 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
                   set_text(text_17, (deep_read_state(get(release)), untrack(() => get(release).slug)));
                 },
                 [
-                  () => (deep_read_state(laneStatesAttr), deep_read_state(get(release)), untrack(() => laneStatesAttr(get(release)))),
+                  () => (get(laneStatesBySlug), deep_read_state(get(release)), deep_read_state(laneStatesAttr), untrack(() => get(laneStatesBySlug).get(get(release).slug) ?? laneStatesAttr(get(release)))),
                   () => (deep_read_state(get(release)), untrack(() => {
                     var _a2;
                     return ((_a2 = get(release).title) == null ? void 0 : _a2.length) > 80 ? get(release).title.slice(0, 80) + "…" : get(release).title;
