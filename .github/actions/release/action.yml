@@ -1,0 +1,287 @@
+name: forest release
+description: >-
+  Render a project's deployment, annotate it, and hand it to forest — the whole
+  release, as one step.
+
+# What this replaces is a thirty-line `run:` block, copied between repos, that
+# spells out the git plumbing by hand:
+#
+#     --context-title "$(git log -1 --pretty=%s)"
+#     --commit-sha "$GITHUB_SHA"
+#     --commit-branch "$GITHUB_REF_NAME"
+#     --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+#     ...
+#
+# Every one of those is derivable from the environment the runner is already
+# sitting in, and every repo that wrote them out got to make its own mistakes.
+# The block that prompted this one had no author on it at all, so every release
+# it made was attributed to whoever owned FOREST_TOKEN rather than to whoever
+# wrote the commit. `--detect` is on by default here for that reason.
+#
+# Usage:
+#
+#     - uses: understory-io/forest/.github/actions/setup-forest@v0.2.21
+#       with:
+#         version: v0.2.21
+#         gh-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
+#         token: ${{ secrets.FOREST_TOKEN }}
+#
+#     - run: forest release prepare
+#
+#     - uses: understory-io/forest/.github/actions/release@v0.2.21
+#
+# Building is the caller's job, not this action's. A repo knows how to build
+# itself — it has an image to push, or a binary to compile, or nothing at all —
+# and no set of inputs here would describe that better than the workflow
+# already does. `forest release prepare` belongs there too: it renders the
+# manifests this uploads, and a repo that renders nothing should not have to
+# opt out of a step it never wanted.
+#
+#     - run: forest release prepare          # or whatever this repo builds with
+#     - uses: understory-io/forest/.github/actions/release@<tag>
+#
+# It assumes `setup-forest` already ran: forest is on PATH and FOREST_TOKEN is
+# in the environment, and that `working-directory` holds whatever the release
+# is meant to ship.
+
+inputs:
+  organisation:
+    description: >-
+      Forest organisation, e.g. `understory`. Read from `project.organisation`
+      in the forest.cue at `working-directory` when not given.
+    required: false
+    default: ""
+  project:
+    description: >-
+      Forest project, e.g. `infrastructure-hetzner`. Read from `project.name`
+      in the forest.cue at `working-directory` when not given.
+    required: false
+    default: ""
+
+  environment:
+    description: >-
+      Target environment. Leave empty to annotate only and let a project
+      trigger decide what to deploy — which is what a repo using pipelines
+      wants, because releasing from here as well would double-fire or race the
+      trigger.
+
+      Set it to release explicitly to that environment: the annotation is then
+      made `--annotation-only` so no trigger races the release this action
+      starts.
+    required: false
+    default: ""
+
+  detect:
+    description: >-
+      Attribute the release to whoever wrote the commit, worked out from the
+      GitHub Actions event payload, then GITHUB_ACTOR, then the commit itself.
+
+      On by default because the alternative is attributing it to whoever owns
+      the CI token, which is the same person for every repo sharing a secret.
+      Turn it off only if you are passing `source-username` yourself.
+    required: false
+    default: "true"
+
+  source-type:
+    description: >-
+      Recorded on the annotation and matched by project triggers. Leave as `ci`
+      unless you know a trigger expects something else — a trigger matching
+      `^ci$` will not fire without it, and the release quietly records without
+      deploying anything.
+    required: false
+    default: ci
+
+  source-username:
+    description: >-
+      Attribute to a specific user rather than detecting one. Wins over
+      `detect`, which then fills in nothing.
+    required: false
+    default: ""
+
+  title:
+    description: Release title. Defaults to the commit subject.
+    required: false
+    default: ""
+  description:
+    description: Release description. Defaults to the commit body.
+    required: false
+    default: ""
+  version:
+    description: Version tag for the release. Defaults to `<branch>-<short sha>`.
+    required: false
+    default: ""
+  destination:
+    description: >-
+      Target destination. Only meaningful together with `environment`; without
+      one the server decides.
+    required: false
+    default: ""
+  no-wait:
+    description: >-
+      Do not wait for the release to finish. Only meaningful together with
+      `environment`. A pipeline that parks for approval never finishes on its
+      own, so a job that waits on one burns runner minutes until it times out.
+    required: false
+    default: "false"
+  spec-file:
+    description: Path to the spec file. Auto-detected from the working directory if empty.
+    required: false
+    default: ""
+  metadata:
+    description: >-
+      Extra `key=value` metadata, one per line. `forest.author.*` keys are
+      written by `detect` and should be left to it.
+    required: false
+    default: ""
+  working-directory:
+    description: Directory to run forest from.
+    required: false
+    default: "."
+
+outputs:
+  slug:
+    description: >-
+      The release slug, e.g. `gracelessly-first-hoopoe` — what
+      `forest release <slug>` and `forest release show <slug>` take.
+    value: ${{ steps.release.outputs.slug }}
+
+runs:
+  using: composite
+  steps:
+    - name: Annotate the release
+      id: release
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        FOREST_ORGANISATION: ${{ inputs.organisation }}
+        FOREST_PROJECT: ${{ inputs.project }}
+        IN_ENVIRONMENT: ${{ inputs.environment }}
+        IN_DETECT: ${{ inputs.detect }}
+        IN_SOURCE_TYPE: ${{ inputs.source-type }}
+        IN_SOURCE_USERNAME: ${{ inputs.source-username }}
+        IN_TITLE: ${{ inputs.title }}
+        IN_DESCRIPTION: ${{ inputs.description }}
+        IN_VERSION: ${{ inputs.version }}
+        IN_SPEC_FILE: ${{ inputs.spec-file }}
+        IN_METADATA: ${{ inputs.metadata }}
+      run: |
+        set -euo pipefail
+
+        short_sha="$(git rev-parse --short HEAD)"
+        run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+        # Built as an array, not a string: a commit subject containing a quote
+        # is the ordinary case, and word-splitting one of these is how a
+        # release ends up titled with half a sentence.
+        #
+        # Organisation and project are passed only when given. Left out, the
+        # CLI reads them from forest.cue — the file that already knows.
+        # Repeating them in a workflow is how the two drift apart.
+        args=()
+        if [ -n "$FOREST_ORGANISATION" ]; then
+          args+=(--organisation "$FOREST_ORGANISATION")
+        fi
+        if [ -n "$FOREST_PROJECT" ]; then
+          args+=(--project-name "$FOREST_PROJECT")
+        fi
+
+        args+=(
+          --source-type "$IN_SOURCE_TYPE"
+          --commit-sha "$GITHUB_SHA"
+          --commit-branch "$GITHUB_REF_NAME"
+          --commit-message "$(git log -1 --pretty=%B)"
+          --context-title "${IN_TITLE:-$(git log -1 --pretty=%s)}"
+          --context-web "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          --repo-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          --run-url "$run_url"
+          --version "${IN_VERSION:-${GITHUB_REF_NAME}-${short_sha}}"
+        )
+
+        if [ -n "$IN_DESCRIPTION" ]; then
+          args+=(--context-description "$IN_DESCRIPTION")
+        fi
+        if [ -n "$IN_SPEC_FILE" ]; then
+          args+=(--spec-file "$IN_SPEC_FILE")
+        fi
+
+        # An explicit username wins outright, and `--detect` alongside it would
+        # only be ignored, so never send both.
+        if [ -n "$IN_SOURCE_USERNAME" ]; then
+          args+=(--source-username "$IN_SOURCE_USERNAME")
+        elif [ "$IN_DETECT" = "true" ]; then
+          args+=(--detect)
+        fi
+
+        if [ -n "$IN_METADATA" ]; then
+          while IFS= read -r pair; do
+            if [ -n "$pair" ]; then
+              args+=(--metadata "$pair")
+            fi
+          done <<< "$IN_METADATA"
+        fi
+
+        # Triggers fire off the annotation. When this action is going to
+        # release explicitly below there must be no trigger firing as well, or
+        # the two race; when it is not, the trigger is the entire point. This
+        # is the same split `forest release create` makes internally.
+        if [ -n "$IN_ENVIRONMENT" ]; then
+          args+=(--annotation-only)
+        fi
+
+        # `--format name` puts the slug, and only the slug, on stdout; the
+        # CLI's narration goes to stderr and straight into the job log.
+        slug="$(forest release annotate "${args[@]}" --format name)"
+        if [ -z "$slug" ]; then
+          echo "::error::forest release annotate produced no slug." >&2
+          exit 1
+        fi
+        echo "slug=$slug" >> "$GITHUB_OUTPUT"
+        echo "::notice::Annotated forest release '$slug'."
+
+    # Only when the caller named an environment. A project driven by triggers
+    # and pipelines deliberately stops at the annotation above — see `environment`.
+    - name: Release
+      if: inputs.environment != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SLUG: ${{ steps.release.outputs.slug }}
+        FOREST_ORGANISATION: ${{ inputs.organisation }}
+        IN_ENVIRONMENT: ${{ inputs.environment }}
+        IN_DESTINATION: ${{ inputs.destination }}
+        IN_NO_WAIT: ${{ inputs.no-wait }}
+      run: |
+        set -euo pipefail
+
+        args=(--environment "$IN_ENVIRONMENT")
+        if [ -n "$FOREST_ORGANISATION" ]; then
+          args+=(--organisation "$FOREST_ORGANISATION")
+        fi
+        if [ -n "$IN_DESTINATION" ]; then
+          args+=(--destination "$IN_DESTINATION")
+        fi
+        # A pipeline that parks for approval never finishes on its own, and a
+        # job waiting on one burns runner minutes until it times out.
+        if [ "$IN_NO_WAIT" = "true" ]; then
+          args+=(--no-wait)
+        fi
+
+        forest release "$SLUG" "${args[@]}"
+
+    - name: Summary
+      shell: bash
+      env:
+        SLUG: ${{ steps.release.outputs.slug }}
+        ORG: ${{ inputs.organisation }}
+      run: |
+        {
+          echo "### forest release \`$SLUG\`"
+          echo
+          echo '```sh'
+          if [ -n "$ORG" ]; then
+            echo "forest release show $SLUG -o $ORG"
+          else
+            echo "forest release show $SLUG"
+          fi
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"

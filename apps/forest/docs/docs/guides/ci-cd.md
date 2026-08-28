@@ -183,6 +183,47 @@ repositories in the org (Settings → Actions → Access).
 
 ### GitHub Actions
 
+Inside understory there are two composite actions in `understory-io/forest`, and
+a pipeline should reach for those before writing any of this out by hand:
+
+```yaml
+name: deploy
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: understory-io/forest/.github/actions/setup-forest@v0.2.21
+        with:
+          version: v0.2.21
+          gh-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
+          token: ${{ secrets.FOREST_TOKEN }}
+
+      # Whatever this repo builds with, plus the render forest needs.
+      - run: forest release prepare
+
+      - uses: understory-io/forest/.github/actions/release@v0.2.21
+```
+
+Building stays in your workflow — a repo knows whether it has an image to push,
+a binary to compile, or nothing at all, and the action would only get in the
+way of that. What the action does own is the release: it derives the commit,
+branch, message, version, run URL and repo URL from the environment the runner
+is already sitting in, reads the organisation and project from `forest.cue`,
+and attributes the release to whoever wrote the commit — see
+[Who a release is attributed to](#who-a-release-is-attributed-to).
+
+Leaving `environment` unset annotates and stops, which is what a project driven
+by [triggers](../concepts/triggers.md) wants. Set it to release explicitly.
+
+The rest of this section spells the same thing out longhand, for pipelines that
+are not GitHub Actions or not inside understory.
+
 ```yaml
 name: Deploy
 on:
@@ -278,6 +319,46 @@ Before releasing, check if policies allow it:
       --environment prod
 ```
 
+## Who a release is attributed to
+
+A release shows a person — the avatar and name on each release in the timeline
+come from `source_user`. Getting that right takes some care in CI, because two
+different people are involved and only one of them is obvious.
+
+The **actor** is whoever the token authenticated. In CI that is the owner of
+`FOREST_TOKEN`, which is one person for every repo that shares the secret. The
+**author** is whoever wrote the commit. Left to itself the server can only see
+the actor, so every release from every project ends up wearing the same name.
+
+`--detect` closes that gap. It works the author out of the environment, in
+order: the GitHub Actions event payload at `GITHUB_EVENT_PATH` (which carries
+`head_commit.author`, the same payload a webhook receiver is sent), then
+`GITHUB_ACTOR`, then the commit itself.
+
+```bash
+forest release annotate \
+  --organisation my-org \
+  --project-name my-service \
+  --source-type ci \
+  --detect
+```
+
+The `release` composite action passes it by default; there is no reason not to.
+
+What it finds is recorded verbatim on the annotation under `forest.author.*`
+metadata, and the server links that to a forest account — preferring the GitHub
+account id, which survives a rename, and falling back to a verified email. A
+commit by somebody with no forest account still shows their name, just without
+an avatar. It never silently falls back to the token's owner.
+
+`--source-username` still wins outright if you would rather say than detect.
+
+:::note
+The author is display attribution, not an authentication claim. `source.user_id`
+on the annotation stays the actor — the credential that actually made the call —
+and that is what an audit should read.
+:::
+
 ## Release Context
 
 The annotation captures rich metadata about the CI context:
@@ -285,7 +366,8 @@ The annotation captures rich metadata about the CI context:
 | Flag | Description | Example |
 |------|-------------|---------|
 | `--source-type` | Where the release came from | `ci`, `manual`, `webhook` |
-| `--source-username` | Who triggered it | `ci-bot` |
+| `--detect` | Work the author out of the CI environment | see above |
+| `--source-username` | Attribute to a specific user | `ci-bot` |
 | `--source-email` | Email of the triggerer | `ci@example.com` |
 | `--run-url` | Link back to the CI run | GitHub Actions URL |
 | `--context-title` | Human-readable title | Commit message |

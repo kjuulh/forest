@@ -205,8 +205,9 @@ forest release annotate [OPTIONS]
 | `--commit-branch` | Source branch (auto-detected from git) |
 | `--commit-message` | Commit message |
 | `--source-type` | Source type (e.g., `ci`, `manual`) |
-| `--source-username` | Who triggered the release |
-| `--source-email` | Triggerer's email |
+| `--source-username` | Attribute to a specific user |
+| `--source-email` | That user's email |
+| `--detect` | Work the release author out of the CI environment ([guide](../guides/ci-cd.md#who-a-release-is-attributed-to)) |
 | `--run-url` | Link to CI run |
 | `--metadata` | Key-value metadata (repeatable) |
 

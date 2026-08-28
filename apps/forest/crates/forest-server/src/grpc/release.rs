@@ -22,6 +22,7 @@ use crate::{
         event_bus::{EventBusState, EventPayload},
         notification_registry::{NotificationRegistryState, ReleaseContext as NotifReleaseContext},
         policy::{PolicyRegistryState, PolicyType},
+        release_author,
         release_event_store::ReleaseEventStoreState,
         release_logs_registry::{LogChannel, ReleaseLogsRegistryState},
         release_pipeline::ReleasePipelineRegistryState,
@@ -45,7 +46,7 @@ impl ReleaseService for ReleaseServer {
         tracing::debug!("annotate release");
 
         let actor = authorize::extract_actor(&request)?;
-        let req = request.into_inner();
+        let mut req = request.into_inner();
 
         let slug = petname::petname(3, "-").expect("to be able to generate slug");
 
@@ -75,27 +76,76 @@ impl ReleaseService for ReleaseServer {
             .context("source is required")
             .to_internal_error()?;
 
-        // Always stamp the actor identity on the source.
-        // For human users, resolve username/email from the DB.
-        // Apps and service accounts keep whatever the caller passed but still get their actor ID.
+        // Two different people can be on one annotation, and conflating them is
+        // what made every release read as the token owner regardless of who did
+        // the work.
+        //
+        // The *actor* is whoever the token authenticated. It is never
+        // caller-supplied, so `source.user_id` stays the audit anchor: it says
+        // which credential made this call, and it keeps saying that below.
+        //
+        // The *author* is whoever wrote the commit, which the CLI sniffs out of
+        // the CI environment under `--detect`. It is display attribution, not
+        // an authentication claim — see the note on trust below.
         match &actor {
-            Actor::User { user_id } => {
-                let user = self
-                    .state
-                    .user_service()
-                    .get_user(*user_id)
-                    .await
-                    .to_internal_error()?
-                    .ok_or_else(|| tonic::Status::internal("authenticated user not found in DB"))?;
-                source.username = Some(user.username);
-                source.email = user.emails.into_iter().next().map(|e| e.email);
-                source.user_id = Some(user_id.to_string());
-            }
-            Actor::App { app_id, .. } => {
-                source.user_id = Some(app_id.to_string());
-            }
+            Actor::User { user_id } => source.user_id = Some(user_id.to_string()),
+            Actor::App { app_id, .. } => source.user_id = Some(app_id.to_string()),
             Actor::ServiceAccount { service_account_id } => {
-                source.user_id = Some(service_account_id.to_string());
+                source.user_id = Some(service_account_id.to_string())
+            }
+        }
+
+        match release_author::DetectedAuthor::from_metadata(&req.metadata) {
+            // The annotation says who wrote the change. Link it to a forest
+            // account where we can, and keep the raw handle where we cannot —
+            // never silently swap in the token's owner.
+            //
+            // Trust: the signals are caller-supplied, so a token holder can
+            // name somebody else here. That is deliberate — the display name
+            // is not an authorisation decision, and `source.user_id` above
+            // still records the credential that actually made the call. Any
+            // check that cares who *did* this must read the actor, not this.
+            Some(detected) => {
+                let resolved = release_author::resolve(&self.state.user_service(), &detected).await;
+
+                tracing::info!(
+                    origin = detected.origin.as_deref().unwrap_or("?"),
+                    linked = ?resolved.how,
+                    author = resolved.username.as_deref().unwrap_or("?"),
+                    "attributed release to the detected commit author"
+                );
+
+                source.username = resolved.username;
+                source.email = resolved.email;
+
+                // Record what the link resolved to, alongside the raw signals
+                // the CLI already wrote, so the decision can be read back
+                // rather than re-derived from a name that may since have
+                // changed.
+                if let Some(user_id) = resolved.user_id {
+                    req.metadata
+                        .insert(release_author::META_RESOLVED_USER_ID.to_string(), user_id);
+                }
+            }
+
+            // No detection: the annotation never said who wrote this, so the
+            // authenticated user is the best answer available. This is the
+            // pre-existing behaviour and every annotation made without
+            // `--detect` still gets it.
+            None => {
+                if let Actor::User { user_id } = &actor {
+                    let user = self
+                        .state
+                        .user_service()
+                        .get_user(*user_id)
+                        .await
+                        .to_internal_error()?
+                        .ok_or_else(|| {
+                            tonic::Status::internal("authenticated user not found in DB")
+                        })?;
+                    source.username = Some(user.username);
+                    source.email = user.emails.into_iter().next().map(|e| e.email);
+                }
             }
         }
         let art_context: release_registry::ArtifactContext = req

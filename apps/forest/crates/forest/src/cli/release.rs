@@ -11,6 +11,7 @@ pub(crate) mod annotate;
 pub(crate) mod approve;
 pub(crate) mod commit;
 mod create;
+pub(crate) mod detect;
 mod fail;
 pub(crate) mod prepare;
 pub(crate) mod reject;

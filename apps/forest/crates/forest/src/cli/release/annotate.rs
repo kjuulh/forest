@@ -87,11 +87,16 @@ pub struct AnnotateCommand {
     #[arg(long = "context-web")]
     context_web: Option<String>,
 
+    /// Organisation name. Auto-detected from the forest.cue in the working
+    /// directory if not specified.
     #[arg(long, short = 'o')]
-    organisation: String,
+    organisation: Option<String>,
 
-    #[arg(long = "project-name")]
-    project_name: String,
+    /// Project name. Auto-detected from the forest.cue in the working
+    /// directory if not specified. `--project` is accepted too, matching
+    /// `forest release create`.
+    #[arg(long = "project-name", short = 'p', alias = "project")]
+    project_name: Option<String>,
 
     #[arg(long = "commit-sha")]
     commit_sha: Option<String>,
@@ -132,10 +137,44 @@ pub struct AnnotateCommand {
     /// Skip automatic trigger evaluation (no auto-release from policies).
     #[arg(long = "annotation-only")]
     annotation_only: bool,
+
+    /// Work out the release author from the surrounding environment — the
+    /// GitHub Actions event payload, `GITHUB_ACTOR`, then the commit itself.
+    ///
+    /// Fills in `--source-username` / `--source-email` when they were not
+    /// given; never overrides them. Intended for CI, where the annotation is
+    /// authenticated by a shared token whose owner is not the person who wrote
+    /// the change.
+    #[arg(long)]
+    detect: bool,
 }
 
 impl AnnotateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
+        // Only read the spec file when something was left blank. A caller that
+        // named both has no reason to need a forest.cue in the directory it
+        // happens to be standing in, and `create` has auto-detected these for
+        // as long as it has existed — `annotate` demanding them was the odd
+        // one out, and every CI workflow spelled them out because of it.
+        let (organisation, project_name) = match (
+            self.organisation.clone(),
+            self.project_name.clone(),
+        ) {
+            (Some(org), Some(project)) => (org, project),
+            (org, project) => {
+                let (detected_org, detected_project) = super::detect::project(state).await;
+
+                let organisation = org.or(detected_org).context(
+                        "organisation not found: set project.organisation in forest.cue or pass --organisation",
+                    )?;
+                let project_name = project.or(detected_project).context(
+                    "project name not found: set project.name in forest.cue or pass --project-name",
+                )?;
+
+                (organisation, project_name)
+            }
+        };
+
         let annotated = annotate(
             state,
             &AnnotateParams {
@@ -145,8 +184,8 @@ impl AnnotateCommand {
                 context_title: self.context_title.clone(),
                 context_description: self.context_description.clone(),
                 context_web: self.context_web.clone(),
-                organisation: self.organisation.clone(),
-                project_name: self.project_name.clone(),
+                organisation,
+                project_name,
                 commit_sha: self.commit_sha.clone(),
                 commit_branch: self.commit_branch.clone(),
                 source_type: self.source_type.clone(),
@@ -159,6 +198,7 @@ impl AnnotateCommand {
                 no_spec: self.no_spec,
                 include_files: self.include_files.clone(),
                 annotation_only: self.annotation_only,
+                detect: self.detect,
             },
         )
         .await?;
@@ -202,6 +242,8 @@ pub struct AnnotateParams {
     pub no_spec: bool,
     pub include_files: Vec<String>,
     pub annotation_only: bool,
+    /// Fill blank source fields from the environment. See `detect::resolve`.
+    pub detect: bool,
 }
 
 /// Core annotate logic. Returns the artifact slug on success.
@@ -341,7 +383,7 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
         .await
         .context("commit artifact upload")?;
 
-    let metadata = params
+    let mut metadata = params
         .metadata
         .iter()
         .map(|m| {
@@ -351,9 +393,29 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
         .collect::<Option<HashMap<String, String>>>()
         .ok_or(anyhow::anyhow!("meta data item did not contain a '='"))?;
 
+    // Blank unless the caller said, or `--detect` found somebody. Leaving it
+    // blank is what hands attribution to the token's owner, which in CI is
+    // whoever created the secret rather than whoever wrote the commit.
+    let attribution = super::detect::resolve(
+        state,
+        params.source_username.clone(),
+        params.source_email.clone(),
+        params.detect,
+    )
+    .await;
+
+    // The raw signals ride along with the annotation. The server links them to
+    // a forest user where it can and records them either way, so a commit by
+    // somebody with no forest account is still attributed to a name rather than
+    // falling back to the token's owner. An explicit `--metadata` on the same
+    // key wins, like every other explicit flag here.
+    for (key, value) in attribution.metadata {
+        metadata.entry(key).or_insert(value);
+    }
+
     let source = Source {
-        username: params.source_username.clone(),
-        email: params.source_email.clone(),
+        username: attribution.username,
+        email: attribution.email,
         user_id: None, // set server-side from auth token
         source_type: params.source_type.clone(),
         run_url: params.run_url.clone(),

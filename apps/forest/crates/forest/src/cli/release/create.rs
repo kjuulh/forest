@@ -1,8 +1,6 @@
 use anyhow::Context;
 
-use crate::{
-    services::project::ProjectParserState, state::State, user_state::UserStateLoaderState,
-};
+use crate::{state::State, user_state::UserStateLoaderState};
 
 use super::{
     annotate::{self, AnnotateParams, git_output},
@@ -76,6 +74,15 @@ pub struct CreateCommand {
     #[arg(long = "source-type")]
     source_type: Option<String>,
 
+    /// Work out the release author from the surrounding environment — the
+    /// GitHub Actions event payload, `GITHUB_ACTOR`, then the commit itself —
+    /// rather than from whoever is signed in locally.
+    ///
+    /// Fills in `--source-username` / `--source-email` when they were not
+    /// given; never overrides them.
+    #[arg(long)]
+    detect: bool,
+
     /// CI run URL.
     #[arg(long = "run-url")]
     run_url: Option<String>,
@@ -129,7 +136,7 @@ pub struct CreateCommand {
 impl CreateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
         // ── Resolve project identity from forest.cue ─────────────────
-        let (detected_org, detected_project) = detect_project(state).await?;
+        let (detected_org, detected_project) = super::detect::project(state).await;
 
         let organisation = self.organisation.clone().or(detected_org).context(
             "organisation not found: set project.organisation in forest.cue or pass --organisation",
@@ -170,18 +177,28 @@ impl CreateCommand {
 
         // ── Resolve author info ──────────────────────────────────────
         // Prefer explicit flags, then local auth state, then git config.
-        let (auth_username, auth_email) = detect_author(state).await;
+        //
+        // `--detect` asks a different question — "who wrote this", answered
+        // from the environment — and the chain below would pre-empt it, since
+        // it answers "who is running this" and always has something to say on
+        // a developer's machine. So under `--detect` the flags pass through
+        // untouched and `annotate` resolves them; see `detect::resolve`.
+        let (source_username, source_email) = if self.detect {
+            (self.source_username.clone(), self.source_email.clone())
+        } else {
+            let (auth_username, auth_email) = detect_author(state).await;
 
-        let source_username = self
-            .source_username
-            .clone()
-            .or(auth_username)
-            .or(git.author_name.clone());
-        let source_email = self
-            .source_email
-            .clone()
-            .or(auth_email)
-            .or(git.author_email.clone());
+            (
+                self.source_username
+                    .clone()
+                    .or(auth_username)
+                    .or(git.author_name.clone()),
+                self.source_email
+                    .clone()
+                    .or(auth_email)
+                    .or(git.author_email.clone()),
+            )
+        };
 
         // ── 1. Prepare ───────────────────────────────────────────────
         tracing::info!("step 1/3: prepare");
@@ -218,6 +235,7 @@ impl CreateCommand {
                 commit_message,
                 version: self.version.clone(),
                 repo_url,
+                detect: self.detect,
                 spec_file: self.spec_file.clone(),
                 no_spec: self.no_spec,
                 include_files: self.include_files.clone(),
@@ -250,15 +268,6 @@ impl CreateCommand {
 }
 
 /// Reads organisation and project name from the forest.cue/toml project file.
-async fn detect_project(state: &State) -> anyhow::Result<(Option<String>, Option<String>)> {
-    let project =
-        state.project_parser().get_project().await.context(
-            "could not parse project file — is there a valid forest.cue in this directory?",
-        )?;
-
-    Ok((project.organisation.clone(), Some(project.name.clone())))
-}
-
 /// Reads author identity from the local forest auth state.
 /// Falls back gracefully — returns (None, None) if not logged in.
 async fn detect_author(state: &State) -> (Option<String>, Option<String>) {

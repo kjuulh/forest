@@ -22,6 +22,7 @@ pub mod notification_registry;
 pub mod oauth_apps;
 pub mod organisations;
 pub mod registration_policy;
+pub mod release_author;
 pub mod release_event_store;
 pub mod release_finalizer;
 pub mod release_health;

@@ -1,0 +1,131 @@
+name: Setup forest CLI
+description: >-
+  Install the forest CLI on a runner and provision a context to talk to the
+  server, for any job that drives forest from CI.
+
+# The canonical copy. This began as the same forty lines pasted into
+# understory-io/commission-dashboard and understory-io/infrastructure-hetzner,
+# each carrying its own note that the other one exists — so a fix had to be
+# made twice and, in practice, was made once. It lives here now because this is
+# the repo that decides what `install.sh` does, and the two can no longer drift
+# apart.
+#
+# Callers reference it by tag, not by branch:
+#
+#     - uses: understory-io/forest/.github/actions/setup-forest@v0.2.21
+#       with:
+#         version: v0.2.21
+#         gh-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
+#         token: ${{ secrets.FOREST_TOKEN }}
+
+inputs:
+  version:
+    description: >-
+      forest CLI release tag to install, e.g. `v0.2.21`. Leave empty to install
+      the newest release that has actually finished publishing — see the
+      resolution step for why "latest" is not the same thing.
+
+      Pin it in anything that matters. An unpinned install means a forest CLI
+      regression reaches your pipeline without anyone bumping a line.
+    required: false
+    default: ""
+  gh-token:
+    description: >-
+      Token with read access to the private understory-io/forest repo. The
+      install goes through `gh release download`, so a workflow's automatic
+      GITHUB_TOKEN will not do — that one is scoped to the calling repository.
+      GO_PRIVATE_MODULES_PAT is org-wide and is what the other repos pass.
+    required: true
+  token:
+    description: >-
+      FOREST_TOKEN to authenticate the CLI with. Optional: a job that only
+      needs `forest --version` or reads public data does not need one. When
+      given, it is exported for every later step in the job so they do not each
+      have to remember to set it.
+    required: false
+    default: ""
+  server:
+    description: Forest server the provisioned context points at.
+    required: false
+    default: https://api.forest.understory.sh
+  context-name:
+    description: Name of the forest context to provision on the runner.
+    required: false
+    default: understory-prod
+
+outputs:
+  version:
+    description: The forest CLI tag that was actually installed.
+    value: ${{ steps.install.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install forest CLI
+      id: install
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.gh-token }}
+        FOREST_CLI_VERSION: ${{ inputs.version }}
+        # Seeds the context during install, so no later step has to log in.
+        FOREST_PROFILE: name=${{ inputs.context-name }},server=${{ inputs.server }}
+        # Stops install.sh appending an eval line to an rc file that no shell
+        # on this runner will ever read.
+        FOREST_NO_SHELL_INTEGRATION: "1"
+      run: |
+        set -euo pipefail
+
+        # Resolve which release to install rather than trusting "latest".
+        # forest cuts a release on every merge to main, and release.yml
+        # attaches install.sh only after all three platform builds finish — so
+        # for several minutes the newest release exists with no assets and
+        # `gh release download` fails with "no assets to download", for a
+        # reason having nothing to do with the caller.
+        #
+        # Because install.sh is uploaded by a job that `needs: [build]`, its
+        # presence proves the tarballs are already there: the newest release
+        # carrying install.sh is the newest fully-published one.
+        tag="${FOREST_CLI_VERSION:-}"
+        if [ -z "$tag" ]; then
+          for candidate in $(gh release list --repo understory-io/forest --limit 10 --json tagName --jq '.[].tagName'); do
+            if gh release view "$candidate" --repo understory-io/forest --json assets \
+                 --jq '[.assets[].name] | any(. == "install.sh")' | grep -q true; then
+              tag="$candidate"
+              break
+            fi
+            echo "forest $candidate has no install.sh yet (release still building) — looking further back"
+          done
+        fi
+        if [ -z "$tag" ]; then
+          echo "::error::No forest release with install.sh found in the last 10 releases." >&2
+          exit 1
+        fi
+
+        echo "installing forest $tag"
+        gh release download "$tag" --repo understory-io/forest --pattern install.sh --dir "$RUNNER_TEMP"
+        bash "$RUNNER_TEMP/install.sh" "$tag"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+    # Exported once here rather than repeated on every step that shells out to
+    # forest. Writing it to $GITHUB_ENV keeps it out of the logs; it is masked
+    # as a secret by the caller regardless.
+    - name: Export FOREST_TOKEN
+      if: inputs.token != ''
+      shell: bash
+      env:
+        FOREST_TOKEN: ${{ inputs.token }}
+      run: echo "FOREST_TOKEN=$FOREST_TOKEN" >> "$GITHUB_ENV"
+
+    # Fail here, loudly, rather than three steps later inside a gRPC transport
+    # error. A missing token is a setup problem with a one-line fix and it
+    # should read like one.
+    - name: Check the token looks usable
+      if: inputs.token == ''
+      shell: bash
+      run: |
+        echo "::notice::No FOREST_TOKEN passed to setup-forest. Steps that talk to the forest server will fail unless they set it themselves."
+
+    - name: Report the installed version
+      shell: bash
+      run: forest --version
