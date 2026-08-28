@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/understory-io/forest/compare/v0.3.4...v0.3.5) (2026-08-28)
+
+
+### Features
+
+* **ci:** publish a component's binaries as one step ([#205](https://github.com/understory-io/forest/issues/205)) ([6a5b3bd](https://github.com/understory-io/forest/commit/6a5b3bd5541e3edf4b96ee0a7d527ee05b71f6d5))
+
 ## [0.3.4](https://github.com/understory-io/forest/compare/v0.3.3...v0.3.4) (2026-08-28)
 
 
