@@ -101,10 +101,11 @@ impl ReleaseService for ReleaseServer {
             // never silently swap in the token's owner.
             //
             // Trust: the signals are caller-supplied, so a token holder can
-            // name somebody else here. That is deliberate — the display name
-            // is not an authorisation decision, and `source.user_id` above
-            // still records the credential that actually made the call. Any
-            // check that cares who *did* this must read the actor, not this.
+            // name somebody else here. That is deliberate — none of this is an
+            // authorisation decision. The credential that actually made the
+            // call is recorded on `release_intents.actor_id`/`actor_type`,
+            // which is what `get_releases_by_actor` reads and what an audit
+            // must read; it is a separate column and nothing below touches it.
             Some(detected) => {
                 let resolved = release_author::resolve(&self.state.user_service(), &detected).await;
 
@@ -118,11 +119,20 @@ impl ReleaseService for ReleaseServer {
                 source.username = resolved.username;
                 source.email = resolved.email;
 
-                // Record what the link resolved to, alongside the raw signals
-                // the CLI already wrote, so the decision can be read back
-                // rather than re-derived from a name that may since have
-                // changed.
+                // The whole identity moves, not just the name.
+                //
+                // Leaving `user_id` on the actor made `source` describe two
+                // different people: it said `madsgodvinjensen` and pointed at
+                // kjuulh's account. Anything reading the name got the author
+                // and anything reading the id got the token owner — and Slack
+                // DM routing reads the id, so every release notified whoever
+                // owned the CI token instead of whoever wrote the change
+                // (`integrations::router`, "the release author's Slack link").
+                //
+                // A `source` that names one person and identifies another is
+                // not a safer record, just a quieter wrong one.
                 if let Some(user_id) = resolved.user_id {
+                    source.user_id = Some(user_id.clone());
                     req.metadata
                         .insert(release_author::META_RESOLVED_USER_ID.to_string(), user_id);
                 }
@@ -199,10 +209,10 @@ impl ReleaseService for ReleaseServer {
                     artifact_id: Some(artifact_id.to_string()),
                     source_username: source.username.clone(),
                     source_email: source.email.clone(),
-                    source_user_id: match &actor {
-                        Actor::User { user_id } => Some(user_id.to_string()),
-                        _ => None,
-                    },
+                    // The author, matching the name beside it. Slack DM routing
+                    // looks this up to find "the release author's Slack link",
+                    // so an actor here notifies whoever owns the CI token.
+                    source_user_id: source.user_id.clone(),
                     source_type: source.source_type.clone(),
                     run_url: source.run_url.clone(),
                     commit_sha: Some(reference.commit_sha.clone()),
@@ -548,10 +558,7 @@ impl ReleaseService for ReleaseServer {
                     error_message: Some(req.reason.clone()),
                     source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
                     source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
-                    source_user_id: match &actor {
-                        Actor::User { user_id } => Some(user_id.to_string()),
-                        _ => None,
-                    },
+                    source_user_id: ann_ctx.as_ref().and_then(|a| a.source.user_id.clone()),
                     source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
                     run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
                     commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),
@@ -737,10 +744,7 @@ impl ReleaseService for ReleaseServer {
                     destination_count: dest_count as i32,
                     source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
                     source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
-                    source_user_id: match &actor {
-                        Actor::User { user_id } => Some(user_id.to_string()),
-                        _ => None,
-                    },
+                    source_user_id: ann_ctx.as_ref().and_then(|a| a.source.user_id.clone()),
                     source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
                     run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
                     commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),

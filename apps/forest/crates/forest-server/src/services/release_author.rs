@@ -268,6 +268,83 @@ mod tests {
         assert_eq!(detected.display_name().as_deref(), Some("Dennis Tychsen"));
     }
 
+    fn profile(username: &str, id: &str, emails: &[(&str, bool)]) -> UserProfile {
+        UserProfile {
+            user_id: id.parse().expect("uuid"),
+            username: username.to_string(),
+            profile_picture_url: None,
+            emails: emails
+                .iter()
+                .map(|(e, verified)| crate::services::users::UserEmail {
+                    email: e.to_string(),
+                    verified: *verified,
+                })
+                .collect(),
+            oauth_connections: Vec::new(),
+            mfa_enabled: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    /// A linked author is one person, and `source` has to say so on every
+    /// field.
+    ///
+    /// Leaving the id on the actor while the name moved to the author made
+    /// `source` describe two people at once — it read `madsgodvinjensen` and
+    /// pointed at kjuulh's account. Slack DM routing looks up "the release
+    /// author's Slack link" by that id, so every release DM'd whoever owned the
+    /// CI token rather than whoever wrote the change.
+    #[test]
+    fn a_linked_author_carries_their_own_user_id() {
+        let resolved = linked(
+            profile(
+                "madsgodvinjensen",
+                "01a0487f-1b24-7432-a060-e1ad8e7dc56f",
+                &[("mgj@understory.io", true)],
+            ),
+            Linked::GithubId,
+        );
+
+        assert_eq!(resolved.username.as_deref(), Some("madsgodvinjensen"));
+        assert_eq!(
+            resolved.user_id.as_deref(),
+            Some("01a0487f-1b24-7432-a060-e1ad8e7dc56f"),
+        );
+        assert_eq!(resolved.email.as_deref(), Some("mgj@understory.io"));
+    }
+
+    /// An unverified address is a claim, not a fact, so a verified one wins
+    /// even when it is not first.
+    #[test]
+    fn a_verified_address_is_preferred() {
+        let resolved = linked(
+            profile(
+                "dentych",
+                "019f6588-fc1b-7aa2-befb-9319660792f9",
+                &[("old@example.com", false), ("dennis@understory.io", true)],
+            ),
+            Linked::Email,
+        );
+
+        assert_eq!(resolved.email.as_deref(), Some("dennis@understory.io"));
+    }
+
+    /// Nothing linked means nothing to point at — the raw handle is shown, and
+    /// the id stays empty rather than falling back to the caller.
+    #[test]
+    fn an_unlinked_author_has_no_user_id() {
+        let detected = DetectedAuthor {
+            origin: Some("git-commit".into()),
+            github_login: None,
+            github_user_id: None,
+            name: Some("Someone Unlinked".into()),
+            email: Some("nobody@example.com".into()),
+        };
+
+        assert_eq!(detected.display_name().as_deref(), Some("Someone Unlinked"));
+    }
+
     /// Both spellings the provider column has been written with must be
     /// asked for. understory/dentych's GitHub link is stored under the newer
     /// one; dropping either half turns "linked" into "no such person", which
