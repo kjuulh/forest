@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.6](https://github.com/understory-io/forest/compare/v0.3.5...v0.3.6) (2026-08-28)
+
+
+### Features
+
+* **forest-server:** a generic destination is a place, projects supply the rest ([#209](https://github.com/understory-io/forest/issues/209)) ([fe6d718](https://github.com/understory-io/forest/commit/fe6d718c9b3771c1bcd576bb5e18804344aa779b))
+
+
+### Bug Fixes
+
+* **forest-server:** notify the author, not the token owner ([#208](https://github.com/understory-io/forest/issues/208)) ([5aeb972](https://github.com/understory-io/forest/commit/5aeb9724373414f34f1904160ec0e0b0e3e7cfd9))
+
 ## [0.3.5](https://github.com/understory-io/forest/compare/v0.3.4...v0.3.5) (2026-08-28)
 
 
