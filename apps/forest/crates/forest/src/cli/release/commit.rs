@@ -143,8 +143,12 @@ impl CommitCommand {
             }
         };
 
-        // Resolve environment: from flag or interactive prompt
+        // Resolve environment: from flag, or interactively — but only when it is
+        // going to be used. Naming destinations explicitly selects them, so
+        // prompting for an environment there asks a question whose answer is
+        // discarded, and on a non-TTY it fails a release that was fully specified.
         let environment = match &self.environment {
+            _ if !destination.is_empty() => String::new(),
             Some(env) if !env.is_empty() => env.clone(),
             _ => {
                 // We need the org to list destinations. Try to get it from flags
@@ -174,7 +178,11 @@ impl CommitCommand {
             .release(
                 artifact_id,
                 &destination,
-                std::slice::from_ref(&environment),
+                if environment.is_empty() {
+                    &[]
+                } else {
+                    std::slice::from_ref(&environment)
+                },
                 self.force,
                 self.pipeline,
             )

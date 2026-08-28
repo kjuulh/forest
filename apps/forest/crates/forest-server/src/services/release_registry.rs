@@ -353,12 +353,24 @@ impl ReleaseRegistry {
     ///
     /// Shared by `release` and `release_failed` so a deploy that failed resolves
     /// its destinations exactly the way the successful one would have.
+    /// Resolve which destinations a release targets.
+    ///
+    /// Named destinations win outright: asking for one destination releases to
+    /// that destination, not to it *and* everything sharing its environment.
+    ///
+    /// This used to be an `OR`, which made `--destination` additive rather than
+    /// restrictive — and since the CLI resolves an environment even when
+    /// destinations are given, naming one destination in a shared environment
+    /// quietly released to all of them. Environments are now only consulted
+    /// when no destination was named.
     async fn resolve_destinations(
         &self,
         organisation: &str,
         destinations: &[String],
         environments: &[String],
     ) -> anyhow::Result<Vec<DestinationRec>> {
+        let by_name = !destinations.is_empty();
+
         let recs = sqlx::query_as!(
             DestinationRec,
             r#"
@@ -366,18 +378,37 @@ impl ReleaseRegistry {
             FROM destinations d
             LEFT JOIN environments e ON d.environment_id = e.id
             WHERE d.organisation = $3
-              AND (d.name = ANY($1) OR e.name = ANY($2))
+              AND CASE WHEN $4::bool
+                       THEN d.name = ANY($1)
+                       ELSE e.name = ANY($2)
+                  END
             "#,
             destinations,
             environments,
             organisation,
+            by_name,
         )
         .fetch_all(&self.db)
         .await
         .context("resolve destinations")?;
 
-        if recs.len() < destinations.len() {
-            anyhow::bail!("not all destinations exist in organisation {organisation}")
+        if by_name {
+            // Name the ones that are missing. "not all destinations exist" sends
+            // the reader back to the command line to diff two lists by eye.
+            let found: std::collections::BTreeSet<&str> =
+                recs.iter().map(|r| r.name.as_str()).collect();
+            let missing: Vec<&str> = destinations
+                .iter()
+                .map(String::as_str)
+                .filter(|name| !found.contains(name))
+                .collect();
+
+            if !missing.is_empty() {
+                anyhow::bail!(
+                    "no destination named {} in organisation {organisation}",
+                    missing.join(", "),
+                );
+            }
         }
 
         if recs.is_empty() {

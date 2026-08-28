@@ -11,5 +11,6 @@ mod oauth_apps;
 mod oauth_flow;
 mod oauth_unlink;
 mod registration_domain;
+mod release_destination_scoping;
 mod release_flow;
 mod release_intent_history;
