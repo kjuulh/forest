@@ -34,6 +34,7 @@ use forest_models::Destination;
 use crate::{
     destinations::{DestinationEdge, DestinationIndex, logger::DestinationLogger},
     services::{
+        artifact_staging_registry::ArtifactStagingRegistry,
         release_registry::ReleaseItem,
         release_token_registry::{ReleaseTokenRegistry, ReleaseTokenScope},
     },
@@ -84,6 +85,7 @@ pub fn metadata_schema() -> Vec<forest_models::MetadataFieldSchema> {
 }
 
 pub struct GenericV1Destination {
+    pub artifact_files: ArtifactStagingRegistry,
     pub release_tokens: ReleaseTokenRegistry,
     /// forest's own externally-reachable address, handed to the provider so it
     /// can call back for artifacts if it needs them.
@@ -246,6 +248,83 @@ impl GenericV1Destination {
             .into_inner())
     }
 
+    /// Per-release variables this project supplies for the destination.
+    ///
+    /// A destination describes a *place* — an account, a region, a cluster —
+    /// and is shared by every project that releases there. What differs per
+    /// project is small: which service, which container. Those come from the
+    /// project's own `forest.cue`, rendered by `release prepare` into
+    /// `forest/config.json` next to whatever manifests the destination needs.
+    ///
+    /// Returned flattened to strings so it can be merged straight over the
+    /// destination's metadata. Absent config is normal, not an error: most
+    /// destination types carry everything they need on the destination itself.
+    async fn release_config(
+        &self,
+        release: &ReleaseItem,
+        destination: &Destination,
+    ) -> HashMap<String, String> {
+        let files = match self
+            .artifact_files
+            .get_files_for_release(&release.artifact, &destination.environment)
+            .await
+        {
+            Ok(files) => files,
+            Err(e) => {
+                tracing::debug!("no artifact files for this release: {e:#}");
+                return HashMap::new();
+            }
+        };
+
+        for (path, content) in files {
+            if !path.ends_with("forest/config.json") {
+                continue;
+            }
+
+            let Ok(item) = serde_json::from_str::<serde_json::Value>(&content) else {
+                continue;
+            };
+
+            // `destination` in the rendered item is the pattern the project
+            // wrote, not the resolved name, so match it the same way the
+            // release did rather than comparing strings.
+            let matches = item
+                .get("destination")
+                .and_then(|d| d.as_str())
+                .map(|pattern| match regex::Regex::new(pattern) {
+                    Ok(re) => re.is_match(&destination.name),
+                    Err(_) => pattern == destination.name,
+                })
+                .unwrap_or(false);
+
+            if !matches {
+                continue;
+            }
+
+            let Some(serde_json::Value::Object(config)) = item.get("config") else {
+                continue;
+            };
+
+            return config
+                .iter()
+                .filter_map(|(k, v)| {
+                    let value = match v {
+                        serde_json::Value::String(s) => s.clone(),
+                        serde_json::Value::Bool(b) => b.to_string(),
+                        serde_json::Value::Number(n) => n.to_string(),
+                        // Nested structure has no meaning to a provider that
+                        // receives a flat string map; skip rather than encode
+                        // JSON into a value someone has to guess the shape of.
+                        _ => return None,
+                    };
+                    Some((k.clone(), value))
+                })
+                .collect();
+        }
+
+        HashMap::new()
+    }
+
     /// Run `Execute`, streaming log lines into the release log.
     ///
     /// Returns the plan text for `RELEASE_MODE_PLAN`.
@@ -278,13 +357,21 @@ impl GenericV1Destination {
             .await
             .context("failed to mint a release token for the provider")?;
 
+        // Destination metadata is the place; the project's config is what it
+        // contributes about itself. Project wins on conflict — a destination
+        // naming one project's service would defeat the point of sharing it.
+        let mut metadata = meta.passthrough.clone();
+        for (key, value) in self.release_config(release, destination).await {
+            metadata.insert(key, value);
+        }
+
         let request = ExecuteRequest {
             mode: mode as i32,
             destination: Some(ProviderDestination {
                 name: destination.name.clone(),
                 environment: destination.environment.clone(),
                 organisation: destination.organisation.clone(),
-                metadata: meta.passthrough.clone(),
+                metadata,
             }),
             release: Some(ProviderRelease {
                 release_id: release.id.to_string(),
