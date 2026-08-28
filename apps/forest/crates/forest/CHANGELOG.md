@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.3](https://github.com/understory-io/forest/compare/v0.3.2...v0.3.3) (2026-08-28)
+
+
+### Features
+
+* **forest-server:** forest/generic@1 — destination types implemented by an external provider ([#200](https://github.com/understory-io/forest/issues/200)) ([27657b9](https://github.com/understory-io/forest/commit/27657b97a1ca7fc2f98d0a587678285c11603731))
+
+
+### Bug Fixes
+
+* **forest-server:** --destination selects destinations, it does not add them ([#202](https://github.com/understory-io/forest/issues/202)) ([388d4c3](https://github.com/understory-io/forest/commit/388d4c3be6cf6aef0a786b83b036f54f9e4b505c))
+
 ## [0.3.2](https://github.com/understory-io/forest/compare/v0.3.1...v0.3.2) (2026-08-27)
 
 
