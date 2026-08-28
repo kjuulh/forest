@@ -12,16 +12,16 @@ description: >-
 #
 # Callers reference it by tag, not by branch:
 #
-#     - uses: understory-io/forest/.github/actions/setup-forest@v0.3.4
+#     - uses: understory-io/forest/.github/actions/setup-forest@v0.3.5
 #       with:
-#         version: v0.3.4
+#         version: v0.3.5
 #         gh-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
 #         token: ${{ secrets.FOREST_TOKEN }}
 
 inputs:
   version:
     description: >-
-      forest CLI release tag to install, e.g. `v0.3.4`. Leave empty to install
+      forest CLI release tag to install, e.g. `v0.3.5`. Leave empty to install
       the newest release that has actually finished publishing — see the
       resolution step for why "latest" is not the same thing.
 

@@ -72,13 +72,13 @@ to a step:
 ```yaml
 - run: mise run dist                  # whatever this repo builds with
 
-- uses: understory-io/forest/.github/actions/setup-forest@v0.3.4
+- uses: understory-io/forest/.github/actions/setup-forest@v0.3.5
   with:
-    version: v0.3.4
+    version: v0.3.5
     gh-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
     token: ${{ secrets.FOREST_TOKEN }}
 
-- uses: understory-io/forest/.github/actions/publish@v0.3.4
+- uses: understory-io/forest/.github/actions/publish@v0.3.5
 ```
 
 It reads the component and version out of `forest.cue`, checks a binary exists
@@ -230,16 +230,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: understory-io/forest/.github/actions/setup-forest@v0.3.4
+      - uses: understory-io/forest/.github/actions/setup-forest@v0.3.5
         with:
-          version: v0.3.4
+          version: v0.3.5
           gh-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
           token: ${{ secrets.FOREST_TOKEN }}
 
       # Whatever this repo builds with, plus the render forest needs.
       - run: forest release prepare
 
-      - uses: understory-io/forest/.github/actions/release@v0.3.4
+      - uses: understory-io/forest/.github/actions/release@v0.3.5
 ```
 
 Building stays in your workflow — a repo knows whether it has an image to push,
