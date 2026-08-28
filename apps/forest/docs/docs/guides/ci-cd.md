@@ -60,6 +60,38 @@ jobs:
       forest-repo-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
 ```
 
+That workflow owns a three-job shape — resolve the version, build across a
+matrix of runners, then publish once — and you want it whenever the component
+has to be built on more than one machine.
+
+### Publishing from a workflow you already have
+
+When the repo already builds its own binaries, the whole of the above collapses
+to a step:
+
+```yaml
+- run: mise run dist                  # whatever this repo builds with
+
+- uses: understory-io/forest/.github/actions/setup-forest@v0.3.4
+  with:
+    version: v0.3.4
+    gh-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
+    token: ${{ secrets.FOREST_TOKEN }}
+
+- uses: understory-io/forest/.github/actions/publish@v0.3.4
+```
+
+It reads the component and version out of `forest.cue`, checks a binary exists
+for the runner's own platform — `forest publish` derives the manifest by
+executing that one and asking it to describe itself, so a runner outside the
+built set fails deep inside the publish otherwise — publishes, and then asks the
+registry for the version back rather than trusting the publish's exit code.
+
+`version:` overrides `forest.component.version`, and `dry-run: true` runs the
+whole preflight without contacting the registry. What it deliberately does not
+do is build: an action cannot fan out a matrix or gather artifacts from legs
+that ran on other runners, and a repo knows how to build itself anyway.
+
 ### The version comes from `forest.cue`
 
 `forest.component.version` is the source of truth. The workflow does not set
@@ -198,16 +230,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: understory-io/forest/.github/actions/setup-forest@v0.2.21
+      - uses: understory-io/forest/.github/actions/setup-forest@v0.3.4
         with:
-          version: v0.2.21
+          version: v0.3.4
           gh-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
           token: ${{ secrets.FOREST_TOKEN }}
 
       # Whatever this repo builds with, plus the render forest needs.
       - run: forest release prepare
 
-      - uses: understory-io/forest/.github/actions/release@v0.2.21
+      - uses: understory-io/forest/.github/actions/release@v0.3.4
 ```
 
 Building stays in your workflow — a repo knows whether it has an image to push,

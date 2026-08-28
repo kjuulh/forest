@@ -1,0 +1,202 @@
+name: forest publish
+description: >-
+  Publish a component's binaries, spec and manifest to the forest registry, and
+  prove the version resolves afterwards.
+
+# The counterpart to `release`: that one ships a deployment, this one ships a
+# binary. Both assume the caller has already built.
+#
+# `forest-publish.yml` remains the way to publish a component that has to be
+# built across several runners — it owns the three-job shape (resolve version →
+# matrix build → publish) that a composite action cannot express, because an
+# action is steps inside one job and cannot fan out a matrix or gather
+# artifacts from legs that ran elsewhere.
+#
+# This is for the other case, and it is the common one: a repo that already
+# builds its own binaries in its own workflow — `mise run dist`, a cargo build,
+# a matrix it drives itself — and wants the publish to be one step rather than
+# a copy of the block below. Point it at a tree that already has
+# `.forest/component/output/<os>/<arch>/<binary>` in place and it does the rest.
+#
+#     - run: mise run dist                  # whatever this repo builds with
+#     - uses: understory-io/forest/.github/actions/setup-forest@v0.3.4
+#       with:
+#         version: v0.3.4
+#         gh-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
+#         token: ${{ secrets.FOREST_TOKEN }}
+#     - uses: understory-io/forest/.github/actions/publish@v0.3.4
+#
+# `cue` must be on PATH — `forest publish` shells out to it to evaluate the
+# spec, and so does this action to read the version back.
+
+inputs:
+  version:
+    description: >-
+      Publish under this version instead of `forest.component.version` from
+      forest.cue. Set it for a tag-triggered release that must not edit a
+      tracked file mid-run.
+
+      Prefer exporting `FOREST_COMPONENT_VERSION` in the job instead when the
+      *build* has to agree: `forest run build` reads the same variable, so the
+      binary's stamped version matches what the registry records. Setting this
+      input alone overrides the publish but leaves an already-built binary
+      stamped with the cue version.
+    required: false
+    default: ""
+  component:
+    description: >-
+      Component to verify after publishing, as `organisation/name`. Read from
+      the spec when not given.
+    required: false
+    default: ""
+  dry-run:
+    description: >-
+      Run the local preflight — cue eval, binary check, describe probe,
+      manifest build — print what would be published, and stop without
+      contacting the registry.
+    required: false
+    default: "false"
+  verify:
+    description: >-
+      After publishing, ask the registry for the version back rather than
+      trusting the publish's own exit code.
+    required: false
+    default: "true"
+  working-directory:
+    description: Directory holding the component's spec and build output.
+    required: false
+    default: "."
+
+outputs:
+  component:
+    description: The component that was published, as `organisation/name`.
+    value: ${{ steps.resolve.outputs.component }}
+  version:
+    description: The version it was published under.
+    value: ${{ steps.resolve.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    # Read the spec the same way `forest publish` does — every *.cue in the
+    # component directory, as one package — so what this reports and what the
+    # publish actually does cannot disagree.
+    - name: Resolve component and version
+      id: resolve
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        IN_VERSION: ${{ inputs.version }}
+        IN_COMPONENT: ${{ inputs.component }}
+      run: |
+        set -euo pipefail
+
+        manifest="$(cue export --out json ./*.cue)"
+
+        version="$IN_VERSION"
+        if [ -z "$version" ]; then
+          version="${FOREST_COMPONENT_VERSION:-}"
+        fi
+        if [ -z "$version" ]; then
+          version="$(printf '%s' "$manifest" | jq -r '.forest.component.version')"
+        fi
+
+        component="$IN_COMPONENT"
+        if [ -z "$component" ]; then
+          organisation="$(printf '%s' "$manifest" | jq -r '.project.organisation')"
+          name="$(printf '%s' "$manifest" | jq -r '.forest.component.name // .project.name')"
+          component="$organisation/$name"
+        fi
+
+        if [ -z "$version" ] || [ "$version" = "null" ]; then
+          echo "::error::No version to publish under: forest.component.version is unset and none was given." >&2
+          exit 1
+        fi
+
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "component=$component" >> "$GITHUB_OUTPUT"
+        echo "::notice::Publishing $component@$version"
+
+    # `forest publish` derives the manifest by executing the binary for the
+    # *runner's own* platform and asking it to describe itself, so a runner
+    # outside the built set fails deep inside the publish with a much worse
+    # message than this one.
+    - name: Check this runner's platform was built
+      if: inputs.dry-run != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+
+        case "$(uname -s)" in
+          Darwin) host_os=macos ;;
+          Linux)  host_os=linux ;;
+          *) echo "::error::Unsupported publish runner OS: $(uname -s)" >&2; exit 1 ;;
+        esac
+        case "$(uname -m)" in
+          x86_64|amd64)  host_arch=amd64 ;;
+          aarch64|arm64) host_arch=arm64 ;;
+          *) echo "::error::Unsupported publish runner arch: $(uname -m)" >&2; exit 1 ;;
+        esac
+
+        if [ ! -d ".forest/component/output/$host_os/$host_arch" ]; then
+          {
+            echo "::error::This runner is $host_os/$host_arch, but no binary was built for it."
+            echo "forest publish probes the binary for the runner's own platform to derive the manifest, so that platform must be in the build."
+            echo "Either build $host_os/$host_arch, or publish from a runner whose platform you do build."
+            echo "Built platforms:"
+            find .forest/component/output -mindepth 2 -maxdepth 2 -type d 2>/dev/null | sort || echo "  (none — did the build step run?)"
+          } >&2
+          exit 1
+        fi
+
+    # Re-running a tag is safe: the registry refuses a version that is already
+    # published, so this fails cleanly rather than double-publishing or
+    # silently overwriting. A half-finished upload is rolled back by the CLI's
+    # abort-on-drop guard, leaving the version free to retry.
+    - name: Publish
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        FOREST_COMPONENT_VERSION: ${{ inputs.version }}
+        IN_DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        set -euo pipefail
+        if [ "$IN_DRY_RUN" = "true" ]; then
+          forest publish --dry-run
+        else
+          forest publish
+        fi
+
+    # Prove the version actually resolves from the registry rather than
+    # trusting the publish's own exit code.
+    - name: Verify the published version resolves
+      if: inputs.verify == 'true' && inputs.dry-run != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        COMPONENT: ${{ steps.resolve.outputs.component }}
+        VERSION: ${{ steps.resolve.outputs.version }}
+      run: |
+        set -euo pipefail
+        if ! forest components show "$COMPONENT" --format json \
+             | jq -e --arg v "$VERSION" '.versions[] | select(.version == $v)' > /dev/null; then
+          echo "::error::$COMPONENT@$VERSION did not resolve from the registry after publishing." >&2
+          exit 1
+        fi
+        echo "::notice::$COMPONENT@$VERSION is resolvable from the registry."
+
+    - name: Summary
+      if: inputs.dry-run != 'true'
+      shell: bash
+      env:
+        COMPONENT: ${{ steps.resolve.outputs.component }}
+        VERSION: ${{ steps.resolve.outputs.version }}
+      run: |
+        {
+          echo "### published \`$COMPONENT@$VERSION\`"
+          echo
+          echo '```sh'
+          echo "forest components show $COMPONENT"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
