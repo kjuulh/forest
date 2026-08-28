@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/understory-io/forest/compare/v0.3.3...v0.3.4) (2026-08-28)
+
+
+### Features
+
+* **release:** attribute a release to whoever wrote the commit ([#203](https://github.com/understory-io/forest/issues/203)) ([3ffb533](https://github.com/understory-io/forest/commit/3ffb533fe5d186aed9926ec5b5c58be85fa22a98))
+
 ## [0.3.3](https://github.com/understory-io/forest/compare/v0.3.2...v0.3.3) (2026-08-28)
 
 
