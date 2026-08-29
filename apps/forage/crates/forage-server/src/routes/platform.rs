@@ -730,6 +730,21 @@ struct CreateOrgForm {
     _csrf: String,
 }
 
+fn create_org_error_message(name: &str, error: &PlatformError) -> String {
+    match error {
+        PlatformError::AlreadyExists(_) => format!(
+            "An organisation named “{name}” already exists. Choose a different slug, or ask an owner to invite you."
+        ),
+        PlatformError::InvalidArgument(msg) | PlatformError::PermissionDenied(msg) => msg.clone(),
+        PlatformError::Unavailable(_) => {
+            "Forest is temporarily unavailable. Wait a moment and try again.".into()
+        }
+        PlatformError::NotAuthenticated => "Your session expired. Sign in again and retry.".into(),
+        PlatformError::NotFound(msg) if !msg.is_empty() => msg.clone(),
+        _ => "Could not create organisation. Please try again.".into(),
+    }
+}
+
 async fn create_org_submit(
     State(state): State<AppState>,
     session: Session,
@@ -789,6 +804,7 @@ async fn create_org_submit(
         }
         Err(e) => {
             tracing::error!("failed to create org: {e}");
+            let error = create_org_error_message(&form.name, &e);
             let html = state
                 .templates
                 .render(
@@ -799,7 +815,7 @@ async fn create_org_submit(
                         user => context! { username => session.user.username },
                         csrf_token => &session.csrf_token,
                         active_tab => "dashboard",
-                        error => "Could not create organisation. Please try again.",
+                        error => error,
                     },
                 )
                 .map_err(|e| {
