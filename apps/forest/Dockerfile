@@ -48,9 +48,8 @@ ENV SQLX_OFFLINE=true
 COPY . .
 
 # Probe the sccache backend before building. If SCCACHE_MEMCACHED_ENDPOINT
-# is set but the host can't be reached, unset the wrapper so cargo builds
-# without caching rather than failing. An empty endpoint (local build)
-# keeps sccache on its harmless disk cache.
+# is empty, remove it so sccache uses its default disk cache. If it is set but
+# unreachable, drop RUSTC_WRAPPER so cargo builds normally instead of failing.
 RUN set -e; \
     if [ -n "$SCCACHE_MEMCACHED_ENDPOINT" ]; then \
       hostport="${SCCACHE_MEMCACHED_ENDPOINT#tcp://}"; \
@@ -61,8 +60,10 @@ RUN set -e; \
         echo "sccache: memcached unreachable at $host:$port — building without rustc cache"; \
         unset RUSTC_WRAPPER SCCACHE_MEMCACHED_ENDPOINT; \
       fi; \
+    else \
+      unset SCCACHE_MEMCACHED_ENDPOINT; \
     fi; \
-    cargo build --release --bin forest-server; \
+    cargo build --release --locked --bin forest-server; \
     if [ -n "${RUSTC_WRAPPER:-}" ]; then sccache --show-stats; fi
 
 FROM debian:13-slim AS production

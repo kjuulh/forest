@@ -32,7 +32,7 @@ steps:
       # Strip leading `v` from the tag and compare with deno.json. If
       # they diverge, refuse to publish — the wrong version on JSR is
       # painful to recover from (yanks aren't deletes).
-      - tag_version="${CI_COMMIT_TAG#v}"
+      - tag_version="${CI_COMMIT_TAG##v}"
       - pkg_version=$(deno eval "console.log(JSON.parse(Deno.readTextFileSync('deno.json')).version)")
       - |
         if [ "$tag_version" != "$pkg_version" ]; then

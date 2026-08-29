@@ -4,7 +4,7 @@ ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        clang mold ca-certificates curl \
+        clang mold ca-certificates curl nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /mnt/src
@@ -35,10 +35,17 @@ ENV SQLX_OFFLINE=true
 
 COPY . .
 
+# Build frontend assets inside the image instead of relying on checked-in
+# generated files. The package locks make Woodpecker's Docker image match the
+# source commit exactly.
+RUN npm ci && \
+    (cd frontend && npm ci && npm run build) && \
+    npx tailwindcss -i static/css/input.css -o static/css/style.css --minify
+
 # Probe the sccache backend before building. If SCCACHE_MEMCACHED_ENDPOINT
-# is set but the host can't be reached, unset the wrapper so cargo builds
-# without caching rather than failing. See apps/forest/Dockerfile for the
-# rationale.
+# is empty, remove it so sccache uses its default disk cache. If it is set but
+# unreachable, drop RUSTC_WRAPPER so cargo builds normally instead of failing.
+# See apps/forest/Dockerfile for the rationale.
 RUN set -e; \
     if [ -n "$SCCACHE_MEMCACHED_ENDPOINT" ]; then \
       hostport="${SCCACHE_MEMCACHED_ENDPOINT#tcp://}"; \
@@ -49,8 +56,10 @@ RUN set -e; \
         echo "sccache: memcached unreachable at $host:$port — building without rustc cache"; \
         unset RUSTC_WRAPPER SCCACHE_MEMCACHED_ENDPOINT; \
       fi; \
+    else \
+      unset SCCACHE_MEMCACHED_ENDPOINT; \
     fi; \
-    cargo build --release -p forage-server; \
+    cargo build --release --locked -p forage-server; \
     if [ -n "${RUSTC_WRAPPER:-}" ]; then sccache --show-stats; fi
 
 FROM gcr.io/distroless/cc-debian13:latest
