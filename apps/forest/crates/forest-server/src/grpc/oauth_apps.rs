@@ -490,9 +490,7 @@ fn oauth_flow_status(err: anyhow::Error) -> tonic::Status {
             OAuthAppError::UnsupportedGrant(_) => {
                 tonic::Status::invalid_argument("unsupported_grant_type")
             }
-            OAuthAppError::ScopeNotGranted(_) => {
-                tonic::Status::invalid_argument("invalid_scope")
-            }
+            OAuthAppError::ScopeNotGranted(_) => tonic::Status::invalid_argument("invalid_scope"),
             OAuthAppError::InvalidName
             | OAuthAppError::NoRedirectUris
             | OAuthAppError::InvalidRedirectUri(_) => {

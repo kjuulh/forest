@@ -1,0 +1,16 @@
+---
+apiVersion: forage.rawpotion.io/v1alpha1
+kind: NatsUser
+metadata:
+  name: forage-nats
+  namespace: prod
+spec:
+  account: FORAGE
+  publish:
+    - subject: "forage.notifications.>"
+    - subject: "forage.email.>"
+    - subject: "$JS.API.>"
+  subscribe:
+    - subject: "forage.notifications.>"
+    - subject: "forage.email.>"
+    - subject: "_INBOX.>"

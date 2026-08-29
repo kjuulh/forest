@@ -55,7 +55,10 @@ impl RejectCommand {
             .await
             .context("reject plan stage")?;
 
-        eprintln!("rejected stage '{stage_id}' of {}/{}", project.organisation, project.project);
+        eprintln!(
+            "rejected stage '{stage_id}' of {}/{}",
+            project.organisation, project.project
+        );
         eprintln!("  intent: {intent_id}");
         if let Some(reason) = &self.reason {
             eprintln!("  reason: {reason}");

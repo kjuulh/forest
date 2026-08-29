@@ -140,6 +140,7 @@
                    org they're currently inside. #}
                 <a href="/orgs/{{ current_org }}/components" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'components' %} text-gray-900 border-gray-900{% endif %}">Components</a>
                 <a href="/orgs/{{ current_org }}/destinations" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'destinations' %} text-gray-900 border-gray-900{% endif %}">Destinations</a>
+                <a href="/orgs/{{ current_org }}/rules" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'org_rules' %} text-gray-900 border-gray-900{% endif %}">Rules</a>
                 <a href="/orgs/{{ current_org }}/settings" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'settings' %} text-gray-900 border-gray-900{% endif %}">Settings</a>
                 {% else %}
                 {# ── Global tabs (no org context) ───────────────────── #}

@@ -47,8 +47,13 @@ impl ApproveCommand {
             intent_state,
             project,
             ..
-        } = resolve(state, self.target.as_deref(), self.organisation.as_deref(), self.project.as_deref())
-            .await?;
+        } = resolve(
+            state,
+            self.target.as_deref(),
+            self.organisation.as_deref(),
+            self.project.as_deref(),
+        )
+        .await?;
 
         let stage_id = super::pick_awaiting_stage(&intent_state, self.stage.as_deref())?;
 
@@ -58,7 +63,10 @@ impl ApproveCommand {
             .await
             .context("approve plan stage")?;
 
-        eprintln!("approved stage '{stage_id}' of {}/{}", project.organisation, project.project);
+        eprintln!(
+            "approved stage '{stage_id}' of {}/{}",
+            project.organisation, project.project
+        );
         eprintln!("  intent: {intent_id}");
         eprintln!("\nthe coordinator activates dependent stages on its next sweep; follow with:");
         eprintln!("  forest release show {intent_id} --follow");

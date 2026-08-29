@@ -38,6 +38,8 @@ package sdk
 	domain?: string
 	// Responsible team or person.
 	owner?: string
+	// Free-form labels used by organisation-scoped rule selectors.
+	tags?: [...string]
 }
 
 #ForestComponent: {

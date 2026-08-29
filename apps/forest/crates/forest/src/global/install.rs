@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::global::fs::{atomic_write, read_optional};
-use crate::global::shellenv::{managed_block, Shell, BLOCK_BEGIN, BLOCK_END};
+use crate::global::shellenv::{BLOCK_BEGIN, BLOCK_END, Shell, managed_block};
 
 /// Outcome of installing the block into one rc file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,14 +219,16 @@ mod tests {
 
     #[test]
     fn upsert_replaces_a_stale_block_in_place() {
-        let stale = format!(
-            "pre\n\n{BLOCK_BEGIN}\nexport PATH=\"/old/shims:$PATH\"\n{BLOCK_END}\npost\n"
-        );
+        let stale =
+            format!("pre\n\n{BLOCK_BEGIN}\nexport PATH=\"/old/shims:$PATH\"\n{BLOCK_END}\npost\n");
         let (out, act) = upsert_block(&stale, &block(), Path::new("/x"));
         assert!(matches!(act, Applied::Updated(_)));
         assert!(out.starts_with("pre\n"), "{out}");
         assert!(out.trim_end().ends_with("post"), "{out}");
-        assert!(!out.contains("/old/shims"), "stale content must be gone: {out}");
+        assert!(
+            !out.contains("/old/shims"),
+            "stale content must be gone: {out}"
+        );
         assert!(out.contains("forest/global/shims"), "{out}");
         // Exactly one managed block.
         assert_eq!(out.matches(BLOCK_BEGIN).count(), 1);
@@ -253,7 +255,11 @@ mod tests {
             let restored = strip_block(&installed).unwrap_or_default();
             let norm = |s: &str| {
                 let t = s.trim_end_matches('\n');
-                if t.is_empty() { String::new() } else { format!("{t}\n") }
+                if t.is_empty() {
+                    String::new()
+                } else {
+                    format!("{t}\n")
+                }
             };
             assert_eq!(norm(&restored), norm(original), "original was {original:?}");
         }
@@ -276,7 +282,12 @@ mod tests {
 
         let r = uninstall(&rc).await.unwrap();
         assert!(matches!(r, Removed::Removed(_)));
-        assert!(!tokio::fs::read_to_string(&rc).await.unwrap().contains(BLOCK_BEGIN));
+        assert!(
+            !tokio::fs::read_to_string(&rc)
+                .await
+                .unwrap()
+                .contains(BLOCK_BEGIN)
+        );
 
         let r2 = uninstall(&rc).await.unwrap();
         assert!(matches!(r2, Removed::Absent(_)), "got {r2:?}");
@@ -286,7 +297,9 @@ mod tests {
     async fn apply_preserves_existing_rc_content() {
         let dir = TempDir::new().unwrap();
         let rc = dir.path().join(".zshenv");
-        atomic_write(&rc, b"export FOO=bar\nalias g=git\n").await.unwrap();
+        atomic_write(&rc, b"export FOO=bar\nalias g=git\n")
+            .await
+            .unwrap();
 
         apply(Shell::Zsh, &rc).await.unwrap();
         let body = tokio::fs::read_to_string(&rc).await.unwrap();
@@ -296,7 +309,10 @@ mod tests {
 
         uninstall(&rc).await.unwrap();
         let after = tokio::fs::read_to_string(&rc).await.unwrap();
-        assert_eq!(after, "export FOO=bar\nalias g=git\n", "user content must survive");
+        assert_eq!(
+            after, "export FOO=bar\nalias g=git\n",
+            "user content must survive"
+        );
     }
 
     #[tokio::test]
@@ -310,7 +326,10 @@ mod tests {
         let body = tokio::fs::read_to_string(&rc).await.unwrap();
         assert!(body.contains(BLOCK_BEGIN));
         // Fish guard, not POSIX case — the latter would be a syntax error.
-        assert!(body.contains("if not contains -- $forest_shim_dir $PATH"), "{body}");
+        assert!(
+            body.contains("if not contains -- $forest_shim_dir $PATH"),
+            "{body}"
+        );
         assert!(!body.contains("case \":$PATH:\""), "{body}");
 
         let a2 = apply(Shell::Fish, &rc).await.unwrap();

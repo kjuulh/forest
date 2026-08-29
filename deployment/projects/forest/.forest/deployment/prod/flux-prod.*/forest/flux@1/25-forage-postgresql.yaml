@@ -1,0 +1,9 @@
+---
+apiVersion: forage.rawpotion.io/v1alpha1
+kind: ForagePostgresql
+metadata:
+  name: forest-db
+  namespace: prod
+spec:
+  databaseName: forest
+  secretName: forest-db-credentials

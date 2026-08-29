@@ -54,23 +54,23 @@ impl ProjectParser {
             // local deps were handled, so a versioned binary component (e.g.
             // fungus → forest-contrib/build-rust@x) exposed no `forest run`
             // commands.
-            let v2_component: Option<(std::path::PathBuf, CommandSource)> =
-                match &component.source {
-                    CacheComponentSource::Local(path) => Some((
-                        path.clone(),
-                        CommandSource::Local(path.canonicalize().context("get absolute path")?),
-                    )),
-                    CacheComponentSource::Versioned(version) => dirs::cache_dir().map(|c| {
-                        let dir = c
-                            .join("forest")
-                            .join("components")
-                            .join(&component.organisation)
-                            .join(&component.name)
-                            .join(version.to_string());
-                        (dir, CommandSource::Versioned(version.to_string()))
-                    }),
-                    CacheComponentSource::Unknown => None,
-                };
+            let v2_component: Option<(std::path::PathBuf, CommandSource)> = match &component.source
+            {
+                CacheComponentSource::Local(path) => Some((
+                    path.clone(),
+                    CommandSource::Local(path.canonicalize().context("get absolute path")?),
+                )),
+                CacheComponentSource::Versioned(version) => dirs::cache_dir().map(|c| {
+                    let dir = c
+                        .join("forest")
+                        .join("components")
+                        .join(&component.organisation)
+                        .join(&component.name)
+                        .join(version.to_string());
+                    (dir, CommandSource::Versioned(version.to_string()))
+                }),
+                CacheComponentSource::Unknown => None,
+            };
             if let Some((v2_dir, v2_source)) = &v2_component {
                 let path = v2_dir;
                 if component_binary::is_v2_component(path) {

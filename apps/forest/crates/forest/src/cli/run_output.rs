@@ -36,7 +36,11 @@ pub fn print(format: OutputFormat, result: &serde_json::Value) -> anyhow::Result
 /// the parent process can parse the result. The outermost layer honours the
 /// requested format.
 fn effective_format(requested: OutputFormat, nested: bool) -> OutputFormat {
-    if nested { OutputFormat::Json } else { requested }
+    if nested {
+        OutputFormat::Json
+    } else {
+        requested
+    }
 }
 
 fn render_result(format: OutputFormat, result: &serde_json::Value) -> anyhow::Result<String> {
@@ -195,9 +199,18 @@ mod tests {
 
     #[test]
     fn nested_forces_json_regardless_of_requested_format() {
-        assert_eq!(effective_format(OutputFormat::Pretty, true), OutputFormat::Json);
-        assert_eq!(effective_format(OutputFormat::Text, true), OutputFormat::Json);
-        assert_eq!(effective_format(OutputFormat::Pretty, false), OutputFormat::Pretty);
+        assert_eq!(
+            effective_format(OutputFormat::Pretty, true),
+            OutputFormat::Json
+        );
+        assert_eq!(
+            effective_format(OutputFormat::Text, true),
+            OutputFormat::Json
+        );
+        assert_eq!(
+            effective_format(OutputFormat::Pretty, false),
+            OutputFormat::Pretty
+        );
     }
 
     #[test]

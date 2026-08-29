@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forage
+  namespace: prod
+  labels:
+    app.kubernetes.io/name: forage
+    app.kubernetes.io/component: server
+    app.kubernetes.io/managed-by: forest
+    forest.sh/managed: "true"
+    forest.sh/project: "forage"
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: forage
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: forage
+        app.kubernetes.io/component: server
+    spec:
+      containers:
+        - name: forage
+          image: git.kjuulh.io/kjuulh/forage:latest
+          ports:
+            - name: 
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: RUST_LOG
+              value: "forage=debug,info"
+            - name: "FORAGE_HOST"
+              value: "0.0.0.0:3000"
+            - name: "FOREST_SERVER_URL"
+              value: "http://forest.prod:4040"
+            - name: "LOG_LEVEL"
+              value: "short"
+            # forage-nats-controller writes the NATS server URL into the
+            # creds Secret under both NATS_URL (env-var style) and url —
+            # so apps don't need to hardcode the server URL alongside
+            # the creds file in their env_vars.
+            - name: NATS_CREDS
+              valueFrom:
+                secretKeyRef:
+                  name: forage-nats-nats-creds
+                  key: creds
+            - name: NATS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: forage-nats-nats-creds
+                  key: NATS_URL
+          envFrom:
+            - secretRef:
+                name: forage-secrets
+            - secretRef:
+                name: forage-db-credentials
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: forage
+  namespace: prod
+  labels:
+    app.kubernetes.io/name: forage
+    app.kubernetes.io/component: server
+    app.kubernetes.io/managed-by: forest
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: forage
+    app.kubernetes.io/component: server
+  ports:
+    - name: 
+      port: 3000
+      targetPort: 3000
+      protocol: TCP

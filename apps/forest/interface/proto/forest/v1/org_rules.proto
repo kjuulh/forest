@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package forest.v1;
+
+import "forest/v1/policies.proto";
+import "forest/v1/release_pipelines.proto";
+
+message ProjectSelector {
+  repeated string include_projects = 1;
+  repeated string exclude_projects = 2;
+  optional string name_regex = 3;
+  map<string, string> metadata_match = 4;
+  repeated string tags = 5;
+}
+
+message OrgPolicyRule {
+  string name = 1;
+  bool enabled = 2;
+  PolicyType policy_type = 3;
+  oneof config {
+    SoakTimeConfig soak_time = 10;
+    BranchRestrictionConfig branch_restriction = 11;
+    ExternalApprovalConfig external_approval = 12;
+  }
+}
+
+message OrgTriggerRule {
+  string name = 1;
+  bool enabled = 2;
+  optional string branch_pattern = 3;
+  optional string title_pattern = 4;
+  optional string author_pattern = 5;
+  optional string commit_message_pattern = 6;
+  optional string source_type_pattern = 7;
+  repeated string target_environments = 8;
+  repeated string target_destinations = 9;
+  bool force_release = 10;
+  bool use_pipeline = 11;
+}
+
+message OrgReleasePipelineRule {
+  string name = 1;
+  bool enabled = 2;
+  repeated PipelineStage stages = 3;
+}
+
+message OrgRuleSet {
+  string organisation = 1;
+  string name = 2;
+  bool enabled = 3;
+  ProjectSelector selector = 4;
+  repeated OrgPolicyRule policies = 5;
+  repeated OrgTriggerRule triggers = 6;
+  repeated OrgReleasePipelineRule release_pipelines = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+message CreateOrgRuleSetRequest {
+  OrgRuleSet rule_set = 1;
+}
+message CreateOrgRuleSetResponse {
+  OrgRuleSet rule_set = 1;
+}
+
+message UpdateOrgRuleSetRequest {
+  OrgRuleSet rule_set = 1;
+}
+message UpdateOrgRuleSetResponse {
+  OrgRuleSet rule_set = 1;
+}
+
+message DeleteOrgRuleSetRequest {
+  string organisation = 1;
+  string name = 2;
+}
+message DeleteOrgRuleSetResponse {}
+
+message ListOrgRuleSetsRequest {
+  string organisation = 1;
+}
+message ListOrgRuleSetsResponse {
+  repeated OrgRuleSet rule_sets = 1;
+}
+
+service OrgRuleSetService {
+  rpc CreateOrgRuleSet(CreateOrgRuleSetRequest) returns (CreateOrgRuleSetResponse);
+  rpc UpdateOrgRuleSet(UpdateOrgRuleSetRequest) returns (UpdateOrgRuleSetResponse);
+  rpc DeleteOrgRuleSet(DeleteOrgRuleSetRequest) returns (DeleteOrgRuleSetResponse);
+  rpc ListOrgRuleSets(ListOrgRuleSetsRequest) returns (ListOrgRuleSetsResponse);
+}

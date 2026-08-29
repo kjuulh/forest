@@ -470,6 +470,8 @@ message ProjectMetadata {
   string domain = 5;
   // Responsible team or person.
   string owner = 6;
+  // Free-form labels for org-scoped rule selection.
+  repeated string tags = 7;
 }
 
 message Ref {

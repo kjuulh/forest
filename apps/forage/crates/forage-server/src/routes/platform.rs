@@ -6,9 +6,10 @@ use axum::{Json, Router};
 use axum_extra::extract::Form;
 use chrono::Datelike;
 use forage_core::platform::{
-    validate_slug, CreatePolicyInput, CreateReleasePipelineInput, CreateTriggerInput,
-    PipelineStage, PlatformError, PolicyConfig, UpdatePolicyInput, UpdateReleasePipelineInput,
-    UpdateTriggerInput,
+    CreateOrgRuleSetInput, CreatePolicyInput, CreateReleasePipelineInput, CreateTriggerInput,
+    OrgPolicyRule, OrgReleasePipelineRule, OrgTriggerRule, PipelineStage, PipelineStageConfig,
+    PlatformError, PolicyConfig, ProjectSelector, UpdatePolicyInput, UpdateReleasePipelineInput,
+    UpdateTriggerInput, validate_slug,
 };
 use forage_core::session::CachedOrg;
 use minijinja::context;
@@ -24,10 +25,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/dashboard", get(dashboard))
         .route("/notifications", get(notifications_page))
-        .route(
-            "/orgs/{org}/notifications",
-            get(org_notifications_page),
-        )
+        .route("/orgs/{org}/notifications", get(org_notifications_page))
         .route("/orgs", post(create_org_submit))
         .route("/orgs/{org}/projects", get(projects_list))
         .route("/orgs/{org}/projects/{project}", get(project_detail))
@@ -49,6 +47,14 @@ pub fn router() -> Router<AppState> {
         .route("/orgs/{org}/releases", get(releases_page))
         .route("/orgs/{org}/destinations", get(destinations_page))
         .route(
+            "/orgs/{org}/rules",
+            get(org_rules_page).post(create_org_rule_submit),
+        )
+        .route(
+            "/orgs/{org}/rules/{name}/delete",
+            post(delete_org_rule_submit),
+        )
+        .route(
             "/orgs/{org}/destinations/environments",
             post(create_environment_submit),
         )
@@ -60,10 +66,7 @@ pub fn router() -> Router<AppState> {
             "/orgs/{org}/destinations/create",
             post(create_destination_submit),
         )
-        .route(
-            "/orgs/{org}/destinations/detail",
-            get(destination_detail),
-        )
+        .route("/orgs/{org}/destinations/detail", get(destination_detail))
         .route(
             "/orgs/{org}/destinations/detail/update",
             post(update_destination_submit),
@@ -102,7 +105,10 @@ pub fn router() -> Router<AppState> {
             "/orgs/{org}/settings/access/verify",
             post(verify_allowed_domain_submit),
         )
-        .route("/join-offers/{org_id}/accept", post(accept_join_offer_submit))
+        .route(
+            "/join-offers/{org_id}/accept",
+            post(accept_join_offer_submit),
+        )
         .route(
             "/orgs/{org}/projects/{project}/deploy",
             post(deploy_release),
@@ -210,7 +216,6 @@ fn project_metadata_to_context(m: &forage_core::platform::ProjectMetadata) -> mi
     }
 }
 
-
 #[allow(clippy::result_large_err)]
 fn require_org_membership<'a>(
     state: &AppState,
@@ -252,10 +257,7 @@ fn require_admin(state: &AppState, org: &CachedOrg) -> Result<(), Response> {
 
 // ─── Dashboard ──────────────────────────────────────────────────────
 
-async fn dashboard(
-    State(state): State<AppState>,
-    session: Session,
-) -> Result<Response, Response> {
+async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
 
     if orgs.is_empty() {
@@ -265,7 +267,10 @@ async fn dashboard(
         // (DATA-252).
         let join_offers = warn_default(
             "onboarding: list_join_offers",
-            state.platform_client.list_join_offers(&session.access_token).await,
+            state
+                .platform_client
+                .list_join_offers(&session.access_token)
+                .await,
         );
 
         let html = state
@@ -285,9 +290,7 @@ async fn dashboard(
                     }).collect::<Vec<_>>(),
                 },
             )
-            .map_err(|e| {
-                internal_error(&state, "template error", &e)
-            })?;
+            .map_err(|e| internal_error(&state, "template error", &e))?;
         return Ok(Html(html).into_response());
     }
 
@@ -297,17 +300,25 @@ async fn dashboard(
     for org in orgs {
         let projects = warn_default(
             "dashboard: list_projects",
-            state.platform_client.list_projects(&session.access_token, &org.name).await,
+            state
+                .platform_client
+                .list_projects(&session.access_token, &org.name)
+                .await,
         );
 
-        if first_org_projects.is_empty() && org.name == orgs.first().map(|o| o.name.as_str()).unwrap_or_default() {
+        if first_org_projects.is_empty()
+            && org.name == orgs.first().map(|o| o.name.as_str()).unwrap_or_default()
+        {
             first_org_projects = projects.clone();
         }
 
         for project in projects.iter().take(5) {
             let artifacts = warn_default(
                 "dashboard: list_artifacts",
-                state.platform_client.list_artifacts(&session.access_token, &org.name, project).await,
+                state
+                    .platform_client
+                    .list_artifacts(&session.access_token, &org.name, project)
+                    .await,
             );
 
             for artifact in artifacts {
@@ -340,7 +351,10 @@ async fn dashboard(
     // Soft-fail: a failure here shouldn't break the dashboard.
     let join_offers = warn_default(
         "dashboard: list_join_offers",
-        state.platform_client.list_join_offers(&session.access_token).await,
+        state
+            .platform_client
+            .list_join_offers(&session.access_token)
+            .await,
     );
 
     let html = state
@@ -364,9 +378,7 @@ async fn dashboard(
                 }).collect::<Vec<_>>(),
             },
         )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "template error", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -392,10 +404,7 @@ struct NotifRelease {
     destinations: Vec<minijinja::Value>,
 }
 
-async fn fetch_notifications(
-    state: &AppState,
-    session: &Session,
-) -> Vec<NotifRelease> {
+async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRelease> {
     let orgs = &session.user.orgs;
     let username = &session.user.username;
     let mut releases: Vec<NotifRelease> = Vec::new();
@@ -408,9 +417,12 @@ async fn fetch_notifications(
             state
                 .platform_client
                 .get_destination_states(&session.access_token, &org.name, None),
-            state
-                .platform_client
-                .get_release_intent_states(&session.access_token, &org.name, None, true),
+            state.platform_client.get_release_intent_states(
+                &session.access_token,
+                &org.name,
+                None,
+                true
+            ),
         );
         let projects = match projects {
             Ok(p) => p,
@@ -500,7 +512,9 @@ async fn fetch_notifications(
                     let sorted = topo_sort_run_stages(run_stages);
                     for rs in sorted {
                         let base_status = deploy_stage_display_status(rs, &matching_states);
-                        let display_status = if rs.stage_type == "plan" && rs.approval_status.as_deref() == Some("AWAITING_APPROVAL") {
+                        let display_status = if rs.stage_type == "plan"
+                            && rs.approval_status.as_deref() == Some("AWAITING_APPROVAL")
+                        {
                             "AWAITING_APPROVAL"
                         } else {
                             base_status
@@ -804,7 +818,12 @@ async fn create_org_submit(
                 )
                 .map_err(|e| {
                     tracing::error!("template error: {e:#}");
-                    error_page(&state, StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong", "Please try again.")
+                    error_page(
+                        &state,
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Something went wrong",
+                        "Please try again.",
+                    )
                 })?;
             Ok(Html(html).into_response())
         }
@@ -843,9 +862,7 @@ async fn projects_list(
                 active_tab => "projects",
             },
         )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "template error", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -872,9 +889,11 @@ async fn project_detail(
 
     let component_versions_fut = async {
         match state.registry_client.as_ref() {
-            Some(registry) => registry
-                .list_component_versions(&session.access_token, &org, &project)
-                .await,
+            Some(registry) => {
+                registry
+                    .list_component_versions(&session.access_token, &org, &project)
+                    .await
+            }
             None => Ok(vec![]),
         }
     };
@@ -915,9 +934,12 @@ async fn project_detail(
         state
             .platform_client
             .get_destination_states(&session.access_token, &org, Some(&project)),
-        state
-            .platform_client
-            .get_release_intent_states(&session.access_token, &org, Some(&project), true),
+        state.platform_client.get_release_intent_states(
+            &session.access_token,
+            &org,
+            Some(&project),
+            true
+        ),
         state
             .platform_client
             .list_release_pipelines(&session.access_token, &org, &project),
@@ -975,15 +997,24 @@ async fn project_detail(
     if !project_pipelines.is_empty() {
         pipelines_map.insert(project.clone(), project_pipelines);
     }
-    let data = build_timeline(items, &org, &environments, &dest_states, &release_intents, &pipelines_map);
-
+    let data = build_timeline(
+        items,
+        &org,
+        &environments,
+        &dest_states,
+        &release_intents,
+        &pipelines_map,
+    );
 
     // Project Overview folds in the canonical component's catalog data.
     // When the component exists: shape badge, install copy, README markdown,
     // manifest pretty JSON + structured view. When it doesn't, all of these
     // are None/empty and the template shows the Get-started panel.
     let comp_summary = comp_detail.as_ref().map(|d| d.summary.clone());
-    let comp_versions = comp_detail.as_ref().map(|d| d.versions.clone()).unwrap_or_default();
+    let comp_versions = comp_detail
+        .as_ref()
+        .map(|d| d.versions.clone())
+        .unwrap_or_default();
     // Prefer the project-level README over a component's `component_files`
     // README (which may be tied to a single version). Falls back to the
     // component README when the project doesn't carry one — same policy
@@ -1063,13 +1094,10 @@ async fn project_detail(
                 project_has_timeline => !data.timeline.is_empty(),
             },
         )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "template error", &e))?;
 
     Ok(Html(html).into_response())
 }
-
 
 // ─── Project releases (deployment timeline + CD plumbing) ────────────
 //
@@ -1096,14 +1124,7 @@ async fn project_releases(
         ));
     }
 
-    let (
-        artifacts,
-        projects,
-        environments,
-        dest_states,
-        release_intents,
-        project_pipelines,
-    ) = tokio::join!(
+    let (artifacts, projects, environments, dest_states, release_intents, project_pipelines) = tokio::join!(
         state
             .platform_client
             .list_artifacts(&session.access_token, &org, &project),
@@ -1116,9 +1137,12 @@ async fn project_releases(
         state
             .platform_client
             .get_destination_states(&session.access_token, &org, Some(&project)),
-        state
-            .platform_client
-            .get_release_intent_states(&session.access_token, &org, Some(&project), true),
+        state.platform_client.get_release_intent_states(
+            &session.access_token,
+            &org,
+            Some(&project),
+            true
+        ),
         state
             .platform_client
             .list_release_pipelines(&session.access_token, &org, &project),
@@ -1158,7 +1182,14 @@ async fn project_releases(
     if !project_pipelines.is_empty() {
         pipelines_map.insert(project.clone(), project_pipelines);
     }
-    let data = build_timeline(items, &org, &environments, &dest_states, &release_intents, &pipelines_map);
+    let data = build_timeline(
+        items,
+        &org,
+        &environments,
+        &dest_states,
+        &release_intents,
+        &pipelines_map,
+    );
 
     let html = state
         .templates
@@ -1191,8 +1222,7 @@ async fn project_releases(
 async fn deployments_to_releases_redirect(
     Path((org, project)): Path<(String, String)>,
 ) -> Response {
-    Redirect::to(&format!("/orgs/{org}/projects/{project}/releases"))
-        .into_response()
+    Redirect::to(&format!("/orgs/{org}/projects/{project}/releases")).into_response()
 }
 
 // ─── Artifact detail ─────────────────────────────────────────────────
@@ -1224,9 +1254,12 @@ async fn artifact_detail(
         state
             .platform_client
             .get_destination_states(&session.access_token, &org, Some(&project)),
-        state
-            .platform_client
-            .get_release_intent_states(&session.access_token, &org, Some(&project), true),
+        state.platform_client.get_release_intent_states(
+            &session.access_token,
+            &org,
+            Some(&project),
+            true
+        ),
         state
             .platform_client
             .list_release_pipelines(&session.access_token, &org, &project),
@@ -1243,9 +1276,7 @@ async fn artifact_detail(
             "Not found",
             "This release could not be found.",
         ),
-        other => {
-            internal_error(&state, "failed to fetch artifact", &other)
-        }
+        other => internal_error(&state, "failed to fetch artifact", &other),
     })?;
 
     // Fetch artifact spec now that we have the artifact_id.
@@ -1287,7 +1318,9 @@ async fn artifact_detail(
         let sorted = topo_sort_run_stages(&ri.stages);
         for rs in sorted {
             let base_status = deploy_stage_display_status(rs, &matching_states);
-            let display_status = if rs.stage_type == "plan" && rs.approval_status.as_deref() == Some("AWAITING_APPROVAL") {
+            let display_status = if rs.stage_type == "plan"
+                && rs.approval_status.as_deref() == Some("AWAITING_APPROVAL")
+            {
                 "AWAITING_APPROVAL"
             } else {
                 base_status
@@ -1361,7 +1394,11 @@ async fn artifact_detail(
         }
     }
 
-    raw_evals.sort_by(|a, b| a.policy_type.cmp(&b.policy_type).then(a.policy_name.cmp(&b.policy_name)));
+    raw_evals.sort_by(|a, b| {
+        a.policy_type
+            .cmp(&b.policy_type)
+            .then(a.policy_name.cmp(&b.policy_name))
+    });
 
     let policy_evaluations: Vec<minijinja::Value> = raw_evals
         .iter()
@@ -1650,14 +1687,16 @@ fn dedupe_destinations<'a>(
             }
         }
     }
-    order.into_iter().filter_map(|k| by_name.get(k).copied()).collect()
+    order
+        .into_iter()
+        .filter_map(|k| by_name.get(k).copied())
+        .collect()
 }
 
 fn build_env_groups(
     matching_states: &[&forage_core::platform::DestinationState],
 ) -> Vec<minijinja::Value> {
-    let mut env_best: std::collections::HashMap<&str, &str> =
-        std::collections::HashMap::new();
+    let mut env_best: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
     let mut unique_envs = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for ds in matching_states {
@@ -1683,7 +1722,12 @@ fn build_env_groups(
         }
     }
     let status_order = [
-        "RUNNING", "QUEUED", "FAILED", "TIMED_OUT", "CANCELLED", "SUCCEEDED",
+        "RUNNING",
+        "QUEUED",
+        "FAILED",
+        "TIMED_OUT",
+        "CANCELLED",
+        "SUCCEEDED",
     ];
     let mut env_groups = Vec::new();
     for &gs in &status_order {
@@ -1713,10 +1757,13 @@ async fn usage(
     let orgs = &session.user.orgs;
     let _ = require_org_membership(&state, orgs, &org)?;
 
-    let projects = warn_default("list_projects", state
-        .platform_client
-        .list_projects(&session.access_token, &org)
-        .await);
+    let projects = warn_default(
+        "list_projects",
+        state
+            .platform_client
+            .list_projects(&session.access_token, &org)
+            .await,
+    );
 
     let html = state
         .templates
@@ -1734,9 +1781,7 @@ async fn usage(
                 active_tab => "settings",
             },
         )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "template error", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -1783,14 +1828,9 @@ async fn deploy_release(
             use_pipeline,
         )
         .await
-        .map_err(|e| {
-            internal_error(&state, "deploy failed", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "deploy failed", &e))?;
 
-    Ok(Redirect::to(&format!(
-        "/orgs/{org}/projects/{project}/releases"
-    ))
-    .into_response())
+    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/releases")).into_response())
 }
 
 // ─── User profile ──────────────────────────────────────────────────
@@ -1805,15 +1845,13 @@ async fn user_profile(
         .get_user_by_username(&session.access_token, &username)
         .await
         .map_err(|e| {
-{
-                tracing::error!("get_user_by_username({username}): {e:#}");
-                error_page(
-                    &state,
-                    StatusCode::NOT_FOUND,
-                    "User not found",
-                    &format!("No user named '{username}' was found."),
-                )
-            }
+            tracing::error!("get_user_by_username({username}): {e:#}");
+            error_page(
+                &state,
+                StatusCode::NOT_FOUND,
+                "User not found",
+                &format!("No user named '{username}' was found."),
+            )
         })?;
 
     let orgs = &session.user.orgs;
@@ -1844,9 +1882,7 @@ async fn user_profile(
                 active_tab => "",
             },
         )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "template error", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -1968,9 +2004,8 @@ async fn build_user_profile_data(
         .collect();
 
     // Build contributed projects list sorted by release count descending.
-    let mut contributed_projects: Vec<((String, String), u32)> = project_release_counts
-        .into_iter()
-        .collect();
+    let mut contributed_projects: Vec<((String, String), u32)> =
+        project_release_counts.into_iter().collect();
     contributed_projects.sort_by(|a, b| b.1.cmp(&a.1));
     let contributed_projects: Vec<minijinja::Value> = contributed_projects
         .into_iter()
@@ -2076,9 +2111,8 @@ struct TimelineData {
 const RELEASE_TIMELINE_CONTEXT_LIMIT: usize = 20;
 
 /// Pipeline info indexed by project name, for overlaying onto releases.
-type PipelinesByProject = std::collections::HashMap<String, Vec<forage_core::platform::ReleasePipeline>>;
-
-
+type PipelinesByProject =
+    std::collections::HashMap<String, Vec<forage_core::platform::ReleasePipeline>>;
 
 /// Topologically sort pipeline run stage states by their `depends_on` edges.
 fn topo_sort_run_stages(
@@ -2131,8 +2165,10 @@ fn topo_sort_run_stages(
     }
 
     if result.len() < stages.len() {
-        let in_result: std::collections::HashSet<usize> =
-            result.iter().map(|s| index_by_id[s.stage_id.as_str()]).collect();
+        let in_result: std::collections::HashSet<usize> = result
+            .iter()
+            .map(|s| index_by_id[s.stage_id.as_str()])
+            .collect();
         for (i, stage) in stages.iter().enumerate() {
             if !in_result.contains(&i) {
                 result.push(stage);
@@ -2247,7 +2283,12 @@ fn build_timeline(
         }
         // Build groups sorted by priority (deploying first), then collect envs per group.
         let status_order = [
-            "RUNNING", "QUEUED", "FAILED", "TIMED_OUT", "CANCELLED", "SUCCEEDED",
+            "RUNNING",
+            "QUEUED",
+            "FAILED",
+            "TIMED_OUT",
+            "CANCELLED",
+            "SUCCEEDED",
         ];
         let mut env_groups: Vec<minijinja::Value> = Vec::new();
         for &group_status in &status_order {
@@ -2293,9 +2334,7 @@ fn build_timeline(
                                 .filter(|ds| ds.environment == *env)
                                 .filter_map(|ds| ds.status.as_deref())
                                 .collect();
-                            if !env_dests.is_empty()
-                                && env_dests.iter().all(|s| *s == "QUEUED")
-                            {
+                            if !env_dests.is_empty() && env_dests.iter().all(|s| *s == "QUEUED") {
                                 "QUEUED"
                             } else {
                                 &rs.status
@@ -2491,8 +2530,13 @@ pub struct ApiTimelineResponse {
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ApiTimelineItem {
-    Release { release: Box<ApiRelease> },
-    Hidden { count: usize, releases: Vec<ApiRelease> },
+    Release {
+        release: Box<ApiRelease>,
+    },
+    Hidden {
+        count: usize,
+        releases: Vec<ApiRelease>,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -2721,7 +2765,12 @@ fn build_timeline_json(
         }
 
         let status_order = [
-            "RUNNING", "QUEUED", "FAILED", "TIMED_OUT", "CANCELLED", "SUCCEEDED",
+            "RUNNING",
+            "QUEUED",
+            "FAILED",
+            "TIMED_OUT",
+            "CANCELLED",
+            "SUCCEEDED",
         ];
         let env_groups: Vec<ApiEnvGroup> = status_order
             .iter()
@@ -2763,9 +2812,7 @@ fn build_timeline_json(
                                 .filter(|ds| ds.environment == *env)
                                 .filter_map(|ds| ds.status.as_deref())
                                 .collect();
-                            if !env_dests.is_empty()
-                                && env_dests.iter().all(|s| *s == "QUEUED")
-                            {
+                            if !env_dests.is_empty() && env_dests.iter().all(|s| *s == "QUEUED") {
                                 "QUEUED".to_string()
                             } else if rs.status == "ASSIGNED" {
                                 "RUNNING".to_string()
@@ -2784,7 +2831,11 @@ fn build_timeline_json(
                     };
                     let blocked_by = if display_status == "PENDING"
                         && rs.stage_type == "deploy"
-                        && rs.environment.as_deref().map(|e| approval_envs.iter().any(|a| a == e)).unwrap_or(false)
+                        && rs
+                            .environment
+                            .as_deref()
+                            .map(|e| approval_envs.iter().any(|a| a == e))
+                            .unwrap_or(false)
                     {
                         Some("Awaiting approval".into())
                     } else {
@@ -2864,7 +2915,10 @@ fn build_timeline_json(
                 commit_sha: artifact.git_ref.as_ref().map(|r| r.commit_sha.clone()),
                 branch: artifact.git_ref.as_ref().and_then(|r| r.branch.clone()),
                 version: artifact.git_ref.as_ref().and_then(|r| r.version.clone()),
-                commit_message: artifact.git_ref.as_ref().and_then(|r| r.commit_message.clone()),
+                commit_message: artifact
+                    .git_ref
+                    .as_ref()
+                    .and_then(|r| r.commit_message.clone()),
                 repo_url: artifact.git_ref.as_ref().and_then(|r| r.repo_url.clone()),
                 source_user: artifact.source.as_ref().and_then(|s| s.user.clone()),
                 source_type: artifact.source.as_ref().and_then(|s| s.source_type.clone()),
@@ -2927,8 +2981,7 @@ fn build_timeline_json(
 
     for raw in raw_releases {
         let needs_action = raw.release.pipeline_stages.iter().any(|s| {
-            s.blocked_by.is_some()
-                || (s.stage_type == "plan" && s.status == "AWAITING_APPROVAL")
+            s.blocked_by.is_some() || (s.stage_type == "plan" && s.status == "AWAITING_APPROVAL")
         });
         if raw.has_dests || needs_action {
             if !hidden_buf.is_empty() {
@@ -2991,9 +3044,12 @@ async fn timeline_api(
         state
             .platform_client
             .get_destination_states(&session.access_token, &org, Some(&project)),
-        state
-            .platform_client
-            .get_release_intent_states(&session.access_token, &org, Some(&project), true),
+        state.platform_client.get_release_intent_states(
+            &session.access_token,
+            &org,
+            Some(&project),
+            true
+        ),
         state
             .platform_client
             .list_release_pipelines(&session.access_token, &org, &project),
@@ -3033,12 +3089,21 @@ async fn timeline_api(
         .iter()
         .filter(|p| p.enabled && p.policy_type == "approval")
         .filter_map(|p| match &p.config {
-            PolicyConfig::Approval { target_environment, .. } => Some(target_environment.clone()),
+            PolicyConfig::Approval {
+                target_environment, ..
+            } => Some(target_environment.clone()),
             _ => None,
         })
         .collect();
 
-    let data = build_timeline_json(items, &environments, &dest_states, &release_intents, &pipelines_map, &approval_envs);
+    let data = build_timeline_json(
+        items,
+        &environments,
+        &dest_states,
+        &release_intents,
+        &pipelines_map,
+        &approval_envs,
+    );
 
     Ok(Json(data).into_response())
 }
@@ -3117,7 +3182,10 @@ async fn fetch_org_artifacts(
     for project in projects {
         let artifacts = warn_default(
             &format!("list_artifacts({project})"),
-            state.platform_client.list_artifacts(access_token, org, project).await,
+            state
+                .platform_client
+                .list_artifacts(access_token, org, project)
+                .await,
         );
         for artifact in artifacts {
             items.push(ArtifactWithProject {
@@ -3174,7 +3242,14 @@ async fn releases_page(
     }
 
     let items = fetch_org_artifacts(&state, &session.access_token, &org, &projects).await;
-    let data = build_timeline(items, &org, &environments, &dest_states, &release_intents, &pipelines_by_project);
+    let data = build_timeline(
+        items,
+        &org,
+        &environments,
+        &dest_states,
+        &release_intents,
+        &pipelines_by_project,
+    );
 
     let mut sorted_envs = environments.clone();
     sorted_envs.sort_by_key(|e| e.sort_order);
@@ -3201,9 +3276,7 @@ async fn releases_page(
                 active_tab => "releases",
             },
         )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "template error", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -3233,12 +3306,15 @@ async fn destinations_page(
             .platform_client
             .list_destination_types(&session.access_token),
     );
-    let mut environments = environments.map_err(|e| internal_error(&state, "list_environments", &e))?;
+    let mut environments =
+        environments.map_err(|e| internal_error(&state, "list_environments", &e))?;
     environments.sort_by_key(|e| e.sort_order);
-    let org_destinations = org_destinations.map_err(|e| internal_error(&state, "list_destinations", &e))?;
+    let org_destinations =
+        org_destinations.map_err(|e| internal_error(&state, "list_destinations", &e))?;
     let projects = warn_default("list_projects", projects);
     let dest_types = warn_default("list_destination_types", dest_types);
-    let destination_types_json = serde_json::to_string(&dest_types).unwrap_or_else(|_| "[]".to_string());
+    let destination_types_json =
+        serde_json::to_string(&dest_types).unwrap_or_else(|_| "[]".to_string());
 
     let destination_types: Vec<minijinja::Value> = dest_types
         .iter()
@@ -3343,9 +3419,7 @@ async fn destinations_page(
                 destination_types_json => destination_types_json,
             },
         )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "template error", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -3370,7 +3444,12 @@ async fn create_environment_submit(
     let current_org = require_org_membership(&state, orgs, &org)?;
     require_admin(&state, current_org)?;
     if !auth::validate_csrf(&session, &form._csrf) {
-        return Err(error_page(&state, StatusCode::FORBIDDEN, "Invalid request", "CSRF validation failed. Please try again."));
+        return Err(error_page(
+            &state,
+            StatusCode::FORBIDDEN,
+            "Invalid request",
+            "CSRF validation failed. Please try again.",
+        ));
     }
 
     if !validate_slug(&form.name) {
@@ -3398,9 +3477,7 @@ async fn create_environment_submit(
             form.sort_order,
         )
         .await
-        .map_err(|e| {
-            internal_error(&state, "create environment error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "create environment error", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/destinations")).into_response())
 }
@@ -3421,16 +3498,19 @@ async fn reorder_environment_submit(
     let current_org = require_org_membership(&state, orgs, &org)?;
     require_admin(&state, current_org)?;
     if !auth::validate_csrf(&session, &form._csrf) {
-        return Err(error_page(&state, StatusCode::FORBIDDEN, "Invalid request", "CSRF validation failed. Please try again."));
+        return Err(error_page(
+            &state,
+            StatusCode::FORBIDDEN,
+            "Invalid request",
+            "CSRF validation failed. Please try again.",
+        ));
     }
 
     state
         .platform_client
         .update_environment(&session.access_token, &id, None, Some(form.sort_order))
         .await
-        .map_err(|e| {
-            internal_error(&state, "update environment error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "update environment error", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/destinations")).into_response())
 }
@@ -3570,9 +3650,7 @@ async fn create_destination_submit(
             },
         )
         .await
-        .map_err(|e| {
-            internal_error(&state, "create destination error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "create destination error", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/destinations")).into_response())
 }
@@ -3649,11 +3727,13 @@ async fn destination_detail(
     let mut meta_entries: Vec<minijinja::Value> = dest
         .metadata
         .iter()
-        .map(|(k, v)| context! {
-            key => k,
-            value => v,
-            sensitive => false,
-            type_sensitive => false,
+        .map(|(k, v)| {
+            context! {
+                key => k,
+                value => v,
+                sensitive => false,
+                type_sensitive => false,
+            }
         })
         .chain(dest.sensitive_keys.iter().map(|k| {
             context! {
@@ -3697,9 +3777,7 @@ async fn destination_detail(
                         .unwrap_or_else(|_| "[]".to_string()),
             },
         )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "template error", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -3732,7 +3810,10 @@ async fn reveal_destination_metadata(
     Ok((
         StatusCode::OK,
         [
-            (axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+            (
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; charset=utf-8",
+            ),
             // Keep it out of any shared cache or history.
             (axum::http::header::CACHE_CONTROL, "no-store, max-age=0"),
         ],
@@ -3796,12 +3877,7 @@ async fn update_destination_submit(
         metadata.remove(&key);
         let value = state
             .platform_client
-            .reveal_destination_metadata(
-                &session.access_token,
-                &current_org.name,
-                dest_name,
-                &key,
-            )
+            .reveal_destination_metadata(&session.access_token, &current_org.name, dest_name, &key)
             .await
             .map_err(|e| internal_error(&state, "preserve sensitive metadata", &e))?;
         metadata.insert(key, value);
@@ -3822,17 +3898,13 @@ async fn update_destination_submit(
             sensitive_keys.as_deref(),
         )
         .await
-        .map_err(|e| {
-            internal_error(&state, "update destination error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "update destination error", &e))?;
 
     let encoded_name = urlencoding::encode(dest_name);
-    Ok(
-        Redirect::to(&format!(
-            "/orgs/{org}/destinations/detail?name={encoded_name}"
-        ))
-        .into_response(),
-    )
+    Ok(Redirect::to(&format!(
+        "/orgs/{org}/destinations/detail?name={encoded_name}"
+    ))
+    .into_response())
 }
 
 // ─── Members ────────────────────────────────────────────────────────
@@ -3875,9 +3947,7 @@ async fn members_page(
                 }).collect::<Vec<_>>(),
             },
         )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "template error", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -3937,7 +4007,9 @@ async fn add_member_submit(
                 &state,
                 StatusCode::NOT_FOUND,
                 "User not found",
-                &format!("No user matches \"{identifier}\". Check the spelling or try the email address."),
+                &format!(
+                    "No user matches \"{identifier}\". Check the spelling or try the email address."
+                ),
             ));
         }
         Err(e) => return Err(internal_error(&state, "failed to look up user", &e)),
@@ -3952,9 +4024,7 @@ async fn add_member_submit(
             &form.role,
         )
         .await
-        .map_err(|e| {
-            internal_error(&state, "failed to add member", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "failed to add member", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/settings/members")).into_response())
 }
@@ -3993,9 +4063,7 @@ async fn update_member_role_submit(
             &form.role,
         )
         .await
-        .map_err(|e| {
-            internal_error(&state, "failed to update member role", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "failed to update member role", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/settings/members")).into_response())
 }
@@ -4032,14 +4100,338 @@ async fn remove_member_submit(
             &user_id,
         )
         .await
-        .map_err(|e| {
-            internal_error(&state, "failed to remove member", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "failed to remove member", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/settings/members")).into_response())
 }
 
 // ─── Auto-Release Policies ──────────────────────────────────────────
+
+// ─── Organisation rule sets ──────────────────────────────────────────
+
+async fn org_rules_page(
+    State(state): State<AppState>,
+    session: Session,
+    Path(org): Path<String>,
+) -> Result<Response, Response> {
+    let orgs = &session.user.orgs;
+    let current_org = require_org_membership(&state, orgs, &org)?;
+    let is_admin = current_org.role == "owner" || current_org.role == "admin";
+
+    let (rule_sets, projects) = tokio::join!(
+        state
+            .platform_client
+            .list_org_rule_sets(&session.access_token, &org),
+        state
+            .platform_client
+            .list_projects(&session.access_token, &org),
+    );
+    let rule_sets = rule_sets.map_err(|e| internal_error(&state, "list_org_rule_sets", &e))?;
+    let projects = warn_default("list_projects", projects);
+
+    let rule_items: Vec<minijinja::Value> = rule_sets
+        .iter()
+        .map(|rule_set| {
+            let selector = &rule_set.selector;
+            let metadata_pairs: Vec<minijinja::Value> = selector
+                .metadata_match
+                .iter()
+                .map(|(key, value)| context! { key => key, value => value })
+                .collect();
+            context! {
+                name => rule_set.name,
+                enabled => rule_set.enabled,
+                include_projects => &selector.include_projects,
+                exclude_projects => &selector.exclude_projects,
+                name_regex => &selector.name_regex,
+                metadata_match => metadata_pairs,
+                tags => &selector.tags,
+                policy_count => rule_set.policies.len(),
+                trigger_count => rule_set.triggers.len(),
+                pipeline_count => rule_set.release_pipelines.len(),
+                policies_json => serde_json::to_string_pretty(&rule_set.policies).unwrap_or_else(|_| "[]".into()),
+                triggers_json => serde_json::to_string_pretty(&rule_set.triggers).unwrap_or_else(|_| "[]".into()),
+                pipelines_json => serde_json::to_string_pretty(&rule_set.release_pipelines).unwrap_or_else(|_| "[]".into()),
+                created_at => rule_set.created_at,
+                updated_at => rule_set.updated_at,
+            }
+        })
+        .collect();
+
+    let html = state
+        .templates
+        .render(
+            "pages/org_rules.html.jinja",
+            context! {
+                page_title => format!("Rules · {}", org),
+                user => context! {
+                    username => session.user.username,
+                },
+                csrf_token => session.csrf_token,
+                orgs => orgs_context(orgs),
+                current_org => org,
+                projects => projects,
+                rules => rule_items,
+                is_admin => is_admin,
+                policy_example => org_policy_example(),
+                trigger_example => org_trigger_example(),
+                pipeline_example => org_pipeline_example(),
+            },
+        )
+        .map_err(|e| internal_error(&state, "template error", &e))?;
+
+    Ok(Html(html).into_response())
+}
+
+#[derive(Deserialize)]
+struct CreateOrgRuleForm {
+    csrf_token: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    enabled: Option<String>,
+    #[serde(default)]
+    include_projects: String,
+    #[serde(default)]
+    exclude_projects: String,
+    #[serde(default)]
+    name_regex: String,
+    #[serde(default)]
+    metadata_match: String,
+    #[serde(default)]
+    tags: String,
+    #[serde(default)]
+    policies_json: String,
+    #[serde(default)]
+    triggers_json: String,
+    #[serde(default)]
+    pipelines_json: String,
+}
+
+async fn create_org_rule_submit(
+    State(state): State<AppState>,
+    session: Session,
+    Path(org): Path<String>,
+    Form(form): Form<CreateOrgRuleForm>,
+) -> Result<Response, Response> {
+    let orgs = &session.user.orgs;
+    let current_org = require_org_membership(&state, orgs, &org)?;
+    require_admin(&state, current_org)?;
+
+    if form.csrf_token != session.csrf_token {
+        return Err(error_page(
+            &state,
+            StatusCode::FORBIDDEN,
+            "Invalid request",
+            "CSRF validation failed. Please try again.",
+        ));
+    }
+
+    let name = form.name.trim();
+    if name.is_empty() {
+        return Err(error_page(
+            &state,
+            StatusCode::BAD_REQUEST,
+            "Invalid request",
+            "Rule set name is required.",
+        ));
+    }
+
+    let selector = ProjectSelector {
+        include_projects: split_csv_lines(&form.include_projects),
+        exclude_projects: split_csv_lines(&form.exclude_projects),
+        name_regex: non_empty(&form.name_regex),
+        metadata_match: parse_metadata_match(&form.metadata_match).map_err(|msg| {
+            error_page(
+                &state,
+                StatusCode::BAD_REQUEST,
+                "Invalid metadata selector",
+                &msg,
+            )
+        })?,
+        tags: split_csv_lines(&form.tags),
+    };
+
+    let policies =
+        parse_json_list::<OrgPolicyRule>(&form.policies_json, "policies_json").map_err(|msg| {
+            error_page(
+                &state,
+                StatusCode::BAD_REQUEST,
+                "Invalid policies JSON",
+                &msg,
+            )
+        })?;
+    let triggers = parse_json_list::<OrgTriggerRule>(&form.triggers_json, "triggers_json")
+        .map_err(|msg| {
+            error_page(
+                &state,
+                StatusCode::BAD_REQUEST,
+                "Invalid triggers JSON",
+                &msg,
+            )
+        })?;
+    let release_pipelines =
+        parse_json_list::<OrgReleasePipelineRule>(&form.pipelines_json, "pipelines_json").map_err(
+            |msg| {
+                error_page(
+                    &state,
+                    StatusCode::BAD_REQUEST,
+                    "Invalid pipelines JSON",
+                    &msg,
+                )
+            },
+        )?;
+
+    let input = CreateOrgRuleSetInput {
+        name: name.to_string(),
+        enabled: form.enabled.is_some(),
+        selector,
+        policies,
+        triggers,
+        release_pipelines,
+    };
+
+    state
+        .platform_client
+        .create_org_rule_set(&session.access_token, &org, &input)
+        .await
+        .map_err(|e| internal_error(&state, "failed to create org rule set", &e))?;
+
+    Ok(Redirect::to(&format!("/orgs/{org}/rules")).into_response())
+}
+
+#[derive(Deserialize)]
+struct DeleteOrgRuleForm {
+    csrf_token: String,
+}
+
+async fn delete_org_rule_submit(
+    State(state): State<AppState>,
+    session: Session,
+    Path((org, name)): Path<(String, String)>,
+    Form(form): Form<DeleteOrgRuleForm>,
+) -> Result<Response, Response> {
+    let orgs = &session.user.orgs;
+    let current_org = require_org_membership(&state, orgs, &org)?;
+    require_admin(&state, current_org)?;
+
+    if form.csrf_token != session.csrf_token {
+        return Err(error_page(
+            &state,
+            StatusCode::FORBIDDEN,
+            "Invalid request",
+            "CSRF validation failed. Please try again.",
+        ));
+    }
+
+    state
+        .platform_client
+        .delete_org_rule_set(&session.access_token, &org, &name)
+        .await
+        .map_err(|e| internal_error(&state, "failed to delete org rule set", &e))?;
+
+    Ok(Redirect::to(&format!("/orgs/{org}/rules")).into_response())
+}
+
+fn split_csv_lines(value: &str) -> Vec<String> {
+    value
+        .split(|c| c == ',' || c == '\n' || c == '\r')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn parse_metadata_match(value: &str) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut pairs = std::collections::BTreeMap::new();
+    for raw in value.lines() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let (key, expected) = line
+            .split_once('=')
+            .ok_or_else(|| format!("metadata selector `{line}` must use key=value"))?;
+        let key = key.trim();
+        if key.is_empty() {
+            return Err(format!("metadata selector `{line}` has an empty key"));
+        }
+        pairs.insert(key.to_string(), expected.trim().to_string());
+    }
+    Ok(pairs)
+}
+
+fn parse_json_list<T>(value: &str, field: &str) -> Result<Vec<T>, String>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let value = value.trim();
+    if value.is_empty() {
+        Ok(Vec::new())
+    } else {
+        serde_json::from_str(value).map_err(|e| format!("{field}: {e}"))
+    }
+}
+
+fn org_policy_example() -> String {
+    serde_json::to_string_pretty(&vec![OrgPolicyRule {
+        name: "prod-main-only".into(),
+        enabled: true,
+        config: PolicyConfig::BranchRestriction {
+            target_environment: "prod".into(),
+            branch_pattern: "^main$".into(),
+        },
+    }])
+    .unwrap_or_else(|_| "[]".into())
+}
+
+fn org_trigger_example() -> String {
+    serde_json::to_string_pretty(&vec![OrgTriggerRule {
+        name: "main-woodpecker-to-dev".into(),
+        enabled: true,
+        branch_pattern: Some("^main$".into()),
+        title_pattern: None,
+        author_pattern: None,
+        commit_message_pattern: None,
+        source_type_pattern: Some("woodpecker".into()),
+        target_environments: vec!["dev".into()],
+        target_destinations: Vec::new(),
+        force_release: true,
+        use_pipeline: false,
+    }])
+    .unwrap_or_else(|_| "[]".into())
+}
+
+fn org_pipeline_example() -> String {
+    serde_json::to_string_pretty(&vec![OrgReleasePipelineRule {
+        name: "dev-to-prod".into(),
+        enabled: true,
+        stages: vec![
+            PipelineStage {
+                id: "deploy-dev".into(),
+                depends_on: Vec::new(),
+                config: PipelineStageConfig::Deploy {
+                    environment: "dev".into(),
+                },
+            },
+            PipelineStage {
+                id: "prod-soak".into(),
+                depends_on: vec!["deploy-dev".into()],
+                config: PipelineStageConfig::Wait {
+                    duration_seconds: 1800,
+                },
+            },
+            PipelineStage {
+                id: "deploy-prod".into(),
+                depends_on: vec!["prod-soak".into()],
+                config: PipelineStageConfig::Deploy {
+                    environment: "prod".into(),
+                },
+            },
+        ],
+    }])
+    .unwrap_or_else(|_| "[]".into())
+}
 
 // ─── Triggers (auto-release triggers) ───────────────────────────────
 
@@ -4121,7 +4513,10 @@ async fn triggers_page(
 
     let projects = warn_default(
         "list_projects",
-        state.platform_client.list_projects(&session.access_token, &org).await,
+        state
+            .platform_client
+            .list_projects(&session.access_token, &org)
+            .await,
     );
 
     let html = state
@@ -4145,9 +4540,7 @@ async fn triggers_page(
                 is_admin => is_admin,
             },
         )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "template error", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -4264,9 +4657,7 @@ async fn create_trigger_submit(
         .platform_client
         .create_trigger(&session.access_token, &org, &project, &input)
         .await
-        .map_err(|e| {
-            internal_error(&state, "failed to create trigger", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "failed to create trigger", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/triggers")).into_response())
 }
@@ -4314,9 +4705,7 @@ async fn toggle_trigger(
         .platform_client
         .update_trigger(&session.access_token, &org, &project, &name, &input)
         .await
-        .map_err(|e| {
-            internal_error(&state, "failed to toggle trigger", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "failed to toggle trigger", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/triggers")).into_response())
 }
@@ -4349,9 +4738,7 @@ async fn delete_trigger(
         .platform_client
         .delete_trigger(&session.access_token, &org, &project, &name)
         .await
-        .map_err(|e| {
-            internal_error(&state, "failed to delete trigger", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "failed to delete trigger", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/triggers")).into_response())
 }
@@ -4389,17 +4776,14 @@ async fn edit_trigger_page(
     let environments = warn_default("list_environments", environments);
     let pipelines = warn_default("list_release_pipelines", pipelines);
 
-    let trigger = triggers
-        .iter()
-        .find(|t| t.name == name)
-        .ok_or_else(|| {
-            error_page(
-                &state,
-                StatusCode::NOT_FOUND,
-                "Not found",
-                "Trigger not found.",
-            )
-        })?;
+    let trigger = triggers.iter().find(|t| t.name == name).ok_or_else(|| {
+        error_page(
+            &state,
+            StatusCode::NOT_FOUND,
+            "Not found",
+            "Trigger not found.",
+        )
+    })?;
 
     let trigger_ctx = context! {
         name => trigger.name,
@@ -4638,7 +5022,10 @@ async fn policies_page(
 
     let projects = warn_default(
         "list_projects",
-        state.platform_client.list_projects(&session.access_token, &org).await,
+        state
+            .platform_client
+            .list_projects(&session.access_token, &org)
+            .await,
     );
 
     let html = state
@@ -4660,9 +5047,7 @@ async fn policies_page(
                 is_admin => is_admin,
             },
         )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "template error", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -4821,9 +5206,7 @@ async fn create_policy_submit(
         .platform_client
         .create_policy(&session.access_token, &org, &project, &input)
         .await
-        .map_err(|e| {
-            internal_error(&state, "failed to create policy", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "failed to create policy", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/policies")).into_response())
 }
@@ -4863,9 +5246,7 @@ async fn toggle_policy(
         .platform_client
         .update_policy(&session.access_token, &org, &project, &name, &input)
         .await
-        .map_err(|e| {
-            internal_error(&state, "failed to toggle policy", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "failed to toggle policy", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/policies")).into_response())
 }
@@ -4898,9 +5279,7 @@ async fn delete_policy(
         .platform_client
         .delete_policy(&session.access_token, &org, &project, &name)
         .await
-        .map_err(|e| {
-            internal_error(&state, "failed to delete policy", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "failed to delete policy", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/policies")).into_response())
 }
@@ -4934,17 +5313,14 @@ async fn edit_policy_page(
     let policies = policies.map_err(|e| internal_error(&state, "list_policies", &e))?;
     let environments = warn_default("list_environments", environments);
 
-    let policy = policies
-        .iter()
-        .find(|p| p.name == name)
-        .ok_or_else(|| {
-            error_page(
-                &state,
-                StatusCode::NOT_FOUND,
-                "Not found",
-                "Policy not found.",
-            )
-        })?;
+    let policy = policies.iter().find(|p| p.name == name).ok_or_else(|| {
+        error_page(
+            &state,
+            StatusCode::NOT_FOUND,
+            "Not found",
+            "Policy not found.",
+        )
+    })?;
 
     let (policy_type, config_ctx) = match &policy.config {
         PolicyConfig::SoakTime {
@@ -5184,9 +5560,7 @@ async fn pipelines_page(
                 is_admin => is_admin,
             },
         )
-        .map_err(|e| {
-            internal_error(&state, "template error", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "template error", &e))?;
 
     Ok(Html(html).into_response())
 }
@@ -5250,9 +5624,7 @@ async fn create_pipeline_submit(
         .platform_client
         .create_release_pipeline(&session.access_token, &org, &project, &input)
         .await
-        .map_err(|e| {
-            internal_error(&state, "failed to create pipeline", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "failed to create pipeline", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/pipelines")).into_response())
 }
@@ -5293,9 +5665,7 @@ async fn toggle_pipeline(
         .platform_client
         .update_release_pipeline(&session.access_token, &org, &project, &name, &input)
         .await
-        .map_err(|e| {
-            internal_error(&state, "failed to toggle pipeline", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "failed to toggle pipeline", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/pipelines")).into_response())
 }
@@ -5349,9 +5719,7 @@ async fn update_pipeline_submit(
         .platform_client
         .update_release_pipeline(&session.access_token, &org, &project, &name, &input)
         .await
-        .map_err(|e| {
-            internal_error(&state, "failed to update pipeline", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "failed to update pipeline", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/pipelines")).into_response())
 }
@@ -5385,9 +5753,7 @@ async fn delete_pipeline(
         .platform_client
         .delete_release_pipeline(&session.access_token, &org, &project, &name)
         .await
-        .map_err(|e| {
-            internal_error(&state, "failed to delete pipeline", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "failed to delete pipeline", &e))?;
 
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/pipelines")).into_response())
 }
@@ -5480,10 +5846,7 @@ async fn approve_release_submit(
             ),
         })?;
 
-    Ok(Redirect::to(&format!(
-        "/orgs/{org}/projects/{project}/releases/{slug}"
-    ))
-    .into_response())
+    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/releases/{slug}")).into_response())
 }
 
 async fn reject_release_submit(
@@ -5530,10 +5893,7 @@ async fn reject_release_submit(
             ),
         })?;
 
-    Ok(Redirect::to(&format!(
-        "/orgs/{org}/projects/{project}/releases/{slug}"
-    ))
-    .into_response())
+    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/releases/{slug}")).into_response())
 }
 
 // ── Plan stage approve / reject / output ─────────────────────────────
@@ -5569,11 +5929,7 @@ async fn approve_plan_stage_submit(
 
     state
         .platform_client
-        .approve_plan_stage(
-            &session.access_token,
-            &form.release_intent_id,
-            &stage_id,
-        )
+        .approve_plan_stage(&session.access_token, &form.release_intent_id, &stage_id)
         .await
         .map_err(|e| match e {
             forage_core::platform::PlatformError::NotAuthenticated => {
@@ -5615,7 +5971,11 @@ async fn reject_plan_stage_submit(
 
     let reason = form.reason.as_deref().and_then(|s| {
         let t = s.trim();
-        if t.is_empty() { None } else { Some(t.to_string()) }
+        if t.is_empty() {
+            None
+        } else {
+            Some(t.to_string())
+        }
     });
 
     state
@@ -5662,24 +6022,22 @@ async fn get_plan_output_api(
 
     let output = state
         .platform_client
-        .get_plan_output(
-            &session.access_token,
-            &query.release_intent_id,
-            &stage_id,
-        )
+        .get_plan_output(&session.access_token, &query.release_intent_id, &stage_id)
         .await
-        .map_err(|e| {
-            internal_error(&state, "get plan output", &e)
-        })?;
+        .map_err(|e| internal_error(&state, "get plan output", &e))?;
 
-    let outputs: Vec<serde_json::Value> = output.outputs.iter().map(|o| {
-        serde_json::json!({
-            "destination_id": o.destination_id,
-            "destination_name": o.destination_name,
-            "plan_output": o.plan_output,
-            "status": o.status,
+    let outputs: Vec<serde_json::Value> = output
+        .outputs
+        .iter()
+        .map(|o| {
+            serde_json::json!({
+                "destination_id": o.destination_id,
+                "destination_name": o.destination_name,
+                "plan_output": o.plan_output,
+                "status": o.status,
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(Json(serde_json::json!({
         "plan_output": output.plan_output,
@@ -5707,10 +6065,7 @@ async fn compute_page(
             .list_instances(namespace)
             .await
             .unwrap_or_default();
-        let rollouts = scheduler
-            .list_rollouts(namespace)
-            .await
-            .unwrap_or_default();
+        let rollouts = scheduler.list_rollouts(namespace).await.unwrap_or_default();
         (instances, rollouts)
     } else {
         (vec![], vec![])
@@ -5831,7 +6186,11 @@ async fn rollout_detail_page(
         })
         .collect();
 
-    let labels_ctx: Vec<minijinja::Value> = rollout.labels.iter().map(|(k, v)| context! { key => k, value => v }).collect();
+    let labels_ctx: Vec<minijinja::Value> = rollout
+        .labels
+        .iter()
+        .map(|(k, v)| context! { key => k, value => v })
+        .collect();
 
     let rollout_ctx = context! {
         id => rollout.id,
@@ -6071,9 +6430,9 @@ async fn verify_allowed_domain_submit(
         .await;
 
     let flash = match result {
-        Ok(forage_core::platform::VerifyDomainOutcome::Verified) => AccessPageFlash::Info(
-            format!("Verified ownership of {}.", form.domain),
-        ),
+        Ok(forage_core::platform::VerifyDomainOutcome::Verified) => {
+            AccessPageFlash::Info(format!("Verified ownership of {}.", form.domain))
+        }
         Ok(forage_core::platform::VerifyDomainOutcome::AlreadyVerified) => {
             AccessPageFlash::Info(format!("{} was already verified.", form.domain))
         }
@@ -6123,12 +6482,9 @@ async fn accept_join_offer_submit(
             // The auto-invite server-side check failed (e.g. domain removed
             // since the banner loaded). Bounce them back to the dashboard
             // with a flat error rather than a 500.
-            PlatformError::PermissionDenied(msg) => error_page(
-                &state,
-                StatusCode::FORBIDDEN,
-                "Not eligible",
-                &msg,
-            ),
+            PlatformError::PermissionDenied(msg) => {
+                error_page(&state, StatusCode::FORBIDDEN, "Not eligible", &msg)
+            }
             other => internal_error(&state, "accept_join_offer", &other),
         })?;
 
@@ -6180,13 +6536,22 @@ mod dedupe_tests {
         let b = ds("d2", "prod-k8s", "RUNNING", Some("2026-05-19T11:00:00Z"));
         let refs = vec![&a, &b];
         let result = dedupe_destinations(&refs);
-        assert_eq!(result.len(), 1, "same destination_name must collapse to one row");
+        assert_eq!(
+            result.len(),
+            1,
+            "same destination_name must collapse to one row"
+        );
     }
 
     #[test]
     fn dedupe_preserves_distinct_destinations() {
         let a = ds("d1", "prod-k8s", "SUCCEEDED", Some("2026-05-19T10:00:00Z"));
-        let b = ds("d2", "staging-k8s", "SUCCEEDED", Some("2026-05-19T10:00:00Z"));
+        let b = ds(
+            "d2",
+            "staging-k8s",
+            "SUCCEEDED",
+            Some("2026-05-19T10:00:00Z"),
+        );
         let refs = vec![&a, &b];
         let result = dedupe_destinations(&refs);
         assert_eq!(result.len(), 2);
