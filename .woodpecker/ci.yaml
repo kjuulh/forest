@@ -48,6 +48,8 @@ steps:
         # clank-sccache host is on the internal VLAN reachable from
         # both amd64 and arm64 woodpecker runners.
         - SCCACHE_MEMCACHED_ENDPOINT=tcp://10.0.10.13:11211
+        - GIT_SHA=${CI_COMMIT_SHA}
+        - BUILD_TIME=${CI_PIPELINE_CREATED}
       # Single platform — routed to the matching agent by the
       # `platform` label above. No QEMU emulation.
       platforms: linux/${ARCH}

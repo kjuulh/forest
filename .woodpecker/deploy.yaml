@@ -48,10 +48,10 @@ steps:
     environment: *forest_env
     commands:
       - apt-get update && apt-get install -y --no-install-recommends curl ca-certificates dpkg unzip
-      # Pull the forest CLI from the fork's public release. Pin to v0.1.13
-      # for the deno-component detection fix; bump in lockstep with the
-      # binary published by release-build.yaml.
-      - FOREST_VERSION="v0.1.13"
+      # Pull the forest CLI from the fork's public release. Keep this in
+      # lockstep with apps/forest-ci/Dockerfile so deploy and the reusable
+      # plugin image execute the same CLI version.
+      - FOREST_VERSION="v0.1.14"
       - CUE_VERSION="v0.15.4"
       # Lockfile v5 (kjuulh/service/deno.lock) requires deno >=2.4. Pin
       # to match developer-local (2.7.x) so the cache hits identically.
