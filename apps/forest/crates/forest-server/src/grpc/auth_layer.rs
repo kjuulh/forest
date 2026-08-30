@@ -5,6 +5,7 @@ use std::{
 
 use sha2::Digest;
 use tower::{Layer, Service};
+use uuid::Uuid;
 
 use crate::{
     actor::Actor,
@@ -48,7 +49,10 @@ async fn resolve_personal_access_token(
     }))
 }
 
-async fn resolve_app_token(db: &sqlx::PgPool, raw_token: &str) -> anyhow::Result<Option<Actor>> {
+async fn resolve_legacy_app_token(
+    db: &sqlx::PgPool,
+    raw_token: &str,
+) -> anyhow::Result<Option<Actor>> {
     let token_hash = sha2::Sha256::digest(raw_token.as_bytes()).to_vec();
 
     let row = sqlx::query!(
@@ -82,6 +86,40 @@ async fn resolve_app_token(db: &sqlx::PgPool, raw_token: &str) -> anyhow::Result
     Ok(Some(Actor::App {
         app_id: row.app_id,
         organisation_id: row.organisation_id,
+        scopes: None,
+    }))
+}
+
+async fn resolve_oauth_client_token(
+    db: &sqlx::PgPool,
+    raw_token: &str,
+) -> anyhow::Result<Option<Actor>> {
+    let token_hash = sha2::Sha256::digest(raw_token.as_bytes()).to_vec();
+
+    let row = sqlx::query_as::<_, (Uuid, Uuid, Vec<String>)>(
+        r#"
+        UPDATE oauth_client_tokens t
+        SET last_used_at = now()
+        FROM oauth_apps a
+        WHERE t.token_hash = $1
+          AND t.app_id = a.id
+          AND t.revoked_at IS NULL
+          AND t.expires_at > now()
+        RETURNING t.app_id, a.organisation_id, t.scopes
+        "#,
+    )
+    .bind(&token_hash)
+    .fetch_optional(db)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    Ok(Some(Actor::App {
+        app_id: row.0,
+        organisation_id: row.1,
+        scopes: Some(row.2),
     }))
 }
 
@@ -294,8 +332,20 @@ where
                 }
             }
 
-            // 4. Fall back to app token lookup (DB)
-            match resolve_app_token(&state.db, &token).await {
+            // 4. Try legacy app token (DB)
+            match resolve_legacy_app_token(&state.db, &token).await {
+                Ok(Some(actor)) => {
+                    req.extensions_mut().insert(actor);
+                    return inner.call(req).await;
+                }
+                Ok(None) => {} // not a legacy app token, try OAuth client token
+                Err(e) => {
+                    tracing::warn!(path = %path, error = %e, "legacy app token lookup failed");
+                }
+            }
+
+            // 5. Fall back to OAuth client-credentials token lookup (DB)
+            match resolve_oauth_client_token(&state.db, &token).await {
                 Ok(Some(actor)) => {
                     req.extensions_mut().insert(actor);
                     inner.call(req).await
@@ -304,11 +354,11 @@ where
                     if mode == AuthMode::Optional {
                         return inner.call(req).await;
                     }
-                    tracing::warn!(path = %path, "token verification failed: no matching user, app, or service account token");
+                    tracing::warn!(path = %path, "token verification failed: no matching user, app, oauth client, or service account token");
                     Ok(grpc_unauthenticated("token verification failed"))
                 }
                 Err(e) => {
-                    tracing::warn!(path = %path, error = %e, "app token lookup failed");
+                    tracing::warn!(path = %path, error = %e, "OAuth client token lookup failed");
                     Ok(grpc_unauthenticated("token verification failed"))
                 }
             }

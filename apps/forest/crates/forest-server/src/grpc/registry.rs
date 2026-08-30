@@ -8,7 +8,10 @@ use uuid::Uuid;
 use crate::{
     actor::Actor,
     grpc::authorize::{self, OrgRole},
-    services::component_aggregate::{ComponentServiceState, ComponentVersion, FileStream},
+    services::{
+        component_aggregate::{ComponentServiceState, ComponentVersion, FileStream},
+        oauth_apps::SCOPE_COMPONENTS_PUBLISH,
+    },
     state::State,
 };
 
@@ -166,6 +169,7 @@ impl RegistryService for RegistryServer {
             OrgRole::Member,
         )
         .await?;
+        require_component_publish_scope(&actor)?;
 
         let upload_id = self
             .state
@@ -222,6 +226,7 @@ impl RegistryService for RegistryServer {
             OrgRole::Member,
         )
         .await?;
+        require_component_publish_scope(&actor)?;
 
         let reason = if request.reason.is_empty() {
             None
@@ -846,6 +851,24 @@ async fn authorize_upload(
     .ok_or_else(|| tonic::Status::not_found("upload not found or already committed"))?;
 
     authorize::require_org_access(&state.db, actor, &org, OrgRole::Member).await?;
+    require_component_publish_scope(actor)?;
+    Ok(())
+}
+
+/// OAuth app tokens need an explicit component-publish grant. Users, service
+/// accounts, and legacy app tokens keep the existing org-member behaviour.
+fn require_component_publish_scope(actor: &crate::actor::Actor) -> Result<(), tonic::Status> {
+    if let Actor::App {
+        scopes: Some(scopes),
+        ..
+    } = actor
+        && !scopes.iter().any(|scope| scope == SCOPE_COMPONENTS_PUBLISH)
+    {
+        return Err(tonic::Status::permission_denied(format!(
+            "app token requires {SCOPE_COMPONENTS_PUBLISH} scope"
+        )));
+    }
+
     Ok(())
 }
 
@@ -872,6 +895,43 @@ impl From<ComponentVersion> for Component {
             id: value.id,
             version: value.version,
         }
+    }
+}
+
+#[cfg(test)]
+mod component_publish_scope_tests {
+    use super::{SCOPE_COMPONENTS_PUBLISH, require_component_publish_scope};
+    use crate::actor::Actor;
+    use uuid::Uuid;
+
+    fn app(scopes: Option<Vec<&str>>) -> Actor {
+        Actor::App {
+            app_id: Uuid::now_v7(),
+            organisation_id: Uuid::now_v7(),
+            scopes: scopes.map(|scopes| scopes.into_iter().map(str::to_owned).collect()),
+        }
+    }
+
+    #[test]
+    fn oauth_app_token_requires_publish_scope() {
+        let err = require_component_publish_scope(&app(Some(vec!["directory:read"]))).unwrap_err();
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    }
+
+    #[test]
+    fn oauth_app_token_with_publish_scope_passes() {
+        assert!(
+            require_component_publish_scope(&app(Some(vec![
+                "directory:read",
+                SCOPE_COMPONENTS_PUBLISH,
+            ])))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn legacy_app_token_keeps_existing_publish_access() {
+        assert!(require_component_publish_scope(&app(None)).is_ok());
     }
 }
 

@@ -9,11 +9,11 @@
 //! - `POST /oauth/token`     — code → token exchange (machine-to-machine)
 #![allow(clippy::result_large_err)]
 
+use axum::Router;
 use axum::extract::{Form, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Json, Redirect, Response};
 use axum::routing::{get, post};
-use axum::Router;
 use forage_core::platform::{OAuthClientInfo, OAuthFlowError};
 use minijinja::context;
 use serde::Deserialize;
@@ -25,7 +25,10 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/oauth/authorize", get(authorize_page).post(authorize_decision))
+        .route(
+            "/oauth/authorize",
+            get(authorize_page).post(authorize_decision),
+        )
         .route("/oauth/token", post(token))
         .route("/oauth/userinfo", get(userinfo).post(userinfo))
         .route("/.well-known/openid-configuration", get(discovery))
@@ -140,12 +143,20 @@ async fn authorize_page(
 
     // From here, redirect_uri is trusted: protocol errors go back to it.
     if q.response_type != "code" {
-        return Ok(redirect_error(&q.redirect_uri, "unsupported_response_type", q.state.as_deref()));
+        return Ok(redirect_error(
+            &q.redirect_uri,
+            "unsupported_response_type",
+            q.state.as_deref(),
+        ));
     }
     let scopes = match resolve_scopes(&app, &q.scope) {
         Ok(s) => s,
         Err(()) => {
-            return Ok(redirect_error(&q.redirect_uri, "invalid_scope", q.state.as_deref()));
+            return Ok(redirect_error(
+                &q.redirect_uri,
+                "invalid_scope",
+                q.state.as_deref(),
+            ));
         }
     };
 
@@ -290,20 +301,34 @@ async fn authorize_decision(
     let state_param = form.state.as_deref();
 
     if form.action != "approve" {
-        return Ok(redirect_error(&form.redirect_uri, "access_denied", state_param));
+        return Ok(redirect_error(
+            &form.redirect_uri,
+            "access_denied",
+            state_param,
+        ));
     }
 
     // The displayed consent params must match what was rendered (review #2):
     // reject if the hidden client_id / redirect_uri / scope were tampered.
-    let expected =
-        consent_binding(&session.csrf_token, &form.client_id, &form.redirect_uri, &form.scope);
+    let expected = consent_binding(
+        &session.csrf_token,
+        &form.client_id,
+        &form.redirect_uri,
+        &form.scope,
+    );
     if !consent_binding_valid(&expected, &form.consent_binding) {
         return Err((StatusCode::FORBIDDEN, "consent binding mismatch").into_response());
     }
 
     let scopes = match resolve_scopes(&app, &form.scope) {
         Ok(s) => s,
-        Err(()) => return Ok(redirect_error(&form.redirect_uri, "invalid_scope", state_param)),
+        Err(()) => {
+            return Ok(redirect_error(
+                &form.redirect_uri,
+                "invalid_scope",
+                state_param,
+            ));
+        }
     };
 
     Ok(issue_code_redirect(
@@ -410,11 +435,7 @@ async fn token(
     // token, no id_token — so it returns straight from here rather than
     // being forced through the user-token response builder below.
     if form.grant_type == "client_credentials" {
-        let scopes: Vec<String> = form
-            .scope
-            .split_whitespace()
-            .map(str::to_string)
-            .collect();
+        let scopes: Vec<String> = form.scope.split_whitespace().map(str::to_string).collect();
         return match client
             .issue_client_credentials_token(&client_id, &client_secret, &scopes)
             .await
@@ -484,7 +505,7 @@ async fn discovery(State(state): State<AppState>) -> Response {
         "userinfo_endpoint": format!("{base}/oauth/userinfo"),
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
-        "scopes_supported": ["openid", "profile", "email"],
+        "scopes_supported": ["openid", "profile", "email", "directory:read", "components:publish"],
         "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
         "id_token_signing_alg_values_supported": ["HS256"],
         "code_challenge_methods_supported": ["S256", "plain"],
@@ -529,10 +550,11 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
             }
             Json(serde_json::Value::Object(claims)).into_response()
         }
-        Err(OAuthFlowError::ServerError(_)) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "server_error" })))
-                .into_response()
-        }
+        Err(OAuthFlowError::ServerError(_)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "server_error" })),
+        )
+            .into_response(),
         Err(_) => unauthorized("invalid_token"),
     }
 }
@@ -605,6 +627,8 @@ fn scope_description(scope: &str) -> &'static str {
         "openid" => "Confirm your identity",
         "profile" => "Your username, account ID and avatar",
         "email" => "Your verified email addresses",
+        "directory:read" => "Look up organisation members by verified identity",
+        "components:publish" => "Publish Forest components from CI",
         _ => "",
     }
 }
@@ -626,8 +650,8 @@ pub(crate) fn consent_binding(
 ) -> String {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
-    let mut mac = <Hmac<Sha256>>::new_from_slice(csrf_token.as_bytes())
-        .expect("hmac accepts any key length");
+    let mut mac =
+        <Hmac<Sha256>>::new_from_slice(csrf_token.as_bytes()).expect("hmac accepts any key length");
     mac.update(client_id.as_bytes());
     mac.update(b"\x00");
     mac.update(redirect_uri.as_bytes());
@@ -756,7 +780,10 @@ mod tests {
     #[test]
     fn empty_secret_is_allowed() {
         let h = basic("public-client:");
-        assert_eq!(parse_basic_auth(&h), Some(("public-client".into(), String::new())));
+        assert_eq!(
+            parse_basic_auth(&h),
+            Some(("public-client".into(), String::new()))
+        );
     }
 
     #[test]

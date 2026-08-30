@@ -13,7 +13,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
-use forage_core::platform::{validate_slug, OAuthApp, PlatformError};
+use forage_core::platform::{OAuthApp, PlatformError, validate_slug};
 use forage_core::session::CachedOrg;
 use minijinja::context;
 use serde::Deserialize;
@@ -28,10 +28,7 @@ pub fn router() -> Router<AppState> {
         .route("/orgs/{org}/settings/developers", post(create_app))
         .route("/orgs/{org}/settings/developers/new", get(new_app_page))
         .route("/orgs/{org}/settings/developers/{app_id}", get(app_detail))
-        .route(
-            "/orgs/{org}/settings/developers/{app_id}",
-            post(update_app),
-        )
+        .route("/orgs/{org}/settings/developers/{app_id}", post(update_app))
         .route(
             "/orgs/{org}/settings/developers/{app_id}/rotate",
             post(rotate_secret),
@@ -152,6 +149,8 @@ struct AppForm {
     scope_profile: Option<String>,
     #[serde(default)]
     scope_email: Option<String>,
+    #[serde(default)]
+    scope_components_publish: Option<String>,
     /// An app may hold both grants — acting for a user and acting as
     /// itself, the way a GitHub App does.
     #[serde(default)]
@@ -196,6 +195,9 @@ impl AppForm {
         }
         if self.scope_email.is_some() {
             scopes.push("email".to_string());
+        }
+        if self.scope_components_publish.is_some() {
+            scopes.push("components:publish".to_string());
         }
         scopes
     }
@@ -313,10 +315,10 @@ async fn create_app(
         Err(e) => {
             if let Some(msg) = flash_for(&e) {
                 let q = urlencoding::encode(&msg);
-                return Ok(Redirect::to(&format!(
-                    "/orgs/{org}/settings/developers/new?error={q}"
-                ))
-                .into_response());
+                return Ok(
+                    Redirect::to(&format!("/orgs/{org}/settings/developers/new?error={q}"))
+                        .into_response(),
+                );
             }
             return Err(internal_error(&state, "create oauth app", &e));
         }
@@ -324,7 +326,13 @@ async fn create_app(
 
     // Render the detail page directly so the freshly-minted secret can be
     // shown exactly once (it is never retrievable again).
-    render_app_detail(&state, &session, &org, &created.app, Some(&created.client_secret))
+    render_app_detail(
+        &state,
+        &session,
+        &org,
+        &created.app,
+        Some(&created.client_secret),
+    )
 }
 
 // ─── Detail ──────────────────────────────────────────────────────────
@@ -411,9 +419,9 @@ async fn update_app(
         )
         .await
     {
-        Ok(_) => Ok(
-            Redirect::to(&format!("/orgs/{org}/settings/developers/{app_id}")).into_response(),
-        ),
+        Ok(_) => {
+            Ok(Redirect::to(&format!("/orgs/{org}/settings/developers/{app_id}")).into_response())
+        }
         Err(e) => {
             if let Some(msg) = flash_for(&e) {
                 let q = urlencoding::encode(&msg);
@@ -490,6 +498,7 @@ mod tests {
             scope_openid: None,
             scope_profile: None,
             scope_email: None,
+            scope_components_publish: None,
             grant_authorization_code: auth_code.then(|| "on".to_string()),
             grant_client_credentials: client_creds.then(|| "on".to_string()),
         }
@@ -526,5 +535,11 @@ mod tests {
     #[test]
     fn no_boxes_defers_the_default_to_forest() {
         assert!(form(false, false).grant_type_list().is_empty());
+    }
+    #[test]
+    fn component_publish_scope_is_requestable() {
+        let mut form = form(false, true);
+        form.scope_components_publish = Some("on".to_string());
+        assert_eq!(form.scope_list(), vec!["components:publish".to_string()]);
     }
 }

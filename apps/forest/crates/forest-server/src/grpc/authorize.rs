@@ -281,6 +281,7 @@ mod typed_gate_tests {
         UnauthenticatedActor(Some(Actor::App {
             app_id: Uuid::now_v7(),
             organisation_id: Uuid::now_v7(),
+            scopes: None,
         }))
         .require_authenticated()
         .expect("app is authenticated")

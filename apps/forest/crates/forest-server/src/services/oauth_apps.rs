@@ -11,12 +11,22 @@ use crate::{
 /// - `openid`:  OIDC marker — issues an `id_token` on the code exchange
 /// - `profile`: sub (user_id), username, profile_picture_url
 /// - `email`:   primary + all verified emails
-pub const ALLOWED_SCOPES: &[&str] = &["openid", "profile", "email", "directory:read"];
+/// - `components:publish`: publish component versions through the registry
+pub const ALLOWED_SCOPES: &[&str] = &[
+    "openid",
+    "profile",
+    "email",
+    "directory:read",
+    SCOPE_COMPONENTS_PUBLISH,
+];
 
 /// Scope for reading the organisation directory — resolving a person from
 /// an external identity to their linked accounts. Only ever granted to
 /// machine clients; there is nothing here a browser login needs.
 pub const SCOPE_DIRECTORY_READ: &str = "directory:read";
+
+/// Scope for publishing component versions to the Forest registry.
+pub const SCOPE_COMPONENTS_PUBLISH: &str = "components:publish";
 
 /// Validation failures for OAuth-app management. The gRPC layer maps these
 /// to `invalid_argument` with the message surfaced to the caller.
@@ -1101,6 +1111,14 @@ mod tests {
             validate_input("App", "", "", &uris, &scopes).unwrap_err(),
             OAuthAppError::UnknownScope("admin".to_string())
         );
+    }
+
+    #[test]
+    fn accepts_component_publish_scope() {
+        let uris = vec!["https://app.example/cb".to_string()];
+        let scopes = vec![SCOPE_COMPONENTS_PUBLISH.to_string()];
+        let out = validate_input("App", "", "", &uris, &scopes).unwrap();
+        assert_eq!(out.scopes, scopes);
     }
 
     #[test]

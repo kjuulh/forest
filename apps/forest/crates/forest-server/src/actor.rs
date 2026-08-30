@@ -4,9 +4,17 @@ use uuid::Uuid;
 /// service account (long-lived infrastructure key).
 #[derive(Debug, Clone)]
 pub enum Actor {
-    User { user_id: Uuid },
-    App { app_id: Uuid, organisation_id: Uuid },
-    ServiceAccount { service_account_id: Uuid },
+    User {
+        user_id: Uuid,
+    },
+    App {
+        app_id: Uuid,
+        organisation_id: Uuid,
+        scopes: Option<Vec<String>>,
+    },
+    ServiceAccount {
+        service_account_id: Uuid,
+    },
 }
 
 impl Actor {
