@@ -1,7 +1,7 @@
 use crate::{
     cli::destination::{
-        create::CreateCommand, delete::DeleteCommand, list::ListCommand,
-        reveal::RevealCommand, types::TypesCommand, update::UpdateCommand,
+        create::CreateCommand, delete::DeleteCommand, list::ListCommand, reveal::RevealCommand,
+        types::TypesCommand, update::UpdateCommand,
     },
     state::State,
 };

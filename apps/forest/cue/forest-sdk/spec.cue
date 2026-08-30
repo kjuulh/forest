@@ -43,6 +43,9 @@ package sdk
 
 	// Responsible team or person (free-form string).
 	owner?: string
+
+	// Free-form labels used by organisation-scoped rule selectors.
+	tags?: [...string]
 }
 
 #ForestComponent: {

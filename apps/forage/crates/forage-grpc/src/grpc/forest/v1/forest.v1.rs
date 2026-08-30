@@ -4,272 +4,266 @@
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct App {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub app_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub description: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="5")]
+    #[prost(string, repeated, tag = "5")]
     pub permissions: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(bool, tag="6")]
+    #[prost(bool, tag = "6")]
     pub suspended: bool,
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag = "7")]
     pub created_at: ::core::option::Option<::prost_types::Timestamp>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct AppToken {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub token_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag = "3")]
     pub expires_at: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag = "4")]
     pub last_used: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(bool, tag="5")]
+    #[prost(bool, tag = "5")]
     pub revoked: bool,
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag = "6")]
     pub created_at: ::core::option::Option<::prost_types::Timestamp>,
 }
 // ─── App lifecycle ───────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateAppRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub description: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="4")]
+    #[prost(string, repeated, tag = "4")]
     pub permissions: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateAppResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub app: ::core::option::Option<App>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetAppRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub app_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetAppResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub app: ::core::option::Option<App>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListAppsRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListAppsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub apps: ::prost::alloc::vec::Vec<App>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteAppRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub app_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeleteAppResponse {
-}
+pub struct DeleteAppResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SuspendAppRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub app_id: ::prost::alloc::string::String,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub suspended: bool,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct SuspendAppResponse {
-}
+pub struct SuspendAppResponse {}
 // ─── App tokens ──────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateAppTokenRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub app_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
     /// 0 = no expiry
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub expires_in_seconds: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateAppTokenResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub token: ::core::option::Option<AppToken>,
     /// only returned on creation
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub raw_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListAppTokensRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub app_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListAppTokensResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub tokens: ::prost::alloc::vec::Vec<AppToken>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RevokeAppTokenRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub token_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RevokeAppTokenResponse {
-}
+pub struct RevokeAppTokenResponse {}
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct BeginUploadArtifactRequest {
-}
+pub struct BeginUploadArtifactRequest {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct BeginUploadArtifactResponse {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub upload_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UploadArtifactRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub upload_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub env: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub file_name: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub file_content: ::prost::alloc::string::String,
     /// Category of the file: "deployment" (default), "spec", or "attachment"
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub category: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UploadArtifactResponse {
-}
+pub struct UploadArtifactResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CommitArtifactRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub upload_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CommitArtifactResponse {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub artifact_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetArtifactFilesRequest {
     /// The artifact_id (UUID from annotations/artifacts table)
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub artifact_id: ::prost::alloc::string::String,
     /// Optional filter: "deployment", "spec", "attachment". Empty = all categories.
-    #[prost(string, optional, tag="2")]
+    #[prost(string, optional, tag = "2")]
     pub category: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetArtifactFilesResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub files: ::prost::alloc::vec::Vec<ArtifactFile>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ArtifactFile {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub file_name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub category: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub env: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub content: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetArtifactSpecRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub artifact_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetArtifactSpecResponse {
     /// The spec file content (forest.cue), empty string if no spec was uploaded.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub content: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateDestinationRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub environment: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="3")]
-    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(message, optional, tag="4")]
+    #[prost(map = "string, string", tag = "3")]
+    pub metadata:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, optional, tag = "4")]
     pub r#type: ::core::option::Option<DestinationType>,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub organisation: ::prost::alloc::string::String,
     /// Metadata keys to treat as credentials, in addition to those the
     /// destination type declares sensitive. Lets free-form keys (e.g. terraform
     /// TF_VAR_* credentials) be marked without changing the type schema.
-    #[prost(string, repeated, tag="6")]
+    #[prost(string, repeated, tag = "6")]
     pub sensitive_keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct CreateDestinationResponse {
-}
+pub struct CreateDestinationResponse {}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UpdateDestinationRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     /// Replaces the stored metadata wholesale, unless `merge_metadata` is set.
     /// Wholesale is the right shape for an editor that renders every key at once
     /// (removing a row has to delete the key), and the wrong shape for a caller
     /// that only names the pairs it cares about.
-    #[prost(map="string, string", tag="2")]
-    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(string, tag="3")]
+    #[prost(map = "string, string", tag = "2")]
+    pub metadata:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(string, tag = "3")]
     pub organisation: ::prost::alloc::string::String,
     /// Replaces the destination's sensitive-key set when `set_sensitive_keys`
     /// is true. Ignored otherwise, so older clients keep the existing set.
-    #[prost(string, repeated, tag="4")]
+    #[prost(string, repeated, tag = "4")]
     pub sensitive_keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(bool, tag="5")]
+    #[prost(bool, tag = "5")]
     pub set_sensitive_keys: bool,
     /// Overlay `metadata` onto what is stored instead of replacing it: keys not
     /// named are left alone. An empty map then means "change nothing", which is
     /// what a caller that only touches sensitive_keys sends. Defaults to false so
     /// existing clients keep replacing.
-    #[prost(bool, tag="6")]
+    #[prost(bool, tag = "6")]
     pub merge_metadata: bool,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UpdateDestinationResponse {
-}
+pub struct UpdateDestinationResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteDestinationRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub organisation: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeleteDestinationResponse {
-}
+pub struct DeleteDestinationResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetDestinationsRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetDestinationsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub destinations: ::prost::alloc::vec::Vec<Destination>,
 }
 /// Fetches the value of exactly one sensitive metadata key. Deliberately
@@ -277,330 +271,329 @@ pub struct GetDestinationsResponse {
 /// always an explicit act against a named key.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RevealDestinationMetadataRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub key: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RevealDestinationMetadataResponse {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub key: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub value: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListDestinationTypesRequest {
-}
+pub struct ListDestinationTypesRequest {}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListDestinationTypesResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub types: ::prost::alloc::vec::Vec<DestinationType>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Destination {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub environment: ::prost::alloc::string::String,
     /// Non-sensitive metadata only. Values for sensitive keys are never sent
     /// here; fetch them one at a time via RevealDestinationMetadata.
-    #[prost(map="string, string", tag="3")]
-    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(message, optional, tag="4")]
+    #[prost(map = "string, string", tag = "3")]
+    pub metadata:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, optional, tag = "4")]
     pub r#type: ::core::option::Option<DestinationType>,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub organisation: ::prost::alloc::string::String,
     /// Names of the metadata keys whose values were withheld from `metadata`.
     /// Key names only — never values.
-    #[prost(string, repeated, tag="6")]
+    #[prost(string, repeated, tag = "6")]
     pub sensitive_keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DestinationType {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(uint64, tag="3")]
+    #[prost(uint64, tag = "3")]
     pub version: u64,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub description: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag="5")]
+    #[prost(message, repeated, tag = "5")]
     pub fields: ::prost::alloc::vec::Vec<MetadataFieldSchema>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct MetadataFieldSchema {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub label: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub description: ::prost::alloc::string::String,
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag = "4")]
     pub required: bool,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub field_type: ::prost::alloc::string::String,
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub default_value: ::prost::alloc::string::String,
     /// When true, this field holds a credential. Servers omit its value from
     /// Destination.metadata in read RPCs and list the key in
     /// Destination.sensitive_keys instead; clients must not render the value.
     /// Absent/false on older types, so this is additive and backward compatible.
-    #[prost(bool, tag="7")]
+    #[prost(bool, tag = "7")]
     pub sensitive: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Environment {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub description: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(int32, tag="5")]
+    #[prost(int32, tag = "5")]
     pub sort_order: i32,
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub created_at: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateEnvironmentRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag = "3")]
     pub description: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(int32, tag="4")]
+    #[prost(int32, tag = "4")]
     pub sort_order: i32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateEnvironmentResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub environment: ::core::option::Option<Environment>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetEnvironmentRequest {
-    #[prost(oneof="get_environment_request::Identifier", tags="1, 2")]
+    #[prost(oneof = "get_environment_request::Identifier", tags = "1, 2")]
     pub identifier: ::core::option::Option<get_environment_request::Identifier>,
 }
 /// Nested message and enum types in `GetEnvironmentRequest`.
 pub mod get_environment_request {
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Identifier {
-        #[prost(string, tag="1")]
+        #[prost(string, tag = "1")]
         Id(::prost::alloc::string::String),
-        #[prost(message, tag="2")]
+        #[prost(message, tag = "2")]
         Lookup(super::EnvironmentLookup),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct EnvironmentLookup {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetEnvironmentResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub environment: ::core::option::Option<Environment>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListEnvironmentsRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListEnvironmentsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub environments: ::prost::alloc::vec::Vec<Environment>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateEnvironmentRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="2")]
+    #[prost(string, optional, tag = "2")]
     pub description: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(int32, optional, tag="3")]
+    #[prost(int32, optional, tag = "3")]
     pub sort_order: ::core::option::Option<i32>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateEnvironmentResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub environment: ::core::option::Option<Environment>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteEnvironmentRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeleteEnvironmentResponse {
-}
+pub struct DeleteEnvironmentResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SubscribeEventsRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
     /// optional — empty means all projects in org
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub project: ::prost::alloc::string::String,
     /// optional filter: "release", "destination", etc.
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub resource_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// optional filter: "created", "updated", etc.
-    #[prost(string, repeated, tag="4")]
+    #[prost(string, repeated, tag = "4")]
     pub actions: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// 0 = latest only, >0 = replay from that sequence
-    #[prost(int64, tag="5")]
+    #[prost(int64, tag = "5")]
     pub since_sequence: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SubscribeDurableRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
     /// the registered subscription name
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub subscription_name: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct AcknowledgeEventsRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub subscription_name: ::prost::alloc::string::String,
     /// advance cursor to this sequence
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub sequence: i64,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct AcknowledgeEventsResponse {
     /// the new cursor value
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub cursor: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OrgEvent {
     /// monotonic cursor — client stores this for reconnect
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub sequence: i64,
     /// UUID, dedup key
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub event_id: ::prost::alloc::string::String,
     /// RFC 3339
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub timestamp: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub organisation: ::prost::alloc::string::String,
     /// empty for org-level events
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub project: ::prost::alloc::string::String,
     /// "release", "destination", "environment", "pipeline", "artifact", "policy", "app", "organisation"
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub resource_type: ::prost::alloc::string::String,
     /// "created", "updated", "deleted", "status_changed"
-    #[prost(string, tag="7")]
+    #[prost(string, tag = "7")]
     pub action: ::prost::alloc::string::String,
     /// ID of the changed resource
-    #[prost(string, tag="8")]
+    #[prost(string, tag = "8")]
     pub resource_id: ::prost::alloc::string::String,
     /// lightweight context (e.g. "status" → "SUCCEEDED")
-    #[prost(map="string, string", tag="9")]
-    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "9")]
+    pub metadata:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct EventSubscription {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="4")]
+    #[prost(string, repeated, tag = "4")]
     pub resource_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="5")]
+    #[prost(string, repeated, tag = "5")]
     pub actions: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="6")]
+    #[prost(string, repeated, tag = "6")]
     pub projects: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// "active", "paused"
-    #[prost(string, tag="7")]
+    #[prost(string, tag = "7")]
     pub status: ::prost::alloc::string::String,
     /// last acknowledged sequence
-    #[prost(int64, tag="8")]
+    #[prost(int64, tag = "8")]
     pub cursor: i64,
-    #[prost(string, tag="9")]
+    #[prost(string, tag = "9")]
     pub created_at: ::prost::alloc::string::String,
-    #[prost(string, tag="10")]
+    #[prost(string, tag = "10")]
     pub updated_at: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateEventSubscriptionRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
     /// empty = all
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub resource_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// empty = all
-    #[prost(string, repeated, tag="4")]
+    #[prost(string, repeated, tag = "4")]
     pub actions: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// empty = all projects in org
-    #[prost(string, repeated, tag="5")]
+    #[prost(string, repeated, tag = "5")]
     pub projects: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateEventSubscriptionResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub subscription: ::core::option::Option<EventSubscription>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateEventSubscriptionRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
     /// "active" or "paused"
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag = "3")]
     pub status: ::core::option::Option<::prost::alloc::string::String>,
     /// To update filters, set update_filters = true and provide new values.
     /// Empty arrays mean "all" (no filter).
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag = "4")]
     pub update_filters: bool,
-    #[prost(string, repeated, tag="5")]
+    #[prost(string, repeated, tag = "5")]
     pub resource_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="6")]
+    #[prost(string, repeated, tag = "6")]
     pub actions: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="7")]
+    #[prost(string, repeated, tag = "7")]
     pub projects: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateEventSubscriptionResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub subscription: ::core::option::Option<EventSubscription>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteEventSubscriptionRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeleteEventSubscriptionResponse {
-}
+pub struct DeleteEventSubscriptionResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListEventSubscriptionsRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListEventSubscriptionsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub subscriptions: ::prost::alloc::vec::Vec<EventSubscription>,
 }
 /// ---------------------------------------------------------------------------
@@ -609,76 +602,77 @@ pub struct ListEventSubscriptionsResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ApplyResourcesRequest {
     /// Caller-chosen idempotency key (release_state id works well).
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub apply_id: ::prost::alloc::string::String,
     /// Namespace / tenant isolation — maps to the forest organisation.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub namespace: ::prost::alloc::string::String,
     /// The ordered list of resources to reconcile.  Forage processes them in
     /// order so that dependencies (e.g. Service before HTTPRoute) are met.
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag = "3")]
     pub resources: ::prost::alloc::vec::Vec<ForageResource>,
     /// Labels propagated to every resource for bookkeeping.
-    #[prost(map="string, string", tag="4")]
-    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "4")]
+    pub labels:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ApplyResourcesResponse {
     /// Server-generated rollout id for status tracking.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub rollout_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WatchRolloutRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub rollout_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RolloutEvent {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub resource_name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub resource_kind: ::prost::alloc::string::String,
-    #[prost(enumeration="RolloutStatus", tag="3")]
+    #[prost(enumeration = "RolloutStatus", tag = "3")]
     pub status: i32,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub message: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeleteResourcesRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub namespace: ::prost::alloc::string::String,
     /// Selector labels — all resources matching these labels are removed.
-    #[prost(map="string, string", tag="2")]
-    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "2")]
+    pub labels:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeleteResourcesResponse {
-}
+pub struct DeleteResourcesResponse {}
 /// ===========================================================================
 /// Resource envelope — every item in the apply list is one of these.
 /// ===========================================================================
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ForageResource {
     /// Unique name within the namespace (e.g. "my-api", "my-api-worker").
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(oneof="forage_resource::Spec", tags="10, 11, 12, 13, 14")]
+    #[prost(oneof = "forage_resource::Spec", tags = "10, 11, 12, 13, 14")]
     pub spec: ::core::option::Option<forage_resource::Spec>,
 }
 /// Nested message and enum types in `ForageResource`.
 pub mod forage_resource {
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Spec {
-        #[prost(message, tag="10")]
+        #[prost(message, tag = "10")]
         ContainerService(super::ContainerServiceSpec),
-        #[prost(message, tag="11")]
+        #[prost(message, tag = "11")]
         Service(super::ServiceSpec),
-        #[prost(message, tag="12")]
+        #[prost(message, tag = "12")]
         Route(super::RouteSpec),
-        #[prost(message, tag="13")]
+        #[prost(message, tag = "13")]
         CronJob(super::CronJobSpec),
-        #[prost(message, tag="14")]
+        #[prost(message, tag = "14")]
         Job(super::JobSpec),
     }
 }
@@ -689,26 +683,26 @@ pub mod forage_resource {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ContainerServiceSpec {
     /// ---- Scheduling & scaling ------------------------------------------------
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub scaling: ::core::option::Option<ScalingPolicy>,
     /// ---- Pod-level settings --------------------------------------------------
     /// Main application container (exactly one required).
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub container: ::core::option::Option<Container>,
     /// Optional sidecar containers that share the pod network.
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag = "3")]
     pub sidecars: ::prost::alloc::vec::Vec<Container>,
     /// Init containers run sequentially before the main container starts.
-    #[prost(message, repeated, tag="4")]
+    #[prost(message, repeated, tag = "4")]
     pub init_containers: ::prost::alloc::vec::Vec<Container>,
     /// ---- Volumes available to all containers in the pod ----------------------
-    #[prost(message, repeated, tag="5")]
+    #[prost(message, repeated, tag = "5")]
     pub volumes: ::prost::alloc::vec::Vec<Volume>,
     /// ---- Update strategy -----------------------------------------------------
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag = "6")]
     pub update_strategy: ::core::option::Option<UpdateStrategy>,
     /// ---- Pod-level configuration ---------------------------------------------
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag = "7")]
     pub pod_config: ::core::option::Option<PodConfig>,
 }
 /// ---------------------------------------------------------------------------
@@ -717,52 +711,52 @@ pub struct ContainerServiceSpec {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Container {
     /// Human-readable name (must be unique within the pod).
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     /// OCI image reference, e.g. "registry.forage.sh/org/app:v1.2.3".
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub image: ::prost::alloc::string::String,
     /// Override the image entrypoint.
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub command: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Arguments passed to the entrypoint.
-    #[prost(string, repeated, tag="4")]
+    #[prost(string, repeated, tag = "4")]
     pub args: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Working directory inside the container.
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub working_dir: ::prost::alloc::string::String,
     /// Environment variables — static values and references.
-    #[prost(message, repeated, tag="6")]
+    #[prost(message, repeated, tag = "6")]
     pub env: ::prost::alloc::vec::Vec<EnvVar>,
     /// Ports the container listens on.
-    #[prost(message, repeated, tag="7")]
+    #[prost(message, repeated, tag = "7")]
     pub ports: ::prost::alloc::vec::Vec<ContainerPort>,
     /// Resource requests and limits.
-    #[prost(message, optional, tag="8")]
+    #[prost(message, optional, tag = "8")]
     pub resources: ::core::option::Option<ResourceRequirements>,
     /// Volume mounts into this container's filesystem.
-    #[prost(message, repeated, tag="9")]
+    #[prost(message, repeated, tag = "9")]
     pub volume_mounts: ::prost::alloc::vec::Vec<VolumeMount>,
     /// Health probes.
-    #[prost(message, optional, tag="10")]
+    #[prost(message, optional, tag = "10")]
     pub liveness_probe: ::core::option::Option<Probe>,
-    #[prost(message, optional, tag="11")]
+    #[prost(message, optional, tag = "11")]
     pub readiness_probe: ::core::option::Option<Probe>,
-    #[prost(message, optional, tag="12")]
+    #[prost(message, optional, tag = "12")]
     pub startup_probe: ::core::option::Option<Probe>,
     /// Lifecycle hooks.
-    #[prost(message, optional, tag="13")]
+    #[prost(message, optional, tag = "13")]
     pub lifecycle: ::core::option::Option<Lifecycle>,
     /// Security context for this container.
-    #[prost(message, optional, tag="14")]
+    #[prost(message, optional, tag = "14")]
     pub security_context: ::core::option::Option<ContainerSecurityContext>,
     /// Image pull policy: "Always", "IfNotPresent", "Never".
-    #[prost(string, tag="15")]
+    #[prost(string, tag = "15")]
     pub image_pull_policy: ::prost::alloc::string::String,
     /// Whether stdin / tty are allocated (usually false for services).
-    #[prost(bool, tag="16")]
+    #[prost(bool, tag = "16")]
     pub stdin: bool,
-    #[prost(bool, tag="17")]
+    #[prost(bool, tag = "17")]
     pub tty: bool,
 }
 /// ---------------------------------------------------------------------------
@@ -770,9 +764,9 @@ pub struct Container {
 /// ---------------------------------------------------------------------------
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct EnvVar {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(oneof="env_var::ValueSource", tags="2, 3, 4, 5, 6")]
+    #[prost(oneof = "env_var::ValueSource", tags = "2, 3, 4, 5, 6")]
     pub value_source: ::core::option::Option<env_var::ValueSource>,
 }
 /// Nested message and enum types in `EnvVar`.
@@ -780,34 +774,34 @@ pub mod env_var {
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum ValueSource {
         /// Literal value.
-        #[prost(string, tag="2")]
+        #[prost(string, tag = "2")]
         Value(::prost::alloc::string::String),
         /// Reference to a secret key.
-        #[prost(message, tag="3")]
+        #[prost(message, tag = "3")]
         SecretRef(super::SecretKeyRef),
         /// Reference to a config-map key.
-        #[prost(message, tag="4")]
+        #[prost(message, tag = "4")]
         ConfigRef(super::ConfigKeyRef),
         /// Downward-API field (e.g. "metadata.name", "status.podIP").
-        #[prost(string, tag="5")]
+        #[prost(string, tag = "5")]
         FieldRef(::prost::alloc::string::String),
         /// Resource field (e.g. "limits.cpu").
-        #[prost(string, tag="6")]
+        #[prost(string, tag = "6")]
         ResourceFieldRef(::prost::alloc::string::String),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SecretKeyRef {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub secret_name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub key: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ConfigKeyRef {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub config_name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub key: ::prost::alloc::string::String,
 }
 /// ---------------------------------------------------------------------------
@@ -816,13 +810,13 @@ pub struct ConfigKeyRef {
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ContainerPort {
     /// Friendly name (e.g. "http", "grpc", "metrics").
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     /// The port number inside the container.
-    #[prost(uint32, tag="2")]
+    #[prost(uint32, tag = "2")]
     pub container_port: u32,
     /// Protocol: TCP (default), UDP, SCTP.
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub protocol: ::prost::alloc::string::String,
 }
 /// ---------------------------------------------------------------------------
@@ -830,25 +824,26 @@ pub struct ContainerPort {
 /// ---------------------------------------------------------------------------
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ResourceRequirements {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub requests: ::core::option::Option<ResourceList>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub limits: ::core::option::Option<ResourceList>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ResourceList {
     /// CPU in Kubernetes quantity format: "100m", "0.5", "2".
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub cpu: ::prost::alloc::string::String,
     /// Memory in Kubernetes quantity format: "128Mi", "1Gi".
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub memory: ::prost::alloc::string::String,
     /// Ephemeral storage: "1Gi".
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub ephemeral_storage: ::prost::alloc::string::String,
     /// GPU / accelerator requests (e.g. "nvidia.com/gpu": "1").
-    #[prost(map="string, string", tag="4")]
-    pub extended: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "4")]
+    pub extended:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 /// ---------------------------------------------------------------------------
 ///   Volumes & mounts
@@ -856,107 +851,107 @@ pub struct ResourceList {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Volume {
     /// Volume name referenced by VolumeMount.name.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(oneof="volume::Source", tags="10, 11, 12, 13, 14, 15")]
+    #[prost(oneof = "volume::Source", tags = "10, 11, 12, 13, 14, 15")]
     pub source: ::core::option::Option<volume::Source>,
 }
 /// Nested message and enum types in `Volume`.
 pub mod volume {
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Source {
-        #[prost(message, tag="10")]
+        #[prost(message, tag = "10")]
         EmptyDir(super::EmptyDirVolume),
-        #[prost(message, tag="11")]
+        #[prost(message, tag = "11")]
         Secret(super::SecretVolume),
-        #[prost(message, tag="12")]
+        #[prost(message, tag = "12")]
         ConfigMap(super::ConfigMapVolume),
-        #[prost(message, tag="13")]
+        #[prost(message, tag = "13")]
         Pvc(super::PvcVolume),
-        #[prost(message, tag="14")]
+        #[prost(message, tag = "14")]
         HostPath(super::HostPathVolume),
-        #[prost(message, tag="15")]
+        #[prost(message, tag = "15")]
         Nfs(super::NfsVolume),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct EmptyDirVolume {
     /// "Memory" for tmpfs, empty for node disk.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub medium: ::prost::alloc::string::String,
     /// Size limit (e.g. "256Mi").  Empty means node default.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub size_limit: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SecretVolume {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub secret_name: ::prost::alloc::string::String,
     /// Optional: mount only specific keys.
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag = "2")]
     pub items: ::prost::alloc::vec::Vec<KeyToPath>,
     /// Octal file mode (e.g. 0644). Default 0644.
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag = "3")]
     pub default_mode: u32,
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag = "4")]
     pub optional: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ConfigMapVolume {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub config_map_name: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag = "2")]
     pub items: ::prost::alloc::vec::Vec<KeyToPath>,
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag = "3")]
     pub default_mode: u32,
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag = "4")]
     pub optional: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct KeyToPath {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub key: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub path: ::prost::alloc::string::String,
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag = "3")]
     pub mode: u32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PvcVolume {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub claim_name: ::prost::alloc::string::String,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub read_only: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct HostPathVolume {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub path: ::prost::alloc::string::String,
     /// "Directory", "File", "DirectoryOrCreate", "FileOrCreate", etc.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub r#type: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct NfsVolume {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub server: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub path: ::prost::alloc::string::String,
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub read_only: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct VolumeMount {
     /// Must match a Volume.name.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     /// Absolute path inside the container.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub mount_path: ::prost::alloc::string::String,
     /// Optional sub-path within the volume.
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub sub_path: ::prost::alloc::string::String,
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag = "4")]
     pub read_only: bool,
 }
 /// ---------------------------------------------------------------------------
@@ -964,67 +959,67 @@ pub struct VolumeMount {
 /// ---------------------------------------------------------------------------
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Probe {
-    #[prost(uint32, tag="10")]
+    #[prost(uint32, tag = "10")]
     pub initial_delay_seconds: u32,
-    #[prost(uint32, tag="11")]
+    #[prost(uint32, tag = "11")]
     pub period_seconds: u32,
-    #[prost(uint32, tag="12")]
+    #[prost(uint32, tag = "12")]
     pub timeout_seconds: u32,
-    #[prost(uint32, tag="13")]
+    #[prost(uint32, tag = "13")]
     pub success_threshold: u32,
-    #[prost(uint32, tag="14")]
+    #[prost(uint32, tag = "14")]
     pub failure_threshold: u32,
-    #[prost(oneof="probe::Handler", tags="1, 2, 3, 4")]
+    #[prost(oneof = "probe::Handler", tags = "1, 2, 3, 4")]
     pub handler: ::core::option::Option<probe::Handler>,
 }
 /// Nested message and enum types in `Probe`.
 pub mod probe {
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Handler {
-        #[prost(message, tag="1")]
+        #[prost(message, tag = "1")]
         HttpGet(super::HttpGetProbe),
-        #[prost(message, tag="2")]
+        #[prost(message, tag = "2")]
         TcpSocket(super::TcpSocketProbe),
-        #[prost(message, tag="3")]
+        #[prost(message, tag = "3")]
         Exec(super::ExecProbe),
-        #[prost(message, tag="4")]
+        #[prost(message, tag = "4")]
         Grpc(super::GrpcProbe),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HttpGetProbe {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub path: ::prost::alloc::string::String,
-    #[prost(uint32, tag="2")]
+    #[prost(uint32, tag = "2")]
     pub port: u32,
     /// "HTTP" or "HTTPS"
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub scheme: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag="4")]
+    #[prost(message, repeated, tag = "4")]
     pub http_headers: ::prost::alloc::vec::Vec<HttpHeader>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct HttpHeader {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub value: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TcpSocketProbe {
-    #[prost(uint32, tag="1")]
+    #[prost(uint32, tag = "1")]
     pub port: u32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExecProbe {
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, repeated, tag = "1")]
     pub command: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GrpcProbe {
-    #[prost(uint32, tag="1")]
+    #[prost(uint32, tag = "1")]
     pub port: u32,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub service: ::prost::alloc::string::String,
 }
 /// ---------------------------------------------------------------------------
@@ -1032,25 +1027,25 @@ pub struct GrpcProbe {
 /// ---------------------------------------------------------------------------
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Lifecycle {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub post_start: ::core::option::Option<LifecycleHandler>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub pre_stop: ::core::option::Option<LifecycleHandler>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct LifecycleHandler {
-    #[prost(oneof="lifecycle_handler::Action", tags="1, 2, 3")]
+    #[prost(oneof = "lifecycle_handler::Action", tags = "1, 2, 3")]
     pub action: ::core::option::Option<lifecycle_handler::Action>,
 }
 /// Nested message and enum types in `LifecycleHandler`.
 pub mod lifecycle_handler {
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Action {
-        #[prost(message, tag="1")]
+        #[prost(message, tag = "1")]
         Exec(super::ExecProbe),
-        #[prost(message, tag="2")]
+        #[prost(message, tag = "2")]
         HttpGet(super::HttpGetProbe),
-        #[prost(message, tag="3")]
+        #[prost(message, tag = "3")]
         TcpSocket(super::TcpSocketProbe),
     }
 }
@@ -1059,51 +1054,51 @@ pub mod lifecycle_handler {
 /// ---------------------------------------------------------------------------
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ContainerSecurityContext {
-    #[prost(bool, tag="1")]
+    #[prost(bool, tag = "1")]
     pub run_as_non_root: bool,
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag = "2")]
     pub run_as_user: i64,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub run_as_group: i64,
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag = "4")]
     pub read_only_root_filesystem: bool,
-    #[prost(bool, tag="5")]
+    #[prost(bool, tag = "5")]
     pub privileged: bool,
-    #[prost(bool, tag="6")]
+    #[prost(bool, tag = "6")]
     pub allow_privilege_escalation: bool,
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag = "7")]
     pub capabilities: ::core::option::Option<Capabilities>,
     /// SELinux options (optional).
-    #[prost(string, tag="8")]
+    #[prost(string, tag = "8")]
     pub se_linux_type: ::prost::alloc::string::String,
     /// Seccomp profile: "RuntimeDefault", "Unconfined", or a localhost path.
-    #[prost(string, tag="9")]
+    #[prost(string, tag = "9")]
     pub seccomp_profile: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Capabilities {
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, repeated, tag = "1")]
     pub add: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="2")]
+    #[prost(string, repeated, tag = "2")]
     pub drop: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PodSecurityContext {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub run_as_user: i64,
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag = "2")]
     pub run_as_group: i64,
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub run_as_non_root: bool,
-    #[prost(int64, tag="4")]
+    #[prost(int64, tag = "4")]
     pub fs_group: i64,
     /// Supplemental groups for all containers.
-    #[prost(int64, repeated, tag="5")]
+    #[prost(int64, repeated, tag = "5")]
     pub supplemental_groups: ::prost::alloc::vec::Vec<i64>,
     /// "OnRootMismatch" or "Always".
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub fs_group_change_policy: ::prost::alloc::string::String,
-    #[prost(string, tag="7")]
+    #[prost(string, tag = "7")]
     pub seccomp_profile: ::prost::alloc::string::String,
 }
 /// ---------------------------------------------------------------------------
@@ -1112,41 +1107,41 @@ pub struct PodSecurityContext {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ScalingPolicy {
     /// Fixed replica count (used when autoscaling is not configured).
-    #[prost(uint32, tag="1")]
+    #[prost(uint32, tag = "1")]
     pub replicas: u32,
     /// Optional horizontal autoscaler.
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub autoscaling: ::core::option::Option<AutoscalingPolicy>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AutoscalingPolicy {
-    #[prost(uint32, tag="1")]
+    #[prost(uint32, tag = "1")]
     pub min_replicas: u32,
-    #[prost(uint32, tag="2")]
+    #[prost(uint32, tag = "2")]
     pub max_replicas: u32,
     /// Target average CPU utilisation percentage (e.g. 70).
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag = "3")]
     pub target_cpu_utilization_percent: u32,
     /// Target average memory utilisation percentage.
-    #[prost(uint32, tag="4")]
+    #[prost(uint32, tag = "4")]
     pub target_memory_utilization_percent: u32,
     /// Custom metrics (e.g. queue depth, RPS).
-    #[prost(message, repeated, tag="5")]
+    #[prost(message, repeated, tag = "5")]
     pub custom_metrics: ::prost::alloc::vec::Vec<CustomMetric>,
     /// Scale-down stabilisation window.
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag = "6")]
     pub scale_down_stabilization: ::core::option::Option<::prost_types::Duration>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CustomMetric {
     /// Metric name as exposed by the metrics adapter.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     /// One of "Value", "AverageValue", "Utilization".
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub target_type: ::prost::alloc::string::String,
     /// Target threshold (interpretation depends on target_type).
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub target_value: ::prost::alloc::string::String,
 }
 /// ---------------------------------------------------------------------------
@@ -1155,17 +1150,17 @@ pub struct CustomMetric {
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateStrategy {
     /// "RollingUpdate" (default) or "Recreate".
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub r#type: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub rolling_update: ::core::option::Option<RollingUpdateConfig>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RollingUpdateConfig {
     /// Absolute number or percentage (e.g. "1", "25%").
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub max_unavailable: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub max_surge: ::prost::alloc::string::String,
 }
 /// ---------------------------------------------------------------------------
@@ -1174,187 +1169,191 @@ pub struct RollingUpdateConfig {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PodConfig {
     /// Service account name for RBAC / workload identity.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub service_account_name: ::prost::alloc::string::String,
     /// Restart policy: "Always" (default for services), "OnFailure", "Never".
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub restart_policy: ::prost::alloc::string::String,
     /// Graceful shutdown window.
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag = "3")]
     pub termination_grace_period_seconds: u32,
     /// DNS policy: "ClusterFirst" (default), "Default", "None".
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub dns_policy: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="5")]
+    #[prost(message, optional, tag = "5")]
     pub dns_config: ::core::option::Option<PodDnsConfig>,
     /// Host networking (rare, but needed for some infra workloads).
-    #[prost(bool, tag="6")]
+    #[prost(bool, tag = "6")]
     pub host_network: bool,
     /// Node scheduling.
-    #[prost(map="string, string", tag="7")]
-    pub node_selector: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(message, repeated, tag="8")]
+    #[prost(map = "string, string", tag = "7")]
+    pub node_selector:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, repeated, tag = "8")]
     pub tolerations: ::prost::alloc::vec::Vec<Toleration>,
-    #[prost(message, optional, tag="9")]
+    #[prost(message, optional, tag = "9")]
     pub affinity: ::core::option::Option<Affinity>,
     /// Topology spread constraints for HA.
-    #[prost(message, repeated, tag="10")]
+    #[prost(message, repeated, tag = "10")]
     pub topology_spread_constraints: ::prost::alloc::vec::Vec<TopologySpreadConstraint>,
     /// Image pull secrets.
-    #[prost(string, repeated, tag="11")]
+    #[prost(string, repeated, tag = "11")]
     pub image_pull_secrets: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Pod-level security context.
-    #[prost(message, optional, tag="12")]
+    #[prost(message, optional, tag = "12")]
     pub security_context: ::core::option::Option<PodSecurityContext>,
     /// Priority class name for preemption.
-    #[prost(string, tag="13")]
+    #[prost(string, tag = "13")]
     pub priority_class_name: ::prost::alloc::string::String,
     /// Runtime class (e.g. "gvisor", "kata").
-    #[prost(string, tag="14")]
+    #[prost(string, tag = "14")]
     pub runtime_class_name: ::prost::alloc::string::String,
     /// Annotations passed to the pod template (not the workload resource).
-    #[prost(map="string, string", tag="15")]
-    pub annotations: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "15")]
+    pub annotations:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Labels passed to the pod template.
-    #[prost(map="string, string", tag="16")]
-    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "16")]
+    pub labels:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PodDnsConfig {
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, repeated, tag = "1")]
     pub nameservers: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="2")]
+    #[prost(string, repeated, tag = "2")]
     pub searches: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag = "3")]
     pub options: ::prost::alloc::vec::Vec<DnsOption>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DnsOption {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub value: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Toleration {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub key: ::prost::alloc::string::String,
     /// "Equal" or "Exists".
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub operator: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub value: ::prost::alloc::string::String,
     /// "NoSchedule", "PreferNoSchedule", "NoExecute".
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub effect: ::prost::alloc::string::String,
     /// Toleration seconds for NoExecute.
-    #[prost(int64, tag="5")]
+    #[prost(int64, tag = "5")]
     pub toleration_seconds: i64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Affinity {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub node_affinity: ::core::option::Option<NodeAffinity>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub pod_affinity: ::core::option::Option<PodAffinity>,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag = "3")]
     pub pod_anti_affinity: ::core::option::Option<PodAntiAffinity>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct NodeAffinity {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub preferred: ::prost::alloc::vec::Vec<PreferredSchedulingTerm>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub required: ::core::option::Option<NodeSelector>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PreferredSchedulingTerm {
-    #[prost(int32, tag="1")]
+    #[prost(int32, tag = "1")]
     pub weight: i32,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub preference: ::core::option::Option<NodeSelectorTerm>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct NodeSelector {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub terms: ::prost::alloc::vec::Vec<NodeSelectorTerm>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct NodeSelectorTerm {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub match_expressions: ::prost::alloc::vec::Vec<NodeSelectorRequirement>,
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag = "2")]
     pub match_fields: ::prost::alloc::vec::Vec<NodeSelectorRequirement>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct NodeSelectorRequirement {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub key: ::prost::alloc::string::String,
     /// "In", "NotIn", "Exists", "DoesNotExist", "Gt", "Lt".
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub operator: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub values: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PodAffinity {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub preferred: ::prost::alloc::vec::Vec<WeightedPodAffinityTerm>,
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag = "2")]
     pub required: ::prost::alloc::vec::Vec<PodAffinityTerm>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PodAntiAffinity {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub preferred: ::prost::alloc::vec::Vec<WeightedPodAffinityTerm>,
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag = "2")]
     pub required: ::prost::alloc::vec::Vec<PodAffinityTerm>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct WeightedPodAffinityTerm {
-    #[prost(int32, tag="1")]
+    #[prost(int32, tag = "1")]
     pub weight: i32,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub term: ::core::option::Option<PodAffinityTerm>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PodAffinityTerm {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub label_selector: ::core::option::Option<LabelSelector>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub topology_key: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub namespaces: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct LabelSelector {
-    #[prost(map="string, string", tag="1")]
-    pub match_labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(message, repeated, tag="2")]
+    #[prost(map = "string, string", tag = "1")]
+    pub match_labels:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, repeated, tag = "2")]
     pub match_expressions: ::prost::alloc::vec::Vec<LabelSelectorRequirement>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct LabelSelectorRequirement {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub key: ::prost::alloc::string::String,
     /// "In", "NotIn", "Exists", "DoesNotExist".
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub operator: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub values: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TopologySpreadConstraint {
     /// Max difference in spread (e.g. 1 for even distribution).
-    #[prost(int32, tag="1")]
+    #[prost(int32, tag = "1")]
     pub max_skew: i32,
     /// "zone", "hostname", or any node label.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub topology_key: ::prost::alloc::string::String,
     /// "DoNotSchedule" or "ScheduleAnyway".
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub when_unsatisfiable: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag = "4")]
     pub label_selector: ::core::option::Option<LabelSelector>,
 }
 /// ===========================================================================
@@ -1364,50 +1363,51 @@ pub struct TopologySpreadConstraint {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ServiceSpec {
     /// The ContainerServiceSpec name this service fronts.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub target: ::prost::alloc::string::String,
     /// Service type: "ClusterIP" (default), "NodePort", "LoadBalancer", "Headless".
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub r#type: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag = "3")]
     pub ports: ::prost::alloc::vec::Vec<ServicePort>,
     /// Session affinity: "None" (default), "ClientIP".
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub session_affinity: ::prost::alloc::string::String,
     /// Optional: expose this service externally via the gateway.
     /// Setting this is equivalent to creating a separate RouteSpec.
     /// Allows combining Service + Route into one resource for simpler configs.
-    #[prost(message, optional, tag="5")]
+    #[prost(message, optional, tag = "5")]
     pub inline_route: ::core::option::Option<InlineRoute>,
     /// Extra annotations on the Service object (e.g. cloud LB configs).
-    #[prost(map="string, string", tag="6")]
-    pub annotations: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "6")]
+    pub annotations:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ServicePort {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(uint32, tag="2")]
+    #[prost(uint32, tag = "2")]
     pub port: u32,
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag = "3")]
     pub target_port: u32,
     /// TCP, UDP, SCTP
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub protocol: ::prost::alloc::string::String,
     /// Only for NodePort type.
-    #[prost(uint32, tag="5")]
+    #[prost(uint32, tag = "5")]
     pub node_port: u32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct InlineRoute {
     /// Hostname(s) to match (e.g. "api.example.com").
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, repeated, tag = "1")]
     pub hostnames: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Path matching rules.  If empty, matches all paths to the first port.
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag = "2")]
     pub rules: ::prost::alloc::vec::Vec<RouteRule>,
     /// TLS configuration.
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag = "3")]
     pub tls: ::core::option::Option<RouteTls>,
 }
 /// ===========================================================================
@@ -1417,167 +1417,171 @@ pub struct InlineRoute {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RouteSpec {
     /// The ServiceSpec name this route targets.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub target_service: ::prost::alloc::string::String,
     /// Hostname(s) this route matches.
-    #[prost(string, repeated, tag="2")]
+    #[prost(string, repeated, tag = "2")]
     pub hostnames: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Matching & routing rules.
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag = "3")]
     pub rules: ::prost::alloc::vec::Vec<RouteRule>,
     /// TLS termination config.
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag = "4")]
     pub tls: ::core::option::Option<RouteTls>,
     /// Which gateway to attach to (empty = cluster default).
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub gateway_ref: ::prost::alloc::string::String,
     /// Route priority / ordering.
-    #[prost(int32, tag="6")]
+    #[prost(int32, tag = "6")]
     pub priority: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RouteRule {
     /// Path matching.
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub matches: ::prost::alloc::vec::Vec<RouteMatch>,
     /// Backend(s) traffic is sent to.
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag = "2")]
     pub backends: ::prost::alloc::vec::Vec<RouteBackend>,
     /// Request / response filters applied to this rule.
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag = "3")]
     pub filters: ::prost::alloc::vec::Vec<RouteFilter>,
     /// Timeout for the entire request.
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag = "4")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RouteMatch {
     /// Path match.
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub path: ::core::option::Option<PathMatch>,
     /// Header conditions.
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag = "2")]
     pub headers: ::prost::alloc::vec::Vec<HeaderMatch>,
     /// Query parameter conditions.
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag = "3")]
     pub query_params: ::prost::alloc::vec::Vec<QueryParamMatch>,
     /// HTTP method constraint.
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub method: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PathMatch {
     /// "Exact", "PathPrefix" (default), "RegularExpression".
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub r#type: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub value: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct HeaderMatch {
     /// "Exact" (default), "RegularExpression".
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub r#type: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub value: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct QueryParamMatch {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub r#type: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub value: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RouteBackend {
     /// Service name.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub service: ::prost::alloc::string::String,
     /// Port on the backend service.
-    #[prost(uint32, tag="2")]
+    #[prost(uint32, tag = "2")]
     pub port: u32,
     /// Traffic weight for canary / blue-green (1-100).
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag = "3")]
     pub weight: u32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RouteFilter {
-    #[prost(oneof="route_filter::Filter", tags="1, 2, 3, 4, 5")]
+    #[prost(oneof = "route_filter::Filter", tags = "1, 2, 3, 4, 5")]
     pub filter: ::core::option::Option<route_filter::Filter>,
 }
 /// Nested message and enum types in `RouteFilter`.
 pub mod route_filter {
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Filter {
-        #[prost(message, tag="1")]
+        #[prost(message, tag = "1")]
         RequestHeaderModifier(super::RequestHeaderModifier),
-        #[prost(message, tag="2")]
+        #[prost(message, tag = "2")]
         ResponseHeaderModifier(super::ResponseHeaderModifier),
-        #[prost(message, tag="3")]
+        #[prost(message, tag = "3")]
         RequestRedirect(super::RequestRedirect),
-        #[prost(message, tag="4")]
+        #[prost(message, tag = "4")]
         UrlRewrite(super::UrlRewrite),
-        #[prost(message, tag="5")]
+        #[prost(message, tag = "5")]
         RequestMirror(super::RequestMirror),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RequestHeaderModifier {
-    #[prost(map="string, string", tag="1")]
-    pub set: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(map="string, string", tag="2")]
-    pub add: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="3")]
+    #[prost(map = "string, string", tag = "1")]
+    pub set:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "2")]
+    pub add:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(string, repeated, tag = "3")]
     pub remove: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ResponseHeaderModifier {
-    #[prost(map="string, string", tag="1")]
-    pub set: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(map="string, string", tag="2")]
-    pub add: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="3")]
+    #[prost(map = "string, string", tag = "1")]
+    pub set:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "2")]
+    pub add:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(string, repeated, tag = "3")]
     pub remove: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RequestRedirect {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub scheme: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub hostname: ::prost::alloc::string::String,
-    #[prost(uint32, tag="3")]
+    #[prost(uint32, tag = "3")]
     pub port: u32,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub path: ::prost::alloc::string::String,
     /// 301, 302, etc.
-    #[prost(uint32, tag="5")]
+    #[prost(uint32, tag = "5")]
     pub status_code: u32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UrlRewrite {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub hostname: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub path: ::core::option::Option<PathMatch>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RequestMirror {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub service: ::prost::alloc::string::String,
-    #[prost(uint32, tag="2")]
+    #[prost(uint32, tag = "2")]
     pub port: u32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RouteTls {
     /// "Terminate" (default) or "Passthrough".
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub mode: ::prost::alloc::string::String,
     /// Secret name containing the TLS certificate.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub certificate_ref: ::prost::alloc::string::String,
 }
 /// ===========================================================================
@@ -1586,36 +1590,36 @@ pub struct RouteTls {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CronJobSpec {
     /// Cron schedule (e.g. "*/5 * * * *").
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub schedule: ::prost::alloc::string::String,
     /// Timezone (e.g. "Europe/Copenhagen").  Empty = UTC.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub timezone: ::prost::alloc::string::String,
     /// Container that runs the job.
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag = "3")]
     pub container: ::core::option::Option<Container>,
     /// Volumes for the job pod.
-    #[prost(message, repeated, tag="4")]
+    #[prost(message, repeated, tag = "4")]
     pub volumes: ::prost::alloc::vec::Vec<Volume>,
     /// Job-level config.
-    #[prost(message, optional, tag="5")]
+    #[prost(message, optional, tag = "5")]
     pub job_config: ::core::option::Option<JobConfig>,
     /// Pod-level config (node selector, tolerations, etc.).
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag = "6")]
     pub pod_config: ::core::option::Option<PodConfig>,
     /// "Allow", "Forbid", "Replace".
-    #[prost(string, tag="7")]
+    #[prost(string, tag = "7")]
     pub concurrency_policy: ::prost::alloc::string::String,
     /// Number of successful/failed jobs to retain.
-    #[prost(uint32, tag="8")]
+    #[prost(uint32, tag = "8")]
     pub successful_jobs_history_limit: u32,
-    #[prost(uint32, tag="9")]
+    #[prost(uint32, tag = "9")]
     pub failed_jobs_history_limit: u32,
     /// Suspend the cron schedule.
-    #[prost(bool, tag="10")]
+    #[prost(bool, tag = "10")]
     pub suspend: bool,
     /// Deadline in seconds for starting the job if it missed its schedule.
-    #[prost(int64, tag="11")]
+    #[prost(int64, tag = "11")]
     pub starting_deadline_seconds: i64,
 }
 /// ===========================================================================
@@ -1624,40 +1628,40 @@ pub struct CronJobSpec {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct JobSpec {
     /// Container that runs the job.
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub container: ::core::option::Option<Container>,
     /// Volumes for the job pod.
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag = "2")]
     pub volumes: ::prost::alloc::vec::Vec<Volume>,
     /// Job-level config.
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag = "3")]
     pub job_config: ::core::option::Option<JobConfig>,
     /// Pod-level config.
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag = "4")]
     pub pod_config: ::core::option::Option<PodConfig>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct JobConfig {
     /// Number of times the job should complete successfully.
-    #[prost(uint32, tag="1")]
+    #[prost(uint32, tag = "1")]
     pub completions: u32,
     /// Max parallel pods.
-    #[prost(uint32, tag="2")]
+    #[prost(uint32, tag = "2")]
     pub parallelism: u32,
     /// "NonIndexed" (default) or "Indexed".
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub completion_mode: ::prost::alloc::string::String,
     /// Number of retries before marking failed.
-    #[prost(uint32, tag="4")]
+    #[prost(uint32, tag = "4")]
     pub backoff_limit: u32,
     /// Active deadline (seconds) — job killed if it runs longer.
-    #[prost(int64, tag="5")]
+    #[prost(int64, tag = "5")]
     pub active_deadline_seconds: i64,
     /// TTL after finished (seconds) — auto-cleanup.
-    #[prost(int64, tag="6")]
+    #[prost(int64, tag = "6")]
     pub ttl_seconds_after_finished: i64,
     /// Restart policy: "OnFailure" (default) or "Never".
-    #[prost(string, tag="7")]
+    #[prost(string, tag = "7")]
     pub restart_policy: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
@@ -1699,8 +1703,7 @@ impl RolloutStatus {
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetStatusRequest {
-}
+pub struct GetStatusRequest {}
 /// Liveness plus build provenance, so "is this server running my fix?" is
 /// answerable without shelling into it.
 ///
@@ -1710,14 +1713,14 @@ pub struct GetStatusRequest {
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetStatusResponse {
     /// Semver of the server binary (its crate version).
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub version: ::prost::alloc::string::String,
     /// Short git commit the binary was built from. Empty for a local build that
     /// was not stamped.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub commit: ::prost::alloc::string::String,
     /// RFC 3339 build timestamp. Empty when unstamped.
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub build_time: ::prost::alloc::string::String,
 }
 // ── Report (agent → server) ────────────────────────────────────────
@@ -1726,40 +1729,39 @@ pub struct GetStatusResponse {
 pub struct ReportHealthRequest {
     /// Release identity — how the agent correlates observed resources
     /// back to a forest release (e.g. from labels/annotations/tags).
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub release_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub project: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub environment: ::prost::alloc::string::String,
     /// The observed health state
-    #[prost(message, optional, tag="10")]
+    #[prost(message, optional, tag = "10")]
     pub observation: ::core::option::Option<HealthObservation>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ReportHealthResponse {
-}
+pub struct ReportHealthResponse {}
 // ── Observation model (infrastructure-agnostic) ────────────────────
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HealthObservation {
     /// Individual observed resources
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub resources: ::prost::alloc::vec::Vec<ResourceHealth>,
     /// When this observation was taken (RFC 3339)
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub observed_at: ::prost::alloc::string::String,
     /// Overall computed status for this observation
-    #[prost(enumeration="HealthStatus", tag="3")]
+    #[prost(enumeration = "HealthStatus", tag = "3")]
     pub status: i32,
     /// Human-readable summary message
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub message: ::prost::alloc::string::String,
 }
 /// A single observed resource's health.
@@ -1771,66 +1773,67 @@ pub struct ResourceHealth {
     /// Resource identification
     ///
     /// e.g. "Deployment", "Pod", "Service", "VM"
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub kind: ::prost::alloc::string::String,
     /// resource name
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
     /// optional grouping (k8s namespace, region, etc.)
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub namespace: ::prost::alloc::string::String,
     /// Health state
-    #[prost(enumeration="HealthStatus", tag="4")]
+    #[prost(enumeration = "HealthStatus", tag = "4")]
     pub status: i32,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub message: ::prost::alloc::string::String,
     /// Optional key-value properties for resource-specific data.
     /// Examples: {"desired_replicas": "3", "ready_replicas": "2"},
     ///            {"last_applied_revision": "main@sha1:abc123"}
-    #[prost(map="string, string", tag="10")]
-    pub properties: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "10")]
+    pub properties:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 // ── Query (CLI/UI → server) ────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetReleaseHealthRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_intent_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetReleaseHealthResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub destinations: ::prost::alloc::vec::Vec<DestinationHealth>,
-    #[prost(enumeration="HealthStatus", tag="2")]
+    #[prost(enumeration = "HealthStatus", tag = "2")]
     pub aggregate_status: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DestinationHealth {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub environment: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag = "3")]
     pub latest_observation: ::core::option::Option<HealthObservation>,
-    #[prost(enumeration="HealthStatus", tag="4")]
+    #[prost(enumeration = "HealthStatus", tag = "4")]
     pub status: i32,
 }
 // ── Streaming ──────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WatchReleaseHealthRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_intent_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReleaseHealthEvent {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub environment: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag = "3")]
     pub observation: ::core::option::Option<HealthObservation>,
-    #[prost(enumeration="HealthStatus", tag="4")]
+    #[prost(enumeration = "HealthStatus", tag = "4")]
     pub status: i32,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
@@ -1875,119 +1878,118 @@ impl HealthStatus {
 /// Integrations decide which fields to use.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReleaseContext {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub slug: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub project: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub artifact_id: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="7")]
+    #[prost(string, tag = "7")]
     pub environment: ::prost::alloc::string::String,
     /// Source info
-    #[prost(string, tag="8")]
+    #[prost(string, tag = "8")]
     pub source_username: ::prost::alloc::string::String,
-    #[prost(string, tag="9")]
+    #[prost(string, tag = "9")]
     pub source_email: ::prost::alloc::string::String,
-    #[prost(string, tag="17")]
+    #[prost(string, tag = "17")]
     pub source_user_id: ::prost::alloc::string::String,
     /// Git ref
-    #[prost(string, tag="10")]
+    #[prost(string, tag = "10")]
     pub commit_sha: ::prost::alloc::string::String,
-    #[prost(string, tag="11")]
+    #[prost(string, tag = "11")]
     pub commit_branch: ::prost::alloc::string::String,
     /// Artifact context
-    #[prost(string, tag="12")]
+    #[prost(string, tag = "12")]
     pub context_title: ::prost::alloc::string::String,
-    #[prost(string, tag="13")]
+    #[prost(string, tag = "13")]
     pub context_description: ::prost::alloc::string::String,
-    #[prost(string, tag="14")]
+    #[prost(string, tag = "14")]
     pub context_web: ::prost::alloc::string::String,
     /// Error info (populated on failure)
-    #[prost(string, tag="15")]
+    #[prost(string, tag = "15")]
     pub error_message: ::prost::alloc::string::String,
     /// Number of destinations involved
-    #[prost(int32, tag="16")]
+    #[prost(int32, tag = "16")]
     pub destination_count: i32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Notification {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
-    #[prost(enumeration="NotificationType", tag="2")]
+    #[prost(enumeration = "NotificationType", tag = "2")]
     pub notification_type: i32,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub title: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub body: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub project: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag = "7")]
     pub release_context: ::core::option::Option<ReleaseContext>,
-    #[prost(string, tag="8")]
+    #[prost(string, tag = "8")]
     pub created_at: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct NotificationPreference {
-    #[prost(enumeration="NotificationType", tag="1")]
+    #[prost(enumeration = "NotificationType", tag = "1")]
     pub notification_type: i32,
-    #[prost(enumeration="NotificationChannel", tag="2")]
+    #[prost(enumeration = "NotificationChannel", tag = "2")]
     pub channel: i32,
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub enabled: bool,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetNotificationPreferencesRequest {
-}
+pub struct GetNotificationPreferencesRequest {}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetNotificationPreferencesResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub preferences: ::prost::alloc::vec::Vec<NotificationPreference>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SetNotificationPreferenceRequest {
-    #[prost(enumeration="NotificationType", tag="1")]
+    #[prost(enumeration = "NotificationType", tag = "1")]
     pub notification_type: i32,
-    #[prost(enumeration="NotificationChannel", tag="2")]
+    #[prost(enumeration = "NotificationChannel", tag = "2")]
     pub channel: i32,
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub enabled: bool,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SetNotificationPreferenceResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub preference: ::core::option::Option<NotificationPreference>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListenNotificationsRequest {
-    #[prost(string, optional, tag="1")]
+    #[prost(string, optional, tag = "1")]
     pub organisation: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="2")]
+    #[prost(string, optional, tag = "2")]
     pub project: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListNotificationsRequest {
-    #[prost(int32, tag="1")]
+    #[prost(int32, tag = "1")]
     pub page_size: i32,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub page_token: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag = "3")]
     pub organisation: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub project: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListNotificationsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub notifications: ::prost::alloc::vec::Vec<Notification>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub next_page_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
@@ -2057,139 +2059,139 @@ impl NotificationChannel {
 /// Opaque bearer tokens issued to an OAuth app on a user's behalf.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct OAuthTokens {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub access_token: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub refresh_token: ::prost::alloc::string::String,
     /// always "bearer"
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub token_type: ::prost::alloc::string::String,
     /// access-token lifetime
-    #[prost(int64, tag="4")]
+    #[prost(int64, tag = "4")]
     pub expires_in_seconds: i64,
     /// granted scopes
-    #[prost(string, repeated, tag="5")]
+    #[prost(string, repeated, tag = "5")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// OIDC id_token (JWT, HS256 signed with the client_secret). Present only when
     /// the `openid` scope was granted; empty otherwise.
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub id_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct LookupOAuthClientRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub client_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct LookupOAuthClientResponse {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub app_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub description: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub homepage_url: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="6")]
+    #[prost(string, repeated, tag = "6")]
     pub redirect_uris: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="7")]
+    #[prost(string, repeated, tag = "7")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateOAuthAuthorizationCodeRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub client_id: ::prost::alloc::string::String,
     /// the consenting user (resolved by Forage's session)
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub redirect_uri: ::prost::alloc::string::String,
     /// consented scopes (subset of app scopes)
-    #[prost(string, repeated, tag="4")]
+    #[prost(string, repeated, tag = "4")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// PKCE (optional)
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub code_challenge: ::prost::alloc::string::String,
     /// "S256" | "plain" (optional)
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub code_challenge_method: ::prost::alloc::string::String,
     /// OIDC nonce (optional) — echoed into the id_token
-    #[prost(string, tag="7")]
+    #[prost(string, tag = "7")]
     pub nonce: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateOAuthAuthorizationCodeResponse {
     /// raw single-use code
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub code: ::prost::alloc::string::String,
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag = "2")]
     pub expires_in_seconds: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExchangeOAuthCodeRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub client_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub client_secret: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub code: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub redirect_uri: ::prost::alloc::string::String,
     /// PKCE (optional)
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub code_verifier: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExchangeOAuthCodeResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub tokens: ::core::option::Option<OAuthTokens>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct IssueClientCredentialsTokenRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub client_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub client_secret: ::prost::alloc::string::String,
     /// Subset of the app's registered scopes. Empty means all of them.
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct IssueClientCredentialsTokenResponse {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub access_token: ::prost::alloc::string::String,
     /// always "bearer"
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub token_type: ::prost::alloc::string::String,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub expires_in_seconds: i64,
-    #[prost(string, repeated, tag="4")]
+    #[prost(string, repeated, tag = "4")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct IntrospectClientTokenRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub access_token: ::prost::alloc::string::String,
 }
 /// Empty `app_id` means the token is not live — unknown, expired or
 /// revoked, deliberately indistinguishable to the caller.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct IntrospectClientTokenResponse {
-    #[prost(bool, tag="1")]
+    #[prost(bool, tag = "1")]
     pub active: bool,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub app_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="4")]
+    #[prost(string, repeated, tag = "4")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetOAuthUserinfoRequest {
     /// raw OAuth access token presented by the client
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub access_token: ::prost::alloc::string::String,
 }
 /// User claims, populated according to the token's granted scopes. `sub` is
@@ -2198,91 +2200,91 @@ pub struct GetOAuthUserinfoRequest {
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct OAuthUserinfo {
     /// user_id (always present)
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub sub: ::prost::alloc::string::String,
     /// scope: profile
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub username: ::prost::alloc::string::String,
     /// scope: profile
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub profile_picture_url: ::prost::alloc::string::String,
     /// scope: email (primary verified address)
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub email: ::prost::alloc::string::String,
     /// scope: email (all verified addresses)
-    #[prost(string, repeated, tag="5")]
+    #[prost(string, repeated, tag = "5")]
     pub emails: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// granted scopes
-    #[prost(string, repeated, tag="6")]
+    #[prost(string, repeated, tag = "6")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetOAuthUserinfoResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub userinfo: ::core::option::Option<OAuthUserinfo>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RefreshOAuthTokenRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub client_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub client_secret: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub refresh_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RefreshOAuthTokenResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub tokens: ::core::option::Option<OAuthTokens>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RevokeOAuthGrantRequest {
     /// resolved by Forage's session (the consenting user)
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub app_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RevokeOAuthGrantResponse {
-    #[prost(uint32, tag="1")]
+    #[prost(uint32, tag = "1")]
     pub revoked_count: u32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListOAuthGrantsRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
 }
 /// A single authorized application from the resource owner's perspective.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct OAuthGrant {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub app_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
     /// union of granted scopes across live tokens
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// earliest live token
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag = "4")]
     pub authorized_at: ::core::option::Option<::prost_types::Timestamp>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListOAuthGrantsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub grants: ::prost::alloc::vec::Vec<OAuthGrant>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetOAuthConsentRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub client_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub user_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetOAuthConsentResponse {
     /// Scopes the user has already consented to for this client (empty = none).
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, repeated, tag = "1")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// Public-safe representation of an OAuth application. Never carries the
@@ -2290,607 +2292,328 @@ pub struct GetOAuthConsentResponse {
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct OAuthApp {
     /// UUID
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub app_id: ::prost::alloc::string::String,
     /// UUID of the owning org
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub description: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub homepage_url: ::prost::alloc::string::String,
     /// public client identifier
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub client_id: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="7")]
+    #[prost(string, repeated, tag = "7")]
     pub redirect_uris: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// scopes this app is permitted to request
-    #[prost(string, repeated, tag="8")]
+    #[prost(string, repeated, tag = "8")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// OAuth grants this app may use: "authorization_code" and/or
     /// "client_credentials". Apps predating machine-to-machine support
     /// carry "authorization_code" alone.
-    #[prost(string, repeated, tag="12")]
+    #[prost(string, repeated, tag = "12")]
     pub grant_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// UUID of the creating user
-    #[prost(string, tag="9")]
+    #[prost(string, tag = "9")]
     pub created_by: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="10")]
+    #[prost(message, optional, tag = "10")]
     pub created_at: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(message, optional, tag="11")]
+    #[prost(message, optional, tag = "11")]
     pub updated_at: ::core::option::Option<::prost_types::Timestamp>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateOAuthAppRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub description: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub homepage_url: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="5")]
+    #[prost(string, repeated, tag = "5")]
     pub redirect_uris: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="6")]
+    #[prost(string, repeated, tag = "6")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Empty defaults to \["authorization_code"\], so an app only becomes
     /// machine-capable by asking.
-    #[prost(string, repeated, tag="7")]
+    #[prost(string, repeated, tag = "7")]
     pub grant_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateOAuthAppResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub app: ::core::option::Option<OAuthApp>,
     /// The raw client_secret, only returned on creation.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub client_secret: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListOAuthAppsRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListOAuthAppsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub apps: ::prost::alloc::vec::Vec<OAuthApp>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetOAuthAppRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub app_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetOAuthAppResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub app: ::core::option::Option<OAuthApp>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateOAuthAppRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub app_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub description: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub homepage_url: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="6")]
+    #[prost(string, repeated, tag = "6")]
     pub redirect_uris: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="7")]
+    #[prost(string, repeated, tag = "7")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Empty defaults to \["authorization_code"\], matching create. Removing
     /// a grant takes effect immediately: in-flight codes and existing
     /// refresh tokens for that flow stop working.
-    #[prost(string, repeated, tag="8")]
+    #[prost(string, repeated, tag = "8")]
     pub grant_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateOAuthAppResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub app: ::core::option::Option<OAuthApp>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RotateOAuthAppSecretRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub app_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RotateOAuthAppSecretResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub app: ::core::option::Option<OAuthApp>,
     /// The new raw client_secret, only returned on rotation.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub client_secret: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteOAuthAppRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub app_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeleteOAuthAppResponse {
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct Organisation {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
-    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct CreateOrganisationRequest {
-    #[prost(string, tag="1")]
-    pub name: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct CreateOrganisationResponse {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetOrganisationRequest {
-    #[prost(oneof="get_organisation_request::Identifier", tags="1, 2")]
-    pub identifier: ::core::option::Option<get_organisation_request::Identifier>,
-}
-/// Nested message and enum types in `GetOrganisationRequest`.
-pub mod get_organisation_request {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
-    pub enum Identifier {
-        #[prost(string, tag="1")]
-        OrganisationId(::prost::alloc::string::String),
-        #[prost(string, tag="2")]
-        Name(::prost::alloc::string::String),
-    }
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetOrganisationResponse {
-    #[prost(message, optional, tag="1")]
-    pub organisation: ::core::option::Option<Organisation>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct SearchOrganisationsRequest {
-    #[prost(string, tag="1")]
-    pub query: ::prost::alloc::string::String,
-    #[prost(int32, tag="2")]
-    pub page_size: i32,
-    #[prost(string, tag="3")]
-    pub page_token: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SearchOrganisationsResponse {
-    #[prost(message, repeated, tag="1")]
-    pub organisations: ::prost::alloc::vec::Vec<Organisation>,
-    #[prost(string, tag="2")]
-    pub next_page_token: ::prost::alloc::string::String,
-    #[prost(int32, tag="3")]
-    pub total_count: i32,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListMyOrganisationsRequest {
-    /// Optional role filter (e.g. "admin"); empty means all roles
-    #[prost(string, tag="1")]
-    pub role: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListMyOrganisationsResponse {
-    #[prost(message, repeated, tag="1")]
-    pub organisations: ::prost::alloc::vec::Vec<Organisation>,
-    /// The role the caller has in each organisation (parallel to organisations)
-    #[prost(string, repeated, tag="2")]
-    pub roles: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-}
-// -- Members ------------------------------------------------------------------
-
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OrganisationMember {
-    #[prost(string, tag="1")]
-    pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub username: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub role: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="4")]
-    pub joined_at: ::core::option::Option<::prost_types::Timestamp>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AddMemberRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub role: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AddMemberResponse {
-    #[prost(message, optional, tag="1")]
-    pub member: ::core::option::Option<OrganisationMember>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RemoveMemberRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub user_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RemoveMemberResponse {
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UpdateMemberRoleRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub role: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UpdateMemberRoleResponse {
-    #[prost(message, optional, tag="1")]
-    pub member: ::core::option::Option<OrganisationMember>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListMembersRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(int32, tag="2")]
-    pub page_size: i32,
-    #[prost(string, tag="3")]
-    pub page_token: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListMembersResponse {
-    #[prost(message, repeated, tag="1")]
-    pub members: ::prost::alloc::vec::Vec<OrganisationMember>,
-    #[prost(string, tag="2")]
-    pub next_page_token: ::prost::alloc::string::String,
-    #[prost(int32, tag="3")]
-    pub total_count: i32,
-}
-// -- Allowed domain auto-invite (DATA-252) ------------------------------------
-
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AllowedDomain {
-    #[prost(string, tag="1")]
-    pub domain: ::prost::alloc::string::String,
-    /// 'auto_invite_any_verified' | 'manual_only' | 'auto_join_oauth' (v1.1).
-    #[prost(string, tag="2")]
-    pub policy: ::prost::alloc::string::String,
-    /// Surfaced to admins for v1.1 DNS TXT verification ("set TXT _forest-verify
-    /// = <token>"). v1 generates and stores but does not validate.
-    #[prost(string, tag="3")]
-    pub dns_verification_token: ::prost::alloc::string::String,
-    /// Null until DNS TXT proven. v1 ignores; v1.1 will gate auto_join_oauth.
-    #[prost(message, optional, tag="4")]
-    pub dns_verified_at: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(message, optional, tag="5")]
-    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(string, tag="6")]
-    pub created_by_user_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AddAllowedDomainRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub domain: ::prost::alloc::string::String,
-    /// Optional; defaults server-side to 'auto_invite_any_verified'.
-    #[prost(string, tag="3")]
-    pub policy: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AddAllowedDomainResponse {
-    #[prost(message, optional, tag="1")]
-    pub domain: ::core::option::Option<AllowedDomain>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListAllowedDomainsRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListAllowedDomainsResponse {
-    #[prost(message, repeated, tag="1")]
-    pub domains: ::prost::alloc::vec::Vec<AllowedDomain>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RemoveAllowedDomainRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub domain: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RemoveAllowedDomainResponse {
-    #[prost(bool, tag="1")]
-    pub removed: bool,
-}
-/// Trigger a DNS TXT lookup at `_forest-verify.<domain>` and flip the row
-/// to verified if the configured token is present (DATA-252).
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VerifyAllowedDomainRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub domain: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VerifyAllowedDomainResponse {
-    #[prost(enumeration="verify_allowed_domain_response::Status", tag="1")]
-    pub status: i32,
-}
-/// Nested message and enum types in `VerifyAllowedDomainResponse`.
-pub mod verify_allowed_domain_response {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-    #[repr(i32)]
-    pub enum Status {
-        Unspecified = 0,
-        /// freshly verified by this call
-        Verified = 1,
-        /// was already verified; no-op
-        AlreadyVerified = 2,
-        /// DNS resolved but no matching TXT was found
-        Missing = 3,
-    }
-    impl Status {
-        /// String value of the enum field names used in the ProtoBuf definition.
-        ///
-        /// The values are not transformed in any way and thus are considered stable
-        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-        pub fn as_str_name(&self) -> &'static str {
-            match self {
-                Self::Unspecified => "STATUS_UNSPECIFIED",
-                Self::Verified => "VERIFIED",
-                Self::AlreadyVerified => "ALREADY_VERIFIED",
-                Self::Missing => "MISSING",
-            }
-        }
-        /// Creates an enum from field names used in the ProtoBuf definition.
-        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-            match value {
-                "STATUS_UNSPECIFIED" => Some(Self::Unspecified),
-                "VERIFIED" => Some(Self::Verified),
-                "ALREADY_VERIFIED" => Some(Self::AlreadyVerified),
-                "MISSING" => Some(Self::Missing),
-                _ => None,
-            }
-        }
-    }
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct JoinOffer {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub organisation_name: ::prost::alloc::string::String,
-    /// The user's email domain that matched the allowlist row.
-    #[prost(string, tag="3")]
-    pub matched_domain: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListJoinOffersRequest {
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListJoinOffersResponse {
-    #[prost(message, repeated, tag="1")]
-    pub offers: ::prost::alloc::vec::Vec<JoinOffer>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AcceptJoinOfferRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AcceptJoinOfferResponse {
-    #[prost(message, optional, tag="1")]
-    pub member: ::core::option::Option<OrganisationMember>,
-}
+pub struct DeleteOAuthAppResponse {}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnnotateReleaseRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub artifact_id: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="2")]
-    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(message, optional, tag="3")]
+    #[prost(map = "string, string", tag = "2")]
+    pub metadata:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, optional, tag = "3")]
     pub source: ::core::option::Option<Source>,
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag = "4")]
     pub context: ::core::option::Option<ArtifactContext>,
-    #[prost(message, optional, tag="5")]
+    #[prost(message, optional, tag = "5")]
     pub project: ::core::option::Option<Project>,
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag = "6")]
     pub r#ref: ::core::option::Option<Ref>,
     /// When true, skip automatic trigger evaluation (no auto-release from policies).
-    #[prost(bool, tag="7")]
+    #[prost(bool, tag = "7")]
     pub annotation_only: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnnotateReleaseResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub artifact: ::core::option::Option<Artifact>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetArtifactBySlugRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub slug: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetArtifactBySlugResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub artifact: ::core::option::Option<Artifact>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetArtifactsByProjectRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetArtifactsByProjectResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub artifact: ::prost::alloc::vec::Vec<Artifact>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReleaseRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub artifact_id: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="2")]
+    #[prost(string, repeated, tag = "2")]
     pub destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub environments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(bool, tag="4")]
+    #[prost(bool, tag = "4")]
     pub force: bool,
     /// When true, use the project's release pipeline (DAG) instead of
     /// deploying directly to the specified destinations/environments.
-    #[prost(bool, tag="5")]
+    #[prost(bool, tag = "5")]
     pub use_pipeline: bool,
     /// When true, create a plan-only pipeline (single Plan stage, no deploy).
-    #[prost(bool, tag="6")]
+    #[prost(bool, tag = "6")]
     pub prepare_only: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReleaseResponse {
     /// List of release intents created (one per destination)
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub intents: ::prost::alloc::vec::Vec<ReleaseIntent>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReleaseIntent {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub environment: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WaitReleaseRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_intent_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WaitReleaseEvent {
-    #[prost(oneof="wait_release_event::Event", tags="1, 2, 3")]
+    #[prost(oneof = "wait_release_event::Event", tags = "1, 2, 3")]
     pub event: ::core::option::Option<wait_release_event::Event>,
 }
 /// Nested message and enum types in `WaitReleaseEvent`.
 pub mod wait_release_event {
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Event {
-        #[prost(message, tag="1")]
+        #[prost(message, tag = "1")]
         StatusUpdate(super::ReleaseStatusUpdate),
-        #[prost(message, tag="2")]
+        #[prost(message, tag = "2")]
         LogLine(super::ReleaseLogLine),
-        #[prost(message, tag="3")]
+        #[prost(message, tag = "3")]
         StageUpdate(super::PipelineStageUpdate),
     }
 }
 /// Streamed in WaitRelease for pipeline releases: reports stage status changes.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PipelineStageUpdate {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub stage_id: ::prost::alloc::string::String,
     /// "deploy", "wait"
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub stage_type: ::prost::alloc::string::String,
     /// PENDING, ACTIVE, SUCCEEDED, FAILED, CANCELLED
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub status: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub queued_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="5")]
+    #[prost(string, optional, tag = "5")]
     pub started_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="6")]
+    #[prost(string, optional, tag = "6")]
     pub completed_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="7")]
+    #[prost(string, optional, tag = "7")]
     pub wait_until: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="8")]
+    #[prost(string, optional, tag = "8")]
     pub error_message: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="9")]
+    #[prost(string, optional, tag = "9")]
     pub approval_status: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReleaseStatusUpdate {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub status: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReleaseLogLine {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub line: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub timestamp: ::prost::alloc::string::String,
-    #[prost(enumeration="LogChannel", tag="4")]
+    #[prost(enumeration = "LogChannel", tag = "4")]
     pub channel: i32,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetOrganisationsRequest {
-}
+pub struct GetOrganisationsRequest {}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetOrganisationsResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub organisations: ::prost::alloc::vec::Vec<OrganisationRef>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetProjectsRequest {
-    #[prost(oneof="get_projects_request::Query", tags="1")]
+    #[prost(oneof = "get_projects_request::Query", tags = "1")]
     pub query: ::core::option::Option<get_projects_request::Query>,
 }
 /// Nested message and enum types in `GetProjectsRequest`.
 pub mod get_projects_request {
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Query {
-        #[prost(message, tag="1")]
+        #[prost(message, tag = "1")]
         Organisation(super::OrganisationRef),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetProjectsResponse {
-    #[prost(string, repeated, tag="1")]
+    #[prost(string, repeated, tag = "1")]
     pub projects: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateProjectRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub project: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateProjectResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
 }
 /// Single-project lookup. `Project.readme` carries the markdown that the
 /// forage Overview renders.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetProjectRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub project: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetProjectResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
 }
 /// Update mutable fields on a project. Field-mask semantics: each
@@ -2900,217 +2623,217 @@ pub struct GetProjectResponse {
 /// trip while still permitting partial updates from other tooling.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateProjectRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub project: ::prost::alloc::string::String,
     /// Replace the project's README markdown. Max 64 KiB. Empty string is a
     /// valid value (clears the README).
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag = "3")]
     pub readme: ::core::option::Option<::prost::alloc::string::String>,
     /// Replace the project's description. Max 4096 chars. Empty allowed.
     /// See specs/features/009-project-metadata.md.
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub description: ::core::option::Option<::prost::alloc::string::String>,
     /// Replace the entire metadata blob. Per-field length caps enforced
     /// server-side. To clear all metadata, send an empty ProjectMetadata.
-    #[prost(message, optional, tag="5")]
+    #[prost(message, optional, tag = "5")]
     pub metadata: ::core::option::Option<ProjectMetadata>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateProjectResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetReleasesByActorRequest {
     /// user_id or app_id
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub actor_id: ::prost::alloc::string::String,
     /// "user" or "app"
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub actor_type: ::prost::alloc::string::String,
-    #[prost(int32, tag="3")]
+    #[prost(int32, tag = "3")]
     pub page_size: i32,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub page_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetReleasesByActorResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub releases: ::prost::alloc::vec::Vec<ReleaseIntentSummary>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub next_page_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReleaseIntentSummary {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub artifact_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag = "3")]
     pub project: ::core::option::Option<Project>,
-    #[prost(message, repeated, tag="4")]
+    #[prost(message, repeated, tag = "4")]
     pub destinations: ::prost::alloc::vec::Vec<ReleaseDestinationStatus>,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub created_at: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReleaseDestinationStatus {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub destination: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub environment: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub status: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetDestinationStatesRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="2")]
+    #[prost(string, optional, tag = "2")]
     pub project: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetDestinationStatesResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub destinations: ::prost::alloc::vec::Vec<DestinationState>,
     /// Active pipeline runs affecting these destinations (if any).
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag = "2")]
     pub pipeline_runs: ::prost::alloc::vec::Vec<PipelineRunState>,
 }
 // ── Release intent states (release-centric view) ─────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetReleaseIntentStatesRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="2")]
+    #[prost(string, optional, tag = "2")]
     pub project: ::core::option::Option<::prost::alloc::string::String>,
     /// When true, also include recently completed release intents.
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub include_completed: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetReleaseIntentStatesResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub release_intents: ::prost::alloc::vec::Vec<ReleaseIntentState>,
 }
 /// Full state of a release intent: pipeline stages + individual release steps.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReleaseIntentState {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub artifact_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub project: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub created_at: ::prost::alloc::string::String,
     /// Pipeline stages (empty for non-pipeline releases).
-    #[prost(message, repeated, tag="5")]
+    #[prost(message, repeated, tag = "5")]
     pub stages: ::prost::alloc::vec::Vec<PipelineStageState>,
     /// All release_states rows for this intent (deploy steps).
-    #[prost(message, repeated, tag="6")]
+    #[prost(message, repeated, tag = "6")]
     pub steps: ::prost::alloc::vec::Vec<ReleaseStepState>,
 }
 /// Status of a single pipeline stage (saga coordinator view).
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PipelineStageState {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub stage_id: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="2")]
+    #[prost(string, repeated, tag = "2")]
     pub depends_on: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(enumeration="PipelineRunStageType", tag="3")]
+    #[prost(enumeration = "PipelineRunStageType", tag = "3")]
     pub stage_type: i32,
-    #[prost(enumeration="PipelineRunStageStatus", tag="4")]
+    #[prost(enumeration = "PipelineRunStageStatus", tag = "4")]
     pub status: i32,
     /// Consistent timestamps for all stage types.
-    #[prost(string, optional, tag="5")]
+    #[prost(string, optional, tag = "5")]
     pub queued_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="6")]
+    #[prost(string, optional, tag = "6")]
     pub started_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="7")]
+    #[prost(string, optional, tag = "7")]
     pub completed_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="8")]
+    #[prost(string, optional, tag = "8")]
     pub error_message: ::core::option::Option<::prost::alloc::string::String>,
     /// Type-specific context.
     ///
     /// deploy/plan stages
-    #[prost(string, optional, tag="9")]
+    #[prost(string, optional, tag = "9")]
     pub environment: ::core::option::Option<::prost::alloc::string::String>,
     /// wait stages
-    #[prost(int64, optional, tag="10")]
+    #[prost(int64, optional, tag = "10")]
     pub duration_seconds: ::core::option::Option<i64>,
     /// wait stages
-    #[prost(string, optional, tag="11")]
+    #[prost(string, optional, tag = "11")]
     pub wait_until: ::core::option::Option<::prost::alloc::string::String>,
     /// deploy/plan stages: individual release IDs
-    #[prost(string, repeated, tag="12")]
+    #[prost(string, repeated, tag = "12")]
     pub release_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// plan stages: AWAITING_APPROVAL, APPROVED, REJECTED
-    #[prost(string, optional, tag="13")]
+    #[prost(string, optional, tag = "13")]
     pub approval_status: ::core::option::Option<::prost::alloc::string::String>,
     /// plan stages
-    #[prost(bool, optional, tag="14")]
+    #[prost(bool, optional, tag = "14")]
     pub auto_approve: ::core::option::Option<bool>,
 }
 /// Status of a single release step (release_states row).
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReleaseStepState {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_id: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="2")]
+    #[prost(string, optional, tag = "2")]
     pub stage_id: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub destination_name: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub environment: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub status: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="6")]
+    #[prost(string, optional, tag = "6")]
     pub queued_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="7")]
+    #[prost(string, optional, tag = "7")]
     pub assigned_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="8")]
+    #[prost(string, optional, tag = "8")]
     pub started_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="9")]
+    #[prost(string, optional, tag = "9")]
     pub completed_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="10")]
+    #[prost(string, optional, tag = "10")]
     pub error_message: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DestinationState {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub destination_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub destination_name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub environment: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub release_id: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="5")]
+    #[prost(string, optional, tag = "5")]
     pub artifact_id: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="6")]
+    #[prost(string, optional, tag = "6")]
     pub status: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="7")]
+    #[prost(string, optional, tag = "7")]
     pub error_message: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="8")]
+    #[prost(string, optional, tag = "8")]
     pub queued_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="9")]
+    #[prost(string, optional, tag = "9")]
     pub completed_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(int32, optional, tag="10")]
+    #[prost(int32, optional, tag = "10")]
     pub queue_position: ::core::option::Option<i32>,
     /// Pipeline context: set when this release was created by a pipeline stage.
-    #[prost(string, optional, tag="11")]
+    #[prost(string, optional, tag = "11")]
     pub release_intent_id: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="12")]
+    #[prost(string, optional, tag = "12")]
     pub stage_id: ::core::option::Option<::prost::alloc::string::String>,
     /// When a runner was assigned to this release.
-    #[prost(string, optional, tag="13")]
+    #[prost(string, optional, tag = "13")]
     pub assigned_at: ::core::option::Option<::prost::alloc::string::String>,
     /// When the runner actually started executing.
-    #[prost(string, optional, tag="14")]
+    #[prost(string, optional, tag = "14")]
     pub started_at: ::core::option::Option<::prost::alloc::string::String>,
 }
 // ── Pipeline run progress ────────────────────────────────────────────
@@ -3118,107 +2841,105 @@ pub struct DestinationState {
 /// Snapshot of an active (or recently completed) pipeline run.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PipelineRunState {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub artifact_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub created_at: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag="4")]
+    #[prost(message, repeated, tag = "4")]
     pub stages: ::prost::alloc::vec::Vec<PipelineRunStage>,
 }
 /// Status of a single stage within a pipeline run.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PipelineRunStage {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub stage_id: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="2")]
+    #[prost(string, repeated, tag = "2")]
     pub depends_on: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(enumeration="PipelineRunStageType", tag="3")]
+    #[prost(enumeration = "PipelineRunStageType", tag = "3")]
     pub stage_type: i32,
-    #[prost(enumeration="PipelineRunStageStatus", tag="4")]
+    #[prost(enumeration = "PipelineRunStageStatus", tag = "4")]
     pub status: i32,
     /// Type-specific context
     ///
     /// deploy stages
-    #[prost(string, optional, tag="5")]
+    #[prost(string, optional, tag = "5")]
     pub environment: ::core::option::Option<::prost::alloc::string::String>,
     /// wait stages
-    #[prost(int64, optional, tag="6")]
+    #[prost(int64, optional, tag = "6")]
     pub duration_seconds: ::core::option::Option<i64>,
     /// when dependencies were met
-    #[prost(string, optional, tag="7")]
+    #[prost(string, optional, tag = "7")]
     pub queued_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="8")]
+    #[prost(string, optional, tag = "8")]
     pub started_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="9")]
+    #[prost(string, optional, tag = "9")]
     pub completed_at: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="10")]
+    #[prost(string, optional, tag = "10")]
     pub error_message: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="11")]
+    #[prost(string, optional, tag = "11")]
     pub wait_until: ::core::option::Option<::prost::alloc::string::String>,
     /// deploy stages: individual release IDs
-    #[prost(string, repeated, tag="12")]
+    #[prost(string, repeated, tag = "12")]
     pub release_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// plan stages: AWAITING_APPROVAL, APPROVED, REJECTED
-    #[prost(string, optional, tag="13")]
+    #[prost(string, optional, tag = "13")]
     pub approval_status: ::core::option::Option<::prost::alloc::string::String>,
     /// plan stages
-    #[prost(bool, optional, tag="14")]
+    #[prost(bool, optional, tag = "14")]
     pub auto_approve: ::core::option::Option<bool>,
 }
 // ── Plan stage approval ──────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ApprovePlanStageRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub stage_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ApprovePlanStageResponse {
-}
+pub struct ApprovePlanStageResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RejectPlanStageRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub stage_id: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag = "3")]
     pub reason: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RejectPlanStageResponse {
-}
+pub struct RejectPlanStageResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetPlanOutputRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub stage_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetPlanOutputResponse {
     /// deprecated: use outputs
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub plan_output: ::prost::alloc::string::String,
     /// RUNNING, AWAITING_APPROVAL, APPROVED, REJECTED
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub status: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag = "3")]
     pub outputs: ::prost::alloc::vec::Vec<PlanDestinationOutput>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PlanDestinationOutput {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub destination_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub destination_name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub plan_output: ::prost::alloc::string::String,
     /// SUCCEEDED, FAILED, RUNNING, etc.
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub status: ::prost::alloc::string::String,
 }
 /// Report that the deploy an annotation announced did not happen.
@@ -3238,109 +2959,109 @@ pub struct PlanDestinationOutput {
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReportReleaseFailedRequest {
     /// Release slug from the annotation, as printed by `forest release annotate`.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub slug: ::prost::alloc::string::String,
     /// Why it failed, shown to whoever reads the notification. Keep it short and
     /// concrete — "ECS rollout did not converge" beats "failed".
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub reason: ::prost::alloc::string::String,
     /// Where the deploy was headed. At least one is required: the failed release
     /// is recorded against a destination, so there has to be one to record it
     /// against. Resolved exactly as `Release` resolves them.
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag = "3")]
     pub destination: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub environment: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ReportReleaseFailedResponse {
-}
+pub struct ReportReleaseFailedResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Source {
-    #[prost(string, optional, tag="1")]
+    #[prost(string, optional, tag = "1")]
     pub user: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="2")]
+    #[prost(string, optional, tag = "2")]
     pub email: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag = "3")]
     pub source_type: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub run_url: ::core::option::Option<::prost::alloc::string::String>,
     /// The actor ID (user, app, or service account UUID) that created this annotation.
-    #[prost(string, optional, tag="5")]
+    #[prost(string, optional, tag = "5")]
     pub user_id: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ArtifactContext {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub title: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="2")]
+    #[prost(string, optional, tag = "2")]
     pub description: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag = "3")]
     pub web: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub pr: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Artifact {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub artifact_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub slug: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="4")]
-    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(message, optional, tag="5")]
+    #[prost(map = "string, string", tag = "4")]
+    pub metadata:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, optional, tag = "5")]
     pub source: ::core::option::Option<Source>,
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag = "6")]
     pub context: ::core::option::Option<ArtifactContext>,
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag = "7")]
     pub project: ::core::option::Option<Project>,
-    #[prost(message, repeated, tag="8")]
+    #[prost(message, repeated, tag = "8")]
     pub destinations: ::prost::alloc::vec::Vec<ArtifactDestination>,
-    #[prost(string, tag="9")]
+    #[prost(string, tag = "9")]
     pub created_at: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="10")]
+    #[prost(message, optional, tag = "10")]
     pub r#ref: ::core::option::Option<Ref>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ArtifactDestination {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub environment: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub type_organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub type_name: ::prost::alloc::string::String,
-    #[prost(uint64, tag="5")]
+    #[prost(uint64, tag = "5")]
     pub type_version: u64,
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub status: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Project {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub project: ::prost::alloc::string::String,
     /// Markdown README, surfaced on the project Overview page in forage.
     /// Set via `forest project update --readme PATH` (and auto-uploaded from
     /// `README.md` during `forest publish`). 64 KiB cap enforced server-side.
     /// Empty string when no README has been uploaded — distinct from "no
     /// project" (which would be a different RPC error).
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub readme: ::prost::alloc::string::String,
     /// Human-readable description shown on the project Overview header.
     /// Set via `forest.cue` `project.description` and pushed by `forest
     /// publish`. ≤ 4096 chars, empty allowed.
     /// See specs/features/009-project-metadata.md.
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub description: ::prost::alloc::string::String,
     /// Blessed project metadata (About sidebar). Length caps per field
     /// enforced server-side; no URL validation — bad URLs render as bad
     /// links and are fixed by re-publishing.
-    #[prost(message, optional, tag="5")]
+    #[prost(message, optional, tag = "5")]
     pub metadata: ::core::option::Option<ProjectMetadata>,
 }
 /// Blessed project metadata — surfaced in the project Overview's About
@@ -3349,40 +3070,43 @@ pub struct Project {
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ProjectMetadata {
     /// Upstream source repository.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub git_url: ::prost::alloc::string::String,
     /// Public landing page / marketing site.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub homepage: ::prost::alloc::string::String,
     /// Docs site URL.
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub docs_url: ::prost::alloc::string::String,
     /// Issue tracker / Slack channel / on-call link.
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub support_url: ::prost::alloc::string::String,
     /// Business or team domain — e.g. "payments", "infra".
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub domain: ::prost::alloc::string::String,
     /// Responsible team or person.
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub owner: ::prost::alloc::string::String,
+    /// Free-form labels for org-scoped rule selection.
+    #[prost(string, repeated, tag = "7")]
+    pub tags: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Ref {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub commit_sha: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="2")]
+    #[prost(string, optional, tag = "2")]
     pub branch: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag = "3")]
     pub commit_message: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub version: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="5")]
+    #[prost(string, optional, tag = "5")]
     pub repo_url: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct OrganisationRef {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
@@ -3490,83 +3214,83 @@ impl PipelineRunStageStatus {
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SoakTimeConfig {
     /// Environment that must have a successful deploy before target is allowed
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub source_environment: ::prost::alloc::string::String,
     /// Environment that is gated by this policy
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub target_environment: ::prost::alloc::string::String,
     /// Seconds to wait after source environment succeeds
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub duration_seconds: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct BranchRestrictionConfig {
     /// Environment that is restricted
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub target_environment: ::prost::alloc::string::String,
     /// Regex that source branch must match
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub branch_pattern: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExternalApprovalConfig {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub target_environment: ::prost::alloc::string::String,
-    #[prost(int32, tag="2")]
+    #[prost(int32, tag = "2")]
     pub required_approvals: i32,
 }
 // ── External approval state ─────────────────────────────────────────
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExternalApprovalState {
-    #[prost(int32, tag="1")]
+    #[prost(int32, tag = "1")]
     pub required_approvals: i32,
-    #[prost(int32, tag="2")]
+    #[prost(int32, tag = "2")]
     pub current_approvals: i32,
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag = "3")]
     pub decisions: ::prost::alloc::vec::Vec<ExternalApprovalDecisionEntry>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExternalApprovalDecisionEntry {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub username: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub decision: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub decided_at: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="5")]
+    #[prost(string, optional, tag = "5")]
     pub comment: ::core::option::Option<::prost::alloc::string::String>,
 }
 // ── Policy resource ─────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Policy {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub enabled: bool,
-    #[prost(enumeration="PolicyType", tag="4")]
+    #[prost(enumeration = "PolicyType", tag = "4")]
     pub policy_type: i32,
-    #[prost(string, tag="20")]
+    #[prost(string, tag = "20")]
     pub created_at: ::prost::alloc::string::String,
-    #[prost(string, tag="21")]
+    #[prost(string, tag = "21")]
     pub updated_at: ::prost::alloc::string::String,
-    #[prost(oneof="policy::Config", tags="10, 11, 12")]
+    #[prost(oneof = "policy::Config", tags = "10, 11, 12")]
     pub config: ::core::option::Option<policy::Config>,
 }
 /// Nested message and enum types in `Policy`.
 pub mod policy {
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Config {
-        #[prost(message, tag="10")]
+        #[prost(message, tag = "10")]
         SoakTime(super::SoakTimeConfig),
-        #[prost(message, tag="11")]
+        #[prost(message, tag = "11")]
         BranchRestriction(super::BranchRestrictionConfig),
-        #[prost(message, tag="12")]
+        #[prost(message, tag = "12")]
         ExternalApproval(super::ExternalApprovalConfig),
     }
 }
@@ -3574,163 +3298,162 @@ pub mod policy {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PolicyEvaluation {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub policy_name: ::prost::alloc::string::String,
-    #[prost(enumeration="PolicyType", tag="2")]
+    #[prost(enumeration = "PolicyType", tag = "2")]
     pub policy_type: i32,
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub passed: bool,
     /// Human-readable explanation when blocked
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub reason: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="10")]
+    #[prost(message, optional, tag = "10")]
     pub external_approval_state: ::core::option::Option<ExternalApprovalState>,
 }
 // ── CRUD messages ───────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreatePolicyRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(enumeration="PolicyType", tag="3")]
+    #[prost(enumeration = "PolicyType", tag = "3")]
     pub policy_type: i32,
-    #[prost(oneof="create_policy_request::Config", tags="10, 11, 12")]
+    #[prost(oneof = "create_policy_request::Config", tags = "10, 11, 12")]
     pub config: ::core::option::Option<create_policy_request::Config>,
 }
 /// Nested message and enum types in `CreatePolicyRequest`.
 pub mod create_policy_request {
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Config {
-        #[prost(message, tag="10")]
+        #[prost(message, tag = "10")]
         SoakTime(super::SoakTimeConfig),
-        #[prost(message, tag="11")]
+        #[prost(message, tag = "11")]
         BranchRestriction(super::BranchRestrictionConfig),
-        #[prost(message, tag="12")]
+        #[prost(message, tag = "12")]
         ExternalApproval(super::ExternalApprovalConfig),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreatePolicyResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub policy: ::core::option::Option<Policy>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdatePolicyRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(bool, optional, tag="3")]
+    #[prost(bool, optional, tag = "3")]
     pub enabled: ::core::option::Option<bool>,
-    #[prost(oneof="update_policy_request::Config", tags="10, 11, 12")]
+    #[prost(oneof = "update_policy_request::Config", tags = "10, 11, 12")]
     pub config: ::core::option::Option<update_policy_request::Config>,
 }
 /// Nested message and enum types in `UpdatePolicyRequest`.
 pub mod update_policy_request {
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Config {
-        #[prost(message, tag="10")]
+        #[prost(message, tag = "10")]
         SoakTime(super::SoakTimeConfig),
-        #[prost(message, tag="11")]
+        #[prost(message, tag = "11")]
         BranchRestriction(super::BranchRestrictionConfig),
-        #[prost(message, tag="12")]
+        #[prost(message, tag = "12")]
         ExternalApproval(super::ExternalApprovalConfig),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdatePolicyResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub policy: ::core::option::Option<Policy>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeletePolicyRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeletePolicyResponse {
-}
+pub struct DeletePolicyResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListPoliciesRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListPoliciesResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub policies: ::prost::alloc::vec::Vec<Policy>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct EvaluatePoliciesRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub target_environment: ::prost::alloc::string::String,
     /// For branch restriction checks
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag = "3")]
     pub branch: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub release_intent_id: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EvaluatePoliciesResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub evaluations: ::prost::alloc::vec::Vec<PolicyEvaluation>,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub all_passed: bool,
 }
 // ── External approval RPC messages ──────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExternalApproveReleaseRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub target_environment: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub comment: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(bool, tag="5")]
+    #[prost(bool, tag = "5")]
     pub force_bypass: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExternalApproveReleaseResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub state: ::core::option::Option<ExternalApprovalState>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExternalRejectReleaseRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub target_environment: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub comment: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ExternalRejectReleaseResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub state: ::core::option::Option<ExternalApprovalState>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetExternalApprovalStateRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub target_environment: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetExternalApprovalStateResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub state: ::core::option::Option<ExternalApprovalState>,
 }
 // ── Policy types ────────────────────────────────────────────────────
@@ -3767,528 +3490,45 @@ impl PolicyType {
         }
     }
 }
-// --- v1 messages (unchanged) ---
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetComponentsRequest {
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetComponentsResponse {
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetComponentRequest {
-    #[prost(string, tag="1")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub organisation: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetComponentResponse {
-    #[prost(message, optional, tag="1")]
-    pub component: ::core::option::Option<Component>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct Component {
-    #[prost(string, tag="1")]
-    pub id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub version: ::prost::alloc::string::String,
-}
-/// ComponentVersion
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetComponentVersionRequest {
-    #[prost(string, tag="1")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub version: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetComponentVersionResponse {
-    #[prost(message, optional, tag="1")]
-    pub component: ::core::option::Option<Component>,
-}
-// BeginUpload
-
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct BeginUploadRequest {
-    #[prost(string, tag="1")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub version: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct BeginUploadResponse {
-    #[prost(string, tag="1")]
-    pub upload_context: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UploadFileRequest {
-    #[prost(string, tag="1")]
-    pub upload_context: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub file_path: ::prost::alloc::string::String,
-    #[prost(bytes="vec", tag="3")]
-    pub file_content: ::prost::alloc::vec::Vec<u8>,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UploadFileResponse {
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct CommitUploadRequest {
-    #[prost(string, tag="1")]
-    pub upload_context: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct CommitUploadResponse {
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AbortUploadRequest {
-    #[prost(string, tag="1")]
-    pub upload_context: ::prost::alloc::string::String,
-    /// Optional free-form reason recorded in the aggregate event for audit.
-    /// Truncated server-side at 256 chars.
-    #[prost(string, tag="2")]
-    pub reason: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AbortUploadResponse {
-}
-/// Get component files
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetComponentFilesRequest {
-    #[prost(string, tag="1")]
-    pub component_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetComponentFilesResponse {
-    #[prost(oneof="get_component_files_response::Msg", tags="1, 2")]
-    pub msg: ::core::option::Option<get_component_files_response::Msg>,
-}
-/// Nested message and enum types in `GetComponentFilesResponse`.
-pub mod get_component_files_response {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
-    pub enum Msg {
-        #[prost(message, tag="1")]
-        Done(super::Done),
-        #[prost(message, tag="2")]
-        ComponentFile(super::ComponentFile),
-    }
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ComponentFile {
-    #[prost(string, tag="1")]
-    pub file_path: ::prost::alloc::string::String,
-    #[prost(bytes="vec", tag="2")]
-    pub file_content: ::prost::alloc::vec::Vec<u8>,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct Done {
-}
-// --- v2 messages: binary component distribution ---
-
-/// UploadBinary — client-streaming upload of a platform-specific binary.
-/// First message must include metadata (upload_context, os, arch, sha256).
-/// Subsequent messages contain binary chunks.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UploadBinaryRequest {
-    #[prost(oneof="upload_binary_request::Msg", tags="1, 2")]
-    pub msg: ::core::option::Option<upload_binary_request::Msg>,
-}
-/// Nested message and enum types in `UploadBinaryRequest`.
-pub mod upload_binary_request {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
-    pub enum Msg {
-        #[prost(message, tag="1")]
-        Metadata(super::UploadBinaryMetadata),
-        #[prost(bytes, tag="2")]
-        Chunk(::prost::alloc::vec::Vec<u8>),
-    }
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UploadBinaryMetadata {
-    #[prost(string, tag="1")]
-    pub upload_context: ::prost::alloc::string::String,
-    /// linux, macos, windows
-    #[prost(string, tag="2")]
-    pub os: ::prost::alloc::string::String,
-    /// amd64, arm64
-    #[prost(string, tag="3")]
-    pub arch: ::prost::alloc::string::String,
-    /// expected SHA-256 hex digest of the full binary
-    #[prost(string, tag="4")]
-    pub sha256: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UploadBinaryResponse {
-    #[prost(uint64, tag="1")]
-    pub size_bytes: u64,
-}
-/// DownloadBinary — server-streaming download of a platform-specific binary.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DownloadBinaryRequest {
-    #[prost(string, tag="1")]
-    pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub version: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
-    pub os: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
-    pub arch: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DownloadBinaryResponse {
-    #[prost(bytes="vec", tag="1")]
-    pub chunk: ::prost::alloc::vec::Vec<u8>,
-}
-/// PublishManifest — publish the component manifest (capabilities, spec schema, etc.)
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct PublishManifestRequest {
-    #[prost(string, tag="1")]
-    pub upload_context: ::prost::alloc::string::String,
-    /// JSON-encoded ComponentManifest
-    #[prost(string, tag="2")]
-    pub manifest_json: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct PublishManifestResponse {
-}
-/// GetComponentManifest — retrieve the manifest for a specific version.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetComponentManifestRequest {
-    #[prost(string, tag="1")]
-    pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub version: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetComponentManifestResponse {
-    #[prost(string, tag="1")]
-    pub manifest_json: ::prost::alloc::string::String,
-}
-/// ListComponentVersions — list all versions of a component with platform info.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListComponentVersionsRequest {
-    #[prost(string, tag="1")]
-    pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListComponentVersionsResponse {
-    #[prost(message, repeated, tag="1")]
-    pub versions: ::prost::alloc::vec::Vec<ComponentVersionInfo>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ComponentVersionInfo {
-    #[prost(string, tag="1")]
-    pub version: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub protocol_version: ::prost::alloc::string::String,
-    /// "binary" or "files"
-    #[prost(string, tag="3")]
-    pub kind: ::prost::alloc::string::String,
-    /// e.g., \["linux_amd64", "darwin_arm64"\]
-    #[prost(string, repeated, tag="4")]
-    pub platforms: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// ISO 8601 — when this version was published
-    #[prost(string, tag="5")]
-    pub created_at: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UnpublishVersionRequest {
-    #[prost(string, tag="1")]
-    pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub version: ::prost::alloc::string::String,
-    /// Optional free-form reason recorded in the aggregate event for audit.
-    /// Truncated server-side at 1024 chars.
-    #[prost(string, tag="4")]
-    pub reason: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UnpublishVersionResponse {
-    /// True if a new event was recorded; false if this was an idempotent
-    /// no-op (version was already unpublished).
-    #[prost(bool, tag="1")]
-    pub unpublished: bool,
-}
-// --- Registry UI / discovery ---
-
-/// SearchComponents — search/browse the registry (like crates.io search).
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct SearchComponentsRequest {
-    /// free-text search (name, description)
-    #[prost(string, tag="1")]
-    pub query: ::prost::alloc::string::String,
-    /// filter by org (empty = all)
-    #[prost(string, tag="2")]
-    pub organisation: ::prost::alloc::string::String,
-    /// pagination (0-indexed)
-    #[prost(int32, tag="3")]
-    pub page: i32,
-    /// items per page (default 20, max 100)
-    #[prost(int32, tag="4")]
-    pub page_size: i32,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SearchComponentsResponse {
-    #[prost(message, repeated, tag="1")]
-    pub components: ::prost::alloc::vec::Vec<ComponentSummary>,
-    #[prost(int32, tag="2")]
-    pub total_count: i32,
-}
-/// ComponentSummary — compact component info for listings.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ComponentSummary {
-    #[prost(string, tag="1")]
-    pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub latest_version: ::prost::alloc::string::String,
-    /// "binary", "external", or "files"
-    #[prost(string, tag="4")]
-    pub kind: ::prost::alloc::string::String,
-    /// from manifest
-    #[prost(string, tag="5")]
-    pub description: ::prost::alloc::string::String,
-    /// ISO 8601
-    #[prost(string, tag="6")]
-    pub created_at: ::prost::alloc::string::String,
-    /// ISO 8601
-    #[prost(string, tag="7")]
-    pub updated_at: ::prost::alloc::string::String,
-    #[prost(int32, tag="8")]
-    pub version_count: i32,
-    /// \["forest/deployment", ...\]
-    #[prost(string, repeated, tag="9")]
-    pub contracts: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// "public" or "private"
-    #[prost(string, tag="10")]
-    pub visibility: ::prost::alloc::string::String,
-    /// §1a.2e taxonomy
-    #[prost(enumeration="ComponentShape", tag="11")]
-    pub shape: i32,
-    /// populated for HYBRID / TOOL_*
-    #[prost(message, optional, tag="12")]
-    pub tool: ::core::option::Option<ToolFacet>,
-    /// names only; populated for COMPONENT / HYBRID
-    #[prost(string, repeated, tag="13")]
-    pub methods: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// For TOOL_EXTERNAL only; full URL is only on detail view.
-    #[prost(string, tag="14")]
-    pub upstream_host: ::prost::alloc::string::String,
-}
-/// GetComponentDetail — full component page (like crates.io crate page).
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetComponentDetailRequest {
-    #[prost(string, tag="1")]
-    pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetComponentDetailResponse {
-    #[prost(message, optional, tag="1")]
-    pub summary: ::core::option::Option<ComponentSummary>,
-    #[prost(message, repeated, tag="2")]
-    pub versions: ::prost::alloc::vec::Vec<ComponentVersionInfo>,
-    /// README content (if available)
-    #[prost(string, tag="3")]
-    pub readme: ::prost::alloc::string::String,
-    /// latest version manifest
-    #[prost(string, tag="4")]
-    pub manifest_json: ::prost::alloc::string::String,
-    /// org members who can publish
-    #[prost(string, repeated, tag="5")]
-    pub owners: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-}
-/// SearchPublicComponents — same shape as SearchComponents, but the server
-/// always restricts to projects with visibility = 'public'. No auth token
-/// is read; if the caller is authenticated they still only see public
-/// components on this RPC.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct SearchPublicComponentsRequest {
-    #[prost(string, tag="1")]
-    pub query: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub organisation: ::prost::alloc::string::String,
-    #[prost(int32, tag="3")]
-    pub page: i32,
-    #[prost(int32, tag="4")]
-    pub page_size: i32,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SearchPublicComponentsResponse {
-    #[prost(message, repeated, tag="1")]
-    pub components: ::prost::alloc::vec::Vec<ComponentSummary>,
-    #[prost(int32, tag="2")]
-    pub total_count: i32,
-}
-/// GetPublicComponentDetail — public-only detail. Returns NOT_FOUND for
-/// any component whose project is private (or for which no project row
-/// exists, since visibility defaults to private).
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetPublicComponentDetailRequest {
-    #[prost(string, tag="1")]
-    pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetPublicComponentDetailResponse {
-    #[prost(message, optional, tag="1")]
-    pub summary: ::core::option::Option<ComponentSummary>,
-    #[prost(message, repeated, tag="2")]
-    pub versions: ::prost::alloc::vec::Vec<ComponentVersionInfo>,
-    #[prost(string, tag="3")]
-    pub readme: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
-    pub manifest_json: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="5")]
-    pub owners: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-}
-/// GetPublicComponentManifest — public-only manifest fetch for a specific
-/// version. NOT_FOUND if the owning project isn't public.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetPublicComponentManifestRequest {
-    #[prost(string, tag="1")]
-    pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub version: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetPublicComponentManifestResponse {
-    #[prost(string, tag="1")]
-    pub manifest_json: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ToolFacet {
-    #[prost(string, tag="1")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(bool, tag="2")]
-    pub argv_passthrough: bool,
-    #[prost(string, tag="3")]
-    pub description: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListOrgToolsRequest {
-    #[prost(string, tag="1")]
-    pub organisation: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OrgToolEntry {
-    #[prost(string, tag="1")]
-    pub organisation: ::prost::alloc::string::String,
-    /// component name
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-    /// server-resolved (excludes prereleases)
-    #[prost(string, tag="3")]
-    pub latest_version: ::prost::alloc::string::String,
-    /// populated for HYBRID/TOOL_*
-    #[prost(message, optional, tag="4")]
-    pub tool: ::core::option::Option<ToolFacet>,
-    #[prost(enumeration="ComponentShape", tag="5")]
-    pub shape: i32,
-    /// populated for TOOL_EXTERNAL only
-    #[prost(string, tag="6")]
-    pub upstream_host: ::prost::alloc::string::String,
-}
-// --- Global-tools (TASKS/018-global-tools.md §1a.2c, §1a.2e) ---
-
-/// Shape taxonomy persisted on `components.shape`. The four observable
-/// kinds of registry artefact:
-///    COMPONENT          — binary + methods, no tool facet (status quo)
-///    HYBRID             — binary + methods + tool facet
-///    TOOL_BINARY        — binary + tool facet, no methods
-///    TOOL_EXTERNAL      — external manifest (URL-hosted) + tool facet
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum ComponentShape {
-    Unspecified = 0,
-    Component = 1,
-    Hybrid = 2,
-    ToolBinary = 3,
-    ToolExternal = 4,
-}
-impl ComponentShape {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            Self::Unspecified => "COMPONENT_SHAPE_UNSPECIFIED",
-            Self::Component => "COMPONENT_SHAPE_COMPONENT",
-            Self::Hybrid => "COMPONENT_SHAPE_HYBRID",
-            Self::ToolBinary => "COMPONENT_SHAPE_TOOL_BINARY",
-            Self::ToolExternal => "COMPONENT_SHAPE_TOOL_EXTERNAL",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "COMPONENT_SHAPE_UNSPECIFIED" => Some(Self::Unspecified),
-            "COMPONENT_SHAPE_COMPONENT" => Some(Self::Component),
-            "COMPONENT_SHAPE_HYBRID" => Some(Self::Hybrid),
-            "COMPONENT_SHAPE_TOOL_BINARY" => Some(Self::ToolBinary),
-            "COMPONENT_SHAPE_TOOL_EXTERNAL" => Some(Self::ToolExternal),
-            _ => None,
-        }
-    }
-}
 // ── Per-type config messages ─────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeployStageConfig {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub environment: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WaitStageConfig {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub duration_seconds: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PlanStageConfig {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub environment: ::prost::alloc::string::String,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub auto_approve: bool,
 }
 // ── A single pipeline stage ──────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PipelineStage {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="2")]
+    #[prost(string, repeated, tag = "2")]
     pub depends_on: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(oneof="pipeline_stage::Config", tags="10, 11, 12")]
+    #[prost(oneof = "pipeline_stage::Config", tags = "10, 11, 12")]
     pub config: ::core::option::Option<pipeline_stage::Config>,
 }
 /// Nested message and enum types in `PipelineStage`.
 pub mod pipeline_stage {
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Config {
-        #[prost(message, tag="10")]
+        #[prost(message, tag = "10")]
         Deploy(super::DeployStageConfig),
-        #[prost(message, tag="11")]
+        #[prost(message, tag = "11")]
         Wait(super::WaitStageConfig),
-        #[prost(message, tag="12")]
+        #[prost(message, tag = "12")]
         Plan(super::PlanStageConfig),
     }
 }
@@ -4296,72 +3536,71 @@ pub mod pipeline_stage {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReleasePipeline {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub enabled: bool,
-    #[prost(message, repeated, tag="4")]
+    #[prost(message, repeated, tag = "4")]
     pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub created_at: ::prost::alloc::string::String,
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub updated_at: ::prost::alloc::string::String,
 }
 // ── CRUD messages ────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateReleasePipelineRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag = "3")]
     pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateReleasePipelineResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub pipeline: ::core::option::Option<ReleasePipeline>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UpdateReleasePipelineRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(bool, optional, tag="3")]
+    #[prost(bool, optional, tag = "3")]
     pub enabled: ::core::option::Option<bool>,
     /// When set, replaces all stages. When absent, stages are unchanged.
-    #[prost(message, repeated, tag="4")]
+    #[prost(message, repeated, tag = "4")]
     pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
-    #[prost(bool, tag="5")]
+    #[prost(bool, tag = "5")]
     pub update_stages: bool,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UpdateReleasePipelineResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub pipeline: ::core::option::Option<ReleasePipeline>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteReleasePipelineRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeleteReleasePipelineResponse {
-}
+pub struct DeleteReleasePipelineResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListReleasePipelinesRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListReleasePipelinesResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub pipelines: ::prost::alloc::vec::Vec<ReleasePipeline>,
 }
 // ── Stage type enum (useful for UI dropdowns / filtering) ────────────
@@ -4441,24 +3680,907 @@ impl PipelineStageStatus {
         }
     }
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ProjectSelector {
+    #[prost(string, repeated, tag = "1")]
+    pub include_projects: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag = "2")]
+    pub exclude_projects: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, optional, tag = "3")]
+    pub name_regex: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(map = "string, string", tag = "4")]
+    pub metadata_match:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(string, repeated, tag = "5")]
+    pub tags: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OrgPolicyRule {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag = "2")]
+    pub enabled: bool,
+    #[prost(enumeration = "PolicyType", tag = "3")]
+    pub policy_type: i32,
+    #[prost(oneof = "org_policy_rule::Config", tags = "10, 11, 12")]
+    pub config: ::core::option::Option<org_policy_rule::Config>,
+}
+/// Nested message and enum types in `OrgPolicyRule`.
+pub mod org_policy_rule {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Config {
+        #[prost(message, tag = "10")]
+        SoakTime(super::SoakTimeConfig),
+        #[prost(message, tag = "11")]
+        BranchRestriction(super::BranchRestrictionConfig),
+        #[prost(message, tag = "12")]
+        ExternalApproval(super::ExternalApprovalConfig),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OrgTriggerRule {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag = "2")]
+    pub enabled: bool,
+    #[prost(string, optional, tag = "3")]
+    pub branch_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag = "4")]
+    pub title_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag = "5")]
+    pub author_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag = "6")]
+    pub commit_message_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag = "7")]
+    pub source_type_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag = "8")]
+    pub target_environments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag = "9")]
+    pub target_destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(bool, tag = "10")]
+    pub force_release: bool,
+    #[prost(bool, tag = "11")]
+    pub use_pipeline: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OrgReleasePipelineRule {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag = "2")]
+    pub enabled: bool,
+    #[prost(message, repeated, tag = "3")]
+    pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OrgRuleSet {
+    #[prost(string, tag = "1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag = "3")]
+    pub enabled: bool,
+    #[prost(message, optional, tag = "4")]
+    pub selector: ::core::option::Option<ProjectSelector>,
+    #[prost(message, repeated, tag = "5")]
+    pub policies: ::prost::alloc::vec::Vec<OrgPolicyRule>,
+    #[prost(message, repeated, tag = "6")]
+    pub triggers: ::prost::alloc::vec::Vec<OrgTriggerRule>,
+    #[prost(message, repeated, tag = "7")]
+    pub release_pipelines: ::prost::alloc::vec::Vec<OrgReleasePipelineRule>,
+    #[prost(string, tag = "8")]
+    pub created_at: ::prost::alloc::string::String,
+    #[prost(string, tag = "9")]
+    pub updated_at: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateOrgRuleSetRequest {
+    #[prost(message, optional, tag = "1")]
+    pub rule_set: ::core::option::Option<OrgRuleSet>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateOrgRuleSetResponse {
+    #[prost(message, optional, tag = "1")]
+    pub rule_set: ::core::option::Option<OrgRuleSet>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateOrgRuleSetRequest {
+    #[prost(message, optional, tag = "1")]
+    pub rule_set: ::core::option::Option<OrgRuleSet>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateOrgRuleSetResponse {
+    #[prost(message, optional, tag = "1")]
+    pub rule_set: ::core::option::Option<OrgRuleSet>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteOrgRuleSetRequest {
+    #[prost(string, tag = "1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteOrgRuleSetResponse {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListOrgRuleSetsRequest {
+    #[prost(string, tag = "1")]
+    pub organisation: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListOrgRuleSetsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub rule_sets: ::prost::alloc::vec::Vec<OrgRuleSet>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Organisation {
+    #[prost(string, tag = "1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateOrganisationRequest {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateOrganisationResponse {
+    #[prost(string, tag = "1")]
+    pub organisation_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOrganisationRequest {
+    #[prost(oneof = "get_organisation_request::Identifier", tags = "1, 2")]
+    pub identifier: ::core::option::Option<get_organisation_request::Identifier>,
+}
+/// Nested message and enum types in `GetOrganisationRequest`.
+pub mod get_organisation_request {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Identifier {
+        #[prost(string, tag = "1")]
+        OrganisationId(::prost::alloc::string::String),
+        #[prost(string, tag = "2")]
+        Name(::prost::alloc::string::String),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOrganisationResponse {
+    #[prost(message, optional, tag = "1")]
+    pub organisation: ::core::option::Option<Organisation>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SearchOrganisationsRequest {
+    #[prost(string, tag = "1")]
+    pub query: ::prost::alloc::string::String,
+    #[prost(int32, tag = "2")]
+    pub page_size: i32,
+    #[prost(string, tag = "3")]
+    pub page_token: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SearchOrganisationsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub organisations: ::prost::alloc::vec::Vec<Organisation>,
+    #[prost(string, tag = "2")]
+    pub next_page_token: ::prost::alloc::string::String,
+    #[prost(int32, tag = "3")]
+    pub total_count: i32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListMyOrganisationsRequest {
+    /// Optional role filter (e.g. "admin"); empty means all roles
+    #[prost(string, tag = "1")]
+    pub role: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListMyOrganisationsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub organisations: ::prost::alloc::vec::Vec<Organisation>,
+    /// The role the caller has in each organisation (parallel to organisations)
+    #[prost(string, repeated, tag = "2")]
+    pub roles: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+// -- Members ------------------------------------------------------------------
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OrganisationMember {
+    #[prost(string, tag = "1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub username: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub role: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "4")]
+    pub joined_at: ::core::option::Option<::prost_types::Timestamp>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddMemberRequest {
+    #[prost(string, tag = "1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub role: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddMemberResponse {
+    #[prost(message, optional, tag = "1")]
+    pub member: ::core::option::Option<OrganisationMember>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveMemberRequest {
+    #[prost(string, tag = "1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveMemberResponse {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateMemberRoleRequest {
+    #[prost(string, tag = "1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub role: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateMemberRoleResponse {
+    #[prost(message, optional, tag = "1")]
+    pub member: ::core::option::Option<OrganisationMember>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListMembersRequest {
+    #[prost(string, tag = "1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(int32, tag = "2")]
+    pub page_size: i32,
+    #[prost(string, tag = "3")]
+    pub page_token: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListMembersResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub members: ::prost::alloc::vec::Vec<OrganisationMember>,
+    #[prost(string, tag = "2")]
+    pub next_page_token: ::prost::alloc::string::String,
+    #[prost(int32, tag = "3")]
+    pub total_count: i32,
+}
+// -- Allowed domain auto-invite (DATA-252) ------------------------------------
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AllowedDomain {
+    #[prost(string, tag = "1")]
+    pub domain: ::prost::alloc::string::String,
+    /// 'auto_invite_any_verified' | 'manual_only' | 'auto_join_oauth' (v1.1).
+    #[prost(string, tag = "2")]
+    pub policy: ::prost::alloc::string::String,
+    /// Surfaced to admins for v1.1 DNS TXT verification ("set TXT _forest-verify
+    /// = <token>"). v1 generates and stores but does not validate.
+    #[prost(string, tag = "3")]
+    pub dns_verification_token: ::prost::alloc::string::String,
+    /// Null until DNS TXT proven. v1 ignores; v1.1 will gate auto_join_oauth.
+    #[prost(message, optional, tag = "4")]
+    pub dns_verified_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(message, optional, tag = "5")]
+    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(string, tag = "6")]
+    pub created_by_user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddAllowedDomainRequest {
+    #[prost(string, tag = "1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub domain: ::prost::alloc::string::String,
+    /// Optional; defaults server-side to 'auto_invite_any_verified'.
+    #[prost(string, tag = "3")]
+    pub policy: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddAllowedDomainResponse {
+    #[prost(message, optional, tag = "1")]
+    pub domain: ::core::option::Option<AllowedDomain>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListAllowedDomainsRequest {
+    #[prost(string, tag = "1")]
+    pub organisation_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListAllowedDomainsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub domains: ::prost::alloc::vec::Vec<AllowedDomain>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveAllowedDomainRequest {
+    #[prost(string, tag = "1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub domain: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveAllowedDomainResponse {
+    #[prost(bool, tag = "1")]
+    pub removed: bool,
+}
+/// Trigger a DNS TXT lookup at `_forest-verify.<domain>` and flip the row
+/// to verified if the configured token is present (DATA-252).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VerifyAllowedDomainRequest {
+    #[prost(string, tag = "1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub domain: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VerifyAllowedDomainResponse {
+    #[prost(enumeration = "verify_allowed_domain_response::Status", tag = "1")]
+    pub status: i32,
+}
+/// Nested message and enum types in `VerifyAllowedDomainResponse`.
+pub mod verify_allowed_domain_response {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum Status {
+        Unspecified = 0,
+        /// freshly verified by this call
+        Verified = 1,
+        /// was already verified; no-op
+        AlreadyVerified = 2,
+        /// DNS resolved but no matching TXT was found
+        Missing = 3,
+    }
+    impl Status {
+        /// String value of the enum field names used in the ProtoBuf definition.
+        ///
+        /// The values are not transformed in any way and thus are considered stable
+        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+        pub fn as_str_name(&self) -> &'static str {
+            match self {
+                Self::Unspecified => "STATUS_UNSPECIFIED",
+                Self::Verified => "VERIFIED",
+                Self::AlreadyVerified => "ALREADY_VERIFIED",
+                Self::Missing => "MISSING",
+            }
+        }
+        /// Creates an enum from field names used in the ProtoBuf definition.
+        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+            match value {
+                "STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+                "VERIFIED" => Some(Self::Verified),
+                "ALREADY_VERIFIED" => Some(Self::AlreadyVerified),
+                "MISSING" => Some(Self::Missing),
+                _ => None,
+            }
+        }
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct JoinOffer {
+    #[prost(string, tag = "1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub organisation_name: ::prost::alloc::string::String,
+    /// The user's email domain that matched the allowlist row.
+    #[prost(string, tag = "3")]
+    pub matched_domain: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListJoinOffersRequest {}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListJoinOffersResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub offers: ::prost::alloc::vec::Vec<JoinOffer>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AcceptJoinOfferRequest {
+    #[prost(string, tag = "1")]
+    pub organisation_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AcceptJoinOfferResponse {
+    #[prost(message, optional, tag = "1")]
+    pub member: ::core::option::Option<OrganisationMember>,
+}
+// --- v1 messages (unchanged) ---
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentsRequest {}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentsResponse {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentRequest {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub organisation: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentResponse {
+    #[prost(message, optional, tag = "1")]
+    pub component: ::core::option::Option<Component>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Component {
+    #[prost(string, tag = "1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub version: ::prost::alloc::string::String,
+}
+/// ComponentVersion
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentVersionRequest {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub version: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentVersionResponse {
+    #[prost(message, optional, tag = "1")]
+    pub component: ::core::option::Option<Component>,
+}
+// BeginUpload
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct BeginUploadRequest {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub version: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct BeginUploadResponse {
+    #[prost(string, tag = "1")]
+    pub upload_context: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UploadFileRequest {
+    #[prost(string, tag = "1")]
+    pub upload_context: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub file_path: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "3")]
+    pub file_content: ::prost::alloc::vec::Vec<u8>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UploadFileResponse {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CommitUploadRequest {
+    #[prost(string, tag = "1")]
+    pub upload_context: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CommitUploadResponse {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AbortUploadRequest {
+    #[prost(string, tag = "1")]
+    pub upload_context: ::prost::alloc::string::String,
+    /// Optional free-form reason recorded in the aggregate event for audit.
+    /// Truncated server-side at 256 chars.
+    #[prost(string, tag = "2")]
+    pub reason: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AbortUploadResponse {}
+/// Get component files
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentFilesRequest {
+    #[prost(string, tag = "1")]
+    pub component_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentFilesResponse {
+    #[prost(oneof = "get_component_files_response::Msg", tags = "1, 2")]
+    pub msg: ::core::option::Option<get_component_files_response::Msg>,
+}
+/// Nested message and enum types in `GetComponentFilesResponse`.
+pub mod get_component_files_response {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Msg {
+        #[prost(message, tag = "1")]
+        Done(super::Done),
+        #[prost(message, tag = "2")]
+        ComponentFile(super::ComponentFile),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ComponentFile {
+    #[prost(string, tag = "1")]
+    pub file_path: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "2")]
+    pub file_content: ::prost::alloc::vec::Vec<u8>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Done {}
+// --- v2 messages: binary component distribution ---
+
+/// UploadBinary — client-streaming upload of a platform-specific binary.
+/// First message must include metadata (upload_context, os, arch, sha256).
+/// Subsequent messages contain binary chunks.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UploadBinaryRequest {
+    #[prost(oneof = "upload_binary_request::Msg", tags = "1, 2")]
+    pub msg: ::core::option::Option<upload_binary_request::Msg>,
+}
+/// Nested message and enum types in `UploadBinaryRequest`.
+pub mod upload_binary_request {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Msg {
+        #[prost(message, tag = "1")]
+        Metadata(super::UploadBinaryMetadata),
+        #[prost(bytes, tag = "2")]
+        Chunk(::prost::alloc::vec::Vec<u8>),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UploadBinaryMetadata {
+    #[prost(string, tag = "1")]
+    pub upload_context: ::prost::alloc::string::String,
+    /// linux, macos, windows
+    #[prost(string, tag = "2")]
+    pub os: ::prost::alloc::string::String,
+    /// amd64, arm64
+    #[prost(string, tag = "3")]
+    pub arch: ::prost::alloc::string::String,
+    /// expected SHA-256 hex digest of the full binary
+    #[prost(string, tag = "4")]
+    pub sha256: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UploadBinaryResponse {
+    #[prost(uint64, tag = "1")]
+    pub size_bytes: u64,
+}
+/// DownloadBinary — server-streaming download of a platform-specific binary.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DownloadBinaryRequest {
+    #[prost(string, tag = "1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub version: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub os: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub arch: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DownloadBinaryResponse {
+    #[prost(bytes = "vec", tag = "1")]
+    pub chunk: ::prost::alloc::vec::Vec<u8>,
+}
+/// PublishManifest — publish the component manifest (capabilities, spec schema, etc.)
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PublishManifestRequest {
+    #[prost(string, tag = "1")]
+    pub upload_context: ::prost::alloc::string::String,
+    /// JSON-encoded ComponentManifest
+    #[prost(string, tag = "2")]
+    pub manifest_json: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PublishManifestResponse {}
+/// GetComponentManifest — retrieve the manifest for a specific version.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentManifestRequest {
+    #[prost(string, tag = "1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub version: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentManifestResponse {
+    #[prost(string, tag = "1")]
+    pub manifest_json: ::prost::alloc::string::String,
+}
+/// ListComponentVersions — list all versions of a component with platform info.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListComponentVersionsRequest {
+    #[prost(string, tag = "1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListComponentVersionsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub versions: ::prost::alloc::vec::Vec<ComponentVersionInfo>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ComponentVersionInfo {
+    #[prost(string, tag = "1")]
+    pub version: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub protocol_version: ::prost::alloc::string::String,
+    /// "binary" or "files"
+    #[prost(string, tag = "3")]
+    pub kind: ::prost::alloc::string::String,
+    /// e.g., \["linux_amd64", "darwin_arm64"\]
+    #[prost(string, repeated, tag = "4")]
+    pub platforms: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// ISO 8601 — when this version was published
+    #[prost(string, tag = "5")]
+    pub created_at: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UnpublishVersionRequest {
+    #[prost(string, tag = "1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub version: ::prost::alloc::string::String,
+    /// Optional free-form reason recorded in the aggregate event for audit.
+    /// Truncated server-side at 1024 chars.
+    #[prost(string, tag = "4")]
+    pub reason: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UnpublishVersionResponse {
+    /// True if a new event was recorded; false if this was an idempotent
+    /// no-op (version was already unpublished).
+    #[prost(bool, tag = "1")]
+    pub unpublished: bool,
+}
+// --- Registry UI / discovery ---
+
+/// SearchComponents — search/browse the registry (like crates.io search).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SearchComponentsRequest {
+    /// free-text search (name, description)
+    #[prost(string, tag = "1")]
+    pub query: ::prost::alloc::string::String,
+    /// filter by org (empty = all)
+    #[prost(string, tag = "2")]
+    pub organisation: ::prost::alloc::string::String,
+    /// pagination (0-indexed)
+    #[prost(int32, tag = "3")]
+    pub page: i32,
+    /// items per page (default 20, max 100)
+    #[prost(int32, tag = "4")]
+    pub page_size: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SearchComponentsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub components: ::prost::alloc::vec::Vec<ComponentSummary>,
+    #[prost(int32, tag = "2")]
+    pub total_count: i32,
+}
+/// ComponentSummary — compact component info for listings.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ComponentSummary {
+    #[prost(string, tag = "1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub latest_version: ::prost::alloc::string::String,
+    /// "binary", "external", or "files"
+    #[prost(string, tag = "4")]
+    pub kind: ::prost::alloc::string::String,
+    /// from manifest
+    #[prost(string, tag = "5")]
+    pub description: ::prost::alloc::string::String,
+    /// ISO 8601
+    #[prost(string, tag = "6")]
+    pub created_at: ::prost::alloc::string::String,
+    /// ISO 8601
+    #[prost(string, tag = "7")]
+    pub updated_at: ::prost::alloc::string::String,
+    #[prost(int32, tag = "8")]
+    pub version_count: i32,
+    /// \["forest/deployment", ...\]
+    #[prost(string, repeated, tag = "9")]
+    pub contracts: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// "public" or "private"
+    #[prost(string, tag = "10")]
+    pub visibility: ::prost::alloc::string::String,
+    /// §1a.2e taxonomy
+    #[prost(enumeration = "ComponentShape", tag = "11")]
+    pub shape: i32,
+    /// populated for HYBRID / TOOL_*
+    #[prost(message, optional, tag = "12")]
+    pub tool: ::core::option::Option<ToolFacet>,
+    /// names only; populated for COMPONENT / HYBRID
+    #[prost(string, repeated, tag = "13")]
+    pub methods: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// For TOOL_EXTERNAL only; full URL is only on detail view.
+    #[prost(string, tag = "14")]
+    pub upstream_host: ::prost::alloc::string::String,
+}
+/// GetComponentDetail — full component page (like crates.io crate page).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetComponentDetailRequest {
+    #[prost(string, tag = "1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetComponentDetailResponse {
+    #[prost(message, optional, tag = "1")]
+    pub summary: ::core::option::Option<ComponentSummary>,
+    #[prost(message, repeated, tag = "2")]
+    pub versions: ::prost::alloc::vec::Vec<ComponentVersionInfo>,
+    /// README content (if available)
+    #[prost(string, tag = "3")]
+    pub readme: ::prost::alloc::string::String,
+    /// latest version manifest
+    #[prost(string, tag = "4")]
+    pub manifest_json: ::prost::alloc::string::String,
+    /// org members who can publish
+    #[prost(string, repeated, tag = "5")]
+    pub owners: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+/// SearchPublicComponents — same shape as SearchComponents, but the server
+/// always restricts to projects with visibility = 'public'. No auth token
+/// is read; if the caller is authenticated they still only see public
+/// components on this RPC.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SearchPublicComponentsRequest {
+    #[prost(string, tag = "1")]
+    pub query: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(int32, tag = "3")]
+    pub page: i32,
+    #[prost(int32, tag = "4")]
+    pub page_size: i32,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SearchPublicComponentsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub components: ::prost::alloc::vec::Vec<ComponentSummary>,
+    #[prost(int32, tag = "2")]
+    pub total_count: i32,
+}
+/// GetPublicComponentDetail — public-only detail. Returns NOT_FOUND for
+/// any component whose project is private (or for which no project row
+/// exists, since visibility defaults to private).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetPublicComponentDetailRequest {
+    #[prost(string, tag = "1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetPublicComponentDetailResponse {
+    #[prost(message, optional, tag = "1")]
+    pub summary: ::core::option::Option<ComponentSummary>,
+    #[prost(message, repeated, tag = "2")]
+    pub versions: ::prost::alloc::vec::Vec<ComponentVersionInfo>,
+    #[prost(string, tag = "3")]
+    pub readme: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub manifest_json: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag = "5")]
+    pub owners: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+/// GetPublicComponentManifest — public-only manifest fetch for a specific
+/// version. NOT_FOUND if the owning project isn't public.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetPublicComponentManifestRequest {
+    #[prost(string, tag = "1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub version: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetPublicComponentManifestResponse {
+    #[prost(string, tag = "1")]
+    pub manifest_json: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ToolFacet {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag = "2")]
+    pub argv_passthrough: bool,
+    #[prost(string, tag = "3")]
+    pub description: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListOrgToolsRequest {
+    #[prost(string, tag = "1")]
+    pub organisation: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OrgToolEntry {
+    #[prost(string, tag = "1")]
+    pub organisation: ::prost::alloc::string::String,
+    /// component name
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    /// server-resolved (excludes prereleases)
+    #[prost(string, tag = "3")]
+    pub latest_version: ::prost::alloc::string::String,
+    /// populated for HYBRID/TOOL_*
+    #[prost(message, optional, tag = "4")]
+    pub tool: ::core::option::Option<ToolFacet>,
+    #[prost(enumeration = "ComponentShape", tag = "5")]
+    pub shape: i32,
+    /// populated for TOOL_EXTERNAL only
+    #[prost(string, tag = "6")]
+    pub upstream_host: ::prost::alloc::string::String,
+}
+// --- Global-tools (TASKS/018-global-tools.md §1a.2c, §1a.2e) ---
+
+/// Shape taxonomy persisted on `components.shape`. The four observable
+/// kinds of registry artefact:
+///    COMPONENT          — binary + methods, no tool facet (status quo)
+///    HYBRID             — binary + methods + tool facet
+///    TOOL_BINARY        — binary + tool facet, no methods
+///    TOOL_EXTERNAL      — external manifest (URL-hosted) + tool facet
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ComponentShape {
+    Unspecified = 0,
+    Component = 1,
+    Hybrid = 2,
+    ToolBinary = 3,
+    ToolExternal = 4,
+}
+impl ComponentShape {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "COMPONENT_SHAPE_UNSPECIFIED",
+            Self::Component => "COMPONENT_SHAPE_COMPONENT",
+            Self::Hybrid => "COMPONENT_SHAPE_HYBRID",
+            Self::ToolBinary => "COMPONENT_SHAPE_TOOL_BINARY",
+            Self::ToolExternal => "COMPONENT_SHAPE_TOOL_EXTERNAL",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "COMPONENT_SHAPE_UNSPECIFIED" => Some(Self::Unspecified),
+            "COMPONENT_SHAPE_COMPONENT" => Some(Self::Component),
+            "COMPONENT_SHAPE_HYBRID" => Some(Self::Hybrid),
+            "COMPONENT_SHAPE_TOOL_BINARY" => Some(Self::ToolBinary),
+            "COMPONENT_SHAPE_TOOL_EXTERNAL" => Some(Self::ToolExternal),
+            _ => None,
+        }
+    }
+}
 // ============================================================================
 // Connect stream: Runner → Server
 // ============================================================================
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RunnerMessage {
-    #[prost(oneof="runner_message::Message", tags="1, 2, 3")]
+    #[prost(oneof = "runner_message::Message", tags = "1, 2, 3")]
     pub message: ::core::option::Option<runner_message::Message>,
 }
 /// Nested message and enum types in `RunnerMessage`.
 pub mod runner_message {
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Message {
-        #[prost(message, tag="1")]
+        #[prost(message, tag = "1")]
         Register(super::RunnerRegister),
-        #[prost(message, tag="2")]
+        #[prost(message, tag = "2")]
         Heartbeat(super::RunnerHeartbeat),
-        #[prost(message, tag="3")]
+        #[prost(message, tag = "3")]
         WorkAck(super::WorkAck),
     }
 }
@@ -4466,40 +4588,40 @@ pub mod runner_message {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RunnerRegister {
     /// Runner-chosen unique identifier. If empty, the server assigns one.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub runner_id: ::prost::alloc::string::String,
     /// Destination types this runner can handle.
-    #[prost(message, repeated, tag="2")]
+    #[prost(message, repeated, tag = "2")]
     pub capabilities: ::prost::alloc::vec::Vec<DestinationCapability>,
     /// Maximum number of simultaneous releases this runner can process.
-    #[prost(int32, tag="3")]
+    #[prost(int32, tag = "3")]
     pub max_concurrent: i32,
 }
 /// Describes a destination type the runner supports.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DestinationCapability {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(uint64, tag="3")]
+    #[prost(uint64, tag = "3")]
     pub version: u64,
 }
 /// Periodic keepalive sent by the runner (recommended every 10s).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RunnerHeartbeat {
     /// Current number of in-progress releases on this runner.
-    #[prost(int32, tag="1")]
+    #[prost(int32, tag = "1")]
     pub active_releases: i32,
 }
 /// Runner's response to a WorkAssignment.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WorkAck {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_token: ::prost::alloc::string::String,
     /// false = runner rejects the work (e.g., overloaded). The server will
     /// reassign or fall back to in-process execution.
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub accepted: bool,
 }
 // ============================================================================
@@ -4508,16 +4630,16 @@ pub struct WorkAck {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ServerMessage {
-    #[prost(oneof="server_message::Message", tags="1, 2")]
+    #[prost(oneof = "server_message::Message", tags = "1, 2")]
     pub message: ::core::option::Option<server_message::Message>,
 }
 /// Nested message and enum types in `ServerMessage`.
 pub mod server_message {
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Message {
-        #[prost(message, tag="1")]
+        #[prost(message, tag = "1")]
         RegisterAck(super::RegisterAck),
-        #[prost(message, tag="2")]
+        #[prost(message, tag = "2")]
         WorkAssignment(super::WorkAssignment),
     }
 }
@@ -4525,11 +4647,11 @@ pub mod server_message {
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RegisterAck {
     /// Server-confirmed (or server-assigned) runner ID.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub runner_id: ::prost::alloc::string::String,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub accepted: bool,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub reason: ::prost::alloc::string::String,
 }
 /// Work assignment pushed to a runner when a matching release is available.
@@ -4538,27 +4660,27 @@ pub struct WorkAssignment {
     /// Scoped opaque auth token. Use this for GetReleaseFiles, PushLogs,
     /// and CompleteRelease. The token restricts access to only the data
     /// associated with this specific release.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_token: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub release_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub release_intent_id: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub artifact_id: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub destination_id: ::prost::alloc::string::String,
     /// Full destination configuration including metadata.
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag = "6")]
     pub destination: ::core::option::Option<DestinationInfo>,
     /// Execution mode. Defaults to DEPLOY if unset.
-    #[prost(enumeration="ReleaseMode", tag="7")]
+    #[prost(enumeration = "ReleaseMode", tag = "7")]
     pub mode: i32,
     /// Per-release HTTP-backed artifact store for destinations that need
     /// server-managed state (terraform.tfstate, k8s applied snapshots,
     /// future destinations…). Destination types that don't need it ignore
     /// these fields. Server-issued per release_token; do NOT log.
-    #[prost(message, optional, tag="8")]
+    #[prost(message, optional, tag = "8")]
     pub artifact_store: ::core::option::Option<ReleaseArtifactStore>,
 }
 /// Generic per-release artifact store exposed by forest-server. The runner
@@ -4569,30 +4691,31 @@ pub struct WorkAssignment {
 pub struct ReleaseArtifactStore {
     /// Stable identifier of this store; useful for logs/metrics. For
     /// terraform: `<environment>.<project_id>`. Treat as opaque otherwise.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
     /// Base URL the runner reads/writes against.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub url: ::prost::alloc::string::String,
     /// HTTP basic auth — the runner uses these for whatever destination-
     /// specific protocol the URL implements.
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub username: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub password: ::prost::alloc::string::String,
 }
 /// Destination configuration sent with the work assignment.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DestinationInfo {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub environment: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="3")]
-    pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(message, optional, tag="4")]
+    #[prost(map = "string, string", tag = "3")]
+    pub metadata:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(message, optional, tag = "4")]
     pub r#type: ::core::option::Option<DestinationCapability>,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub organisation: ::prost::alloc::string::String,
 }
 // ============================================================================
@@ -4601,14 +4724,14 @@ pub struct DestinationInfo {
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetReleaseFilesRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReleaseFile {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub file_name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub file_content: ::prost::alloc::string::String,
 }
 // ============================================================================
@@ -4617,7 +4740,7 @@ pub struct ReleaseFile {
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetSpecFilesRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_token: ::prost::alloc::string::String,
 }
 // ============================================================================
@@ -4626,32 +4749,32 @@ pub struct GetSpecFilesRequest {
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetReleaseAnnotationRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReleaseAnnotationResponse {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub slug: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub source_username: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub source_email: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub context_title: ::prost::alloc::string::String,
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub context_description: ::prost::alloc::string::String,
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub context_web: ::prost::alloc::string::String,
-    #[prost(string, tag="7")]
+    #[prost(string, tag = "7")]
     pub reference_version: ::prost::alloc::string::String,
-    #[prost(string, tag="8")]
+    #[prost(string, tag = "8")]
     pub reference_commit_sha: ::prost::alloc::string::String,
-    #[prost(string, tag="9")]
+    #[prost(string, tag = "9")]
     pub reference_commit_branch: ::prost::alloc::string::String,
-    #[prost(string, tag="10")]
+    #[prost(string, tag = "10")]
     pub reference_commit_message: ::prost::alloc::string::String,
-    #[prost(string, tag="11")]
+    #[prost(string, tag = "11")]
     pub created_at: ::prost::alloc::string::String,
 }
 // ============================================================================
@@ -4660,14 +4783,14 @@ pub struct ReleaseAnnotationResponse {
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetProjectInfoRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ProjectInfoResponse {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub organisation: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub project: ::prost::alloc::string::String,
 }
 // ============================================================================
@@ -4676,40 +4799,38 @@ pub struct ProjectInfoResponse {
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PushLogRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_token: ::prost::alloc::string::String,
     /// "stdout" or "stderr"
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub channel: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub line: ::prost::alloc::string::String,
-    #[prost(uint64, tag="4")]
+    #[prost(uint64, tag = "4")]
     pub timestamp: u64,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct PushLogResponse {
-}
+pub struct PushLogResponse {}
 // ============================================================================
 // CompleteRelease
 // ============================================================================
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CompleteReleaseRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub release_token: ::prost::alloc::string::String,
-    #[prost(enumeration="ReleaseOutcome", tag="2")]
+    #[prost(enumeration = "ReleaseOutcome", tag = "2")]
     pub outcome: i32,
     /// Error description when outcome is FAILURE.
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub error_message: ::prost::alloc::string::String,
     /// Plan output text when mode was "plan" and outcome is SUCCESS.
     /// Stored in release_states.plan_output for UI review.
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub plan_output: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct CompleteReleaseResponse {
-}
+pub struct CompleteReleaseResponse {}
 /// Execution mode for a work assignment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
@@ -4774,117 +4895,116 @@ impl ReleaseOutcome {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Trigger {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub enabled: bool,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub branch_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="5")]
+    #[prost(string, optional, tag = "5")]
     pub title_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="6")]
+    #[prost(string, optional, tag = "6")]
     pub author_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="7")]
+    #[prost(string, optional, tag = "7")]
     pub commit_message_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="8")]
+    #[prost(string, optional, tag = "8")]
     pub source_type_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="9")]
+    #[prost(string, repeated, tag = "9")]
     pub target_environments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="10")]
+    #[prost(string, repeated, tag = "10")]
     pub target_destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(bool, tag="11")]
+    #[prost(bool, tag = "11")]
     pub force_release: bool,
-    #[prost(string, tag="12")]
+    #[prost(string, tag = "12")]
     pub created_at: ::prost::alloc::string::String,
-    #[prost(string, tag="13")]
+    #[prost(string, tag = "13")]
     pub updated_at: ::prost::alloc::string::String,
     /// When true, trigger the project's release pipeline instead of
     /// deploying directly to target destinations/environments.
-    #[prost(bool, tag="14")]
+    #[prost(bool, tag = "14")]
     pub use_pipeline: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateTriggerRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag = "3")]
     pub branch_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub title_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="5")]
+    #[prost(string, optional, tag = "5")]
     pub author_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="6")]
+    #[prost(string, optional, tag = "6")]
     pub commit_message_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="7")]
+    #[prost(string, optional, tag = "7")]
     pub source_type_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="8")]
+    #[prost(string, repeated, tag = "8")]
     pub target_environments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="9")]
+    #[prost(string, repeated, tag = "9")]
     pub target_destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(bool, tag="10")]
+    #[prost(bool, tag = "10")]
     pub force_release: bool,
-    #[prost(bool, tag="11")]
+    #[prost(bool, tag = "11")]
     pub use_pipeline: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateTriggerResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub trigger: ::core::option::Option<Trigger>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateTriggerRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(bool, optional, tag="3")]
+    #[prost(bool, optional, tag = "3")]
     pub enabled: ::core::option::Option<bool>,
-    #[prost(string, optional, tag="4")]
+    #[prost(string, optional, tag = "4")]
     pub branch_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="5")]
+    #[prost(string, optional, tag = "5")]
     pub title_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="6")]
+    #[prost(string, optional, tag = "6")]
     pub author_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="7")]
+    #[prost(string, optional, tag = "7")]
     pub commit_message_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="8")]
+    #[prost(string, optional, tag = "8")]
     pub source_type_pattern: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="9")]
+    #[prost(string, repeated, tag = "9")]
     pub target_environments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, repeated, tag="10")]
+    #[prost(string, repeated, tag = "10")]
     pub target_destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(bool, optional, tag="11")]
+    #[prost(bool, optional, tag = "11")]
     pub force_release: ::core::option::Option<bool>,
-    #[prost(bool, optional, tag="12")]
+    #[prost(bool, optional, tag = "12")]
     pub use_pipeline: ::core::option::Option<bool>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateTriggerResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub trigger: ::core::option::Option<Trigger>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteTriggerRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeleteTriggerResponse {
-}
+pub struct DeleteTriggerResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListTriggersRequest {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub project: ::core::option::Option<Project>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListTriggersResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub triggers: ::prost::alloc::vec::Vec<Trigger>,
 }
 // ─── Core types ──────────────────────────────────────────────────────
@@ -4892,79 +5012,79 @@ pub struct ListTriggersResponse {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct User {
     /// UUID
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub username: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag="3")]
+    #[prost(message, repeated, tag = "3")]
     pub emails: ::prost::alloc::vec::Vec<UserEmail>,
-    #[prost(message, repeated, tag="4")]
+    #[prost(message, repeated, tag = "4")]
     pub oauth_connections: ::prost::alloc::vec::Vec<OAuthConnection>,
-    #[prost(bool, tag="5")]
+    #[prost(bool, tag = "5")]
     pub mfa_enabled: bool,
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag = "6")]
     pub created_at: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag = "7")]
     pub updated_at: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(string, optional, tag="8")]
+    #[prost(string, optional, tag = "8")]
     pub profile_picture_url: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UserEmail {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub email: ::prost::alloc::string::String,
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub verified: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct OAuthConnection {
-    #[prost(enumeration="OAuthProvider", tag="1")]
+    #[prost(enumeration = "OAuthProvider", tag = "1")]
     pub provider: i32,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub provider_user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub provider_email: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag = "4")]
     pub linked_at: ::core::option::Option<::prost_types::Timestamp>,
     /// Human-readable display name from the provider (e.g. GitHub login,
     /// Google "name"). Empty if not provided.
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub provider_display_name: ::prost::alloc::string::String,
     /// Provider-specific extras (avatar_url, login, etc.) as JSON.
     /// Empty if not provided. The structure is provider-dependent and
     /// best-effort — readers should tolerate missing keys.
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub provider_data_json: ::prost::alloc::string::String,
 }
 // ─── Authentication ──────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RegisterRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub username: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub email: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub password: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RegisterResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub user: ::core::option::Option<User>,
     /// Empty when email_verification_required is true.
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub tokens: ::core::option::Option<AuthTokens>,
     /// True when the server requires email verification before issuing tokens.
     /// The caller (forage) is responsible for triggering the verification email.
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub email_verification_required: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct LoginRequest {
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub password: ::prost::alloc::string::String,
     /// Login with either username or email
-    #[prost(oneof="login_request::Identifier", tags="1, 2")]
+    #[prost(oneof = "login_request::Identifier", tags = "1, 2")]
     pub identifier: ::core::option::Option<login_request::Identifier>,
 }
 /// Nested message and enum types in `LoginRequest`.
@@ -4972,186 +5092,181 @@ pub mod login_request {
     /// Login with either username or email
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Identifier {
-        #[prost(string, tag="1")]
+        #[prost(string, tag = "1")]
         Username(::prost::alloc::string::String),
-        #[prost(string, tag="2")]
+        #[prost(string, tag = "2")]
         Email(::prost::alloc::string::String),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct LoginResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub user: ::core::option::Option<User>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub tokens: ::core::option::Option<AuthTokens>,
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub mfa_required: bool,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub mfa_session_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RefreshTokenRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub refresh_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RefreshTokenResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub tokens: ::core::option::Option<AuthTokens>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct LogoutRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub refresh_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct LogoutResponse {
-}
+pub struct LogoutResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct AuthTokens {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub access_token: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub refresh_token: ::prost::alloc::string::String,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub expires_in_seconds: i64,
 }
 // ─── Token introspection ─────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct TokenInfoRequest {
-}
+pub struct TokenInfoRequest {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TokenInfoResponse {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
     /// Unix timestamp (seconds)
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag = "2")]
     pub expires_at: i64,
 }
 // ─── User CRUD ───────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetUserRequest {
-    #[prost(oneof="get_user_request::Identifier", tags="1, 2, 3, 4")]
+    #[prost(oneof = "get_user_request::Identifier", tags = "1, 2, 3, 4")]
     pub identifier: ::core::option::Option<get_user_request::Identifier>,
 }
 /// Nested message and enum types in `GetUserRequest`.
 pub mod get_user_request {
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Identifier {
-        #[prost(string, tag="1")]
+        #[prost(string, tag = "1")]
         UserId(::prost::alloc::string::String),
-        #[prost(string, tag="2")]
+        #[prost(string, tag = "2")]
         Username(::prost::alloc::string::String),
-        #[prost(string, tag="3")]
+        #[prost(string, tag = "3")]
         Email(::prost::alloc::string::String),
         /// Look a user up by a linked external account — e.g. the GitHub
         /// account that authored a commit. This is the join that email alone
         /// cannot make: people commit from addresses their Forest account has
         /// never heard of, but the linked GitHub identity is exact.
-        #[prost(message, tag="4")]
+        #[prost(message, tag = "4")]
         ProviderIdentity(super::ProviderIdentity),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ProviderIdentity {
     /// "github" | "google" — matches the `identities.provider` column.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub provider: ::prost::alloc::string::String,
     /// The provider's own stable id for the user (GitHub's numeric id,
     /// Google's `sub`), not a username: logins get renamed, ids don't.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub provider_user_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetUserResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub user: ::core::option::Option<User>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateUserRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
-    #[prost(string, optional, tag="2")]
+    #[prost(string, optional, tag = "2")]
     pub username: ::core::option::Option<::prost::alloc::string::String>,
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag = "3")]
     pub profile_picture_url: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UpdateUserResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub user: ::core::option::Option<User>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteUserRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeleteUserResponse {
-}
+pub struct DeleteUserResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListUsersRequest {
-    #[prost(int32, tag="1")]
+    #[prost(int32, tag = "1")]
     pub page_size: i32,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub page_token: ::prost::alloc::string::String,
     /// search across username, email
-    #[prost(string, optional, tag="3")]
+    #[prost(string, optional, tag = "3")]
     pub search: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListUsersResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub users: ::prost::alloc::vec::Vec<User>,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub next_page_token: ::prost::alloc::string::String,
-    #[prost(int32, tag="3")]
+    #[prost(int32, tag = "3")]
     pub total_count: i32,
 }
 // ─── Password management ─────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ChangePasswordRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub current_password: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub new_password: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ChangePasswordResponse {
-}
+pub struct ChangePasswordResponse {}
 // ─── Email management ────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct AddEmailRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub email: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct AddEmailResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub email: ::core::option::Option<UserEmail>,
     /// True when the server requires verification of this newly added email.
     /// The caller (forage) should trigger the verification flow for it.
-    #[prost(bool, tag="2")]
+    #[prost(bool, tag = "2")]
     pub email_verification_required: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct VerifyEmailRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub email: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VerifyEmailResponse {
-}
+pub struct VerifyEmailResponse {}
 /// Service-account-only confirmation that an email has been verified via
 /// the out-of-band token-redemption flow. The caller has already proven
 /// the user owns this address (typically by clicking a link in their
@@ -5160,22 +5275,20 @@ pub struct VerifyEmailResponse {
 /// user_id.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ConfirmEmailVerificationRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub email: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ConfirmEmailVerificationResponse {
-}
+pub struct ConfirmEmailVerificationResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RemoveEmailRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub email: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RemoveEmailResponse {
-}
+pub struct RemoveEmailResponse {}
 // ─── OAuth / Social login ────────────────────────────────────────────
 
 /// OAuthLoginRequest accepts pre-verified identity info from a trusted caller
@@ -5184,211 +5297,207 @@ pub struct RemoveEmailResponse {
 /// Requires service-account bearer auth.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct OAuthLoginRequest {
-    #[prost(enumeration="OAuthProvider", tag="1")]
+    #[prost(enumeration = "OAuthProvider", tag = "1")]
     pub provider: i32,
     /// unique user ID from the provider (e.g. Google "sub")
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub provider_user_id: ::prost::alloc::string::String,
     /// verified email from the provider
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub provider_email: ::prost::alloc::string::String,
     /// display name for profile seeding (optional)
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub provider_display_name: ::prost::alloc::string::String,
     /// arbitrary provider data as JSON (optional)
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub provider_data_json: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct OAuthLoginResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub user: ::core::option::Option<User>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub tokens: ::core::option::Option<AuthTokens>,
-    #[prost(bool, tag="3")]
+    #[prost(bool, tag = "3")]
     pub is_new_user: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct LinkOAuthProviderRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
-    #[prost(enumeration="OAuthProvider", tag="2")]
+    #[prost(enumeration = "OAuthProvider", tag = "2")]
     pub provider: i32,
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub provider_user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub provider_email: ::prost::alloc::string::String,
     /// Optional human-readable display name (e.g. GitHub login). Stored on
     /// the identity and surfaced via OAuthConnection.
-    #[prost(string, tag="5")]
+    #[prost(string, tag = "5")]
     pub provider_display_name: ::prost::alloc::string::String,
     /// Optional provider-specific extras as JSON (avatar_url, login, etc.).
     /// Stored as JSONB in `identities.provider_data` and echoed back via
     /// OAuthConnection.provider_data_json.
-    #[prost(string, tag="6")]
+    #[prost(string, tag = "6")]
     pub provider_data_json: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct LinkOAuthProviderResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub connection: ::core::option::Option<OAuthConnection>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UnlinkOAuthProviderRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
-    #[prost(enumeration="OAuthProvider", tag="2")]
+    #[prost(enumeration = "OAuthProvider", tag = "2")]
     pub provider: i32,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UnlinkOAuthProviderResponse {
-}
+pub struct UnlinkOAuthProviderResponse {}
 // ─── Personal access tokens ──────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PersonalAccessToken {
     /// UUID
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub token_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(message, optional, tag="4")]
+    #[prost(message, optional, tag = "4")]
     pub expires_at: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(message, optional, tag="5")]
+    #[prost(message, optional, tag = "5")]
     pub last_used: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag = "6")]
     pub created_at: ::core::option::Option<::prost_types::Timestamp>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreatePersonalAccessTokenRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub name: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Duration in seconds; 0 = no expiry
-    #[prost(int64, tag="4")]
+    #[prost(int64, tag = "4")]
     pub expires_in_seconds: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreatePersonalAccessTokenResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub token: ::core::option::Option<PersonalAccessToken>,
     /// The raw token value, only returned on creation
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub raw_token: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListPersonalAccessTokensRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListPersonalAccessTokensResponse {
-    #[prost(message, repeated, tag="1")]
+    #[prost(message, repeated, tag = "1")]
     pub tokens: ::prost::alloc::vec::Vec<PersonalAccessToken>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeletePersonalAccessTokenRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub token_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeletePersonalAccessTokenResponse {
-}
+pub struct DeletePersonalAccessTokenResponse {}
 // ─── Stats ──────────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetUserStatsRequest {
-    #[prost(oneof="get_user_stats_request::Identifier", tags="1, 2")]
+    #[prost(oneof = "get_user_stats_request::Identifier", tags = "1, 2")]
     pub identifier: ::core::option::Option<get_user_stats_request::Identifier>,
 }
 /// Nested message and enum types in `GetUserStatsRequest`.
 pub mod get_user_stats_request {
     #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Identifier {
-        #[prost(string, tag="1")]
+        #[prost(string, tag = "1")]
         UserId(::prost::alloc::string::String),
-        #[prost(string, tag="2")]
+        #[prost(string, tag = "2")]
         Username(::prost::alloc::string::String),
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetUserStatsResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub stats: ::core::option::Option<UserStats>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UserStats {
-    #[prost(int64, tag="1")]
+    #[prost(int64, tag = "1")]
     pub total_releases: i64,
-    #[prost(int64, tag="2")]
+    #[prost(int64, tag = "2")]
     pub successful_releases: i64,
-    #[prost(int64, tag="3")]
+    #[prost(int64, tag = "3")]
     pub failed_releases: i64,
-    #[prost(int64, tag="4")]
+    #[prost(int64, tag = "4")]
     pub in_progress_releases: i64,
-    #[prost(int64, tag="5")]
+    #[prost(int64, tag = "5")]
     pub total_annotations: i64,
-    #[prost(int64, tag="6")]
+    #[prost(int64, tag = "6")]
     pub total_uploads: i64,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SetupMfaRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
-    #[prost(enumeration="MfaType", tag="2")]
+    #[prost(enumeration = "MfaType", tag = "2")]
     pub mfa_type: i32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SetupMfaResponse {
     /// UUID
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub mfa_id: ::prost::alloc::string::String,
     /// TOTP provisioning URI (otpauth://...)
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub provisioning_uri: ::prost::alloc::string::String,
     /// Base32-encoded secret for manual entry
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub secret: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct VerifyMfaRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub mfa_id: ::prost::alloc::string::String,
     /// The TOTP code to verify setup
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub code: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VerifyMfaResponse {
-}
+pub struct VerifyMfaResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DisableMfaRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_id: ::prost::alloc::string::String,
     /// Current TOTP code to confirm disable
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub code: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DisableMfaResponse {
-}
+pub struct DisableMfaResponse {}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct VerifyLoginMfaRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub mfa_session_token: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub code: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct VerifyLoginMfaResponse {
-    #[prost(message, optional, tag="1")]
+    #[prost(message, optional, tag = "1")]
     pub user: ::core::option::Option<User>,
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub tokens: ::core::option::Option<AuthTokens>,
 }
 // ─── Device authorization grant (RFC 8628) ───────────────────────────
@@ -5399,57 +5508,57 @@ pub struct VerifyLoginMfaResponse {
 pub struct InitiateDeviceLoginRequest {
     /// e.g. "forest-cli/0.3.2 darwin-arm64". Free-form, used for audit and
     /// for rendering "Approve forest-cli/0.3.2?" in the forage approval UI.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub client_name: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub client_version: ::prost::alloc::string::String,
     /// Reserved for future per-scope authorisation. Today the server stores
     /// and echoes them back but does not enforce anything.
-    #[prost(string, repeated, tag="3")]
+    #[prost(string, repeated, tag = "3")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct InitiateDeviceLoginResponse {
     /// Opaque, base64url-encoded random material. The CLI keeps this and
     /// sends it back via PollDeviceLogin; it is never displayed to the user.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub device_code: ::prost::alloc::string::String,
     /// Human-typeable code, grouped with a dash for readability,
     /// e.g. "BCDF-GHJK". Case- and dash-insensitive on the approval side.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub user_code: ::prost::alloc::string::String,
     /// Base verification URL (no user_code embedded), e.g.
     /// "<https://forage.example.com/device".> For headless devices the user
     /// visits this URL and types the user_code by hand.
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub verification_uri: ::prost::alloc::string::String,
     /// Convenience URL with the user_code pre-filled as a query parameter.
     /// The CLI opens this in the user's browser.
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub verification_uri_complete: ::prost::alloc::string::String,
     /// Lifetime of the grant in seconds (server-authoritative, default 900).
-    #[prost(int64, tag="5")]
+    #[prost(int64, tag = "5")]
     pub expires_in_seconds: i64,
     /// Minimum interval (in seconds) the CLI should wait between polls.
     /// Polling faster yields DEVICE_LOGIN_STATUS_SLOW_DOWN.
-    #[prost(int32, tag="6")]
+    #[prost(int32, tag = "6")]
     pub interval_seconds: i32,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct PollDeviceLoginRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub device_code: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PollDeviceLoginResponse {
-    #[prost(enumeration="DeviceLoginStatus", tag="1")]
+    #[prost(enumeration = "DeviceLoginStatus", tag = "1")]
     pub status: i32,
     /// Populated only when status == DEVICE_LOGIN_STATUS_APPROVED. Identical
     /// shape to a successful LoginResponse so the CLI's storage code is
     /// unchanged from the password flow.
-    #[prost(message, optional, tag="2")]
+    #[prost(message, optional, tag = "2")]
     pub user: ::core::option::Option<User>,
-    #[prost(message, optional, tag="3")]
+    #[prost(message, optional, tag = "3")]
     pub tokens: ::core::option::Option<AuthTokens>,
 }
 /// Service-account-only. Called by the forage backend after the user
@@ -5457,31 +5566,29 @@ pub struct PollDeviceLoginResponse {
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ApproveDeviceLoginRequest {
     /// Looked up case-insensitively, dashes/whitespace stripped.
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_code: ::prost::alloc::string::String,
     /// The forage-authenticated user who clicked Approve.
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub user_id: ::prost::alloc::string::String,
     /// Forwarded from forage for audit. Optional but recommended.
-    #[prost(string, tag="3")]
+    #[prost(string, tag = "3")]
     pub approving_ip: ::prost::alloc::string::String,
-    #[prost(string, tag="4")]
+    #[prost(string, tag = "4")]
     pub approving_user_agent: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ApproveDeviceLoginResponse {
-}
+pub struct ApproveDeviceLoginResponse {}
 /// Service-account-only.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DenyDeviceLoginRequest {
-    #[prost(string, tag="1")]
+    #[prost(string, tag = "1")]
     pub user_code: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
+    #[prost(string, tag = "2")]
     pub user_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DenyDeviceLoginResponse {
-}
+pub struct DenyDeviceLoginResponse {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum OAuthProvider {

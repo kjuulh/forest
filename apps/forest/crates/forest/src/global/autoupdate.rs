@@ -170,9 +170,6 @@ mod tests {
     fn interval_defaults_when_env_unset() {
         // Not asserting against the live env (tests share a process); just
         // confirm the parser falls back for garbage input.
-        assert_eq!(
-            super::DEFAULT_INTERVAL,
-            Duration::from_secs(24 * 60 * 60)
-        );
+        assert_eq!(super::DEFAULT_INTERVAL, Duration::from_secs(24 * 60 * 60));
     }
 }

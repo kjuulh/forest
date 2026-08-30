@@ -1,0 +1,8 @@
+---
+apiVersion: forage.rawpotion.io/v1alpha1
+kind: S3Bucket
+metadata:
+  name: forest-s3
+  namespace: dev
+spec:
+  bucketName: forest

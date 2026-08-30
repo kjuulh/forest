@@ -1327,11 +1327,8 @@ mod tests {
         assert!(matches!(err, OAuthAppError::UnsupportedGrant(g) if g == "implicit"));
         // And one bad entry fails the whole list.
         assert!(
-            validate_grant_types(&[
-                "authorization_code".to_string(),
-                "password".to_string()
-            ])
-            .is_err()
+            validate_grant_types(&["authorization_code".to_string(), "password".to_string()])
+                .is_err()
         );
     }
 

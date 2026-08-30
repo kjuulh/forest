@@ -41,9 +41,7 @@ impl EventData for DestinationEvent {
         match self {
             DestinationEvent::Created { .. } => "destination.created",
             DestinationEvent::MetadataUpdated { .. } => "destination.metadata_updated",
-            DestinationEvent::SensitiveKeysUpdated { .. } => {
-                "destination.sensitive_keys_updated"
-            }
+            DestinationEvent::SensitiveKeysUpdated { .. } => "destination.sensitive_keys_updated",
             DestinationEvent::Deleted => "destination.deleted",
         }
     }

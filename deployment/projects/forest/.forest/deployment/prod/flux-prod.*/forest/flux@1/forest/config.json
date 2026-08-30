@@ -1,0 +1,49 @@
+{
+  "env": "prod",
+  "destination": "flux-prod.*",
+  "destination_type": "forest/flux@1",
+  "component": {
+    "organisation": "kjuulh",
+    "name": "service",
+    "source": {
+      "Local": "../../components/kjuulh/service"
+    }
+  },
+  "config": {
+    "health_host": "0.0.0.0",
+    "tag": "latest",
+    "image": "git.kjuulh.io/kjuulh/forest",
+    "health_binary": "forest-server",
+    "port_name": "grpc",
+    "port": 4040,
+    "replicas": 3,
+    "forage_nats": {
+      "publish": [
+        {
+          "subject": "forest.>"
+        }
+      ],
+      "subscribe": [
+        {
+          "subject": "forest.>"
+        },
+        {
+          "subject": "_INBOX.>"
+        }
+      ]
+    },
+    "host": "forest.forage.sh",
+    "name": "forest",
+    "forage_s3": {},
+    "args": [
+      "serve"
+    ],
+    "env_vars": {
+      "EXTERNAL_HOST": "https://forest.forage.sh",
+      "FOREST_HOST": "0.0.0.0:4040",
+      "LOG_LEVEL": "short",
+      "FOREST_TERRAFORM_V1_EXTERNAL_HOST": "https://forest.forage.sh"
+    },
+    "forage_postgresql": {}
+  }
+}

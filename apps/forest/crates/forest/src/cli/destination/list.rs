@@ -159,7 +159,10 @@ mod tests {
         // The terraform case: keys the type never declares are forwarded as
         // TF_VAR_* and are not secret by default.
         let dest = destination(
-            &[("tf_workspace", "platform-dev"), ("infra_environment", "dev")],
+            &[
+                ("tf_workspace", "platform-dev"),
+                ("infra_environment", "dev"),
+            ],
             &[],
         );
 
@@ -176,8 +179,15 @@ mod tests {
     fn declared_free_form_keys_are_hidden() {
         // DATA-575: these live outside the terraform type's field schema.
         let dest = destination(
-            &[("tf_workspace", "platform-dev"), ("aws_account_id", "12345")],
-            &["aws_access_key_id", "aws_secret_access_key", "cloudflare_token"],
+            &[
+                ("tf_workspace", "platform-dev"),
+                ("aws_account_id", "12345"),
+            ],
+            &[
+                "aws_access_key_id",
+                "aws_secret_access_key",
+                "cloudflare_token",
+            ],
         );
 
         assert_eq!(

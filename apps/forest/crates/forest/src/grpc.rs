@@ -332,10 +332,7 @@ impl GrpcClient {
         let channel = self.auth_channel(self.channel().await?);
         let mut client =
             forest_grpc_interface::status_service_client::StatusServiceClient::new(channel);
-        let res = client
-            .status(GetStatusRequest {})
-            .await
-            .map_err(grpc_err)?;
+        let res = client.status(GetStatusRequest {}).await.map_err(grpc_err)?;
         Ok(res.into_inner())
     }
 

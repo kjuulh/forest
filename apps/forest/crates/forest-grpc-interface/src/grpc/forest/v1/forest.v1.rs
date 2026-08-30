@@ -2423,284 +2423,6 @@ pub struct DeleteOAuthAppRequest {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteOAuthAppResponse {
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct Organisation {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="3")]
-    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct CreateOrganisationRequest {
-    #[prost(string, tag="1")]
-    pub name: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct CreateOrganisationResponse {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetOrganisationRequest {
-    #[prost(oneof="get_organisation_request::Identifier", tags="1, 2")]
-    pub identifier: ::core::option::Option<get_organisation_request::Identifier>,
-}
-/// Nested message and enum types in `GetOrganisationRequest`.
-pub mod get_organisation_request {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
-    pub enum Identifier {
-        #[prost(string, tag="1")]
-        OrganisationId(::prost::alloc::string::String),
-        #[prost(string, tag="2")]
-        Name(::prost::alloc::string::String),
-    }
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetOrganisationResponse {
-    #[prost(message, optional, tag="1")]
-    pub organisation: ::core::option::Option<Organisation>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct SearchOrganisationsRequest {
-    #[prost(string, tag="1")]
-    pub query: ::prost::alloc::string::String,
-    #[prost(int32, tag="2")]
-    pub page_size: i32,
-    #[prost(string, tag="3")]
-    pub page_token: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SearchOrganisationsResponse {
-    #[prost(message, repeated, tag="1")]
-    pub organisations: ::prost::alloc::vec::Vec<Organisation>,
-    #[prost(string, tag="2")]
-    pub next_page_token: ::prost::alloc::string::String,
-    #[prost(int32, tag="3")]
-    pub total_count: i32,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListMyOrganisationsRequest {
-    /// Optional role filter (e.g. "admin"); empty means all roles
-    #[prost(string, tag="1")]
-    pub role: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListMyOrganisationsResponse {
-    #[prost(message, repeated, tag="1")]
-    pub organisations: ::prost::alloc::vec::Vec<Organisation>,
-    /// The role the caller has in each organisation (parallel to organisations)
-    #[prost(string, repeated, tag="2")]
-    pub roles: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-}
-// -- Members ------------------------------------------------------------------
-
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OrganisationMember {
-    #[prost(string, tag="1")]
-    pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub username: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub role: ::prost::alloc::string::String,
-    #[prost(message, optional, tag="4")]
-    pub joined_at: ::core::option::Option<::prost_types::Timestamp>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AddMemberRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub role: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AddMemberResponse {
-    #[prost(message, optional, tag="1")]
-    pub member: ::core::option::Option<OrganisationMember>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RemoveMemberRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub user_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RemoveMemberResponse {
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UpdateMemberRoleRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub user_id: ::prost::alloc::string::String,
-    #[prost(string, tag="3")]
-    pub role: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct UpdateMemberRoleResponse {
-    #[prost(message, optional, tag="1")]
-    pub member: ::core::option::Option<OrganisationMember>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListMembersRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(int32, tag="2")]
-    pub page_size: i32,
-    #[prost(string, tag="3")]
-    pub page_token: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListMembersResponse {
-    #[prost(message, repeated, tag="1")]
-    pub members: ::prost::alloc::vec::Vec<OrganisationMember>,
-    #[prost(string, tag="2")]
-    pub next_page_token: ::prost::alloc::string::String,
-    #[prost(int32, tag="3")]
-    pub total_count: i32,
-}
-// -- Allowed domain auto-invite (DATA-252) ------------------------------------
-
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AllowedDomain {
-    #[prost(string, tag="1")]
-    pub domain: ::prost::alloc::string::String,
-    /// 'auto_invite_any_verified' | 'manual_only' | 'auto_join_oauth' (v1.1).
-    #[prost(string, tag="2")]
-    pub policy: ::prost::alloc::string::String,
-    /// Surfaced to admins for v1.1 DNS TXT verification ("set TXT _forest-verify
-    /// = <token>"). v1 generates and stores but does not validate.
-    #[prost(string, tag="3")]
-    pub dns_verification_token: ::prost::alloc::string::String,
-    /// Null until DNS TXT proven. v1 ignores; v1.1 will gate auto_join_oauth.
-    #[prost(message, optional, tag="4")]
-    pub dns_verified_at: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(message, optional, tag="5")]
-    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(string, tag="6")]
-    pub created_by_user_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AddAllowedDomainRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub domain: ::prost::alloc::string::String,
-    /// Optional; defaults server-side to 'auto_invite_any_verified'.
-    #[prost(string, tag="3")]
-    pub policy: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AddAllowedDomainResponse {
-    #[prost(message, optional, tag="1")]
-    pub domain: ::core::option::Option<AllowedDomain>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListAllowedDomainsRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListAllowedDomainsResponse {
-    #[prost(message, repeated, tag="1")]
-    pub domains: ::prost::alloc::vec::Vec<AllowedDomain>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RemoveAllowedDomainRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub domain: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RemoveAllowedDomainResponse {
-    #[prost(bool, tag="1")]
-    pub removed: bool,
-}
-/// Trigger a DNS TXT lookup at `_forest-verify.<domain>` and flip the row
-/// to verified if the configured token is present (DATA-252).
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VerifyAllowedDomainRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub domain: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VerifyAllowedDomainResponse {
-    #[prost(enumeration="verify_allowed_domain_response::Status", tag="1")]
-    pub status: i32,
-}
-/// Nested message and enum types in `VerifyAllowedDomainResponse`.
-pub mod verify_allowed_domain_response {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-    #[repr(i32)]
-    pub enum Status {
-        Unspecified = 0,
-        /// freshly verified by this call
-        Verified = 1,
-        /// was already verified; no-op
-        AlreadyVerified = 2,
-        /// DNS resolved but no matching TXT was found
-        Missing = 3,
-    }
-    impl Status {
-        /// String value of the enum field names used in the ProtoBuf definition.
-        ///
-        /// The values are not transformed in any way and thus are considered stable
-        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-        pub fn as_str_name(&self) -> &'static str {
-            match self {
-                Self::Unspecified => "STATUS_UNSPECIFIED",
-                Self::Verified => "VERIFIED",
-                Self::AlreadyVerified => "ALREADY_VERIFIED",
-                Self::Missing => "MISSING",
-            }
-        }
-        /// Creates an enum from field names used in the ProtoBuf definition.
-        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-            match value {
-                "STATUS_UNSPECIFIED" => Some(Self::Unspecified),
-                "VERIFIED" => Some(Self::Verified),
-                "ALREADY_VERIFIED" => Some(Self::AlreadyVerified),
-                "MISSING" => Some(Self::Missing),
-                _ => None,
-            }
-        }
-    }
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct JoinOffer {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub organisation_name: ::prost::alloc::string::String,
-    /// The user's email domain that matched the allowlist row.
-    #[prost(string, tag="3")]
-    pub matched_domain: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListJoinOffersRequest {
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListJoinOffersResponse {
-    #[prost(message, repeated, tag="1")]
-    pub offers: ::prost::alloc::vec::Vec<JoinOffer>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AcceptJoinOfferRequest {
-    #[prost(string, tag="1")]
-    pub organisation_id: ::prost::alloc::string::String,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AcceptJoinOfferResponse {
-    #[prost(message, optional, tag="1")]
-    pub member: ::core::option::Option<OrganisationMember>,
-}
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnnotateReleaseRequest {
     #[prost(string, tag="1")]
@@ -3366,6 +3088,9 @@ pub struct ProjectMetadata {
     /// Responsible team or person.
     #[prost(string, tag="6")]
     pub owner: ::prost::alloc::string::String,
+    /// Free-form labels for org-scoped rule selection.
+    #[prost(string, repeated, tag="7")]
+    pub tags: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Ref {
@@ -3766,6 +3491,606 @@ impl PolicyType {
             _ => None,
         }
     }
+}
+// ── Per-type config messages ─────────────────────────────────────────
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeployStageConfig {
+    #[prost(string, tag="1")]
+    pub environment: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WaitStageConfig {
+    #[prost(int64, tag="1")]
+    pub duration_seconds: i64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PlanStageConfig {
+    #[prost(string, tag="1")]
+    pub environment: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
+    pub auto_approve: bool,
+}
+// ── A single pipeline stage ──────────────────────────────────────────
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PipelineStage {
+    #[prost(string, tag="1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag="2")]
+    pub depends_on: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(oneof="pipeline_stage::Config", tags="10, 11, 12")]
+    pub config: ::core::option::Option<pipeline_stage::Config>,
+}
+/// Nested message and enum types in `PipelineStage`.
+pub mod pipeline_stage {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Config {
+        #[prost(message, tag="10")]
+        Deploy(super::DeployStageConfig),
+        #[prost(message, tag="11")]
+        Wait(super::WaitStageConfig),
+        #[prost(message, tag="12")]
+        Plan(super::PlanStageConfig),
+    }
+}
+// ── Pipeline resource ────────────────────────────────────────────────
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReleasePipeline {
+    #[prost(string, tag="1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag="3")]
+    pub enabled: bool,
+    #[prost(message, repeated, tag="4")]
+    pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
+    #[prost(string, tag="5")]
+    pub created_at: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
+    pub updated_at: ::prost::alloc::string::String,
+}
+// ── CRUD messages ────────────────────────────────────────────────────
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateReleasePipelineRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="3")]
+    pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateReleasePipelineResponse {
+    #[prost(message, optional, tag="1")]
+    pub pipeline: ::core::option::Option<ReleasePipeline>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateReleasePipelineRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, optional, tag="3")]
+    pub enabled: ::core::option::Option<bool>,
+    /// When set, replaces all stages. When absent, stages are unchanged.
+    #[prost(message, repeated, tag="4")]
+    pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
+    #[prost(bool, tag="5")]
+    pub update_stages: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateReleasePipelineResponse {
+    #[prost(message, optional, tag="1")]
+    pub pipeline: ::core::option::Option<ReleasePipeline>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteReleasePipelineRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteReleasePipelineResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListReleasePipelinesRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListReleasePipelinesResponse {
+    #[prost(message, repeated, tag="1")]
+    pub pipelines: ::prost::alloc::vec::Vec<ReleasePipeline>,
+}
+// ── Stage type enum (useful for UI dropdowns / filtering) ────────────
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum StageType {
+    Unspecified = 0,
+    Deploy = 1,
+    Wait = 2,
+    Plan = 3,
+}
+impl StageType {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "STAGE_TYPE_UNSPECIFIED",
+            Self::Deploy => "STAGE_TYPE_DEPLOY",
+            Self::Wait => "STAGE_TYPE_WAIT",
+            Self::Plan => "STAGE_TYPE_PLAN",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "STAGE_TYPE_UNSPECIFIED" => Some(Self::Unspecified),
+            "STAGE_TYPE_DEPLOY" => Some(Self::Deploy),
+            "STAGE_TYPE_WAIT" => Some(Self::Wait),
+            "STAGE_TYPE_PLAN" => Some(Self::Plan),
+            _ => None,
+        }
+    }
+}
+// ── Runtime stage status (for observing pipeline progress) ───────────
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum PipelineStageStatus {
+    Unspecified = 0,
+    Pending = 1,
+    Active = 2,
+    Succeeded = 3,
+    Failed = 4,
+    Cancelled = 5,
+    AwaitingApproval = 6,
+}
+impl PipelineStageStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "PIPELINE_STAGE_STATUS_UNSPECIFIED",
+            Self::Pending => "PIPELINE_STAGE_STATUS_PENDING",
+            Self::Active => "PIPELINE_STAGE_STATUS_ACTIVE",
+            Self::Succeeded => "PIPELINE_STAGE_STATUS_SUCCEEDED",
+            Self::Failed => "PIPELINE_STAGE_STATUS_FAILED",
+            Self::Cancelled => "PIPELINE_STAGE_STATUS_CANCELLED",
+            Self::AwaitingApproval => "PIPELINE_STAGE_STATUS_AWAITING_APPROVAL",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "PIPELINE_STAGE_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "PIPELINE_STAGE_STATUS_PENDING" => Some(Self::Pending),
+            "PIPELINE_STAGE_STATUS_ACTIVE" => Some(Self::Active),
+            "PIPELINE_STAGE_STATUS_SUCCEEDED" => Some(Self::Succeeded),
+            "PIPELINE_STAGE_STATUS_FAILED" => Some(Self::Failed),
+            "PIPELINE_STAGE_STATUS_CANCELLED" => Some(Self::Cancelled),
+            "PIPELINE_STAGE_STATUS_AWAITING_APPROVAL" => Some(Self::AwaitingApproval),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ProjectSelector {
+    #[prost(string, repeated, tag="1")]
+    pub include_projects: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="2")]
+    pub exclude_projects: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="3")]
+    pub name_regex: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(map="string, string", tag="4")]
+    pub metadata_match: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="5")]
+    pub tags: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OrgPolicyRule {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
+    pub enabled: bool,
+    #[prost(enumeration="PolicyType", tag="3")]
+    pub policy_type: i32,
+    #[prost(oneof="org_policy_rule::Config", tags="10, 11, 12")]
+    pub config: ::core::option::Option<org_policy_rule::Config>,
+}
+/// Nested message and enum types in `OrgPolicyRule`.
+pub mod org_policy_rule {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Config {
+        #[prost(message, tag="10")]
+        SoakTime(super::SoakTimeConfig),
+        #[prost(message, tag="11")]
+        BranchRestriction(super::BranchRestrictionConfig),
+        #[prost(message, tag="12")]
+        ExternalApproval(super::ExternalApprovalConfig),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OrgTriggerRule {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
+    pub enabled: bool,
+    #[prost(string, optional, tag="3")]
+    pub branch_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="4")]
+    pub title_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="5")]
+    pub author_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="6")]
+    pub commit_message_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag="7")]
+    pub source_type_pattern: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="8")]
+    pub target_environments: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, repeated, tag="9")]
+    pub target_destinations: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(bool, tag="10")]
+    pub force_release: bool,
+    #[prost(bool, tag="11")]
+    pub use_pipeline: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OrgReleasePipelineRule {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag="2")]
+    pub enabled: bool,
+    #[prost(message, repeated, tag="3")]
+    pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct OrgRuleSet {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(bool, tag="3")]
+    pub enabled: bool,
+    #[prost(message, optional, tag="4")]
+    pub selector: ::core::option::Option<ProjectSelector>,
+    #[prost(message, repeated, tag="5")]
+    pub policies: ::prost::alloc::vec::Vec<OrgPolicyRule>,
+    #[prost(message, repeated, tag="6")]
+    pub triggers: ::prost::alloc::vec::Vec<OrgTriggerRule>,
+    #[prost(message, repeated, tag="7")]
+    pub release_pipelines: ::prost::alloc::vec::Vec<OrgReleasePipelineRule>,
+    #[prost(string, tag="8")]
+    pub created_at: ::prost::alloc::string::String,
+    #[prost(string, tag="9")]
+    pub updated_at: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateOrgRuleSetRequest {
+    #[prost(message, optional, tag="1")]
+    pub rule_set: ::core::option::Option<OrgRuleSet>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateOrgRuleSetResponse {
+    #[prost(message, optional, tag="1")]
+    pub rule_set: ::core::option::Option<OrgRuleSet>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateOrgRuleSetRequest {
+    #[prost(message, optional, tag="1")]
+    pub rule_set: ::core::option::Option<OrgRuleSet>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateOrgRuleSetResponse {
+    #[prost(message, optional, tag="1")]
+    pub rule_set: ::core::option::Option<OrgRuleSet>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteOrgRuleSetRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeleteOrgRuleSetResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListOrgRuleSetsRequest {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListOrgRuleSetsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub rule_sets: ::prost::alloc::vec::Vec<OrgRuleSet>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Organisation {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateOrganisationRequest {
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreateOrganisationResponse {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOrganisationRequest {
+    #[prost(oneof="get_organisation_request::Identifier", tags="1, 2")]
+    pub identifier: ::core::option::Option<get_organisation_request::Identifier>,
+}
+/// Nested message and enum types in `GetOrganisationRequest`.
+pub mod get_organisation_request {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Identifier {
+        #[prost(string, tag="1")]
+        OrganisationId(::prost::alloc::string::String),
+        #[prost(string, tag="2")]
+        Name(::prost::alloc::string::String),
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetOrganisationResponse {
+    #[prost(message, optional, tag="1")]
+    pub organisation: ::core::option::Option<Organisation>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SearchOrganisationsRequest {
+    #[prost(string, tag="1")]
+    pub query: ::prost::alloc::string::String,
+    #[prost(int32, tag="2")]
+    pub page_size: i32,
+    #[prost(string, tag="3")]
+    pub page_token: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SearchOrganisationsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub organisations: ::prost::alloc::vec::Vec<Organisation>,
+    #[prost(string, tag="2")]
+    pub next_page_token: ::prost::alloc::string::String,
+    #[prost(int32, tag="3")]
+    pub total_count: i32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListMyOrganisationsRequest {
+    /// Optional role filter (e.g. "admin"); empty means all roles
+    #[prost(string, tag="1")]
+    pub role: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListMyOrganisationsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub organisations: ::prost::alloc::vec::Vec<Organisation>,
+    /// The role the caller has in each organisation (parallel to organisations)
+    #[prost(string, repeated, tag="2")]
+    pub roles: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+// -- Members ------------------------------------------------------------------
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OrganisationMember {
+    #[prost(string, tag="1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub username: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub role: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="4")]
+    pub joined_at: ::core::option::Option<::prost_types::Timestamp>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddMemberRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub role: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddMemberResponse {
+    #[prost(message, optional, tag="1")]
+    pub member: ::core::option::Option<OrganisationMember>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveMemberRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveMemberResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateMemberRoleRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub role: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateMemberRoleResponse {
+    #[prost(message, optional, tag="1")]
+    pub member: ::core::option::Option<OrganisationMember>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListMembersRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(int32, tag="2")]
+    pub page_size: i32,
+    #[prost(string, tag="3")]
+    pub page_token: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListMembersResponse {
+    #[prost(message, repeated, tag="1")]
+    pub members: ::prost::alloc::vec::Vec<OrganisationMember>,
+    #[prost(string, tag="2")]
+    pub next_page_token: ::prost::alloc::string::String,
+    #[prost(int32, tag="3")]
+    pub total_count: i32,
+}
+// -- Allowed domain auto-invite (DATA-252) ------------------------------------
+
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AllowedDomain {
+    #[prost(string, tag="1")]
+    pub domain: ::prost::alloc::string::String,
+    /// 'auto_invite_any_verified' | 'manual_only' | 'auto_join_oauth' (v1.1).
+    #[prost(string, tag="2")]
+    pub policy: ::prost::alloc::string::String,
+    /// Surfaced to admins for v1.1 DNS TXT verification ("set TXT _forest-verify
+    /// = <token>"). v1 generates and stores but does not validate.
+    #[prost(string, tag="3")]
+    pub dns_verification_token: ::prost::alloc::string::String,
+    /// Null until DNS TXT proven. v1 ignores; v1.1 will gate auto_join_oauth.
+    #[prost(message, optional, tag="4")]
+    pub dns_verified_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(message, optional, tag="5")]
+    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(string, tag="6")]
+    pub created_by_user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddAllowedDomainRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub domain: ::prost::alloc::string::String,
+    /// Optional; defaults server-side to 'auto_invite_any_verified'.
+    #[prost(string, tag="3")]
+    pub policy: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddAllowedDomainResponse {
+    #[prost(message, optional, tag="1")]
+    pub domain: ::core::option::Option<AllowedDomain>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListAllowedDomainsRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListAllowedDomainsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub domains: ::prost::alloc::vec::Vec<AllowedDomain>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveAllowedDomainRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub domain: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveAllowedDomainResponse {
+    #[prost(bool, tag="1")]
+    pub removed: bool,
+}
+/// Trigger a DNS TXT lookup at `_forest-verify.<domain>` and flip the row
+/// to verified if the configured token is present (DATA-252).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VerifyAllowedDomainRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub domain: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VerifyAllowedDomainResponse {
+    #[prost(enumeration="verify_allowed_domain_response::Status", tag="1")]
+    pub status: i32,
+}
+/// Nested message and enum types in `VerifyAllowedDomainResponse`.
+pub mod verify_allowed_domain_response {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+    #[repr(i32)]
+    pub enum Status {
+        Unspecified = 0,
+        /// freshly verified by this call
+        Verified = 1,
+        /// was already verified; no-op
+        AlreadyVerified = 2,
+        /// DNS resolved but no matching TXT was found
+        Missing = 3,
+    }
+    impl Status {
+        /// String value of the enum field names used in the ProtoBuf definition.
+        ///
+        /// The values are not transformed in any way and thus are considered stable
+        /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+        pub fn as_str_name(&self) -> &'static str {
+            match self {
+                Self::Unspecified => "STATUS_UNSPECIFIED",
+                Self::Verified => "VERIFIED",
+                Self::AlreadyVerified => "ALREADY_VERIFIED",
+                Self::Missing => "MISSING",
+            }
+        }
+        /// Creates an enum from field names used in the ProtoBuf definition.
+        pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+            match value {
+                "STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+                "VERIFIED" => Some(Self::Verified),
+                "ALREADY_VERIFIED" => Some(Self::AlreadyVerified),
+                "MISSING" => Some(Self::Missing),
+                _ => None,
+            }
+        }
+    }
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct JoinOffer {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub organisation_name: ::prost::alloc::string::String,
+    /// The user's email domain that matched the allowlist row.
+    #[prost(string, tag="3")]
+    pub matched_domain: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListJoinOffersRequest {
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListJoinOffersResponse {
+    #[prost(message, repeated, tag="1")]
+    pub offers: ::prost::alloc::vec::Vec<JoinOffer>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AcceptJoinOfferRequest {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AcceptJoinOfferResponse {
+    #[prost(message, optional, tag="1")]
+    pub member: ::core::option::Option<OrganisationMember>,
 }
 // --- v1 messages (unchanged) ---
 
@@ -4246,197 +4571,6 @@ impl ComponentShape {
             "COMPONENT_SHAPE_HYBRID" => Some(Self::Hybrid),
             "COMPONENT_SHAPE_TOOL_BINARY" => Some(Self::ToolBinary),
             "COMPONENT_SHAPE_TOOL_EXTERNAL" => Some(Self::ToolExternal),
-            _ => None,
-        }
-    }
-}
-// ── Per-type config messages ─────────────────────────────────────────
-
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeployStageConfig {
-    #[prost(string, tag="1")]
-    pub environment: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct WaitStageConfig {
-    #[prost(int64, tag="1")]
-    pub duration_seconds: i64,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct PlanStageConfig {
-    #[prost(string, tag="1")]
-    pub environment: ::prost::alloc::string::String,
-    #[prost(bool, tag="2")]
-    pub auto_approve: bool,
-}
-// ── A single pipeline stage ──────────────────────────────────────────
-
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct PipelineStage {
-    #[prost(string, tag="1")]
-    pub id: ::prost::alloc::string::String,
-    #[prost(string, repeated, tag="2")]
-    pub depends_on: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(oneof="pipeline_stage::Config", tags="10, 11, 12")]
-    pub config: ::core::option::Option<pipeline_stage::Config>,
-}
-/// Nested message and enum types in `PipelineStage`.
-pub mod pipeline_stage {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
-    pub enum Config {
-        #[prost(message, tag="10")]
-        Deploy(super::DeployStageConfig),
-        #[prost(message, tag="11")]
-        Wait(super::WaitStageConfig),
-        #[prost(message, tag="12")]
-        Plan(super::PlanStageConfig),
-    }
-}
-// ── Pipeline resource ────────────────────────────────────────────────
-
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ReleasePipeline {
-    #[prost(string, tag="1")]
-    pub id: ::prost::alloc::string::String,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(bool, tag="3")]
-    pub enabled: bool,
-    #[prost(message, repeated, tag="4")]
-    pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
-    #[prost(string, tag="5")]
-    pub created_at: ::prost::alloc::string::String,
-    #[prost(string, tag="6")]
-    pub updated_at: ::prost::alloc::string::String,
-}
-// ── CRUD messages ────────────────────────────────────────────────────
-
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct CreateReleasePipelineRequest {
-    #[prost(message, optional, tag="1")]
-    pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag="3")]
-    pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct CreateReleasePipelineResponse {
-    #[prost(message, optional, tag="1")]
-    pub pipeline: ::core::option::Option<ReleasePipeline>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct UpdateReleasePipelineRequest {
-    #[prost(message, optional, tag="1")]
-    pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-    #[prost(bool, optional, tag="3")]
-    pub enabled: ::core::option::Option<bool>,
-    /// When set, replaces all stages. When absent, stages are unchanged.
-    #[prost(message, repeated, tag="4")]
-    pub stages: ::prost::alloc::vec::Vec<PipelineStage>,
-    #[prost(bool, tag="5")]
-    pub update_stages: bool,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct UpdateReleasePipelineResponse {
-    #[prost(message, optional, tag="1")]
-    pub pipeline: ::core::option::Option<ReleasePipeline>,
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeleteReleasePipelineRequest {
-    #[prost(message, optional, tag="1")]
-    pub project: ::core::option::Option<Project>,
-    #[prost(string, tag="2")]
-    pub name: ::prost::alloc::string::String,
-}
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct DeleteReleasePipelineResponse {
-}
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListReleasePipelinesRequest {
-    #[prost(message, optional, tag="1")]
-    pub project: ::core::option::Option<Project>,
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListReleasePipelinesResponse {
-    #[prost(message, repeated, tag="1")]
-    pub pipelines: ::prost::alloc::vec::Vec<ReleasePipeline>,
-}
-// ── Stage type enum (useful for UI dropdowns / filtering) ────────────
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum StageType {
-    Unspecified = 0,
-    Deploy = 1,
-    Wait = 2,
-    Plan = 3,
-}
-impl StageType {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            Self::Unspecified => "STAGE_TYPE_UNSPECIFIED",
-            Self::Deploy => "STAGE_TYPE_DEPLOY",
-            Self::Wait => "STAGE_TYPE_WAIT",
-            Self::Plan => "STAGE_TYPE_PLAN",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "STAGE_TYPE_UNSPECIFIED" => Some(Self::Unspecified),
-            "STAGE_TYPE_DEPLOY" => Some(Self::Deploy),
-            "STAGE_TYPE_WAIT" => Some(Self::Wait),
-            "STAGE_TYPE_PLAN" => Some(Self::Plan),
-            _ => None,
-        }
-    }
-}
-// ── Runtime stage status (for observing pipeline progress) ───────────
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum PipelineStageStatus {
-    Unspecified = 0,
-    Pending = 1,
-    Active = 2,
-    Succeeded = 3,
-    Failed = 4,
-    Cancelled = 5,
-    AwaitingApproval = 6,
-}
-impl PipelineStageStatus {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            Self::Unspecified => "PIPELINE_STAGE_STATUS_UNSPECIFIED",
-            Self::Pending => "PIPELINE_STAGE_STATUS_PENDING",
-            Self::Active => "PIPELINE_STAGE_STATUS_ACTIVE",
-            Self::Succeeded => "PIPELINE_STAGE_STATUS_SUCCEEDED",
-            Self::Failed => "PIPELINE_STAGE_STATUS_FAILED",
-            Self::Cancelled => "PIPELINE_STAGE_STATUS_CANCELLED",
-            Self::AwaitingApproval => "PIPELINE_STAGE_STATUS_AWAITING_APPROVAL",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "PIPELINE_STAGE_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
-            "PIPELINE_STAGE_STATUS_PENDING" => Some(Self::Pending),
-            "PIPELINE_STAGE_STATUS_ACTIVE" => Some(Self::Active),
-            "PIPELINE_STAGE_STATUS_SUCCEEDED" => Some(Self::Succeeded),
-            "PIPELINE_STAGE_STATUS_FAILED" => Some(Self::Failed),
-            "PIPELINE_STAGE_STATUS_CANCELLED" => Some(Self::Cancelled),
-            "PIPELINE_STAGE_STATUS_AWAITING_APPROVAL" => Some(Self::AwaitingApproval),
             _ => None,
         }
     }

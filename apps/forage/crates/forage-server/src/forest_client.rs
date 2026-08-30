@@ -4,33 +4,35 @@ use forage_core::auth::{
 };
 use forage_core::platform::{
     AllowedDomain, ApprovalDecisionEntry, ApprovalState, Artifact, ArtifactContext,
-    ArtifactDestination, ArtifactRef, ArtifactSource, CreatePolicyInput,
-    CreateReleasePipelineInput, CreateTriggerInput, CreatedOAuthApp, Destination, DestinationType,
-    DestinationTypeInfo, Environment, ForestOAuthApps, ForestPlatform, JoinOffer, MetadataFieldDef,
-    ClientPrincipal, DirectoryLookup, DirectoryUser, OAuthApp, OAuthClientInfo, OAuthClientToken,
-    OAuthFlowError, OAuthGrant, OAuthIssuedTokens, OAuthUserinfo,
-    NotificationPreference, Organisation, OrgMember, PipelineStage, PipelineStageConfig,
-    PlanOutput, PlatformError, Policy, PolicyConfig, PolicyEvaluation, ReleasePipeline,
-    Trigger, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
+    ArtifactDestination, ArtifactRef, ArtifactSource, ClientPrincipal, CreateOrgRuleSetInput,
+    CreatePolicyInput, CreateReleasePipelineInput, CreateTriggerInput, CreatedOAuthApp,
+    Destination, DestinationType, DestinationTypeInfo, DirectoryLookup, DirectoryUser, Environment,
+    ForestOAuthApps, ForestPlatform, JoinOffer, MetadataFieldDef, NotificationPreference, OAuthApp,
+    OAuthClientInfo, OAuthClientToken, OAuthFlowError, OAuthGrant, OAuthIssuedTokens,
+    OAuthUserinfo, OrgMember, OrgPolicyRule, OrgReleasePipelineRule, OrgRuleSet, OrgTriggerRule,
+    Organisation, PipelineStage, PipelineStageConfig, PlanOutput, PlatformError, Policy,
+    PolicyConfig, PolicyEvaluation, ProjectSelector, ReleasePipeline, Trigger,
+    UpdateOrgRuleSetInput, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
     VerifyDomainOutcome,
 };
 use forage_core::registry::{
     ComponentDetail, ComponentSearchResult, ComponentSummary, ComponentVersionInfo, ForestRegistry,
     ToolSummary,
 };
+use forage_grpc::destination_service_client::DestinationServiceClient;
+use forage_grpc::environment_service_client::EnvironmentServiceClient;
+use forage_grpc::org_rule_set_service_client::OrgRuleSetServiceClient;
+use forage_grpc::organisation_service_client::OrganisationServiceClient;
 use forage_grpc::policy_service_client::PolicyServiceClient;
 use forage_grpc::registry_service_client::RegistryServiceClient;
 use forage_grpc::release_pipeline_service_client::ReleasePipelineServiceClient;
-use forage_grpc::trigger_service_client::TriggerServiceClient;
-use forage_grpc::destination_service_client::DestinationServiceClient;
-use forage_grpc::environment_service_client::EnvironmentServiceClient;
-use forage_grpc::organisation_service_client::OrganisationServiceClient;
-use forage_grpc::release_health_service_client::ReleaseHealthServiceClient;
 use forage_grpc::release_service_client::ReleaseServiceClient;
+use forage_grpc::release_health_service_client::ReleaseHealthServiceClient;
+use forage_grpc::trigger_service_client::TriggerServiceClient;
 use forage_grpc::users_service_client::UsersServiceClient;
+use tonic::Request;
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
-use tonic::Request;
 
 fn bearer_request<T>(access_token: &str, msg: T) -> Result<Request<T>, String> {
     let mut req = Request::new(msg);
@@ -75,7 +77,9 @@ impl GrpcForestClient {
         OrganisationServiceClient::new(self.channel.clone())
     }
 
-    fn user_service_client(&self) -> forage_grpc::users_service_client::UsersServiceClient<Channel> {
+    fn user_service_client(
+        &self,
+    ) -> forage_grpc::users_service_client::UsersServiceClient<Channel> {
         forage_grpc::users_service_client::UsersServiceClient::new(self.channel.clone())
     }
 
@@ -119,9 +123,11 @@ impl GrpcForestClient {
         ReleasePipelineServiceClient::new(self.channel.clone())
     }
 
-    pub fn event_client(
-        &self,
-    ) -> forage_grpc::event_service_client::EventServiceClient<Channel> {
+    fn org_rule_set_client(&self) -> OrgRuleSetServiceClient<Channel> {
+        OrgRuleSetServiceClient::new(self.channel.clone())
+    }
+
+    pub fn event_client(&self) -> forage_grpc::event_service_client::EventServiceClient<Channel> {
         forage_grpc::event_service_client::EventServiceClient::new(self.channel.clone())
     }
 
@@ -174,8 +180,16 @@ impl GrpcForestClient {
                 artifact_id: ri.artifact_id,
                 project: ri.project,
                 created_at: ri.created_at,
-                stages: ri.stages.into_iter().map(convert_pipeline_stage_state).collect(),
-                steps: ri.steps.into_iter().map(convert_release_step_state).collect(),
+                stages: ri
+                    .stages
+                    .into_iter()
+                    .map(convert_pipeline_stage_state)
+                    .collect(),
+                steps: ri
+                    .steps
+                    .into_iter()
+                    .map(convert_release_step_state)
+                    .collect(),
             })
             .collect())
     }
@@ -265,7 +279,9 @@ impl ForestAuth for GrpcForestClient {
             return Ok(RegisterResult::VerificationRequired);
         }
 
-        let tokens = resp.tokens.ok_or(AuthError::Other("no tokens in response".into()))?;
+        let tokens = resp
+            .tokens
+            .ok_or(AuthError::Other("no tokens in response".into()))?;
         Ok(RegisterResult::Success(AuthTokens {
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token,
@@ -305,7 +321,9 @@ impl ForestAuth for GrpcForestClient {
             });
         }
 
-        let tokens = resp.tokens.ok_or(AuthError::Other("no tokens in response".into()))?;
+        let tokens = resp
+            .tokens
+            .ok_or(AuthError::Other("no tokens in response".into()))?;
         Ok(LoginResult::Success(AuthTokens {
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token,
@@ -329,7 +347,9 @@ impl ForestAuth for GrpcForestClient {
             .map_err(map_status)?
             .into_inner();
 
-        let tokens = resp.tokens.ok_or(AuthError::Other("no tokens in MFA response".into()))?;
+        let tokens = resp
+            .tokens
+            .ok_or(AuthError::Other("no tokens in MFA response".into()))?;
         Ok(AuthTokens {
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token,
@@ -338,11 +358,7 @@ impl ForestAuth for GrpcForestClient {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn setup_mfa(
-        &self,
-        access_token: &str,
-        user_id: &str,
-    ) -> Result<MfaSetup, AuthError> {
+    async fn setup_mfa(&self, access_token: &str, user_id: &str) -> Result<MfaSetup, AuthError> {
         let req = Self::authed_request(
             access_token,
             forage_grpc::SetupMfaRequest {
@@ -380,10 +396,7 @@ impl ForestAuth for GrpcForestClient {
             },
         )?;
 
-        self.client()
-            .verify_mfa(req)
-            .await
-            .map_err(map_status)?;
+        self.client().verify_mfa(req).await.map_err(map_status)?;
         Ok(())
     }
 
@@ -402,10 +415,7 @@ impl ForestAuth for GrpcForestClient {
             },
         )?;
 
-        self.client()
-            .disable_mfa(req)
-            .await
-            .map_err(map_status)?;
+        self.client().disable_mfa(req).await.map_err(map_status)?;
         Ok(())
     }
 
@@ -443,10 +453,7 @@ impl ForestAuth for GrpcForestClient {
 
     #[tracing::instrument(skip_all)]
     async fn get_user(&self, access_token: &str) -> Result<User, AuthError> {
-        let req = Self::authed_request(
-            access_token,
-            forage_grpc::TokenInfoRequest {},
-        )?;
+        let req = Self::authed_request(access_token, forage_grpc::TokenInfoRequest {})?;
 
         let info = self
             .client()
@@ -471,7 +478,9 @@ impl ForestAuth for GrpcForestClient {
             .map_err(map_status)?
             .into_inner();
 
-        let user = resp.user.ok_or(AuthError::Other("no user in response".into()))?;
+        let user = resp
+            .user
+            .ok_or(AuthError::Other("no user in response".into()))?;
         Ok(convert_user(user))
     }
 
@@ -605,11 +614,7 @@ impl ForestAuth for GrpcForestClient {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn delete_token(
-        &self,
-        access_token: &str,
-        token_id: &str,
-    ) -> Result<(), AuthError> {
+    async fn delete_token(&self, access_token: &str, token_id: &str) -> Result<(), AuthError> {
         let req = Self::authed_request(
             access_token,
             forage_grpc::DeletePersonalAccessTokenRequest {
@@ -647,7 +652,9 @@ impl ForestAuth for GrpcForestClient {
             .map_err(map_status)?
             .into_inner();
 
-        let user = resp.user.ok_or(AuthError::Other("no user in response".into()))?;
+        let user = resp
+            .user
+            .ok_or(AuthError::Other("no user in response".into()))?;
         Ok(convert_user(user))
     }
 
@@ -674,7 +681,9 @@ impl ForestAuth for GrpcForestClient {
             .map_err(map_status)?
             .into_inner();
 
-        let user = resp.user.ok_or(AuthError::Other("no user in response".into()))?;
+        let user = resp
+            .user
+            .ok_or(AuthError::Other("no user in response".into()))?;
         Ok(convert_user(user))
     }
 
@@ -724,7 +733,9 @@ impl ForestAuth for GrpcForestClient {
             .map_err(map_status)?
             .into_inner();
 
-        let email = resp.email.ok_or(AuthError::Other("no email in response".into()))?;
+        let email = resp
+            .email
+            .ok_or(AuthError::Other("no email in response".into()))?;
         Ok(AddEmailResult {
             email: UserEmail {
                 email: email.email,
@@ -736,10 +747,9 @@ impl ForestAuth for GrpcForestClient {
 
     #[tracing::instrument(skip_all)]
     async fn confirm_email_verification(&self, email: &str) -> Result<(), AuthError> {
-        let service_key = self
-            .service_account_key
-            .as_deref()
-            .ok_or(AuthError::Other("service account key not configured".into()))?;
+        let service_key = self.service_account_key.as_deref().ok_or(AuthError::Other(
+            "service account key not configured".into(),
+        ))?;
 
         let req = bearer_request(
             service_key,
@@ -771,10 +781,7 @@ impl ForestAuth for GrpcForestClient {
             },
         )?;
 
-        self.client()
-            .remove_email(req)
-            .await
-            .map_err(map_status)?;
+        self.client().remove_email(req).await.map_err(map_status)?;
         Ok(())
     }
 
@@ -793,14 +800,17 @@ impl ForestAuth for GrpcForestClient {
             "gitlab" => forage_grpc::OAuthProvider::OauthProviderGitlab as i32,
             "microsoft" => forage_grpc::OAuthProvider::OauthProviderMicrosoft as i32,
             "magic-link" => forage_grpc::OAuthProvider::OauthProviderMagicLink as i32,
-            _ => return Err(AuthError::Other(format!("unsupported OAuth provider: {provider}"))),
+            _ => {
+                return Err(AuthError::Other(format!(
+                    "unsupported OAuth provider: {provider}"
+                )));
+            }
         };
 
         // Use service account key for this privileged call.
-        let service_key = self
-            .service_account_key
-            .as_deref()
-            .ok_or(AuthError::Other("service account key not configured".into()))?;
+        let service_key = self.service_account_key.as_deref().ok_or(AuthError::Other(
+            "service account key not configured".into(),
+        ))?;
 
         let req = bearer_request(
             service_key,
@@ -867,7 +877,9 @@ impl ForestAuth for GrpcForestClient {
             .map_err(map_status)?
             .into_inner();
 
-        let user = resp.user.ok_or(AuthError::Other("no user in response".into()))?;
+        let user = resp
+            .user
+            .ok_or(AuthError::Other("no user in response".into()))?;
 
         let identities = user
             .oauth_connections
@@ -942,10 +954,9 @@ impl ForestAuth for GrpcForestClient {
         approving_ip: &str,
         approving_user_agent: &str,
     ) -> Result<(), AuthError> {
-        let service_key = self
-            .service_account_key
-            .as_deref()
-            .ok_or(AuthError::Other("service account key not configured".into()))?;
+        let service_key = self.service_account_key.as_deref().ok_or(AuthError::Other(
+            "service account key not configured".into(),
+        ))?;
 
         let req = bearer_request(
             service_key,
@@ -966,15 +977,10 @@ impl ForestAuth for GrpcForestClient {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn deny_device_login(
-        &self,
-        user_code: &str,
-        user_id: &str,
-    ) -> Result<(), AuthError> {
-        let service_key = self
-            .service_account_key
-            .as_deref()
-            .ok_or(AuthError::Other("service account key not configured".into()))?;
+    async fn deny_device_login(&self, user_code: &str, user_id: &str) -> Result<(), AuthError> {
+        let service_key = self.service_account_key.as_deref().ok_or(AuthError::Other(
+            "service account key not configured".into(),
+        ))?;
 
         let req = bearer_request(
             service_key,
@@ -1077,10 +1083,7 @@ fn convert_project(p: forage_grpc::Project) -> forage_core::platform::Project {
         project: p.project,
         readme: p.readme,
         description: p.description,
-        metadata: p
-            .metadata
-            .map(convert_project_metadata)
-            .unwrap_or_default(),
+        metadata: p.metadata.map(convert_project_metadata).unwrap_or_default(),
     }
 }
 
@@ -1094,6 +1097,7 @@ fn convert_project_metadata(
         support_url: m.support_url,
         domain: m.domain,
         owner: m.owner,
+        tags: m.tags,
     }
 }
 
@@ -1162,16 +1166,19 @@ fn convert_artifact(a: forage_grpc::Artifact) -> Artifact {
 
 fn convert_pipeline_stage(s: forage_grpc::PipelineStage) -> PipelineStage {
     let config = match s.config {
-        Some(forage_grpc::pipeline_stage::Config::Deploy(d)) => {
-            PipelineStageConfig::Deploy { environment: d.environment }
-        }
-        Some(forage_grpc::pipeline_stage::Config::Wait(w)) => {
-            PipelineStageConfig::Wait { duration_seconds: w.duration_seconds }
-        }
-        Some(forage_grpc::pipeline_stage::Config::Plan(p)) => {
-            PipelineStageConfig::Plan { environment: p.environment, auto_approve: p.auto_approve }
-        }
-        None => PipelineStageConfig::Deploy { environment: String::new() },
+        Some(forage_grpc::pipeline_stage::Config::Deploy(d)) => PipelineStageConfig::Deploy {
+            environment: d.environment,
+        },
+        Some(forage_grpc::pipeline_stage::Config::Wait(w)) => PipelineStageConfig::Wait {
+            duration_seconds: w.duration_seconds,
+        },
+        Some(forage_grpc::pipeline_stage::Config::Plan(p)) => PipelineStageConfig::Plan {
+            environment: p.environment,
+            auto_approve: p.auto_approve,
+        },
+        None => PipelineStageConfig::Deploy {
+            environment: String::new(),
+        },
     };
     PipelineStage {
         id: s.id,
@@ -1252,12 +1259,13 @@ fn convert_stages_to_grpc(stages: &[PipelineStage]) -> Vec<forage_grpc::Pipeline
                         duration_seconds: *duration_seconds,
                     })
                 }
-                PipelineStageConfig::Plan { environment, auto_approve } => {
-                    forage_grpc::pipeline_stage::Config::Plan(forage_grpc::PlanStageConfig {
-                        environment: environment.clone(),
-                        auto_approve: *auto_approve,
-                    })
-                }
+                PipelineStageConfig::Plan {
+                    environment,
+                    auto_approve,
+                } => forage_grpc::pipeline_stage::Config::Plan(forage_grpc::PlanStageConfig {
+                    environment: environment.clone(),
+                    auto_approve: *auto_approve,
+                }),
             }),
         })
         .collect()
@@ -1382,6 +1390,221 @@ fn policy_config_to_grpc(
     }
 }
 
+fn policy_config_to_org_rule_grpc(
+    config: &PolicyConfig,
+) -> (i32, Option<forage_grpc::org_policy_rule::Config>) {
+    match config {
+        PolicyConfig::SoakTime {
+            source_environment,
+            target_environment,
+            duration_seconds,
+        } => (
+            forage_grpc::PolicyType::SoakTime as i32,
+            Some(forage_grpc::org_policy_rule::Config::SoakTime(
+                forage_grpc::SoakTimeConfig {
+                    source_environment: source_environment.clone(),
+                    target_environment: target_environment.clone(),
+                    duration_seconds: *duration_seconds,
+                },
+            )),
+        ),
+        PolicyConfig::BranchRestriction {
+            target_environment,
+            branch_pattern,
+        } => (
+            forage_grpc::PolicyType::BranchRestriction as i32,
+            Some(forage_grpc::org_policy_rule::Config::BranchRestriction(
+                forage_grpc::BranchRestrictionConfig {
+                    target_environment: target_environment.clone(),
+                    branch_pattern: branch_pattern.clone(),
+                },
+            )),
+        ),
+        PolicyConfig::Approval {
+            target_environment,
+            required_approvals,
+        } => (
+            forage_grpc::PolicyType::ExternalApproval as i32,
+            Some(forage_grpc::org_policy_rule::Config::ExternalApproval(
+                forage_grpc::ExternalApprovalConfig {
+                    target_environment: target_environment.clone(),
+                    required_approvals: *required_approvals,
+                },
+            )),
+        ),
+    }
+}
+
+fn org_policy_rule_from_grpc(rule: forage_grpc::OrgPolicyRule) -> OrgPolicyRule {
+    let config = match rule.config {
+        Some(forage_grpc::org_policy_rule::Config::SoakTime(c)) => PolicyConfig::SoakTime {
+            source_environment: c.source_environment,
+            target_environment: c.target_environment,
+            duration_seconds: c.duration_seconds,
+        },
+        Some(forage_grpc::org_policy_rule::Config::BranchRestriction(c)) => {
+            PolicyConfig::BranchRestriction {
+                target_environment: c.target_environment,
+                branch_pattern: c.branch_pattern,
+            }
+        }
+        Some(forage_grpc::org_policy_rule::Config::ExternalApproval(c)) => PolicyConfig::Approval {
+            target_environment: c.target_environment,
+            required_approvals: c.required_approvals,
+        },
+        None => PolicyConfig::SoakTime {
+            source_environment: String::new(),
+            target_environment: String::new(),
+            duration_seconds: 0,
+        },
+    };
+    OrgPolicyRule {
+        name: rule.name,
+        enabled: rule.enabled,
+        config,
+    }
+}
+
+fn org_policy_rule_to_grpc(rule: &OrgPolicyRule) -> forage_grpc::OrgPolicyRule {
+    let (policy_type, config) = policy_config_to_org_rule_grpc(&rule.config);
+    forage_grpc::OrgPolicyRule {
+        name: rule.name.clone(),
+        enabled: rule.enabled,
+        policy_type,
+        config,
+    }
+}
+
+fn org_trigger_rule_from_grpc(rule: forage_grpc::OrgTriggerRule) -> OrgTriggerRule {
+    OrgTriggerRule {
+        name: rule.name,
+        enabled: rule.enabled,
+        branch_pattern: rule.branch_pattern,
+        title_pattern: rule.title_pattern,
+        author_pattern: rule.author_pattern,
+        commit_message_pattern: rule.commit_message_pattern,
+        source_type_pattern: rule.source_type_pattern,
+        target_environments: rule.target_environments,
+        target_destinations: rule.target_destinations,
+        force_release: rule.force_release,
+        use_pipeline: rule.use_pipeline,
+    }
+}
+
+fn org_trigger_rule_to_grpc(rule: &OrgTriggerRule) -> forage_grpc::OrgTriggerRule {
+    forage_grpc::OrgTriggerRule {
+        name: rule.name.clone(),
+        enabled: rule.enabled,
+        branch_pattern: rule.branch_pattern.clone(),
+        title_pattern: rule.title_pattern.clone(),
+        author_pattern: rule.author_pattern.clone(),
+        commit_message_pattern: rule.commit_message_pattern.clone(),
+        source_type_pattern: rule.source_type_pattern.clone(),
+        target_environments: rule.target_environments.clone(),
+        target_destinations: rule.target_destinations.clone(),
+        force_release: rule.force_release,
+        use_pipeline: rule.use_pipeline,
+    }
+}
+
+fn org_pipeline_rule_from_grpc(
+    rule: forage_grpc::OrgReleasePipelineRule,
+) -> OrgReleasePipelineRule {
+    OrgReleasePipelineRule {
+        name: rule.name,
+        enabled: rule.enabled,
+        stages: rule
+            .stages
+            .into_iter()
+            .map(convert_pipeline_stage)
+            .collect(),
+    }
+}
+
+fn org_pipeline_rule_to_grpc(rule: &OrgReleasePipelineRule) -> forage_grpc::OrgReleasePipelineRule {
+    forage_grpc::OrgReleasePipelineRule {
+        name: rule.name.clone(),
+        enabled: rule.enabled,
+        stages: convert_stages_to_grpc(&rule.stages),
+    }
+}
+
+fn project_selector_from_grpc(selector: Option<forage_grpc::ProjectSelector>) -> ProjectSelector {
+    let selector = selector.unwrap_or_default();
+    ProjectSelector {
+        include_projects: selector.include_projects,
+        exclude_projects: selector.exclude_projects,
+        name_regex: selector.name_regex,
+        metadata_match: selector.metadata_match.into_iter().collect(),
+        tags: selector.tags,
+    }
+}
+
+fn project_selector_to_grpc(selector: &ProjectSelector) -> forage_grpc::ProjectSelector {
+    forage_grpc::ProjectSelector {
+        include_projects: selector.include_projects.clone(),
+        exclude_projects: selector.exclude_projects.clone(),
+        name_regex: selector.name_regex.clone(),
+        metadata_match: selector
+            .metadata_match
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        tags: selector.tags.clone(),
+    }
+}
+
+fn org_rule_set_from_grpc(rule_set: forage_grpc::OrgRuleSet) -> OrgRuleSet {
+    OrgRuleSet {
+        organisation: rule_set.organisation,
+        name: rule_set.name,
+        enabled: rule_set.enabled,
+        selector: project_selector_from_grpc(rule_set.selector),
+        policies: rule_set
+            .policies
+            .into_iter()
+            .map(org_policy_rule_from_grpc)
+            .collect(),
+        triggers: rule_set
+            .triggers
+            .into_iter()
+            .map(org_trigger_rule_from_grpc)
+            .collect(),
+        release_pipelines: rule_set
+            .release_pipelines
+            .into_iter()
+            .map(org_pipeline_rule_from_grpc)
+            .collect(),
+        created_at: rule_set.created_at,
+        updated_at: rule_set.updated_at,
+    }
+}
+
+fn org_rule_set_to_grpc(
+    organisation: &str,
+    name: &str,
+    enabled: bool,
+    selector: &ProjectSelector,
+    policies: &[OrgPolicyRule],
+    triggers: &[OrgTriggerRule],
+    release_pipelines: &[OrgReleasePipelineRule],
+) -> forage_grpc::OrgRuleSet {
+    forage_grpc::OrgRuleSet {
+        organisation: organisation.into(),
+        name: name.into(),
+        enabled,
+        selector: Some(project_selector_to_grpc(selector)),
+        policies: policies.iter().map(org_policy_rule_to_grpc).collect(),
+        triggers: triggers.iter().map(org_trigger_rule_to_grpc).collect(),
+        release_pipelines: release_pipelines
+            .iter()
+            .map(org_pipeline_rule_to_grpc)
+            .collect(),
+        created_at: String::new(),
+        updated_at: String::new(),
+    }
+}
+
 fn convert_member(m: forage_grpc::OrganisationMember) -> OrgMember {
     OrgMember {
         user_id: m.user_id,
@@ -1394,9 +1617,7 @@ fn convert_member(m: forage_grpc::OrganisationMember) -> OrgMember {
 fn map_platform_status(status: tonic::Status) -> PlatformError {
     match status.code() {
         tonic::Code::Unauthenticated => PlatformError::NotAuthenticated,
-        tonic::Code::PermissionDenied => {
-            PlatformError::PermissionDenied(status.message().into())
-        }
+        tonic::Code::PermissionDenied => PlatformError::PermissionDenied(status.message().into()),
         tonic::Code::NotFound => PlatformError::NotFound(status.message().into()),
         tonic::Code::Unavailable => PlatformError::Unavailable(status.message().into()),
         tonic::Code::InvalidArgument => PlatformError::InvalidArgument(status.message().into()),
@@ -1424,7 +1645,9 @@ impl ForestPlatform for GrpcForestClient {
     ) -> Result<Vec<Organisation>, PlatformError> {
         let req = platform_authed_request(
             access_token,
-            forage_grpc::ListMyOrganisationsRequest { role: String::new() },
+            forage_grpc::ListMyOrganisationsRequest {
+                role: String::new(),
+            },
         )?;
 
         let resp = self
@@ -1527,9 +1750,7 @@ impl ForestPlatform for GrpcForestClient {
     ) -> Result<String, PlatformError> {
         let req = platform_authed_request(
             access_token,
-            forage_grpc::CreateOrganisationRequest {
-                name: name.into(),
-            },
+            forage_grpc::CreateOrganisationRequest { name: name.into() },
         )?;
 
         let resp = self
@@ -1654,9 +1875,7 @@ impl ForestPlatform for GrpcForestClient {
     ) -> Result<Artifact, PlatformError> {
         let req = platform_authed_request(
             access_token,
-            forage_grpc::GetArtifactBySlugRequest {
-                slug: slug.into(),
-            },
+            forage_grpc::GetArtifactBySlugRequest { slug: slug.into() },
         )?;
 
         let resp = self
@@ -1847,10 +2066,8 @@ impl ForestPlatform for GrpcForestClient {
         &self,
         access_token: &str,
     ) -> Result<Vec<DestinationTypeInfo>, PlatformError> {
-        let req = platform_authed_request(
-            access_token,
-            forage_grpc::ListDestinationTypesRequest {},
-        )?;
+        let req =
+            platform_authed_request(access_token, forage_grpc::ListDestinationTypesRequest {})?;
         let resp = self
             .dest_client()
             .list_destination_types(req)
@@ -1978,9 +2195,7 @@ impl ForestPlatform for GrpcForestClient {
             })
             .collect();
 
-        Ok(forage_core::platform::DeploymentStates {
-            destinations,
-        })
+        Ok(forage_core::platform::DeploymentStates { destinations })
     }
 
     #[tracing::instrument(skip_all)]
@@ -2125,6 +2340,115 @@ impl ForestPlatform for GrpcForestClient {
             .await
             .map_err(map_platform_status)?;
 
+        Ok(())
+    }
+
+    async fn list_org_rule_sets(
+        &self,
+        access_token: &str,
+        organisation: &str,
+    ) -> Result<Vec<OrgRuleSet>, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::ListOrgRuleSetsRequest {
+                organisation: organisation.into(),
+            },
+        )?;
+        let resp = self
+            .org_rule_set_client()
+            .list_org_rule_sets(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        Ok(resp
+            .rule_sets
+            .into_iter()
+            .map(org_rule_set_from_grpc)
+            .collect())
+    }
+
+    async fn create_org_rule_set(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        input: &CreateOrgRuleSetInput,
+    ) -> Result<OrgRuleSet, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::CreateOrgRuleSetRequest {
+                rule_set: Some(org_rule_set_to_grpc(
+                    organisation,
+                    &input.name,
+                    input.enabled,
+                    &input.selector,
+                    &input.policies,
+                    &input.triggers,
+                    &input.release_pipelines,
+                )),
+            },
+        )?;
+        let resp = self
+            .org_rule_set_client()
+            .create_org_rule_set(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        let rule_set = resp
+            .rule_set
+            .ok_or(PlatformError::Other("no org rule set in response".into()))?;
+        Ok(org_rule_set_from_grpc(rule_set))
+    }
+
+    async fn update_org_rule_set(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        _name: &str,
+        input: &UpdateOrgRuleSetInput,
+    ) -> Result<OrgRuleSet, PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::UpdateOrgRuleSetRequest {
+                rule_set: Some(org_rule_set_to_grpc(
+                    organisation,
+                    &input.name,
+                    input.enabled,
+                    &input.selector,
+                    &input.policies,
+                    &input.triggers,
+                    &input.release_pipelines,
+                )),
+            },
+        )?;
+        let resp = self
+            .org_rule_set_client()
+            .update_org_rule_set(req)
+            .await
+            .map_err(map_platform_status)?
+            .into_inner();
+        let rule_set = resp
+            .rule_set
+            .ok_or(PlatformError::Other("no org rule set in response".into()))?;
+        Ok(org_rule_set_from_grpc(rule_set))
+    }
+
+    async fn delete_org_rule_set(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        name: &str,
+    ) -> Result<(), PlatformError> {
+        let req = platform_authed_request(
+            access_token,
+            forage_grpc::DeleteOrgRuleSetRequest {
+                organisation: organisation.into(),
+                name: name.into(),
+            },
+        )?;
+        self.org_rule_set_client()
+            .delete_org_rule_set(req)
+            .await
+            .map_err(map_platform_status)?;
         Ok(())
     }
 
@@ -2493,7 +2817,11 @@ impl ForestPlatform for GrpcForestClient {
                 }),
                 name: name.into(),
                 enabled: input.enabled,
-                stages: input.stages.as_ref().map(|s| convert_stages_to_grpc(s)).unwrap_or_default(),
+                stages: input
+                    .stages
+                    .as_ref()
+                    .map(|s| convert_stages_to_grpc(s))
+                    .unwrap_or_default(),
                 update_stages: input.stages.is_some(),
             },
         )?;
@@ -2814,14 +3142,16 @@ impl ForestPlatform for GrpcForestClient {
         Ok(PlanOutput {
             plan_output: inner.plan_output,
             status: inner.status,
-            outputs: inner.outputs.into_iter().map(|o| {
-                forage_core::platform::PlanDestinationOutput {
+            outputs: inner
+                .outputs
+                .into_iter()
+                .map(|o| forage_core::platform::PlanDestinationOutput {
                     destination_id: o.destination_id,
                     destination_name: o.destination_name,
                     plan_output: o.plan_output,
                     status: o.status,
-                }
-            }).collect(),
+                })
+                .collect(),
         })
     }
 
@@ -2845,7 +3175,11 @@ impl ForestPlatform for GrpcForestClient {
             .await
             .map_err(map_platform_status)?
             .into_inner();
-        Ok(resp.domains.into_iter().map(convert_allowed_domain).collect())
+        Ok(resp
+            .domains
+            .into_iter()
+            .map(convert_allowed_domain)
+            .collect())
     }
 
     #[tracing::instrument(skip_all)]
@@ -2930,14 +3264,8 @@ impl ForestPlatform for GrpcForestClient {
     }
 
     #[tracing::instrument(skip_all)]
-    async fn list_join_offers(
-        &self,
-        access_token: &str,
-    ) -> Result<Vec<JoinOffer>, PlatformError> {
-        let req = platform_authed_request(
-            access_token,
-            forage_grpc::ListJoinOffersRequest {},
-        )?;
+    async fn list_join_offers(&self, access_token: &str) -> Result<Vec<JoinOffer>, PlatformError> {
+        let req = platform_authed_request(access_token, forage_grpc::ListJoinOffersRequest {})?;
         let resp = self
             .org_client()
             .list_join_offers(req)
@@ -3001,7 +3329,9 @@ fn convert_policy_evaluation(e: forage_grpc::PolicyEvaluation) -> PolicyEvaluati
         3 => "approval",
         _ => "unknown",
     };
-    let approval_state = e.external_approval_state.map(|s| convert_approval_state(Some(s)));
+    let approval_state = e
+        .external_approval_state
+        .map(|s| convert_approval_state(Some(s)));
     PolicyEvaluation {
         policy_name: e.policy_name,
         policy_type: policy_type.into(),
@@ -3615,10 +3945,9 @@ impl ForestOAuthApps for GrpcForestClient {
         code_challenge_method: Option<&str>,
         nonce: Option<&str>,
     ) -> Result<String, OAuthFlowError> {
-        let service_key = self
-            .service_account_key
-            .as_deref()
-            .ok_or_else(|| OAuthFlowError::ServerError("service account key not configured".into()))?;
+        let service_key = self.service_account_key.as_deref().ok_or_else(|| {
+            OAuthFlowError::ServerError("service account key not configured".into())
+        })?;
         let req = bearer_request(
             service_key,
             forage_grpc::CreateOAuthAuthorizationCodeRequest {
@@ -3647,10 +3976,9 @@ impl ForestOAuthApps for GrpcForestClient {
         client_secret: &str,
         scopes: &[String],
     ) -> Result<OAuthClientToken, OAuthFlowError> {
-        let service_key = self
-            .service_account_key
-            .as_deref()
-            .ok_or_else(|| OAuthFlowError::ServerError("service account key not configured".into()))?;
+        let service_key = self.service_account_key.as_deref().ok_or_else(|| {
+            OAuthFlowError::ServerError("service account key not configured".into())
+        })?;
         let req = bearer_request(
             service_key,
             forage_grpc::IssueClientCredentialsTokenRequest {
@@ -3679,10 +4007,9 @@ impl ForestOAuthApps for GrpcForestClient {
         &self,
         access_token: &str,
     ) -> Result<Option<ClientPrincipal>, OAuthFlowError> {
-        let service_key = self
-            .service_account_key
-            .as_deref()
-            .ok_or_else(|| OAuthFlowError::ServerError("service account key not configured".into()))?;
+        let service_key = self.service_account_key.as_deref().ok_or_else(|| {
+            OAuthFlowError::ServerError("service account key not configured".into())
+        })?;
         let req = bearer_request(
             service_key,
             forage_grpc::IntrospectClientTokenRequest {
@@ -3711,9 +4038,10 @@ impl ForestOAuthApps for GrpcForestClient {
         &self,
         lookup: DirectoryLookup,
     ) -> Result<Option<DirectoryUser>, PlatformError> {
-        let service_key = self.service_account_key.as_deref().ok_or_else(|| {
-            PlatformError::Other("service account key not configured".into())
-        })?;
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| PlatformError::Other("service account key not configured".into()))?;
 
         use forage_grpc::get_user_request::Identifier;
         let identifier = match lookup {
@@ -3759,10 +4087,9 @@ impl ForestOAuthApps for GrpcForestClient {
         redirect_uri: &str,
         code_verifier: Option<&str>,
     ) -> Result<OAuthIssuedTokens, OAuthFlowError> {
-        let service_key = self
-            .service_account_key
-            .as_deref()
-            .ok_or_else(|| OAuthFlowError::ServerError("service account key not configured".into()))?;
+        let service_key = self.service_account_key.as_deref().ok_or_else(|| {
+            OAuthFlowError::ServerError("service account key not configured".into())
+        })?;
         let req = bearer_request(
             service_key,
             forage_grpc::ExchangeOAuthCodeRequest {
@@ -3790,15 +4117,18 @@ impl ForestOAuthApps for GrpcForestClient {
             token_type: tokens.token_type,
             expires_in_seconds: tokens.expires_in_seconds,
             scopes: tokens.scopes,
-            id_token: if tokens.id_token.is_empty() { None } else { Some(tokens.id_token) },
+            id_token: if tokens.id_token.is_empty() {
+                None
+            } else {
+                Some(tokens.id_token)
+            },
         })
     }
 
     async fn oauth_userinfo(&self, access_token: &str) -> Result<OAuthUserinfo, OAuthFlowError> {
-        let service_key = self
-            .service_account_key
-            .as_deref()
-            .ok_or_else(|| OAuthFlowError::ServerError("service account key not configured".into()))?;
+        let service_key = self.service_account_key.as_deref().ok_or_else(|| {
+            OAuthFlowError::ServerError("service account key not configured".into())
+        })?;
         let req = bearer_request(
             service_key,
             forage_grpc::GetOAuthUserinfoRequest {
@@ -3832,10 +4162,9 @@ impl ForestOAuthApps for GrpcForestClient {
         client_secret: &str,
         refresh_token: &str,
     ) -> Result<OAuthIssuedTokens, OAuthFlowError> {
-        let service_key = self
-            .service_account_key
-            .as_deref()
-            .ok_or_else(|| OAuthFlowError::ServerError("service account key not configured".into()))?;
+        let service_key = self.service_account_key.as_deref().ok_or_else(|| {
+            OAuthFlowError::ServerError("service account key not configured".into())
+        })?;
         let req = bearer_request(
             service_key,
             forage_grpc::RefreshOAuthTokenRequest {
@@ -3861,15 +4190,15 @@ impl ForestOAuthApps for GrpcForestClient {
             token_type: tokens.token_type,
             expires_in_seconds: tokens.expires_in_seconds,
             scopes: tokens.scopes,
-            id_token: if tokens.id_token.is_empty() { None } else { Some(tokens.id_token) },
+            id_token: if tokens.id_token.is_empty() {
+                None
+            } else {
+                Some(tokens.id_token)
+            },
         })
     }
 
-    async fn revoke_oauth_grant(
-        &self,
-        user_id: &str,
-        app_id: &str,
-    ) -> Result<u32, PlatformError> {
+    async fn revoke_oauth_grant(&self, user_id: &str, app_id: &str) -> Result<u32, PlatformError> {
         let service_key = self
             .service_account_key
             .as_deref()
@@ -3983,7 +4312,10 @@ mod tests {
         }
     }
 
-    fn make_artifact(slug: &str, ctx: Option<forage_grpc::ArtifactContext>) -> forage_grpc::Artifact {
+    fn make_artifact(
+        slug: &str,
+        ctx: Option<forage_grpc::ArtifactContext>,
+    ) -> forage_grpc::Artifact {
         forage_grpc::Artifact {
             artifact_id: "a1".into(),
             slug: slug.into(),
@@ -4025,11 +4357,14 @@ mod tests {
 
     #[test]
     fn convert_artifact_with_full_context() {
-        let a = make_artifact("my-api", Some(forage_grpc::ArtifactContext {
-            title: "My API".into(),
-            description: Some("A cool API".into()),
-            ..Default::default()
-        }));
+        let a = make_artifact(
+            "my-api",
+            Some(forage_grpc::ArtifactContext {
+                title: "My API".into(),
+                description: Some("A cool API".into()),
+                ..Default::default()
+            }),
+        );
 
         let result = convert_artifact(a);
         assert_eq!(result.slug, "my-api");
@@ -4039,11 +4374,14 @@ mod tests {
 
     #[test]
     fn convert_artifact_empty_description_becomes_none() {
-        let a = make_artifact("my-api", Some(forage_grpc::ArtifactContext {
-            title: "My API".into(),
-            description: Some(String::new()),
-            ..Default::default()
-        }));
+        let a = make_artifact(
+            "my-api",
+            Some(forage_grpc::ArtifactContext {
+                title: "My API".into(),
+                description: Some(String::new()),
+                ..Default::default()
+            }),
+        );
 
         let result = convert_artifact(a);
         assert!(result.context.description.is_none());
@@ -4060,11 +4398,14 @@ mod tests {
 
     #[test]
     fn convert_artifact_none_description_stays_none() {
-        let a = make_artifact("my-api", Some(forage_grpc::ArtifactContext {
-            title: "My API".into(),
-            description: None,
-            ..Default::default()
-        }));
+        let a = make_artifact(
+            "my-api",
+            Some(forage_grpc::ArtifactContext {
+                title: "My API".into(),
+                description: None,
+                ..Default::default()
+            }),
+        );
 
         let result = convert_artifact(a);
         assert!(result.context.description.is_none());
@@ -4127,7 +4468,11 @@ mod tests {
         // E3 — a tool with no facet (shouldn't happen post-server-validation,
         // but the conversion stays total). Description falls back to empty,
         // argv_passthrough to false.
-        let entry = make_tool_entry(forage_grpc::ComponentShape::ToolExternal, "github.com", None);
+        let entry = make_tool_entry(
+            forage_grpc::ComponentShape::ToolExternal,
+            "github.com",
+            None,
+        );
         let s = convert_tool_summary(entry);
         assert_eq!(s.description, "");
         assert!(!s.argv_passthrough);
@@ -4196,9 +4541,8 @@ mod tests {
 
     #[test]
     fn map_status_translates_same_user_constraint_message() {
-        let status = tonic::Status::already_exists(
-            "user already has an account linked for this provider",
-        );
+        let status =
+            tonic::Status::already_exists("user already has an account linked for this provider");
         match map_status(status) {
             AuthError::AlreadyExists(msg) => {
                 // This message is what the route layer falls through to —
@@ -4215,17 +4559,13 @@ mod tests {
     #[test]
     fn map_status_unauthenticated_maps_to_invalid_credentials() {
         let status = tonic::Status::unauthenticated("invalid token");
-        assert!(matches!(
-            map_status(status),
-            AuthError::InvalidCredentials
-        ));
+        assert!(matches!(map_status(status), AuthError::InvalidCredentials));
     }
 
     #[test]
     fn map_status_permission_denied_preserves_message() {
-        let status = tonic::Status::permission_denied(
-            "you can only link providers to your own account",
-        );
+        let status =
+            tonic::Status::permission_denied("you can only link providers to your own account");
         match map_status(status) {
             AuthError::PermissionDenied(msg) => {
                 assert!(msg.contains("link providers to your own account"));

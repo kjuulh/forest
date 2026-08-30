@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Validate that a slug (org name, project name) is safe for use in URLs and templates.
@@ -52,6 +54,8 @@ pub struct ProjectMetadata {
     pub domain: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub owner: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 impl ProjectMetadata {
@@ -62,6 +66,7 @@ impl ProjectMetadata {
             && self.support_url.is_empty()
             && self.domain.is_empty()
             && self.owner.is_empty()
+            && self.tags.is_empty()
     }
 }
 
@@ -91,7 +96,9 @@ pub fn prettify_url(url: &str) -> String {
         .strip_prefix("https://")
         .or_else(|| trimmed.strip_prefix("http://"))
         .unwrap_or(trimmed);
-    let without_www = without_scheme.strip_prefix("www.").unwrap_or(without_scheme);
+    let without_www = without_scheme
+        .strip_prefix("www.")
+        .unwrap_or(without_scheme);
     let trailing_slash_trimmed = without_www.trim_end_matches('/');
 
     // Forge-specific: GitHub / GitLab repo URLs collapse to `org/repo`.
@@ -159,16 +166,17 @@ mod prettify_url_tests {
 
     #[test]
     fn homepage_strips_scheme_and_www() {
+        assert_eq!(prettify_url("https://www.example.com/"), "example.com");
         assert_eq!(
-            prettify_url("https://www.example.com/"),
-            "example.com"
+            prettify_url("http://forest.rawpotion.io"),
+            "forest.rawpotion.io"
         );
-        assert_eq!(prettify_url("http://forest.rawpotion.io"), "forest.rawpotion.io");
     }
 
     #[test]
     fn long_url_is_capped_with_ellipsis() {
-        let pretty = prettify_url("https://very-long.example.com/path/that/keeps/going/and/going/forever");
+        let pretty =
+            prettify_url("https://very-long.example.com/path/that/keeps/going/and/going/forever");
         // 48 chars including the ellipsis at the end.
         assert!(pretty.chars().count() <= 48);
         assert!(pretty.ends_with('…'));
@@ -363,7 +371,7 @@ pub struct PipelineRunStageState {
     pub stage_id: String,
     pub depends_on: Vec<String>,
     pub stage_type: String, // "deploy", "wait", or "plan"
-    pub status: String,     // "PENDING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "AWAITING_APPROVAL"
+    pub status: String, // "PENDING", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "AWAITING_APPROVAL"
     pub environment: Option<String>,
     pub duration_seconds: Option<i64>,
     pub queued_at: Option<String>,
@@ -409,6 +417,79 @@ pub struct ReleaseStepState {
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub error_message: Option<String>,
+}
+
+// ── Organisation rule sets (org-scoped defaults/overrides) ───────────
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProjectSelector {
+    pub include_projects: Vec<String>,
+    pub exclude_projects: Vec<String>,
+    pub name_regex: Option<String>,
+    pub metadata_match: BTreeMap<String, String>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrgRuleSet {
+    pub organisation: String,
+    pub name: String,
+    pub enabled: bool,
+    pub selector: ProjectSelector,
+    pub policies: Vec<OrgPolicyRule>,
+    pub triggers: Vec<OrgTriggerRule>,
+    pub release_pipelines: Vec<OrgReleasePipelineRule>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrgPolicyRule {
+    pub name: String,
+    pub enabled: bool,
+    pub config: PolicyConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrgTriggerRule {
+    pub name: String,
+    pub enabled: bool,
+    pub branch_pattern: Option<String>,
+    pub title_pattern: Option<String>,
+    pub author_pattern: Option<String>,
+    pub commit_message_pattern: Option<String>,
+    pub source_type_pattern: Option<String>,
+    pub target_environments: Vec<String>,
+    pub target_destinations: Vec<String>,
+    pub force_release: bool,
+    pub use_pipeline: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrgReleasePipelineRule {
+    pub name: String,
+    pub enabled: bool,
+    pub stages: Vec<PipelineStage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateOrgRuleSetInput {
+    pub name: String,
+    pub enabled: bool,
+    pub selector: ProjectSelector,
+    pub policies: Vec<OrgPolicyRule>,
+    pub triggers: Vec<OrgTriggerRule>,
+    pub release_pipelines: Vec<OrgReleasePipelineRule>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateOrgRuleSetInput {
+    pub name: String,
+    pub enabled: bool,
+    pub selector: ProjectSelector,
+    pub policies: Vec<OrgPolicyRule>,
+    pub triggers: Vec<OrgTriggerRule>,
+    pub release_pipelines: Vec<OrgReleasePipelineRule>,
 }
 
 // ── Triggers (auto-release triggers) ────────────────────────────────
@@ -565,9 +646,16 @@ pub struct PipelineStage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PipelineStageConfig {
-    Deploy { environment: String },
-    Wait { duration_seconds: i64 },
-    Plan { environment: String, auto_approve: bool },
+    Deploy {
+        environment: String,
+    },
+    Wait {
+        duration_seconds: i64,
+    },
+    Plan {
+        environment: String,
+        auto_approve: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -787,6 +875,34 @@ pub trait ForestPlatform: Send + Sync {
         use_pipeline: bool,
     ) -> Result<(), PlatformError>;
 
+    async fn list_org_rule_sets(
+        &self,
+        access_token: &str,
+        organisation: &str,
+    ) -> Result<Vec<OrgRuleSet>, PlatformError>;
+
+    async fn create_org_rule_set(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        input: &CreateOrgRuleSetInput,
+    ) -> Result<OrgRuleSet, PlatformError>;
+
+    async fn update_org_rule_set(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        name: &str,
+        input: &UpdateOrgRuleSetInput,
+    ) -> Result<OrgRuleSet, PlatformError>;
+
+    async fn delete_org_rule_set(
+        &self,
+        access_token: &str,
+        organisation: &str,
+        name: &str,
+    ) -> Result<(), PlatformError>;
+
     async fn list_triggers(
         &self,
         access_token: &str,
@@ -993,10 +1109,7 @@ pub trait ForestPlatform: Send + Sync {
         domain: &str,
     ) -> Result<VerifyDomainOutcome, PlatformError>;
 
-    async fn list_join_offers(
-        &self,
-        access_token: &str,
-    ) -> Result<Vec<JoinOffer>, PlatformError>;
+    async fn list_join_offers(&self, access_token: &str) -> Result<Vec<JoinOffer>, PlatformError>;
 
     async fn accept_join_offer(
         &self,
@@ -1278,17 +1391,10 @@ pub trait ForestOAuthApps: Send + Sync {
     ) -> Result<OAuthIssuedTokens, OAuthFlowError>;
 
     /// Revoke a user's grant for an app. Returns the number of tokens revoked.
-    async fn revoke_oauth_grant(
-        &self,
-        user_id: &str,
-        app_id: &str,
-    ) -> Result<u32, PlatformError>;
+    async fn revoke_oauth_grant(&self, user_id: &str, app_id: &str) -> Result<u32, PlatformError>;
 
     /// List the apps a user has authorized (one entry per app).
-    async fn list_oauth_grants(
-        &self,
-        user_id: &str,
-    ) -> Result<Vec<OAuthGrant>, PlatformError>;
+    async fn list_oauth_grants(&self, user_id: &str) -> Result<Vec<OAuthGrant>, PlatformError>;
 
     /// Scopes the user has previously consented to for a client (empty = none).
     async fn get_oauth_consent(

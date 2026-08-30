@@ -509,7 +509,10 @@ mod tests {
         // Must match what serde persists in `stage_states` and what
         // PipelineStageState.approval_status is documented to carry. `Debug`
         // would render "AwaitingApproval" and clients would never match.
-        assert_eq!(ApprovalStatus::AwaitingApproval.as_str(), "AWAITING_APPROVAL");
+        assert_eq!(
+            ApprovalStatus::AwaitingApproval.as_str(),
+            "AWAITING_APPROVAL"
+        );
         assert_eq!(ApprovalStatus::Approved.as_str(), "APPROVED");
         assert_eq!(ApprovalStatus::Rejected.as_str(), "REJECTED");
 

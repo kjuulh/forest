@@ -1168,6 +1168,16 @@ fn extract_project_metadata(meta: &serde_json::Value) -> ProjectMetadata {
             .unwrap_or("")
             .to_string()
     };
+    let tags = meta
+        .get("tags")
+        .and_then(|v| v.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
     ProjectMetadata {
         git_url: s("git_url"),
         homepage: s("homepage"),
@@ -1175,6 +1185,7 @@ fn extract_project_metadata(meta: &serde_json::Value) -> ProjectMetadata {
         support_url: s("support_url"),
         domain: s("domain"),
         owner: s("owner"),
+        tags,
     }
 }
 
@@ -1973,7 +1984,6 @@ mod include_tests {
         assert!(!looks_secret("FUNGUS_SERVER"));
         assert!(!looks_secret("RUST_LOG"));
     }
-
 }
 
 /// Guards the single-platform tool warning — the check that would have caught
@@ -2029,7 +2039,11 @@ mod platform_guard_tests {
         );
         // Two is enough to be deliberate.
         assert_eq!(
-            single_platform_tool_warning(true, &plats(&["darwin_arm64", "linux_amd64"]), Some("rust")),
+            single_platform_tool_warning(
+                true,
+                &plats(&["darwin_arm64", "linux_amd64"]),
+                Some("rust")
+            ),
             None
         );
     }

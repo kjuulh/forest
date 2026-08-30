@@ -209,7 +209,8 @@ impl DestinationService for DestinationServer {
     async fn reveal_destination_metadata(
         &self,
         request: tonic::Request<RevealDestinationMetadataRequest>,
-    ) -> std::result::Result<tonic::Response<RevealDestinationMetadataResponse>, tonic::Status> {
+    ) -> std::result::Result<tonic::Response<RevealDestinationMetadataResponse>, tonic::Status>
+    {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
         if req.organisation.is_empty() {

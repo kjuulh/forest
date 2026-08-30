@@ -50,6 +50,8 @@ pub struct ProjectMetadata {
     pub domain: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub owner: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 impl ProjectMetadata {
@@ -60,6 +62,7 @@ impl ProjectMetadata {
             && self.support_url.is_empty()
             && self.domain.is_empty()
             && self.owner.is_empty()
+            && self.tags.is_empty()
     }
 }
 
@@ -93,6 +96,9 @@ fn validate_metadata(m: &ProjectMetadata) -> anyhow::Result<()> {
     url_field("support_url", &m.support_url)?;
     text_field("domain", &m.domain)?;
     text_field("owner", &m.owner)?;
+    for tag in &m.tags {
+        text_field("tags[]", tag)?;
+    }
     Ok(())
 }
 
@@ -1446,6 +1452,7 @@ mod project_metadata_tests {
             support_url: "https://example.slack.com/channels/forest".into(),
             domain: "payments".into(),
             owner: "platform-team".into(),
+            tags: vec!["backend".into()],
         };
         validate_metadata(&m).unwrap();
     }

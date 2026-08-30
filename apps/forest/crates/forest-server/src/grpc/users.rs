@@ -350,10 +350,7 @@ impl UsersService for UsersServer {
                 // round-trip so callers can say either and a lookup can
                 // never silently miss the rows it is looking for.
                 let providers = provider_spellings(&id.provider).ok_or_else(|| {
-                    tonic::Status::invalid_argument(format!(
-                        "unknown provider: {}",
-                        id.provider
-                    ))
+                    tonic::Status::invalid_argument(format!("unknown provider: {}", id.provider))
                 })?;
                 self.service()
                     .get_user_by_provider_identity(&providers, &id.provider_user_id)
@@ -1752,7 +1749,10 @@ mod provider_tests {
     fn every_input_spelling_yields_every_stored_spelling() {
         for input in ["github", "GitHub", "  oauth_provider_github  "] {
             let got = provider_spellings(input).unwrap();
-            assert!(got.contains(&"oauth_provider_github".to_string()), "{input}");
+            assert!(
+                got.contains(&"oauth_provider_github".to_string()),
+                "{input}"
+            );
             assert!(got.contains(&"github".to_string()), "{input}");
         }
         let google = provider_spellings("google").unwrap();

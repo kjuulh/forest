@@ -144,9 +144,7 @@ pub fn parse(json: &str) -> Result<UserConfig, UserConfigError> {
                     None | Some(serde_json::Value::Null) => false,
                     Some(serde_json::Value::Bool(b)) => *b,
                     Some(_) => {
-                        return Err(UserConfigError::InvalidJson(
-                            "pinned must be a bool".into(),
-                        ));
+                        return Err(UserConfigError::InvalidJson("pinned must be a bool".into()));
                     }
                 };
                 let env = parse_dep_env(dep_obj.get("env"))?;
@@ -363,10 +361,7 @@ mod tests {
                 }
             }
         }"#;
-        assert!(matches!(
-            parse(json),
-            Err(UserConfigError::InvalidJson(_))
-        ));
+        assert!(matches!(parse(json), Err(UserConfigError::InvalidJson(_))));
     }
 
     #[test]

@@ -1,0 +1,13 @@
+---
+apiVersion: forage.rawpotion.io/v1alpha1
+kind: NatsUser
+metadata:
+  name: forest-nats
+  namespace: prod
+spec:
+  account: FOREST
+  publish:
+    - subject: "forest.>"
+  subscribe:
+    - subject: "forest.>"
+    - subject: "_INBOX.>"

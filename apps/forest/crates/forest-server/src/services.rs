@@ -20,6 +20,7 @@ pub mod release_registry;
 pub mod domain_policy;
 pub mod notification_registry;
 pub mod oauth_apps;
+pub mod org_rules;
 pub mod organisations;
 pub mod registration_policy;
 pub mod release_author;

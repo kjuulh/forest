@@ -36,7 +36,10 @@ async fn create_org(fixture: &crate::accepttest::fixtures::Fixture, token: &str)
     let name = format!("org-{}", uuid::Uuid::now_v7());
     fixture
         .organisations()
-        .create_organisation(authed_request(token, CreateOrganisationRequest { name: name.clone() }))
+        .create_organisation(authed_request(
+            token,
+            CreateOrganisationRequest { name: name.clone() },
+        ))
         .await
         .expect("create org");
     name
@@ -163,7 +166,10 @@ async fn type_declared_sensitive_fields_are_withheld_from_the_list_response() {
     // Sensitive fields: key names only, values gone.
     let mut withheld = found.sensitive_keys.clone();
     withheld.sort();
-    assert_eq!(withheld, vec!["git_token", "reconcile_url", "webhook_secret"]);
+    assert_eq!(
+        withheld,
+        vec!["git_token", "reconcile_url", "webhook_secret"]
+    );
     assert!(!found.metadata.contains_key("git_token"));
     assert!(!found.metadata.contains_key("webhook_secret"));
     // The Receiver webhook path is a capability, not configuration: holding the
@@ -224,7 +230,11 @@ async fn destination_declared_sensitive_keys_round_trip_and_are_withheld() {
     withheld.sort();
     assert_eq!(
         withheld,
-        vec!["aws_access_key_id", "aws_secret_access_key", "cloudflare_token"]
+        vec![
+            "aws_access_key_id",
+            "aws_secret_access_key",
+            "cloudflare_token"
+        ]
     );
 
     // Declared-benign keys keep their values, including the one DATA-575
@@ -274,10 +284,7 @@ async fn reveal_returns_one_requested_value() {
                 ]
                 .into(),
                 r#type: Some(terraform_type()),
-                sensitive_keys: vec![
-                    "cloudflare_token".into(),
-                    "aws_secret_access_key".into(),
-                ],
+                sensitive_keys: vec!["cloudflare_token".into(), "aws_secret_access_key".into()],
             },
         ))
         .await
@@ -366,7 +373,10 @@ async fn reveal_is_denied_across_organisations() {
 
     let err = result.expect_err("outsider must not reveal a credential");
     assert!(
-        matches!(err.code(), tonic::Code::PermissionDenied | tonic::Code::NotFound),
+        matches!(
+            err.code(),
+            tonic::Code::PermissionDenied | tonic::Code::NotFound
+        ),
         "unexpected status: {err:?}"
     );
     assert!(
@@ -492,7 +502,10 @@ async fn list_destination_types_reports_which_fields_are_sensitive() {
         v.sort();
         v
     };
-    assert_eq!(sensitive, vec!["git_token", "reconcile_url", "webhook_secret"]);
+    assert_eq!(
+        sensitive,
+        vec!["git_token", "reconcile_url", "webhook_secret"]
+    );
 
     // And plain config fields are not swept up.
     assert!(
@@ -594,7 +607,10 @@ async fn merging_an_empty_overlay_changes_no_metadata() {
                 environment: env,
                 metadata: [
                     ("tf_workspace".to_string(), "platform-dev".to_string()),
-                    ("aws_secret_access_key".to_string(), "live-secret".to_string()),
+                    (
+                        "aws_secret_access_key".to_string(),
+                        "live-secret".to_string(),
+                    ),
                 ]
                 .into(),
                 r#type: Some(terraform_type()),
@@ -628,7 +644,10 @@ async fn merging_an_empty_overlay_changes_no_metadata() {
         found.metadata.get("tf_workspace").map(String::as_str),
         Some("platform-dev")
     );
-    assert_eq!(found.sensitive_keys, vec!["aws_secret_access_key".to_string()]);
+    assert_eq!(
+        found.sensitive_keys,
+        vec!["aws_secret_access_key".to_string()]
+    );
     assert!(
         !format!("{found:?}").contains("live-secret"),
         "the value must be withheld, not deleted or leaked"
@@ -661,7 +680,10 @@ async fn a_destination_with_no_event_stream_can_still_be_updated() {
                 environment: env,
                 metadata: [
                     ("tf_workspace".to_string(), "platform-dev".to_string()),
-                    ("aws_secret_access_key".to_string(), "live-secret".to_string()),
+                    (
+                        "aws_secret_access_key".to_string(),
+                        "live-secret".to_string(),
+                    ),
                 ]
                 .into(),
                 r#type: Some(terraform_type()),
@@ -713,7 +735,10 @@ async fn a_destination_with_no_event_stream_can_still_be_updated() {
     let found = fetch_destination(&fixture, &token, &org, &dest).await;
 
     // The credential is withheld now, and nothing else was disturbed.
-    assert_eq!(found.sensitive_keys, vec!["aws_secret_access_key".to_string()]);
+    assert_eq!(
+        found.sensitive_keys,
+        vec!["aws_secret_access_key".to_string()]
+    );
     assert_eq!(
         found.metadata.get("tf_workspace").map(String::as_str),
         Some("platform-dev")
@@ -732,14 +757,17 @@ async fn a_destination_with_no_event_stream_can_still_be_updated() {
             .fetch_one(&fixture.db)
             .await
             .expect("projection row");
-    let event_ids: Vec<String> =
-        sqlx::query_scalar("SELECT data::text FROM es_events WHERE stream_id = $1 ORDER BY stream_version")
-            .bind(&stream_id)
-            .fetch_all(&fixture.db)
-            .await
-            .expect("seeded events");
+    let event_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT data::text FROM es_events WHERE stream_id = $1 ORDER BY stream_version",
+    )
+    .bind(&stream_id)
+    .fetch_all(&fixture.db)
+    .await
+    .expect("seeded events");
     assert!(
-        event_ids.first().is_some_and(|d| d.contains(&row_id.to_string())),
+        event_ids
+            .first()
+            .is_some_and(|d| d.contains(&row_id.to_string())),
         "the rebuilt stream must carry the projection's id, got: {event_ids:?}"
     );
 }

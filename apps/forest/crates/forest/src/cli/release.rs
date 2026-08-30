@@ -217,7 +217,10 @@ mod tests {
             stage("plan-dev", Some("APPROVED")),
             stage("plan-prod", Some("AWAITING_APPROVAL")),
         ]);
-        let err = format!("{:#}", pick_awaiting_stage(&i, Some("plan-dev")).unwrap_err());
+        let err = format!(
+            "{:#}",
+            pick_awaiting_stage(&i, Some("plan-dev")).unwrap_err()
+        );
         assert!(err.contains("not awaiting approval"), "{err}");
         assert!(err.contains("plan-prod"), "{err}");
     }

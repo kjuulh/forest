@@ -21,6 +21,7 @@ use crate::{
     services::{
         event_bus::{EventBusState, EventPayload},
         notification_registry::{NotificationRegistryState, ReleaseContext as NotifReleaseContext},
+        org_rules::OrgRuleSetRegistryState,
         policy::{PolicyRegistryState, PolicyType},
         release_author,
         release_event_store::ReleaseEventStoreState,
@@ -1264,6 +1265,13 @@ impl ReleaseService for ReleaseServer {
             .context("create project")
             .to_internal_error()?;
 
+        self.state
+            .org_rule_set_registry()
+            .reconcile_project(&req.organisation, &req.project)
+            .await
+            .context("reconcile org rule sets for project")
+            .to_internal_error()?;
+
         Ok(Response::new(CreateProjectResponse {
             project: Some(Project {
                 organisation: req.organisation,
@@ -1358,6 +1366,13 @@ impl ReleaseService for ReleaseServer {
                     tonic::Status::internal(msg)
                 }
             })?;
+
+        self.state
+            .org_rule_set_registry()
+            .reconcile_project(&req.organisation, &req.project)
+            .await
+            .context("reconcile org rule sets for project")
+            .to_internal_error()?;
 
         Ok(Response::new(UpdateProjectResponse {
             project: Some(project_record_to_proto(rec)),
@@ -1905,6 +1920,7 @@ fn record_metadata_to_proto(
         support_url: m.support_url,
         domain: m.domain,
         owner: m.owner,
+        tags: m.tags,
     }
 }
 
@@ -1918,6 +1934,7 @@ fn proto_metadata_to_record(
         support_url: m.support_url,
         domain: m.domain,
         owner: m.owner,
+        tags: m.tags,
     }
 }
 

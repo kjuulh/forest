@@ -3,18 +3,19 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use chrono::Utc;
 use forage_core::auth::{self, LoginResult, MfaSetup, *};
+use forage_core::integrations::InMemoryIntegrationStore;
 use forage_core::platform::{
-    Artifact, ArtifactContext, CreatePolicyInput, CreateReleasePipelineInput, CreateTriggerInput,
-    CreatedOAuthApp, Destination, DestinationTypeInfo, Environment, ForestOAuthApps, ForestPlatform,
-    ClientPrincipal, DirectoryLookup, DirectoryUser, NotificationPreference, OAuthApp,
-    OAuthClientInfo, OAuthClientToken, OAuthFlowError, OAuthIssuedTokens,
-    OAuthGrant, OAuthUserinfo, Organisation, OrgMember, PlatformError, Policy, ReleasePipeline,
-    Trigger, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
+    Artifact, ArtifactContext, ClientPrincipal, CreateOrgRuleSetInput, CreatePolicyInput,
+    CreateReleasePipelineInput, CreateTriggerInput, CreatedOAuthApp, Destination,
+    DestinationTypeInfo, DirectoryLookup, DirectoryUser, Environment, ForestOAuthApps,
+    ForestPlatform, NotificationPreference, OAuthApp, OAuthClientInfo, OAuthClientToken,
+    OAuthFlowError, OAuthGrant, OAuthIssuedTokens, OAuthUserinfo, OrgMember, OrgRuleSet,
+    Organisation, PlatformError, Policy, ReleasePipeline, Trigger, UpdateOrgRuleSetInput,
+    UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
 };
 use forage_core::registry::{
     ComponentDetail, ComponentSearchResult, ComponentVersionInfo, ForestRegistry, ToolSummary,
 };
-use forage_core::integrations::InMemoryIntegrationStore;
 use forage_core::session::{
     CachedOrg, CachedUser, InMemorySessionStore, SessionData, SessionStore,
 };
@@ -67,6 +68,10 @@ pub(crate) struct MockPlatformBehavior {
     pub list_environments_result: Option<Result<Vec<Environment>, PlatformError>>,
     pub update_environment_result: Option<Result<Environment, PlatformError>>,
     pub list_destinations_result: Option<Result<Vec<Destination>, PlatformError>>,
+    pub list_org_rule_sets_result: Option<Result<Vec<OrgRuleSet>, PlatformError>>,
+    pub create_org_rule_set_result: Option<Result<OrgRuleSet, PlatformError>>,
+    pub update_org_rule_set_result: Option<Result<OrgRuleSet, PlatformError>>,
+    pub delete_org_rule_set_result: Option<Result<(), PlatformError>>,
     pub list_triggers_result: Option<Result<Vec<Trigger>, PlatformError>>,
     pub create_trigger_result: Option<Result<Trigger, PlatformError>>,
     pub update_trigger_result: Option<Result<Trigger, PlatformError>>,
@@ -76,7 +81,8 @@ pub(crate) struct MockPlatformBehavior {
     pub update_release_pipeline_result: Option<Result<ReleasePipeline, PlatformError>>,
     pub delete_release_pipeline_result: Option<Result<(), PlatformError>>,
     pub get_artifact_spec_result: Option<Result<String, PlatformError>>,
-    pub get_notification_preferences_result: Option<Result<Vec<NotificationPreference>, PlatformError>>,
+    pub get_notification_preferences_result:
+        Option<Result<Vec<NotificationPreference>, PlatformError>>,
     pub set_notification_preference_result: Option<Result<(), PlatformError>>,
     pub list_destination_types_result: Option<Result<Vec<DestinationTypeInfo>, PlatformError>>,
     pub reveal_destination_metadata_result: Option<Result<String, PlatformError>>,
@@ -88,7 +94,8 @@ pub(crate) struct MockPlatformBehavior {
     pub remove_allowed_domain_result: Option<Result<bool, PlatformError>>,
     pub verify_allowed_domain_result:
         Option<Result<forage_core::platform::VerifyDomainOutcome, PlatformError>>,
-    pub list_join_offers_result: Option<Result<Vec<forage_core::platform::JoinOffer>, PlatformError>>,
+    pub list_join_offers_result:
+        Option<Result<Vec<forage_core::platform::JoinOffer>, PlatformError>>,
     pub accept_join_offer_result: Option<Result<OrgMember, PlatformError>>,
     // DATA-660 — the timeline needs both the current-state-per-destination
     // view and the per-release deploy history to tell a superseded release
@@ -153,11 +160,7 @@ impl ForestAuth for MockForestClient {
             .unwrap_or(Ok(RegisterResult::Success(ok_tokens())))
     }
 
-    async fn login(
-        &self,
-        identifier: &str,
-        password: &str,
-    ) -> Result<LoginResult, AuthError> {
+    async fn login(&self, identifier: &str, password: &str) -> Result<LoginResult, AuthError> {
         let b = self.behavior.lock().unwrap();
         if let Some(result) = b.login_result.clone() {
             return result;
@@ -178,15 +181,12 @@ impl ForestAuth for MockForestClient {
         b.verify_login_mfa_result.clone().unwrap_or(Ok(ok_tokens()))
     }
 
-    async fn setup_mfa(
-        &self,
-        _access_token: &str,
-        _user_id: &str,
-    ) -> Result<MfaSetup, AuthError> {
+    async fn setup_mfa(&self, _access_token: &str, _user_id: &str) -> Result<MfaSetup, AuthError> {
         let b = self.behavior.lock().unwrap();
         b.setup_mfa_result.clone().unwrap_or(Ok(MfaSetup {
             mfa_id: "mfa-mock-1".into(),
-            provisioning_uri: "otpauth://totp/Forest:testuser?secret=JBSWY3DPEHPK3PXP&issuer=Forest".into(),
+            provisioning_uri:
+                "otpauth://totp/Forest:testuser?secret=JBSWY3DPEHPK3PXP&issuer=Forest".into(),
             secret: "JBSWY3DPEHPK3PXP".into(),
         }))
     }
@@ -265,11 +265,7 @@ impl ForestAuth for MockForestClient {
         }))
     }
 
-    async fn delete_token(
-        &self,
-        _access_token: &str,
-        _token_id: &str,
-    ) -> Result<(), AuthError> {
+    async fn delete_token(&self, _access_token: &str, _token_id: &str) -> Result<(), AuthError> {
         let b = self.behavior.lock().unwrap();
         b.delete_token_result.clone().unwrap_or(Ok(()))
     }
@@ -322,7 +318,9 @@ impl ForestAuth for MockForestClient {
 
     async fn confirm_email_verification(&self, _email: &str) -> Result<(), AuthError> {
         let b = self.behavior.lock().unwrap();
-        b.confirm_email_verification_result.clone().unwrap_or(Ok(()))
+        b.confirm_email_verification_result
+            .clone()
+            .unwrap_or(Ok(()))
     }
 
     async fn get_user_by_username(
@@ -331,16 +329,14 @@ impl ForestAuth for MockForestClient {
         username: &str,
     ) -> Result<UserProfile, AuthError> {
         let b = self.behavior.lock().unwrap();
-        b.get_user_by_username_result
-            .clone()
-            .unwrap_or_else(|| {
-                Ok(UserProfile {
-                    user_id: "user-123".into(),
-                    username: username.into(),
-                    profile_picture_url: None,
-                    created_at: Some("2025-01-15T10:00:00Z".into()),
-                })
+        b.get_user_by_username_result.clone().unwrap_or_else(|| {
+            Ok(UserProfile {
+                user_id: "user-123".into(),
+                username: username.into(),
+                profile_picture_url: None,
+                created_at: Some("2025-01-15T10:00:00Z".into()),
             })
+        })
     }
 
     async fn get_user_by_email(
@@ -397,7 +393,9 @@ impl ForestAuth for MockForestClient {
         _user_id: &str,
     ) -> Result<Vec<forage_core::auth::LinkedIdentity>, AuthError> {
         let b = self.behavior.lock().unwrap();
-        b.list_linked_identities_result.clone().unwrap_or(Ok(vec![]))
+        b.list_linked_identities_result
+            .clone()
+            .unwrap_or(Ok(vec![]))
     }
 
     async fn link_oauth_provider(
@@ -431,11 +429,7 @@ impl ForestAuth for MockForestClient {
         b.approve_device_login_result.clone().unwrap_or(Ok(()))
     }
 
-    async fn deny_device_login(
-        &self,
-        _user_code: &str,
-        _user_id: &str,
-    ) -> Result<(), AuthError> {
+    async fn deny_device_login(&self, _user_code: &str, _user_id: &str) -> Result<(), AuthError> {
         let b = self.behavior.lock().unwrap();
         b.deny_device_login_result.clone().unwrap_or(Ok(()))
     }
@@ -495,13 +489,13 @@ impl ForestPlatform for MockPlatformClient {
         project: &str,
     ) -> Result<Option<forage_core::platform::Project>, PlatformError> {
         let b = self.behavior.lock().unwrap();
-        b.get_project_result
-            .clone()
-            .unwrap_or_else(|| Ok(Some(forage_core::platform::Project {
+        b.get_project_result.clone().unwrap_or_else(|| {
+            Ok(Some(forage_core::platform::Project {
                 organisation: organisation.into(),
                 project: project.into(),
                 ..Default::default()
-            })))
+            }))
+        })
     }
 
     async fn list_artifacts(
@@ -689,7 +683,9 @@ impl ForestPlatform for MockPlatformClient {
         _access_token: &str,
     ) -> Result<Vec<DestinationTypeInfo>, PlatformError> {
         let b = self.behavior.lock().unwrap();
-        b.list_destination_types_result.clone().unwrap_or(Ok(vec![]))
+        b.list_destination_types_result
+            .clone()
+            .unwrap_or(Ok(vec![]))
     }
 
     async fn update_destination(
@@ -760,6 +756,70 @@ impl ForestPlatform for MockPlatformClient {
         _use_pipeline: bool,
     ) -> Result<(), PlatformError> {
         Ok(())
+    }
+
+    async fn list_org_rule_sets(
+        &self,
+        _access_token: &str,
+        _organisation: &str,
+    ) -> Result<Vec<OrgRuleSet>, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.list_org_rule_sets_result.clone().unwrap_or(Ok(vec![]))
+    }
+
+    async fn create_org_rule_set(
+        &self,
+        _access_token: &str,
+        organisation: &str,
+        input: &CreateOrgRuleSetInput,
+    ) -> Result<OrgRuleSet, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.create_org_rule_set_result.clone().unwrap_or_else(|| {
+            Ok(OrgRuleSet {
+                organisation: organisation.into(),
+                name: input.name.clone(),
+                enabled: input.enabled,
+                selector: input.selector.clone(),
+                policies: input.policies.clone(),
+                triggers: input.triggers.clone(),
+                release_pipelines: input.release_pipelines.clone(),
+                created_at: "2026-03-08T00:00:00Z".into(),
+                updated_at: "2026-03-08T00:00:00Z".into(),
+            })
+        })
+    }
+
+    async fn update_org_rule_set(
+        &self,
+        _access_token: &str,
+        organisation: &str,
+        _name: &str,
+        input: &UpdateOrgRuleSetInput,
+    ) -> Result<OrgRuleSet, PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.update_org_rule_set_result.clone().unwrap_or_else(|| {
+            Ok(OrgRuleSet {
+                organisation: organisation.into(),
+                name: input.name.clone(),
+                enabled: input.enabled,
+                selector: input.selector.clone(),
+                policies: input.policies.clone(),
+                triggers: input.triggers.clone(),
+                release_pipelines: input.release_pipelines.clone(),
+                created_at: "2026-03-08T00:00:00Z".into(),
+                updated_at: "2026-03-08T00:00:00Z".into(),
+            })
+        })
+    }
+
+    async fn delete_org_rule_set(
+        &self,
+        _access_token: &str,
+        _organisation: &str,
+        _name: &str,
+    ) -> Result<(), PlatformError> {
+        let b = self.behavior.lock().unwrap();
+        b.delete_org_rule_set_result.clone().unwrap_or(Ok(()))
     }
 
     async fn list_triggers(
@@ -1175,7 +1235,11 @@ pub(crate) fn test_state_with(
 pub(crate) fn test_state_with_integrations(
     mock: MockForestClient,
     platform: MockPlatformClient,
-) -> (AppState, Arc<InMemorySessionStore>, Arc<InMemoryIntegrationStore>) {
+) -> (
+    AppState,
+    Arc<InMemorySessionStore>,
+    Arc<InMemoryIntegrationStore>,
+) {
     let sessions = Arc::new(InMemorySessionStore::new());
     let integrations = Arc::new(InMemoryIntegrationStore::new());
     let state = AppState::new(
@@ -1235,7 +1299,12 @@ impl MockOAuthAppsClient {
 
     /// Seed an app directly (for OAuth-flow route tests that don't go through
     /// the create handler).
-    pub(crate) fn seed_app(&self, client_id: &str, redirect_uris: Vec<String>, scopes: Vec<String>) {
+    pub(crate) fn seed_app(
+        &self,
+        client_id: &str,
+        redirect_uris: Vec<String>,
+        scopes: Vec<String>,
+    ) {
         let mut counter = self.counter.lock().unwrap();
         *counter += 1;
         let id = format!("app-{}", *counter);
@@ -1568,7 +1637,11 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         })
     }
 
-    async fn revoke_oauth_grant(&self, _user_id: &str, _app_id: &str) -> Result<u32, PlatformError> {
+    async fn revoke_oauth_grant(
+        &self,
+        _user_id: &str,
+        _app_id: &str,
+    ) -> Result<u32, PlatformError> {
         if let Some(err) = &self.forced_error {
             return Err(err.clone());
         }
@@ -1779,10 +1852,12 @@ impl ForestRegistry for MockRegistryClient {
         _page_size: i32,
     ) -> Result<ComponentSearchResult, PlatformError> {
         let b = self.behavior.lock().unwrap();
-        b.search_components_result.clone().unwrap_or(Ok(ComponentSearchResult {
-            components: vec![],
-            total_count: 0,
-        }))
+        b.search_components_result
+            .clone()
+            .unwrap_or(Ok(ComponentSearchResult {
+                components: vec![],
+                total_count: 0,
+            }))
     }
 
     async fn search_public_components(
@@ -1809,9 +1884,9 @@ impl ForestRegistry for MockRegistryClient {
         _name: &str,
     ) -> Result<ComponentDetail, PlatformError> {
         let b = self.behavior.lock().unwrap();
-        b.get_component_detail_result.clone().unwrap_or(Err(
-            PlatformError::NotFound("component not found".into()),
-        ))
+        b.get_component_detail_result
+            .clone()
+            .unwrap_or(Err(PlatformError::NotFound("component not found".into())))
     }
 
     async fn get_public_component_detail(
@@ -1833,7 +1908,9 @@ impl ForestRegistry for MockRegistryClient {
         _name: &str,
     ) -> Result<Vec<ComponentVersionInfo>, PlatformError> {
         let b = self.behavior.lock().unwrap();
-        b.list_component_versions_result.clone().unwrap_or(Ok(vec![]))
+        b.list_component_versions_result
+            .clone()
+            .unwrap_or(Ok(vec![]))
     }
 
     async fn get_component_manifest(
@@ -1844,7 +1921,9 @@ impl ForestRegistry for MockRegistryClient {
         _version: &str,
     ) -> Result<String, PlatformError> {
         let b = self.behavior.lock().unwrap();
-        b.get_component_manifest_result.clone().unwrap_or(Ok(String::new()))
+        b.get_component_manifest_result
+            .clone()
+            .unwrap_or(Ok(String::new()))
     }
 
     async fn get_public_component_manifest(

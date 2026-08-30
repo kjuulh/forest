@@ -21,7 +21,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::global::eval::{fish_path_prepend, posix_path_prepend, SHIM_DIR_LITERAL};
+use crate::global::eval::{SHIM_DIR_LITERAL, fish_path_prepend, posix_path_prepend};
 
 /// First line of the managed block. Also the needle the installer/uninstaller
 /// search for.
@@ -104,8 +104,14 @@ mod tests {
     fn block_is_delimited_by_both_markers() {
         for shell in [Shell::Zsh, Shell::Bash, Shell::Fish] {
             let b = managed_block(shell);
-            assert!(b.starts_with(BLOCK_BEGIN), "must start with begin marker: {b}");
-            assert!(b.trim_end().ends_with(BLOCK_END), "must end with end marker: {b}");
+            assert!(
+                b.starts_with(BLOCK_BEGIN),
+                "must start with begin marker: {b}"
+            );
+            assert!(
+                b.trim_end().ends_with(BLOCK_END),
+                "must end with end marker: {b}"
+            );
         }
     }
 
@@ -123,7 +129,10 @@ mod tests {
         // Fish is not POSIX — its block must use the fish guard, never `case`.
         let b = managed_block(Shell::Fish);
         assert!(b.contains(&fish_path_prepend()), "{b}");
-        assert!(!b.contains("case \":$PATH:\""), "fish block must not embed POSIX case: {b}");
+        assert!(
+            !b.contains("case \":$PATH:\""),
+            "fish block must not embed POSIX case: {b}"
+        );
     }
 
     #[test]
