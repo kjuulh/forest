@@ -313,4 +313,28 @@ jobs:
           version="$(cue export --out json ./*.cue | jq -r '.forest.component.version')"
           forest components show "forest-contrib/${{ inputs.component }}" --format json \
             | jq -e --arg v "$version" '.versions[] | select(.version == $v)' > /dev/null
-          echo "::notice::forest-contrib/${{ inputs.component }}@$version is resolvable."
+
+          # Listed is not the same as usable. build-rust@0.1.1, build-go@0.1.5
+          # and build-docker@0.1.1 all passed the check above while being
+          # unusable: they were published by a CLI that did not yet upload
+          # cue.mod/module.cue, so their `import "forest.sh/forest/sdk@v0"`
+          # could not resolve and the component failed to parse for every
+          # consumer. This step said "resolvable" for all three.
+          #
+          # So fetch what a consumer would fetch and evaluate it the way a
+          # consumer does — from inside the component, which is where cue
+          # looks for the module root.
+          probe="$RUNNER_TEMP/probe"
+          rm -rf "$probe" && mkdir -p "$probe"
+          printf 'dependencies: {\n\t"forest-contrib/%s": version: "%s"\n}\n\nproject: {\n\tname:         "publish-verify"\n\torganisation: "forest-contrib"\n}\n' \
+            "${{ inputs.component }}" "$version" > "$probe/forest.cue"
+          ( cd "$probe" && forest update )
+
+          cached="$HOME/.cache/forest/components/forest-contrib/${{ inputs.component }}/$version"
+          if [ ! -f "$cached/cue.mod/module.cue" ]; then
+            echo "::error::forest-contrib/${{ inputs.component }}@$version published without cue.mod/module.cue — every import in it will fail for consumers. Publish with a forest CLI that includes the cue.mod fix (>= 0.3.8)." >&2
+            ls -la "$cached" >&2 || true
+            exit 1
+          fi
+          ( cd "$cached" && cue export ./forest.cue --out json > /dev/null )
+          echo "::notice::forest-contrib/${{ inputs.component }}@$version is resolvable and parses from the cache."

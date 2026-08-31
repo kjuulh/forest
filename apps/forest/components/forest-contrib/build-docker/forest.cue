@@ -17,9 +17,16 @@ forest: component: sdk.#ForestComponent & {
 	// Republished for the cue.mod fix (#212/#215): every version below this
 	// one was published without cue.mod/module.cue, so its `import
 	// "forest.sh/forest/sdk@v0"` cannot resolve and the component fails to
-	// parse wherever it is used. Inert for existing consumers — dependents
-	// pin an exact version, so nothing picks this up until a repo bumps.
-	version: "0.1.1"
+	// parse wherever it is used.
+	//
+	// The first attempt at that republish is among them. It was published by
+	// forest v0.3.7, whose tag turned out to point at a commit predating the
+	// fix, so it shipped the old collect_cue_files and uploaded two CUE files
+	// where three were needed. Hence this second bump, published by >= 0.3.8.
+	//
+	// Inert for existing consumers — dependents pin an exact version, so
+	// nothing picks this up until a repo bumps.
+	version: "0.1.2"
 
 	upload: {
 		source: "./crates/build-docker"
