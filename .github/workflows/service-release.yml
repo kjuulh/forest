@@ -10,8 +10,29 @@ name: service release
 #     release:
 #       needs: [test, build-and-push]
 #       if: github.ref == 'refs/heads/main'
-#       uses: understory-io/forest/.github/workflows/service-release.yml@v0.3.9
+#       uses: understory-io/forest/.github/workflows/service-release.yml@stable
 #       secrets: inherit
+#
+# ── Why @stable rather than a version tag ──────────────────────────────
+#
+# `stable` is a branch this repo moves deliberately, not on every release. A
+# version tag would be safer in isolation and worse in practice: every service
+# calling this would need its own bump commit to pick up a fix, so twelve repos
+# would drift apart exactly the way the copy-pasted jobs did — which is the
+# thing this workflow exists to stop.
+#
+# The pinning still exists, it just moved. `forest-version` below is an exact
+# version, and it is bumped in the same change that moves `stable`. So the
+# decision "this forest release is safe to deploy with" is made once, here,
+# rather than twelve times or not at all.
+#
+# To move it:
+#
+#     git push origin <sha>:refs/heads/stable --force-with-lease
+#
+# Move it to a commit that has been released and whose install.sh has finished
+# uploading — `setup-forest` resolves a version, and a release whose assets are
+# still in flight is not usable yet.
 #
 # ── Why this annotates rather than releases ────────────────────────────
 #
@@ -53,8 +74,10 @@ on:
     inputs:
       forest-version:
         description: >-
-          forest CLI to install. Pinned rather than latest so a CLI regression
-          cannot reach a deploy pipeline without someone bumping this line.
+          forest CLI to install. An exact version, never `latest`: callers track
+          this workflow through the mutable `stable` branch, so this line is the
+          one place where "which forest CLI deploys our services" is decided.
+          Bump it in the same change that moves `stable`.
 
           The floor is v0.3.8: services onboarded this way declare destinations
           without a component, which every earlier CLI refused to prepare, and

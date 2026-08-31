@@ -298,7 +298,7 @@ jobs:
   release:
     needs: [test, build-and-push]
     if: github.ref == 'refs/heads/main'
-    uses: understory-io/forest/.github/workflows/service-release.yml@v0.3.9
+    uses: understory-io/forest/.github/workflows/service-release.yml@stable
     secrets: inherit
 ```
 
@@ -364,11 +364,39 @@ green while the old code keeps running. Leaving the wait to the destination is
 what makes a dev-then-prod pipeline meaningful — dev has to genuinely converge
 before prod is touched.
 
+### `@stable`, not a version tag
+
+`stable` is a branch forest moves deliberately — not on every release. A version
+tag would be safer read in isolation and worse in practice: every service
+calling the workflow would need its own bump commit to pick up a fix, so the
+callers would drift apart exactly the way copy-pasted jobs do. That is the
+problem the reusable workflow exists to solve, and pinning each caller would
+reintroduce it one level up.
+
+The pinning has not gone away, it has moved. `forest-version` inside the
+workflow is an exact version, bumped in the same change that moves `stable`, so
+the decision "this forest release is safe to deploy with" is made once rather
+than twelve times or not at all.
+
+To move it:
+
+```console
+$ git push origin <sha>:refs/heads/stable --force-with-lease
+```
+
+Point it at a commit that has been released *and* whose `install.sh` has
+finished uploading — `setup-forest` resolves a version, and a release whose
+assets are still in flight is not usable yet.
+
+A repo that wants to opt out of the channel can pin the reference itself
+(`@v0.3.9`); nothing stops it, and a service under active incident is a
+reasonable place to do that.
+
 ### Inputs
 
 | Input | Default | Why you would change it |
 |---|---|---|
-| `forest-version` | `v0.3.8` | Pinned so a CLI regression cannot reach a deploy pipeline unnoticed. `v0.3.8` is the floor for projects that declare destinations without a component. |
+| `forest-version` | `v0.3.8` | An exact version, never `latest`. Callers track the workflow through `@stable`, so this is the one place "which forest CLI deploys our services" is decided. `v0.3.8` is the floor for projects that declare destinations without a component. |
 | `cue-version` | `v0.17.1` | `forest release prepare` shells out to `cue`; forest does not vendor it. |
 | `working-directory` | `.` | The project's `forest.cue` lives in a subdirectory. |
 | `runs-on` | `ubuntu-latest` | The job builds nothing, so it has no reason to occupy a self-hosted build machine. |
