@@ -374,33 +374,7 @@ impl ProjectParser {
         let file_path = dir.join(FOREST_PROJECT_CUE_FILE);
         if file_path.exists() {
             // 1. Transform cue into toml
-            let output = crate::tools::cue::output(|| {
-                let mut cmd = tokio::process::Command::new("cue");
-                cmd.arg("export").arg(&file_path).arg("--out").arg("toml");
-
-                // Pass CUE_REGISTRY if set (enables module imports from OCI registry)
-                if let Ok(registry) = std::env::var("CUE_REGISTRY") {
-                    cmd.env("CUE_REGISTRY", registry);
-                }
-                cmd
-            })
-            .await?;
-
-            let stderr =
-                std::string::String::from_utf8(output.stderr).context("interpret stderr")?;
-
-            if !output.status.success() {
-                anyhow::bail!(
-                    "failed to evaluate {}: {}",
-                    file_path.display(),
-                    stderr.trim()
-                );
-            }
-
-            let output = std::string::String::from_utf8(output.stdout)
-                .context("convert cue into native format (toml)")?;
-
-            tracing::trace!("output: (stdout: {:?}, stderr: {:?})", output, stderr);
+            let output = export_project_cue(dir).await?;
 
             return Ok(Some((file_path, output)));
         }
@@ -456,6 +430,55 @@ impl ProjectParser {
         tracing::debug!("project file doesn't exist");
         return Ok(None);
     }
+}
+
+/// `cue export` a project's forest.cue to TOML, evaluated from inside the
+/// project.
+///
+/// The working directory is the whole point. `cue` locates the module root by
+/// walking up from where it runs, not from the file it was handed, so handing
+/// it an absolute path from somewhere else evaluates the project against
+/// whatever module the caller happens to be standing in — or, far more often,
+/// against no module at all. Any import in the project's forest.cue then fails
+/// with "imports are unavailable because there is no cue.mod/module.cue file",
+/// naming the very file sitting next to it.
+///
+/// `forest` walks up from the current directory to find the project, so the two
+/// are equal exactly when it is run from the project root and differ every
+/// other time.
+async fn export_project_cue(dir: &Path) -> anyhow::Result<String> {
+    let output = crate::tools::cue::output(|| {
+        let mut cmd = tokio::process::Command::new("cue");
+        cmd.current_dir(dir);
+        cmd.arg("export")
+            .arg(format!("./{FOREST_PROJECT_CUE_FILE}"))
+            .arg("--out")
+            .arg("toml");
+
+        // Pass CUE_REGISTRY if set (enables module imports from OCI registry)
+        if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+            cmd.env("CUE_REGISTRY", registry);
+        }
+        cmd
+    })
+    .await?;
+
+    let stderr = std::string::String::from_utf8(output.stderr).context("interpret stderr")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "failed to evaluate {}: {}",
+            dir.join(FOREST_PROJECT_CUE_FILE).display(),
+            stderr.trim()
+        );
+    }
+
+    let stdout = std::string::String::from_utf8(output.stdout)
+        .context("convert cue into native format (toml)")?;
+
+    tracing::trace!("output: (stdout: {:?}, stderr: {:?})", stdout, stderr);
+
+    Ok(stdout)
 }
 
 pub trait ProjectParserState {
@@ -563,5 +586,117 @@ impl TryFrom<toml::Value> for ProjectValue {
         };
 
         Ok(item)
+    }
+}
+
+#[cfg(test)]
+mod project_cue_module_test {
+    use super::*;
+
+    /// Lay out a project the way a real one is laid out once it depends on
+    /// anything published: a `cue.mod/module.cue`, a package inside the module,
+    /// and a `forest.cue` that imports it.
+    fn write_project_importing_its_own_module(root: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(root.join("cue.mod"))?;
+        std::fs::create_dir_all(root.join("shared"))?;
+        std::fs::write(
+            root.join("cue.mod/module.cue"),
+            "module: \"example.com/proj@v0\"\nlanguage: version: \"v0.16.1\"\n",
+        )?;
+        std::fs::write(
+            root.join("shared/shared.cue"),
+            "package shared\n\nOrganisation: \"understory\"\n",
+        )?;
+        std::fs::write(
+            root.join(FOREST_PROJECT_CUE_FILE),
+            "package proj\n\n\
+             import \"example.com/proj/shared\"\n\n\
+             project: {\n\
+             \tname:         \"demo\"\n\
+             \torganisation: shared.Organisation\n\
+             }\n",
+        )?;
+        Ok(())
+    }
+
+    /// The property: which directory `forest` was run from must not change
+    /// whether the project parses.
+    ///
+    /// It did. `forest` walks *up* from the current directory to find the
+    /// project, so the project root and the working directory are the same
+    /// exactly when you happen to be standing at the top of the repo — and
+    /// differ every other time. `cue`, meanwhile, finds its module root by
+    /// walking up from where it runs rather than from the file it was given.
+    /// Run from a subdirectory, a project that imported anything at all failed.
+    #[tokio::test]
+    async fn a_project_is_evaluated_against_its_own_module_from_any_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(root.join("crates/deep/nested")).expect("create project tree");
+        write_project_importing_its_own_module(&root).expect("write project");
+
+        // The path forest resolves is the project root, whatever directory the
+        // user is standing in — so that is what gets evaluated.
+        let toml = export_project_cue(&root)
+            .await
+            .expect("a project with a cue.mod parses regardless of working directory");
+
+        assert!(
+            toml.contains("organisation = 'understory'"),
+            "organisation comes from the imported package, so reading it back \
+             proves the import resolved; got:\n{toml}"
+        );
+    }
+
+    /// The overwhelmingly common case, and the one that hid the bug for so
+    /// long: no cue.mod, no imports. It worked before and must keep working.
+    #[tokio::test]
+    async fn a_project_with_no_module_still_parses() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("plain");
+        std::fs::create_dir_all(&root).expect("create project dir");
+        std::fs::write(
+            root.join(FOREST_PROJECT_CUE_FILE),
+            "project: {\n\tname:         \"plain\"\n\torganisation: \"understory\"\n}\n",
+        )
+        .expect("write forest.cue");
+
+        let toml = export_project_cue(&root)
+            .await
+            .expect("plain project parses");
+
+        assert!(
+            toml.contains("name = 'plain'"),
+            "expected the project name in the exported toml; got:\n{toml}"
+        );
+    }
+
+    /// A broken project must still fail, and the failure must name the file and
+    /// carry cue's own diagnostic — running from a different directory changed
+    /// what gets reported, so it is worth pinning.
+    #[tokio::test]
+    async fn a_broken_project_fails_with_cues_own_diagnostic() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("broken");
+        std::fs::create_dir_all(&root).expect("create project dir");
+        std::fs::write(
+            root.join(FOREST_PROJECT_CUE_FILE),
+            "project: name: \"a\"\nproject: name: \"b\"\n",
+        )
+        .expect("write forest.cue");
+
+        let err = export_project_cue(&root)
+            .await
+            .expect_err("conflicting values are not a valid project");
+        let msg = format!("{err:#}");
+
+        assert!(
+            msg.contains(FOREST_PROJECT_CUE_FILE),
+            "the error should name the file that failed; got: {msg}"
+        );
+        assert!(
+            msg.contains("conflicting values"),
+            "the error should carry cue's own diagnostic; got: {msg}"
+        );
     }
 }
