@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.9](https://github.com/understory-io/forest/compare/v0.3.8...v0.3.9) (2026-08-31)
+
+
+### Features
+
+* **ci:** a reusable workflow for releasing a service that already exists ([#220](https://github.com/understory-io/forest/issues/220)) ([6d6b0a2](https://github.com/understory-io/forest/commit/6d6b0a2e822f14b396735a6c7d7532e0cb2f7c03))
+* **ci:** track service-release through a mutable `stable` branch ([#221](https://github.com/understory-io/forest/issues/221)) ([77de6fa](https://github.com/understory-io/forest/commit/77de6fa2d9462548f33f9ac5f197769b0fb289c0))
+
+
+### Bug Fixes
+
+* **ci:** verify a published component parses, and republish the three that did not ([#218](https://github.com/understory-io/forest/issues/218)) ([75229ab](https://github.com/understory-io/forest/commit/75229ab2c9e098f455931427814247ce45f10ae8))
+
 ## [0.3.8](https://github.com/understory-io/forest/compare/v0.3.7...v0.3.8) (2026-08-31)
 
 
