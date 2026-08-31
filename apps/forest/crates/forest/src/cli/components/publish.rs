@@ -409,7 +409,7 @@ mod abort_on_drop_tests {
         );
     }
 
-    use super::{PublishSummary, derive_summary_shape};
+    use super::{PublishSummary, collect_cue_files, derive_summary_shape};
 
     #[test]
     fn shape_for_binary_tool() {
@@ -431,6 +431,51 @@ mod abort_on_drop_tests {
             derive_summary_shape("external", true, true),
             "tool_external"
         );
+    }
+
+    /// A component that imports the SDK is unusable from the registry without
+    /// its module file, so publishing has to carry it. Regression for
+    /// forest/deployment@0.3.0, which shipped without one and failed every
+    /// consumer with "imports are unavailable because there is no
+    /// cue.mod/module.cue file".
+    #[tokio::test]
+    async fn cue_publish_includes_the_module_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        tokio::fs::write(dir.path().join("forest.cue"), "package x\n")
+            .await
+            .expect("write forest.cue");
+        tokio::fs::create_dir_all(dir.path().join("cue.mod"))
+            .await
+            .expect("create cue.mod");
+        tokio::fs::write(
+            dir.path().join("cue.mod").join("module.cue"),
+            "module: \"forest.sh/forest/deployment\"\n",
+        )
+        .await
+        .expect("write module.cue");
+
+        let files = collect_cue_files(dir.path()).await.expect("collect");
+        let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
+
+        assert!(
+            names.contains(&"cue.mod/module.cue"),
+            "module file must be published, got: {names:?}",
+        );
+        assert!(names.contains(&"forest.cue"), "got: {names:?}");
+    }
+
+    /// And a component without one still publishes rather than erroring —
+    /// plenty of components import nothing.
+    #[tokio::test]
+    async fn cue_publish_without_a_module_file_is_fine() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        tokio::fs::write(dir.path().join("forest.cue"), "package x\n")
+            .await
+            .expect("write forest.cue");
+
+        let files = collect_cue_files(dir.path()).await.expect("collect");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].0, "forest.cue");
     }
 
     #[test]
@@ -1659,7 +1704,18 @@ async fn eval_tool_facet(dir: &std::path::Path) -> anyhow::Result<serde_json::Va
     Ok(v)
 }
 
-/// Collect all `.cue` files from a directory (non-recursive, excludes cue.mod/).
+/// Collect the `.cue` files a consumer needs: every `.cue` in the component
+/// directory, plus `cue.mod/module.cue` when the component has one.
+///
+/// The module file is not optional dressing. A component whose spec begins
+/// `import "forest.sh/forest/sdk@v0"` cannot be evaluated without it — CUE
+/// reports `imports are unavailable because there is no cue.mod/module.cue
+/// file` and the consumer's parse fails. Publishing without it produced
+/// components that worked from a relative `path:` and were unusable from the
+/// registry, which is why every example references contracts by path.
+///
+/// `collect_deno_files` has always shipped it for the Deno path; this is the
+/// same rule for the CUE one.
 async fn collect_cue_files(dir: &std::path::Path) -> anyhow::Result<Vec<(String, String)>> {
     let mut files = Vec::new();
     let mut entries = tokio::fs::read_dir(dir).await?;
@@ -1673,6 +1729,14 @@ async fn collect_cue_files(dir: &std::path::Path) -> anyhow::Result<Vec<(String,
             let content = tokio::fs::read_to_string(&path).await?;
             files.push((file_name, content));
         }
+    }
+
+    // Forward slash on purpose: the path round-trips through registry storage
+    // and is recreated verbatim in the consumer cache, which creates parents.
+    let module_cue = dir.join("cue.mod").join("module.cue");
+    if module_cue.exists() {
+        let content = tokio::fs::read_to_string(&module_cue).await?;
+        files.push(("cue.mod/module.cue".to_string(), content));
     }
 
     files.sort_by(|a, b| a.0.cmp(&b.0));
