@@ -226,12 +226,25 @@ impl PrepareCommand {
                 .join(&deployment_item.destination)
                 .join(&deployment_item.destination_type);
 
+            // A project can declare destinations without a component, and that
+            // is a real case rather than a mistake: components exist to render
+            // deployment manifests, and a destination type that acts on
+            // infrastructure which already exists — `forest/generic@1` calling
+            // ecs:UpdateService, say — has no manifests to render. What such a
+            // project still needs to say is *config*: which service it is.
+            //
+            // So there is nothing to invoke, but there is something to write.
+            // Fall through to the config.json below, which is what carries the
+            // project's variables to the destination.
             let Some(component) = &deployment_item.component else {
-                anyhow::bail!(
-                    "deployment item for {}/{} has no component reference",
-                    deployment_item.env,
-                    deployment_item.destination
+                tracing::info!(
+                    env = deployment_item.env,
+                    destination = deployment_item.destination,
+                    "no component for this deployment item — writing config only",
                 );
+
+                write_forest_config(&output_path, &deployment_item).await?;
+                continue;
             };
 
             // Local deps use their declared path directly. Versioned
@@ -422,31 +435,46 @@ impl PrepareCommand {
                 }
             }
 
-            // Write forest config.json
-            let config_file_path = output_path.join("forest").join("config.json");
-            if let Some(parent) = config_file_path.parent() {
-                tokio::fs::create_dir_all(parent)
-                    .await
-                    .context("forest config file path")?;
-            }
-            let mut config_file = tokio::fs::File::create(config_file_path)
-                .await
-                .context("create config file")?;
-            config_file
-                .write_all(
-                    serde_json::to_string_pretty(&deployment_item)
-                        .context("serialize deployment item")?
-                        .as_bytes(),
-                )
-                .await
-                .context("write forest config")?;
-            config_file.flush().await?;
+            write_forest_config(&output_path, &deployment_item).await?;
 
             tracing::info!("generated deployment at: {}", output_path.display());
         }
 
         Ok(())
     }
+}
+
+/// Write the deployment item to `forest/config.json` under the destination's
+/// output path.
+///
+/// This is what carries a project's per-environment config to the destination
+/// — the destination describes a place, the config says what this project is
+/// within it. Written for every deployment item, with or without a component.
+async fn write_forest_config(
+    output_path: &std::path::Path,
+    deployment_item: &DeploymentItem,
+) -> anyhow::Result<()> {
+    let config_file_path = output_path.join("forest").join("config.json");
+    if let Some(parent) = config_file_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .context("forest config file path")?;
+    }
+
+    let mut config_file = tokio::fs::File::create(config_file_path)
+        .await
+        .context("create config file")?;
+    config_file
+        .write_all(
+            serde_json::to_string_pretty(deployment_item)
+                .context("serialize deployment item")?
+                .as_bytes(),
+        )
+        .await
+        .context("write forest config")?;
+    config_file.flush().await?;
+
+    Ok(())
 }
 
 fn get_deployment_items(

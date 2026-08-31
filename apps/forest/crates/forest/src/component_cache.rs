@@ -96,7 +96,30 @@ impl ComponentCache {
                         name_entry.path().to_string_lossy()
                     ))?
                 {
-                    let mut component = self.get_component_from_path(&version_entry.path()).await?;
+                    // One unparseable component in the cache must not take the
+                    // scan down with it. The cache holds everything ever pulled
+                    // on this machine, most of which a given project does not
+                    // depend on — so a single bad entry would otherwise make
+                    // every project unloadable, with an error naming a component
+                    // the project has never heard of.
+                    //
+                    // Not hypothetical: every CUE component published before the
+                    // cue.mod fix is missing its module file and fails to parse,
+                    // so one stale entry bricked unrelated projects.
+                    //
+                    // A project that actually depends on the bad component still
+                    // fails, later, where the error can name the dependency.
+                    let mut component =
+                        match self.get_component_from_path(&version_entry.path()).await {
+                            Ok(component) => component,
+                            Err(e) => {
+                                tracing::warn!(
+                                    path = %version_entry.path().to_string_lossy(),
+                                    "skipping unparseable component in cache: {e:#}",
+                                );
+                                continue;
+                            }
+                        };
 
                     component.source =
                         models::CacheComponentSource::Versioned(component.version.clone());
