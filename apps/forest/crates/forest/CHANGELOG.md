@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.7](https://github.com/understory-io/forest/compare/v0.3.6...v0.3.7) (2026-08-31)
+
+
+### Features
+
+* add organisation rule sets ([32187a8](https://github.com/understory-io/forest/commit/32187a8b0d623ce212bfca7c9fa6c927533d175e))
+* detect ci release context ([ad35401](https://github.com/understory-io/forest/commit/ad35401085e455973d3328d0bed76acc38165ac4))
+
+
+### Bug Fixes
+
+* **forest:** a project can declare destinations without a component ([#213](https://github.com/understory-io/forest/issues/213)) ([0d42f3f](https://github.com/understory-io/forest/commit/0d42f3f17bb29512b3e136c0b4c565ac886a82be))
+* **forest:** publish a component's cue.mod/module.cue ([#212](https://github.com/understory-io/forest/issues/212)) ([e347387](https://github.com/understory-io/forest/commit/e347387030cbcb6f191a1febaa1b0855354d5303))
+
 ## [0.3.6](https://github.com/understory-io/forest/compare/v0.3.5...v0.3.6) (2026-08-28)
 
 
