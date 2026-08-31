@@ -26,7 +26,12 @@ forest: component: sdk.#ForestComponent & {
 	// across native runners. It also carries the fix for the `go -ldflags …
 	// build` argument order, which would have broken every Go build the moment
 	// this component was next published.
-	version: "0.1.4"
+	// Republished for the cue.mod fix (#212/#215): every version below this
+	// one was published without cue.mod/module.cue, so its `import
+	// "forest.sh/forest/sdk@v0"` cannot resolve and the component fails to
+	// parse wherever it is used. Inert for existing consumers — dependents
+	// pin an exact version, so nothing picks this up until a repo bumps.
+	version: "0.1.5"
 
 	upload: {
 		source: "./crates/build-go"

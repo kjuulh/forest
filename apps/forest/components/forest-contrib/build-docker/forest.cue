@@ -13,8 +13,13 @@ project: sdk.#ForestProject & {
 }
 
 forest: component: sdk.#ForestComponent & {
-	name:    project.name
-	version: "0.1.0"
+	name: project.name
+	// Republished for the cue.mod fix (#212/#215): every version below this
+	// one was published without cue.mod/module.cue, so its `import
+	// "forest.sh/forest/sdk@v0"` cannot resolve and the component fails to
+	// parse wherever it is used. Inert for existing consumers — dependents
+	// pin an exact version, so nothing picks this up until a repo bumps.
+	version: "0.1.1"
 
 	upload: {
 		source: "./crates/build-docker"
