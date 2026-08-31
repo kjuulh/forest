@@ -1,0 +1,163 @@
+name: service release
+
+# Reusable workflow: annotate a release for a service that already exists, and
+# let the project's pipeline decide where it goes.
+#
+# Every understory service releasing through forest calls this instead of
+# copy-pasting the steps, so a fix here reaches all of them at once. The
+# caller's job is a thin `uses:` block:
+#
+#     release:
+#       needs: [test, build-and-push]
+#       if: github.ref == 'refs/heads/main'
+#       uses: understory-io/forest/.github/workflows/service-release.yml@v0.3.9
+#       secrets: inherit
+#
+# ── Why this annotates rather than releases ────────────────────────────
+#
+# It records a release and stops. The project's trigger — by convention
+# `deploy-main-via-pipeline`, matching branch `^main$` and source type `^ci$` —
+# fires the project's pipeline off that annotation. Releasing from here as well
+# would double-fire or race it.
+#
+# That indirection is the point. Which environments a release reaches, and in
+# what order, is configuration on the project rather than YAML copied between
+# repos:
+#
+#     dev-then-prod   deploy-dev (data-dev) -> deploy-prod (data)
+#     prod-only       deploy-prod (data)
+#
+# Changing a service's rollout shape — adding a dev stage once its dev service
+# is healthy, say — touches no CI at all.
+#
+# `source-type: ci` is load-bearing rather than decorative: a trigger matching
+# `^ci$` will not fire without it, and an annotation made from a laptop does not
+# match, so it records a release without deploying anything.
+#
+# ── Why waiting is safe to leave to forest ─────────────────────────────
+#
+# The destination's provider watches the rollout: stability is
+# `deployments == 1 && running == desired`, a deployment-identity change at the
+# end is a rollback and fails, and its timeout is failure — our `ecs-task`
+# module does not enable the deployment circuit breaker, so a bad image never
+# reports FAILED, it simply never converges.
+#
+# `aws ecs wait services-stable`, which the canopy-deploy step this replaced
+# used, returns *success* after a circuit-breaker rollback, because a
+# rolled-back deployment is itself perfectly stable (US-9330). That is why a
+# dev-then-prod pipeline means something: dev has to genuinely converge before
+# prod is touched.
+
+on:
+  workflow_call:
+    inputs:
+      forest-version:
+        description: >-
+          forest CLI to install. Pinned rather than latest so a CLI regression
+          cannot reach a deploy pipeline without someone bumping this line.
+
+          The floor is v0.3.8: services onboarded this way declare destinations
+          without a component, which every earlier CLI refused to prepare, and
+          0.3.8 is the first release whose tag actually contains that fix —
+          v0.3.7 was cut by hand on an older commit and ships code predating it.
+        type: string
+        required: false
+        default: v0.3.8
+      cue-version:
+        description: >-
+          `forest release prepare` evaluates forest.cue by shelling out to
+          `cue`; forest does not vendor it and it is not on the runner.
+        type: string
+        required: false
+        default: v0.17.1
+      working-directory:
+        description: Directory holding the project's forest.cue.
+        type: string
+        required: false
+        default: "."
+      runs-on:
+        description: >-
+          Runner label. Defaults to a hosted runner: this job builds nothing, so
+          it has no reason to occupy a self-hosted build machine.
+        type: string
+        required: false
+        default: ubuntu-latest
+    outputs:
+      slug:
+        description: The forest release slug, for a caller that wants to link to it.
+        value: ${{ jobs.release.outputs.slug }}
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: release
+    runs-on: ${{ inputs.runs-on }}
+
+    # One rollout at a time per calling repository. Two merges in quick
+    # succession would otherwise race for the same ECS service and the older
+    # image could land last. `cancel-in-progress: false` because a run that has
+    # already started an UpdateService must be allowed to see it through.
+    concurrency:
+      group: forest-service-release-${{ github.repository }}
+      cancel-in-progress: false
+
+    outputs:
+      slug: ${{ steps.annotate.outputs.slug }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - uses: cue-lang/setup-cue@v1.0.1
+        with:
+          version: ${{ inputs.cue-version }}
+
+      # Fail here, loudly, rather than three steps later inside a gRPC
+      # transport error. A missing token is a setup problem with a one-line fix
+      # and should read like one.
+      - name: Check the forest token is configured
+        env:
+          FOREST_TOKEN: ${{ secrets.FOREST_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FOREST_TOKEN:-}" ]; then
+            echo "::error::FOREST_TOKEN is not set. It is an org-level secret with private visibility — if this repo is public it will not receive it. Pass \`secrets: inherit\` from the calling workflow." >&2
+            exit 1
+          fi
+
+      - name: Install forest CLI
+        uses: understory-io/forest/.github/actions/setup-forest@v0.3.8
+        with:
+          version: ${{ inputs.forest-version }}
+          gh-token: ${{ secrets.GO_PRIVATE_MODULES_PAT }}
+          token: ${{ secrets.FOREST_TOKEN }}
+
+      # Renders forest/config.json — the file carrying this repo's own config,
+      # notably which ECS service it is, to a destination shared with every
+      # other project releasing into that account.
+      - name: Render the deployment
+        working-directory: ${{ inputs.working-directory }}
+        run: forest release prepare
+
+      # `detect` attributes the release to whoever wrote the commit. Without it
+      # the server stamps whoever owns FOREST_TOKEN, which is the same person
+      # for every repo sharing the org secret.
+      - name: Annotate the release
+        id: annotate
+        uses: understory-io/forest/.github/actions/release@v0.3.8
+        with:
+          detect: true
+          source-type: ci
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Summary
+        env:
+          SLUG: ${{ steps.annotate.outputs.slug }}
+        run: |
+          {
+            echo "### forest release \`$SLUG\`"
+            echo
+            echo "Annotated. The project's trigger decides where it goes — see the pipeline on the project in forest."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -286,6 +286,97 @@ jobs:
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 ```
 
+## Releasing a service that already exists
+
+For a long-running service whose infrastructure someone else owns — an ECS
+service defined in an infrastructure repo, say — the whole of CI is a thin
+`uses:` block:
+
+```yaml
+# .github/workflows/ci.yml
+jobs:
+  release:
+    needs: [test, build-and-push]
+    if: github.ref == 'refs/heads/main'
+    uses: understory-io/forest/.github/workflows/service-release.yml@v0.3.9
+    secrets: inherit
+```
+
+That is the entire deploy configuration in the repo. Every service calls the
+same workflow, so a fix reaches all of them at once, and onboarding the next
+one is this block plus a `forest.cue`.
+
+### Where the release actually goes
+
+The workflow annotates and stops. The project's trigger — by convention
+`deploy-main-via-pipeline` — fires the project's pipeline off that annotation:
+
+```console
+$ forest project trigger create --organisation understory --project my-service \
+    --name deploy-main-via-pipeline --branch '^main$' --source-type '^ci$' --use-pipeline
+
+$ forest project pipeline create --organisation understory --project my-service \
+    --name dev-then-prod --stages-json '{
+      "deploy-dev":  {"type": "deploy", "environment": "dev"},
+      "deploy-prod": {"type": "deploy", "environment": "prod", "depends_on": ["deploy-dev"]}
+    }'
+```
+
+Which environments a release reaches, and in what order, is therefore
+configuration on the project rather than YAML copied between repos. Adding a
+dev stage to a service that has just become healthy in dev touches no CI at
+all.
+
+`source-type: ci` is load-bearing rather than decorative: a trigger matching
+`^ci$` will not fire without it, and an annotation made from a laptop does not
+match — so it records a release without deploying anything.
+
+Do not also pass an `environment` to the release action. Releasing from CI as
+well as from the trigger will double-fire or race it.
+
+### The destination names a place, not a service
+
+A destination is an account, a region, a cluster — shared by every project
+releasing there — so it carries no service name. What service *this* repo is
+belongs to the repo, and travels with the release as config:
+
+```cue
+project: env: "prod": {
+    destinations: [{destination: "^prod/.*$", type: "forest/generic@1"}]
+    config: service: "my_service"
+}
+```
+
+`forest release prepare` renders that to `forest/config.json`, and forest merges
+it over the destination's metadata before the release runs, with the project
+winning. One destination per place then serves every service in it.
+
+### Why CI does not wait
+
+Because the destination does. An ECS provider, for instance, holds a rollout to
+`deployments == 1 && running == desired`, treats a deployment-identity change
+at the end as a rollback, and treats its own timeout as failure.
+
+That last point matters more than it looks: `aws ecs wait services-stable`
+returns **success** after a circuit-breaker rollback, because a rolled-back
+deployment is itself perfectly stable. A CI step that shells out to it reports
+green while the old code keeps running. Leaving the wait to the destination is
+what makes a dev-then-prod pipeline meaningful — dev has to genuinely converge
+before prod is touched.
+
+### Inputs
+
+| Input | Default | Why you would change it |
+|---|---|---|
+| `forest-version` | `v0.3.8` | Pinned so a CLI regression cannot reach a deploy pipeline unnoticed. `v0.3.8` is the floor for projects that declare destinations without a component. |
+| `cue-version` | `v0.17.1` | `forest release prepare` shells out to `cue`; forest does not vendor it. |
+| `working-directory` | `.` | The project's `forest.cue` lives in a subdirectory. |
+| `runs-on` | `ubuntu-latest` | The job builds nothing, so it has no reason to occupy a self-hosted build machine. |
+
+`secrets: inherit` passes `FOREST_TOKEN` and `GO_PRIVATE_MODULES_PAT`. Both are
+org-level secrets with private visibility, so a private repo needs no setup of
+its own; a public one will not receive them.
+
 ## Trigger-Based Flow
 
 The recommended pattern is to use [triggers](../concepts/triggers.md) instead of explicit release commands in CI. Your CI pipeline only annotates — triggers handle the rest:
