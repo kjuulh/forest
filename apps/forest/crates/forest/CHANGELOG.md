@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.10](https://github.com/understory-io/forest/compare/v0.3.9...v0.3.10) (2026-09-01)
+
+
+### Features
+
+* **forage:** fuzzy type-to-filter search in the breadcrumb switchers ([#222](https://github.com/understory-io/forest/issues/222)) ([a29e106](https://github.com/understory-io/forest/commit/a29e106fdad1d580c0d19937669b9d8dafdf8188))
+* **sdk:** a project can say where it deploys ([#223](https://github.com/understory-io/forest/issues/223)) ([928f3e1](https://github.com/understory-io/forest/commit/928f3e1d1f5b3cfe955287fcd58f3b605827e0c9))
+
+
+### Bug Fixes
+
+* **forest-server:** release to the destinations a project declared, not the whole environment ([#229](https://github.com/understory-io/forest/issues/229)) ([8d40ce6](https://github.com/understory-io/forest/commit/8d40ce6d0fa1bf2c059ed7a31f6fd761dcc3ed83))
+* **server:** publish the CUE module for components that ship their own cue.mod ([#225](https://github.com/understory-io/forest/issues/225)) ([cc39058](https://github.com/understory-io/forest/commit/cc3905839a839de1e49ee85079c0b9ac7e999e7f))
+
 ## [0.3.9](https://github.com/understory-io/forest/compare/v0.3.8...v0.3.9) (2026-08-31)
 
 
