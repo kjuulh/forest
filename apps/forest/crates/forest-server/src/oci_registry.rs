@@ -160,6 +160,9 @@ fn detect_manifest_media_type(data: &[u8]) -> &'static str {
 /// Called by the component service when a component is committed.
 /// Creates an OCI image manifest with a single layer containing all CUE files
 /// as a tar archive.
+/// Path CUE requires a module file to live at inside the zip.
+const MODULE_CUE_PATH: &str = "cue.mod/module.cue";
+
 pub async fn publish_cue_module(
     store: &ObjectStore,
     organisation: &str,
@@ -173,9 +176,27 @@ pub async fn publish_cue_module(
 
     // Create a zip archive of the CUE files (CUE modules use zip, not tar)
     // CUE expects the zip to contain cue.mod/module.cue inside it.
-    let module_cue_in_zip = format!(
-        "module: \"forest.sh/{organisation}/{name}@v0\"\nlanguage: {{\n\tversion: \"v0.16.1\"\n}}\nsource: {{\n\tkind: \"self\"\n}}\n"
-    );
+    //
+    // The component may now carry its own: since components started publishing
+    // `cue.mod/module.cue` as one of their files, it arrives in `cue_files` too.
+    // Writing both put the same name into the zip twice, which the writer
+    // rejects — and because the caller treats a failed OCI publish as
+    // non-fatal, the component published fine while its CUE module silently
+    // did not, leaving every consumer's `import` unresolvable. Prefer the
+    // component's own module file, which is the one its authors wrote and
+    // which carries its dependencies; synthesise one only when it has none.
+    let uploaded_module_cue = cue_files
+        .iter()
+        .find(|(file_name, _)| file_name == MODULE_CUE_PATH)
+        .map(|(_, content)| content.clone());
+
+    let module_cue_in_zip = uploaded_module_cue.unwrap_or_else(|| {
+        format!(
+            "module: \"forest.sh/{organisation}/{name}@v0\"\nlanguage: {{\n\tversion: \"v0.16.1\"\n}}\nsource: {{\n\tkind: \"self\"\n}}\n"
+        )
+        .into_bytes()
+    });
+
     let mut zip_data = Vec::new();
     {
         use std::io::Write;
@@ -183,9 +204,12 @@ pub async fn publish_cue_module(
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated);
         // Include cue.mod/module.cue — required by CUE's module resolver
-        zip.start_file("cue.mod/module.cue", options)?;
-        zip.write_all(module_cue_in_zip.as_bytes())?;
+        zip.start_file(MODULE_CUE_PATH, options)?;
+        zip.write_all(&module_cue_in_zip)?;
         for (file_name, content) in &cue_files {
+            if file_name == MODULE_CUE_PATH {
+                continue; // already written above
+            }
             zip.start_file(file_name, options)?;
             zip.write_all(content)?;
         }
@@ -270,4 +294,129 @@ pub async fn publish_cue_module(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod publish_cue_module_tests {
+    use super::*;
+    use std::io::Read;
+
+    /// Build the zip exactly as `publish_cue_module` does, so the test exercises
+    /// the archive shape without needing an object store.
+    fn build_zip(
+        organisation: &str,
+        name: &str,
+        cue_files: &[(String, Vec<u8>)],
+    ) -> anyhow::Result<Vec<u8>> {
+        let uploaded_module_cue = cue_files
+            .iter()
+            .find(|(file_name, _)| file_name == MODULE_CUE_PATH)
+            .map(|(_, content)| content.clone());
+
+        let module_cue_in_zip = uploaded_module_cue.unwrap_or_else(|| {
+            format!(
+                "module: \"forest.sh/{organisation}/{name}@v0\"\nlanguage: {{\n\tversion: \"v0.16.1\"\n}}\nsource: {{\n\tkind: \"self\"\n}}\n"
+            )
+            .into_bytes()
+        });
+
+        let mut zip_data = Vec::new();
+        {
+            use std::io::Write;
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut zip_data));
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file(MODULE_CUE_PATH, options)?;
+            zip.write_all(&module_cue_in_zip)?;
+            for (file_name, content) in cue_files {
+                if file_name == MODULE_CUE_PATH {
+                    continue;
+                }
+                zip.start_file(file_name, options)?;
+                zip.write_all(content)?;
+            }
+            zip.finish()?;
+        }
+        Ok(zip_data)
+    }
+
+    fn entries(zip_data: &[u8]) -> Vec<String> {
+        let mut archive =
+            zip::ZipArchive::new(std::io::Cursor::new(zip_data)).expect("readable zip");
+        (0..archive.len())
+            .map(|i| archive.by_index(i).expect("entry").name().to_string())
+            .collect()
+    }
+
+    fn read_entry(zip_data: &[u8], name: &str) -> String {
+        let mut archive =
+            zip::ZipArchive::new(std::io::Cursor::new(zip_data)).expect("readable zip");
+        let mut f = archive.by_name(name).expect("entry present");
+        let mut s = String::new();
+        f.read_to_string(&mut s).expect("utf8");
+        s
+    }
+
+    /// A component that ships its own module file must still produce a valid
+    /// archive. It did not: the packager wrote its synthesised
+    /// `cue.mod/module.cue` and then the uploaded one under the same name, and
+    /// the zip writer refused the duplicate. Because the caller logs a failed
+    /// OCI publish and carries on, the component published while its CUE module
+    /// did not — so `import "forest.sh/<org>/<name>@v0"` could not resolve for
+    /// any consumer, with nothing failing to say so.
+    #[test]
+    fn a_component_shipping_its_own_module_file_still_packages() {
+        let files = vec![
+            (
+                MODULE_CUE_PATH.to_string(),
+                b"module: \"forest.sh/forest/sdk@v0\"\n".to_vec(),
+            ),
+            ("spec.cue".to_string(), b"package sdk\n".to_vec()),
+        ];
+
+        let zip_data = build_zip("forest", "sdk", &files).expect("packages");
+        let names = entries(&zip_data);
+
+        assert_eq!(
+            names.iter().filter(|n| *n == MODULE_CUE_PATH).count(),
+            1,
+            "the module file must appear exactly once; got {names:?}"
+        );
+        assert!(names.contains(&"spec.cue".to_string()));
+    }
+
+    /// And the one that survives is the component's own, not a synthesised
+    /// stand-in — the uploaded file is what its authors wrote and is the only
+    /// copy carrying the component's own `deps`.
+    #[test]
+    fn the_components_own_module_file_wins() {
+        let authored = "module: \"forest.sh/forest/deployment@v0\"\ndeps: {\n\t\"forest.sh/forest/sdk@v0\": {\n\t\tv: \"v0.7.0\"\n\t}\n}\n";
+        let files = vec![
+            (MODULE_CUE_PATH.to_string(), authored.as_bytes().to_vec()),
+            ("forest.cue".to_string(), b"package deployment\n".to_vec()),
+        ];
+
+        let zip_data = build_zip("forest", "deployment", &files).expect("packages");
+
+        assert_eq!(
+            read_entry(&zip_data, MODULE_CUE_PATH),
+            authored,
+            "the uploaded module file carries the component's deps; a synthesised \
+             one would silently drop them"
+        );
+    }
+
+    /// The long-standing case: a component with no module file of its own still
+    /// gets a synthesised one, because CUE cannot resolve the module without it.
+    #[test]
+    fn a_component_without_a_module_file_still_gets_one() {
+        let files = vec![("spec.cue".to_string(), b"package sdk\n".to_vec())];
+
+        let zip_data = build_zip("forest", "sdk", &files).expect("packages");
+
+        assert!(
+            read_entry(&zip_data, MODULE_CUE_PATH).contains("forest.sh/forest/sdk@v0"),
+            "a synthesised module file should name the module"
+        );
+    }
 }
