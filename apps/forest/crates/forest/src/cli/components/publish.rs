@@ -409,7 +409,7 @@ mod abort_on_drop_tests {
         );
     }
 
-    use super::{PublishSummary, collect_cue_files, derive_summary_shape};
+    use super::{PublishSummary, collect_component_files, derive_summary_shape};
 
     #[test]
     fn shape_for_binary_tool() {
@@ -433,13 +433,22 @@ mod abort_on_drop_tests {
         );
     }
 
+    async fn published_names(dir: &std::path::Path) -> Vec<String> {
+        collect_component_files(dir, &[])
+            .await
+            .expect("collect")
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect()
+    }
+
     /// A component that imports the SDK is unusable from the registry without
     /// its module file, so publishing has to carry it. Regression for
     /// forest/deployment@0.3.0, which shipped without one and failed every
     /// consumer with "imports are unavailable because there is no
     /// cue.mod/module.cue file".
     #[tokio::test]
-    async fn cue_publish_includes_the_module_file() {
+    async fn publish_includes_the_cue_module_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         tokio::fs::write(dir.path().join("forest.cue"), "package x\n")
             .await
@@ -454,28 +463,108 @@ mod abort_on_drop_tests {
         .await
         .expect("write module.cue");
 
-        let files = collect_cue_files(dir.path()).await.expect("collect");
-        let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
+        let names = published_names(dir.path()).await;
 
         assert!(
-            names.contains(&"cue.mod/module.cue"),
+            names.iter().any(|n| n == "cue.mod/module.cue"),
             "module file must be published, got: {names:?}",
         );
-        assert!(names.contains(&"forest.cue"), "got: {names:?}");
+        assert!(names.iter().any(|n| n == "forest.cue"), "got: {names:?}");
     }
 
     /// And a component without one still publishes rather than erroring —
     /// plenty of components import nothing.
     #[tokio::test]
-    async fn cue_publish_without_a_module_file_is_fine() {
+    async fn publish_without_a_module_file_is_fine() {
         let dir = tempfile::tempdir().expect("tempdir");
         tokio::fs::write(dir.path().join("forest.cue"), "package x\n")
             .await
             .expect("write forest.cue");
 
-        let files = collect_cue_files(dir.path()).await.expect("collect");
-        assert_eq!(files.len(), 1);
-        assert_eq!(files[0].0, "forest.cue");
+        let names = published_names(dir.path()).await;
+        assert_eq!(names, vec!["forest.cue".to_string()]);
+    }
+
+    /// The regression this whole function exists for.
+    ///
+    /// Publishing used to collect a hand-picked list — top-level `*.cue`
+    /// plus `cue.mod/module.cue` — so `templates/` shipped with nothing.
+    /// A consumer then deployed a component whose Terraform did not
+    /// exist, and because `forest release prepare` renders templates
+    /// behind `if template_dir.exists()`, it produced an empty directory
+    /// and OpenTofu failed with "No configuration files" — naming
+    /// neither the component nor the missing files. `init/**`, read by
+    /// scaffolding, fell through the same hole.
+    #[tokio::test]
+    async fn publish_includes_templates_and_scaffolding() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        tokio::fs::write(dir.path().join("forest.component.cue"), "package x\n")
+            .await
+            .expect("write component cue");
+
+        let tf = dir.path().join("templates/deployment/forest/terraform@1");
+        tokio::fs::create_dir_all(&tf).await.expect("create tf dir");
+        tokio::fs::write(tf.join("main.tf"), "resource \"null_resource\" \"x\" {}\n")
+            .await
+            .expect("write main.tf");
+
+        let init = dir.path().join("init/service/files");
+        tokio::fs::create_dir_all(&init).await.expect("create init");
+        tokio::fs::write(init.join("README.md"), "scaffold\n")
+            .await
+            .expect("write scaffold");
+
+        let names = published_names(dir.path()).await;
+
+        assert!(
+            names
+                .iter()
+                .any(|n| n == "templates/deployment/forest/terraform@1/main.tf"),
+            "templates must publish, got: {names:?}",
+        );
+        assert!(
+            names.iter().any(|n| n == "init/service/files/README.md"),
+            "scaffolding must publish, got: {names:?}",
+        );
+    }
+
+    /// Staged build output is uploaded as typed per-platform binaries, so
+    /// it must not ALSO ship as generic files — that would double every
+    /// binary in the payload.
+    #[tokio::test]
+    async fn publish_excludes_staged_build_output() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        tokio::fs::write(dir.path().join("forest.cue"), "package x\n")
+            .await
+            .expect("write forest.cue");
+
+        let staged = dir.path().join(".forest/component/output/linux/amd64");
+        tokio::fs::create_dir_all(&staged)
+            .await
+            .expect("create staged");
+        tokio::fs::write(staged.join("service"), b"ELF".to_vec())
+            .await
+            .expect("write staged binary");
+
+        // Consumers DO read this one, so it is not excluded with the rest
+        // of `.forest/`.
+        let meta = dir.path().join(".forest/component");
+        tokio::fs::write(meta.join("meta.json"), "{}\n")
+            .await
+            .expect("write meta.json");
+
+        let names = published_names(dir.path()).await;
+
+        assert!(
+            !names
+                .iter()
+                .any(|n| n.starts_with(".forest/component/output/")),
+            "staged binaries must not ship as files, got: {names:?}",
+        );
+        assert!(
+            names.iter().any(|n| n == ".forest/component/meta.json"),
+            "meta.json is consumer-read and must publish, got: {names:?}",
+        );
     }
 
     #[test]
@@ -762,11 +851,6 @@ impl PublishCommand {
         let upload_type = upload_section
             .and_then(|u| u.get("type"))
             .and_then(|v| v.as_str());
-        let upload_source = upload_section
-            .and_then(|u| u.get("source"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("./src");
-
         let is_deno_component = upload_type == Some("deno")
             || (current_dir.join("deno.json").exists()
                 && current_dir.join("src").join("main.ts").exists());
@@ -965,43 +1049,37 @@ impl PublishCommand {
             }
         }
 
-        // 6. Upload CUE spec files
-        let cue_files: Vec<(String, String)> = collect_cue_files(&current_dir).await?;
-        if !cue_files.is_empty() {
-            tracing::info!("uploading {} CUE spec file(s)", cue_files.len());
-            for (rel_path, content) in &cue_files {
-                client
-                    .upload_component_file(&upload_context, rel_path, content.as_bytes())
-                    .await
-                    .with_context(|| format!("upload CUE file: {rel_path}"))?;
-            }
-        }
+        // 6. Upload the component's files — CUE specs, templates,
+        //    scaffolding, sources. One call, shared with the prebuilt and
+        //    external paths, because three independent lists is how
+        //    `templates/` came to be published by none of them.
+        let uploaded_binaries: Vec<std::path::PathBuf> = if binary.is_some() {
+            publishable_binaries(&current_dir, name)?
+                .into_iter()
+                .map(|(_, _, path)| path)
+                .collect()
+        } else {
+            Vec::new()
+        };
 
-        // 6b. Upload Deno source tree (and module / lock / meta).
-        // Consumers' `forest update` already streams every file via
-        // `get_component_files` into the cache, so anything we put here
-        // ends up at ~/.cache/forest/components/<org>/<name>/<version>/.
-        // The `.forest/component/meta.json` path matters: it's the
-        // fallback `read_meta_json()` already checks, so the same
-        // is_deno_component_with_meta()/resolve_entrypoint_with_meta()
-        // helpers work against the cached copy without further changes.
-        if kind == "deno" {
-            let deno_files =
-                collect_deno_files(&current_dir, upload_source, organisation, name, version)
-                    .await?;
-            if !deno_files.is_empty() {
-                tracing::info!(
-                    "uploading {} Deno source file(s) from {upload_source}",
-                    deno_files.len()
-                );
-                for (rel_path, content) in &deno_files {
-                    client
-                        .upload_component_file(&upload_context, rel_path, content)
-                        .await
-                        .with_context(|| format!("upload Deno file: {rel_path}"))?;
-                }
-            }
-        }
+        // Deno's meta.json is not in the tree; it comes from the build
+        // cache and publishes at the path consumers read.
+        let extra = match kind {
+            "deno" => deno_meta_extra(organisation, name, version)
+                .await
+                .into_iter()
+                .collect(),
+            _ => Vec::new(),
+        };
+
+        upload_component_files(
+            &client,
+            &upload_context,
+            &current_dir,
+            &uploaded_binaries,
+            extra,
+        )
+        .await?;
 
         // 7. Publish manifest — skipped for CUE-only components. The
         //    server's manifest validator (forest-manifest::parse) only
@@ -1467,15 +1545,10 @@ async fn publish_external(
         .await?;
     let abort_guard = AbortOnDrop::new(client.clone(), &upload_context);
 
-    // Skip UploadBinary entirely — externals are URL-hosted.
-    // Upload the CUE files (lightweight, for the registry's discovery UI).
-    let cue_files: Vec<(String, String)> = collect_cue_files(current_dir).await?;
-    for (rel_path, content) in &cue_files {
-        client
-            .upload_component_file(&upload_context, rel_path, content.as_bytes())
-            .await
-            .with_context(|| format!("upload CUE file: {rel_path}"))?;
-    }
+    // Skip UploadBinary entirely — externals are URL-hosted. The file
+    // payload still ships: an external tool can carry templates and
+    // scaffolding like any other component.
+    upload_component_files(&client, &upload_context, current_dir, &[], Vec::new()).await?;
 
     let manifest_json = serde_json::to_string(&manifest)?;
     client
@@ -1534,6 +1607,10 @@ async fn publish_prebuilt(
     // Flatten the os→arch→path map and read each binary.
     let mut platforms_for_manifest = serde_json::Map::new();
     let mut uploads: Vec<(String, String, Vec<u8>, String)> = Vec::new();
+    // Kept so the file walk can exclude them: these binaries ship as
+    // typed per-platform payloads, and a `dist/` tree walked as generic
+    // files would double every one of them.
+    let mut uploaded_binary_paths: Vec<std::path::PathBuf> = Vec::new();
     for (os, archs) in prebuilt {
         let archs = archs
             .as_object()
@@ -1547,6 +1624,7 @@ async fn publish_prebuilt(
                 .await
                 .with_context(|| format!("reading prebuilt binary {}", abs_path.display()))?;
             let sha256 = hex::encode(Sha256::digest(&bytes));
+            uploaded_binary_paths.push(abs_path.clone());
 
             // Match the upload/external paths: SDK exposes "macos" to
             // CUE authors, manifest validator wants "darwin".
@@ -1642,13 +1720,17 @@ async fn publish_prebuilt(
             .await?;
     }
 
-    let cue_files: Vec<(String, String)> = collect_cue_files(current_dir).await?;
-    for (rel_path, content) in &cue_files {
-        client
-            .upload_component_file(&upload_context, rel_path, content.as_bytes())
-            .await
-            .with_context(|| format!("upload CUE file: {rel_path}"))?;
-    }
+    // Every declared platform's binary is uploaded above as a typed
+    // payload, so all of them are excluded from the file walk — a
+    // prebuilt component's `dist/` would otherwise ship twice.
+    upload_component_files(
+        &client,
+        &upload_context,
+        current_dir,
+        &uploaded_binary_paths,
+        Vec::new(),
+    )
+    .await?;
 
     let manifest_json = serde_json::to_string(&manifest)?;
     client
@@ -1676,6 +1758,129 @@ async fn publish_prebuilt(
     }
     .print();
     Ok(())
+}
+
+/// Collect everything a component ships that is NOT a typed binary.
+///
+/// Pure and separately testable; [`upload_component_files`] is the thing
+/// that talks to the registry.
+///
+/// The payload is the component tree itself. It used to be a hand-picked
+/// list — top-level `*.cue` plus `cue.mod/module.cue` — assembled
+/// independently at three call sites, and `templates/` was in none of
+/// them. A published component's Terraform therefore did not exist on
+/// the machine that deployed it, and `forest release prepare` renders
+/// templates behind `if template_dir.exists()`, so it produced an empty
+/// directory and OpenTofu failed with "No configuration files", naming
+/// nothing that would lead you here. `init/**`, which scaffolding reads,
+/// fell through the same hole.
+///
+/// Consuming a component by PATH hides all of this: the files are simply
+/// on disk. So it works locally and breaks only once published.
+///
+/// `component_walk` applies the non-overridable excludes (`.git/`,
+/// `target/`, vendored cue deps, staged build output), subtracts the
+/// component's own `.forestignore`, and enforces the size caps.
+async fn collect_component_files(
+    dir: &std::path::Path,
+    binary_paths: &[std::path::PathBuf],
+) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+    use crate::services::component_walk::{WalkConfig, component_walk};
+
+    // Read here rather than inside the walker, so the walker stays pure.
+    let forestignore = match tokio::fs::read_to_string(dir.join(".forestignore")).await {
+        Ok(contents) => contents
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(str::to_string)
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+
+    let result = component_walk(
+        dir,
+        &WalkConfig {
+            binary_paths: binary_paths.to_vec(),
+            forestignore,
+            // When the SDK grows `forest.component.paths.include`, it
+            // plugs in here — one place, which is the point of this
+            // function existing.
+            allowlist: None,
+            ..WalkConfig::default()
+        },
+    )?;
+
+    let mut files = Vec::with_capacity(result.include.len());
+    for entry in &result.include {
+        let content = tokio::fs::read(&entry.abs_path)
+            .await
+            .with_context(|| format!("read {}", entry.rel_path))?;
+        files.push((entry.rel_path.clone(), content));
+    }
+
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(files)
+}
+
+/// Upload a component's non-binary payload. **The** place that happens.
+///
+/// `extra` carries entries that are not in the tree but have to land in
+/// it: deno's `meta.json` is read out of the local build cache and
+/// published at the path a consumer looks for. An `extra` entry wins
+/// over a walked file of the same name.
+async fn upload_component_files(
+    client: &crate::grpc::GrpcClient,
+    upload_context: &str,
+    dir: &std::path::Path,
+    binary_paths: &[std::path::PathBuf],
+    extra: Vec<(String, Vec<u8>)>,
+) -> anyhow::Result<usize> {
+    let mut files = collect_component_files(dir, binary_paths).await?;
+
+    for (rel_path, content) in extra {
+        match files.iter_mut().find(|(name, _)| *name == rel_path) {
+            Some(existing) => existing.1 = content,
+            None => files.push((rel_path, content)),
+        }
+    }
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+
+    if files.is_empty() {
+        return Ok(0);
+    }
+
+    tracing::info!("uploading {} component file(s)", files.len());
+    for (rel_path, content) in &files {
+        client
+            .upload_component_file(upload_context, rel_path, content)
+            .await
+            .with_context(|| format!("upload component file: {rel_path}"))?;
+    }
+
+    Ok(files.len())
+}
+
+/// Deno's `meta.json`, which lives in the local build cache rather than
+/// in the component tree, mapped to the path a consumer reads it from.
+async fn deno_meta_extra(
+    organisation: &str,
+    name: &str,
+    version: &str,
+) -> Option<(String, Vec<u8>)> {
+    let meta_dir = component_binary::component_meta_dir(organisation, name, version)?;
+    let meta_path = meta_dir.join("meta.json");
+
+    match tokio::fs::read(&meta_path).await {
+        Ok(content) => Some((".forest/component/meta.json".to_string(), content)),
+        Err(_) => {
+            tracing::warn!(
+                "no meta.json found at {} — run `forest run build` before `forest publish`",
+                meta_path.display()
+            );
+            None
+        }
+    }
 }
 
 /// Evaluate `#Tool` from the project's CUE package. Since `#Tool` is a
@@ -1716,133 +1921,6 @@ async fn eval_tool_facet(dir: &std::path::Path) -> anyhow::Result<serde_json::Va
 ///
 /// `collect_deno_files` has always shipped it for the Deno path; this is the
 /// same rule for the CUE one.
-async fn collect_cue_files(dir: &std::path::Path) -> anyhow::Result<Vec<(String, String)>> {
-    let mut files = Vec::new();
-    let mut entries = tokio::fs::read_dir(dir).await?;
-
-    // Include all .cue files in the component directory.
-    // These form the component's public API (types, contracts, specs).
-    while let Some(entry) = entries.next_entry().await? {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("cue") {
-            let file_name = entry.file_name().to_string_lossy().to_string();
-            let content = tokio::fs::read_to_string(&path).await?;
-            files.push((file_name, content));
-        }
-    }
-
-    // Forward slash on purpose: the path round-trips through registry storage
-    // and is recreated verbatim in the consumer cache, which creates parents.
-    let module_cue = dir.join("cue.mod").join("module.cue");
-    if module_cue.exists() {
-        let content = tokio::fs::read_to_string(&module_cue).await?;
-        files.push(("cue.mod/module.cue".to_string(), content));
-    }
-
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(files)
-}
-
-/// Collect the Deno runtime + module + meta files that consumers need.
-///
-/// Returns `(relative_path, bytes)` pairs. Paths are POSIX-style with
-/// forward slashes so they round-trip through the registry storage and
-/// re-emerge identically in the consumer cache. The set covers:
-///   - The full `upload.source` tree (default `./src`), recursively.
-///   - `deno.json` (+ optional `deno.lock`, `import_map.json`).
-///   - `cue.mod/module.cue` if present.
-///   - The local-build `meta.json` placed at `.forest/component/meta.json`
-///     so the consumer's existing `read_meta_json()` fallback finds it.
-async fn collect_deno_files(
-    dir: &std::path::Path,
-    upload_source: &str,
-    organisation: &str,
-    name: &str,
-    version: &str,
-) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
-    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
-
-    // --- 1. upload.source tree (recursive)
-    let source_root = dir.join(upload_source.trim_start_matches("./"));
-    if source_root.exists() {
-        collect_dir_recursive(&source_root, dir, &mut files).await?;
-    }
-
-    // --- 2. deno.json / deno.lock / import_map.json (top-level only)
-    for candidate in ["deno.json", "deno.lock", "import_map.json"] {
-        let p = dir.join(candidate);
-        if p.exists() {
-            let content = tokio::fs::read(&p).await?;
-            files.push((candidate.to_string(), content));
-        }
-    }
-
-    // --- 3. cue.mod/module.cue
-    let module_cue = dir.join("cue.mod").join("module.cue");
-    if module_cue.exists() {
-        let content = tokio::fs::read(&module_cue).await?;
-        files.push(("cue.mod/module.cue".to_string(), content));
-    }
-
-    // --- 4. meta.json from the local build cache
-    if let Some(meta_dir) = component_binary::component_meta_dir(organisation, name, version) {
-        let meta_path = meta_dir.join("meta.json");
-        if meta_path.exists() {
-            let content = tokio::fs::read(&meta_path).await?;
-            // Upload under the same relative path read_meta_json() falls
-            // back to: <component_root>/.forest/component/meta.json
-            files.push((".forest/component/meta.json".to_string(), content));
-        } else {
-            tracing::warn!(
-                "no meta.json found at {} — run `forest run build` before `forest publish`",
-                meta_path.display()
-            );
-        }
-    }
-
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(files)
-}
-
-/// Recurse `root`, emitting `(relative_to_base, bytes)` pairs. Skips
-/// dotfiles and common build/scratch dirs to avoid shipping cache junk
-/// (`.forest/`, `target/`, `node_modules/`).
-fn collect_dir_recursive<'a>(
-    root: &'a std::path::Path,
-    base: &'a std::path::Path,
-    out: &'a mut Vec<(String, Vec<u8>)>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>> {
-    Box::pin(async move {
-        let mut entries = tokio::fs::read_dir(root).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            let file_name = entry.file_name();
-            let name_str = file_name.to_string_lossy();
-
-            // Skip hidden + scratch dirs. `.forest/component/meta.json` is
-            // re-added by the caller from the build cache, not the source
-            // tree, so excluding `.forest/` here is intentional.
-            if name_str.starts_with('.') || name_str == "target" || name_str == "node_modules" {
-                continue;
-            }
-
-            let ft = entry.file_type().await?;
-            if ft.is_dir() {
-                collect_dir_recursive(&path, base, out).await?;
-            } else if ft.is_file() {
-                let rel = path
-                    .strip_prefix(base)
-                    .map_err(|e| anyhow::anyhow!("path outside base: {e}"))?
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                let content = tokio::fs::read(&path).await?;
-                out.push((rel, content));
-            }
-        }
-        Ok(())
-    })
-}
-
 /// DATA-583 — version override resolution.
 ///
 /// Precedence is **`--version` > `FOREST_COMPONENT_VERSION` > forest.cue**, and

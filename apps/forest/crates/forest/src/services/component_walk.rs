@@ -41,9 +41,17 @@ const DEFAULT_EXCLUDE_FILE_GLOBS: &[&str] = &[
 ];
 
 /// Path-prefix patterns (rel_path-rooted) that are always excluded.
+///
 /// `cue.mod/pkg/**` is vendored cue deps, re-vendored at consume time
 /// — never publish them.
-const DEFAULT_EXCLUDE_PATH_GLOBS: &[&str] = &["cue.mod/pkg/**"];
+///
+/// `.forest/component/output/**` is where a build stages its binaries.
+/// Those are uploaded as typed per-platform payloads, so including them
+/// here as well would ship every binary twice — once addressable by
+/// platform and once as a meaningless generic file. Note this excludes
+/// only `output/`: `.forest/component/meta.json` is a consumer-read file
+/// and must still publish.
+const DEFAULT_EXCLUDE_PATH_GLOBS: &[&str] = &["cue.mod/pkg/**", ".forest/component/output/**"];
 
 #[derive(Debug, Clone)]
 pub struct WalkConfig {
@@ -54,9 +62,13 @@ pub struct WalkConfig {
     /// `.forestignore` patterns (gitignore-style globs, parsed
     /// line-by-line by the caller).
     pub forestignore: Vec<String>,
-    /// The compiled binary path; uploaded separately as a typed
-    /// binary, not as a generic file.
-    pub binary_path: Option<PathBuf>,
+    /// Compiled binary paths, uploaded separately as typed per-platform
+    /// binaries rather than as generic files.
+    ///
+    /// A list, not one path: a `prebuilt` component declares a binary per
+    /// platform, and every one of them has to be skipped here or it ships
+    /// twice.
+    pub binary_paths: Vec<PathBuf>,
 }
 
 impl Default for WalkConfig {
@@ -66,7 +78,7 @@ impl Default for WalkConfig {
             max_total_bytes: DEFAULT_MAX_TOTAL_BYTES,
             allowlist: None,
             forestignore: Vec::new(),
-            binary_path: None,
+            binary_paths: Vec::new(),
         }
     }
 }
@@ -138,10 +150,11 @@ pub fn component_walk(root: &Path, config: &WalkConfig) -> Result<WalkResult, Wa
         None => None,
     };
 
-    let canonical_binary = config
-        .binary_path
-        .as_ref()
-        .and_then(|p| std::fs::canonicalize(p).ok());
+    let canonical_binaries: Vec<PathBuf> = config
+        .binary_paths
+        .iter()
+        .filter_map(|p| std::fs::canonicalize(p).ok())
+        .collect();
 
     let mut result = WalkResult::default();
     let mut total_bytes: u64 = 0;
@@ -189,10 +202,11 @@ pub fn component_walk(root: &Path, config: &WalkConfig) -> Result<WalkResult, Wa
             continue;
         }
 
-        // The compiled binary is shipped separately; skip it here.
-        if let Some(ref bin) = canonical_binary
+        // Compiled binaries are shipped separately as typed payloads;
+        // skip them here so they do not also ship as generic files.
+        if !canonical_binaries.is_empty()
             && let Ok(canonical_entry) = std::fs::canonicalize(abs_path)
-            && canonical_entry == *bin
+            && canonical_binaries.contains(&canonical_entry)
         {
             result.skipped.push((rel_path, SkipReason::BinaryArtifact));
             continue;
@@ -560,7 +574,7 @@ mod tests {
     fn binary_path_is_skipped() {
         let tmp = make_tree(&[("forest.cue", b"x"), ("ecs-service", b"binary blob")]);
         let cfg = WalkConfig {
-            binary_path: Some(tmp.path().join("ecs-service")),
+            binary_paths: vec![tmp.path().join("ecs-service")],
             ..Default::default()
         };
         let result = component_walk(tmp.path(), &cfg).unwrap();
