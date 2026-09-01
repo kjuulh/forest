@@ -23,6 +23,24 @@ package sdk
 	// Blessed project metadata. Surfaced in the project Overview's
 	// "About" sidebar (links + identity).
 	metadata?: #ProjectMetadata
+
+	// Where this project deploys, keyed by environment name, and what it
+	// contributes about itself at each one.
+	//
+	// The same shape a component usage block takes, because it is the same
+	// question — which destinations, and what config travels with the release.
+	// A project needs it without a component whenever the thing being released
+	// already exists and has no manifests to render: an ECS service rolled by
+	// `forest/generic@1`, say, where the only project-specific fact is which
+	// service it is.
+	//
+	// Its absence here is why a project could not both use this schema and say
+	// where it deploys: `#ForestProject` is closed, so `project: env:` was
+	// rejected outright, and every deploying project had to drop the schema to
+	// get a deployment spec.
+	env?: {
+		[string]: #ForestEnvironmentConfig
+	}
 }
 
 #ProjectMetadata: {
