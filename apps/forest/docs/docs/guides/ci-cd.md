@@ -297,7 +297,6 @@ service defined in an infrastructure repo, say — the whole of CI is a thin
 jobs:
   release:
     needs: [test, build-and-push]
-    if: github.ref == 'refs/heads/main'
     uses: understory-io/forest/.github/workflows/service-release.yml@stable
     secrets: inherit
 ```
@@ -305,6 +304,18 @@ jobs:
 That is the entire deploy configuration in the repo. Every service calls the
 same workflow, so a fix reaches all of them at once, and onboarding the next
 one is this block plus a `forest.cue`.
+
+Note the absence of a branch condition. The workflow annotates and stops, and
+an annotation deploys nothing by itself — which branch may reach which
+environment belongs to the trigger (`--branch '^main$'`) and to the project's
+policies, which take a `--branch-pattern` of their own.
+
+An `if: github.ref == 'refs/heads/main'` on the caller duplicates that decision
+into every repo's YAML, and the two can then disagree: a repo whose `if:` says
+`main` while its trigger says `^release/.*$` silently never deploys, and nothing
+reports the conflict. The cost of leaving it off is that a feature branch also
+uploads its artifact and records an annotation — intended, since it lets you see
+what was built before deciding to promote it, but not free.
 
 ### Where the release actually goes
 

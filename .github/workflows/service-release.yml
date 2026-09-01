@@ -9,9 +9,26 @@ name: service release
 #
 #     release:
 #       needs: [test, build-and-push]
-#       if: github.ref == 'refs/heads/main'
 #       uses: understory-io/forest/.github/workflows/service-release.yml@stable
 #       secrets: inherit
+#
+# ── Note there is no branch condition ──────────────────────────────────
+#
+# This workflow annotates and stops. An annotation is a record that a build
+# exists; it deploys nothing by itself. Which branch is allowed to reach which
+# environment is the trigger's business — `--branch '^main$'` — and the
+# project's policies', which take a `--branch-pattern` of their own.
+#
+# Putting `if: github.ref == 'refs/heads/main'` on the caller duplicates that
+# decision into every repo's YAML, which is the thing this workflow exists to
+# stop. Worse, the two can disagree: a repo whose `if:` says `main` while its
+# trigger says `^release/.*$` silently never deploys, and nothing anywhere
+# reports a conflict.
+#
+# The cost is that a feature branch also uploads its artifact and records an
+# annotation. That is the intended shape — you can see what was built before
+# deciding to promote it — but it is not free, so a repo that pushes very
+# frequently may still want a condition. Set it deliberately if so.
 #
 # ── Why @stable rather than a version tag ──────────────────────────────
 #
