@@ -56,13 +56,11 @@ impl ArtifactStagingRegistry {
         destination: &str,
         category: &str,
     ) -> anyhow::Result<()> {
-        // Store in S3
-        let s3_key = crate::object_store::keys::artifact_file(
-            &id.id().to_string(),
-            env,
-            destination,
-            file_name,
-        );
+        // Keyed by the file's own path, not by env/destination — so the server
+        // stays free to correct those columns later without moving the object.
+        // See `keys::artifact_file_by_name`.
+        let s3_key =
+            crate::object_store::keys::artifact_file_by_name(&id.id().to_string(), file_name);
         self.object_store
             .put(&s3_key, file_content.as_bytes())
             .await
@@ -152,35 +150,11 @@ impl ArtifactStagingRegistry {
 
         let mut result = Vec::new();
         for r in recs {
-            let s3_key = crate::object_store::keys::artifact_file(
-                &artifact_id.to_string(),
-                &r.env,
-                &r.destination,
-                &r.file_name,
-            );
-            match self.object_store.get(&s3_key).await {
-                Ok(content) => {
-                    result.push((
-                        PathBuf::from(r.file_name),
-                        String::from_utf8_lossy(&content).to_string(),
-                    ));
-                }
-                Err(_) => {
-                    // Fallback to DB for legacy data
-                    let legacy = sqlx::query!(
-                        "SELECT blob.content FROM artifact_files file
-                         JOIN blob_storage blob ON file.file_content = blob.id
-                         WHERE file.artifact_staging_id = $1 AND file.file_name = $2 AND file.env = $3 AND file.category = 'deployment'",
-                        artifact_id, r.file_name, env
-                    )
-                    .fetch_optional(&self.db)
-                    .await?;
-                    if let Some(row) = legacy {
-                        if let Some(content) = row.content {
-                            result.push((PathBuf::from(r.file_name), content));
-                        }
-                    }
-                }
+            if let Some(content) = self
+                .file_content(&artifact_id, &r.env, &r.destination, &r.file_name)
+                .await
+            {
+                result.push((PathBuf::from(r.file_name), content));
             }
         }
         Ok(result)
@@ -204,35 +178,11 @@ impl ArtifactStagingRegistry {
 
         let mut result = Vec::new();
         for r in recs {
-            let s3_key = crate::object_store::keys::artifact_file(
-                &artifact_id.to_string(),
-                &r.env,
-                &r.destination,
-                &r.file_name,
-            );
-            match self.object_store.get(&s3_key).await {
-                Ok(content) => {
-                    result.push((
-                        PathBuf::from(r.file_name),
-                        String::from_utf8_lossy(&content).to_string(),
-                    ));
-                }
-                Err(_) => {
-                    // Fallback to DB for legacy data
-                    let legacy = sqlx::query!(
-                        "SELECT blob.content FROM artifact_files file
-                         JOIN blob_storage blob ON file.file_content = blob.id
-                         WHERE file.artifact_staging_id = $1 AND file.file_name = $2 AND file.category = 'spec'",
-                        artifact_id, r.file_name
-                    )
-                    .fetch_optional(&self.db)
-                    .await?;
-                    if let Some(row) = legacy {
-                        if let Some(content) = row.content {
-                            result.push((PathBuf::from(r.file_name), content));
-                        }
-                    }
-                }
+            if let Some(content) = self
+                .file_content(&artifact_id, &r.env, &r.destination, &r.file_name)
+                .await
+            {
+                result.push((PathBuf::from(r.file_name), content));
             }
         }
         Ok(result)
@@ -270,30 +220,10 @@ impl ArtifactStagingRegistry {
 
         let mut entries = Vec::new();
         for r in recs {
-            let s3_key = crate::object_store::keys::artifact_file(
-                &staging_id.to_string(),
-                &r.env,
-                &r.destination,
-                &r.file_name,
-            );
-            let content = match self.object_store.get(&s3_key).await {
-                Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
-                Err(_) => {
-                    // Fallback to DB for legacy data
-                    let legacy = sqlx::query!(
-                        "SELECT blob.content FROM artifact_files file
-                         JOIN blob_storage blob ON file.file_content = blob.id
-                         WHERE file.artifact_staging_id = $1 AND file.file_name = $2",
-                        staging_id,
-                        r.file_name
-                    )
-                    .fetch_optional(&self.db)
-                    .await?
-                    .and_then(|row| row.content)
-                    .unwrap_or_default();
-                    legacy
-                }
-            };
+            let content = self
+                .file_content(&staging_id, &r.env, &r.destination, &r.file_name)
+                .await
+                .unwrap_or_default();
 
             entries.push(ArtifactFileEntry {
                 file_name: r.file_name,
@@ -306,7 +236,30 @@ impl ArtifactStagingRegistry {
         Ok(entries)
     }
 
+    /// Freeze a staged upload into an artifact.
+    ///
+    /// Before doing so, re-derive which deployment item each uploaded file
+    /// belongs to and correct `env`/`destination` from the tree itself.
+    ///
+    /// The client sends those two values per file, and it used to be the client
+    /// that decided them — by splitting the upload path on `/`, in two
+    /// copy-pasted loops, when both the selector and the destination type
+    /// routinely contain `/`. So every client truncated the selector, and fixing
+    /// one copy left the other wrong. The server has the whole tree and each
+    /// item's own record of what it is, so it decides here instead: one
+    /// implementation, and every client is correct including the ones nobody
+    /// upgrades.
+    ///
+    /// A file the tree cannot place keeps whatever it was uploaded with — this
+    /// corrects what it can prove and touches nothing else.
     pub async fn commit_staging(&self, id: &StagingArtifactID) -> anyhow::Result<ArtifactID> {
+        if let Err(e) = self.reattribute_deployment_files(id).await {
+            // Refuse the commit: a wrongly-attributed file is a release aimed at
+            // the wrong place, and this is the last point at which anyone is
+            // still watching.
+            return Err(e.context("attribute this artifact's deployment files"));
+        }
+
         let rec = sqlx::query!(
             "
                 INSERT INTO artifacts (
@@ -417,5 +370,122 @@ impl ArtifactStagingRegistryState for State {
             db: self.db.clone(),
             object_store: self.object_store.clone(),
         }
+    }
+}
+
+impl ArtifactStagingRegistry {
+    /// An artifact file's content, wherever it happens to live.
+    ///
+    /// Three places, newest first: the current key, the pre-correction key that
+    /// mixed env and destination in, and the `blob_storage` copy `upload_file`
+    /// writes alongside. Older artifacts genuinely are in the older places, and
+    /// a release of one must not start failing because the key shape moved.
+    async fn file_content(
+        &self,
+        staging_id: &uuid::Uuid,
+        env: &str,
+        destination: &str,
+        file_name: &str,
+    ) -> Option<String> {
+        let id = staging_id.to_string();
+
+        let current = crate::object_store::keys::artifact_file_by_name(&id, file_name);
+        if let Ok(bytes) = self.object_store.get(&current).await {
+            return Some(String::from_utf8_lossy(&bytes).to_string());
+        }
+
+        let legacy = crate::object_store::keys::artifact_file(&id, env, destination, file_name);
+        if let Ok(bytes) = self.object_store.get(&legacy).await {
+            return Some(String::from_utf8_lossy(&bytes).to_string());
+        }
+
+        sqlx::query_scalar!(
+            "SELECT blob.content
+             FROM artifact_files file
+             JOIN blob_storage blob ON file.file_content = blob.id
+             WHERE file.artifact_staging_id = $1 AND file.file_name = $2",
+            staging_id,
+            file_name,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .ok()
+        .flatten()
+        .flatten()
+    }
+}
+
+impl ArtifactStagingRegistry {
+    /// Correct `artifact_files.env`/`.destination` for deployment files from the
+    /// item records in the uploaded tree. See `commit_staging`.
+    async fn reattribute_deployment_files(&self, id: &StagingArtifactID) -> anyhow::Result<()> {
+        use crate::services::destination_selector;
+
+        let rows = sqlx::query!(
+            r#"SELECT f.file_name, f.env, f.destination, blob.content
+               FROM artifact_files f
+               JOIN blob_storage blob ON blob.id = f.file_content
+               WHERE f.artifact_staging_id = $1 AND f.category = 'deployment'"#,
+            id.id(),
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("read the staged deployment files")?;
+
+        if rows.is_empty() {
+            return Ok(());
+        }
+
+        let files: Vec<(PathBuf, String)> = rows
+            .iter()
+            .map(|r| {
+                (
+                    PathBuf::from(&r.file_name),
+                    r.content.clone().unwrap_or_default(),
+                )
+            })
+            .collect();
+
+        let items = destination_selector::parse_items(&files)?;
+        if items.is_empty() {
+            return Ok(());
+        }
+
+        let current: std::collections::HashMap<&str, (&str, &str)> = rows
+            .iter()
+            .map(|r| {
+                (
+                    r.file_name.as_str(),
+                    (r.env.as_str(), r.destination.as_str()),
+                )
+            })
+            .collect();
+
+        for (file_name, env, destination) in destination_selector::attribute_files(&files, &items) {
+            if current.get(file_name) == Some(&(env.as_str(), destination.as_str())) {
+                continue;
+            }
+
+            sqlx::query!(
+                "UPDATE artifact_files SET env = $3, destination = $4, updated = now()
+                 WHERE artifact_staging_id = $1 AND file_name = $2 AND category = 'deployment'",
+                id.id(),
+                file_name,
+                env,
+                destination,
+            )
+            .execute(&self.db)
+            .await
+            .context("correct a deployment file's env/destination")?;
+
+            tracing::debug!(
+                file_name,
+                env,
+                destination,
+                "corrected a deployment file's attribution from its item record"
+            );
+        }
+
+        Ok(())
     }
 }

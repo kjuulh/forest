@@ -86,6 +86,8 @@ pub fn metadata_schema() -> Vec<forest_models::MetadataFieldSchema> {
 
 pub struct GenericV1Destination {
     pub artifact_files: ArtifactStagingRegistry,
+    /// For reading the declaration `annotate` recorded. See `release_config`.
+    pub db: sqlx::PgPool,
     pub release_tokens: ReleaseTokenRegistry,
     /// forest's own externally-reachable address, handed to the provider so it
     /// can call back for artifacts if it needs them.
@@ -217,6 +219,32 @@ fn matches_host(pattern: &str, authority: &str) -> bool {
     pattern == authority || pattern == host
 }
 
+/// A project's config block, flattened for a provider that receives a flat
+/// string map.
+///
+/// Nested structure has no meaning there, so it is skipped rather than encoded
+/// as JSON into a value someone would have to guess the shape of.
+fn flatten_config(config: &serde_json::Value) -> Option<HashMap<String, String>> {
+    let serde_json::Value::Object(config) = config else {
+        return None;
+    };
+
+    Some(
+        config
+            .iter()
+            .filter_map(|(k, v)| {
+                let value = match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Bool(b) => b.to_string(),
+                    serde_json::Value::Number(n) => n.to_string(),
+                    _ => return None,
+                };
+                Some((k.clone(), value))
+            })
+            .collect(),
+    )
+}
+
 impl GenericV1Destination {
     async fn connect(
         &self,
@@ -259,11 +287,42 @@ impl GenericV1Destination {
     /// Returned flattened to strings so it can be merged straight over the
     /// destination's metadata. Absent config is normal, not an error: most
     /// destination types carry everything they need on the destination itself.
+    ///
+    /// Read from the declaration `annotate` recorded, which is the same record
+    /// the scheduler filtered this release's destinations with — so the config a
+    /// destination receives and the reason it was chosen cannot come apart.
+    /// Artifacts annotated before that column existed have nothing recorded and
+    /// fall back to scanning the files, unchanged.
     async fn release_config(
         &self,
         release: &ReleaseItem,
         destination: &Destination,
     ) -> HashMap<String, String> {
+        match crate::services::destination_selector::recorded_declaration(
+            &self.db,
+            &release.artifact,
+        )
+        .await
+        {
+            Ok(Some(items)) => {
+                return crate::services::destination_selector::config_for_destination(
+                    &items,
+                    &destination.environment,
+                    &destination.name,
+                );
+            }
+            Ok(None) => {
+                tracing::debug!("no recorded declaration for this artifact — scanning its files");
+            }
+            Err(e) => {
+                // Fall through rather than fail: a release that cannot read its
+                // config should still be able to run on the destination's own
+                // metadata, which is what every release did before projects
+                // could contribute config at all.
+                tracing::warn!("could not read the recorded declaration: {e:#}");
+            }
+        }
+
         let files = match self
             .artifact_files
             .get_files_for_release(&release.artifact, &destination.environment)
@@ -287,13 +346,15 @@ impl GenericV1Destination {
 
             // `destination` in the rendered item is the pattern the project
             // wrote, not the resolved name, so match it the same way the
-            // release did rather than comparing strings.
+            // release did rather than comparing strings. Shared with the
+            // scheduler via `destination_selector` — the two disagreeing is
+            // what let a release be scheduled somewhere its config was then
+            // (correctly) withheld.
             let matches = item
                 .get("destination")
                 .and_then(|d| d.as_str())
-                .map(|pattern| match regex::Regex::new(pattern) {
-                    Ok(re) => re.is_match(&destination.name),
-                    Err(_) => pattern == destination.name,
+                .map(|pattern| {
+                    crate::services::destination_selector::matches(pattern, &destination.name)
                 })
                 .unwrap_or(false);
 
@@ -301,25 +362,11 @@ impl GenericV1Destination {
                 continue;
             }
 
-            let Some(serde_json::Value::Object(config)) = item.get("config") else {
+            let Some(config) = item.get("config") else {
                 continue;
             };
 
-            return config
-                .iter()
-                .filter_map(|(k, v)| {
-                    let value = match v {
-                        serde_json::Value::String(s) => s.clone(),
-                        serde_json::Value::Bool(b) => b.to_string(),
-                        serde_json::Value::Number(n) => n.to_string(),
-                        // Nested structure has no meaning to a provider that
-                        // receives a flat string map; skip rather than encode
-                        // JSON into a value someone has to guess the shape of.
-                        _ => return None,
-                    };
-                    Some((k.clone(), value))
-                })
-                .collect();
+            return flatten_config(config).unwrap_or_default();
         }
 
         HashMap::new()

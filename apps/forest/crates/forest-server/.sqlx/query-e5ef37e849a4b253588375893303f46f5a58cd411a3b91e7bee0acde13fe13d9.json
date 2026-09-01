@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE artifact_files SET env = $3, destination = $4, updated = now()\n                 WHERE artifact_staging_id = $1 AND file_name = $2 AND category = 'deployment'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e5ef37e849a4b253588375893303f46f5a58cd411a3b91e7bee0acde13fe13d9"
+}

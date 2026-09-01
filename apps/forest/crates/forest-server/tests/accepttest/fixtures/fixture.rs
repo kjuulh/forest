@@ -7,6 +7,7 @@ use forest_grpc_interface::environment_service_client::EnvironmentServiceClient;
 use forest_grpc_interface::o_auth_apps_service_client::OAuthAppsServiceClient;
 use forest_grpc_interface::organisation_service_client::OrganisationServiceClient;
 use forest_grpc_interface::registry_service_client::RegistryServiceClient;
+use forest_grpc_interface::release_pipeline_service_client::ReleasePipelineServiceClient;
 use forest_grpc_interface::release_service_client::ReleaseServiceClient;
 use forest_grpc_interface::users_service_client::UsersServiceClient;
 use tonic::transport::Channel;
@@ -20,6 +21,11 @@ pub struct Fixture {
     /// real network lookups. Used by the org-allowed-domain verification
     /// flow (DATA-252).
     pub dns: std::sync::Arc<forest_server::dns::MockDnsResolver>,
+
+    /// The server's own state, so a test can drive a component the fixture does
+    /// not run — currently `intent_coordinator::evaluate`. See its doc comment
+    /// for why the coordinator is not spawned here.
+    pub state: forest_server::State,
 }
 
 impl Fixture {
@@ -45,6 +51,10 @@ impl Fixture {
 
     pub fn destinations(&self) -> DestinationServiceClient<Channel> {
         DestinationServiceClient::new(self.channel.clone())
+    }
+
+    pub fn release_pipelines(&self) -> ReleasePipelineServiceClient<Channel> {
+        ReleasePipelineServiceClient::new(self.channel.clone())
     }
 
     pub fn environments(&self) -> EnvironmentServiceClient<Channel> {
@@ -154,6 +164,7 @@ fn bring_up(config: forest_server::Config) -> Fixture {
                 channel,
                 db,
                 dns: mock_dns,
+                state,
             }
         })
     })

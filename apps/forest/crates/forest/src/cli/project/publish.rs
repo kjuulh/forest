@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
 
 use anyhow::Context;
 
@@ -85,32 +85,13 @@ impl PublishCommand {
 
         // Shared with `forest release annotate`, which uploads the same tree the
         // same way — including treating a missing directory as "nothing to
-        // upload" rather than as a failure (DATA-637).
+        // upload" rather than as a failure (DATA-637), and leaving env and
+        // destination for the server to derive at commit. This used to be a
+        // verbatim copy of that loop, which is how fixing the path-splitting
+        // truncation in one place left it in the other.
         for file in deployment_files()? {
             let artifact_file = file.strip_prefix(DEPLOYMENT_DIR)?;
-            let mut components = artifact_file.components();
-            let Some(env) = components.next() else {
-                tracing::warn!("file doesn't exist, env is required");
-                continue;
-            };
-            let Some(destination) = components.next() else {
-                tracing::warn!("file doesn't exist, destination is required");
-                continue;
-            };
 
-            let destination = destination.as_os_str().to_string_lossy();
-            let destination = destination.replace(".", "/");
-
-            let Some(_destination_type_namespace) = components.next() else {
-                tracing::warn!("file doesn't exist, destination_type_namespace is required");
-                continue;
-            };
-            let Some(_destination_type_name) = components.next() else {
-                tracing::warn!("file doesn't exist, destination_type_name is required");
-                continue;
-            };
-
-            let _file_name = components.collect::<PathBuf>();
             let file_content = tokio::fs::read_to_string(&file)
                 .await
                 .context("failed to read template file")?;
@@ -121,8 +102,8 @@ impl PublishCommand {
                 &upload_handle,
                 &file_path,
                 &file_content,
-                &env.as_os_str().to_string_lossy(),
-                &destination,
+                "",
+                "",
                 "deployment",
             )
             .await

@@ -160,6 +160,37 @@ pub mod keys {
 
     /// Extracted artifact file key: `artifacts/{artifact_id}/files/{env}/{destination}/{file_name}`
     /// Empty segments are filtered out to prevent double-slash paths.
+    /// Key for an artifact's file, derived from the artifact and the file's own
+    /// path — and deliberately **not** from its env or destination.
+    ///
+    /// The old key mixed both in, which quietly made them immutable: correcting
+    /// a mis-recorded destination moved the object's key, so the read went
+    /// looking in the wrong place. That is what kept the truncated selector in
+    /// `artifact_files.destination` un-fixable from the server, and pushed the
+    /// decision back onto every client.
+    ///
+    /// `file_name` is already the file's full path within the artifact, so it is
+    /// unique on its own. Segments are sanitized individually and rejoined,
+    /// rather than flattened into one segment: flattening let `a/b` and `ab`
+    /// collide, and with the old key so did two selectors differing only by a
+    /// slash.
+    pub fn artifact_file_by_name(artifact_id: &str, file_name: &str) -> String {
+        let path: Vec<String> = file_name
+            .split('/')
+            .filter(|s| !s.is_empty() && *s != "." && *s != "..")
+            .map(|s| s.replace(['\\', '\0'], ""))
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        format!(
+            "artifacts/{}/files/{}",
+            sanitize(artifact_id),
+            path.join("/")
+        )
+    }
+
+    /// The pre-`artifact_file_by_name` key. Still read, never written: artifacts
+    /// uploaded before the change have their objects here.
     pub fn artifact_file(
         artifact_id: &str,
         env: &str,

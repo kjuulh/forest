@@ -7,7 +7,11 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::{State, actor::Actor, services::artifact_staging_registry::ArtifactID};
+use crate::{
+    State,
+    actor::Actor,
+    services::{artifact_staging_registry::ArtifactID, destination_selector},
+};
 
 #[derive(Clone)]
 pub struct ReleaseRegistry {
@@ -115,8 +119,14 @@ impl ReleaseRegistry {
         project: &str,
         reference: &Reference,
         actor: &Actor,
+        deployment_items: &[crate::services::destination_selector::DeploymentItem],
     ) -> anyhow::Result<ReleaseAnnotation> {
         let metadata = serde_json::to_value(metadata)?;
+        // What the project declared about where this artifact goes, parsed from
+        // the deployment files it just uploaded. Recorded here, once, so that
+        // scheduling a stage never has to reach into file content — see
+        // `destination_selector`.
+        let deployment_items = serde_json::to_value(deployment_items)?;
         let source = serde_json::to_value(source)?;
         let context = serde_json::to_value(context)?;
         let reference = serde_json::to_value(reference)?;
@@ -177,7 +187,8 @@ impl ReleaseRegistry {
                     project_id,
                     ref,
                     actor_id,
-                    actor_type
+                    actor_type,
+                    deployment_items
                 ) VALUES (
                     $1,
                     $2,
@@ -187,7 +198,8 @@ impl ReleaseRegistry {
                     $6,
                     $7,
                     $8,
-                    $9
+                    $9,
+                    $10
                 )
                 RETURNING id, created
             ",
@@ -200,6 +212,7 @@ impl ReleaseRegistry {
             reference,
             actor_id,
             actor_type,
+            deployment_items,
         )
         .fetch_one(&mut *tx)
         .await
@@ -277,8 +290,17 @@ impl ReleaseRegistry {
         }
 
         // Non-pipeline mode: flat release to all requested destinations.
+        // What the project declared about where this artifact goes, recorded at
+        // annotate time. Absent for artifacts annotated before that column
+        // existed, which read as "declared nothing" and so fan out — exactly
+        // what they did then.
+        let declared = destination_selector::recorded_declaration(&self.db, artifact_id)
+            .await
+            .unwrap_or_default()
+            .unwrap_or_default();
+
         let destination_recs = self
-            .resolve_destinations(&organisation, &destinations, &environments)
+            .resolve_destinations(&organisation, &destinations, &environments, &declared)
             .await?;
 
         let actor_id = actor.actor_id();
@@ -369,11 +391,24 @@ impl ReleaseRegistry {
     /// destinations are given, naming one destination in a shared environment
     /// quietly released to all of them. Environments are now only consulted
     /// when no destination was named.
+    ///
+    /// Asking for an *environment* is narrowed by what the artifact declared for
+    /// it, using the rule the pipeline path uses
+    /// (`destination_selector::narrow_to_declared`). Before that, `--env prod`
+    /// released to every destination in `prod` regardless of the two lines of
+    /// `forest.cue` saying which one the project meant — the same bug the
+    /// pipeline path had, on the path that had supposedly been fixed.
+    ///
+    /// Naming a *destination* still means exactly that destination. A person
+    /// typing `--destination` is deliberately overriding the declaration, and an
+    /// override that silently refuses to override is worse than no override; it
+    /// is logged, not filtered.
     async fn resolve_destinations(
         &self,
         organisation: &str,
         destinations: &[String],
         environments: &[String],
+        declared: &[crate::services::destination_selector::DeploymentItem],
     ) -> anyhow::Result<Vec<DestinationRec>> {
         let by_name = !destinations.is_empty();
 
@@ -423,7 +458,53 @@ impl ReleaseRegistry {
             );
         }
 
-        Ok(recs)
+        if by_name {
+            // An explicit --destination overrides the declaration; say so rather
+            // than quietly doing something else.
+            for rec in &recs {
+                let declared_here: Vec<&str> =
+                    destination_selector::selectors_for_env(declared, &rec.environment);
+                if !declared_here.is_empty()
+                    && !declared_here
+                        .iter()
+                        .any(|s| destination_selector::matches(s, &rec.name))
+                {
+                    tracing::warn!(
+                        destination = %rec.name,
+                        environment = %rec.environment,
+                        "released to a destination this project does not declare, because it was named explicitly"
+                    );
+                }
+            }
+
+            return Ok(recs);
+        }
+
+        // Narrow per environment: a request may name several, and a declaration
+        // is scoped to one.
+        let mut by_environment: std::collections::BTreeMap<String, Vec<DestinationRec>> =
+            std::collections::BTreeMap::new();
+        for rec in recs {
+            by_environment
+                .entry(rec.environment.clone())
+                .or_default()
+                .push(rec);
+        }
+
+        let mut selected = Vec::new();
+        for (environment, candidates) in by_environment {
+            match destination_selector::narrow_to_declared(
+                candidates,
+                declared,
+                &environment,
+                |rec| rec.name.as_str(),
+            ) {
+                Ok(mut narrowed) => selected.append(&mut narrowed),
+                Err(message) => anyhow::bail!(message),
+            }
+        }
+
+        Ok(selected)
     }
 
     /// Record a release that failed outside Forest.
@@ -463,8 +544,16 @@ impl ReleaseRegistry {
 
         let (organisation, project) = self.get_project_context(&project_id).await?;
 
+        // Same declaration, same narrowing as a successful release: a deploy that
+        // failed outside Forest should produce a record for the destinations the
+        // project actually declared, not for every one sharing their environment.
+        let declared = destination_selector::recorded_declaration(&self.db, artifact_id)
+            .await
+            .unwrap_or_default()
+            .unwrap_or_default();
+
         let destination_recs = self
-            .resolve_destinations(&organisation, &destinations, &environments)
+            .resolve_destinations(&organisation, &destinations, &environments, &declared)
             .await?;
 
         let actor_id = actor.actor_id();

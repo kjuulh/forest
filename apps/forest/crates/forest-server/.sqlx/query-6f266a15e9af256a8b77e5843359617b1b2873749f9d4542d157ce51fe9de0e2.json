@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.name as \"name!\"\n           FROM release_states rs\n           JOIN destinations d ON d.id = rs.destination_id\n           WHERE rs.release_intent_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6f266a15e9af256a8b77e5843359617b1b2873749f9d4542d157ce51fe9de0e2"
+}

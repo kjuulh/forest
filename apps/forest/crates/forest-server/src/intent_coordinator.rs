@@ -124,12 +124,18 @@ async fn sweep_active_intents(state: &State) -> anyhow::Result<()> {
 ///   - Propagate cancellations transitively
 ///   - Activate PENDING stages whose deps are satisfied (with soak_time checks)
 ///   - Compute intent-level terminal status
-async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
+///
+/// Public so acceptance tests can drive exactly one evaluation and then assert
+/// on rows. The test fixture runs the gRPC server and the `Scheduler` but not
+/// this component: it is process-wide across every acceptance test, and a
+/// background loop mutating every intent in the shared dev database would make
+/// unrelated tests flaky. A direct call needs no sleeping and cannot race.
+pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     let mut tx = state.db.begin().await?;
 
     // Step 1: Lock the intent
     let intent = sqlx::query!(
-        "SELECT id, artifact, project_id, stages, stage_states, status
+        "SELECT id, artifact, project_id, annotation_id, stages, stage_states, status
          FROM release_intents
          WHERE id = $1
          FOR UPDATE SKIP LOCKED",
@@ -417,47 +423,37 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                     continue;
                 }
 
-                // Resolve environment -> destinations, scoped to the intent's
-                // owning organisation. Env names are globally non-unique so
-                // without this filter a `dev` deploy stage would fan out into
-                // every org's dev destinations.
-                let dest_recs = sqlx::query!(
-                    r#"SELECT d.id
-                     FROM destinations d
-                     JOIN environments e ON d.environment_id = e.id
-                     JOIN projects p ON p.id = $2
-                     WHERE e.name = $1
-                       AND e.organisation = p.organisation
-                       AND d.organisation = p.organisation"#,
-                    environment.as_str(),
-                    intent.project_id,
+                let resolved = resolve_stage_destinations(
+                    &mut tx,
+                    &intent.project_id,
+                    &intent.annotation_id,
+                    environment,
                 )
-                .fetch_all(&mut *tx)
                 .await
                 .context("resolve destinations for deploy stage")?;
 
-                if dest_recs.is_empty() {
-                    // No destinations for this environment — fail the stage with a clear error
-                    stage_states.insert(
-                        stage_id.clone(),
-                        StageState {
-                            status: StageStatus::Failed,
-                            error_message: Some(format!(
-                                "no destinations configured for environment '{environment}'"
-                            )),
-                            completed_at: Some(now_str.clone()),
-                            ..StageState::pending()
-                        },
-                    );
-                    changed = true;
-                    tracing::warn!(
-                        %intent_id,
-                        stage_id,
-                        environment,
-                        "coordinator: deploy stage failed — no destinations for environment"
-                    );
-                    continue;
-                }
+                let dest_recs = match resolved {
+                    StageResolution::Ready(destinations) => destinations,
+                    StageResolution::Failed(error_message) => {
+                        tracing::warn!(
+                            %intent_id,
+                            stage_id,
+                            environment,
+                            "coordinator: deploy stage failed — {error_message}"
+                        );
+                        stage_states.insert(
+                            stage_id.clone(),
+                            StageState {
+                                status: StageStatus::Failed,
+                                error_message: Some(error_message),
+                                completed_at: Some(now_str.clone()),
+                                ..StageState::pending()
+                            },
+                        );
+                        changed = true;
+                        continue;
+                    }
+                };
 
                 let mut release_ids = Vec::new();
                 for dest in &dest_recs {
@@ -566,44 +562,37 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 // that should execute so users can review the output before approving.
                 // The plan stage has its own built-in approval gate (AWAITING_APPROVAL).
 
-                // Resolve environment -> destinations, scoped to the intent's
-                // owning organisation (see deploy-stage comment above).
-                let dest_recs = sqlx::query!(
-                    r#"SELECT d.id
-                     FROM destinations d
-                     JOIN environments e ON d.environment_id = e.id
-                     JOIN projects p ON p.id = $2
-                     WHERE e.name = $1
-                       AND e.organisation = p.organisation
-                       AND d.organisation = p.organisation"#,
-                    environment.as_str(),
-                    intent.project_id,
+                let resolved = resolve_stage_destinations(
+                    &mut tx,
+                    &intent.project_id,
+                    &intent.annotation_id,
+                    environment,
                 )
-                .fetch_all(&mut *tx)
                 .await
                 .context("resolve destinations for plan stage")?;
 
-                if dest_recs.is_empty() {
-                    stage_states.insert(
-                        stage_id.clone(),
-                        StageState {
-                            status: StageStatus::Failed,
-                            error_message: Some(format!(
-                                "no destinations configured for environment '{environment}'"
-                            )),
-                            completed_at: Some(now_str.clone()),
-                            ..StageState::pending()
-                        },
-                    );
-                    changed = true;
-                    tracing::warn!(
-                        %intent_id,
-                        stage_id,
-                        environment,
-                        "coordinator: plan stage failed — no destinations for environment"
-                    );
-                    continue;
-                }
+                let dest_recs = match resolved {
+                    StageResolution::Ready(destinations) => destinations,
+                    StageResolution::Failed(error_message) => {
+                        tracing::warn!(
+                            %intent_id,
+                            stage_id,
+                            environment,
+                            "coordinator: plan stage failed — {error_message}"
+                        );
+                        stage_states.insert(
+                            stage_id.clone(),
+                            StageState {
+                                status: StageStatus::Failed,
+                                error_message: Some(error_message),
+                                completed_at: Some(now_str.clone()),
+                                ..StageState::pending()
+                            },
+                        );
+                        changed = true;
+                        continue;
+                    }
+                };
 
                 let mut release_ids = Vec::new();
                 for dest in &dest_recs {
@@ -820,6 +809,119 @@ async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// A destination a stage is about to release to.
+struct StageDestination {
+    id: Uuid,
+    name: String,
+}
+
+/// The outcome of working out where a stage should release to.
+enum StageResolution {
+    Ready(Vec<StageDestination>),
+    /// The stage cannot run, and this says why in terms the person reading the
+    /// release can act on.
+    Failed(String),
+}
+
+/// Which destinations a deploy or plan stage releases to.
+///
+/// Two filters, in order.
+///
+/// **The organisation.** Environment names are globally non-unique, so without
+/// this a `dev` stage would fan out into every organisation's `dev`
+/// destinations.
+///
+/// **The project's declaration.** A stage names an environment; the project's
+/// `forest.cue` names the destinations *within* an environment it releases to,
+/// as selectors. Resolving the environment and stopping there is what scheduled
+/// an ECS service artifact at a shiitake slice registry: the environment held
+/// both, the project had asked for one of them, and nothing consulted the ask.
+/// The declaration was recorded on the annotation at annotate time — see
+/// `destination_selector` — so this works identically for a release fired by a
+/// trigger, where no client supplied anything.
+///
+/// Declaring nothing for the stage's environment means no filtering, not an
+/// empty filter. Projects that name no destinations must keep releasing to
+/// whole environments or this fix breaks every one of them to help one.
+async fn resolve_stage_destinations(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    project_id: &Uuid,
+    annotation_id: &Uuid,
+    environment: &str,
+) -> anyhow::Result<StageResolution> {
+    use crate::services::destination_selector;
+
+    let in_environment = sqlx::query!(
+        r#"SELECT d.id, d.name
+         FROM destinations d
+         JOIN environments e ON d.environment_id = e.id
+         JOIN projects p ON p.id = $2
+         WHERE e.name = $1
+           AND e.organisation = p.organisation
+           AND d.organisation = p.organisation"#,
+        environment,
+        project_id,
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .context("resolve environment to destinations")?;
+
+    if in_environment.is_empty() {
+        return Ok(StageResolution::Failed(format!(
+            "no destinations configured for environment '{environment}'"
+        )));
+    }
+
+    let candidates: Vec<StageDestination> = in_environment
+        .into_iter()
+        .map(|d| StageDestination {
+            id: d.id,
+            name: d.name,
+        })
+        .collect();
+
+    // Absent for artifacts annotated before the column existed, which read as
+    // "nothing declared" and therefore fan out — exactly what they do today.
+    let declared = sqlx::query_scalar!(
+        "SELECT deployment_items FROM annotations WHERE id = $1",
+        annotation_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await
+    .context("read the project's declaration for this release")?
+    .flatten();
+
+    // A JSON `null` reads as "nothing recorded", the same as a SQL NULL. Our
+    // writer only ever stores an array, but the two spellings of absent should
+    // not behave differently — one of them failing a stage would be a puzzle.
+    let declared = declared.filter(|value| !value.is_null());
+
+    let items: Vec<destination_selector::DeploymentItem> = match declared {
+        // Fail the stage rather than the evaluation. Propagating this error would
+        // leave the stage PENDING and let the 5s sweep retry it forever — a
+        // release that hangs silently instead of one that says what is wrong.
+        Some(value) => match serde_json::from_value(value) {
+            Ok(items) => items,
+            Err(e) => {
+                return Ok(StageResolution::Failed(format!(
+                    "this release's recorded declaration could not be read ({e}), so which destinations in '{environment}' it asked for is unknown"
+                )));
+            }
+        },
+        None => Vec::new(),
+    };
+
+    // The rule itself lives in `destination_selector`, shared with the request
+    // path. Two copies is how the pipeline path came to ignore declarations the
+    // request path already honoured.
+    match destination_selector::narrow_to_declared(candidates, &items, environment, |dest| {
+        dest.name.as_str()
+    }) {
+        Ok(selected) => Ok(StageResolution::Ready(selected)),
+        Err(message) => Ok(StageResolution::Failed(message)),
+    }
 }
 
 struct ReleaseRow {

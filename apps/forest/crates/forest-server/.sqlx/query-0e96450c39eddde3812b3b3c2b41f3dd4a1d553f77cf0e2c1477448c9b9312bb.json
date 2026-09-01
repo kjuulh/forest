@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT f.file_name, f.env, f.destination, blob.content\n               FROM artifact_files f\n               JOIN blob_storage blob ON blob.id = f.file_content\n               WHERE f.artifact_staging_id = $1 AND f.category = 'deployment'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "file_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "env",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "destination",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "content",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "0e96450c39eddde3812b3b3c2b41f3dd4a1d553f77cf0e2c1477448c9b9312bb"
+}

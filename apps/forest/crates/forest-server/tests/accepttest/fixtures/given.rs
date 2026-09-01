@@ -27,6 +27,7 @@ pub trait GivenReleaseFlow {
         sensitive_keys: Vec<String>,
     ) -> Self;
     async fn an_uploaded_artifact(self) -> Self;
+    async fn an_uploaded_artifact_declaring(self, env: &str, selectors: &[&str]) -> Self;
     async fn an_annotated_release(self) -> Self;
 }
 
@@ -193,6 +194,60 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
             .expect("upload artifact");
 
         // Commit
+        let commit_resp = art_client
+            .commit_artifact(authed_request(&token, CommitArtifactRequest { upload_id }))
+            .await
+            .expect("commit artifact");
+
+        self.data_mut().artifact_id = commit_resp.into_inner().artifact_id;
+
+        self
+    }
+
+    /// An artifact whose deployment files declare `selectors` for `env` — the
+    /// shape `release prepare` produces, which the server parses at annotate
+    /// time into `annotations.deployment_items`.
+    ///
+    /// The file name mirrors prepare's layout exactly, selector and destination
+    /// type each carrying a `/`, because that layout is what the parse has to
+    /// cope with.
+    async fn an_uploaded_artifact_declaring(self, env: &str, selectors: &[&str]) -> Self {
+        let mut art_client = self.fixture().artifacts();
+        let token = self.data().auth_token.clone();
+
+        let begin_resp = art_client
+            .begin_upload_artifact(authed_request(&token, BeginUploadArtifactRequest {}))
+            .await
+            .expect("begin upload");
+        let upload_id = begin_resp.into_inner().upload_id;
+
+        let uploads: Vec<UploadArtifactRequest> = selectors
+            .iter()
+            .map(|selector| UploadArtifactRequest {
+                upload_id: upload_id.clone(),
+                file_name: format!("{env}/{selector}/forest/generic@1/forest/config.json"),
+                file_content: serde_json::json!({
+                    "env": env,
+                    "destination": selector,
+                    "destination_type": "forest/generic@1",
+                    "component": null,
+                    "config": { "service": "accept-test-service" },
+                })
+                .to_string(),
+                env: env.into(),
+                destination: (*selector).into(),
+                category: "deployment".into(),
+            })
+            .collect();
+
+        let mut req = tonic::Request::new(tokio_stream::iter(uploads));
+        let val: MetadataValue<_> = format!("Bearer {}", token).parse().unwrap();
+        req.metadata_mut().insert("authorization", val);
+        art_client
+            .upload_artifact(req)
+            .await
+            .expect("upload artifact");
+
         let commit_resp = art_client
             .commit_artifact(authed_request(&token, CommitArtifactRequest { upload_id }))
             .await

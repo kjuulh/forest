@@ -19,6 +19,7 @@ use crate::{
     domains::trigger::AnnotationMatchData,
     grpc::{artifacts::GrpcErrorExt, authorize},
     services::{
+        artifact_staging_registry::ArtifactStagingRegistryState,
         event_bus::{EventBusState, EventPayload},
         notification_registry::{NotificationRegistryState, ReleaseContext as NotifReleaseContext},
         org_rules::OrgRuleSetRegistryState,
@@ -170,6 +171,32 @@ impl ReleaseService for ReleaseServer {
             .context("ref is required")
             .to_internal_error()?;
 
+        // The project's declaration, parsed from the deployment files this
+        // artifact already carries. Derived server-side rather than sent by the
+        // client, which is what makes it work for every project on its next
+        // release regardless of which CLI version built the artifact — and for
+        // trigger-fired releases, where there is no client at all.
+        //
+        // A file that will not parse fails the annotate (see
+        // `parse_declaration`): recording a partial declaration would silently
+        // narrow what later stages schedule.
+        let deployment_files = self
+            .state
+            .artifact_staging_registry()
+            .get_artifact_files(&artifact_id, Some("deployment"))
+            .await
+            .context("read the deployment files for this artifact")
+            .to_internal_error()?;
+
+        let deployment_files: Vec<(std::path::PathBuf, String)> = deployment_files
+            .into_iter()
+            .map(|f| (std::path::PathBuf::from(f.file_name), f.content))
+            .collect();
+
+        let deployment_items =
+            crate::services::destination_selector::parse_declaration(&deployment_files)
+                .to_internal_error()?;
+
         let artifact = self
             .state
             .release_registry()
@@ -183,6 +210,7 @@ impl ReleaseService for ReleaseServer {
                 &proj.project,
                 &reference,
                 &actor,
+                &deployment_items,
             )
             .await
             .to_internal_error()?;

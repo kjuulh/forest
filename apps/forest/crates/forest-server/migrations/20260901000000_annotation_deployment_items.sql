@@ -1,0 +1,19 @@
+-- What the project declared about where this artifact releases to.
+--
+-- `release prepare` renders one deployment item per (environment, destination
+-- selector, destination type) the project's forest.cue names, and writes each
+-- one's record to `forest/config.json` inside the item. `release annotate`
+-- uploads those files; this column is the server's parse of them, taken once at
+-- annotate time so that scheduling never has to reach into file content.
+--
+-- Shape: [{ "env": ..., "destination": ..., "destination_type": ..., "config": {...} }]
+--
+-- Nullable on purpose, and the three states are distinct:
+--   NULL  -- annotated before this column existed. Fan out to the whole
+--            environment, which is exactly what those artifacts do today.
+--   []    -- prepared and declared nothing (or annotation-only). Fan out too.
+--   [...] -- the declaration. Scheduling filters the environment through it.
+--
+-- No backfill: an artifact that has already released will not release again,
+-- and one that has not will be re-annotated.
+ALTER TABLE annotations ADD COLUMN deployment_items JSONB;

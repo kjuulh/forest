@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, artifact, project_id, stages, stage_states, status\n         FROM release_intents\n         WHERE id = $1\n         FOR UPDATE SKIP LOCKED",
+  "query": "SELECT id, artifact, project_id, annotation_id, stages, stage_states, status\n         FROM release_intents\n         WHERE id = $1\n         FOR UPDATE SKIP LOCKED",
   "describe": {
     "columns": [
       {
@@ -20,16 +20,21 @@
       },
       {
         "ordinal": 3,
+        "name": "annotation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
         "name": "stages",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "stage_states",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "status",
         "type_info": "Text"
       }
@@ -43,10 +48,11 @@
       false,
       false,
       false,
+      false,
       true,
       true,
       false
     ]
   },
-  "hash": "d33c6781aa2e2738d88cf71c6778901a76479703834bd772389ec623761e0066"
+  "hash": "c2246b29a247b3f4ad862824f6bb0c6c6bc6e40c3cf4b3c4bb2043bba394e60a"
 }

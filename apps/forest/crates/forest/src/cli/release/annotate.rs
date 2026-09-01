@@ -270,43 +270,35 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
         .await
         .context("begin artifact upload")?;
 
+    // Which item each file belongs to comes from the item's own record, deepest
+    // match first. See `deployment_items_in` for why the path cannot be split.
     for file in deployment_files()? {
         let artifact_file = file.strip_prefix(DEPLOYMENT_DIR)?;
-        let mut components = artifact_file.components();
-        let Some(env) = components.next() else {
-            tracing::warn!("file doesn't exist, env is required");
-            continue;
-        };
-        let Some(destination) = components.next() else {
-            tracing::warn!("file doesn't exist, destination is required");
-            continue;
-        };
 
-        let destination = destination.as_os_str().to_string_lossy();
-        let destination = destination.replace(".", "/");
-
-        let Some(_destination_type_namespace) = components.next() else {
-            tracing::warn!("file doesn't exist, destination_type_namespace is required");
-            continue;
-        };
-        let Some(_destination_type_name) = components.next() else {
-            tracing::warn!("file doesn't exist, destination_type_name is required");
-            continue;
-        };
-
-        let _file_name = components.collect::<PathBuf>();
         let file_content = tokio::fs::read_to_string(&file)
             .await
             .context("failed to read template file")?;
 
+        // Env and destination are left blank on purpose. Working out which
+        // deployment item a file belongs to means reading that item's own
+        // `forest/config.json`, and the client is the wrong place to decide it:
+        // this logic existed here in two copy-pasted loops that both split the
+        // upload path on `/`, which truncated every selector containing one —
+        // and fixing one copy left the other wrong. The server has the whole
+        // tree and derives it at commit, so every client is correct including
+        // ones that are never upgraded.
+        //
+        // The uploaded name stays the full path under `.forest/deployment`,
+        // which is what the server attributes from and what destination
+        // providers already receive.
         let file_path = artifact_file.to_string_lossy();
         tracing::info!("uploading file: {}", file_path);
         grpc.upload_artifact_file(
             &upload_handle,
             &file_path,
             &file_content,
-            &env.as_os_str().to_string_lossy(),
-            &destination,
+            "",
+            "",
             "deployment",
         )
         .await

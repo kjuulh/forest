@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE annotations SET deployment_items = NULL WHERE artifact_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d499f9c4499eb400d69aca00c61f0d61fc81a5aeaeca0f70d9047781437bba3a"
+}

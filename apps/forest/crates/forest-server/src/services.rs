@@ -11,6 +11,7 @@ pub mod artifact_registry;
 pub mod artifact_staging_registry;
 pub mod destination_aggregate;
 pub mod destination_registry;
+pub mod destination_selector;
 pub mod environment_registry;
 pub mod event_bus;
 pub mod event_subscription;

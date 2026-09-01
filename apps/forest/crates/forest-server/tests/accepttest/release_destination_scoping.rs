@@ -222,3 +222,190 @@ async fn a_misspelled_destination_is_rejected_not_expanded() -> anyhow::Result<(
 
     Ok(())
 }
+
+/// Asking for an environment now honours what the project declared for it.
+///
+/// #202 stopped `--destination` being *widened* by the environment travelling
+/// with it. It did not make `--env` alone consult the declaration, so
+/// `forest release create --env prod` still released to every destination in
+/// `prod` — the same bug the pipeline path had, on the path that had supposedly
+/// been fixed. The rule is now shared between the two
+/// (`destination_selector::narrow_to_declared`).
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_is_narrowed_by_what_the_project_declared() -> anyhow::Result<()> {
+    let (given, when, _then) = testcase::<ReleaseFlowData>().await?;
+
+    let suffix = uuid::Uuid::now_v7();
+    let org = format!("test-org-{suffix}");
+    let env = format!("accept-env-{suffix}");
+    let target = format!("target-{suffix}");
+    let neighbour = format!("neighbour-{suffix}");
+
+    let given = given
+        .a_registered_user()
+        .await
+        .an_organisation(&org)
+        .await
+        .an_environment(&env)
+        .await
+        .a_destination(&target, &env)
+        .await
+        .a_destination(&neighbour, &env)
+        .await
+        .an_uploaded_artifact_declaring(&env, &["^target-.*$"])
+        .await
+        .an_annotated_release()
+        .await;
+
+    let (token, artifact_id) = {
+        let data = given.data();
+        (data.auth_token.clone(), data.artifact_id.clone())
+    };
+
+    let resp = when
+        .fixture()
+        .releases()
+        .release(authed_request(
+            &token,
+            ReleaseRequest {
+                artifact_id,
+                destinations: vec![],
+                environments: vec![env.clone()],
+                force: false,
+                use_pipeline: false,
+                prepare_only: false,
+            },
+        ))
+        .await?
+        .into_inner();
+
+    let released: Vec<String> = resp
+        .intents
+        .iter()
+        .map(|intent| intent.destination.clone())
+        .collect();
+
+    assert_eq!(
+        released,
+        vec![target.clone()],
+        "declaring ^target-.*$ should release to {target} alone; {neighbour} shares the \
+         environment but the project did not ask for it",
+    );
+
+    Ok(())
+}
+
+/// Naming a destination is a person overriding the declaration on purpose. An
+/// override that silently refuses to override is worse than no override, so this
+/// still releases where it was told — the disagreement is logged, not enforced.
+#[tokio::test(flavor = "multi_thread")]
+async fn naming_a_destination_the_project_does_not_declare_still_releases_there()
+-> anyhow::Result<()> {
+    let (given, when, _then) = testcase::<ReleaseFlowData>().await?;
+
+    let suffix = uuid::Uuid::now_v7();
+    let org = format!("test-org-{suffix}");
+    let env = format!("accept-env-{suffix}");
+    let declared = format!("target-{suffix}");
+    let other = format!("neighbour-{suffix}");
+
+    let given = given
+        .a_registered_user()
+        .await
+        .an_organisation(&org)
+        .await
+        .an_environment(&env)
+        .await
+        .a_destination(&declared, &env)
+        .await
+        .a_destination(&other, &env)
+        .await
+        .an_uploaded_artifact_declaring(&env, &["^target-.*$"])
+        .await
+        .an_annotated_release()
+        .await;
+
+    let (token, artifact_id) = {
+        let data = given.data();
+        (data.auth_token.clone(), data.artifact_id.clone())
+    };
+
+    let resp = when
+        .fixture()
+        .releases()
+        .release(authed_request(
+            &token,
+            ReleaseRequest {
+                artifact_id,
+                destinations: vec![other.clone()],
+                environments: vec![env.clone()],
+                force: false,
+                use_pipeline: false,
+                prepare_only: false,
+            },
+        ))
+        .await?
+        .into_inner();
+
+    let released: Vec<String> = resp
+        .intents
+        .iter()
+        .map(|intent| intent.destination.clone())
+        .collect();
+
+    assert_eq!(
+        released,
+        vec![other],
+        "an explicitly named destination must still be released to, declaration or not",
+    );
+
+    Ok(())
+}
+
+/// A declaration that matches nothing in the environment refuses the request
+/// rather than releasing nowhere and reporting success.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_matching_nothing_refuses_the_request() -> anyhow::Result<()> {
+    let (given, when, _then) = testcase::<ReleaseFlowData>().await?;
+
+    let suffix = uuid::Uuid::now_v7();
+    let org = format!("test-org-{suffix}");
+    let env = format!("accept-env-{suffix}");
+
+    let given = given
+        .a_registered_user()
+        .await
+        .an_organisation(&org)
+        .await
+        .an_environment(&env)
+        .await
+        .a_destination(&format!("dest-{suffix}"), &env)
+        .await
+        .an_uploaded_artifact_declaring(&env, &["^nowhere/.*$"])
+        .await
+        .an_annotated_release()
+        .await;
+
+    let (token, artifact_id) = {
+        let data = given.data();
+        (data.auth_token.clone(), data.artifact_id.clone())
+    };
+
+    when.fixture()
+        .releases()
+        .release(authed_request(
+            &token,
+            ReleaseRequest {
+                artifact_id,
+                destinations: vec![],
+                environments: vec![env.clone()],
+                force: false,
+                use_pipeline: false,
+                prepare_only: false,
+            },
+        ))
+        .await
+        .expect_err("a declaration matching nothing must be refused, not released nowhere");
+
+    Ok(())
+}
