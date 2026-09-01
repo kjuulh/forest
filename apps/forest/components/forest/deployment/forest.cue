@@ -13,6 +13,9 @@ project: sdk.#ForestProject & {
 }
 
 forest: component: {
-	name:    "deployment"
-	version: "0.3.1"
+	name: "deployment"
+	// 0.3.1 published without a CUE module, for the reason recorded in the sdk
+	// component: the OCI packager rejected the duplicate cue.mod/module.cue and
+	// the failure was non-fatal (fixed in #225). Versions are immutable.
+	version: "0.3.2"
 }
