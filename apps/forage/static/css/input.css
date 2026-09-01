@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @source "../../templates";
+/* Both globs are needed. The recursive one only reaches files nested under a
+   directory, so scripts sitting directly in static/js — where the hand-written
+   progressive-enhancement scripts live — would have their utility classes
+   silently dropped from the build. */
+@source "../js/*.js";
 @source "../js/**/*.js";
 
 /* ── Compact text utilities ───────────────────────────────────────────────
@@ -208,4 +213,25 @@
     background-color: transparent;
     padding: 0;
   }
+}
+
+/* ── Keyboard highlight in the fuzzy switchers ────────────────────────
+   static/js/fuzzy-switcher.js marks the arrow-key selection with
+   `data-fuzzy-active`. Written unlayered on purpose: it has to beat the
+   `bg-gray-50` the current project already carries, and an attribute
+   selector ties with a utility class on specificity — unlayered styles
+   win over everything Tailwind emits into @layer utilities, so the
+   highlight shows on the current row too. `--color-gray-100` is remapped
+   by the dark-mode block above, so this follows the theme. */
+[data-fuzzy-active] {
+  background-color: var(--color-gray-100);
+}
+
+/* The characters the fuzzy match landed on. <mark>'s default is a yellow
+   highlighter, which is far too loud for a name you are reading a dozen of;
+   weight alone is enough to show why a row is in the list. */
+[data-fuzzy-list] mark {
+  background: none;
+  color: inherit;
+  font-weight: 600;
 }
