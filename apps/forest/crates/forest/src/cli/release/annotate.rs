@@ -270,8 +270,6 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
         .await
         .context("begin artifact upload")?;
 
-    // Which item each file belongs to comes from the item's own record, deepest
-    // match first. See `deployment_items_in` for why the path cannot be split.
     for file in deployment_files()? {
         let artifact_file = file.strip_prefix(DEPLOYMENT_DIR)?;
 

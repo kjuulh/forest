@@ -477,3 +477,57 @@ async fn annotate_records_the_declaration_with_the_selector_whole() -> anyhow::R
 
     Ok(())
 }
+
+/// The server decides which item a deployment file belongs to, overriding
+/// whatever the client claimed.
+///
+/// This is what lets a CLI nobody will upgrade be correct. Before 0.3.10 the
+/// client worked it out itself by splitting the upload path on `/` — and both the
+/// selector (`^data-prod/.*$`) and the destination type (`forest/generic@1`)
+/// routinely contain one, so every such client recorded the selector truncated at
+/// its first slash. `commit_staging` re-derives both from the item's own record.
+///
+/// Asserted with a deliberately wrong label rather than a blank one: blank could
+/// pass by being *filled in*, which would not prove the client is overridden.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_server_overrides_what_the_client_claimed_a_file_was_for() -> anyhow::Result<()> {
+    let (given, _when, _then) = testcase::<ReleaseFlowData>().await?;
+
+    let suffix = uuid::Uuid::now_v7();
+    let org = format!("test-org-{suffix}");
+    let env = format!("accept-env-{suffix}");
+
+    let given = given
+        .a_registered_user()
+        .await
+        .an_organisation(&org)
+        .await
+        .an_environment(&env)
+        .await
+        .a_destination(&format!("dest-{suffix}"), &env)
+        .await
+        // Exactly what forest 0.3.8 sends: the selector cut at its first slash.
+        .an_uploaded_artifact_declaring_mislabelled(&env, "^data-prod/.*$", (&env, "^data-prod"))
+        .await;
+
+    let artifact_id: uuid::Uuid = given.data().artifact_id.parse()?;
+
+    let row = sqlx::query!(
+        r#"SELECT f.env as "env!", f.destination as "destination!"
+           FROM artifacts a
+           JOIN artifact_files f ON f.artifact_staging_id = a.artifact_id
+           WHERE a.id = $1 AND f.category = 'deployment'"#,
+        artifact_id,
+    )
+    .fetch_one(&given.fixture().db)
+    .await?;
+
+    assert_eq!(
+        row.destination, "^data-prod/.*$",
+        "the server must record the selector the item declared, not the truncated \
+         value the client claimed",
+    );
+    assert_eq!(row.env, env);
+
+    Ok(())
+}

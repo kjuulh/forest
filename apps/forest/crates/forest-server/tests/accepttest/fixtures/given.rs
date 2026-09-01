@@ -28,6 +28,14 @@ pub trait GivenReleaseFlow {
     ) -> Self;
     async fn an_uploaded_artifact(self) -> Self;
     async fn an_uploaded_artifact_declaring(self, env: &str, selectors: &[&str]) -> Self;
+    /// As above, but the upload metadata carries `mislabelled_as` instead of
+    /// being blank — what a pre-0.3.10 CLI sends, having split the path itself.
+    async fn an_uploaded_artifact_declaring_mislabelled(
+        self,
+        env: &str,
+        selector: &str,
+        mislabelled_as: (&str, &str),
+    ) -> Self;
     async fn an_annotated_release(self) -> Self;
 }
 
@@ -234,13 +242,68 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
                     "config": { "service": "accept-test-service" },
                 })
                 .to_string(),
-                env: env.into(),
-                destination: (*selector).into(),
+                // Blank, exactly as the CLI sends them: which item a file belongs
+                // to is derived server-side at commit from the item's own
+                // record. A fixture that filled these in would make
+                // `reattribute_deployment_files` a no-op in every test, leaving
+                // the behaviour every released CLI now depends on uncovered.
+                env: String::new(),
+                destination: String::new(),
                 category: "deployment".into(),
             })
             .collect();
 
         let mut req = tonic::Request::new(tokio_stream::iter(uploads));
+        let val: MetadataValue<_> = format!("Bearer {}", token).parse().unwrap();
+        req.metadata_mut().insert("authorization", val);
+        art_client
+            .upload_artifact(req)
+            .await
+            .expect("upload artifact");
+
+        let commit_resp = art_client
+            .commit_artifact(authed_request(&token, CommitArtifactRequest { upload_id }))
+            .await
+            .expect("commit artifact");
+
+        self.data_mut().artifact_id = commit_resp.into_inner().artifact_id;
+
+        self
+    }
+
+    async fn an_uploaded_artifact_declaring_mislabelled(
+        self,
+        env: &str,
+        selector: &str,
+        mislabelled_as: (&str, &str),
+    ) -> Self {
+        let mut art_client = self.fixture().artifacts();
+        let token = self.data().auth_token.clone();
+
+        let begin_resp = art_client
+            .begin_upload_artifact(authed_request(&token, BeginUploadArtifactRequest {}))
+            .await
+            .expect("begin upload");
+        let upload_id = begin_resp.into_inner().upload_id;
+
+        let (wrong_env, wrong_destination) = mislabelled_as;
+        let upload = UploadArtifactRequest {
+            upload_id: upload_id.clone(),
+            file_name: format!("{env}/{selector}/forest/generic@1/forest/config.json"),
+            file_content: serde_json::json!({
+                "env": env,
+                "destination": selector,
+                "destination_type": "forest/generic@1",
+                "component": null,
+                "config": { "service": "accept-test-service" },
+            })
+            .to_string(),
+            env: wrong_env.into(),
+            destination: wrong_destination.into(),
+            category: "deployment".into(),
+        };
+
+        let mut req = tonic::Request::new(tokio_stream::iter(vec![upload]));
         let val: MetadataValue<_> = format!("Bearer {}", token).parse().unwrap();
         req.metadata_mut().insert("authorization", val);
         art_client
