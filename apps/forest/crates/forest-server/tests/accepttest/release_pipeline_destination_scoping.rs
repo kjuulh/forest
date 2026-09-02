@@ -78,11 +78,48 @@ struct Outcome {
     stage_error: Option<String>,
 }
 
+/// The type both destinations get unless a test is about the type.
+const FLUX: &str = "forest/flux@1";
+/// A second, unrelated kind, for the tests that are.
+const TERRAFORM: &str = "forest/terraform@1";
+
 #[allow(clippy::too_many_arguments)]
 async fn run_stage(
     stage: PipelineStage,
     stage_env: &str,
     declare_for: Option<(&str, &[&str])>,
+    null_the_declaration: bool,
+) -> anyhow::Result<Outcome> {
+    let declare_for = declare_for.map(|(env, selectors)| {
+        (
+            env,
+            selectors
+                .iter()
+                .map(|selector| (*selector, FLUX))
+                .collect::<Vec<_>>(),
+        )
+    });
+
+    run_typed_stage(
+        stage,
+        stage_env,
+        (FLUX, FLUX),
+        declare_for
+            .as_ref()
+            .map(|(env, declarations)| (*env, declarations.as_slice())),
+        null_the_declaration,
+    )
+    .await
+}
+
+/// As `run_stage`, but the two destinations' types and the declared types are
+/// the test's to choose. `types` is `(target, neighbour)`.
+#[allow(clippy::too_many_arguments)]
+async fn run_typed_stage(
+    stage: PipelineStage,
+    stage_env: &str,
+    types: (&str, &str),
+    declare_for: Option<(&str, &[(&str, &str)])>,
     null_the_declaration: bool,
 ) -> anyhow::Result<Outcome> {
     let (given, when, _then) = testcase::<ReleaseFlowData>().await?;
@@ -102,13 +139,17 @@ async fn run_stage(
         .await
         .an_environment(stage_env)
         .await
-        .a_destination(&target, stage_env)
+        .a_destination_of_type(&target, stage_env, types.0)
         .await
-        .a_destination(&neighbour, stage_env)
+        .a_destination_of_type(&neighbour, stage_env, types.1)
         .await;
 
     let given = match declare_for {
-        Some((env, selectors)) => given.an_uploaded_artifact_declaring(env, selectors).await,
+        Some((env, declarations)) => {
+            given
+                .an_uploaded_artifact_declaring_types(env, declarations)
+                .await
+        }
         // No item records at all — the project prepared nothing, so it declared
         // nothing. Distinct from NULL, which means "annotated before the column
         // existed"; both fan out, but only one of them is a statement.
@@ -528,6 +569,141 @@ async fn the_server_overrides_what_the_client_claimed_a_file_was_for() -> anyhow
          value the client claimed",
     );
     assert_eq!(row.env, env);
+
+    Ok(())
+}
+
+/// The `fungus` case, on the path that scheduled it.
+///
+/// `fungus` declared `forest/terraform@1` for a selector that reached both
+/// destinations in `platform-dev` — one terraform, one ECS. Nothing consulted
+/// the type, so a terraform plan was scheduled at the ECS place, where the
+/// artifact carries no terraform to run; it failed on arrival and the release
+/// showed a red row for a destination the project never annotated.
+///
+/// Here the selector deliberately matches both names. Only the type tells them
+/// apart.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stage_does_not_schedule_a_destination_whose_type_the_project_never_declared()
+-> anyhow::Result<()> {
+    let env = format!("accept-env-{}", uuid::Uuid::now_v7());
+
+    let outcome = run_typed_stage(
+        deploy_stage("only", &env),
+        &env,
+        (TERRAFORM, FLUX),
+        Some((&env, &[(".*", TERRAFORM)])),
+        false,
+    )
+    .await?;
+
+    assert!(
+        only(&outcome.scheduled, "target-"),
+        "a terraform declaration must reach the terraform destination and not \
+         the flux one, even though the selector matches both names. \
+         scheduled: {:?}",
+        outcome.scheduled,
+    );
+
+    Ok(())
+}
+
+/// Skipped is not failed. The destination the project declares nothing for
+/// leaves no release row at all, so it cannot render red and cannot be counted
+/// against the stage — the release is in scope for exactly what was declared.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_destination_of_an_undeclared_type_leaves_no_release_row() -> anyhow::Result<()> {
+    let env = format!("accept-env-{}", uuid::Uuid::now_v7());
+
+    let outcome = run_typed_stage(
+        deploy_stage("only", &env),
+        &env,
+        (FLUX, TERRAFORM),
+        Some((&env, &[(".*", FLUX)])),
+        false,
+    )
+    .await?;
+
+    assert_eq!(
+        outcome.scheduled.len(),
+        1,
+        "the undeclared-type destination must not be scheduled at all: {:?}",
+        outcome.scheduled,
+    );
+
+    let error = outcome.stage_error.unwrap_or_default();
+    assert!(
+        !error.contains("match none of them"),
+        "an out-of-scope destination is not a selection failure, got: {error}",
+    );
+
+    Ok(())
+}
+
+/// The no-regression half, and the reason this is an intersection rather than a
+/// veto: a project declaring both kinds still reaches both destinations. This is
+/// `fungus` as its forest.cue stands today — an ECS item and a terraform item in
+/// one environment, one destination each.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_project_declaring_both_types_still_reaches_both_destinations() -> anyhow::Result<()> {
+    let env = format!("accept-env-{}", uuid::Uuid::now_v7());
+
+    let outcome = run_typed_stage(
+        deploy_stage("only", &env),
+        &env,
+        (TERRAFORM, FLUX),
+        Some((
+            &env,
+            &[("^target-.*$", TERRAFORM), ("^neighbour-.*$", FLUX)],
+        )),
+        false,
+    )
+    .await?;
+
+    assert_eq!(
+        outcome.scheduled.len(),
+        2,
+        "declaring both kinds must schedule both: {:?}",
+        outcome.scheduled,
+    );
+
+    Ok(())
+}
+
+/// A declaration that matches every name and no type is a stage that would
+/// deploy nothing, and that still fails loudly — silent success having deployed
+/// nothing is the failure mode this whole mechanism exists to prevent. The
+/// message has to say the types are what disagreed, or it sends the reader off
+/// to rewrite a regex that was already right.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_matching_only_by_name_fails_and_says_why() -> anyhow::Result<()> {
+    let env = format!("accept-env-{}", uuid::Uuid::now_v7());
+
+    let outcome = run_typed_stage(
+        deploy_stage("only", &env),
+        &env,
+        (FLUX, FLUX),
+        Some((&env, &[(".*", TERRAFORM)])),
+        false,
+    )
+    .await?;
+
+    assert!(
+        outcome.scheduled.is_empty(),
+        "nothing may be scheduled: {:?}",
+        outcome.scheduled,
+    );
+    assert_eq!(outcome.stage_status, "FAILED");
+
+    let error = outcome.stage_error.unwrap_or_default();
+    assert!(
+        error.contains("a type this project declares nothing for"),
+        "the failure should name the type mismatch, got: {error}",
+    );
+    assert!(
+        error.contains(TERRAFORM) && error.contains(FLUX),
+        "and both types, got: {error}",
+    );
 
     Ok(())
 }

@@ -14,11 +14,89 @@ fn authed_request<T>(token: &str, inner: T) -> tonic::Request<T> {
     req
 }
 
+/// Every acceptance destination is `forest/flux@1` unless a test says otherwise.
+const DEFAULT_DESTINATION_TYPE: &str = "forest/flux@1";
+
+/// `organisation/name@version` → the proto message.
+fn parse_destination_type(spec: &str) -> DestinationType {
+    let (organisation, rest) = spec.split_once('/').expect("org/name@version");
+    let (name, version) = rest.split_once('@').expect("org/name@version");
+
+    DestinationType {
+        organisation: organisation.into(),
+        name: name.into(),
+        version: version.parse().expect("a numeric version"),
+        description: String::new(),
+        fields: vec![],
+    }
+}
+
+async fn create_destination(
+    given: Given<ReleaseFlowData>,
+    name: &str,
+    environment: &str,
+    destination_type: &str,
+    extra_metadata: HashMap<String, String>,
+    sensitive_keys: Vec<String>,
+) -> Given<ReleaseFlowData> {
+    let mut dest_client = given.fixture().destinations();
+
+    // Create a temp directory for the local flux destination
+    let local_path = format!("/tmp/forest-accept-test-{}", uuid::Uuid::now_v7());
+    std::fs::create_dir_all(&local_path).expect("create local path");
+
+    let mut metadata = HashMap::new();
+    metadata.insert("cluster_name".into(), "test-cluster".into());
+    metadata.insert("namespace".into(), "test-namespace".into());
+    metadata.insert("local_path".into(), local_path.clone());
+    metadata.extend(extra_metadata);
+
+    let (token, org) = {
+        let data = given.data();
+        (data.auth_token.clone(), data.organisation.clone())
+    };
+
+    dest_client
+        .create_destination(authed_request(
+            &token,
+            CreateDestinationRequest {
+                organisation: org,
+                name: name.into(),
+                environment: environment.into(),
+                metadata,
+                r#type: Some(parse_destination_type(destination_type)),
+                sensitive_keys,
+            },
+        ))
+        .await
+        .expect("create destination");
+
+    {
+        let mut data = given.data_mut();
+        data.destination_name = name.into();
+        data.destination_environment = environment.into();
+        data.local_path = local_path;
+    }
+
+    given
+}
+
 pub trait GivenReleaseFlow {
     async fn a_registered_user(self) -> Self;
     async fn an_organisation(self, name: &str) -> Self;
     async fn an_environment(self, name: &str) -> Self;
     async fn a_destination(self, name: &str, environment: &str) -> Self;
+    /// A destination of a named type, `organisation/name@version`.
+    ///
+    /// Selection compares a destination's type against the type each declared
+    /// item names, so a test about that intersection needs both sides to be
+    /// settable. Everything else keeps `forest/flux@1`.
+    async fn a_destination_of_type(
+        self,
+        name: &str,
+        environment: &str,
+        destination_type: &str,
+    ) -> Self;
     async fn a_destination_with_sensitive_keys(
         self,
         name: &str,
@@ -28,6 +106,13 @@ pub trait GivenReleaseFlow {
     ) -> Self;
     async fn an_uploaded_artifact(self) -> Self;
     async fn an_uploaded_artifact_declaring(self, env: &str, selectors: &[&str]) -> Self;
+    /// As above, but each selector carries the destination type it declares —
+    /// what a project shipping more than one kind of deployment writes.
+    async fn an_uploaded_artifact_declaring_types(
+        self,
+        env: &str,
+        declarations: &[(&str, &str)],
+    ) -> Self;
     /// As above, but the upload metadata carries `mislabelled_as` instead of
     /// being blank — what a pre-0.3.10 CLI sends, having split the path itself.
     async fn an_uploaded_artifact_declaring_mislabelled(
@@ -107,6 +192,23 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
             .await
     }
 
+    async fn a_destination_of_type(
+        self,
+        name: &str,
+        environment: &str,
+        destination_type: &str,
+    ) -> Self {
+        create_destination(
+            self,
+            name,
+            environment,
+            destination_type,
+            HashMap::new(),
+            vec![],
+        )
+        .await
+    }
+
     /// Same as `a_destination`, plus extra metadata and a set of
     /// destination-declared sensitive keys.
     async fn a_destination_with_sensitive_keys(
@@ -116,54 +218,16 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
         extra_metadata: HashMap<String, String>,
         sensitive_keys: Vec<String>,
     ) -> Self {
-        let mut dest_client = self.fixture().destinations();
-
-        // Create a temp directory for the local flux destination
-        let local_path = format!("/tmp/forest-accept-test-{}", uuid::Uuid::now_v7());
-        std::fs::create_dir_all(&local_path).expect("create local path");
-
-        let mut metadata = HashMap::new();
-        metadata.insert("cluster_name".into(), "test-cluster".into());
-        metadata.insert("namespace".into(), "test-namespace".into());
-        metadata.insert("local_path".into(), local_path.clone());
-        metadata.extend(extra_metadata);
-
-        let (token, org) = {
-            let data = self.data();
-            (data.auth_token.clone(), data.organisation.clone())
-        };
-
-        dest_client
-            .create_destination(authed_request(
-                &token,
-                CreateDestinationRequest {
-                    organisation: org,
-                    name: name.into(),
-                    environment: environment.into(),
-                    metadata,
-                    r#type: Some(DestinationType {
-                        organisation: "forest".into(),
-                        name: "flux".into(),
-                        version: 1,
-                        description: String::new(),
-                        fields: vec![],
-                    }),
-                    sensitive_keys,
-                },
-            ))
-            .await
-            .expect("create destination");
-
-        {
-            let mut data = self.data_mut();
-            data.destination_name = name.into();
-            data.destination_environment = environment.into();
-            data.local_path = local_path;
-        }
-
-        self
+        create_destination(
+            self,
+            name,
+            environment,
+            DEFAULT_DESTINATION_TYPE,
+            extra_metadata,
+            sensitive_keys,
+        )
+        .await
     }
-
     async fn an_uploaded_artifact(self) -> Self {
         let mut art_client = self.fixture().artifacts();
         let (token, dest, env) = {
@@ -220,6 +284,24 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
     /// type each carrying a `/`, because that layout is what the parse has to
     /// cope with.
     async fn an_uploaded_artifact_declaring(self, env: &str, selectors: &[&str]) -> Self {
+        // The fixture's destinations are `forest/flux@1`, so that is what a
+        // declaration meant to reach them has to name. It used to say
+        // `forest/generic@1` and still matched, because nothing consulted the
+        // type — which is the bug these fixtures now have to be able to express.
+        let declarations: Vec<(&str, &str)> = selectors
+            .iter()
+            .map(|selector| (*selector, DEFAULT_DESTINATION_TYPE))
+            .collect();
+
+        self.an_uploaded_artifact_declaring_types(env, &declarations)
+            .await
+    }
+
+    async fn an_uploaded_artifact_declaring_types(
+        self,
+        env: &str,
+        declarations: &[(&str, &str)],
+    ) -> Self {
         let mut art_client = self.fixture().artifacts();
         let token = self.data().auth_token.clone();
 
@@ -229,15 +311,15 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
             .expect("begin upload");
         let upload_id = begin_resp.into_inner().upload_id;
 
-        let uploads: Vec<UploadArtifactRequest> = selectors
+        let uploads: Vec<UploadArtifactRequest> = declarations
             .iter()
-            .map(|selector| UploadArtifactRequest {
+            .map(|(selector, destination_type)| UploadArtifactRequest {
                 upload_id: upload_id.clone(),
-                file_name: format!("{env}/{selector}/forest/generic@1/forest/config.json"),
+                file_name: format!("{env}/{selector}/{destination_type}/forest/config.json"),
                 file_content: serde_json::json!({
                     "env": env,
                     "destination": selector,
-                    "destination_type": "forest/generic@1",
+                    "destination_type": destination_type,
                     "component": null,
                     "config": { "service": "accept-test-service" },
                 })
@@ -289,11 +371,11 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
         let (wrong_env, wrong_destination) = mislabelled_as;
         let upload = UploadArtifactRequest {
             upload_id: upload_id.clone(),
-            file_name: format!("{env}/{selector}/forest/generic@1/forest/config.json"),
+            file_name: format!("{env}/{selector}/forest/flux@1/forest/config.json"),
             file_content: serde_json::json!({
                 "env": env,
                 "destination": selector,
-                "destination_type": "forest/generic@1",
+                "destination_type": "forest/flux@1",
                 "component": null,
                 "config": { "service": "accept-test-service" },
             })

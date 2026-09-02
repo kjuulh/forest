@@ -415,7 +415,9 @@ impl ReleaseRegistry {
         let recs = sqlx::query_as!(
             DestinationRec,
             r#"
-            SELECT DISTINCT d.id, d.name, d.environment
+            SELECT DISTINCT d.id, d.name, d.environment,
+                   d.type_organisation || '/' || d.type_name || '@' || d.type_version
+                       AS "destination_type!"
             FROM destinations d
             LEFT JOIN environments e ON d.environment_id = e.id
             WHERE d.organisation = $3
@@ -465,9 +467,9 @@ impl ReleaseRegistry {
                 let declared_here: Vec<&str> =
                     destination_selector::selectors_for_env(declared, &rec.environment);
                 if !declared_here.is_empty()
-                    && !declared_here
-                        .iter()
-                        .any(|s| destination_selector::matches(s, &rec.name))
+                    && !declared.iter().any(|item| {
+                        destination_selector::selects(item, &rec.name, &rec.destination_type)
+                    })
                 {
                     tracing::warn!(
                         destination = %rec.name,
@@ -497,7 +499,7 @@ impl ReleaseRegistry {
                 candidates,
                 declared,
                 &environment,
-                |rec| rec.name.as_str(),
+                |rec| (rec.name.as_str(), rec.destination_type.as_str()),
             ) {
                 Ok(mut narrowed) => selected.append(&mut narrowed),
                 Err(message) => anyhow::bail!(message),
@@ -1448,6 +1450,9 @@ pub struct DestinationRec {
     pub id: Uuid,
     pub name: String,
     pub environment: String,
+    /// `organisation/name@version`. Selection compares it against the type each
+    /// declared item names — see `destination_selector::selects`.
+    pub destination_type: String,
 }
 
 #[derive(Clone)]

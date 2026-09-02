@@ -200,6 +200,17 @@ pub struct DestinationType {
 }
 
 impl DestinationType {
+    /// `organisation/name@version` — the one spelling of a destination type.
+    ///
+    /// It is what `forest destination create --type` parses, what `forest
+    /// destination types` prints, and what a project writes in its `forest.cue`
+    /// destination blocks. Selection compares a destination's type against the
+    /// type each declared item names, so the two sides have to agree on the
+    /// spelling; this is where they do.
+    pub fn qualified(&self) -> String {
+        format!("{}/{}@{}", self.organisation, self.name, self.version)
+    }
+
     /// Names of the fields this type declares as credentials.
     pub fn sensitive_field_names(&self) -> impl Iterator<Item = &str> {
         self.fields

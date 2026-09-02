@@ -815,6 +815,10 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
 struct StageDestination {
     id: Uuid,
     name: String,
+    /// `organisation/name@version`, as `destination create --type` spells it.
+    /// Carried because selection compares it against the type each declared
+    /// item names — see `destination_selector::selects`.
+    destination_type: String,
 }
 
 /// The outcome of working out where a stage should release to.
@@ -835,12 +839,21 @@ enum StageResolution {
 ///
 /// **The project's declaration.** A stage names an environment; the project's
 /// `forest.cue` names the destinations *within* an environment it releases to,
-/// as selectors. Resolving the environment and stopping there is what scheduled
-/// an ECS service artifact at a shiitake slice registry: the environment held
-/// both, the project had asked for one of them, and nothing consulted the ask.
-/// The declaration was recorded on the annotation at annotate time — see
-/// `destination_selector` — so this works identically for a release fired by a
-/// trigger, where no client supplied anything.
+/// as selectors, each with the destination *type* it renders for. Resolving the
+/// environment and stopping there is what scheduled an ECS service artifact at a
+/// shiitake slice registry: the environment held both, the project had asked for
+/// one of them, and nothing consulted the ask. The declaration was recorded on
+/// the annotation at annotate time — see `destination_selector` — so this works
+/// identically for a release fired by a trigger, where no client supplied
+/// anything.
+///
+/// The type half is the second turn of the same screw. Honouring the selector
+/// but not the type still schedules work nobody declared: `fungus` declares
+/// `forest/terraform@1` for `^dev/.*$` and `forest/generic@1` for
+/// `^platform-dev/.*$`, and both selectors reached both destinations in
+/// `platform-dev` — so a terraform plan ran at an ECS place with no terraform in
+/// the artifact to run. A destination whose type this project declares nothing
+/// for is not scheduled at all; it is out of scope, not failed.
 ///
 /// Declaring nothing for the stage's environment means no filtering, not an
 /// empty filter. Projects that name no destinations must keep releasing to
@@ -854,7 +867,7 @@ async fn resolve_stage_destinations(
     use crate::services::destination_selector;
 
     let in_environment = sqlx::query!(
-        r#"SELECT d.id, d.name
+        r#"SELECT d.id, d.name, d.type_organisation, d.type_name, d.type_version
          FROM destinations d
          JOIN environments e ON d.environment_id = e.id
          JOIN projects p ON p.id = $2
@@ -879,6 +892,7 @@ async fn resolve_stage_destinations(
         .map(|d| StageDestination {
             id: d.id,
             name: d.name,
+            destination_type: format!("{}/{}@{}", d.type_organisation, d.type_name, d.type_version),
         })
         .collect();
 
@@ -917,7 +931,7 @@ async fn resolve_stage_destinations(
     // path. Two copies is how the pipeline path came to ignore declarations the
     // request path already honoured.
     match destination_selector::narrow_to_declared(candidates, &items, environment, |dest| {
-        dest.name.as_str()
+        (dest.name.as_str(), dest.destination_type.as_str())
     }) {
         Ok(selected) => Ok(StageResolution::Ready(selected)),
         Err(message) => Ok(StageResolution::Failed(message)),

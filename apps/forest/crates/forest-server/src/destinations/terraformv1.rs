@@ -441,6 +441,128 @@ pub struct TerraformV1Destination {
     pub tf_state: TerraformStateStore,
 }
 
+/// The directories this release should run terraform in, for this destination.
+///
+/// `release prepare` gives every rendered deployment item a directory of its
+/// own — `{env}/{selector}/{type}` — and drops that item's `forest/config.json`
+/// inside it. Reading those records is the only reliable way back from the
+/// uploaded tree to a directory: the selector is a regex, it routinely contains
+/// a `/` (`^dev/.*$`), and a path with a `/` in one of its components is not
+/// recoverable by listing one level.
+///
+/// Listing one level is what this did, and it is the second half of `fungus`'s
+/// failed release: `^dev/.*$` lands on disk as `^dev/` then `.*$/`, `read_dir`
+/// of the environment sees only `^dev`, and joining the destination's type onto
+/// that names a directory nobody ever wrote. `tokio::process` reports a missing
+/// working directory as a spawn failure, so it surfaced as `terraform init: No
+/// such file or directory (os error 2)` — indistinguishable, from the release
+/// view, from a missing terraform binary. Selectors with no `/` in them
+/// (`hetzner-dev`) resolved fine, which is why this went unnoticed.
+///
+/// The item is chosen by `destination_selector::selects`, the same rule that
+/// scheduled the release — so a destination cannot be sent work that a different
+/// item declared, and a terraform-typed item cannot claim an ECS destination's
+/// directory.
+///
+/// An artifact carrying no item records at all falls back to the original scan.
+/// That is the compatibility hinge: those are artifacts prepared before item
+/// records existed, and they are exactly the ones whose selectors held no `/`.
+async fn work_dirs(
+    temp_dir: &std::path::Path,
+    destination: &Destination,
+    files: &[(std::path::PathBuf, String)],
+) -> anyhow::Result<Vec<std::path::PathBuf>> {
+    use crate::services::destination_selector;
+
+    let destination_type = destination.destination_type.qualified();
+
+    let items = match destination_selector::parse_items(files) {
+        Ok(items) => items,
+        Err(e) => {
+            // Degrade rather than fail: a release that cannot read its own item
+            // records should still get the behaviour it had before they existed.
+            tracing::warn!("could not read this release's deployment items: {e:#}");
+            Vec::new()
+        }
+    };
+
+    if !items.is_empty() {
+        let mut dirs: Vec<std::path::PathBuf> = items
+            .iter()
+            .filter(|parsed| parsed.item.env == destination.environment)
+            .filter(|parsed| {
+                destination_selector::selects(&parsed.item, &destination.name, &destination_type)
+            })
+            .map(|parsed| temp_dir.join(&parsed.root))
+            .collect();
+
+        // `parse_items` orders deepest-root-first for attribution; terraform
+        // wants a stable order and does not care which.
+        dirs.sort();
+        dirs.dedup();
+
+        return Ok(dirs);
+    }
+
+    legacy_work_dirs(temp_dir, destination).await
+}
+
+/// The pre-item-record scan, kept for artifacts that carry no `forest/config.json`.
+///
+/// One level under `{env}/`, each entry treated as a regex over the destination
+/// name, the destination's own type joined on. Correct only while no selector
+/// contains a `/`; see `work_dirs`.
+async fn legacy_work_dirs(
+    temp_dir: &std::path::Path,
+    destination: &Destination,
+) -> anyhow::Result<Vec<std::path::PathBuf>> {
+    let env_dir = temp_dir.join(&destination.environment);
+
+    let mut entries = tokio::fs::read_dir(&env_dir)
+        .await
+        .context("read dir found no destinations for env")?;
+
+    let mut dirs = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        if !entry.file_type().await?.is_dir() {
+            // Ignore forest dirs
+            continue;
+        }
+
+        let entry_name = entry.file_name().to_string_lossy().to_string();
+        if let Ok(re) = regex::Regex::new(&entry_name) {
+            if !re.is_match(&destination.name) {
+                tracing::debug!(
+                    "destination (regex) is not a match: files: {}, destination_name: {}",
+                    entry_name,
+                    destination.name
+                );
+                continue;
+            }
+        } else if entry_name != destination.name {
+            tracing::debug!(
+                "destination is not a match: files: {}, destination_name: {}",
+                entry_name,
+                destination.name
+            );
+            continue;
+        }
+
+        dirs.push(
+            env_dir
+                .join(&entry_name)
+                .join(&destination.destination_type.organisation)
+                .join(format!(
+                    "{}@{}",
+                    destination.destination_type.name, destination.destination_type.version
+                )),
+        );
+    }
+
+    dirs.sort();
+    Ok(dirs)
+}
+
 impl TerraformV1Destination {
     async fn run(
         &self,
@@ -472,7 +594,7 @@ impl TerraformV1Destination {
             .context("get files for release")?;
 
         // 1. Fill temp dir with the correct files
-        for (path, content) in files {
+        for (path, content) in &files {
             let path = temp_dir.join(path);
             tracing::debug!("placing files in: {}", path.display());
 
@@ -491,50 +613,13 @@ impl TerraformV1Destination {
             file.flush().await.context("terraform flush file")?
         }
 
-        let env_dir = &temp_dir.join(&destination.environment);
+        let dirs = work_dirs(&temp_dir, destination, &files).await?;
 
-        let mut env_dir_entries = tokio::fs::read_dir(env_dir)
-            .await
-            .context("read dir found no destinations for env")?;
+        if dirs.is_empty() {
+            anyhow::bail!("failed to find a destination match for submitted release");
+        }
 
-        let mut matched = false;
-        while let Some(env_dir_entry) = env_dir_entries.next_entry().await? {
-            let entry = env_dir_entry.file_type().await?;
-            if !entry.is_dir() {
-                // Ignore forest dirs
-                continue;
-            }
-
-            let entry_name = env_dir_entry.file_name();
-            let entry_name = entry_name.to_string_lossy().to_string();
-            if let Ok(re) = regex::Regex::new(&entry_name.clone()) {
-                if !re.is_match(&destination.name) {
-                    tracing::debug!(
-                        "destination (regex) is not a match: files: {}, destination_name: {}",
-                        entry_name,
-                        destination.name
-                    );
-                    continue;
-                }
-            } else if entry_name != destination.name {
-                tracing::debug!(
-                    "destination is not a match: files: {}, destination_name: {}",
-                    entry_name,
-                    destination.name
-                );
-                continue;
-            }
-
-            matched = true;
-
-            let dir = env_dir
-                .join(entry_name) // find name that matches the dir
-                .join(&destination.destination_type.organisation)
-                .join(format!(
-                    "{}@{}",
-                    destination.destination_type.name, destination.destination_type.version
-                ));
-
+        for dir in dirs {
             // 2. Run terraform command over it
             self.run_command(logger, destination, &dir, &tf_envs, &["init"])
                 .await
@@ -560,10 +645,6 @@ impl TerraformV1Destination {
                     .context("terraform apply")?;
                 }
             }
-        }
-
-        if !matched {
-            anyhow::bail!("failed to find a destination match for submitted release");
         }
 
         Ok(())
@@ -598,7 +679,7 @@ impl TerraformV1Destination {
             .await
             .context("get files for release")?;
 
-        for (path, content) in files {
+        for (path, content) in &files {
             let path = temp_dir.join(path);
             if let Some(parent) = path.parent() {
                 tokio::fs::create_dir_all(parent)
@@ -612,36 +693,15 @@ impl TerraformV1Destination {
             file.flush().await.context("flush")?;
         }
 
-        let env_dir = &temp_dir.join(&destination.environment);
-        let mut env_dir_entries = tokio::fs::read_dir(env_dir)
-            .await
-            .context("read dir found no destinations for env")?;
+        let dirs = work_dirs(&temp_dir, destination, &files).await?;
+
+        if dirs.is_empty() {
+            anyhow::bail!("failed to find a destination match for submitted release");
+        }
 
         let mut plan_output = String::new();
-        let mut matched = false;
 
-        while let Some(env_dir_entry) = env_dir_entries.next_entry().await? {
-            if !env_dir_entry.file_type().await?.is_dir() {
-                continue;
-            }
-            let entry_name = env_dir_entry.file_name().to_string_lossy().to_string();
-            if let Ok(re) = regex::Regex::new(&entry_name) {
-                if !re.is_match(&destination.name) {
-                    continue;
-                }
-            } else if entry_name != destination.name {
-                continue;
-            }
-
-            matched = true;
-            let dir = env_dir
-                .join(&entry_name)
-                .join(&destination.destination_type.organisation)
-                .join(format!(
-                    "{}@{}",
-                    destination.destination_type.name, destination.destination_type.version
-                ));
-
+        for dir in dirs {
             // init
             self.run_command(logger, destination, &dir, &tf_envs, &["init"])
                 .await
@@ -652,10 +712,6 @@ impl TerraformV1Destination {
                 .run_command_capture(logger, destination, &dir, &tf_envs, &["plan"])
                 .await
                 .context("terraform plan")?;
-        }
-
-        if !matched {
-            anyhow::bail!("failed to find a destination match for submitted release");
         }
 
         Ok(plan_output)
@@ -945,5 +1001,140 @@ mod tests {
             Some(v) => unsafe { std::env::set_var("TERRAFORM_EXE", v) },
             None => unsafe { std::env::remove_var("TERRAFORM_EXE") },
         }
+    }
+
+    fn destination(name: &str, environment: &str, type_name: &str) -> Destination {
+        Destination::new(
+            "understory",
+            name,
+            environment,
+            HashMap::new(),
+            forest_models::DestinationType {
+                organisation: "forest".into(),
+                name: type_name.into(),
+                version: 1,
+                description: String::new(),
+                fields: vec![],
+            },
+        )
+    }
+
+    fn item_record(
+        env: &str,
+        selector: &str,
+        destination_type: &str,
+    ) -> (std::path::PathBuf, String) {
+        (
+            std::path::PathBuf::from(format!(
+                "{env}/{selector}/{destination_type}/forest/config.json"
+            )),
+            serde_json::json!({
+                "env": env,
+                "destination": selector,
+                "destination_type": destination_type,
+                "config": {},
+            })
+            .to_string(),
+        )
+    }
+
+    /// `fungus`'s selector, and the reason its release said `terraform init: No
+    /// such file or directory (os error 2)`.
+    ///
+    /// `^dev/.*$` lands on disk as two directories. Listing one level under the
+    /// environment sees `^dev`, and joining the destination's type onto that
+    /// names `platform-dev/^dev/forest/terraform@1` — a directory nobody wrote.
+    /// The item's own record says where it really is.
+    #[tokio::test]
+    async fn a_selector_containing_a_slash_still_resolves_to_its_directory() {
+        let temp = std::path::Path::new("/tmp/forest-work-dirs-test");
+        let files = vec![item_record(
+            "platform-dev",
+            "^dev/.*$",
+            "forest/terraform@1",
+        )];
+
+        let dirs = work_dirs(
+            temp,
+            &destination(
+                "dev/eu-west-1/infrastructure-platform",
+                "platform-dev",
+                "terraform",
+            ),
+            &files,
+        )
+        .await
+        .expect("resolve");
+
+        assert_eq!(
+            dirs,
+            vec![temp.join("platform-dev/^dev/.*$/forest/terraform@1")],
+        );
+    }
+
+    /// And the type is consulted here too, so a terraform destination cannot be
+    /// handed the directory an ECS item rendered.
+    #[tokio::test]
+    async fn an_item_of_another_type_does_not_supply_a_directory() {
+        let temp = std::path::Path::new("/tmp/forest-work-dirs-test");
+        let files = vec![item_record("platform-dev", ".*", "forest/generic@1")];
+
+        let dirs = work_dirs(
+            temp,
+            &destination(
+                "dev/eu-west-1/infrastructure-platform",
+                "platform-dev",
+                "terraform",
+            ),
+            &files,
+        )
+        .await
+        .expect("resolve");
+
+        assert!(dirs.is_empty(), "got: {dirs:?}");
+    }
+
+    /// A project declaring both kinds gets the terraform one, and only it.
+    #[tokio::test]
+    async fn the_right_item_of_several_supplies_the_directory() {
+        let temp = std::path::Path::new("/tmp/forest-work-dirs-test");
+        let files = vec![
+            item_record("platform-dev", ".*", "forest/generic@1"),
+            item_record("platform-dev", "^dev/.*$", "forest/terraform@1"),
+        ];
+
+        let dirs = work_dirs(
+            temp,
+            &destination(
+                "dev/eu-west-1/infrastructure-platform",
+                "platform-dev",
+                "terraform",
+            ),
+            &files,
+        )
+        .await
+        .expect("resolve");
+
+        assert_eq!(
+            dirs,
+            vec![temp.join("platform-dev/^dev/.*$/forest/terraform@1")],
+        );
+    }
+
+    /// Items scoped to another environment are not this destination's.
+    #[tokio::test]
+    async fn an_item_for_another_environment_is_ignored() {
+        let temp = std::path::Path::new("/tmp/forest-work-dirs-test");
+        let files = vec![item_record("platform-prod", ".*", "forest/terraform@1")];
+
+        let dirs = work_dirs(
+            temp,
+            &destination("dev/eu-west-1/x", "platform-dev", "terraform"),
+            &files,
+        )
+        .await
+        .expect("resolve");
+
+        assert!(dirs.is_empty(), "got: {dirs:?}");
     }
 }

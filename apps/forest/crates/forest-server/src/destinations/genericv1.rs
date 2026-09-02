@@ -309,6 +309,7 @@ impl GenericV1Destination {
                     &items,
                     &destination.environment,
                     &destination.name,
+                    &destination.destination_type.qualified(),
                 );
             }
             Ok(None) => {
@@ -350,15 +351,26 @@ impl GenericV1Destination {
             // scheduler via `destination_selector` — the two disagreeing is
             // what let a release be scheduled somewhere its config was then
             // (correctly) withheld.
-            let matches = item
+            //
+            // Type as well as name, for the same reason the scheduler consults
+            // it: a project with an ECS item and a terraform item in one
+            // environment has two records whose selectors can both match, and
+            // the first by name is not necessarily the right one.
+            let selected = item
                 .get("destination")
                 .and_then(|d| d.as_str())
                 .map(|pattern| {
                     crate::services::destination_selector::matches(pattern, &destination.name)
                 })
-                .unwrap_or(false);
+                .unwrap_or(false)
+                && crate::services::destination_selector::type_matches(
+                    item.get("destination_type")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or_default(),
+                    &destination.destination_type.qualified(),
+                );
 
-            if !matches {
+            if !selected {
                 continue;
             }
 

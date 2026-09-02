@@ -129,18 +129,25 @@ pub fn parse_declaration(
 /// The config a declaration contributes for one destination, flattened for a
 /// provider that receives a flat string map.
 ///
-/// The item is picked by the same `matches` the scheduler used, so the config a
+/// The item is picked by the same [`selects`] the scheduler used, so the config a
 /// destination receives and the reason it was chosen cannot come apart. Nested
 /// structure is dropped rather than encoded as JSON into a value someone would
 /// have to guess the shape of.
+///
+/// Type included, and it matters here as much as in the scheduler: a project
+/// declaring two items for one environment — an ECS one and a terraform one, as
+/// `fungus` does — has two records whose selectors can both match a given name,
+/// and picking the first by name alone hands the ECS destination the terraform
+/// item's config.
 pub fn config_for_destination(
     items: &[DeploymentItem],
     environment: &str,
     destination_name: &str,
+    destination_type: &str,
 ) -> std::collections::HashMap<String, String> {
     let Some(item) = items
         .iter()
-        .find(|item| item.env == environment && matches(&item.destination, destination_name))
+        .find(|item| item.env == environment && selects(item, destination_name, destination_type))
     else {
         return std::collections::HashMap::new();
     };
@@ -190,6 +197,48 @@ pub async fn recorded_declaration(
     }
 }
 
+/// Does a project's declared destination *type* cover a destination of type
+/// `actual`?
+///
+/// Both are the `organisation/name@version` spelling — `forest/terraform@1` —
+/// the one `destination create --type` takes and the one `release prepare`
+/// renders into each item record, so they compare directly.
+///
+/// **Blank on either side means "do not filter on type."** That is the
+/// compatibility hinge, and it has two real sources: an artifact annotated
+/// before item records carried a type at all (`destination_type` is
+/// `#[serde(default)]`), and a caller that has no type to offer. Neither is a
+/// statement about kind, and reading absence as "matches nothing" would fail
+/// stages for projects that never said anything wrong.
+pub fn type_matches(declared: &str, actual: &str) -> bool {
+    let declared = declared.trim();
+    let actual = actual.trim();
+
+    if declared.is_empty() || actual.is_empty() {
+        return true;
+    }
+
+    declared == actual
+}
+
+/// Does one declared item select this destination? **Place and kind, both.**
+///
+/// The name selector says *where*; the item's `type` says *what it renders*. A
+/// project that declared `forest/terraform@1` for `^dev/.*$` has said it ships
+/// terraform to the terraform places called `dev/…` — it has not volunteered to
+/// have a terraform plan run at an ECS service that happens to share the name
+/// shape, and it has not asked for an ECS rollout either.
+///
+/// Matching on the name alone is what scheduled a terraform plan for `fungus`
+/// at `platform-dev/eu-west-1/infrastructure-platform`, an ECS place, where the
+/// artifact carries no terraform to run. The destination it *did* declare was
+/// released to as well, so the failure read as "half the release is broken"
+/// rather than as "forest scheduled something nobody asked for".
+pub fn selects(item: &DeploymentItem, destination_name: &str, destination_type: &str) -> bool {
+    matches(&item.destination, destination_name)
+        && type_matches(&item.destination_type, destination_type)
+}
+
 /// Narrow a set of candidate destinations to the ones a project declared for
 /// `environment`.
 ///
@@ -197,6 +246,9 @@ pub async fn recorded_declaration(
 /// or plan stage activating) and the request path (`forest release` naming an
 /// environment). They were separate once, which is how the pipeline path spent a
 /// release cycle ignoring declarations the request path was already honouring.
+///
+/// `describe` yields a candidate's `(name, type)`. Both are consulted — see
+/// [`selects`].
 ///
 /// - Nothing declared for `environment` → every candidate, unchanged. This is the
 ///   compatibility hinge: a project that declares no destinations must keep
@@ -207,6 +259,12 @@ pub async fn recorded_declaration(
 ///   success: silently deploying nothing is the failure this whole mechanism
 ///   exists to prevent.
 ///
+/// A candidate the declaration does not cover is simply **not scheduled**. It is
+/// not a failure and it does not appear on the release at all: no row, no red
+/// stage, and nothing counted against "stages complete". Failing it instead
+/// would be describing a project's own scoping decision as a problem with the
+/// release.
+///
 /// A selector that matches nothing while a sibling matches something is a
 /// warning, not an error — a regex is allowed not to match, and a project
 /// declaring several regions should not break because one does not exist here
@@ -215,21 +273,25 @@ pub fn narrow_to_declared<T>(
     candidates: Vec<T>,
     items: &[DeploymentItem],
     environment: &str,
-    name_of: impl Fn(&T) -> &str,
+    describe: impl Fn(&T) -> (&str, &str),
 ) -> Result<Vec<T>, String> {
-    let selectors = selectors_for_env(items, environment);
-    if selectors.is_empty() {
+    let declared: Vec<&DeploymentItem> = items
+        .iter()
+        .filter(|item| item.env == environment)
+        .collect();
+    if declared.is_empty() {
         return Ok(candidates);
     }
 
-    for selector in &selectors {
-        if !candidates
-            .iter()
-            .any(|candidate| matches(selector, name_of(candidate)))
-        {
+    for item in &declared {
+        if !candidates.iter().any(|candidate| {
+            let (name, destination_type) = describe(candidate);
+            selects(item, name, destination_type)
+        }) {
             tracing::warn!(
                 environment,
-                selector,
+                selector = item.destination,
+                destination_type = item.destination_type,
                 "declared destination selector matches nothing in this environment"
             );
         }
@@ -237,20 +299,48 @@ pub fn narrow_to_declared<T>(
 
     let available: Vec<String> = candidates
         .iter()
-        .map(|candidate| name_of(candidate).to_string())
+        .map(|candidate| describe_one(&describe, candidate))
         .collect();
+
+    // Matched the place but not the kind. Kept separately because it is the one
+    // exclusion worth explaining: "your selector found this destination, and
+    // then the types disagreed" is a different thing to debug from "your
+    // selector found nothing".
+    let mut wrong_kind: Vec<String> = Vec::new();
 
     let selected: Vec<T> = candidates
         .into_iter()
         .filter(|candidate| {
-            selectors
+            let (name, destination_type) = describe(candidate);
+
+            if declared
                 .iter()
-                .any(|selector| matches(selector, name_of(candidate)))
+                .any(|item| selects(item, name, destination_type))
+            {
+                return true;
+            }
+
+            if declared.iter().any(|item| matches(&item.destination, name)) {
+                tracing::info!(
+                    environment,
+                    destination = name,
+                    destination_type,
+                    "not scheduled: this project declares no component of this destination's type"
+                );
+                wrong_kind.push(format!("{name} ({destination_type})"));
+            }
+
+            false
         })
         .collect();
 
     if selected.is_empty() {
-        return Err(format!(
+        let selectors: Vec<String> = declared
+            .iter()
+            .map(|item| describe_declared(item))
+            .collect();
+
+        let mut message = format!(
             "environment '{environment}' holds {} ({}), and this project declared [{}] for it, which match none of them",
             match available.len() {
                 1 => "1 destination".to_string(),
@@ -258,10 +348,40 @@ pub fn narrow_to_declared<T>(
             },
             available.join(", "),
             selectors.join(", "),
-        ));
+        );
+
+        if !wrong_kind.is_empty() {
+            message.push_str(&format!(
+                " — {} match by name but are of a type this project declares nothing for",
+                wrong_kind.join(", "),
+            ));
+        }
+
+        return Err(message);
     }
 
     Ok(selected)
+}
+
+/// `name (type)`, or just the name when the caller has no type to offer.
+fn describe_one<T>(describe: &impl Fn(&T) -> (&str, &str), candidate: &T) -> String {
+    let (name, destination_type) = describe(candidate);
+    if destination_type.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name} ({destination_type})")
+    }
+}
+
+/// The same shape for the other side of the comparison, so a failure message
+/// puts `^dev/.*$ (forest/terraform@1)` next to
+/// `platform-dev/… (forest/generic@1)` and the mismatch reads off the line.
+fn describe_declared(item: &DeploymentItem) -> String {
+    if item.destination_type.is_empty() {
+        item.destination.clone()
+    } else {
+        format!("{} ({})", item.destination, item.destination_type)
+    }
 }
 
 /// A parsed item record together with the directory it governs.
@@ -365,7 +485,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        DeploymentItem, config_for_destination, matches, parse_declaration, selectors_for_env,
+        DeploymentItem, config_for_destination, matches, narrow_to_declared, parse_declaration,
+        selectors_for_env, type_matches,
     };
 
     /// What `release prepare` writes, at the path it writes it to — selector and
@@ -568,7 +689,8 @@ mod tests {
             ),
         ];
 
-        let config = config_for_destination(&items, "data", "data-prod/eu-west-1/x");
+        let config =
+            config_for_destination(&items, "data", "data-prod/eu-west-1/x", "forest/generic@1");
 
         assert_eq!(
             config.get("service").map(String::as_str),
@@ -587,7 +709,7 @@ mod tests {
             serde_json::json!({ "service": "x" }),
         )];
 
-        assert!(config_for_destination(&items, "data", "data").is_empty());
+        assert!(config_for_destination(&items, "data", "data", "forest/generic@1").is_empty());
     }
 
     #[test]
@@ -599,7 +721,10 @@ mod tests {
         )];
 
         // The selector would match, but it was declared for another environment.
-        assert!(config_for_destination(&items, "data-prod", "data-prod/x").is_empty());
+        assert!(
+            config_for_destination(&items, "data-prod", "data-prod/x", "forest/generic@1")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -616,7 +741,7 @@ mod tests {
             }),
         )];
 
-        let config = config_for_destination(&items, "e", "d");
+        let config = config_for_destination(&items, "e", "d", "forest/generic@1");
 
         assert_eq!(config.get("service").map(String::as_str), Some("svc"));
         assert_eq!(config.get("replicas").map(String::as_str), Some("3"));
@@ -675,7 +800,379 @@ mod tests {
             config: Some(serde_json::json!({ "service": "x" })),
         }];
 
-        assert!(config_for_destination(&items, "data", "anything").is_empty());
+        assert!(config_for_destination(&items, "data", "anything", "t").is_empty());
         assert!(!matches(&items[0].destination, "anything"));
+    }
+
+    // ── The declared-type intersection ──────────────────────────────────
+    //
+    // `fungus` is the worked example throughout. Its forest.cue declares two
+    // items for one environment:
+    //
+    //     understory/service  ^dev/.*$          forest/terraform@1
+    //     project             ^platform-dev/.*$ forest/generic@1
+    //
+    // and `platform-dev` holds two destinations, one of each type. Selecting on
+    // the name alone puts every item at every destination whose name matches
+    // any of them.
+
+    /// A candidate as the scheduler describes it: name, then type.
+    fn dest(name: &str, destination_type: &str) -> (String, String) {
+        (name.to_string(), destination_type.to_string())
+    }
+
+    fn describe(d: &(String, String)) -> (&str, &str) {
+        (d.0.as_str(), d.1.as_str())
+    }
+
+    fn declared(env: &str, selector: &str, destination_type: &str) -> DeploymentItem {
+        DeploymentItem {
+            env: env.into(),
+            destination: selector.into(),
+            destination_type: destination_type.into(),
+            config: None,
+        }
+    }
+
+    /// The bug, in one assertion. A terraform item and an ECS destination in the
+    /// same environment: the selector reaches it, the type does not, so it is
+    /// not scheduled.
+    #[test]
+    fn a_terraform_item_does_not_schedule_an_ecs_destination() {
+        let items = vec![declared("platform-dev", "dev.*", "forest/terraform@1")];
+
+        let candidates = vec![
+            dest(
+                "dev/eu-west-1/infrastructure-platform",
+                "forest/terraform@1",
+            ),
+            dest(
+                "platform-dev/eu-west-1/infrastructure-platform",
+                "forest/generic@1",
+            ),
+        ];
+
+        // Unanchored on purpose: this is what `fungus` shipped, and both names
+        // match it. Only the type tells them apart.
+        assert!(matches(
+            "dev.*",
+            "platform-dev/eu-west-1/infrastructure-platform"
+        ));
+
+        let selected =
+            narrow_to_declared(candidates, &items, "platform-dev", describe).expect("some match");
+
+        assert_eq!(
+            selected.iter().map(|d| d.0.as_str()).collect::<Vec<_>>(),
+            vec!["dev/eu-west-1/infrastructure-platform"],
+            "a terraform declaration must not reach an ECS place",
+        );
+    }
+
+    /// And the other direction, which is the same mistake wearing the other hat:
+    /// an ECS item must not schedule a terraform plan.
+    #[test]
+    fn an_ecs_item_does_not_schedule_a_terraform_destination() {
+        let items = vec![declared(
+            "platform-dev",
+            ".*infrastructure-platform",
+            "forest/generic@1",
+        )];
+
+        let candidates = vec![
+            dest(
+                "dev/eu-west-1/infrastructure-platform",
+                "forest/terraform@1",
+            ),
+            dest(
+                "platform-dev/eu-west-1/infrastructure-platform",
+                "forest/generic@1",
+            ),
+        ];
+
+        let selected =
+            narrow_to_declared(candidates, &items, "platform-dev", describe).expect("some match");
+
+        assert_eq!(
+            selected.iter().map(|d| d.0.as_str()).collect::<Vec<_>>(),
+            vec!["platform-dev/eu-west-1/infrastructure-platform"],
+        );
+    }
+
+    /// `fungus` as it stands today: both types declared, both destinations
+    /// reached. The filter is an intersection, not a veto — over-filtering would
+    /// break the very release it is meant to fix.
+    #[test]
+    fn a_project_declaring_both_types_schedules_both() {
+        let items = vec![
+            declared("platform-dev", "^dev/.*$", "forest/terraform@1"),
+            declared("platform-dev", "^platform-dev/.*$", "forest/generic@1"),
+        ];
+
+        let candidates = vec![
+            dest(
+                "dev/eu-west-1/infrastructure-platform",
+                "forest/terraform@1",
+            ),
+            dest(
+                "platform-dev/eu-west-1/infrastructure-platform",
+                "forest/generic@1",
+            ),
+        ];
+
+        let selected =
+            narrow_to_declared(candidates, &items, "platform-dev", describe).expect("both match");
+
+        assert_eq!(selected.len(), 2, "got: {selected:?}");
+    }
+
+    /// A destination excluded only by its type is *out of scope*, not failed. It
+    /// leaves no release row, so it cannot show up red on the release view and
+    /// cannot be counted against the stages that are in scope — which is the
+    /// difference between `0/2 complete` with a phantom terraform row and `1/1`.
+    #[test]
+    fn a_destination_of_an_undeclared_type_is_skipped_not_failed() {
+        let items = vec![declared("platform-dev", ".*", "forest/generic@1")];
+
+        let candidates = vec![
+            dest("a", "forest/generic@1"),
+            dest("b", "forest/terraform@1"),
+        ];
+
+        let selected = narrow_to_declared(candidates, &items, "platform-dev", describe)
+            .expect("the declared one matches, so this is not an error");
+
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].0, "a");
+    }
+
+    /// When the *only* thing wrong is the type, the message has to say so.
+    /// "matches none of them" next to a destination the selector obviously
+    /// matches is the kind of error that sends someone to rewrite a working
+    /// regex.
+    #[test]
+    fn a_type_only_mismatch_says_it_is_a_type_mismatch() {
+        let items = vec![declared("platform-dev", "^dev/.*$", "forest/terraform@1")];
+
+        let candidates = vec![dest(
+            "dev/eu-west-1/infrastructure-platform",
+            "forest/generic@1",
+        )];
+
+        let err = narrow_to_declared(candidates, &items, "platform-dev", describe)
+            .expect_err("nothing is selectable");
+
+        assert!(err.contains("forest/terraform@1"), "got: {err}");
+        assert!(err.contains("forest/generic@1"), "got: {err}");
+        assert!(
+            err.contains("a type this project declares nothing for"),
+            "got: {err}",
+        );
+    }
+
+    /// The compatibility hinge. An artifact annotated before item records
+    /// carried a type has `destination_type: ""`, which is not a claim about
+    /// kind — filtering on it would fail stages for projects that never said
+    /// anything wrong.
+    #[test]
+    fn an_item_with_no_recorded_type_still_gates_on_the_name_alone() {
+        let items = vec![declared("platform-dev", "^dev/.*$", "")];
+
+        let candidates = vec![
+            dest(
+                "dev/eu-west-1/infrastructure-platform",
+                "forest/terraform@1",
+            ),
+            dest(
+                "platform-dev/eu-west-1/infrastructure-platform",
+                "forest/generic@1",
+            ),
+        ];
+
+        let selected =
+            narrow_to_declared(candidates, &items, "platform-dev", describe).expect("some match");
+
+        assert_eq!(
+            selected.iter().map(|d| d.0.as_str()).collect::<Vec<_>>(),
+            vec!["dev/eu-west-1/infrastructure-platform"],
+            "the name selector still applies; only the type check is skipped",
+        );
+    }
+
+    /// And a caller with no type to offer is not filtered either.
+    #[test]
+    fn a_candidate_with_no_known_type_is_not_filtered_out() {
+        assert!(type_matches("", "forest/generic@1"));
+        assert!(type_matches("forest/generic@1", ""));
+        assert!(type_matches("", ""));
+    }
+
+    /// Types compare as the whole `organisation/name@version` string. `@1` and
+    /// `@2` of one type are different destination types, and forest already
+    /// treats them that way everywhere else.
+    #[test]
+    fn types_compare_whole_including_the_version() {
+        assert!(type_matches("forest/terraform@1", "forest/terraform@1"));
+        assert!(!type_matches("forest/terraform@1", "forest/terraform@2"));
+        assert!(!type_matches("forest/terraform@1", "forest/generic@1"));
+        assert!(!type_matches(
+            "forest/terraform@1",
+            "understory/terraform@1"
+        ));
+    }
+
+    /// Declaring nothing at all for an environment still fans out — the hinge
+    /// every project that names no destinations depends on. Unchanged by the
+    /// type filter, and asserted here because the filter now runs over items
+    /// rather than over selectors.
+    #[test]
+    fn nothing_declared_for_the_environment_still_fans_out() {
+        let items = vec![declared("some-other-env", "^dev/.*$", "forest/terraform@1")];
+
+        let candidates = vec![
+            dest("a", "forest/generic@1"),
+            dest("b", "forest/terraform@1"),
+        ];
+
+        let selected =
+            narrow_to_declared(candidates, &items, "platform-dev", describe).expect("no filter");
+
+        assert_eq!(selected.len(), 2);
+    }
+
+    /// `selects` is the single rule; `config_for_destination` uses it too, so a
+    /// destination cannot be scheduled by one item and configured by another.
+    #[test]
+    fn config_comes_from_the_item_that_selected_the_destination() {
+        let items = vec![
+            DeploymentItem {
+                env: "platform-dev".into(),
+                destination: ".*infrastructure-platform".into(),
+                destination_type: "forest/terraform@1".into(),
+                config: Some(serde_json::json!({ "service": "terraform_one" })),
+            },
+            DeploymentItem {
+                env: "platform-dev".into(),
+                destination: ".*infrastructure-platform".into(),
+                destination_type: "forest/generic@1".into(),
+                config: Some(serde_json::json!({ "service": "ecs_one" })),
+            },
+        ];
+
+        // Both selectors match this name; only the type separates them, and the
+        // terraform item is first in the list.
+        let config = config_for_destination(
+            &items,
+            "platform-dev",
+            "platform-dev/eu-west-1/infrastructure-platform",
+            "forest/generic@1",
+        );
+
+        assert_eq!(config.get("service").map(String::as_str), Some("ecs_one"));
+    }
+
+    /// End to end from the real thing: the item records `forest release prepare`
+    /// writes for `fungus`, at the paths it writes them to, against the two
+    /// destinations `understory`'s `platform-dev` actually holds.
+    ///
+    /// Captured from the repo rather than invented, because the two details that
+    /// matter are easy to get wrong from memory: the selector carries a `/`, and
+    /// the two items differ only in their type.
+    #[test]
+    fn the_fungus_declaration_reaches_one_destination_of_each_kind() {
+        let files = vec![
+            (
+                PathBuf::from("platform-dev/^dev/.*$/forest/terraform@1/forest/config.json"),
+                r#"{"env":"platform-dev","destination":"^dev/.*$",
+                    "destination_type":"forest/terraform@1","component":null,
+                    "config":{"name":"fungus"}}"#
+                    .to_string(),
+            ),
+            (
+                PathBuf::from("platform-dev/^platform-dev/.*$/forest/generic@1/forest/config.json"),
+                r#"{"env":"platform-dev","destination":"^platform-dev/.*$",
+                    "destination_type":"forest/generic@1","component":null,
+                    "config":{"service":"fungus"}}"#
+                    .to_string(),
+            ),
+        ];
+
+        let items = parse_declaration(&files).expect("the real records parse");
+
+        let candidates = vec![
+            dest(
+                "dev/eu-west-1/infrastructure-platform",
+                "forest/terraform@1",
+            ),
+            dest(
+                "platform-dev/eu-west-1/infrastructure-platform",
+                "forest/generic@1",
+            ),
+        ];
+
+        let selected =
+            narrow_to_declared(candidates, &items, "platform-dev", describe).expect("both match");
+
+        assert_eq!(selected.len(), 2);
+
+        // And each one gets its own item's config, not the other's.
+        assert_eq!(
+            config_for_destination(
+                &items,
+                "platform-dev",
+                "platform-dev/eu-west-1/infrastructure-platform",
+                "forest/generic@1",
+            )
+            .get("service")
+            .map(String::as_str),
+            Some("fungus"),
+        );
+        assert_eq!(
+            config_for_destination(
+                &items,
+                "platform-dev",
+                "dev/eu-west-1/infrastructure-platform",
+                "forest/terraform@1",
+            )
+            .get("name")
+            .map(String::as_str),
+            Some("fungus"),
+        );
+    }
+
+    /// And the version of that declaration this fixes: before `fungus` anchored
+    /// its selector, the terraform item read `dev/.*`, which finds "dev" inside
+    /// "platform-dev". Anchoring was the workaround; consulting the type is what
+    /// makes the workaround unnecessary.
+    #[test]
+    fn the_unanchored_fungus_selector_no_longer_reaches_the_ecs_place() {
+        let items = vec![
+            declared("platform-dev", "dev/.*", "forest/terraform@1"),
+            declared("platform-dev", "^platform-dev/.*$", "forest/generic@1"),
+        ];
+
+        assert!(
+            matches("dev/.*", "platform-dev/eu-west-1/infrastructure-platform"),
+            "the selector really does match the ECS place by name",
+        );
+
+        let ecs = vec![dest(
+            "platform-dev/eu-west-1/infrastructure-platform",
+            "forest/generic@1",
+        )];
+
+        // Only the generic item can claim it, and that is the one whose config
+        // and manifests belong there.
+        let selected = narrow_to_declared(ecs, &items, "platform-dev", describe).expect("matches");
+        assert_eq!(selected.len(), 1);
+
+        let terraform_only = vec![declared("platform-dev", "dev/.*", "forest/terraform@1")];
+        let ecs = vec![dest(
+            "platform-dev/eu-west-1/infrastructure-platform",
+            "forest/generic@1",
+        )];
+
+        narrow_to_declared(ecs, &terraform_only, "platform-dev", describe)
+            .expect_err("a terraform-only declaration has no business here");
     }
 }
