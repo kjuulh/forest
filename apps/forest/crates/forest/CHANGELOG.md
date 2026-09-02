@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.11](https://github.com/understory-io/forest/compare/v0.3.10...v0.3.11) (2026-09-02)
+
+
+### Bug Fixes
+
+* **forest-server:** respect the destination types a project declared ([#231](https://github.com/understory-io/forest/issues/231)) ([9d48b17](https://github.com/understory-io/forest/commit/9d48b17a0ec4bac793d39b7e469762917bd466b8))
+
 ## [0.3.10](https://github.com/understory-io/forest/compare/v0.3.9...v0.3.10) (2026-09-01)
 
 
