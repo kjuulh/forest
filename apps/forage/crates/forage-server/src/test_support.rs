@@ -104,6 +104,11 @@ pub(crate) struct MockPlatformBehavior {
         Option<Result<forage_core::platform::DeploymentStates, PlatformError>>,
     pub get_release_intent_states_result:
         Option<Result<Vec<forage_core::platform::ReleaseIntentState>, PlatformError>>,
+    // DATA-703 — per-project artifacts, so a test can give each project its
+    // own releases and assert how a cross-project feed orders them.
+    // Takes precedence over `list_artifacts_result`; a project with no entry
+    // returns no artifacts.
+    pub list_artifacts_by_project: Option<std::collections::HashMap<String, Vec<Artifact>>>,
 }
 
 pub(crate) fn ok_tokens() -> AuthTokens {
@@ -502,9 +507,12 @@ impl ForestPlatform for MockPlatformClient {
         &self,
         _access_token: &str,
         _organisation: &str,
-        _project: &str,
+        project: &str,
     ) -> Result<Vec<Artifact>, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        if let Some(by_project) = b.list_artifacts_by_project.as_ref() {
+            return Ok(by_project.get(project).cloned().unwrap_or_default());
+        }
         b.list_artifacts_result.clone().unwrap_or(Ok(vec![Artifact {
             artifact_id: "art-1".into(),
             slug: "my-api-abc123".into(),

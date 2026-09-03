@@ -294,8 +294,32 @@ async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Re
         return Ok(Html(html).into_response());
     }
 
-    // Fetch recent activity: for each org, get projects, then artifacts
-    let mut recent_activity = Vec::new();
+    // Fetch recent activity: for each org, get projects, then artifacts.
+    //
+    // Collect every project's artifacts first and sort by `created_at` at the
+    // end. Filling the list project by project instead — and stopping at the
+    // first five projects — pinned the feed to whichever projects
+    // `list_projects` happened to return first (it has no ORDER BY, so that is
+    // heap order, unrelated to recency). One busy project with ten or more
+    // releases filled the whole list on its own and the loop broke, so the
+    // dashboard showed that project's history and never the org's newest work
+    // — "Recent activity" sat frozen at a release days old while other
+    // projects deployed all day (DATA-703).
+    //
+    // Same collect-then-sort shape as the notifications and profile feeds
+    // below, which were already correct.
+    const RECENT_ACTIVITY_LIMIT: usize = 10;
+
+    struct ActivityItem {
+        org_name: String,
+        project_name: String,
+        slug: String,
+        title: String,
+        created_at: String,
+        dest_envs: Vec<String>,
+    }
+
+    let mut activity: Vec<ActivityItem> = Vec::new();
     let mut first_org_projects: Vec<String> = Vec::new();
     for org in orgs {
         let projects = warn_default(
@@ -312,15 +336,22 @@ async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Re
             first_org_projects = projects.clone();
         }
 
-        for project in projects.iter().take(5) {
-            let artifacts = warn_default(
-                "dashboard: list_artifacts",
-                state
-                    .platform_client
-                    .list_artifacts(&session.access_token, &org.name, project)
-                    .await,
-            );
+        // One round trip per project, issued concurrently: covering every
+        // project costs about what the old capped five did serially.
+        let client = &state.platform_client;
+        let token = session.access_token.as_str();
+        let org_name = org.name.as_str();
+        let artifact_lists =
+            futures_util::future::join_all(projects.iter().map(|project| async move {
+                let artifacts = warn_default(
+                    "dashboard: list_artifacts",
+                    client.list_artifacts(token, org_name, project).await,
+                );
+                (project, artifacts)
+            }))
+            .await;
 
+        for (project, artifacts) in artifact_lists {
             for artifact in artifacts {
                 let mut seen_envs = std::collections::HashSet::new();
                 let dest_envs: Vec<String> = artifact
@@ -329,23 +360,37 @@ async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Re
                     .filter(|d| seen_envs.insert(d.environment.clone()))
                     .map(|d| d.environment.clone())
                     .collect();
-                recent_activity.push(context! {
-                    org_name => org.name,
-                    project_name => project,
-                    slug => artifact.slug,
-                    title => artifact.context.title,
-                    created_at => artifact.created_at,
-                    dest_envs => dest_envs,
+                activity.push(ActivityItem {
+                    org_name: org.name.clone(),
+                    project_name: project.clone(),
+                    slug: artifact.slug,
+                    title: artifact.context.title,
+                    created_at: artifact.created_at,
+                    dest_envs,
                 });
-                if recent_activity.len() >= 10 {
-                    break;
-                }
-            }
-            if recent_activity.len() >= 10 {
-                break;
             }
         }
     }
+
+    // Newest first, then cap. `created_at` is RFC3339 rendered from a UTC
+    // timestamp, so the offset is always `+00:00` and a lexicographic compare
+    // orders it correctly — the same compare the profile feed uses.
+    activity.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    activity.truncate(RECENT_ACTIVITY_LIMIT);
+
+    let recent_activity: Vec<_> = activity
+        .iter()
+        .map(|item| {
+            context! {
+                org_name => &item.org_name,
+                project_name => &item.project_name,
+                slug => &item.slug,
+                title => &item.title,
+                created_at => &item.created_at,
+                dest_envs => &item.dest_envs,
+            }
+        })
+        .collect();
 
     // Auto-invite offers — surfaced as a banner if any are present (DATA-252).
     // Soft-fail: a failure here shouldn't break the dashboard.

@@ -59,6 +59,110 @@ async fn dashboard_shows_recent_artifacts() {
     assert!(html.contains("Deploy v1.0"));
 }
 
+/// DATA-703 — "Recent activity" must be ordered by release time across every
+/// project, not filled project by project.
+///
+/// The regression this pins: the feed used to walk only the first five
+/// projects `list_projects` returned and stop as soon as it had ten items. One
+/// busy project with ten or more releases filled the list on its own, so the
+/// dashboard rendered that project's history and never the org's newest work —
+/// in production it sat six days stale while other projects deployed hourly.
+///
+/// `stale-project` comes first and has twelve old releases; `fresh-project`
+/// comes sixth and holds the newest one. Under the old code `fresh-project`
+/// was never even fetched.
+#[tokio::test]
+async fn dashboard_recent_activity_orders_across_projects_not_per_project() {
+    fn artifact(slug: &str, title: &str, created_at: &str) -> Artifact {
+        Artifact {
+            artifact_id: slug.into(),
+            slug: slug.into(),
+            context: ArtifactContext {
+                title: title.into(),
+                description: None,
+                web: None,
+                pr: None,
+            },
+            source: None,
+            git_ref: None,
+            destinations: vec![],
+            created_at: created_at.into(),
+        }
+    }
+
+    // Newest first, the order the artifacts API returns them in.
+    let stale: Vec<Artifact> = (1..=12)
+        .map(|i| {
+            artifact(
+                &format!("stale-{i:02}"),
+                &format!("Stale {i:02}"),
+                // 2026-08-20 counting down to 2026-08-09.
+                &format!("2026-08-{:02}T10:00:00+00:00", 21 - i),
+            )
+        })
+        .collect();
+    let fresh = vec![artifact(
+        "fresh-1",
+        "Fresh deploy",
+        "2026-09-03T09:26:29+00:00",
+    )];
+
+    let mut by_project = std::collections::HashMap::new();
+    by_project.insert("stale-project".to_string(), stale);
+    by_project.insert("fresh-project".to_string(), fresh);
+
+    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
+        // `fresh-project` sits past the old five-project cutoff.
+        list_projects_result: Some(Ok(vec![
+            "stale-project".into(),
+            "filler-2".into(),
+            "filler-3".into(),
+            "filler-4".into(),
+            "filler-5".into(),
+            "fresh-project".into(),
+        ])),
+        list_artifacts_by_project: Some(by_project),
+        ..Default::default()
+    });
+    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/dashboard")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+
+    // The newest release is present at all — the old code dropped it entirely.
+    let fresh_at = html
+        .find("Fresh deploy")
+        .expect("newest release across projects should appear in recent activity");
+
+    // ...and it leads the feed, ahead of the stale project's newest.
+    let stale_at = html.find("Stale 01").expect("stale releases should appear");
+    assert!(
+        fresh_at < stale_at,
+        "newest release should sort ahead of older ones"
+    );
+
+    // The ten-item cap still holds, applied after sorting: the newest release
+    // plus the nine newest stale ones, so 10, 11 and 12 fall off.
+    assert!(html.contains("Stale 09"), "should keep the 9 newest stale");
+    assert!(!html.contains("Stale 10"), "should cap at 10 items total");
+    assert!(!html.contains("Stale 12"), "oldest should be dropped");
+}
+
 #[tokio::test]
 async fn dashboard_empty_activity_shows_empty_state() {
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
