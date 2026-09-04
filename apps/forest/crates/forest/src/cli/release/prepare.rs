@@ -19,9 +19,25 @@ use crate::{
 
 #[derive(clap::Parser)]
 pub struct PrepareCommand {
-    /// Override config values. Format: org/component.key=value
-    /// Example: --set kjuulh/service.tag=abc123
-    /// Nested keys use dots: --set kjuulh/service.env_vars.LOG_LEVEL=debug
+    /// Override a config value for this release, without editing forest.cue.
+    ///
+    /// Two targets, told apart by whether the path names a component:
+    ///
+    ///   --set org/component.key=value   a component's config
+    ///     e.g. --set understory/service.image.tag=main-601f507
+    ///     Nested keys use dots: --set kjuulh/service.env_vars.LOG_LEVEL=debug
+    ///
+    ///   --set config.key=value          the deployment config block
+    ///     e.g. --set config.image_tag=main-601f507
+    ///
+    /// A component-rendered destination (`forest/terraform@1`) consumes
+    /// component config. A `forest/generic@1` destination has no component and
+    /// is handed the deployment `config` block directly, so that is what a
+    /// release contributes to for one of those.
+    ///
+    /// Either way the use is the same: a value the project cannot know when it
+    /// is written — an image tag CI has just pushed, where forest.cue carries
+    /// `main` or nothing as the fallback for a render with no override.
     #[arg(long = "set", value_name = "KEY=VALUE")]
     pub overrides: Vec<String>,
 }
@@ -37,8 +53,16 @@ impl PrepareCommand {
 
         let mut project = state.project_parser().get_project().await?;
 
-        // Apply --set overrides to project config
-        for kv in &self.overrides {
+        // `config.`-prefixed overrides address the deployment config block,
+        // which does not exist yet — it is merged out of the project and
+        // environment blocks further down. Everything else is component config
+        // and applies to the parsed project now.
+        let (deployment_overrides, component_overrides): (Vec<&String>, Vec<&String>) = self
+            .overrides
+            .iter()
+            .partition(|kv| kv.starts_with(DEPLOYMENT_CONFIG_PREFIX));
+
+        for kv in component_overrides {
             apply_config_override(&mut project.other, kv)
                 .with_context(|| format!("invalid --set value: {kv}"))?;
         }
@@ -102,6 +126,16 @@ impl PrepareCommand {
             let project_config = project.get("config");
             tracing::trace!("adding deployment from project");
             get_deployment_items(&mut deployment_items, None, project_config, envs)?;
+        }
+
+        // Applied after the project and environment blocks have merged, so a
+        // release override wins over both — it is the most specific thing
+        // anyone said about this release.
+        for item in &mut deployment_items {
+            for kv in &deployment_overrides {
+                apply_deployment_config_override(item, kv)
+                    .with_context(|| format!("invalid --set value: {kv}"))?;
+            }
         }
 
         tracing::info!("generate deployment env");
@@ -620,6 +654,46 @@ fn merge_config(base: ProjectValue, patch: ProjectValue) -> ProjectValue {
 /// Examples:
 ///   "kjuulh/service.tag=abc123"           → config.tag = "abc123"
 ///   "kjuulh/service.env_vars.LOG=debug"   → config.env_vars.LOG = "debug"
+/// Marks a `--set` path as addressing the deployment config block rather than a
+/// component's. Unambiguous because a component path always carries a `/`.
+const DEPLOYMENT_CONFIG_PREFIX: &str = "config.";
+
+/// Set one key in a deployment item's `config` block, from `config.key=value`.
+///
+/// Flat on purpose. This block is flattened to a string map before it reaches a
+/// generic destination's provider, so nesting here would be silently dropped at
+/// the far end — better to refuse the shape than to render something the
+/// provider never sees.
+fn apply_deployment_config_override(item: &mut DeploymentItem, kv: &str) -> anyhow::Result<()> {
+    let (path, value) = kv
+        .split_once('=')
+        .ok_or_else(|| anyhow::anyhow!("expected config.KEY=VALUE format"))?;
+
+    let key = path
+        .strip_prefix(DEPLOYMENT_CONFIG_PREFIX)
+        .ok_or_else(|| anyhow::anyhow!("expected config.KEY=VALUE format, got: {path}"))?;
+
+    if key.is_empty() {
+        anyhow::bail!("expected config.KEY=VALUE format, got an empty key");
+    }
+    if key.contains('.') {
+        anyhow::bail!(
+            "'{key}' is nested, and a destination receives this block flattened to a string \
+             map — a nested key would be dropped before the provider saw it. Use a flat key."
+        );
+    }
+
+    let config = item
+        .config
+        .get_or_insert_with(|| ProjectValue::Map(Default::default()));
+    let ProjectValue::Map(config) = config else {
+        anyhow::bail!("deployment config for '{}' is not a map", item.destination);
+    };
+
+    config.insert(key.to_string(), ProjectValue::String(value.to_string()));
+    Ok(())
+}
+
 fn apply_config_override(root: &mut ProjectValue, kv: &str) -> anyhow::Result<()> {
     let (path, value) = kv
         .split_once('=')
@@ -678,4 +752,108 @@ fn apply_config_override(root: &mut ProjectValue, kv: &str) -> anyhow::Result<()
     current.insert(final_key, ProjectValue::String(value.to_string()));
 
     Ok(())
+}
+
+#[cfg(test)]
+mod deployment_config_override_tests {
+    use super::*;
+
+    fn item() -> DeploymentItem {
+        DeploymentItem {
+            env: "data".into(),
+            destination: "^data-prod/.*$".into(),
+            destination_type: "forest/generic@1".into(),
+            component: None,
+            config: None,
+        }
+    }
+
+    fn get(item: &DeploymentItem, key: &str) -> Option<String> {
+        let Some(ProjectValue::Map(config)) = item.config.as_ref() else {
+            return None;
+        };
+        match config.get(key) {
+            Some(ProjectValue::String(s)) => Some(s.clone()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn sets_a_key_on_an_item_that_had_no_config_at_all() {
+        let mut i = item();
+        apply_deployment_config_override(&mut i, "config.image_tag=main-601f507").unwrap();
+        assert_eq!(get(&i, "image_tag").as_deref(), Some("main-601f507"));
+    }
+
+    #[test]
+    fn replaces_the_fallback_the_project_declared() {
+        // The whole point: forest.cue carries `main` for a render with no
+        // override, and the release replaces it with what CI actually pushed.
+        let mut i = item();
+        apply_deployment_config_override(&mut i, "config.image_tag=main").unwrap();
+        apply_deployment_config_override(&mut i, "config.image_tag=main-601f507").unwrap();
+        assert_eq!(get(&i, "image_tag").as_deref(), Some("main-601f507"));
+    }
+
+    #[test]
+    fn leaves_the_projects_other_keys_alone() {
+        let mut i = item();
+        apply_deployment_config_override(&mut i, "config.service=canopy_connect").unwrap();
+        apply_deployment_config_override(&mut i, "config.image_tag=main-601f507").unwrap();
+        assert_eq!(get(&i, "service").as_deref(), Some("canopy_connect"));
+        assert_eq!(get(&i, "image_tag").as_deref(), Some("main-601f507"));
+    }
+
+    #[test]
+    fn a_value_may_contain_equals_signs() {
+        let mut i = item();
+        apply_deployment_config_override(&mut i, "config.args=--flag=1").unwrap();
+        assert_eq!(get(&i, "args").as_deref(), Some("--flag=1"));
+    }
+
+    #[test]
+    fn an_empty_value_is_allowed_because_clearing_a_key_is_meaningful() {
+        let mut i = item();
+        apply_deployment_config_override(&mut i, "config.image_tag=").unwrap();
+        assert_eq!(get(&i, "image_tag").as_deref(), Some(""));
+    }
+
+    #[test]
+    fn the_prefix_is_what_routes_a_set_to_one_target_or_the_other() {
+        // One flag, two destinations for the value. A component path always
+        // carries a '/', so `config.` cannot collide with one.
+        let component = "understory/service.image.tag=main-601f507";
+        let deployment = "config.image_tag=main-601f507";
+
+        assert!(!component.starts_with(DEPLOYMENT_CONFIG_PREFIX));
+        assert!(deployment.starts_with(DEPLOYMENT_CONFIG_PREFIX));
+
+        // And each is only accepted by the handler it routes to.
+        assert!(apply_deployment_config_override(&mut item(), component).is_err());
+        apply_deployment_config_override(&mut item(), deployment).unwrap();
+    }
+
+    #[test]
+    fn rejects_a_nested_key_rather_than_dropping_it_silently() {
+        // The block is flattened to a string map before the provider sees it,
+        // so a nested key would vanish somewhere the author cannot see.
+        let err = apply_deployment_config_override(&mut item(), "config.image.tag=main-601f507")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("nested"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_input_that_is_not_key_equals_value() {
+        for bad in ["config.image_tag", "", "image_tag=x"] {
+            assert!(
+                apply_deployment_config_override(&mut item(), bad).is_err(),
+                "'{bad}' should not parse"
+            );
+        }
+        let err = apply_deployment_config_override(&mut item(), "config.=main-601f507")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("empty key"), "got: {err}");
+    }
 }

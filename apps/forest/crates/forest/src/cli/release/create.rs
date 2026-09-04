@@ -113,8 +113,11 @@ pub struct CreateCommand {
     #[arg(long, short = 'd')]
     destination: Option<Vec<String>>,
 
-    /// Override config values. Format: org/component.key=value
-    /// Example: --set kjuulh/service.tag=abc123
+    /// Override config values for this release. Format:
+    /// `org/component.key=value` for a component's config, or
+    /// `config.key=value` for the deployment config block a generic
+    /// destination receives.
+    /// Example: --set config.image_tag=main-601f507
     #[arg(long = "set", value_name = "KEY=VALUE")]
     overrides: Vec<String>,
 
