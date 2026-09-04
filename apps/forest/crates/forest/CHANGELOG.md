@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.12](https://github.com/understory-io/forest/compare/v0.3.11...v0.3.12) (2026-09-04)
+
+
+### Features
+
+* **auth:** show a QR for the device-login URL ([06e3c31](https://github.com/understory-io/forest/commit/06e3c3137f3001efc120f9654e04a10603fb5236))
+* **service-release:** let a release pin the image it deploys ([da473f6](https://github.com/understory-io/forest/commit/da473f6a389f498e8219ad6a9a0483fbfc44650d))
+
+
+### Bug Fixes
+
+* **forage:** order dashboard activity by release time, not by project ([#233](https://github.com/understory-io/forest/issues/233)) ([a3fac65](https://github.com/understory-io/forest/commit/a3fac65d6fcd803183812b62c5dd915acfcfdcf8))
+* **publish:** one handle for a component's files, so templates actually ship ([9437ed9](https://github.com/understory-io/forest/commit/9437ed9ddc1d921bcf857914fa64b7575408bcfc))
+* **publish:** stage the payload under .forest, and let a component declare its paths ([aace81b](https://github.com/understory-io/forest/commit/aace81b962636f3e90dd0e50477a99941555942f))
+* **release:** build the linux binaries against an older glibc ([c160541](https://github.com/understory-io/forest/commit/c160541b320dd297acc998db66f810636692b730))
+
 ## [0.3.11](https://github.com/understory-io/forest/compare/v0.3.10...v0.3.11) (2026-09-02)
 
 
