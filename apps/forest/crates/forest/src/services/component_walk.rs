@@ -49,9 +49,17 @@ const DEFAULT_EXCLUDE_FILE_GLOBS: &[&str] = &[
 /// Those are uploaded as typed per-platform payloads, so including them
 /// here as well would ship every binary twice — once addressable by
 /// platform and once as a meaningless generic file. Note this excludes
-/// only `output/`: `.forest/component/meta.json` is a consumer-read file
-/// and must still publish.
-const DEFAULT_EXCLUDE_PATH_GLOBS: &[&str] = &["cue.mod/pkg/**", ".forest/component/output/**"];
+/// only `output/` and `package/`: `.forest/component/meta.json` is a
+/// consumer-read file and must still publish.
+///
+/// `.forest/component/package/**` is where publish stages the payload it
+/// is about to upload. Walking it would package the previous run's
+/// package, so the payload would compound on every publish.
+const DEFAULT_EXCLUDE_PATH_GLOBS: &[&str] = &[
+    "cue.mod/pkg/**",
+    ".forest/component/output/**",
+    ".forest/component/package/**",
+];
 
 #[derive(Debug, Clone)]
 pub struct WalkConfig {
@@ -568,6 +576,23 @@ mod tests {
             matches!(err, WalkError::TotalTooLarge { .. }),
             "got {err:?}"
         );
+    }
+
+    /// Publish stages its payload under `.forest/component/package`;
+    /// walking that would package the previous run's package, and the
+    /// payload would compound on every publish.
+    #[test]
+    fn staged_package_dir_is_excluded() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(tmp.path().join("forest.cue"), "package x\n").expect("write");
+        let staged = tmp.path().join(".forest/component/package/templates");
+        std::fs::create_dir_all(&staged).expect("create staged");
+        std::fs::write(staged.join("main.tf"), "old\n").expect("write staged");
+
+        let result = component_walk(tmp.path(), &WalkConfig::default()).expect("walk");
+        let names: Vec<&str> = result.include.iter().map(|e| e.rel_path.as_str()).collect();
+
+        assert_eq!(names, vec!["forest.cue"], "got: {names:?}");
     }
 
     #[test]

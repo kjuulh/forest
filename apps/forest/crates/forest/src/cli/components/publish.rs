@@ -434,7 +434,7 @@ mod abort_on_drop_tests {
     }
 
     async fn published_names(dir: &std::path::Path) -> Vec<String> {
-        collect_component_files(dir, &[])
+        collect_component_files(dir, &[], &super::DeclaredPaths::default())
             .await
             .expect("collect")
             .into_iter()
@@ -525,6 +525,75 @@ mod abort_on_drop_tests {
         assert!(
             names.iter().any(|n| n == "init/service/files/README.md"),
             "scaffolding must publish, got: {names:?}",
+        );
+    }
+
+    /// The payload lands on disk before it is sent, so "what did this
+    /// publish contain" is a directory you can look at rather than a
+    /// question you answer by reading the code — the same role
+    /// `.forest/deployment/` plays for a release.
+    #[tokio::test]
+    async fn publish_stages_the_payload_under_dot_forest() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        tokio::fs::write(dir.path().join("forest.cue"), "package x\n")
+            .await
+            .expect("write forest.cue");
+        let tf = dir.path().join("templates/deployment/forest/terraform@1");
+        tokio::fs::create_dir_all(&tf).await.expect("create tf dir");
+        tokio::fs::write(tf.join("main.tf"), "resource {}\n")
+            .await
+            .expect("write main.tf");
+
+        let files = super::stage_component_package(
+            dir.path(),
+            &[],
+            &super::DeclaredPaths::default(),
+            Vec::new(),
+        )
+        .await
+        .expect("stage");
+        assert_eq!(files.len(), 2, "got: {files:?}");
+
+        let staged = dir.path().join(super::PACKAGE_DIR);
+        assert!(staged.join("forest.cue").is_file(), "forest.cue not staged");
+        assert!(
+            staged
+                .join("templates/deployment/forest/terraform@1/main.tf")
+                .is_file(),
+            "templates not staged",
+        );
+    }
+
+    /// A file deleted from the component must not survive in the package.
+    /// The staged tree is rebuilt each run precisely so a stale entry
+    /// cannot ship forever.
+    #[tokio::test]
+    async fn staging_clears_what_the_component_no_longer_has() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        tokio::fs::write(dir.path().join("forest.cue"), "package x\n")
+            .await
+            .expect("write forest.cue");
+
+        let stale = dir.path().join(super::PACKAGE_DIR).join("templates");
+        tokio::fs::create_dir_all(&stale)
+            .await
+            .expect("create stale");
+        tokio::fs::write(stale.join("gone.tf"), "removed\n")
+            .await
+            .expect("write stale");
+
+        super::stage_component_package(
+            dir.path(),
+            &[],
+            &super::DeclaredPaths::default(),
+            Vec::new(),
+        )
+        .await
+        .expect("stage");
+
+        assert!(
+            !stale.join("gone.tf").exists(),
+            "a file the component no longer has was left in the package",
         );
     }
 
@@ -1077,6 +1146,7 @@ impl PublishCommand {
             &upload_context,
             &current_dir,
             &uploaded_binaries,
+            &DeclaredPaths::from_doc(&doc),
             extra,
         )
         .await?;
@@ -1548,7 +1618,15 @@ async fn publish_external(
     // Skip UploadBinary entirely — externals are URL-hosted. The file
     // payload still ships: an external tool can carry templates and
     // scaffolding like any other component.
-    upload_component_files(&client, &upload_context, current_dir, &[], Vec::new()).await?;
+    upload_component_files(
+        &client,
+        &upload_context,
+        current_dir,
+        &[],
+        &DeclaredPaths::from_doc(doc),
+        Vec::new(),
+    )
+    .await?;
 
     let manifest_json = serde_json::to_string(&manifest)?;
     client
@@ -1728,6 +1806,7 @@ async fn publish_prebuilt(
         &upload_context,
         current_dir,
         &uploaded_binary_paths,
+        &DeclaredPaths::from_doc(doc),
         Vec::new(),
     )
     .await?;
@@ -1760,6 +1839,40 @@ async fn publish_prebuilt(
     Ok(())
 }
 
+/// `forest.component.paths`, as the walker wants it.
+///
+/// Absent means "the component tree", which is the default and the right
+/// one: whatever a consumer reads at deploy time is carried without
+/// anyone having to remember it.
+#[derive(Debug, Default, Clone)]
+struct DeclaredPaths {
+    /// `None` ⇒ include everything the excludes admit.
+    include: Option<Vec<String>>,
+    exclude: Vec<String>,
+}
+
+impl DeclaredPaths {
+    /// Read from the evaluated manifest. A component that declares no
+    /// `paths` block gets the default.
+    fn from_doc(doc: &serde_json::Value) -> Self {
+        let globs = |key: &str| -> Option<Vec<String>> {
+            doc.pointer(&format!("/forest/component/paths/{key}"))?
+                .as_array()
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+        };
+
+        Self {
+            include: globs("include").filter(|globs| !globs.is_empty()),
+            exclude: globs("exclude").unwrap_or_default(),
+        }
+    }
+}
+
 /// Collect everything a component ships that is NOT a typed binary.
 ///
 /// Pure and separately testable; [`upload_component_files`] is the thing
@@ -1784,29 +1897,30 @@ async fn publish_prebuilt(
 async fn collect_component_files(
     dir: &std::path::Path,
     binary_paths: &[std::path::PathBuf],
+    paths: &DeclaredPaths,
 ) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
     use crate::services::component_walk::{WalkConfig, component_walk};
 
-    // Read here rather than inside the walker, so the walker stays pure.
-    let forestignore = match tokio::fs::read_to_string(dir.join(".forestignore")).await {
-        Ok(contents) => contents
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .map(str::to_string)
-            .collect(),
-        Err(_) => Vec::new(),
-    };
+    // `.forestignore` and `paths.exclude` say the same thing in two
+    // places, so they compose rather than override: a component can use
+    // either, and neither silently wins.
+    let mut forestignore = paths.exclude.clone();
+    if let Ok(contents) = tokio::fs::read_to_string(dir.join(".forestignore")).await {
+        forestignore.extend(
+            contents
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(str::to_string),
+        );
+    }
 
     let result = component_walk(
         dir,
         &WalkConfig {
             binary_paths: binary_paths.to_vec(),
             forestignore,
-            // When the SDK grows `forest.component.paths.include`, it
-            // plugs in here — one place, which is the point of this
-            // function existing.
-            allowlist: None,
+            allowlist: paths.include.clone(),
             ..WalkConfig::default()
         },
     )?;
@@ -1823,7 +1937,28 @@ async fn collect_component_files(
     Ok(files)
 }
 
-/// Upload a component's non-binary payload. **The** place that happens.
+/// Where publish assembles the payload before sending it, relative to
+/// the component root.
+///
+/// A sibling of `output/`, which holds the binaries a build staged. The
+/// walker excludes both.
+const PACKAGE_DIR: &str = ".forest/component/package";
+
+/// Stage the payload on disk, then upload it from there. **The** place a
+/// component's files are published.
+///
+/// Staging rather than streaming straight from the source tree, because
+/// that is what `.forest/` is for: `forest release prepare` renders a
+/// deployment into `.forest/deployment/<env>/<destination>/` and the
+/// apply runs from it, so "what is about to be shipped" is a directory
+/// you can look at. Publishing had no equivalent — the payload existed
+/// only as an in-memory list, so the honest answer to "what did this
+/// publish contain" was to read the code. Now it is
+/// `.forest/component/package/`.
+///
+/// The staged tree is rebuilt from scratch each run. A leftover file
+/// from a previous publish that no longer exists in the component would
+/// otherwise ship forever.
 ///
 /// `extra` carries entries that are not in the tree but have to land in
 /// it: deno's `meta.json` is read out of the local build cache and
@@ -1834,9 +1969,41 @@ async fn upload_component_files(
     upload_context: &str,
     dir: &std::path::Path,
     binary_paths: &[std::path::PathBuf],
+    paths: &DeclaredPaths,
     extra: Vec<(String, Vec<u8>)>,
 ) -> anyhow::Result<usize> {
-    let mut files = collect_component_files(dir, binary_paths).await?;
+    let files = stage_component_package(dir, binary_paths, paths, extra).await?;
+
+    if files.is_empty() {
+        return Ok(0);
+    }
+
+    tracing::info!(
+        "uploading {} component file(s) from {}",
+        files.len(),
+        PACKAGE_DIR
+    );
+    for (rel_path, content) in &files {
+        client
+            .upload_component_file(upload_context, rel_path, content)
+            .await
+            .with_context(|| format!("upload component file: {rel_path}"))?;
+    }
+
+    Ok(files.len())
+}
+
+/// Assemble the payload under [`PACKAGE_DIR`] and return it.
+///
+/// Separated from the upload so it is testable without a registry, and
+/// so `--dry-run` can stage without sending.
+async fn stage_component_package(
+    dir: &std::path::Path,
+    binary_paths: &[std::path::PathBuf],
+    paths: &DeclaredPaths,
+    extra: Vec<(String, Vec<u8>)>,
+) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+    let mut files = collect_component_files(dir, binary_paths, paths).await?;
 
     for (rel_path, content) in extra {
         match files.iter_mut().find(|(name, _)| *name == rel_path) {
@@ -1846,19 +2013,28 @@ async fn upload_component_files(
     }
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
-    if files.is_empty() {
-        return Ok(0);
-    }
-
-    tracing::info!("uploading {} component file(s)", files.len());
-    for (rel_path, content) in &files {
-        client
-            .upload_component_file(upload_context, rel_path, content)
+    let package_root = dir.join(PACKAGE_DIR);
+    // Rebuilt from scratch: a file that has since been deleted from the
+    // component must not survive in the package.
+    if tokio::fs::try_exists(&package_root).await.unwrap_or(false) {
+        tokio::fs::remove_dir_all(&package_root)
             .await
-            .with_context(|| format!("upload component file: {rel_path}"))?;
+            .with_context(|| format!("clear {}", package_root.display()))?;
     }
 
-    Ok(files.len())
+    for (rel_path, content) in &files {
+        let staged = package_root.join(rel_path);
+        if let Some(parent) = staged.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .with_context(|| format!("create {}", parent.display()))?;
+        }
+        tokio::fs::write(&staged, content)
+            .await
+            .with_context(|| format!("stage {rel_path}"))?;
+    }
+
+    Ok(files)
 }
 
 /// Deno's `meta.json`, which lives in the local build cache rather than

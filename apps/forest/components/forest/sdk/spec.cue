@@ -88,6 +88,39 @@ package sdk
 	// diagnostic, rather than letting the missing binary blow up mid-run.
 	// DATA-312.
 	requires?: #ForestRequires
+
+	// Which files publish ships. Optional — the default is the component
+	// tree minus the non-overridable excludes.
+	paths?: #ForestPaths
+}
+
+// `paths` — what a publish carries.
+//
+// The default is everything in the component directory except the
+// non-overridable excludes (`.git/`, `target/`, `node_modules/`,
+// vendored cue deps, and the `.forest/component/{output,package}` trees
+// that publish itself writes). That default is deliberate: whatever a
+// consumer reads at deploy time — `templates/`, `init/`, the CUE — is
+// carried without anyone having to remember it.
+#ForestPaths: {
+	// Subtract from what would otherwise ship. The normal knob, and the
+	// safe polarity: forgetting an exclude ships something harmless,
+	// which is recoverable. Equivalent to a `.forestignore` file, in the
+	// spec where it is visible.
+	exclude?: [...string]
+
+	// Restrict the publish to these globs.
+	//
+	// OPT-IN, and sharp. An allowlist is exactly how `templates/` came to
+	// be published by no path at all: the payload was a hand-picked list
+	// and a directory was simply absent from it, which a consumer only
+	// discovered as "No configuration files" at apply time. Forgetting an
+	// entry here means a consumer silently receives nothing.
+	//
+	// Prefer `exclude`. Reach for this only when a component's directory
+	// genuinely holds something that must not ship and cannot be named
+	// the other way round.
+	include?: [...string]
 }
 
 // `requires` — the component's runtime tool contract. Forest checks these are
