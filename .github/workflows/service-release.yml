@@ -115,6 +115,36 @@ on:
         type: string
         required: false
         default: "."
+      image-tag:
+        description: >-
+          Container image tag to deploy, injected into the render as
+          `--set <image-component>.image.tag=<value>`.
+
+          The ONE thing a release should inject from outside, and the
+          reason it matters: a service whose forest.cue pins a moving tag
+          (`:main`) republishes the image under a name Terraform has
+          already seen, so a code-only merge produces no diff, no new
+          task definition, and the old container keeps running. Pinning
+          the tag per release makes the roll a consequence of deploying a
+          specific build rather than something a second destination has
+          to force.
+
+          Pass the tag the build job actually pushed — a job output, not
+          a re-derivation — so the release deploys the image that was
+          built and not whatever the branch tag points at by then.
+
+          Empty renders with whatever forest.cue declares, which is the
+          behaviour every existing caller had.
+        type: string
+        required: false
+        default: ""
+      image-component:
+        description: >-
+          Which component's `image.tag` `image-tag` sets. Only consulted
+          when `image-tag` is non-empty.
+        type: string
+        required: false
+        default: understory/service
       runs-on:
         description: >-
           Runner label. Defaults to a hosted runner: this job builds nothing, so
@@ -179,7 +209,17 @@ jobs:
       # other project releasing into that account.
       - name: Render the deployment
         working-directory: ${{ inputs.working-directory }}
-        run: forest release prepare
+        env:
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          IMAGE_COMPONENT: ${{ inputs.image-component }}
+        run: |
+          set -euo pipefail
+          if [ -n "${IMAGE_TAG}" ]; then
+            echo "pinning ${IMAGE_COMPONENT}.image.tag=${IMAGE_TAG}"
+            forest release prepare --set "${IMAGE_COMPONENT}.image.tag=${IMAGE_TAG}"
+          else
+            forest release prepare
+          fi
 
       # `detect` attributes the release to whoever wrote the commit. Without it
       # the server stamps whoever owns FOREST_TOKEN, which is the same person
