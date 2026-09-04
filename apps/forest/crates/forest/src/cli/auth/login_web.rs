@@ -23,7 +23,7 @@ const CLIENT_NAME: &str = "forest-cli";
 /// ourselves at 1h to avoid runaway processes on a misconfigured server.
 const MAX_TOTAL_WAIT: Duration = Duration::from_secs(3600);
 
-pub async fn run(state: &State) -> anyhow::Result<()> {
+pub async fn run(state: &State, show_qr: bool) -> anyhow::Result<()> {
     // Resolve the web URL for the active context — without one, we
     // don't know where to send the browser and there's no point starting
     // the flow.
@@ -59,6 +59,23 @@ pub async fn run(state: &State) -> anyhow::Result<()> {
     // appropriate for the platform.
     eprintln!();
     eprintln!("! First copy your one-time code: {}", init.user_code);
+
+    // The QR goes BEFORE the browser attempt on purpose. On a headless
+    // box — a dashboard pi over ssh, a server, a container — the open
+    // below fails and its error would otherwise be the last thing on
+    // screen, burying the one instruction that still works. The URL it
+    // encodes is `verification_uri_complete`, which already carries the
+    // code, so scanning it approves without typing anything.
+    if show_qr && std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+        if let Some(qr) = render_qr(&init.verification_uri_complete) {
+            eprintln!();
+            eprintln!("Or scan this with a phone — the code is already in it:");
+            eprintln!();
+            eprint!("{qr}");
+            eprintln!();
+        }
+    }
+
     eprintln!(
         "Opening {} in your browser…",
         format_terminal_hyperlink(&init.verification_uri, &init.verification_uri)
@@ -206,4 +223,83 @@ fn supports_hyperlinks() -> bool {
     }
     // Default to off — better a plain URL than mangled output.
     false
+}
+
+/// Render `url` as a QR code made of unicode half-blocks.
+///
+/// Polarity is the whole difficulty, and it is not theme-independent by
+/// default. The unicode renderer draws dark modules as filled blocks and
+/// light ones as spaces, taking its actual colours from the terminal —
+/// so on a dark theme the result is an INVERTED code, which a good
+/// number of phone scanners simply refuse. Every line is therefore
+/// wrapped in explicit black-on-white (`ESC[30;47m`), which makes the
+/// filled blocks dark and the gaps light whichever theme is in use.
+///
+/// `Dense1x2` packs two module rows into one text row, so a version-4
+/// code is about 19 lines rather than 37 — the difference between
+/// fitting an ssh window and scrolling out of it.
+///
+/// Returns `None` if the URL will not fit in a QR code at all, which is
+/// not worth failing a login over: the URL is printed above regardless.
+fn render_qr(url: &str) -> Option<String> {
+    use qrcode::render::unicode::Dense1x2;
+
+    let code = qrcode::QrCode::new(url.as_bytes()).ok()?;
+    let rendered = code.render::<Dense1x2>().quiet_zone(true).build();
+
+    Some(
+        rendered
+            .lines()
+            .map(|line| format!("\x1b[30;47m{line}\x1b[0m\n"))
+            .collect(),
+    )
+}
+
+#[cfg(test)]
+mod qr_tests {
+    use super::render_qr;
+
+    #[test]
+    fn renders_a_url_as_wrapped_lines() {
+        let qr = render_qr("https://forest.understory.sh/device?code=ABCD-1234")
+            .expect("a URL of this length encodes");
+        let lines: Vec<&str> = qr.lines().collect();
+
+        assert!(
+            lines.len() > 8,
+            "suspiciously short QR: {} lines",
+            lines.len()
+        );
+        for line in &lines {
+            // Without this the code renders inverted on a dark terminal.
+            assert!(
+                line.starts_with("\x1b[30;47m"),
+                "line not colour-wrapped: {line:?}"
+            );
+            assert!(line.ends_with("\x1b[0m"), "line not reset: {line:?}");
+        }
+    }
+
+    #[test]
+    fn a_quiet_zone_is_present() {
+        // Scanners need the light margin; without it the finder patterns
+        // sit flush against whatever else is on the terminal.
+        let qr = render_qr("https://example.com/d?code=AAAA-0000").expect("encodes");
+        let first = qr.lines().next().expect("at least one line");
+        let payload = first
+            .trim_start_matches("\x1b[30;47m")
+            .trim_end_matches("\x1b[0m");
+        assert!(
+            payload.chars().all(|c| c == ' '),
+            "first row should be all quiet zone, got {payload:?}"
+        );
+    }
+
+    #[test]
+    fn oversized_input_is_declined_rather_than_panicking() {
+        // A QR code tops out around 3kB of binary data. Returning None
+        // keeps a login working — the URL is printed either way.
+        let huge = "h".repeat(8000);
+        assert!(render_qr(&huge).is_none());
+    }
 }

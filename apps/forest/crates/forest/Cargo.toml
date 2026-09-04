@@ -81,6 +81,7 @@ tabled = "0.20"
 chrono = "0.4"
 itertools = "0.14.0"
 tempfile = "3"
+qrcode = { version = "0.14.1", default-features = false }
 
 
 [dev-dependencies]

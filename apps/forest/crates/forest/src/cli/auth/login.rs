@@ -30,6 +30,13 @@ pub struct LoginCommand {
     /// Login with email. Only valid with --password.
     #[arg(long, conflicts_with = "username")]
     email: Option<String>,
+
+    /// Do not print a QR code for the approval URL. The QR is shown by
+    /// default on a terminal — it is how you approve a login on a
+    /// headless machine without retyping a URL and a code — but block
+    /// characters are noise in a log, so this turns it off.
+    #[arg(long)]
+    no_qr: bool,
 }
 
 impl LoginCommand {
@@ -64,7 +71,7 @@ impl LoginCommand {
         };
 
         match mode {
-            LoginMode::Web => login_web::run(state).await,
+            LoginMode::Web => login_web::run(state, !self.no_qr).await,
             LoginMode::Password => self.execute_password(state).await,
         }
     }
