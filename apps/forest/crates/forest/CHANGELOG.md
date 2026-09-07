@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.13](https://github.com/understory-io/forest/compare/v0.3.12...v0.3.13) (2026-09-07)
+
+
+### Features
+
+* **release:** let --set reach the deployment config block (DATA-710) ([#239](https://github.com/understory-io/forest/issues/239)) ([d9f7861](https://github.com/understory-io/forest/commit/d9f78619d8949a4509f47b59e15ccebb0ba247a8))
+
+
+### Bug Fixes
+
+* **notifications:** personal release notifications only reach the release owner (DATA-723) ([#241](https://github.com/understory-io/forest/issues/241)) ([03071ce](https://github.com/understory-io/forest/commit/03071ce84830cdf8c7ea910b25e103c2a5b53006))
+
 ## [0.3.12](https://github.com/understory-io/forest/compare/v0.3.11...v0.3.12) (2026-09-04)
 
 
