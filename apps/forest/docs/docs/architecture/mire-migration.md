@@ -129,7 +129,7 @@ still audited and strict mode remains blocked until all are reconciled.
 
 The first Mire application release performs a clean code cutover:
 
-1. Upgrade Forest to Rust 1.94 and SQLx 0.9.
+1. Upgrade Forest to Rust 1.98.1 and SQLx 0.9.
 2. Pin `mire` and `mire-sagas` to an exact release or immutable revision.
 3. Replace `forest_event_store::EventStore` with `mire::EventStore`.
 4. Preserve all stream categories, stream IDs, event names, and JSON layouts.
@@ -229,18 +229,80 @@ Production traffic remains blocked until:
 - rollback has been rehearsed
 - projection and saga pool capacity has been measured
 
-## Progress
+## Progress and handoff
 
-Implemented in the preparatory change:
+### Implemented
 
-- this concrete Aurora runbook
-- additive Mire compatibility schema migration
-- event-store audit binary packaged in the Forest image
+- Rust is pinned to 1.98.1 across the root toolchain, Forest and Forage build images, CI images, and the Forage server template.
+- SQLx is pinned to 0.9.0 and the Forest server's offline query metadata has been regenerated.
+- `mire` and `mire-sagas` are pinned to 0.3.0. Mire's optional NATS integration is not enabled; Forest's existing NATS dependency remains independent.
+- All six aggregate contracts use Mire's `Aggregate`, `AggregateRoot`, `EventData`, and `RecordedEvent` types without compatibility aliases.
+- Forest `State` owns `mire::EventStore`.
+- Forest's transactional projection adapter uses Mire `TransactionScope`, so event append and synchronous projection SQL still commit or roll back together.
+- The old `forest-event-store` crate, CI exclusions, test task, and fuzz task have been removed.
+- `20260902120000_mire_event_store_compatibility.sql` creates the canonical event tables on a fresh database and additively upgrades legacy tables.
+- `forest-event-migration prepare` applies Forest migrations and repeats the compatibility backfills under an advisory lock.
+- `forest-event-migration audit --strict` checks PostgreSQL support, schema columns and nulls, stream integrity, sequence safety, subscription cursors, projection coverage, all 958 historical payloads, and stored event-type tags.
+- The Forest image contains the migration binary and `mise` exposes preparation and audit tasks.
+- Production had already applied `20260901000000_annotation_deployment_items.sql`; the exact migration and checksum are retained so SQLx accepts the production migration history.
 
-Deferred until extracted production data is available:
+### Production-data rehearsal
 
-- SQLx 0.9 and Rust 1.94 upgrade
-- Mire dependency and application-store cutover
-- reconciliation event generation
-- shadow projection handlers
-- release aggregates and saga workers
+The production-derived logical dump is intentionally not committed. The local handoff artifact is:
+
+```text
+~/prod-extracts/forest-prod-20260907T210311Z.dump
+```
+
+Source counts are in `~/prod-extracts/source_rowcounts-20260907T210311Z.txt`. The event-store subset was 87 streams, 958 events, and zero subscriptions.
+
+Before preparation, the audit decoded all 958 events with zero failures and found zero orphan events, version mismatches, or stream gaps. It correctly reported Mire incompatibility because Mire's additive columns were absent.
+
+Preparation followed by strict audit passed on PostgreSQL 16.15, matching production's PostgreSQL 16 major version, and on PostgreSQL 18. The resulting schema had:
+
+- zero null Mire compatibility values
+- zero event-category or subscription-cursor mismatches
+- zero projection rows without streams
+- a safe global-position sequence
+- 958 of 958 historical events decoded successfully
+
+A focused cutover smoke scenario loaded `component-forest-contrib/build-rust` at version 16 through Mire, committed a new app event and projection atomically, then forced a projection foreign-key failure and confirmed both the event stream and projection rolled back. The post-write strict audit passed with 88 streams, 959 events, and zero decode failures.
+
+Repository verification completed with:
+
+```text
+cargo fmt --all -- --check
+SQLX_OFFLINE=true cargo check --workspace
+cargo test -p forest-server --lib domains::
+mkdocs build --strict
+```
+
+The aggregate test run passed 152 tests.
+
+### Jujutsu checkpoint stack
+
+Stable change IDs, oldest first, rebased onto `main@github` at `9529edb4`:
+
+```text
+mlqktsun feat: prepare Mire event-store migration
+orqqrvnm chore: upgrade Forest to Rust 1.98.1
+mmvrmkmn build: upgrade SQLx and pin Mire 0.3
+nonrwpso refactor: replace Forest event store with Mire
+ytzwzmys build: preserve production migration history
+qxtomumn chore: upgrade Forage build images to Rust 1.98.1
+omvlrukv docs: record Mire migration handoff
+```
+
+Published to GitHub as `feat/mire-event-store-migration` in
+`understory-io/forest`. Continue review and integration from that branch.
+
+### Still required before production traffic
+
+- Land and exercise maintenance mode, then stop every Forest writer rather than only the Forage UI.
+- Capture the final production high-water mark and a fresh quiescent snapshot/export.
+- Inventory and verify object storage, including every component and artifact reference.
+- Re-run `prepare`, `audit --strict`, and the aggregate smoke scenarios on the final green Aurora restore.
+- Implement and compare Mire shadow projections before moving any read path.
+- Exercise all six aggregate command/read paths; the focused rehearsal covered historical hydration and the app transactional path.
+- Rehearse rollback and measure projection/saga connection-pool capacity.
+- Keep release orchestration on the existing dynamic DAG until the separate aggregate/saga design in Phase 7 is implemented and rehearsed.
