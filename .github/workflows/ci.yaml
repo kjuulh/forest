@@ -2,6 +2,12 @@ name: ci
 
 on:
   push:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Roll the built images onto the platform ECS clusters"
+        type: boolean
+        default: false
 
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: true
@@ -184,7 +190,27 @@ jobs:
     needs: build-and-push
     # Fork PRs get no secrets; the repository guard makes that a clean skip
     # rather than a red X on someone's fork.
-    if: github.repository == 'understory-io/forest' && github.ref == 'refs/heads/main'
+    #
+    # ── Deploys are opt-in, not automatic ──────────────────────────────────
+    #
+    # This used to fire on every push to main. That made "merge the PR" and
+    # "roll production" the same action, which is wrong for any change that
+    # needs a window: the Mire event-store migration runs schema migrations
+    # from the application's own startup path, so an automatic rolling deploy
+    # would migrate the live database under traffic, with old and new replicas
+    # briefly serving side by side, and no restore point taken first.
+    #
+    # Merging is now safe on its own. To actually deploy, run this workflow
+    # from the Actions tab (or `gh workflow run ci.yaml --ref main -f
+    # deploy=true`) with `deploy` checked. It rebuilds from the chosen ref and
+    # then rolls both services.
+    #
+    # To restore automatic deploys, replace the event/input condition below
+    # with `github.ref == 'refs/heads/main'`.
+    if: >-
+      github.repository == 'understory-io/forest'
+      && github.event_name == 'workflow_dispatch'
+      && inputs.deploy
     runs-on: ubuntu-latest
 
     # Job-level, so a queued deploy waits for the running one instead of

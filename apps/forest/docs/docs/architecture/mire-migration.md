@@ -466,18 +466,58 @@ compatibility columns already exist.
 
 **Not executed. This requires Kasper's explicit go and a scheduled window.**
 
+### Merging is decoupled from deploying
+
+`ci.yaml` used to run its ECS `deploy` job on every push to `main`, which made
+"merge the PR" and "roll production" the same action. For this change that is
+actively unsafe: Forest runs `sqlx::migrate!` and `EventStore::migrate()` from
+its own startup path, so an automatic rolling deploy would migrate the live
+production database under traffic, with old and new replicas briefly serving
+side by side — which this runbook prohibits — and with no restore point taken
+first.
+
+The deploy job is now opt-in: it runs only on an explicit
+`workflow_dispatch` with `deploy=true`. Merging is therefore safe on its own,
+and the production rollout is a separate, deliberate action:
+
+```console
+gh workflow run ci.yaml --ref main -f deploy=true
+```
+
+To restore automatic deploys, put `github.ref == 'refs/heads/main'` back on the
+job's `if:`.
+
 ### Blocking dependencies
 
-1. **Maintenance mode must land first.** It lives separately and is not on this
+1. **PostgreSQL 18 goes first.** Decided 2026-09-08: the engine upgrade lands
+   before this migration.
+
+   Dev has now completed it, and the sequencing turned out to be informative.
+   The first in-place 16.11 → 18.4 attempt **failed** at 22:16 UTC (`Postgres
+   cluster is in a state where pg_upgrade can not be completed successfully`)
+   and rolled back to 16.11. The Forest compatibility migration was then
+   applied to dev. A second attempt at 22:21 UTC **succeeded**: dev is on
+   **18.4.1**, 707 seconds offline, moved from `default.aurora-postgresql16` to
+   the `platform-apps-pg18` parameter group.
+
+   Because the migration was applied before the upgrade, dev carried the Mire
+   schema **through `pg_upgrade`**, which answers the question directly:
+
+   - all five compatibility columns survived the major upgrade
+   - the event store is unchanged — 23 streams, 135 events, high-water mark 143
+   - `forest-event-migration audit --strict` **passes on Aurora PostgreSQL
+     18.4.1** (`server_version_num` 180004), 135/135 events decoded, every
+     invariant zero, `mire_compatible: true`
+
+   So the additive schema, the `XID8` columns and the Mire cursor indexes are
+   all verified on 18.4 on real Aurora, not just on 16.x. What remains is to
+   **re-run the full green rehearsal against an 18.4 restore of production
+   data** — the restore, the byte-identical hash comparison, hydration of every
+   stream, and the projection replay were all done on 16.15, and prod-shaped
+   data on the new engine is the part still unproven.
+2. **Maintenance mode must land first.** It lives separately and is not on this
    branch. Forage's maintenance surface alone is insufficient: the Forest CLI,
    Woodpecker jobs, remote runners and direct API clients all bypass Forage.
-2. **Sequence against the PostgreSQL 18 upgrade.** The dev cluster's in-place
-   16.11 → 18.4 major upgrade **failed** on 2026-09-07 at 22:16 UTC
-   (`Postgres cluster is in a state where pg_upgrade can not be completed
-   successfully`), rolled back to 16.11, and a retry started at 22:21 UTC. Do
-   not stack this migration and that upgrade in the same window. The Mire
-   migration is additive and verified on 16.11, so **migrate first, upgrade
-   later** is the lower-risk order.
 3. **Do not run against the pegged source.** The source Aurora is reported at
    100%. Restore green from a snapshot rather than reading the live cluster.
 
@@ -515,6 +555,8 @@ again.
 
 ### Still open before traffic
 
+- production PostgreSQL 18 upgrade completed (dev is done and audits clean on
+  18.4.1), then this green rehearsal re-run against an 18.4 restore of prod data
 - maintenance mode landed and exercised
 - rollback rehearsed end to end
 - projection and saga connection-pool capacity measured
