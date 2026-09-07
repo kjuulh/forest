@@ -153,6 +153,14 @@ run = 'psql -h localhost -p 5432 -U devuser -d dev -c {{arg(name="sql")}}'
 depends = ["local:up"]
 run = "cargo sqlx migrate run --source ./crates/forest-server/migrations/"
 
+[tasks."db:prepare-mire-event-store"]
+description = "Apply migrations and finalize Mire event-store backfills"
+run = "cargo run -p forest-server --bin forest-event-migration -- prepare"
+
+[tasks."db:audit-event-store"]
+description = "Audit event streams and Mire migration compatibility"
+run = "cargo run -p forest-server --bin forest-event-migration -- audit --strict"
+
 [tasks."db:prepare"]
 depends = ["db:migrate"]
 # Must run inside the crate, NOT `--workspace`. The offline cache the release

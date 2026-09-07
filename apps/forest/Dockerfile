@@ -24,7 +24,7 @@ ENV SQLX_OFFLINE=true
 
 COPY . .
 
-RUN --mount=type=ssh cargo build --release --bin forest-server
+RUN --mount=type=ssh cargo build --release --bin forest-server --bin forest-event-migration
 
 FROM debian:13-slim AS production
 
@@ -48,6 +48,7 @@ deb-src [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-rep
 WORKDIR /app
 
 COPY --from=builder /app/target/release/forest-server /usr/local/bin/forest-server
+COPY --from=builder /app/target/release/forest-event-migration /usr/local/bin/forest-event-migration
 
 RUN groupadd -r appuser && useradd -r -g appuser appuser \
     && chown -R appuser:appuser /app \
