@@ -35,6 +35,13 @@ forest-sdk = { path = "crates/forest-sdk" }
 forest-sdk-codegen = { path = "crates/forest-sdk-codegen" }
 mire = { version = "=0.3.0", default-features = false }
 mire-sagas = { version = "=0.3.0", default-features = false }
+# Both `ring` and `aws-lc-rs` end up enabled on rustls 0.23 through third-party
+# crates (async-nats pulls ring; rust-s3/attohttpc and reqwest pull aws-lc-rs).
+# rustls then refuses to guess a process-level CryptoProvider and panics on the
+# first TLS handshake, so every binary that talks TLS must install one
+# explicitly. Pin the pure-Rust `ring` provider rather than the aws-lc-sys C
+# wrapper.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 sqlx = { version = "=0.9.0", features = [
   "chrono",
   "json",

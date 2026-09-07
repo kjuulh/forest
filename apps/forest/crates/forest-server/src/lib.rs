@@ -6,6 +6,7 @@ pub mod cli;
 pub mod domains;
 mod event_store;
 mod repositories;
+pub mod tls;
 /// Re-exported for the OAuth reaper acceptance test (repository layer is
 /// otherwise crate-internal).
 pub use repositories::oauth_apps::OAuthAppRepository;

@@ -233,7 +233,7 @@ Production traffic remains blocked until:
 
 ### Implemented
 
-- Rust is pinned to 1.98.1 across the root toolchain, Forest and Forage build images, CI images, and the Forage server template.
+- Rust is pinned to 1.98.1 across the root toolchain, CI images, and the Forage server template. The Forest and Forage build images track `rust:1.98-trixie`: Docker's official `rust` image publishes 1.98 and 1.98.0 but no 1.98.1 tag, so pinning the patch broke both image builds until this was corrected.
 - SQLx is pinned to 0.9.0 and the Forest server's offline query metadata has been regenerated.
 - `mire` and `mire-sagas` are pinned to 0.3.0. Mire's optional NATS integration is not enabled; Forest's existing NATS dependency remains independent.
 - All six aggregate contracts use Mire's `Aggregate`, `AggregateRoot`, `EventData`, and `RecordedEvent` types without compatibility aliases.
@@ -294,10 +294,232 @@ ytzwzmys build: preserve production migration history
 qxtomumn chore: upgrade Forage build images to Rust 1.98.1
 omvlrukv docs: record Mire migration handoff
 suwmxrlk feat(forage): restore organisation rule settings
+zowvrsmr fix: install a rustls provider and add mire-migrate for the cutover
 ```
 
 Published to GitHub as `feat/mire-event-store-migration` in
 `understory-io/forest`. Continue review and integration from that branch.
+
+## Green rehearsal result (2026-09-07/08)
+
+The full backup → restore → migrate → audit → smoke sequence has been executed
+against an isolated green copy of production. Production was **not** touched:
+the source Aurora cluster remains untouched and is the rollback.
+
+### Backup verified before anything else
+
+| Item | Value |
+| --- | --- |
+| Artifact | `nef_remote:~/prod-extracts/forest-prod-20260907T210311Z.dump` |
+| Size | 4 971 511 bytes |
+| sha256 | `7dd8af831288f8787d79fb29dd12ec468f04ad11d20ac264e3872c1fadeab12f` |
+| Source engine | PostgreSQL **16.11** (`Dumped from database version` in the archive header) |
+| Dumped by | `pg_dump` 16.15, custom format, 319 TOC entries |
+| Table set | 54 of 54 tables, identical to the source row-count manifest |
+
+The checksum matches the value computed in flight during the original transfer,
+so the artifact has not rotted at rest. Aurora's own backups were confirmed
+independently: cluster `platform-apps`, 7-day retention, PITR
+`LatestRestorableTime` within ~3 minutes of wall clock, daily automated
+snapshots, all on engine 16.11.
+
+**Retention caveat:** automated snapshots and PITR only reach back 7 days. The
+pre-cutover state must be captured as a **manual** cluster snapshot during the
+window, because manual snapshots outlive the retention period and automated
+ones do not.
+
+### Green restore
+
+Restored into an isolated PostgreSQL 16.15 instance at the **old** schema
+(`pg_restore --exit-on-error`, exit 0), then verified:
+
+- row counts identical to production across all 54 tables — 34 522 rows
+- old schema confirmed: zero Mire compatibility columns present before migrating
+- baseline hashes recorded: `es_streams` `3135421b…`, `es_events` positions
+  `47ddafd9…`, full event payload hash `a6563605…`
+- 24 SQLx migrations with checksums, including production's
+  `20260901000000_annotation_deployment_items`
+- event store: 87 streams, 958 events, 0 subscriptions, high-water mark 958,
+  sequence at 958
+
+### Compatibility + Mire migrations
+
+`forest-event-migration prepare` then `mire-migrate`, then the strict audit.
+`prepare` reported zero backfilled rows, which is correct: the compatibility
+migration's own inline backfills already covered every row, and the repeat pass
+exists only for rows a legacy writer appends after the additive deploy.
+
+Nothing was lost. Post-migration the three baseline hashes are **byte-identical**
+and every data table's row count is unchanged. The only two differences are the
+intended additive ones: `_sqlx_migrations` 24 → 25, and Mire's new empty
+`es_projection_leases` table.
+
+### `forest-event-migration audit --strict` — PASS
+
+Exit 0, `mire_compatible: true`, on both green (PG 16.15) and dev Aurora
+(PG 16.11): all five compatibility columns present with zero nulls, zero
+orphan events, zero stream-version mismatches, zero gaps, zero category or
+subscription-cursor mismatches, sequence safe, and **958 of 958 events decoded
+with zero failures**. Projection coverage is zero missing streams for all six
+aggregate families.
+
+### Dev first
+
+The same sequence was run against the **dev** Aurora cluster (16.11, TLS
+`verify-ca`) before green was migrated, after taking and checksum-verifying a
+dev backup (`nef_remote:~/dev-extracts/forest-dev-20260907T221920Z.dump`,
+sha256 `1e1c7f0d…`). Dev strict audit passed: 23 streams, 135 events, zero
+decode failures.
+
+### Upgraded Forest against green, traffic blocked
+
+The upgraded (Mire) `forest-server` boots against green and reports healthy in
+about two seconds, bound to loopback only on 4140/4141/4142 with in-process
+destination execution disabled — no ingress, no runners, no external effects.
+
+Gates exercised by `crates/forest-server/tests/green_hydration.rs`
+(`GREEN_DATABASE_URL`, plus `GREEN_ALLOW_WRITES=1` for the write smoke):
+
+- **every historical stream hydrates through Mire** — 87 of 87, across all six
+  categories, each at exactly the version `es_streams` records
+- **event log invariants** — zero orphans, zero version gaps, zero unfilled
+  compatibility columns, sequence not behind the highest event
+- **replay agrees with the live projections** (see below)
+- **transactional atomicity** — an app event and its projection row commit
+  together, and a forced projection foreign-key violation rolls back *both*;
+  the rolled-back event is not visible in the replayed aggregate
+
+Post-write strict audit passes at 88 streams / 959 events. Global positions 959
+and 960 are absent because the rolled-back attempts burned them — expected
+`BIGSERIAL` behaviour, and the audit still reports the sequence safe.
+
+### Replay vs live projections
+
+Full Mire shadow projections (standalone handlers writing `*_mire_shadow`
+tables) are **not implemented**; Forest writes its projections inline inside the
+command services through `TransactionScope`, so there is no replayable handler
+to drive yet. What is verified instead is the property the go/no-go gate cares
+about: replaying the event log through Mire reproduces the read model the live
+projections serve.
+
+| Category | Result |
+| --- | --- |
+| app | 1 live / 0 deleted — agrees |
+| destination | 12 live / **8 deleted** — agrees |
+| policy | 2 live / 0 deleted — agrees |
+| trigger | 21 live / **1 deleted** — agrees |
+| device_grant | 24 grants — presence and `user_code` agree |
+| component | 19 components, **122 published versions** match; 2 in-flight/unpublished correctly absent |
+
+Two things this comparison surfaced, both of which any shadow implementation
+must honour:
+
+1. **A deleted aggregate keeps its stream but loses its projection row.** Nine
+   streams (8 destinations, 1 trigger) are in this state, so "stream count ==
+   projection row count" is the wrong assertion; lifecycle state is what must
+   agree.
+2. **Only `Published` component versions are served.** `Uploading` (upload in
+   flight) and `Unpublished` (removed by an owner) versions live in the
+   aggregate but must be absent from `components`.
+
+### Runtime state and object storage
+
+- `release_states`: 558 SUCCEEDED, 72 FAILED — **zero QUEUED/ASSIGNED/RUNNING**
+- `release_intents`: 335 SUCCEEDED, 74 FAILED, 7 ACTIVE (ACTIVE means an enabled
+  pipeline definition; those 7 have 19 child states and zero in flight)
+- `release_tokens`: 394 rows, none revoked, **zero unexpired** — no live tokens
+- `terraform_state_locks`, `event_subscriptions`, `es_subscriptions`: all zero
+  (the empty `es_subscriptions` is why the audit finds no cursor to translate)
+- object storage `understory-forest-blobs-production`: versioning **Enabled**,
+  4 039 objects / 3 518 185 308 bytes inventoried (key, size, ETag, mtime);
+  **zero** `component_artifacts.storage_path` references missing from S3;
+  `blob_storage` fallback content (2 958 rows) preserved in the dump
+
+The drain precondition the runbook prefers therefore already holds. Release
+orchestration still stays on the legacy path for this cutover, per Phase 7.
+
+### Defect found and fixed during the rehearsal
+
+The branch could not have completed a cutover as it stood. Forest's dependency
+graph enables **both** rustls crypto providers on rustls 0.23 — `async-nats`
+pulls `ring`, while `rust-s3`/`attohttpc` and `reqwest` pull `aws-lc-rs` — and
+nothing installed a process-level provider. rustls refuses to guess, so the
+first TLS handshake panics:
+
+```text
+Could not automatically determine the process-level CryptoProvider
+```
+
+Green did not catch this because it is plain TCP. **Aurora requires TLS**, so
+`forest-event-migration` and `forest-server` would both have panicked on their
+first connection to green or production. Fixed by installing the pure-Rust
+`ring` provider (in preference to the `aws-lc-sys` C wrapper) at the top of
+every entry point — `forest_server::tls::install_crypto_provider()` — and
+verified by running the audit against dev Aurora over `verify-ca`.
+
+`forest-event-migration mire-migrate` was also added, because the cutover
+command list requires "run Mire migrations on green" as a discrete step and
+Mire's `migrate()` was reachable only from Rust. It refuses to run unless the
+compatibility columns already exist.
+
+## Staged production cutover — awaiting approval
+
+**Not executed. This requires Kasper's explicit go and a scheduled window.**
+
+### Blocking dependencies
+
+1. **Maintenance mode must land first.** It lives separately and is not on this
+   branch. Forage's maintenance surface alone is insufficient: the Forest CLI,
+   Woodpecker jobs, remote runners and direct API clients all bypass Forage.
+2. **Sequence against the PostgreSQL 18 upgrade.** The dev cluster's in-place
+   16.11 → 18.4 major upgrade **failed** on 2026-09-07 at 22:16 UTC
+   (`Postgres cluster is in a state where pg_upgrade can not be completed
+   successfully`), rolled back to 16.11, and a retry started at 22:21 UTC. Do
+   not stack this migration and that upgrade in the same window. The Mire
+   migration is additive and verified on 16.11, so **migrate first, upgrade
+   later** is the lower-risk order.
+3. **Do not run against the pegged source.** The source Aurora is reported at
+   100%. Restore green from a snapshot rather than reading the live cluster.
+
+### Order (fixed)
+
+1. Maintenance on; pause Woodpecker, remote runners, and CLI/API writers.
+2. Stop new release creation and component publication; drain in flight
+   (currently already zero — re-confirm in the window).
+3. Scale Forest replicas to zero; confirm Aurora has no Forest writer sessions.
+4. Record the final `es_events.global_position` high-water mark.
+5. Take a **manual** Aurora cluster snapshot (survives the 7-day retention) and
+   capture the object-store inventory.
+6. Restore that snapshot into an isolated green cluster at the old schema.
+7. `forest-event-migration prepare` against green.
+8. `forest-event-migration mire-migrate` against green.
+9. `forest-event-migration audit --strict` against green — **hard gate**.
+10. Start one upgraded Forest replica against green with ingress still blocked;
+    run the aggregate and object-store smoke scenarios.
+11. Start projection workers; verify zero lag.
+12. Start remaining replicas; switch traffic; maintenance off; resume CI and
+    runners.
+
+### Rollback
+
+Before public writes reach green: stop green, point traffic back at the source
+cluster, start the previous Forest image. The source is untouched, so this is
+clean.
+
+After public writes reach green: re-enter maintenance, stop green writers, and
+prefer rolling the **binary** back on green — the schema changes are additive
+and the old event store can still read them. Do not switch back to the source
+cluster unless post-cutover writes have been reconciled, and backfill
+`stream_category` for anything the old binary wrote before rolling forward
+again.
+
+### Still open before traffic
+
+- maintenance mode landed and exercised
+- rollback rehearsed end to end
+- projection and saga connection-pool capacity measured
+- Mire shadow projections implemented, if any read path is to move (not needed
+  for this cutover, which keeps the existing projections)
 
 ### Still required before production traffic
 

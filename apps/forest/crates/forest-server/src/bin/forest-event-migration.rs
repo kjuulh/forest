@@ -7,7 +7,7 @@ use forest_server::domains::{
     device_login::DeviceGrantEvent, policy::PolicyEvent, trigger::TriggerEvent,
 };
 use futures::TryStreamExt;
-use mire::EventData;
+use mire::{EventData, EventStore};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::{AssertSqlSafe, PgPool, Row, postgres::PgPoolOptions};
@@ -38,6 +38,11 @@ struct Args {
 enum Command {
     /// Apply Forest migrations and finish compatibility backfills after legacy writers stop.
     Prepare,
+
+    /// Apply Mire's own event-store migrations. Run this after `prepare`: Mire's
+    /// initial migration indexes `transaction_id`, and `CREATE TABLE IF NOT
+    /// EXISTS` cannot add that column to Forest's pre-existing tables.
+    MireMigrate,
 
     /// Inspect event schema, stream integrity, payload compatibility, and projection coverage.
     Audit {
@@ -160,6 +165,13 @@ struct DecodeFailure {
 }
 
 #[derive(Debug, Serialize)]
+struct MireMigrateReport {
+    /// Compatibility columns Mire's migrations depend on, verified before they run.
+    compatibility_columns_present: bool,
+    mire_migrations_applied: bool,
+}
+
+#[derive(Debug, Serialize)]
 struct PrepareReport {
     event_transaction_ids_backfilled: u64,
     event_categories_backfilled: u64,
@@ -169,6 +181,9 @@ struct PrepareReport {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Aurora requires TLS, so this must happen before the pool connects.
+    forest_server::tls::install_crypto_provider();
+
     let args = Args::parse();
     let pool = PgPoolOptions::new()
         .max_connections(2)
@@ -179,6 +194,10 @@ async fn main() -> anyhow::Result<()> {
     match args.command {
         Command::Prepare => {
             let report = prepare(&pool).await?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Command::MireMigrate => {
+            let report = mire_migrate(&pool).await?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Command::Audit {
@@ -195,6 +214,36 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Run Mire's embedded event-store migrations against an already-prepared
+/// database. Refuses to run when the compatibility columns are absent, because
+/// Mire's `001_event_store.sql` immediately indexes `transaction_id` and its
+/// `CREATE TABLE IF NOT EXISTS` will not add the column to Forest's legacy
+/// tables — the index build would fail on a half-migrated database.
+async fn mire_migrate(pool: &PgPool) -> anyhow::Result<MireMigrateReport> {
+    let transaction_id = column_exists(pool, "es_events", "transaction_id").await?;
+    let subscription_cursor =
+        column_exists(pool, "es_subscriptions", "last_transaction_id").await?;
+    let compatibility_columns_present = transaction_id && subscription_cursor;
+
+    if !compatibility_columns_present {
+        anyhow::bail!(
+            "refusing to run Mire migrations: es_events.transaction_id and \
+             es_subscriptions.last_transaction_id must exist first. Run \
+             `forest-event-migration prepare` before this command."
+        );
+    }
+
+    EventStore::new(pool.clone())
+        .migrate()
+        .await
+        .context("apply Mire event-store migrations")?;
+
+    Ok(MireMigrateReport {
+        compatibility_columns_present,
+        mire_migrations_applied: true,
+    })
 }
 
 async fn prepare(pool: &PgPool) -> anyhow::Result<PrepareReport> {

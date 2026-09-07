@@ -2,6 +2,9 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Must happen before any TLS connection (Aurora, S3, OTLP) is opened.
+    forest_server::tls::install_crypto_provider();
+
     dotenvy::dotenv().ok();
     let log_level = std::env::var("LOG_LEVEL");
 
