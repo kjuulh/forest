@@ -751,6 +751,17 @@ impl TerraformV1Destination {
             cmd.env("TF_CLI_CONFIG_FILE", &cli_config);
         }
 
+        // Before the TF_VAR pass, so a destination naming a role gets one.
+        if let Some(aws_config) = write_aws_profile(path, destination).await {
+            cmd.env("AWS_CONFIG_FILE", &aws_config)
+                .env("AWS_PROFILE", "forest")
+                // A stale AWS_PROFILE in forest-server's own environment would
+                // otherwise win over the file we just wrote.
+                .env_remove("AWS_ACCESS_KEY_ID")
+                .env_remove("AWS_SECRET_ACCESS_KEY")
+                .env_remove("AWS_SESSION_TOKEN");
+        }
+
         for (k, v) in &destination.metadata {
             cmd.env(format!("TF_VAR_{}", k), v);
         }
@@ -837,6 +848,17 @@ impl TerraformV1Destination {
             .await
             .ok();
             cmd.env("TF_CLI_CONFIG_FILE", &cli_config);
+        }
+
+        // Before the TF_VAR pass, so a destination naming a role gets one.
+        if let Some(aws_config) = write_aws_profile(path, destination).await {
+            cmd.env("AWS_CONFIG_FILE", &aws_config)
+                .env("AWS_PROFILE", "forest")
+                // A stale AWS_PROFILE in forest-server's own environment would
+                // otherwise win over the file we just wrote.
+                .env_remove("AWS_ACCESS_KEY_ID")
+                .env_remove("AWS_SECRET_ACCESS_KEY")
+                .env_remove("AWS_SESSION_TOKEN");
         }
 
         for (k, v) in &destination.metadata {
@@ -976,9 +998,279 @@ enum Mode {
     Apply,
 }
 
+/// Teach the AWS SDK to assume a role, when the destination names one.
+///
+/// A destination carrying `aws_role_arn` gets a generated AWS config profile in
+/// the run directory and `AWS_CONFIG_FILE` / `AWS_PROFILE` pointing at it. The
+/// terraform-aws provider then does the assume itself, through the SDK's normal
+/// credential resolution, and no component has to know about any of it.
+///
+/// Doing it here rather than in each component's `provider "aws"` block is the
+/// point. A provider-level `assume_role` works, but it has to be added to every
+/// component and kept consistent across them, and a component that forgets it
+/// silently falls back to whatever standing credential the destination carries.
+/// One runner, one mechanism, every component.
+///
+/// A profile rather than injected `AWS_SESSION_TOKEN`: the SDK re-assumes when
+/// the session expires, so an apply that outlives the role's session duration
+/// keeps working. Injecting static session credentials would strand a long
+/// apply — an ACM validation wait is exactly the case that gets close.
+///
+/// Where the *base* credentials come from depends on what else the destination
+/// has. Static keys become a source profile; otherwise the SDK is pointed at
+/// the ECS task role forest-server itself runs as, which is the shape worth
+/// wanting — nothing standing anywhere.
+async fn write_aws_profile(
+    path: &std::path::Path,
+    destination: &Destination,
+) -> Option<std::path::PathBuf> {
+    let role_arn = destination
+        .metadata
+        .get("aws_role_arn")
+        .map(String::as_str)
+        .unwrap_or_default();
+    if role_arn.is_empty() {
+        return None;
+    }
+
+    let region = destination
+        .metadata
+        .get("aws_region")
+        .map(String::as_str)
+        .unwrap_or("eu-west-1");
+
+    // Names the deploy in CloudTrail. Truncated because STS rejects a session
+    // name over 64 characters, and that arrives as an opaque AccessDenied on
+    // the assume rather than as a validation error.
+    let mut session_name = format!("forest-{}", destination.environment);
+    session_name.truncate(64);
+    let session_name: String = session_name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "+=,.@-_".contains(c) {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+
+    let access_key = destination
+        .metadata
+        .get("aws_access_key_id")
+        .map(String::as_str)
+        .unwrap_or_default();
+    let secret_key = destination
+        .metadata
+        .get("aws_secret_access_key")
+        .map(String::as_str)
+        .unwrap_or_default();
+
+    // Built line by line and joined, not as one format! with continuations.
+    // An AWS config file must have no leading whitespace on its keys, and a
+    // multi-line string literal is exactly where stray indentation creeps in.
+    let mut lines: Vec<String> = Vec::new();
+
+    if !access_key.is_empty() && !secret_key.is_empty() {
+        // Role chaining from the destination's own keys. Transitional: it lets
+        // a destination move to a role before its keys are removed.
+        lines.push("[profile forest-source]".into());
+        lines.push(format!("aws_access_key_id = {access_key}"));
+        lines.push(format!("aws_secret_access_key = {secret_key}"));
+        lines.push(String::new());
+        lines.push("[profile forest]".into());
+        lines.push(format!("role_arn = {role_arn}"));
+        lines.push("source_profile = forest-source".into());
+    } else {
+        // `EcsContainer` because forest-server runs as an ECS task; the SDK
+        // reads the task role from the container credentials endpoint and
+        // assumes from there. No standing credential is involved at any point.
+        lines.push("[profile forest]".into());
+        lines.push(format!("role_arn = {role_arn}"));
+        lines.push("credential_source = EcsContainer".into());
+    }
+
+    lines.push(format!("role_session_name = {session_name}"));
+    lines.push(format!("region = {region}"));
+
+    let config = format!("{}\n", lines.join("\n"));
+
+    let config_path = path.join(".aws-config");
+    if let Err(e) = tokio::fs::write(&config_path, config).await {
+        // Deliberately not fatal here: the apply fails on its own with a
+        // credentials error, which is a clearer signal than this one, and
+        // failing here would also mask a destination that never needed the
+        // profile.
+        tracing::error!(
+            error = %e,
+            path = %config_path.display(),
+            "could not write the AWS profile for the assumed role"
+        );
+        return None;
+    }
+
+    // 0600. The file holds a role ARN and, in the transitional case, the
+    // destination's access keys.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ =
+            tokio::fs::set_permissions(&config_path, std::fs::Permissions::from_mode(0o600)).await;
+    }
+
+    tracing::debug!(
+        role_arn = %role_arn,
+        chained = !access_key.is_empty(),
+        "terraform will assume a role"
+    );
+
+    Some(config_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use forest_models::DestinationType;
+
+    fn destination_with(metadata: &[(&str, &str)]) -> Destination {
+        Destination {
+            organisation: "understory".into(),
+            name: "dev/eu-west-1/infrastructure-platform".into(),
+            environment: "platform-dev".into(),
+            metadata: metadata
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            sensitive_keys: vec![],
+            destination_type: DestinationType {
+                organisation: "forest".into(),
+                name: "terraform".into(),
+                version: 1,
+                description: String::new(),
+                fields: vec![],
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn no_role_arn_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = destination_with(&[("aws_region", "eu-west-1")]);
+
+        assert!(write_aws_profile(dir.path(), &dest).await.is_none());
+        assert!(
+            !dir.path().join(".aws-config").exists(),
+            "a destination without a role must be left entirely alone"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_role_arn_is_the_same_as_none() {
+        // Metadata keys are strings and a cleared one arrives empty rather
+        // than absent, so this is the shape a migrated-then-reverted
+        // destination actually has.
+        let dir = tempfile::tempdir().unwrap();
+        let dest = destination_with(&[("aws_role_arn", "")]);
+
+        assert!(write_aws_profile(dir.path(), &dest).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_role_alone_assumes_from_the_task_role() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = destination_with(&[
+            (
+                "aws_role_arn",
+                "arn:aws:iam::462774209206:role/ForestTerraformDeploy",
+            ),
+            ("aws_region", "eu-west-1"),
+        ]);
+
+        let path = write_aws_profile(dir.path(), &dest)
+            .await
+            .expect("a profile");
+        let config = std::fs::read_to_string(&path).unwrap();
+
+        assert!(config.contains("[profile forest]"));
+        assert!(config.contains("role_arn = arn:aws:iam::462774209206:role/ForestTerraformDeploy"));
+        // The whole point: no standing credential anywhere in the chain.
+        assert!(
+            config.contains("credential_source = EcsContainer"),
+            "without static keys the base credentials must be the task role, got:\n{config}"
+        );
+        assert!(!config.contains("aws_secret_access_key"));
+        assert!(config.contains("region = eu-west-1"));
+    }
+
+    #[tokio::test]
+    async fn static_keys_become_a_source_profile_for_the_role() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = destination_with(&[
+            (
+                "aws_role_arn",
+                "arn:aws:iam::618060699933:role/ForestTerraformDeploy",
+            ),
+            ("aws_access_key_id", "AKIAEXAMPLE"),
+            ("aws_secret_access_key", "shhh"),
+        ]);
+
+        let path = write_aws_profile(dir.path(), &dest)
+            .await
+            .expect("a profile");
+        let config = std::fs::read_to_string(&path).unwrap();
+
+        // Role chaining, so a destination can move to a role before its keys
+        // are removed rather than in the same change.
+        assert!(config.contains("[profile forest-source]"));
+        assert!(config.contains("source_profile = forest-source"));
+        assert!(config.contains("aws_access_key_id = AKIAEXAMPLE"));
+        assert!(!config.contains("credential_source"));
+    }
+
+    #[tokio::test]
+    async fn the_session_name_is_bounded_and_sts_safe() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut dest = destination_with(&[("aws_role_arn", "arn:aws:iam::1:role/r")]);
+        // Environments are free-form strings; a long one with characters STS
+        // rejects would fail the assume with an opaque AccessDenied.
+        dest.environment = format!("platform/prod {}", "x".repeat(120));
+
+        let path = write_aws_profile(dir.path(), &dest)
+            .await
+            .expect("a profile");
+        let config = std::fs::read_to_string(&path).unwrap();
+        let line = config
+            .lines()
+            .find(|l| l.starts_with("role_session_name = "))
+            .expect("a session name");
+        let name = line.trim_start_matches("role_session_name = ");
+
+        assert!(name.len() <= 64, "STS caps this at 64, got {}", name.len());
+        assert!(
+            name.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+=,.@-_".contains(c)),
+            "unexpected character in {name}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_profile_is_not_world_readable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let dest = destination_with(&[
+            ("aws_role_arn", "arn:aws:iam::1:role/r"),
+            ("aws_access_key_id", "AKIAEXAMPLE"),
+            ("aws_secret_access_key", "shhh"),
+        ]);
+
+        let path = write_aws_profile(dir.path(), &dest)
+            .await
+            .expect("a profile");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the file can hold access keys");
+    }
 
     #[test]
     fn resolve_terraform_exe_uses_env_override_when_set() {
