@@ -1,5 +1,5 @@
 use anyhow::bail;
-use forest_event_store::{Aggregate, AggregateRoot, EventData, IntoStreamCategory, StreamCategory};
+use mire::{Aggregate, AggregateRoot, EventData};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -78,8 +78,8 @@ impl Default for PolicyAggregate {
 impl Aggregate for PolicyAggregate {
     type Event = PolicyEvent;
 
-    fn stream_category() -> StreamCategory {
-        "policy".into_stream_category()
+    fn stream_category() -> &'static str {
+        "policy"
     }
 
     fn apply(&mut self, event: &PolicyEvent) {
@@ -283,10 +283,10 @@ pub fn stream_key(project_id: &Uuid, name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use forest_event_store::AggregateRoot;
+    use mire::AggregateRoot;
 
     fn new_root() -> AggregateRoot<PolicyAggregate> {
-        AggregateRoot::new("policy-proj123/my-policy".into())
+        AggregateRoot::new("proj123/my-policy")
     }
 
     fn soak_time_config() -> serde_json::Value {
@@ -345,7 +345,7 @@ mod tests {
             ("branch_restriction", branch_config()),
             ("approval", approval_config()),
         ] {
-            let mut root = AggregateRoot::new(format!("policy-x/{pt}"));
+            let mut root = AggregateRoot::new(&format!("x/{pt}"));
             let params = CreatePolicyParams {
                 project_id: Uuid::now_v7(),
                 name: pt.into(),
@@ -502,13 +502,14 @@ mod tests {
             .take_pending()
             .into_iter()
             .enumerate()
-            .map(|(i, e)| forest_event_store::RecordedEvent {
+            .map(|(i, e)| mire::RecordedEvent {
                 global_position: i as i64 + 1,
                 stream_id: "policy-proj123/my-policy".into(),
                 stream_version: i as i64 + 1,
                 event_type: e.event_type().into(),
                 data: serde_json::to_value(&e).unwrap(),
                 metadata: serde_json::json!({}),
+                transaction_id: (i as i64 + 1) as u64,
                 created_at: chrono::Utc::now(),
             })
             .collect();
@@ -519,7 +520,8 @@ mod tests {
             "policy-proj123/my-policy".into(),
             &events,
             events.len() as i64,
-        );
+        )
+        .expect("valid contiguous event history");
 
         assert_eq!(replayed.state.status, PolicyStatus::Deleted);
         assert!(!replayed.state.enabled);

@@ -1,6 +1,6 @@
 use anyhow::Context;
 use drop_queue::DropQueue;
-use forest_event_store::EventStore;
+use mire::EventStore;
 use sqlx::PgPool;
 
 /// Connect to NATS with optional authentication.

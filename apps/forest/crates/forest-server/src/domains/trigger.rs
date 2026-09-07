@@ -1,5 +1,5 @@
 use anyhow::bail;
-use forest_event_store::{Aggregate, AggregateRoot, EventData, IntoStreamCategory, StreamCategory};
+use mire::{Aggregate, AggregateRoot, EventData};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -105,8 +105,8 @@ impl Default for TriggerAggregate {
 impl Aggregate for TriggerAggregate {
     type Event = TriggerEvent;
 
-    fn stream_category() -> StreamCategory {
-        "trigger".into_stream_category()
+    fn stream_category() -> &'static str {
+        "trigger"
     }
 
     fn apply(&mut self, event: &TriggerEvent) {
@@ -357,10 +357,10 @@ pub fn stream_key(project_id: &Uuid, name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use forest_event_store::AggregateRoot;
+    use mire::AggregateRoot;
 
     fn new_root() -> AggregateRoot<TriggerAggregate> {
-        AggregateRoot::new("trigger-proj123/my-trigger".into())
+        AggregateRoot::new("proj123/my-trigger")
     }
 
     fn default_params() -> CreateTriggerParams {
@@ -652,13 +652,14 @@ mod tests {
             .take_pending()
             .into_iter()
             .enumerate()
-            .map(|(i, e)| forest_event_store::RecordedEvent {
+            .map(|(i, e)| mire::RecordedEvent {
                 global_position: i as i64 + 1,
                 stream_id: "trigger-proj123/my-trigger".into(),
                 stream_version: i as i64 + 1,
                 event_type: e.event_type().into(),
                 data: serde_json::to_value(&e).unwrap(),
                 metadata: serde_json::json!({}),
+                transaction_id: (i as i64 + 1) as u64,
                 created_at: chrono::Utc::now(),
             })
             .collect();
@@ -669,7 +670,8 @@ mod tests {
             "trigger-proj123/my-trigger".into(),
             &events,
             events.len() as i64,
-        );
+        )
+        .expect("valid contiguous event history");
 
         assert_eq!(replayed.state.status, TriggerStatus::Deleted);
         assert_eq!(replayed.state.trigger_id, Some(id));
@@ -683,7 +685,8 @@ mod tests {
 
     #[test]
     fn hydrate_empty_events_gives_non_existent() {
-        let root = AggregateRoot::<TriggerAggregate>::hydrate("trigger-x/y".into(), &[], 0);
+        let root = AggregateRoot::<TriggerAggregate>::hydrate("trigger-x/y".into(), &[], 0)
+            .expect("valid contiguous event history");
         assert_eq!(root.state.status, TriggerStatus::NonExistent);
     }
 

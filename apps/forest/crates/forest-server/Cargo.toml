@@ -8,7 +8,6 @@ forest-grpc-interface.workspace = true
 forest-manifest.workspace = true
 forest-models.workspace = true
 forest-runner.workspace = true
-forest-event-store.workspace = true
 mire.workspace = true
 mire-sagas.workspace = true
 

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
+use crate::event_store::EventStoreExt;
 use anyhow::Context;
-use forest_event_store::EventStore;
+use mire::EventStore;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -95,7 +96,7 @@ impl DestinationAggregateService {
         let t_name = type_name.to_string();
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query(
                         "INSERT INTO destinations (
@@ -189,9 +190,7 @@ impl DestinationAggregateService {
 
         // Events only: the projection already holds exactly this.
         self.event_store
-            .save_with(&mut root, move |_events, _tx| {
-                Box::pin(async move { Ok(()) })
-            })
+            .save_with(&mut root, move |_tx| Box::pin(async move { Ok(()) }))
             .await?;
 
         tracing::info!(
@@ -236,7 +235,7 @@ impl DestinationAggregateService {
         let name_owned = name.to_string();
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     let res = sqlx::query(
                         "UPDATE destinations SET metadata = $1
@@ -283,7 +282,7 @@ impl DestinationAggregateService {
         let name_owned = name.to_string();
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     let res = sqlx::query(
                         "UPDATE destinations SET sensitive_keys = $1
@@ -322,7 +321,7 @@ impl DestinationAggregateService {
         let name_owned = name.to_string();
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     let res = sqlx::query(
                         "DELETE FROM destinations

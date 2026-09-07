@@ -4,6 +4,7 @@ pub mod actor;
 pub mod build_info;
 pub mod cli;
 pub mod domains;
+mod event_store;
 mod repositories;
 /// Re-exported for the OAuth reaper acceptance test (repository layer is
 /// otherwise crate-internal).

@@ -1,5 +1,6 @@
+use crate::event_store::EventStoreExt;
 use anyhow::Context;
-use forest_event_store::EventStore;
+use mire::EventStore;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -45,7 +46,7 @@ impl PolicyAggregateService {
         )?;
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query(
                         "INSERT INTO policies (id, project_id, name, policy_type, config)
@@ -112,7 +113,7 @@ impl PolicyAggregateService {
         let config_val = root.state.config.clone();
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query(
                         "UPDATE policies SET
@@ -150,7 +151,7 @@ impl PolicyAggregateService {
         let name_owned = name.to_string();
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     let res =
                         sqlx::query("DELETE FROM policies WHERE project_id = $1 AND name = $2")

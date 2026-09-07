@@ -10,9 +10,10 @@
 //! the caller — externally indistinguishable from a natural TTL expiry,
 //! so a replay attacker cannot learn that the code was already redeemed.
 
+use crate::event_store::EventStoreExt;
 use anyhow::Context;
 use chrono::{Duration, Utc};
-use forest_event_store::EventStore;
+use mire::EventStore;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -169,7 +170,7 @@ impl DeviceLoginAggregateService {
 
             let result = self
                 .event_store
-                .save_with(&mut root, move |_events, tx| {
+                .save_with(&mut root, move |tx| {
                     Box::pin(async move {
                         sqlx::query(
                             "INSERT INTO device_login_grants
@@ -298,7 +299,7 @@ impl DeviceLoginAggregateService {
 
                 let device_code_hash_for_update = device_code_hash.clone();
                 self.event_store
-                    .save_with(&mut root, move |_events, tx| {
+                    .save_with(&mut root, move |tx| {
                         Box::pin(async move {
                             sqlx::query(
                                 r#"UPDATE device_login_grants
@@ -406,7 +407,7 @@ impl DeviceLoginAggregateService {
         let approving_ip_owned = approving_ip_clean;
         let approving_ua_owned = approving_ua_clean;
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query(
                         r#"UPDATE device_login_grants
@@ -489,7 +490,7 @@ impl DeviceLoginAggregateService {
 
         let device_code_hash_for_update = device_code_hash.clone();
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query(
                         r#"UPDATE device_login_grants

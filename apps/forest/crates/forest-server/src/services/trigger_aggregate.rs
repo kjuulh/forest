@@ -1,5 +1,6 @@
+use crate::event_store::EventStoreExt;
 use anyhow::Context;
-use forest_event_store::EventStore;
+use mire::EventStore;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -77,7 +78,7 @@ impl TriggerAggregateService {
         )?;
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query(
                         "INSERT INTO triggers (
@@ -168,7 +169,7 @@ impl TriggerAggregateService {
         let state = root.state.clone_for_projection();
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query(
                         "UPDATE triggers SET
@@ -223,7 +224,7 @@ impl TriggerAggregateService {
         let name_owned = name.to_string();
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     let res =
                         sqlx::query("DELETE FROM triggers WHERE project_id = $1 AND name = $2")

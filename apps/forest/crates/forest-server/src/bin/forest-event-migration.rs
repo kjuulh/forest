@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use forest_event_store::EventData;
 use forest_server::domains::{
     app::AppEvent, component::ComponentEvent, destination::DestinationEvent,
     device_login::DeviceGrantEvent, policy::PolicyEvent, trigger::TriggerEvent,
 };
 use futures::TryStreamExt;
+use mire::EventData;
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::{AssertSqlSafe, PgPool, Row, postgres::PgPoolOptions};

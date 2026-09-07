@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::bail;
-use forest_event_store::{Aggregate, AggregateRoot, EventData, IntoStreamCategory, StreamCategory};
+use mire::{Aggregate, AggregateRoot, EventData};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -94,8 +94,8 @@ impl Default for DestinationAggregate {
 impl Aggregate for DestinationAggregate {
     type Event = DestinationEvent;
 
-    fn stream_category() -> StreamCategory {
-        "destination".into_stream_category()
+    fn stream_category() -> &'static str {
+        "destination"
     }
 
     fn apply(&mut self, event: &DestinationEvent) {
@@ -315,10 +315,10 @@ pub fn stream_key(organisation: &str, name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use forest_event_store::AggregateRoot;
+    use mire::AggregateRoot;
 
     fn new_root() -> AggregateRoot<DestinationAggregate> {
-        AggregateRoot::new("destination-acme/prod-k8s".into())
+        AggregateRoot::new("acme/prod-k8s")
     }
 
     fn default_params() -> CreateDestinationParams {
@@ -488,13 +488,14 @@ mod tests {
             .take_pending()
             .into_iter()
             .enumerate()
-            .map(|(i, e)| forest_event_store::RecordedEvent {
+            .map(|(i, e)| mire::RecordedEvent {
                 global_position: i as i64 + 1,
                 stream_id: "destination-acme/prod-k8s".into(),
                 stream_version: i as i64 + 1,
                 event_type: e.event_type().into(),
                 data: serde_json::to_value(&e).unwrap(),
                 metadata: serde_json::json!({}),
+                transaction_id: (i as i64 + 1) as u64,
                 created_at: chrono::Utc::now(),
             })
             .collect();
@@ -503,7 +504,8 @@ mod tests {
             "destination-acme/prod-k8s".into(),
             &events,
             events.len() as i64,
-        );
+        )
+        .expect("valid contiguous event history");
 
         assert_eq!(replayed.state.status, DestinationStatus::Active);
         assert_eq!(replayed.state.destination_id, Some(id));
@@ -522,13 +524,14 @@ mod tests {
             .take_pending()
             .into_iter()
             .enumerate()
-            .map(|(i, e)| forest_event_store::RecordedEvent {
+            .map(|(i, e)| mire::RecordedEvent {
                 global_position: i as i64 + 1,
                 stream_id: "destination-acme/prod-k8s".into(),
                 stream_version: i as i64 + 1,
                 event_type: e.event_type().into(),
                 data: serde_json::to_value(&e).unwrap(),
                 metadata: serde_json::json!({}),
+                transaction_id: (i as i64 + 1) as u64,
                 created_at: chrono::Utc::now(),
             })
             .collect();
@@ -537,7 +540,8 @@ mod tests {
             "destination-acme/prod-k8s".into(),
             &events,
             events.len() as i64,
-        );
+        )
+        .expect("valid contiguous event history");
 
         assert_eq!(replayed.state.status, DestinationStatus::Deleted);
     }
@@ -545,7 +549,8 @@ mod tests {
     #[test]
     fn hydrate_empty_events_gives_non_existent() {
         let root =
-            AggregateRoot::<DestinationAggregate>::hydrate("destination-acme/x".into(), &[], 0);
+            AggregateRoot::<DestinationAggregate>::hydrate("destination-acme/x".into(), &[], 0)
+                .expect("valid contiguous event history");
         assert_eq!(root.state.status, DestinationStatus::NonExistent);
     }
 
@@ -676,8 +681,8 @@ mod tests {
 
     #[test]
     fn each_create_generates_unique_id() {
-        let mut root1 = AggregateRoot::<DestinationAggregate>::new("destination-acme/a".into());
-        let mut root2 = AggregateRoot::<DestinationAggregate>::new("destination-acme/b".into());
+        let mut root1 = AggregateRoot::<DestinationAggregate>::new("acme/a");
+        let mut root2 = AggregateRoot::<DestinationAggregate>::new("acme/b");
 
         let id1 = DestinationAggregate::create(
             &mut root1,
@@ -720,13 +725,14 @@ mod tests {
             .take_pending()
             .into_iter()
             .enumerate()
-            .map(|(i, e)| forest_event_store::RecordedEvent {
+            .map(|(i, e)| mire::RecordedEvent {
                 global_position: i as i64 + 1,
                 stream_id: "destination-acme/prod-k8s".into(),
                 stream_version: i as i64 + 1,
                 event_type: e.event_type().into(),
                 data: serde_json::to_value(&e).unwrap(),
                 metadata: serde_json::json!({}),
+                transaction_id: (i as i64 + 1) as u64,
                 created_at: chrono::Utc::now(),
             })
             .collect();
@@ -737,7 +743,8 @@ mod tests {
             "destination-acme/prod-k8s".into(),
             &events,
             events.len() as i64,
-        );
+        )
+        .expect("valid contiguous event history");
 
         assert_eq!(replayed.state.status, DestinationStatus::Deleted);
         assert_eq!(replayed.state.metadata, meta2); // last update wins
@@ -762,13 +769,14 @@ mod tests {
             .take_pending()
             .into_iter()
             .enumerate()
-            .map(|(i, e)| forest_event_store::RecordedEvent {
+            .map(|(i, e)| mire::RecordedEvent {
                 global_position: i as i64 + 1,
                 stream_id: "destination-acme/prod-k8s".into(),
                 stream_version: i as i64 + 1,
                 event_type: e.event_type().into(),
                 data: serde_json::to_value(&e).unwrap(),
                 metadata: serde_json::json!({}),
+                transaction_id: (i as i64 + 1) as u64,
                 created_at: chrono::Utc::now(),
             })
             .collect();
@@ -777,7 +785,8 @@ mod tests {
             "destination-acme/prod-k8s".into(),
             &events,
             events.len() as i64,
-        );
+        )
+        .expect("valid contiguous event history");
 
         assert_eq!(replayed.state.type_organisation, "myorg");
         assert_eq!(replayed.state.type_name, "flux");
@@ -1016,10 +1025,7 @@ mod tests {
 
     #[test]
     fn stream_category_is_destination() {
-        assert_eq!(
-            DestinationAggregate::stream_category().as_str(),
-            "destination"
-        );
+        assert_eq!(DestinationAggregate::stream_category(), "destination");
     }
 
     #[test]

@@ -27,13 +27,12 @@ An overview of Forest's internal architecture for contributors and operators.
 | `forest-runner` | Distributed execution agent |
 | `forest-sdk` | Component SDK (traits, protocol) |
 | `forest-sdk-codegen` | CUE → Rust/TS code generation |
-| `forest-event-store` | Generic event store library |
 | `forest-models` | Shared types (users, organisations) |
 | `forest-grpc-interface` | Generated protobuf/tonic code |
 
 ## Event Sourcing
 
-Forest uses event sourcing for its core domain aggregates:
+Forest uses Mire-backed event sourcing for its core domain aggregates:
 
 - **Events** are immutable facts stored in append-only tables
 - **Aggregates** reconstruct state by replaying events

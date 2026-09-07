@@ -1521,27 +1521,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "forest-event-store"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "dotenvy",
- "futures",
- "insta",
- "proptest",
- "rand 0.10.1",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "forest-grpc-interface"
 version = "0.1.0"
 dependencies = [
@@ -1643,7 +1622,6 @@ dependencies = [
  "clap",
  "dotenvy",
  "drop-queue",
- "forest-event-store",
  "forest-grpc-interface",
  "forest-manifest",
  "forest-models",
