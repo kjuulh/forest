@@ -67,6 +67,9 @@ kjuulh: service: sdk.#ForestComponentUsage & {
 
 		env_vars: {
 			FORAGE_HOST: "0.0.0.0:3000"
+			// Set to "true" to serve the maintenance page and return default
+			// gRPC responses. Health probes remain available.
+			FORAGE_MAINTENANCE_MODE: "false"
 			// FOREST_SERVER_URL is the in-cluster address of forest, which
 			// runs as svc/forest in the same namespace as the release env
 			// (dev → forest.dev, prod → forest.prod) — set per-environment

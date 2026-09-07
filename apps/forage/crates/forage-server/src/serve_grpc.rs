@@ -12,6 +12,7 @@ use crate::compute_grpc::ForageServiceImpl;
 pub struct ServeGrpc {
     pub addr: SocketAddr,
     pub scheduler: Arc<dyn ComputeScheduler>,
+    pub maintenance_mode: bool,
 }
 
 impl Component for ServeGrpc {
@@ -22,6 +23,7 @@ impl Component for ServeGrpc {
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {
         let svc = ForageServiceImpl {
             scheduler: self.scheduler.clone(),
+            maintenance_mode: self.maintenance_mode,
         };
 
         tracing::info!("gRPC server listening on {}", self.addr);

@@ -1136,6 +1136,7 @@ dependencies = [
  "axum-extra",
  "base64 0.22.1",
  "chrono",
+ "clap",
  "forage-core",
  "forage-db",
  "forage-grpc",

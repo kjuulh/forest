@@ -11,5 +11,5 @@ path = "src/main.rs"
 dagger-sdk = "0.20"
 eyre = "0.6"
 tokio = { version = "1", features = ["full"] }
-clap = { version = "4", features = ["derive"] }
+clap.workspace = true
 chrono = "0.4"

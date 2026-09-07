@@ -32,6 +32,7 @@ async-trait = "0.1"
 hmac = "0.12"
 sha2 = "0.10"
 moka = { version = "0.12", features = ["future"] }
+clap = { version = "4", features = ["derive", "env"] }
 notmad = "0.11"
 nostatus = "0.1.0"
 tokio-util = "0.7"

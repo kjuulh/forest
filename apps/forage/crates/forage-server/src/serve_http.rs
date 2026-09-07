@@ -5,10 +5,16 @@ use notmad::{Component, ComponentInfo, MadError};
 use tokio_util::sync::CancellationToken;
 
 use crate::state::AppState;
+use crate::templates::TemplateEngine;
+
+pub enum ServeMode {
+    Application(AppState),
+    Maintenance(TemplateEngine),
+}
 
 pub struct ServeHttp {
     pub addr: SocketAddr,
-    pub state: AppState,
+    pub mode: ServeMode,
 }
 
 impl Component for ServeHttp {
@@ -17,8 +23,10 @@ impl Component for ServeHttp {
     }
 
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {
-        let app = crate::build_router(self.state.clone());
-
+        let app = match &self.mode {
+            ServeMode::Application(state) => crate::build_router(state.clone()),
+            ServeMode::Maintenance(templates) => crate::build_maintenance_router(templates.clone()),
+        };
         let listener = tokio::net::TcpListener::bind(self.addr)
             .await
             .context(anyhow::anyhow!("failed to listen on port: {}", self.addr))?;
