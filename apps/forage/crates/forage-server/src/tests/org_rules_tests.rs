@@ -2,7 +2,9 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use forage_core::platform::{OrgPolicyRule, OrgRuleSet, PolicyConfig, ProjectSelector};
+use forage_core::platform::{
+    OrgPolicyRule, OrgRuleSet, PolicyConfig, Project, ProjectMetadata, ProjectSelector,
+};
 use tower::ServiceExt;
 
 use crate::build_router;
@@ -17,6 +19,11 @@ async fn body_to_string(body: Body) -> String {
 async fn org_rules_page_renders_rule_sets_and_nav() {
     let mut metadata = std::collections::BTreeMap::new();
     metadata.insert("domain".into(), "retail".into());
+    let project_metadata = ProjectMetadata {
+        domain: "retail".into(),
+        tags: vec!["web".into(), "postgres".into()],
+        ..Default::default()
+    };
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
         list_org_rule_sets_result: Some(Ok(vec![OrgRuleSet {
             organisation: "testorg".into(),
@@ -42,6 +49,13 @@ async fn org_rules_page_renders_rule_sets_and_nav() {
             created_at: "2026-08-30T00:00:00Z".into(),
             updated_at: "2026-08-30T00:00:00Z".into(),
         }])),
+        list_projects_result: Some(Ok(vec!["butikkaerlighilsen".into(), "sandbox".into()])),
+        get_project_result: Some(Ok(Some(Project {
+            organisation: "testorg".into(),
+            project: "butikkaerlighilsen".into(),
+            metadata: project_metadata,
+            ..Default::default()
+        }))),
         ..Default::default()
     });
     let (state, sessions) = test_state_with(MockForestClient::new(), platform);
@@ -51,7 +65,7 @@ async fn org_rules_page_renders_rule_sets_and_nav() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/orgs/testorg/rules")
+                .uri("/orgs/testorg/settings/rules")
                 .header("cookie", &cookie)
                 .body(Body::empty())
                 .unwrap(),
@@ -59,12 +73,15 @@ async fn org_rules_page_renders_rule_sets_and_nav() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    let status = response.status();
     let html = body_to_string(response.into_body()).await;
+    assert_eq!(status, StatusCode::OK, "{html}");
     assert!(html.contains("Organisation Rules"));
     assert!(html.contains("retail-prod"));
     assert!(html.contains("prod-main-only"));
-    assert!(html.contains("/orgs/testorg/rules"));
+    assert!(html.contains("/orgs/testorg/settings/rules"));
+    assert!(html.contains("Matching projects"));
+    assert!(html.contains("data-rule-preview=\"retail-prod\""));
 }
 
 #[tokio::test]
@@ -78,7 +95,7 @@ async fn org_rules_create_rejects_invalid_json() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/rules")
+                .uri("/orgs/testorg/settings/rules")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from(body))

@@ -245,6 +245,7 @@ Production traffic remains blocked until:
 - `forest-event-migration audit --strict` checks PostgreSQL support, schema columns and nulls, stream integrity, sequence safety, subscription cursors, projection coverage, all 958 historical payloads, and stored event-type tags.
 - The Forest image contains the migration binary and `mise` exposes preparation and audit tasks.
 - Production had already applied `20260901000000_annotation_deployment_items.sql`; the exact migration and checksum are retained so SQLx accepts the production migration history.
+- The organisation rule UI delta from closed PR #214 is ported selectively onto current GitHub `main`: settings-scoped routes and navigation, live project-selector previews, and structured policy, trigger, and pipeline builders. The PR's stale fork-wide workflow and unrelated file changes are intentionally excluded.
 
 ### Production-data rehearsal
 
@@ -271,13 +272,14 @@ A focused cutover smoke scenario loaded `component-forest-contrib/build-rust` at
 Repository verification completed with:
 
 ```text
-cargo fmt --all -- --check
+rustfmt --check --edition 2024 <changed Rust sources>
 SQLX_OFFLINE=true cargo check --workspace
 cargo test -p forest-server --lib domains::
+cargo test -p forage-server org_rules_tests
 mkdocs build --strict
 ```
 
-The aggregate test run passed 152 tests.
+The aggregate test run passed 152 tests. Both organisation-rule route tests passed. Repository-wide `cargo fmt --all -- --check` still reports unrelated formatting drift inherited from GitHub `main`; all Rust sources changed by this stack pass `rustfmt --check`.
 
 ### Jujutsu checkpoint stack
 
@@ -291,6 +293,7 @@ nonrwpso refactor: replace Forest event store with Mire
 ytzwzmys build: preserve production migration history
 qxtomumn chore: upgrade Forage build images to Rust 1.98.1
 omvlrukv docs: record Mire migration handoff
+suwmxrlk feat(forage): restore organisation rule settings
 ```
 
 Published to GitHub as `feat/mire-event-store-migration` in

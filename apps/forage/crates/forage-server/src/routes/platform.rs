@@ -47,11 +47,11 @@ pub fn router() -> Router<AppState> {
         .route("/orgs/{org}/releases", get(releases_page))
         .route("/orgs/{org}/destinations", get(destinations_page))
         .route(
-            "/orgs/{org}/rules",
+            "/orgs/{org}/settings/rules",
             get(org_rules_page).post(create_org_rule_submit),
         )
         .route(
-            "/orgs/{org}/rules/{name}/delete",
+            "/orgs/{org}/settings/rules/{name}/delete",
             post(delete_org_rule_submit),
         )
         .route(
@@ -4154,6 +4154,12 @@ async fn remove_member_submit(
 
 // ─── Organisation rule sets ──────────────────────────────────────────
 
+#[derive(Serialize)]
+struct OrgRuleProjectPreview {
+    name: String,
+    metadata: forage_core::platform::ProjectMetadata,
+}
+
 async fn org_rules_page(
     State(state): State<AppState>,
     session: Session,
@@ -4173,6 +4179,24 @@ async fn org_rules_page(
     );
     let rule_sets = rule_sets.map_err(|e| internal_error(&state, "list_org_rule_sets", &e))?;
     let projects = warn_default("list_projects", projects);
+
+    let mut project_previews = Vec::with_capacity(projects.len());
+    for project_name in &projects {
+        let metadata = match state
+            .platform_client
+            .get_project(&session.access_token, &org, project_name)
+            .await
+        {
+            Ok(Some(project)) => project.metadata,
+            _ => Default::default(),
+        };
+        project_previews.push(OrgRuleProjectPreview {
+            name: project_name.clone(),
+            metadata,
+        });
+    }
+    let projects_json = serde_json::to_string(&project_previews).unwrap_or_else(|_| "[]".into());
+    let rules_json = serde_json::to_string(&rule_sets).unwrap_or_else(|_| "[]".into());
 
     let rule_items: Vec<minijinja::Value> = rule_sets
         .iter()
@@ -4214,10 +4238,13 @@ async fn org_rules_page(
                 },
                 csrf_token => session.csrf_token,
                 orgs => orgs_context(orgs),
-                current_org => org,
-                projects => projects,
+                current_org => &org,
+                projects => &projects,
+                projects_json => projects_json,
+                rules_json => rules_json,
                 rules => rule_items,
                 is_admin => is_admin,
+                active_tab => "settings",
                 policy_example => org_policy_example(),
                 trigger_example => org_trigger_example(),
                 pipeline_example => org_pipeline_example(),
@@ -4342,7 +4369,7 @@ async fn create_org_rule_submit(
         .await
         .map_err(|e| internal_error(&state, "failed to create org rule set", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/rules")).into_response())
+    Ok(Redirect::to(&format!("/orgs/{org}/settings/rules")).into_response())
 }
 
 #[derive(Deserialize)]
@@ -4375,7 +4402,7 @@ async fn delete_org_rule_submit(
         .await
         .map_err(|e| internal_error(&state, "failed to delete org rule set", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/rules")).into_response())
+    Ok(Redirect::to(&format!("/orgs/{org}/settings/rules")).into_response())
 }
 
 fn split_csv_lines(value: &str) -> Vec<String> {
