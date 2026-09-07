@@ -209,8 +209,48 @@ After public writes reach green:
 - re-enter maintenance
 - stop all green writers
 - prefer rolling back the binary on green because the schema changes are additive
+- **first delete the compatibility migration's ledger row** — see below; the old
+  binary will not start without this
 - do not switch back to the source cluster unless post-cutover writes have been reconciled
 - before a later roll-forward, backfill `stream_category` for any events written by the old binary
+
+### Binary rollback requires removing the migration ledger row
+
+Rehearsed 2026-09-08 against the migrated PostgreSQL 18 green copy. "The schema
+is additive, so just roll the binary back" is **not sufficient on its own**, and
+the failure is total rather than subtle:
+
+```text
+Error: migration 20260902120000 was previously applied but is missing in the
+resolved migrations
+```
+
+The pre-Mire binary embeds 24 migrations; the migrated database records 25.
+SQLx 0.8's `Migrator::run` calls `validate_applied_migrations`, which errors on
+any *applied* migration it cannot resolve locally, and `ignore_missing` defaults
+to false. Forest calls `sqlx::migrate!("./migrations/").run(&pool)` without
+overriding it, so the old binary aborts during `State::new` — before it reads a
+single event. The additive schema is genuinely readable; the binary simply never
+gets that far.
+
+The tested recovery is to drop only the ledger row, leaving every added column,
+index and Mire table in place:
+
+```sql
+DELETE FROM _sqlx_migrations WHERE version = 20260902120000;
+```
+
+With that row gone and the additive schema untouched, the pre-Mire binary starts
+healthy in about two seconds and reads the migrated event store normally
+(verified at 88 streams / 959 events, including events Mire had written).
+
+Roll-forward was rehearsed too: `forest-event-migration prepare` is idempotent,
+so re-running it restores the ledger row and the strict audit passes again. Do
+that rather than hand-editing the table back.
+
+Do **not** drop the added columns as part of a rollback. They are nullable or
+defaulted, the old writer ignores them, and dropping them would discard the
+backfilled `transaction_id` values that Mire needs on the next roll-forward.
 
 After release sagas are enabled, the old release scheduler must never run concurrently with saga workers. Saga/outbox state must be materialized and reconciled before scheduler rollback.
 
@@ -227,7 +267,7 @@ Production traffic remains blocked until:
 - all six aggregate command/read smoke scenarios pass
 - component and artifact objects can be fetched and hashed
 - rollback has been rehearsed
-- projection and saga pool capacity has been measured
+- projection and saga pool capacity has been measured — done
 
 ## Progress and handoff
 
@@ -462,6 +502,136 @@ command list requires "run Mire migrations on green" as a discrete step and
 Mire's `migrate()` was reachable only from Rust. It refuses to run unless the
 compatibility columns already exist.
 
+## PostgreSQL 18 rehearsal (2026-09-08)
+
+Because the PostgreSQL 18 upgrade lands first, the rehearsal was re-run on 18
+with production-shaped data. The verified production dump was restored at the
+**old** schema into an isolated PostgreSQL 18 instance, then migrated and
+audited exactly as on 16.
+
+Results are identical to the 16.15 run:
+
+- restore matched production across all 54 tables — 34 522 rows
+- the three baseline hashes are **byte-identical** before and after migrating
+  (`es_streams` `3135421b…`, `es_events` positions `47ddafd9…`, payloads
+  `a6563605…`), so nothing was lost or rewritten
+- the only row-count differences are the intended additive ones:
+  `_sqlx_migrations` 24 → 25 and Mire's empty `es_projection_leases`
+- `forest-event-migration audit --strict` **passes** — 958/958 events decoded,
+  every invariant zero, sequence safe, zero projection rows without streams
+- the rehearsal gates all pass: 88/88 streams hydrate through Mire, the replay
+  comparison matches the live projections for all six categories, and the
+  transactional smoke commits and rolls back atomically
+
+Two engine notes. The container used here reports 18.0, while dev Aurora is on
+**18.4.1**; the strict audit passes on both, and on dev that is real Aurora
+post-`pg_upgrade`. What is still unproven is a full prod-data rehearsal on
+**Aurora** 18.4 specifically, which needs a real green cluster and therefore the
+window.
+
+## Known accepted risk: prod ECS pins a mutable tag
+
+Recorded 2026-09-08, accepted deliberately.
+
+The production task definition (`forest:4`) pins
+`ghcr.io/understory-io/forest:latest` rather than a digest. Merging the Mire
+branch to `main` moved that tag to the Mire build
+(`sha256:e515b8d3…`), while the single running task stays on the pre-Mire
+`sha256:5f80ff45…`.
+
+The CI deploy job is gated, so nothing deploys on merge. But ECS resolves
+`:latest` whenever it *starts* a task, so an unplanned task replacement — a
+health-check failure on the currently saturated cluster, Fargate patching, AZ
+rebalancing, instance replacement — would pull the Mire image and run
+`sqlx::migrate!` plus `EventStore::migrate()` against production unattended,
+with no snapshot taken first. `desiredCount` is 1, so there is no second
+replica to fall back on.
+
+Two things bound the severity:
+
+- production's live data already passes the read-only audit — 965/965 events
+  decode, zero orphans, zero version mismatches, zero gaps, sequence safe — so
+  an unattended migration would very likely *succeed* rather than corrupt
+- the schema change is additive
+
+The residual exposure is that it would happen without a fresh restore point,
+and that recovery then depends on the binary rollback described below.
+
+## Connection-pool and capacity measurement (2026-09-08)
+
+The go/no-go list asks for projection and saga pool capacity to be measured.
+Measured; the short answer is that **this cutover changes Forest's connection
+profile not at all**, and that connections are not the binding constraint —
+compute is.
+
+### Connections: unchanged by this migration
+
+Both the pre-Mire and the Mire code construct the pool the same way:
+
+```rust
+let pool = sqlx::PgPool::connect(&std::env::var("DATABASE_URL")?).await?;
+```
+
+No explicit sizing, so both inherit SQLx's default ceiling of **10**
+connections per replica. Forest also wires **no** `ProjectionRunner` and **no**
+saga worker — `mire_sagas` is a pinned dependency that no code references yet —
+so projections remain inline inside command transactions via `TransactionScope`.
+There are no new long-lived connections.
+
+Observed against production: **31** connections in use of a **194** ceiling
+(3 superuser-reserved), split forest 6, fungus 10, forage 2, the rest
+administrative. Connection headroom is ample and unaffected by the migration.
+
+### The binding constraint is ACU, not connections
+
+The cluster is Aurora **Serverless v2** with:
+
+```text
+MinCapacity 0.5
+MaxCapacity 1.0
+```
+
+and it has been sitting at **1.0 ACU — its configured ceiling — continuously**.
+That reframes the "100% CPU" reading: this is not a large instance being
+saturated by a runaway query, it is a cluster capped at roughly 2 GiB and a
+fraction of a vCPU, pinned against that cap. `max_connections` of 194 is
+consistent with that size.
+
+Two consequences that matter more than anything in this document:
+
+1. **Raising `MaxCapacity` is the fastest relief**, and it is a cluster-level
+   setting rather than a query rewrite. That belongs to the Aurora work, but the
+   migration and the PostgreSQL 18 upgrade both inherit the problem until it is
+   done.
+2. **Neither the major upgrade nor this cutover should be attempted while the
+   cluster is pinned at its ceiling.** There is no headroom to absorb the extra
+   work, and the dev upgrade already failed once. Sequence the ACU change first.
+
+The migration's own cost is negligible by comparison — 958 events and four
+index builds. The exposure is not volume, it is the absence of headroom, plus
+one specific timeout: Mire's `migrate()` sets a **15 second `lock_timeout`**.
+That bounds how long it waits to acquire a lock, so a legacy writer holding a
+conflicting lock on a saturated cluster can fail the migration outright. This is
+a concrete reason to stop every writer before migrating rather than relying on
+low traffic.
+
+### What to size before promoting workers
+
+None of this bites during the first cutover, but before any projection or saga
+worker is promoted:
+
+- `ProjectionRunner::run` asserts `get_max_connections() >= 2` and then holds
+  **one connection for its entire lifetime**, reserved for lease heartbeats
+- each category lease loop acquires a connection while it works, so a runner
+  covering all six categories can hold several at once under catch-up
+- `mire-sagas` opens a `PgListener` for wake notifications, which is another
+  dedicated connection
+
+With the inherited ceiling of 10, a runner permanently holding one leaves nine
+for the request path. Set the pool size explicitly with `PgPoolOptions` at that
+point rather than continuing to inherit SQLx's default, and size it against the
+ACU ceiling in force at the time.
+
 ## Staged production cutover — awaiting approval
 
 **Not executed. This requires Kasper's explicit go and a scheduled window.**
@@ -557,19 +727,49 @@ again.
 
 - production PostgreSQL 18 upgrade completed (dev is done and audits clean on
   18.4.1), then this green rehearsal re-run against an 18.4 restore of prod data
-- maintenance mode landed and exercised
-- rollback rehearsed end to end
-- projection and saga connection-pool capacity measured
+- **raise the Aurora `MaxCapacity` ceiling** — the cluster is pinned at 1.0 ACU;
+  neither the upgrade nor the cutover should run against that
+- maintenance mode landed and exercised — dropped as a hard blocker on
+  2026-09-08 on the grounds of low overnight traffic. Note that its real job is
+  the automated writers (Woodpecker, remote runners, CLI and API clients), which
+  are not time-of-day dependent, and that Mire's 15 second migration
+  `lock_timeout` gives an independent reason to stop writers rather than hope
+  they are quiet
+- rollback rehearsed end to end — **done** for the binary-rollback path
+  (including the ledger-row step above) and for roll-forward; switching traffic
+  back to the source cluster is still unrehearsed
+- projection and saga connection-pool capacity measured — **done**; see the
+  measurement section above. The actionable follow-up is the ACU ceiling, not
+  the pool
 - Mire shadow projections implemented, if any read path is to move (not needed
   for this cutover, which keeps the existing projections)
 
 ### Still required before production traffic
 
-- Land and exercise maintenance mode, then stop every Forest writer rather than only the Forage UI.
-- Capture the final production high-water mark and a fresh quiescent snapshot/export.
-- Inventory and verify object storage, including every component and artifact reference.
-- Re-run `prepare`, `audit --strict`, and the aggregate smoke scenarios on the final green Aurora restore.
+This list predates the 2026-09-08 rehearsal. Items now closed are struck
+through; see the sections above for evidence.
+
+- ~~Land and exercise maintenance mode~~ — dropped as a hard blocker; stopping
+  every writer still matters, for the `lock_timeout` reason above.
+- Capture the final production high-water mark and a fresh quiescent
+  snapshot/export. **Still required** — production has moved since the dump
+  (965 events versus 958), and the pre-cutover snapshot must be a *manual* one.
+- ~~Inventory and verify object storage~~ — done: versioning enabled, 4 039
+  objects inventoried, zero dangling `component_artifacts.storage_path`
+  references.
+- Re-run `prepare`, `audit --strict`, and the aggregate smoke scenarios on the
+  final green Aurora restore. **Still required on Aurora specifically** — done
+  on isolated PostgreSQL 16.15 and 18, and the strict audit passes on real dev
+  Aurora 16.11 and 18.4.1.
 - Implement and compare Mire shadow projections before moving any read path.
-- Exercise all six aggregate command/read paths; the focused rehearsal covered historical hydration and the app transactional path.
-- Rehearse rollback and measure projection/saga connection-pool capacity.
-- Keep release orchestration on the existing dynamic DAG until the separate aggregate/saga design in Phase 7 is implemented and rehearsed.
+  **Still open**, and not needed for this cutover; the replay comparison covers
+  the go/no-go question in the meantime.
+- ~~Exercise all six aggregate command/read paths~~ — all six hydrate through
+  Mire (87/87 historical streams) and all six replay-match the live
+  projections; the app transactional path also commits and rolls back
+  atomically.
+- ~~Rehearse rollback and measure projection/saga connection-pool capacity~~ —
+  both done. Rollback needed a correction (the migration ledger row); capacity
+  is unchanged by this cutover and bounded by ACU rather than connections.
+- Keep release orchestration on the existing dynamic DAG until the separate
+  aggregate/saga design in Phase 7 is implemented and rehearsed. **Unchanged.**
