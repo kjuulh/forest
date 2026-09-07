@@ -15,7 +15,7 @@ _.file = ".env"
 CUE_REGISTRY = "forest.sh=registry.api.forest.development.understory.sh,registry.cuelang.org"
 
 [tools]
-rust = { version = "1.93", components = "rust-src,rust-analyzer" }
+rust = { version = "1.98.1", components = "rust-src,rust-analyzer" }
 uv = "latest"
 
 [tasks.todos]

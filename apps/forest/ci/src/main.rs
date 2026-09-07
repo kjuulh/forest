@@ -390,7 +390,7 @@ async fn build_base_for_platform(
     // Base rust image with build tools — always x86_64 (cross-compile for arm64).
     let mut rust_base = client
         .container()
-        .from("rust:1.93-trixie")
+        .from("rust:1.98.1-trixie")
         .with_exec(vec!["apt", "update"])
         .with_exec(vec!["apt", "install", "-y", "clang", "wget", "git"])
         // Git config needed for tests that commit.
