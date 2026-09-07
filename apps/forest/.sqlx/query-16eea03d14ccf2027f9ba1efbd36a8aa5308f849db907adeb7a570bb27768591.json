@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM release_tokens WHERE expires < now() - interval '1 day'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "16eea03d14ccf2027f9ba1efbd36a8aa5308f849db907adeb7a570bb27768591"
+}

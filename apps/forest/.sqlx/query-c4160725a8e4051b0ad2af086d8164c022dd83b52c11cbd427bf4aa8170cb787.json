@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO oauth_access_tokens\n                (token_hash, app_id, user_id, scopes, refresh_hash,\n                 expires_at, refresh_expires_at)\n            VALUES ($1, $2, $3, $4, $5, $6, $7)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Uuid",
+        "Uuid",
+        "TextArray",
+        "Bytea",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c4160725a8e4051b0ad2af086d8164c022dd83b52c11cbd427bf4aa8170cb787"
+}

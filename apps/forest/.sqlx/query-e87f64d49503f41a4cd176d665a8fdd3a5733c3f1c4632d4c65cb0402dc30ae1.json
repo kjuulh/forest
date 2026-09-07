@@ -1,0 +1,113 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT id, environment, environment_id, metadata, sensitive_keys,\n                       type_organisation, type_name, type_version\n                FROM destinations\n                WHERE organisation = $1 AND name = $2\n                LIMIT 1;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "environment",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "environment"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "environment_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "environment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "metadata",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "metadata"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "sensitive_keys",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "sensitive_keys"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "type_organisation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "type_organisation"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "type_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "type_name"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "type_version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "type_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e87f64d49503f41a4cd176d665a8fdd3a5733c3f1c4632d4c65cb0402dc30ae1"
+}

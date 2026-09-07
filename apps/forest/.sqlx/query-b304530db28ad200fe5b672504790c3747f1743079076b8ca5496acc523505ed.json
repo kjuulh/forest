@@ -1,0 +1,127 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                n.id,\n                n.sequence,\n                n.notification_type,\n                n.title,\n                n.body,\n                n.organisation,\n                n.project,\n                n.release_context,\n                n.created_at\n            FROM notifications n\n            WHERE ($1::text IS NULL OR n.organisation = $1)\n              AND ($2::text IS NULL OR n.project = $2)\n              AND NOT EXISTS (\n                  SELECT 1 FROM notification_preferences np\n                  WHERE np.user_id = $3\n                    AND np.notification_type = n.notification_type\n                    AND np.channel = 'CLI'\n                    AND np.enabled = false\n              )\n            ORDER BY n.sequence DESC\n            LIMIT $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "sequence",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "sequence"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "notification_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "notification_type"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "body",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "body"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "organisation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "organisation"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "project",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "project"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "release_context",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "release_context"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b304530db28ad200fe5b672504790c3747f1743079076b8ca5496acc523505ed"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE release_states SET last_heartbeat_at = now()\n             WHERE runner_id = $1 AND status IN ('ASSIGNED', 'RUNNING')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6583d925a911fdba0a0c9d9550bb66ae9582c203d502cf6aa60d90bef9584a4e"
+}

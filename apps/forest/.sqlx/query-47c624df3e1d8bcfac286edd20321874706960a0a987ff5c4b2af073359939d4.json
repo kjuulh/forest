@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_emails (user_id, email, verified, verification_source)\n         VALUES ($1, $2, TRUE, 'magic_link')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "47c624df3e1d8bcfac286edd20321874706960a0a987ff5c4b2af073359939d4"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE release_states SET\n                        status = $2, started_at = now(),\n                        last_heartbeat_at = now(), updated_at = now()\n                     WHERE release_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "084a9712959bb504bf3a4591a2676049bb160d48fc3d04c3b3b7e22bec771ba0"
+}
