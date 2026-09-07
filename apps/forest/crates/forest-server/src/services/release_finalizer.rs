@@ -154,7 +154,10 @@ async fn create_release_notification(
         environment: dest_env,
         source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
         source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
-        source_user_id: ann_ctx.as_ref().and_then(|a| a.source.user_id.clone()),
+        // The release owner, or nobody. Deliberately not the actor: a release
+        // nobody owns (a bot's, an unlinked author's) still posts to the
+        // channel and DMs no one — see `services::release_owner`.
+        source_user_id: ann_ctx.as_ref().and_then(|a| a.personal_recipient()),
         source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
         run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
         commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),

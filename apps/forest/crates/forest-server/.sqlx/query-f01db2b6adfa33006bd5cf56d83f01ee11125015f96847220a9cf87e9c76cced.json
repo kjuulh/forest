@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                n.id,\n                n.sequence,\n                n.notification_type,\n                n.title,\n                n.body,\n                n.organisation,\n                n.project,\n                n.release_context,\n                n.created_at\n            FROM notifications n\n            WHERE ($1::text IS NULL OR n.organisation = $1)\n              AND ($2::text IS NULL OR n.project = $2)\n              AND NOT EXISTS (\n                  SELECT 1 FROM notification_preferences np\n                  WHERE np.user_id = $3\n                    AND np.notification_type = n.notification_type\n                    AND np.channel = 'CLI'\n                    AND np.enabled = false\n              )\n            ORDER BY n.sequence DESC\n            LIMIT $4\n            ",
+  "query": "\n            SELECT\n                n.id,\n                n.sequence,\n                n.notification_type,\n                n.title,\n                n.body,\n                n.organisation,\n                n.project,\n                n.release_context,\n                n.created_at\n            FROM notifications n\n            WHERE n.sequence > $1\n              AND ($2::text IS NULL OR n.organisation = $2)\n              AND ($3::text IS NULL OR n.project = $3)\n              AND NOT EXISTS (\n                  SELECT 1 FROM notification_preferences np\n                  WHERE np.user_id = $4\n                    AND np.notification_type = n.notification_type\n                    AND np.channel = 'CLI'\n                    AND np.enabled = false\n              )\n              AND ($5::text IS NULL OR n.release_context->>'source_user_id' = $5)\n            ORDER BY n.sequence ASC\n            LIMIT $6\n            ",
   "describe": {
     "columns": [
       {
@@ -51,9 +51,11 @@
     ],
     "parameters": {
       "Left": [
+        "Int8",
         "Text",
         "Text",
         "Uuid",
+        "Text",
         "Int8"
       ]
     },
@@ -69,5 +71,5 @@
       false
     ]
   },
-  "hash": "b304530db28ad200fe5b672504790c3747f1743079076b8ca5496acc523505ed"
+  "hash": "f01db2b6adfa33006bd5cf56d83f01ee11125015f96847220a9cf87e9c76cced"
 }

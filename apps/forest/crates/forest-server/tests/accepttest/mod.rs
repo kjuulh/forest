@@ -7,6 +7,7 @@ mod device_login;
 mod email_verification;
 mod fixtures;
 mod global_tools_flow;
+mod notification_recipient;
 mod oauth_apps;
 mod oauth_flow;
 mod oauth_unlink;

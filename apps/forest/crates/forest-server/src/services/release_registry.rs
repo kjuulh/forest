@@ -1205,7 +1205,7 @@ impl ReleaseRegistry {
     ) -> anyhow::Result<AnnotationContext> {
         let rec = sqlx::query!(
             r#"
-            SELECT slug, source, context, ref
+            SELECT slug, source, context, ref, metadata, actor_type
             FROM annotations
             WHERE artifact_id = $1
             "#,
@@ -1237,11 +1237,20 @@ impl ReleaseRegistry {
             repo_url: None,
         });
 
+        // Both carry the release's *owner*, and only together: the detection
+        // `--detect` recorded and the account it was linked to live in
+        // `metadata`, and `actor_type` says whether the credential that
+        // annotated belongs to a person. `release_owner` reads them.
+        let metadata: HashMap<String, String> =
+            serde_json::from_value(rec.metadata).unwrap_or_default();
+
         Ok(AnnotationContext {
             slug: rec.slug,
             source,
             context,
             reference,
+            metadata,
+            actor_type: rec.actor_type,
         })
     }
 
@@ -1513,6 +1522,23 @@ pub struct AnnotationContext {
     pub source: Source,
     pub context: ArtifactContext,
     pub reference: Reference,
+    /// The annotation's metadata, verbatim. `forest.author.*` lives in here.
+    pub metadata: HashMap<String, String>,
+    /// The kind of credential that annotated — `user`, `app` or
+    /// `service_account`. See `Actor::actor_type`.
+    pub actor_type: Option<String>,
+}
+
+impl AnnotationContext {
+    /// The one user this release may be notified to personally, if any. See
+    /// `services::release_owner`.
+    pub fn personal_recipient(&self) -> Option<String> {
+        crate::services::release_owner::personal_recipient_id(
+            &self.metadata,
+            self.source.user_id.as_deref(),
+            self.actor_type.as_deref(),
+        )
+    }
 }
 
 #[cfg(test)]

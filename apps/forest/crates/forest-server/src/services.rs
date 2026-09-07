@@ -28,6 +28,7 @@ pub mod release_author;
 pub mod release_event_store;
 pub mod release_finalizer;
 pub mod release_health;
+pub mod release_owner;
 pub mod release_pipeline;
 pub mod release_token_registry;
 pub mod users;

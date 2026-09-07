@@ -27,6 +27,7 @@ use crate::{
         release_author,
         release_event_store::ReleaseEventStoreState,
         release_logs_registry::{LogChannel, ReleaseLogsRegistryState},
+        release_owner,
         release_pipeline::ReleasePipelineRegistryState,
         release_registry::{self, ReleaseAnnotation, ReleaseDestination, ReleaseRegistryState},
         trigger_aggregate::TriggerAggregateServiceState,
@@ -238,10 +239,16 @@ impl ReleaseService for ReleaseServer {
                     artifact_id: Some(artifact_id.to_string()),
                     source_username: source.username.clone(),
                     source_email: source.email.clone(),
-                    // The author, matching the name beside it. Slack DM routing
-                    // looks this up to find "the release author's Slack link",
-                    // so an actor here notifies whoever owns the CI token.
-                    source_user_id: source.user_id.clone(),
+                    // Who this release may be told to *personally* — the owner,
+                    // and nobody else. Not `source.user_id`: that is the actor,
+                    // and where the author did not link to an account it stays
+                    // the actor, which is how a renovate[bot] release DM'd
+                    // whoever owns the CI token (`services::release_owner`).
+                    source_user_id: release_owner::personal_recipient_id(
+                        &req.metadata,
+                        source.user_id.as_deref(),
+                        Some(actor.actor_type()),
+                    ),
                     source_type: source.source_type.clone(),
                     run_url: source.run_url.clone(),
                     commit_sha: Some(reference.commit_sha.clone()),
@@ -587,7 +594,8 @@ impl ReleaseService for ReleaseServer {
                     error_message: Some(req.reason.clone()),
                     source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
                     source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
-                    source_user_id: ann_ctx.as_ref().and_then(|a| a.source.user_id.clone()),
+                    // The owner, not the actor — see the note in `annotate`.
+                    source_user_id: ann_ctx.as_ref().and_then(|a| a.personal_recipient()),
                     source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
                     run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
                     commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),
@@ -773,7 +781,8 @@ impl ReleaseService for ReleaseServer {
                     destination_count: dest_count as i32,
                     source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
                     source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
-                    source_user_id: ann_ctx.as_ref().and_then(|a| a.source.user_id.clone()),
+                    // The owner, not the actor — see the note in `annotate`.
+                    source_user_id: ann_ctx.as_ref().and_then(|a| a.personal_recipient()),
                     source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
                     run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
                     commit_sha: ann_ctx.as_ref().map(|a| a.reference.commit_sha.clone()),

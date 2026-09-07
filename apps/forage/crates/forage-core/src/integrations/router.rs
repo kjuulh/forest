@@ -23,6 +23,11 @@ pub struct ReleaseContext {
     pub destination: String,
     pub environment: String,
     pub source_username: String,
+    /// The release's **owner** — the one person a DM may go to, and empty when
+    /// the release has no human owner (a bot wrote it, or its author has no
+    /// forest account). Forest derives it; it is not the CI credential that
+    /// happened to make the call. A release with no owner still posts to the
+    /// channel and DMs nobody.
     pub source_user_id: String,
     pub commit_sha: String,
     pub commit_branch: String,
@@ -827,6 +832,125 @@ mod tests {
         let integrations = vec![webhook_integration("w1"), slack_integration("s1")];
         let tasks = route_notification(&event, &integrations);
         assert_eq!(tasks.len(), 2);
+    }
+
+    /// Set up an org with one Slack workspace and, optionally, a Slack link for
+    /// one user, then route an event through it.
+    async fn route_with_slack(
+        event: &NotificationEvent,
+        linked_user: Option<&str>,
+    ) -> Vec<DispatchTask> {
+        let store = super::super::InMemoryIntegrationStore::new();
+        let integration = store
+            .create_integration(&super::super::CreateIntegrationInput {
+                organisation: "test-org".into(),
+                integration_type: super::super::IntegrationType::Slack,
+                name: "#deploys".into(),
+                config: IntegrationConfig::Slack {
+                    team_id: "T123".into(),
+                    team_name: "Test".into(),
+                    channel_id: "C456".into(),
+                    channel_name: "#deploys".into(),
+                    access_token: "xoxb-test".into(),
+                    webhook_url: "https://hooks.slack.com/test".into(),
+                },
+                created_by: "user-1".into(),
+            })
+            .await
+            .expect("create slack integration");
+        assert!(integration.enabled);
+
+        if let Some(user_id) = linked_user {
+            store
+                .upsert_slack_user_link(&super::super::SlackUserLink {
+                    id: "link-1".into(),
+                    user_id: user_id.into(),
+                    team_id: "T123".into(),
+                    team_name: "Test".into(),
+                    slack_user_id: "U999".into(),
+                    slack_username: "alice".into(),
+                    created_at: "2026-03-09T00:00:00Z".into(),
+                })
+                .await
+                .expect("link slack user");
+        }
+
+        route_notification_for_org(&store, event).await
+    }
+
+    fn dm_recipients(tasks: &[DispatchTask]) -> Vec<&str> {
+        tasks
+            .iter()
+            .filter_map(|t| match t {
+                DispatchTask::SlackDm { slack_user_id, .. } => Some(slack_user_id.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn channel_posts(tasks: &[DispatchTask]) -> usize {
+        tasks
+            .iter()
+            .filter(|t| matches!(t, DispatchTask::Slack { .. }))
+            .count()
+    }
+
+    /// The owner of a release gets the DM. `source_user_id` on the event is the
+    /// release *owner* — forest derives it and leaves it empty where there
+    /// isn't one (`services::release_owner`), which is what the two tests below
+    /// exercise.
+    #[tokio::test]
+    async fn the_owner_of_a_release_is_dmd() {
+        let mut event = test_event();
+        event.notification_type = "release_succeeded".into();
+
+        let tasks = route_with_slack(&event, Some("alice_id")).await;
+
+        assert_eq!(dm_recipients(&tasks), vec!["U999"]);
+        assert_eq!(channel_posts(&tasks), 1, "the channel post still happens");
+    }
+
+    /// A release with no owner — the renovate[bot] case (DATA-723). The channel
+    /// carries it to everybody, as it always did, and nobody is DM'd. In
+    /// particular the fallback that used to fill `source_user_id` with whoever
+    /// owned the CI token must not resurface: an empty owner means nobody, not
+    /// "ask the store who else to tell".
+    #[tokio::test]
+    async fn a_release_with_no_owner_posts_to_the_channel_and_dms_nobody() {
+        let mut event = test_event();
+        event.notification_type = "release_succeeded".into();
+        event.release.as_mut().expect("release").source_user_id = String::new();
+        // The bot is still named on the message — the channel says who, it just
+        // has nobody to address personally.
+        event.release.as_mut().expect("release").source_username = "renovate[bot]".into();
+
+        // Somebody's Slack link exists in this workspace; it is simply not this
+        // release's owner, so it must not be reached for.
+        let tasks = route_with_slack(&event, Some("kasper_id")).await;
+
+        assert!(
+            dm_recipients(&tasks).is_empty(),
+            "a release nobody owns must not DM anybody, got {:?}",
+            dm_recipients(&tasks),
+        );
+        assert_eq!(channel_posts(&tasks), 1, "the channel post is unchanged");
+    }
+
+    /// A non-owner with a Slack link in the same workspace is not a recipient.
+    /// They see the release in the channel like everyone else.
+    #[tokio::test]
+    async fn a_non_owner_is_not_dmd_about_somebody_elses_release() {
+        let mut event = test_event();
+        event.notification_type = "release_succeeded".into();
+        // Owned by alice; the only linked Slack account belongs to kasper.
+        let tasks = route_with_slack(&event, Some("kasper_id")).await;
+
+        assert!(
+            dm_recipients(&tasks).is_empty(),
+            "only the owner is DM'd, got {:?}",
+            dm_recipients(&tasks),
+        );
+        assert_eq!(channel_posts(&tasks), 1);
     }
 
     #[test]

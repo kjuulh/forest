@@ -28,6 +28,14 @@ pub struct ReleaseContext {
     pub source_username: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_email: Option<String>,
+    /// The release's **owner**: the one user this notification may be
+    /// delivered to personally, and empty when the release has no human owner
+    /// (a bot wrote it, or its author has no forest account).
+    ///
+    /// Not the actor. The credential that made the call is recorded on
+    /// `annotations.actor_id` / `release_intents.actor_id`, which is what an
+    /// audit reads; putting it here DM'd whoever owns the shared CI token about
+    /// every release in the org. `services::release_owner` derives this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_user_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -56,6 +64,53 @@ pub struct ReleaseContext {
     pub error_message: Option<String>,
     #[serde(default)]
     pub destination_count: i32,
+}
+
+/// Who a read of the notification feed is for.
+///
+/// The same rows serve two audiences and they are not the same feed. A person
+/// reading `forest notifications` gets their own releases — a personal
+/// notification about somebody else's release is a second copy of what the
+/// shared channel already showed them, and for a bot's release there is no
+/// owner at all. forage's fan-out listener reads the *fleet* feed under the
+/// service-account key: it is what posts the release-channel message, so it
+/// must keep seeing everything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Audience {
+    /// One person's inbox — only releases they own.
+    Personal(Uuid),
+    /// Every notification in scope, whoever owns it. Machine credentials only.
+    Fleet(Uuid),
+}
+
+impl Audience {
+    /// Which credential is reading, for the preference lookup. A machine has no
+    /// preferences, so nothing is muted for it.
+    pub fn reader(&self) -> Uuid {
+        match self {
+            Audience::Personal(id) | Audience::Fleet(id) => *id,
+        }
+    }
+
+    /// The owner a row must have to be delivered, or `None` for "any owner".
+    pub fn owner_filter(&self) -> Option<String> {
+        match self {
+            Audience::Personal(id) => Some(id.to_string()),
+            Audience::Fleet(_) => None,
+        }
+    }
+
+    /// A person reads their own feed; an app token or the service account reads
+    /// the fleet. Kept next to the query it parameterises so the two cannot
+    /// drift apart.
+    pub fn from_actor(actor: &crate::actor::Actor) -> Self {
+        match actor {
+            crate::actor::Actor::User { user_id } => Audience::Personal(*user_id),
+            crate::actor::Actor::App { .. } | crate::actor::Actor::ServiceAccount { .. } => {
+                Audience::Fleet(actor.actor_id())
+            }
+        }
+    }
 }
 
 impl NotificationRegistry {
@@ -107,15 +162,19 @@ impl NotificationRegistry {
         Ok(rec.max)
     }
 
-    /// List the most recent notifications (newest first) for a user.
-    /// Respects the same preference-based filtering as poll_notifications.
+    /// List the most recent notifications (newest first) for an audience.
+    /// Respects the same owner gate and preference filtering as
+    /// `poll_notifications`.
     pub async fn list_recent_notifications(
         &self,
-        user_id: &Uuid,
+        audience: &Audience,
         organisation: Option<&str>,
         project: Option<&str>,
         limit: i64,
     ) -> anyhow::Result<Vec<NotificationRecord>> {
+        let reader = audience.reader();
+        let owner = audience.owner_filter();
+
         let recs = sqlx::query!(
             r#"
             SELECT
@@ -138,12 +197,14 @@ impl NotificationRegistry {
                     AND np.channel = 'CLI'
                     AND np.enabled = false
               )
+              AND ($4::text IS NULL OR n.release_context->>'source_user_id' = $4)
             ORDER BY n.sequence DESC
-            LIMIT $4
+            LIMIT $5
             "#,
             organisation,
             project,
-            user_id,
+            reader,
+            owner,
             limit,
         )
         .fetch_all(&self.db)
@@ -166,16 +227,27 @@ impl NotificationRegistry {
             .collect())
     }
 
-    /// Poll for notifications newer than `after_sequence` for the given user.
-    /// Filters out notification types the user has explicitly disabled for CLI channel.
+    /// Poll for notifications newer than `after_sequence` for an audience.
+    ///
+    /// A `Personal` audience is an inbox, so the owner gate comes first: only
+    /// releases this person owns, whatever their preferences say. Being a
+    /// non-owner is not a default-off preference — it is nothing to deliver,
+    /// because the release channel already carried it. Preferences then mute
+    /// types the person opted out of on top of that.
+    ///
+    /// A `Fleet` audience is unfiltered by owner. That is the feed forage's
+    /// listener consumes to post the shared release-channel message.
     pub async fn poll_notifications(
         &self,
-        user_id: &Uuid,
+        audience: &Audience,
         after_sequence: i64,
         organisation: Option<&str>,
         project: Option<&str>,
         limit: i64,
     ) -> anyhow::Result<Vec<NotificationRecord>> {
+        let reader = audience.reader();
+        let owner = audience.owner_filter();
+
         let recs = sqlx::query!(
             r#"
             SELECT
@@ -199,13 +271,15 @@ impl NotificationRegistry {
                     AND np.channel = 'CLI'
                     AND np.enabled = false
               )
+              AND ($5::text IS NULL OR n.release_context->>'source_user_id' = $5)
             ORDER BY n.sequence ASC
-            LIMIT $5
+            LIMIT $6
             "#,
             after_sequence,
             organisation,
             project,
-            user_id,
+            reader,
+            owner,
             limit,
         )
         .fetch_all(&self.db)

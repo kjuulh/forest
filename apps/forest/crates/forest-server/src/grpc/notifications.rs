@@ -7,13 +7,36 @@ use uuid::Uuid;
 use crate::{
     actor::Actor,
     grpc::artifacts::GrpcErrorExt,
-    services::notification_registry::{NotificationRecord, NotificationRegistryState},
+    services::notification_registry::{Audience, NotificationRecord, NotificationRegistryState},
     state::State,
     tokens::AppClaims,
 };
 
 pub struct NotificationsServer {
     pub state: State,
+}
+
+/// Which feed the caller is reading.
+///
+/// A person gets their own notifications; the release channel is what shows
+/// them everybody else's, and a release with no owner is nobody's to receive.
+/// A machine credential — forage's fan-out listener under the service-account
+/// key, or an app token — reads the whole stream, because that is the feed the
+/// channel post is built from.
+fn extract_audience(extensions: &http::Extensions) -> Result<Audience, tonic::Status> {
+    if let Some(actor) = extensions.get::<Actor>() {
+        return Ok(Audience::from_actor(actor));
+    }
+    // A JWT always arrives with an `Actor` beside it; this is the belt-and-
+    // braces path, and a user token can only ever be a personal audience.
+    if let Some(claims) = extensions.get::<AppClaims>() {
+        return claims
+            .user_id
+            .parse()
+            .map(Audience::Personal)
+            .map_err(|_| tonic::Status::internal("invalid user_id in token"));
+    }
+    Err(tonic::Status::unauthenticated("missing auth context"))
 }
 
 /// Extract the actor's identity from request extensions.
@@ -95,7 +118,7 @@ impl NotificationService for NotificationsServer {
     ) -> std::result::Result<tonic::Response<Self::ListenNotificationsStream>, tonic::Status> {
         tracing::debug!("listen_notifications stream");
 
-        let user_id = extract_actor_id(request.extensions())?;
+        let audience = extract_audience(request.extensions())?;
 
         let req = request.into_inner();
         let organisation = req.organisation;
@@ -112,7 +135,7 @@ impl NotificationService for NotificationsServer {
             loop {
                 match registry
                     .poll_notifications(
-                        &user_id,
+                        &audience,
                         last_sequence,
                         organisation.as_deref(),
                         project.as_deref(),
@@ -153,7 +176,7 @@ impl NotificationService for NotificationsServer {
         &self,
         request: tonic::Request<ListNotificationsRequest>,
     ) -> std::result::Result<tonic::Response<ListNotificationsResponse>, tonic::Status> {
-        let user_id = extract_actor_id(request.extensions())?;
+        let audience = extract_audience(request.extensions())?;
 
         let req = request.into_inner();
         let limit = if req.page_size > 0 {
@@ -167,7 +190,7 @@ impl NotificationService for NotificationsServer {
             .state
             .notification_registry()
             .list_recent_notifications(
-                &user_id,
+                &audience,
                 req.organisation.as_deref(),
                 req.project.as_deref(),
                 limit,
