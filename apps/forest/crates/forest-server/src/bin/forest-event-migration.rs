@@ -10,7 +10,7 @@ use forest_server::domains::{
 use futures::TryStreamExt;
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::{PgPool, Row, postgres::PgPoolOptions};
+use sqlx::{AssertSqlSafe, PgPool, Row, postgres::PgPoolOptions};
 
 const SUPPORTED_CATEGORIES: [&str; 6] = [
     "app",
@@ -480,7 +480,9 @@ async fn nullable_count(
 }
 
 async fn scalar_count(pool: &PgPool, sql: &str) -> anyhow::Result<i64> {
-    Ok(sqlx::query_scalar(sql).fetch_one(pool).await?)
+    Ok(sqlx::query_scalar(AssertSqlSafe(sql))
+        .fetch_one(pool)
+        .await?)
 }
 
 async fn stream_categories(pool: &PgPool) -> anyhow::Result<BTreeMap<String, i64>> {

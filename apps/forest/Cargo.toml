@@ -34,6 +34,17 @@ forest-runner = { path = "crates/forest-runner" }
 forest-sdk = { path = "crates/forest-sdk" }
 forest-sdk-codegen = { path = "crates/forest-sdk-codegen" }
 forest-event-store = { path = "crates/forest-event-store" }
+mire = { version = "=0.3.0", default-features = false }
+mire-sagas = { version = "=0.3.0", default-features = false }
+sqlx = { version = "=0.9.0", features = [
+  "chrono",
+  "json",
+  "postgres",
+  "runtime-tokio",
+  "tls-rustls",
+  "uuid",
+] }
+
 
 anyhow = { version = "1" }
 miette = { version = "7", features = ["fancy"] }

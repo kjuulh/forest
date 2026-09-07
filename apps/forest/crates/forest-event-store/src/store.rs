@@ -1,5 +1,5 @@
 use anyhow::{Context, bail};
-use sqlx::{PgPool, Postgres, Row, Transaction};
+use sqlx::{AssertSqlSafe, PgPool, Postgres, Row, Transaction};
 
 use crate::{
     Aggregate, AggregateRoot,
@@ -44,7 +44,7 @@ impl EventStore {
             if cleaned.is_empty() {
                 continue;
             }
-            sqlx::query(cleaned)
+            sqlx::query(AssertSqlSafe(cleaned))
                 .execute(&mut *tx)
                 .await
                 .with_context(|| {
