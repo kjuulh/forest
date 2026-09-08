@@ -728,7 +728,31 @@ images from a `force-new-deployment`, so `ci.yaml`'s deploy job is now a no-op
 for image updates. Either teach it to register a new task-definition revision
 with the digest it just built — the better practice, and it removes the cached
 mutable tag hazard permanently — or accept tag pinning again with its risks.
-Until that is decided, deploying Forest means registering a new revision.
+Until that is decided, deploying either service means registering a new
+revision.
+
+Note this is not purely a workflow edit: registering revisions needs
+`ecs:RegisterTaskDefinition` and `iam:PassRole` on the deploy role, which
+`ecs-deploy.tf` in *infrastructure-platform* deliberately withholds — the
+current job needs neither because it only calls `update-service
+--force-new-deployment`. So the fix spans two repositories.
+
+### Forage was deployed separately
+
+Gating the deploy job meant merging deployed *nothing*, and the cutover above
+only moved Forest. Forage therefore kept running its pre-merge image for several
+hours, so the organisation rule settings work that landed in the same pull
+request was merged but not live.
+
+Deployed afterwards the same way, digest-pinned to avoid the cached-tag trap:
+task definition **`forage:4`** references
+`ghcr.io/understory-io/forage@sha256:aca4d4cc…`. Forage carries no schema
+coupling — 12 embedded migrations against 12 applied, and that change added
+none — so `sqlx::migrate!` found nothing to do. The rollout overlapped old and
+new briefly and took zero downtime, which is safe here precisely because there
+is no migration involved; that overlap is the thing Forest could not tolerate.
+
+Both services are now pinned to digests rather than `:latest`.
 
 ### Rollback position
 
