@@ -278,12 +278,70 @@ jobs:
           fi
           echo "authenticated to ${{ matrix.environment.name }} ($actual)"
 
-      - name: Force new deployment
+      # Deploy by digest, not by moving `:latest`.
+      #
+      # `--force-new-deployment` against a mutable tag is not reliable: the ECS
+      # agent may serve a cached layer for that tag, so the "new" task starts on
+      # the *old* image. Forest hit this on 2026-09-08 (DATA-739) -- two
+      # consecutive tasks came up on the pre-Mire digest against an
+      # already-migrated database and crash-looped, because the tag had moved
+      # but the cache had not.
+      #
+      # So resolve `:latest` to a digest and register a revision pinned to it.
+      # The service's `task_definition` is `ignore_changes` in the ecs-task
+      # module precisely so this does not fight Terraform.
+      # The registry needs auth to read a manifest, and this job -- unlike
+      # build-and-push -- had no reason to log in before.
+      - name: Log in to ghcr
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve the image digest
+        id: digest
+        run: |
+          image="ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}"
+          digest=$(docker buildx imagetools inspect "$image:latest" \
+            --format '{{ .Manifest.Digest }}')
+          if [ -z "$digest" ]; then
+            echo "::error::could not resolve $image:latest to a digest"
+            exit 1
+          fi
+          echo "image=$image@$digest" >> "$GITHUB_OUTPUT"
+          echo "resolved ${{ matrix.service }} -> $digest"
+
+      - name: Register a task definition pinned to that digest
+        id: taskdef
+        run: |
+          current=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" --services "${{ matrix.service }}" \
+            --region "$AWS_REGION" --query 'services[0].taskDefinition' --output text)
+
+          aws ecs describe-task-definition --task-definition "$current" \
+            --region "$AWS_REGION" --query 'taskDefinition' > td.json
+
+          # Swap only this service's own container image; leave sidecars alone.
+          jq --arg name "${{ matrix.service }}" --arg image "${{ steps.digest.outputs.image }}" '
+            .containerDefinitions = (.containerDefinitions
+              | map(if .name == $name then .image = $image else . end))
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+          ' td.json > new-td.json
+
+          arn=$(aws ecs register-task-definition \
+            --cli-input-json file://new-td.json --region "$AWS_REGION" \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
+          echo "registered $arn"
+
+      - name: Deploy that revision
         run: |
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
             --service "${{ matrix.service }}" \
-            --force-new-deployment \
+            --task-definition "${{ steps.taskdef.outputs.arn }}" \
             --region "$AWS_REGION" \
             --query 'service.deployments[0].[id,status,taskDefinition]' \
             --output text
