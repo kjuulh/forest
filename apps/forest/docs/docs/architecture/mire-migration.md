@@ -632,7 +632,113 @@ for the request path. Set the pool size explicitly with `PgPoolOptions` at that
 point rather than continuing to inherit SQLx's default, and size it against the
 ACU ceiling in force at the time.
 
-## Staged production cutover — awaiting approval
+## Production cutover — executed 2026-09-08
+
+Done. Production runs Mire on Aurora PostgreSQL 18.4 and every gate passes.
+
+### Order as executed
+
+| Time (UTC) | Step |
+| --- | --- |
+| 00:01–00:16 | Aurora major upgrade 16.11 → 18.4 completes; cluster available |
+| 00:17 | Fresh logical dump taken and checksum-verified |
+| 00:21 | Manual pre-Mire cluster snapshot reaches `available` |
+| 00:22:30 | Forest scaled to 0 — downtime begins |
+| 00:24:10 | All 10 pooled writer sessions confirmed closed |
+| 00:24:34 | `prepare` + `mire-migrate` applied to production |
+| ~00:25 | `audit --strict` passes; hashes confirmed unchanged |
+| 00:29:31 | Forest running and healthy on the Mire image — downtime ends |
+
+Total downtime roughly **seven minutes**, of which about four were an avoidable
+incident described below.
+
+### Backups taken before touching anything
+
+Three independent restore points, all verified before the migration ran:
+
+- `pre-mire-migration-18-4-2026-09-08-0016` — manual cluster snapshot, 18.4,
+  the post-upgrade **pre-Mire** state. This is the primary rollback.
+- `preupgrade-platform-apps-16-11-to-18-4-2026-09-08-00-01` — Aurora's own
+  pre-upgrade snapshot, 16.11.
+- `nef_remote:~/prod-extracts/forest-prod-20260908T001701Z.dump` — 5 001 555
+  bytes, sha256 `40bdb4af…` matching in flight and at rest, 54/54 tables,
+  34 702 rows, dumped from 18.4.
+
+### The migration was lossless
+
+Captured with the database quiescent, before and after:
+
+| | Before | After |
+| --- | --- | --- |
+| streams / events / subs | 87 / 965 / 0 | 87 / 965 / 0 |
+| high-water mark | 965 | 965 |
+| sequence | 990 | 990 |
+| `md5(stream_id …)` | `3135421b…` | `3135421b…` |
+| `md5(global_position …)` | `3231348c…` | `3231348c…` |
+| `md5(position:stream:version:type:payload …)` | `97dc5cdf…` | `97dc5cdf…` |
+| `_sqlx_migrations` | 24 | 25 |
+
+All three hashes are byte-identical. The only changes are the intended additive
+ones: one migration ledger row and Mire's empty `es_projection_leases`.
+
+Worth noting these same hashes were produced by the green rehearsal, so the
+rehearsal ran on byte-identical data rather than an approximation.
+
+### Verified on production
+
+- `forest-event-migration audit --strict` — **passes**, 965/965 events decoded,
+  every compatibility column present with zero nulls, zero orphans, zero
+  stream-version mismatches, zero gaps, zero category or subscription-cursor
+  mismatches, sequence safe, zero projection rows without streams across all
+  six aggregate families
+- **87 of 87 historical streams hydrate through Mire**
+- the replay comparison **matches the live projections** for all six categories,
+  including all 123 published component versions
+- both load-balancer target groups healthy — gRPC 4040 and HTTP 4042
+- ECS service steady at 1/1 on task definition `forest:5`
+
+The write smoke was deliberately **not** run against production; it creates an
+app aggregate and would pollute real data. It ran on the green copy instead.
+
+### Incident: ECS served a cached `:latest` and crash-looped
+
+Scaling back up did not start the new image. Two consecutive tasks came up on
+the **pre-Mire** digest `sha256:5f80ff45…` and the `forest` container exited 1
+each time, because task definition `forest:4` pinned the mutable tag
+`ghcr.io/understory-io/forest:latest` and the container instance already had a
+layer cached under that tag. Meanwhile the registry tag had moved twice during
+the evening's merges.
+
+The failure mode was precisely the one rehearsed earlier: an old binary against
+a migrated database dies on
+
+```text
+migration 20260902120000 was previously applied but is missing in the resolved migrations
+```
+
+Because that had already been diagnosed, the cause was obvious from the digest
+alone rather than needing investigation under pressure.
+
+Resolved by pinning the digest instead of the tag: task definition **`forest:5`**
+references `ghcr.io/understory-io/forest@sha256:df18ae55…`. The task started
+healthy immediately.
+
+**Follow-up required.** A digest-pinned task definition no longer picks up new
+images from a `force-new-deployment`, so `ci.yaml`'s deploy job is now a no-op
+for image updates. Either teach it to register a new task-definition revision
+with the digest it just built — the better practice, and it removes the cached
+mutable tag hazard permanently — or accept tag pinning again with its risks.
+Until that is decided, deploying Forest means registering a new revision.
+
+### Rollback position
+
+The source cluster is no longer a clean rollback: it *is* the migrated cluster.
+Rollback is now either the pre-Mire snapshot above, or the binary rollback,
+which requires deleting the migration ledger row first — see the rollback
+section. That step is no longer hypothetical; the crash-loop above was the same
+mechanism.
+
+## Staged production cutover — superseded, executed above
 
 **Not executed. This requires Kasper's explicit go and a scheduled window.**
 
