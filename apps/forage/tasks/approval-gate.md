@@ -29,6 +29,9 @@ New policy type `POLICY_TYPE_EXTERNAL_APPROVAL` that requires human approval bef
 
 **New file:** `scripts/sync-protos.sh`
 - Copies all `.proto` files from forest repo to forage, runs `buf generate`
+- *(Removed since. forest and forage share a monorepo now, and
+  `apps/forage/interface/proto` is a symlink to forest's, so the copy step has
+  nothing to do — only `buf generate` remains.)*
 
 **Regenerated:** `crates/forage-grpc/src/grpc/forest/v1/forest.v1.rs` and `forest.v1.tonic.rs`
 
