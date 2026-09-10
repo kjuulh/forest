@@ -4906,6 +4906,62 @@ impl ReleaseOutcome {
         }
     }
 }
+/// One named observation about a release on one destination.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Signal {
+    /// The reporter's own name for what it observed — `rollout`, `smoke`,
+    /// `migrations`. Scoped to the destination, so two destinations reporting
+    /// `rollout` do not collide.
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(enumeration="HealthStatus", tag="2")]
+    pub status: i32,
+    /// Human-readable, and the thing a person reads first when a gate did not
+    /// open. The ECS provider puts its poll line here:
+    /// "deployments=1 running=1/1".
+    #[prost(string, tag="3")]
+    pub detail: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
+    pub environment: ::prost::alloc::string::String,
+    /// When the reporter observed this, RFC 3339 — not when the server stored
+    /// it. A gate compares this against the stage that preceded it, so a
+    /// HEALTHY observed before the deploy started cannot satisfy anything.
+    #[prost(string, tag="6")]
+    pub observed_at: ::prost::alloc::string::String,
+    /// Who reported it, for the case where a signal is wrong and someone has
+    /// to work out which reporter to go and look at. Free-form: an agent name,
+    /// a provider name.
+    #[prost(string, tag="7")]
+    pub reported_by: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReportSignalRequest {
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub release_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub project: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="10")]
+    pub signal: ::core::option::Option<Signal>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReportSignalResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListSignalsRequest {
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListSignalsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub signals: ::prost::alloc::vec::Vec<Signal>,
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Trigger {
     #[prost(string, tag="1")]
