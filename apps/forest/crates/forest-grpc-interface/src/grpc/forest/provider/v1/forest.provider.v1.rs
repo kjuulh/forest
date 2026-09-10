@@ -94,7 +94,7 @@ pub struct Release {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExecuteEvent {
-    #[prost(oneof="execute_event::Event", tags="1, 2")]
+    #[prost(oneof="execute_event::Event", tags="1, 2, 3")]
     pub event: ::core::option::Option<execute_event::Event>,
 }
 /// Nested message and enum types in `ExecuteEvent`.
@@ -105,7 +105,44 @@ pub mod execute_event {
         Log(super::LogLine),
         #[prost(message, tag="2")]
         Outcome(super::Outcome),
+        /// Something the provider observed and forest should record. Optional, and
+        /// a provider may send any number of them.
+        #[prost(message, tag="3")]
+        Signal(super::Signal),
     }
+}
+/// A named observation about this release, pushed as it is made.
+///
+/// A provider knows things about a rollout that its final outcome cannot carry:
+/// that the new tasks are up, that a smoke check passed, that the thing is
+/// serving. Sending them as they happen lets a pipeline gate on them — see
+/// forest.v1.SignalService and the `gate` stage type.
+///
+/// Deliberately an event on this stream rather than a call back into forest.
+/// This protocol is self-contained on purpose, so that a provider needs no
+/// forest dependency and can be vendored on its own; a signal that required
+/// dialling forest's SignalService would take that away. forest already knows
+/// which release and organisation this stream belongs to, so the provider only
+/// has to say what it saw.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Signal {
+    /// The provider's own name for it — `rollout`, `smoke`. A pipeline gate waits
+    /// on this name.
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    /// One of forest.v1.HealthStatus, by name: HEALTHY, PROGRESSING, DEGRADED,
+    /// UNHEALTHY, MISSING. A string rather than the enum so this file stays
+    /// free of forest imports; forest validates it and rejects anything else.
+    #[prost(string, tag="2")]
+    pub status: ::prost::alloc::string::String,
+    /// What a person reads first when a gate did not open. The ECS provider puts
+    /// its poll line here: "deployments=1 running=1/1".
+    #[prost(string, tag="3")]
+    pub detail: ::prost::alloc::string::String,
+    /// RFC 3339, and the provider's own clock. Empty means "when forest received
+    /// it", which is close enough for a signal sent as it happens.
+    #[prost(string, tag="4")]
+    pub observed_at: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct LogLine {

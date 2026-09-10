@@ -71,6 +71,7 @@ impl DestinationService {
             GenericV1Destination {
                 artifact_files: state.artifact_staging_registry(),
                 db: state.db.clone(),
+                nats: state.nats.clone(),
                 release_tokens: state.release_token_registry(),
                 external_host: state.config.external_host.clone(),
             },

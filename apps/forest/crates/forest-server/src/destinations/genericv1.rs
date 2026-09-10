@@ -88,6 +88,9 @@ pub struct GenericV1Destination {
     pub artifact_files: ArtifactStagingRegistry,
     /// For reading the declaration `annotate` recorded. See `release_config`.
     pub db: sqlx::PgPool,
+    /// For announcing signals a provider reports, so a gate waiting on one
+    /// re-evaluates immediately rather than on the next sweep.
+    pub nats: async_nats::Client,
     pub release_tokens: ReleaseTokenRegistry,
     /// forest's own externally-reachable address, handed to the provider so it
     /// can call back for artifacts if it needs them.
@@ -463,6 +466,59 @@ impl GenericV1Destination {
                         logger.log_stderr(&line.line);
                     } else {
                         logger.log_stdout(&line.line);
+                    }
+                }
+                Some(Event::Signal(sig)) => {
+                    // A provider says what it saw; forest knows which release
+                    // it is about. Recorded here rather than by the provider
+                    // calling back, so the provider protocol stays free of any
+                    // forest dependency.
+                    let status = sig.status.trim().to_ascii_uppercase();
+                    if !crate::services::release_signals::is_valid_status(&status) {
+                        // Not fatal to the release — a provider that
+                        // mis-reports a signal has still deployed — but it must
+                        // not be stored, or a gate would wait on a state
+                        // nothing can ever match.
+                        logger.log_stderr(&format!(
+                            "provider reported signal '{}' with unknown status '{}'; ignoring \
+                             (expected one of {:?})",
+                            sig.name,
+                            sig.status,
+                            crate::services::release_signals::VALID_STATUSES,
+                        ));
+                        continue;
+                    }
+
+                    let observed_at = chrono::DateTime::parse_from_rfc3339(&sig.observed_at)
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                        .unwrap_or_else(|_| chrono::Utc::now());
+
+                    let row = crate::services::release_signals::SignalRow {
+                        name: sig.name.clone(),
+                        status,
+                        detail: sig.detail.clone(),
+                        destination_name: destination.name.clone(),
+                        environment: destination.environment.clone(),
+                        reported_by: meta.provider_url.clone(),
+                        observed_at,
+                    };
+
+                    if let Err(e) = crate::services::release_signals::report(
+                        &self.db,
+                        &self.nats,
+                        release.release_intent_id,
+                        release.id,
+                        &destination.organisation,
+                        &release.project,
+                        &row,
+                    )
+                    .await
+                    {
+                        // Same reasoning: the deploy is what matters, and a
+                        // signal that failed to store is recoverable by the
+                        // next report. Losing the release over it would not be.
+                        logger
+                            .log_stderr(&format!("failed to record signal '{}': {e:#}", sig.name));
                     }
                 }
                 Some(Event::Outcome(o)) => {
