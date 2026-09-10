@@ -180,6 +180,11 @@ fn stages_from_proto(proto_stages: Vec<PipelineStage>) -> anyhow::Result<Pipelin
                 environment: c.environment,
                 auto_approve: c.auto_approve,
             },
+            Some(pipeline_stage::Config::Gate(c)) => StageConfig::Gate {
+                requires: crate::grpc::release_pipelines::requirements_from_proto(c.requires),
+                timeout_seconds: c.timeout_seconds,
+                on_timeout: crate::grpc::release_pipelines::gate_timeout_from_proto(c.on_timeout),
+            },
             None => anyhow::bail!("stage '{}' is missing a config", ps.id),
         };
         if stages
@@ -220,6 +225,19 @@ fn stages_to_proto(stages: PipelineStages) -> Vec<PipelineStage> {
                     environment,
                     auto_approve,
                 })),
+                StageConfig::Gate {
+                    requires,
+                    timeout_seconds,
+                    on_timeout,
+                } => Some(pipeline_stage::Config::Gate(
+                    forest_grpc_interface::GateStageConfig {
+                        requires: crate::grpc::release_pipelines::requirements_to_proto(&requires),
+                        timeout_seconds,
+                        on_timeout: crate::grpc::release_pipelines::gate_timeout_to_proto(
+                            &on_timeout,
+                        ),
+                    },
+                )),
             };
             PipelineStage {
                 id,

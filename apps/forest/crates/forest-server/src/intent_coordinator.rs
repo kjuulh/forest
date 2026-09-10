@@ -10,8 +10,9 @@ use uuid::Uuid;
 use crate::State;
 use crate::services::release_event_store::{check_approval_policies, check_soak_time_policies};
 use crate::services::release_pipeline::{
-    ApprovalStatus, PipelineStages, StageConfig, StageState, StageStates, StageStatus,
-    find_ready_stages, has_failed_dependency, init_stage_states, is_pipeline_complete,
+    ApprovalStatus, GateTimeout, PipelineStages, SignalRequirement, StageConfig, StageState,
+    StageStates, StageStatus, find_ready_stages, has_failed_dependency, init_stage_states,
+    is_pipeline_complete,
 };
 
 /// The IntentCoordinator is the single saga orchestrator for pipeline release intents.
@@ -267,6 +268,93 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                             Some(existing) => existing.min(wait_until_utc),
                             None => wait_until_utc,
                         });
+                    }
+                }
+            }
+            StageConfig::Gate {
+                requires,
+                on_timeout,
+                ..
+            } => {
+                let signals =
+                    crate::services::release_signals::list_for_intent(&state.db, intent_id)
+                        .await
+                        .unwrap_or_default();
+
+                let unmet = unmet_requirements(requires, &signals);
+
+                if unmet.is_empty() {
+                    let mut updated = current.clone();
+                    updated.status = StageStatus::Succeeded;
+                    updated.completed_at = Some(now_str.clone());
+                    updated.gate_waiting_on = None;
+                    stage_states.insert(stage_id.clone(), updated);
+                    changed = true;
+
+                    tracing::info!(
+                        %intent_id,
+                        stage_id,
+                        "coordinator: gate satisfied"
+                    );
+                    continue;
+                }
+
+                let deadline = current
+                    .gate_deadline
+                    .as_deref()
+                    .and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok())
+                    .map(|d| d.with_timezone(&chrono::Utc));
+
+                match deadline {
+                    Some(deadline) if deadline <= now => {
+                        let mut updated = current.clone();
+                        updated.completed_at = Some(now_str.clone());
+                        updated.gate_waiting_on = Some(unmet.clone());
+                        let waiting = unmet.join(", ");
+
+                        match on_timeout {
+                            GateTimeout::Proceed => {
+                                updated.status = StageStatus::Succeeded;
+                                updated.error_message = Some(format!(
+                                    "gate timed out waiting for {waiting}; proceeding because \
+                                     on_timeout is `proceed`"
+                                ));
+                                tracing::warn!(
+                                    %intent_id,
+                                    stage_id,
+                                    "coordinator: gate timed out, proceeding: {waiting}"
+                                );
+                            }
+                            GateTimeout::Fail => {
+                                updated.status = StageStatus::Failed;
+                                updated.error_message =
+                                    Some(format!("gate timed out waiting for {waiting}"));
+                                tracing::warn!(
+                                    %intent_id,
+                                    stage_id,
+                                    "coordinator: gate timed out: {waiting}"
+                                );
+                            }
+                        }
+
+                        stage_states.insert(stage_id.clone(), updated);
+                        changed = true;
+                    }
+                    _ => {
+                        // Still waiting. Record what for, so a parked pipeline
+                        // says what it is parked on rather than looking hung.
+                        if current.gate_waiting_on.as_deref() != Some(unmet.as_slice()) {
+                            let mut updated = current.clone();
+                            updated.gate_waiting_on = Some(unmet);
+                            stage_states.insert(stage_id.clone(), updated);
+                            changed = true;
+                        }
+                        if let Some(deadline) = deadline {
+                            earliest_timer = Some(match earliest_timer {
+                                Some(existing) => existing.min(deadline),
+                                None => deadline,
+                            });
+                        }
                     }
                 }
             }
@@ -531,6 +619,39 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                     stage_id,
                     duration_seconds,
                     "coordinator: activated wait stage (until {wait_until})"
+                );
+            }
+            StageConfig::Gate {
+                timeout_seconds, ..
+            } => {
+                let deadline = now + chrono::Duration::seconds(*timeout_seconds);
+
+                stage_states.insert(
+                    stage_id.clone(),
+                    StageState {
+                        status: StageStatus::Active,
+                        queued_at: Some(now_str.clone()),
+                        started_at: Some(now_str.clone()),
+                        gate_deadline: Some(deadline.to_rfc3339()),
+                        ..StageState::pending()
+                    },
+                );
+                changed = true;
+
+                // The deadline is a timer like a wait stage's, so the sweep
+                // wakes to decide `on_timeout` even if no signal ever arrives.
+                // Arriving signals wake it sooner, by publishing
+                // `forest.intent.evaluate` — see services/release_signals.rs.
+                earliest_timer = Some(match earliest_timer {
+                    Some(existing) => existing.min(deadline),
+                    None => deadline,
+                });
+
+                tracing::info!(
+                    %intent_id,
+                    stage_id,
+                    timeout_seconds,
+                    "coordinator: activated gate stage (deadline {deadline})"
                 );
             }
             StageConfig::Plan { environment, .. } => {
@@ -858,6 +979,56 @@ enum StageResolution {
 /// Declaring nothing for the stage's environment means no filtering, not an
 /// empty filter. Projects that name no destinations must keep releasing to
 /// whole environments or this fix breaks every one of them to help one.
+/// Which of a gate's requirements are not yet satisfied, rendered for a human.
+///
+/// A requirement is satisfied when *some* destination has reported that signal
+/// in one of the accepted states. Deliberately "some" and not "every
+/// destination in the preceding stage": forest does not model which
+/// destinations a gate is about, and demanding a quorum it cannot define would
+/// mean a gate that never opens for a stage that fans out. The narrower rule
+/// belongs with per-destination gates, if that turns out to be wanted.
+fn unmet_requirements(
+    requires: &[SignalRequirement],
+    signals: &[crate::services::release_signals::SignalRow],
+) -> Vec<String> {
+    requires
+        .iter()
+        .filter_map(|req| {
+            let accepted = req.accepted();
+            let satisfied = signals
+                .iter()
+                .any(|s| s.name == req.signal && accepted.contains(&s.status));
+            if satisfied {
+                return None;
+            }
+
+            // Name what was actually seen, if anything. "waiting for rollout
+            // to be HEALTHY (currently UNHEALTHY)" is a different problem from
+            // "waiting for rollout to be HEALTHY (nothing reported)", and the
+            // two want different responses.
+            let seen: Vec<&str> = signals
+                .iter()
+                .filter(|s| s.name == req.signal)
+                .map(|s| s.status.as_str())
+                .collect();
+            Some(if seen.is_empty() {
+                format!(
+                    "{} to be {} (nothing reported)",
+                    req.signal,
+                    accepted.join(" or ")
+                )
+            } else {
+                format!(
+                    "{} to be {} (currently {})",
+                    req.signal,
+                    accepted.join(" or "),
+                    seen.join(", ")
+                )
+            })
+        })
+        .collect()
+}
+
 async fn resolve_stage_destinations(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     project_id: &Uuid,
@@ -941,4 +1112,119 @@ async fn resolve_stage_destinations(
 struct ReleaseRow {
     status: String,
     error_message: Option<String>,
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+    use crate::services::release_signals::SignalRow;
+
+    fn signal(name: &str, status: &str) -> SignalRow {
+        SignalRow {
+            name: name.to_string(),
+            status: status.to_string(),
+            detail: String::new(),
+            destination_name: "platform-dev/eu-west-1/infrastructure-platform".to_string(),
+            environment: "platform-dev".to_string(),
+            reported_by: "forest-ecs-provider".to_string(),
+            observed_at: chrono::Utc::now(),
+        }
+    }
+
+    fn req(name: &str, accept: &[&str]) -> SignalRequirement {
+        SignalRequirement {
+            signal: name.to_string(),
+            accept: accept.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn a_reported_healthy_signal_satisfies_the_gate() {
+        let unmet = unmet_requirements(
+            &[req("rollout", &["HEALTHY"])],
+            &[signal("rollout", "HEALTHY")],
+        );
+        assert!(unmet.is_empty(), "got: {unmet:?}");
+    }
+
+    /// The point of the whole thing: a gate must not open on a bad state.
+    #[test]
+    fn an_unhealthy_signal_does_not_satisfy_a_gate_waiting_for_healthy() {
+        let unmet = unmet_requirements(
+            &[req("rollout", &["HEALTHY"])],
+            &[signal("rollout", "UNHEALTHY")],
+        );
+        assert_eq!(unmet.len(), 1);
+        assert!(unmet[0].contains("currently UNHEALTHY"), "got: {unmet:?}");
+    }
+
+    /// "Nothing reported" and "reported something bad" are different problems
+    /// wanting different responses, so they must read differently.
+    #[test]
+    fn nothing_reported_says_so_rather_than_naming_a_state() {
+        let unmet = unmet_requirements(&[req("rollout", &["HEALTHY"])], &[]);
+        assert_eq!(unmet.len(), 1);
+        assert!(unmet[0].contains("nothing reported"), "got: {unmet:?}");
+        assert!(unmet[0].contains("rollout"), "got: {unmet:?}");
+    }
+
+    /// A signal by another name is not this signal.
+    #[test]
+    fn a_different_signal_does_not_satisfy_the_requirement() {
+        let unmet = unmet_requirements(
+            &[req("rollout", &["HEALTHY"])],
+            &[signal("smoke", "HEALTHY")],
+        );
+        assert_eq!(unmet.len(), 1);
+        assert!(unmet[0].contains("nothing reported"), "got: {unmet:?}");
+    }
+
+    #[test]
+    fn any_of_the_accepted_states_satisfies_it() {
+        for status in ["HEALTHY", "DEGRADED"] {
+            let unmet = unmet_requirements(
+                &[req("rollout", &["HEALTHY", "DEGRADED"])],
+                &[signal("rollout", status)],
+            );
+            assert!(unmet.is_empty(), "{status} should satisfy: {unmet:?}");
+        }
+        let unmet = unmet_requirements(
+            &[req("rollout", &["HEALTHY", "DEGRADED"])],
+            &[signal("rollout", "UNHEALTHY")],
+        );
+        assert_eq!(unmet.len(), 1, "UNHEALTHY should not: {unmet:?}");
+    }
+
+    /// Every requirement must be met, not any.
+    #[test]
+    fn all_requirements_must_be_satisfied() {
+        let requires = [req("rollout", &["HEALTHY"]), req("smoke", &["HEALTHY"])];
+        let unmet = unmet_requirements(&requires, &[signal("rollout", "HEALTHY")]);
+        assert_eq!(unmet.len(), 1);
+        assert!(unmet[0].contains("smoke"), "got: {unmet:?}");
+
+        let unmet = unmet_requirements(
+            &requires,
+            &[signal("rollout", "HEALTHY"), signal("smoke", "HEALTHY")],
+        );
+        assert!(unmet.is_empty(), "got: {unmet:?}");
+    }
+
+    /// A stage that fans out reports one signal per destination. Any
+    /// destination reporting HEALTHY satisfies it — see the note on
+    /// `unmet_requirements` for why this is deliberately not a quorum.
+    #[test]
+    fn one_destination_reporting_is_enough() {
+        let mut from_other = signal("rollout", "HEALTHY");
+        from_other.destination_name = "finance/eu-west-1/infrastructure-finance".to_string();
+        let unmet = unmet_requirements(&[req("rollout", &["HEALTHY"])], &[from_other]);
+        assert!(unmet.is_empty(), "got: {unmet:?}");
+    }
+
+    #[test]
+    fn an_omitted_accept_list_waits_for_healthy() {
+        let unmet = unmet_requirements(&[req("rollout", &[])], &[signal("rollout", "DEGRADED")]);
+        assert_eq!(unmet.len(), 1);
+        assert!(unmet[0].contains("to be HEALTHY"), "got: {unmet:?}");
+    }
 }

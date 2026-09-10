@@ -95,6 +95,20 @@ pub async fn report(
     // failing the report would lose the observation entirely.
     let _ = nats.publish(subject, payload.to_string().into()).await;
 
+    // Wake the intent coordinator so a gate waiting on this signal opens now
+    // rather than on the next five-second sweep. Same nudge the approval path
+    // sends when a release is approved.
+    //
+    // Also best-effort, and safe to lose for a different reason: the gate's
+    // own deadline is registered as a timer, so a dropped nudge costs latency
+    // and not correctness.
+    let _ = nats
+        .publish(
+            "forest.intent.evaluate",
+            release_intent_id.to_string().into(),
+        )
+        .await;
+
     Ok(())
 }
 

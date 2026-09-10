@@ -47,7 +47,7 @@ mod policies;
 mod registry;
 mod release;
 mod release_health;
-mod release_pipelines;
+pub(crate) mod release_pipelines;
 mod release_signals;
 pub mod runner;
 mod status;

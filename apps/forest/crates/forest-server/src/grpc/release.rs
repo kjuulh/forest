@@ -973,6 +973,7 @@ impl ReleaseService for ReleaseServer {
                                         StageConfig::Deploy { .. } => "deploy",
                                         StageConfig::Wait { .. } => "wait",
                                         StageConfig::Plan { .. } => "plan",
+                                        StageConfig::Gate { .. } => "gate",
                                     })
                                     .unwrap_or("unknown");
 
@@ -2014,6 +2015,12 @@ fn stage_def_to_type_fields(
             None,
             Some(*auto_approve),
         ),
+        StageConfig::Gate { .. } => (
+            forest_grpc_interface::PipelineRunStageType::Gate as i32,
+            None,
+            None,
+            None,
+        ),
     }
 }
 
@@ -2091,6 +2098,10 @@ fn intent_to_stage_states(
                 wait_until,
                 release_ids,
                 approval_status,
+                gate_deadline: state.and_then(|s| s.gate_deadline.clone()),
+                gate_waiting_on: state
+                    .and_then(|s| s.gate_waiting_on.clone())
+                    .unwrap_or_default(),
                 auto_approve,
             }
         })
@@ -2170,6 +2181,10 @@ fn pipeline_run_to_proto(
                 wait_until,
                 release_ids,
                 approval_status,
+                gate_deadline: state.and_then(|s| s.gate_deadline.clone()),
+                gate_waiting_on: state
+                    .and_then(|s| s.gate_waiting_on.clone())
+                    .unwrap_or_default(),
                 auto_approve,
             }
         })

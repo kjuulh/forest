@@ -7353,7 +7353,6 @@ pub mod release_service_client {
                 .insert(GrpcMethod::new("forest.v1.ReleaseService", "Release"));
             self.inner.unary(req, path, codec).await
         }
-        ///
         pub async fn report_release_failed(
             &mut self,
             request: impl tonic::IntoRequest<super::ReportReleaseFailedRequest>,
@@ -7754,7 +7753,6 @@ pub mod release_service_server {
             &self,
             request: tonic::Request<super::ReleaseRequest>,
         ) -> std::result::Result<tonic::Response<super::ReleaseResponse>, tonic::Status>;
-        ///
         async fn report_release_failed(
             &self,
             request: tonic::Request<super::ReportReleaseFailedRequest>,

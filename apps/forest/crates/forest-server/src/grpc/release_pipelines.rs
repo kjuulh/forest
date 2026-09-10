@@ -1,6 +1,7 @@
 use anyhow::Context;
 use forest_grpc_interface::{
-    DeployStageConfig, PipelineStage, PlanStageConfig, WaitStageConfig, pipeline_stage,
+    DeployStageConfig, GateStageConfig, GateTimeoutBehaviour, HealthStatus, PipelineStage,
+    PlanStageConfig, SignalRequirement as ProtoSignalRequirement, WaitStageConfig, pipeline_stage,
     release_pipeline_service_server::ReleasePipelineService, *,
 };
 use tonic::Response;
@@ -9,8 +10,8 @@ use crate::{
     grpc::{artifacts::GrpcErrorExt, authorize},
     services::{
         release_pipeline::{
-            CreatePipelineParams, PipelineStages, ReleasePipelineRegistryState, StageConfig,
-            StageDefinition, UpdatePipelineParams,
+            CreatePipelineParams, GateTimeout, PipelineStages, ReleasePipelineRegistryState,
+            SignalRequirement, StageConfig, StageDefinition, UpdatePipelineParams,
         },
         release_registry::ReleaseRegistryState,
     },
@@ -45,6 +46,15 @@ fn stages_to_proto(stages: &PipelineStages) -> Vec<PipelineStage> {
                     environment: environment.clone(),
                     auto_approve: *auto_approve,
                 })),
+                StageConfig::Gate {
+                    requires,
+                    timeout_seconds,
+                    on_timeout,
+                } => Some(pipeline_stage::Config::Gate(GateStageConfig {
+                    requires: requirements_to_proto(requires),
+                    timeout_seconds: *timeout_seconds,
+                    on_timeout: gate_timeout_to_proto(on_timeout),
+                })),
             };
 
             PipelineStage {
@@ -52,6 +62,73 @@ fn stages_to_proto(stages: &PipelineStages) -> Vec<PipelineStage> {
                 depends_on: def.depends_on.clone(),
                 config,
             }
+        })
+        .collect()
+}
+
+// ── Gate conversion, shared with org_rules ───────────────────────────────
+//
+// `stages_to_proto` / `stages_from_proto` are duplicated between this module
+// and `org_rules`, which predates this change. Rather than add a third copy of
+// the gate's own conversion to that, the gate-specific parts live here and both
+// call them.
+
+pub(crate) fn gate_timeout_from_proto(v: i32) -> GateTimeout {
+    match GateTimeoutBehaviour::try_from(v) {
+        Ok(GateTimeoutBehaviour::Proceed) => GateTimeout::Proceed,
+        // Unspecified included: an unset value must mean Fail, or a gate whose
+        // caller forgot the field would quietly stop gating.
+        _ => GateTimeout::Fail,
+    }
+}
+
+pub(crate) fn gate_timeout_to_proto(t: &GateTimeout) -> i32 {
+    match t {
+        GateTimeout::Fail => GateTimeoutBehaviour::Fail as i32,
+        GateTimeout::Proceed => GateTimeoutBehaviour::Proceed as i32,
+    }
+}
+
+pub(crate) fn requirements_from_proto(reqs: Vec<ProtoSignalRequirement>) -> Vec<SignalRequirement> {
+    reqs.into_iter()
+        .map(|r| SignalRequirement {
+            signal: r.signal,
+            accept: r
+                .accept
+                .into_iter()
+                .filter_map(|s| match HealthStatus::try_from(s) {
+                    Ok(HealthStatus::Healthy) => Some("HEALTHY".to_string()),
+                    Ok(HealthStatus::Progressing) => Some("PROGRESSING".to_string()),
+                    Ok(HealthStatus::Degraded) => Some("DEGRADED".to_string()),
+                    Ok(HealthStatus::Unhealthy) => Some("UNHEALTHY".to_string()),
+                    Ok(HealthStatus::Missing) => Some("MISSING".to_string()),
+                    // Dropped rather than mapped to a default. An UNSPECIFIED
+                    // in the accept list would otherwise become a status the
+                    // gate waits for and nothing can send; dropping it leaves
+                    // the list empty, which `accepted()` reads as HEALTHY.
+                    Ok(HealthStatus::Unspecified) | Err(_) => None,
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+pub(crate) fn requirements_to_proto(reqs: &[SignalRequirement]) -> Vec<ProtoSignalRequirement> {
+    reqs.iter()
+        .map(|r| ProtoSignalRequirement {
+            signal: r.signal.clone(),
+            accept: r
+                .accept
+                .iter()
+                .map(|s| match s.as_str() {
+                    "HEALTHY" => HealthStatus::Healthy as i32,
+                    "PROGRESSING" => HealthStatus::Progressing as i32,
+                    "DEGRADED" => HealthStatus::Degraded as i32,
+                    "UNHEALTHY" => HealthStatus::Unhealthy as i32,
+                    "MISSING" => HealthStatus::Missing as i32,
+                    _ => HealthStatus::Unspecified as i32,
+                })
+                .collect(),
         })
         .collect()
 }
@@ -74,8 +151,13 @@ fn stages_from_proto(proto_stages: Vec<PipelineStage>) -> anyhow::Result<Pipelin
                 environment: c.environment,
                 auto_approve: c.auto_approve,
             },
+            Some(pipeline_stage::Config::Gate(c)) => StageConfig::Gate {
+                requires: requirements_from_proto(c.requires),
+                timeout_seconds: c.timeout_seconds,
+                on_timeout: gate_timeout_from_proto(c.on_timeout),
+            },
             None => anyhow::bail!(
-                "stage '{}' is missing a config (deploy, wait, or plan)",
+                "stage '{}' is missing a config (deploy, wait, plan, or gate)",
                 ps.id
             ),
         };
