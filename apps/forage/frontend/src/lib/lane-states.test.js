@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import {
   releaseEnvStates, laneStatesAttr, timelineEnvStates, timelineLaneStatesAttrs,
-  isUnfinished, effectiveStatus, isPlanAwaiting, DOT_PRIORITY,
+  isUnfinished, effectiveStatus, isPlanAwaiting, isGateAwaiting, DOT_PRIORITY,
 } from "./lane-states.js";
 import { FIXTURES, byKey } from "./fixtures.js";
 
@@ -302,5 +302,48 @@ describe("every lane state has a rendering", () => {
     const src = componentSrc();
     expect(src).toContain("timelineLaneStatesAttrs");
     expect(src).toContain("data-lane-states={laneStatesBySlug.get(release.slug)");
+  });
+});
+
+// ── Gate stages (forest#252) ────────────────────────────────────────
+
+describe("gate stages", () => {
+  const gate = (over = {}) => ({
+    stage_type: "gate",
+    status: "RUNNING",
+    gate_waiting_on: ["rollout to be HEALTHY (nothing reported)"],
+    ...over,
+  });
+
+  it("a running gate with unmet requirements is awaiting a signal", () => {
+    expect(isGateAwaiting(gate())).toBe(true);
+    expect(effectiveStatus(gate())).toBe("AWAITING_SIGNAL");
+  });
+
+  // The server clears the list when everything has reported, just before the
+  // stage succeeds. That is finishing, not waiting.
+  it("a running gate with nothing outstanding is not awaiting", () => {
+    expect(isGateAwaiting(gate({ gate_waiting_on: [] }))).toBe(false);
+    expect(effectiveStatus(gate({ gate_waiting_on: [] }))).toBe("RUNNING");
+  });
+
+  it("a finished gate is not awaiting, whatever it once waited on", () => {
+    for (const status of ["SUCCEEDED", "FAILED", "CANCELLED"]) {
+      expect(isGateAwaiting(gate({ status }))).toBe(false);
+      expect(effectiveStatus(gate({ status }))).toBe(status);
+    }
+  });
+
+  // An older forage against a newer forest, or a stage the server has not
+  // evaluated yet: absent rather than empty.
+  it("survives gate_waiting_on being absent", () => {
+    const { gate_waiting_on, ...noField } = gate();
+    expect(isGateAwaiting(noField)).toBe(false);
+    expect(effectiveStatus(noField)).toBe("RUNNING");
+  });
+
+  it("does not mistake other stage types for gates", () => {
+    expect(isGateAwaiting({ ...gate(), stage_type: "wait" })).toBe(false);
+    expect(isGateAwaiting({ ...gate(), stage_type: "deploy" })).toBe(false);
   });
 });

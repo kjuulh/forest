@@ -38,6 +38,9 @@ export const DOT_PRIORITY = { awaiting: 6, flight: 5, live: 4, stopped: 3, pendi
  * both have been observed in the wild.
  */
 export function effectiveStatus(stage) {
+  if (isGateAwaiting(stage)) {
+    return "AWAITING_SIGNAL";
+  }
   if (
     stage.stage_type === "plan" &&
     stage.approval_status &&
@@ -50,6 +53,23 @@ export function effectiveStatus(stage) {
 
 export function isPlanAwaiting(stage) {
   return stage.stage_type === "plan" && effectiveStatus(stage) === "AWAITING_APPROVAL";
+}
+
+/**
+ * A gate that is running and still missing something.
+ *
+ * The server keeps a gate ACTIVE while it waits and lists what it is missing in
+ * `gate_waiting_on`, the same way a plan stage stays ACTIVE with an
+ * `approval_status`. An empty list on a running gate means everything reported
+ * and the stage is about to succeed, so it is not "awaiting" — it is finishing.
+ */
+export function isGateAwaiting(stage) {
+  return (
+    stage.stage_type === "gate" &&
+    stage.status === "RUNNING" &&
+    Array.isArray(stage.gate_waiting_on) &&
+    stage.gate_waiting_on.length > 0
+  );
 }
 
 /**
@@ -103,7 +123,7 @@ export function releaseEnvStates(release) {
     const status = effectiveStatus(s);
     if (IN_FLIGHT.has(status)) put(s.environment, "flight");
     else if (STOPPED.has(status)) put(s.environment, "past");
-    else if (status === "PENDING" || status === "AWAITING_APPROVAL") put(s.environment, "pending");
+    else if (status === "PENDING" || status === "AWAITING_APPROVAL" || status === "AWAITING_SIGNAL") put(s.environment, "pending");
   }
 
   return [...byEnv].map(([env, kind]) => ({ env, kind }));

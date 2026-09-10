@@ -6,10 +6,10 @@
   import { envColors, envLaneColor, envBadgeClasses, statusDotColor } from "./lib/colors.js";
   import {
     IN_FLIGHT, DEPLOYED, STOPPED,
-    effectiveStatus, isPlanAwaiting, releaseEnvStates, laneStatesAttr,
+    effectiveStatus, isPlanAwaiting, isGateAwaiting, releaseEnvStates, laneStatesAttr,
     timelineLaneStatesAttrs, isUnfinished,
   } from "./lib/lane-states.js";
-  import { pipelineSummary, deployStageLabel, waitStageLabel, planStageLabel, STATUS_CONFIG } from "./lib/status.js";
+  import { pipelineSummary, deployStageLabel, waitStageLabel, planStageLabel, gateStageLabel, STATUS_CONFIG } from "./lib/status.js";
 
   // Props from attributes
   export let org = "";
@@ -960,6 +960,8 @@
                         <svg class="w-4 h-4 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                       {:else if stageStatus === "AWAITING_APPROVAL"}
                         <svg class="w-4 h-4 text-purple-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                      {:else if stageStatus === "AWAITING_SIGNAL"}
+                        <svg class="w-4 h-4 text-yellow-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                       {:else}
                         <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/></svg>
                       {/if}
@@ -997,6 +999,21 @@
                             disabled={approving.has(`plan:${release.release_intent_id}:${stage.id}`)}
                             on:click|stopPropagation={() => { if (confirm('Reject this plan?')) approvePlanStage(release, stage, true); }}
                           >Reject</button>
+                        {/if}
+                      {:else if stage.stage_type === "gate"}
+                        <span class="text-sm {stageStatus === 'AWAITING_SIGNAL' ? 'text-yellow-700' : stageStatus === 'SUCCEEDED' ? 'text-gray-700' : stageStatus === 'FAILED' ? 'text-red-700' : 'text-gray-400'}">
+                          {gateStageLabel(stageStatus)}
+                        </span>
+                        <!-- What it is parked on, in the server's own words. A
+                             gate whose state you cannot see is worse than the
+                             sleep it replaced, so this is the point of the
+                             stage rendering rather than a nicety. -->
+                        {#if isGateAwaiting(stage)}
+                          {#each stage.gate_waiting_on as waiting}
+                            <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-800">{waiting}</span>
+                          {/each}
+                        {:else if stageStatus === "FAILED" && stage.error_message}
+                          <span class="text-xs text-red-700">{stage.error_message}</span>
                         {/if}
                         {#if (stageStatus === "AWAITING_APPROVAL" || stageStatus === "SUCCEEDED" || stageStatus === "FAILED") && release.release_intent_id}
                           <button

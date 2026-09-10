@@ -4991,6 +4991,9 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
   const STOPPED = /* @__PURE__ */ new Set(["FAILED", "TIMED_OUT", "CANCELLED"]);
   const DOT_PRIORITY = { awaiting: 6, flight: 5, live: 4, stopped: 3, pending: 2, past: 1 };
   function effectiveStatus(stage) {
+    if (isGateAwaiting(stage)) {
+      return "AWAITING_SIGNAL";
+    }
     if (stage.stage_type === "plan" && stage.approval_status && (stage.approval_status === "AWAITINGAPPROVAL" || stage.approval_status === "AWAITING_APPROVAL")) {
       return "AWAITING_APPROVAL";
     }
@@ -4998,6 +5001,9 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
   }
   function isPlanAwaiting(stage) {
     return stage.stage_type === "plan" && effectiveStatus(stage) === "AWAITING_APPROVAL";
+  }
+  function isGateAwaiting(stage) {
+    return stage.stage_type === "gate" && stage.status === "RUNNING" && Array.isArray(stage.gate_waiting_on) && stage.gate_waiting_on.length > 0;
   }
   function releaseEnvStates(release) {
     const byEnv = /* @__PURE__ */ new Map();
@@ -5026,7 +5032,7 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
       const status = effectiveStatus(s);
       if (IN_FLIGHT.has(status)) put(s.environment, "flight");
       else if (STOPPED.has(status)) put(s.environment, "past");
-      else if (status === "PENDING" || status === "AWAITING_APPROVAL") put(s.environment, "pending");
+      else if (status === "PENDING" || status === "AWAITING_APPROVAL" || status === "AWAITING_SIGNAL") put(s.environment, "pending");
     }
     return [...byEnv].map(([env, kind]) => ({ env, kind }));
   }
@@ -5077,12 +5083,16 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
       if (s.status === "QUEUED") anyQueued = true;
       if (s.stage_type === "wait" && s.status === "RUNNING") anyWaiting = true;
     }
+    let anyGateAwaiting = stages.some(
+      (s) => s.stage_type === "gate" && s.status === "RUNNING" && Array.isArray(s.gate_waiting_on) && s.gate_waiting_on.length > 0
+    );
     let anyApprovalBlocked = stages.some((s) => s.blocked_by);
     let anyPlanAwaiting = stages.some((s) => s.stage_type === "plan" && (s.status === "AWAITING_APPROVAL" || s.approval_status === "AWAITINGAPPROVAL" || s.approval_status === "AWAITING_APPROVAL"));
     if (allDone) return { label: "Pipeline complete", color: "text-gray-600", icon: "check-circle", iconColor: "text-green-500", done, total };
     if (anyFailed) return { label: "Pipeline failed", color: "text-red-600", icon: "x-circle", iconColor: "text-red-500", done, total };
     if (anyPlanAwaiting) return { label: "Awaiting plan approval", color: "text-purple-700", icon: "shield", iconColor: "text-purple-500", done, total };
     if (anyApprovalBlocked) return { label: "Awaiting approval", color: "text-emerald-700", icon: "shield", iconColor: "text-emerald-500", done, total };
+    if (anyGateAwaiting) return { label: "Waiting for signals", color: "text-yellow-700", icon: "clock", iconColor: "text-yellow-500", done, total };
     if (anyWaiting) return { label: "Waiting for time window", color: "text-yellow-700", icon: "clock", iconColor: "text-yellow-500", done, total };
     if (anyRunning) return { label: "Deploying to", color: "text-yellow-700", icon: "pulse", iconColor: "text-yellow-500", done, total };
     if (anyQueued) return { label: "Queued", color: "text-blue-600", icon: "clock", iconColor: "text-blue-400", done, total };
@@ -5120,6 +5130,22 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
         return "Deploy to";
     }
   }
+  function gateStageLabel(status) {
+    switch (status) {
+      case "SUCCEEDED":
+        return "Signals received";
+      case "AWAITING_SIGNAL":
+        return "Waiting for";
+      case "RUNNING":
+        return "Checking signals";
+      case "FAILED":
+        return "Gate timed out";
+      case "CANCELLED":
+        return "Gate cancelled";
+      default:
+        return "Gate";
+    }
+  }
   function planStageLabel(status) {
     switch (status) {
       case "SUCCEEDED":
@@ -5128,6 +5154,8 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
         return "Planning";
       case "AWAITING_APPROVAL":
         return "Awaiting plan approval";
+      case "AWAITING_SIGNAL":
+        return "Waiting for signals";
       case "FAILED":
         return "Plan failed";
       case "CANCELLED":
@@ -5184,37 +5212,41 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
   var root_56 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-blue-400 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" class="svelte-4kxpm1"></path></svg>`);
   var root_57 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-red-500 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" class="svelte-4kxpm1"></path></svg>`);
   var root_58 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-purple-500 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" class="svelte-4kxpm1"></path></svg>`);
-  var root_59 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-gray-300 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2" class="svelte-4kxpm1"></circle></svg>`);
-  var root_60 = /* @__PURE__ */ from_html(`<span> </span> <span> <span></span></span>`, 1);
-  var root_61 = /* @__PURE__ */ from_html(`<span> </span>`);
-  var root_63 = /* @__PURE__ */ from_html(`<button class="text-xs px-2 py-0.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50 svelte-4kxpm1">Approve plan</button> <button class="text-xs px-2 py-0.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 svelte-4kxpm1">Reject</button>`, 1);
-  var root_64 = /* @__PURE__ */ from_html(`<button class="text-xs px-2 py-0.5 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50 svelte-4kxpm1"> </button>`);
-  var root_62 = /* @__PURE__ */ from_html(`<span> </span> <span> <span></span></span> <!> <!>`, 1);
-  var root_65 = /* @__PURE__ */ from_html(`<span class="text-xs text-gray-400 tabular-nums svelte-4kxpm1"> </span>`);
-  var root_68 = /* @__PURE__ */ from_html(`<div class="svelte-4kxpm1"><div class="flex items-center gap-2 mb-1 svelte-4kxpm1"><span class="text-xs font-medium text-gray-600 svelte-4kxpm1"> </span> <span class="text-xs text-gray-400 svelte-4kxpm1"> </span></div> <pre class="text-xs font-mono text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded p-3 max-h-48 overflow-auto svelte-4kxpm1"> </pre></div>`);
-  var root_69 = /* @__PURE__ */ from_html(`<pre class="text-xs font-mono text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded p-3 max-h-64 overflow-auto svelte-4kxpm1"> </pre>`);
-  var root_66 = /* @__PURE__ */ from_html(`<div class="px-4 py-3 bg-gray-50 border-t border-gray-100 space-y-3 svelte-4kxpm1"><div class="flex items-center gap-2 svelte-4kxpm1"><span class="text-xs font-medium text-gray-500 svelte-4kxpm1">Plan output</span> <span class="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 svelte-4kxpm1"> </span></div> <!></div>`);
+  var root_59 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-yellow-500 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" class="svelte-4kxpm1"></path></svg>`);
+  var root_60 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-gray-300 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2" class="svelte-4kxpm1"></circle></svg>`);
+  var root_61 = /* @__PURE__ */ from_html(`<span> </span> <span> <span></span></span>`, 1);
+  var root_62 = /* @__PURE__ */ from_html(`<span> </span>`);
+  var root_64 = /* @__PURE__ */ from_html(`<button class="text-xs px-2 py-0.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50 svelte-4kxpm1">Approve plan</button> <button class="text-xs px-2 py-0.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 svelte-4kxpm1">Reject</button>`, 1);
+  var root_63 = /* @__PURE__ */ from_html(`<span> </span> <span> <span></span></span> <!>`, 1);
+  var root_67 = /* @__PURE__ */ from_html(`<span class="text-xs font-medium px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-800 svelte-4kxpm1"> </span>`);
+  var root_68 = /* @__PURE__ */ from_html(`<span class="text-xs text-red-700 svelte-4kxpm1"> </span>`);
+  var root_69 = /* @__PURE__ */ from_html(`<button class="text-xs px-2 py-0.5 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50 svelte-4kxpm1"> </button>`);
+  var root_65 = /* @__PURE__ */ from_html(`<span> </span> <!> <!>`, 1);
+  var root_70 = /* @__PURE__ */ from_html(`<span class="text-xs text-gray-400 tabular-nums svelte-4kxpm1"> </span>`);
+  var root_73 = /* @__PURE__ */ from_html(`<div class="svelte-4kxpm1"><div class="flex items-center gap-2 mb-1 svelte-4kxpm1"><span class="text-xs font-medium text-gray-600 svelte-4kxpm1"> </span> <span class="text-xs text-gray-400 svelte-4kxpm1"> </span></div> <pre class="text-xs font-mono text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded p-3 max-h-48 overflow-auto svelte-4kxpm1"> </pre></div>`);
+  var root_74 = /* @__PURE__ */ from_html(`<pre class="text-xs font-mono text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded p-3 max-h-64 overflow-auto svelte-4kxpm1"> </pre>`);
+  var root_71 = /* @__PURE__ */ from_html(`<div class="px-4 py-3 bg-gray-50 border-t border-gray-100 space-y-3 svelte-4kxpm1"><div class="flex items-center gap-2 svelte-4kxpm1"><span class="text-xs font-medium text-gray-500 svelte-4kxpm1">Plan output</span> <span class="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 svelte-4kxpm1"> </span></div> <!></div>`);
   var root_53 = /* @__PURE__ */ from_html(`<div><!> <!> <!> <span class="ml-auto flex items-center gap-1 text-xs text-gray-400 shrink-0 svelte-4kxpm1"><svg class="w-3 h-3 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" class="svelte-4kxpm1"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" class="svelte-4kxpm1"></path></svg> pipeline</span></div> <!>`, 1);
   var root_52 = /* @__PURE__ */ from_html(`<div class="border-t border-gray-100 svelte-4kxpm1"></div>`);
-  var root_71 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-green-500 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" class="svelte-4kxpm1"></path></svg>`);
-  var root_72 = /* @__PURE__ */ from_html(`<span class="w-4 h-4 shrink-0 flex items-center justify-center svelte-4kxpm1"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse svelte-4kxpm1"></span></span>`);
-  var root_73 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-blue-400 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" class="svelte-4kxpm1"></path></svg>`);
-  var root_74 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-red-500 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" class="svelte-4kxpm1"></path></svg>`);
-  var root_75 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-gray-300 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" class="svelte-4kxpm1"></path></svg>`);
-  var root_76 = /* @__PURE__ */ from_html(`<span class="text-xs text-green-600 svelte-4kxpm1">Deployed</span>`);
-  var root_77 = /* @__PURE__ */ from_html(`<span class="text-xs text-yellow-600 svelte-4kxpm1">Deploying</span>`);
-  var root_78 = /* @__PURE__ */ from_html(`<span class="text-xs text-blue-600 svelte-4kxpm1"> </span>`);
-  var root_79 = /* @__PURE__ */ from_html(`<span class="text-xs text-red-600 svelte-4kxpm1">Failed</span>`);
-  var root_80 = /* @__PURE__ */ from_html(`<time class="text-xs text-gray-400 ml-auto svelte-4kxpm1"> </time>`);
-  var root_70 = /* @__PURE__ */ from_html(`<div><!> <span> <span></span></span> <span class="text-gray-400 text-xs svelte-4kxpm1"> </span> <!> <!></div>`);
+  var root_76 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-green-500 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" class="svelte-4kxpm1"></path></svg>`);
+  var root_77 = /* @__PURE__ */ from_html(`<span class="w-4 h-4 shrink-0 flex items-center justify-center svelte-4kxpm1"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse svelte-4kxpm1"></span></span>`);
+  var root_78 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-blue-400 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" class="svelte-4kxpm1"></path></svg>`);
+  var root_79 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-red-500 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" class="svelte-4kxpm1"></path></svg>`);
+  var root_80 = /* @__PURE__ */ from_svg(`<svg class="w-4 h-4 text-gray-300 shrink-0 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" class="svelte-4kxpm1"></path></svg>`);
+  var root_81 = /* @__PURE__ */ from_html(`<span class="text-xs text-green-600 svelte-4kxpm1">Deployed</span>`);
+  var root_82 = /* @__PURE__ */ from_html(`<span class="text-xs text-yellow-600 svelte-4kxpm1">Deploying</span>`);
+  var root_83 = /* @__PURE__ */ from_html(`<span class="text-xs text-blue-600 svelte-4kxpm1"> </span>`);
+  var root_84 = /* @__PURE__ */ from_html(`<span class="text-xs text-red-600 svelte-4kxpm1">Failed</span>`);
+  var root_85 = /* @__PURE__ */ from_html(`<time class="text-xs text-gray-400 ml-auto svelte-4kxpm1"> </time>`);
+  var root_75 = /* @__PURE__ */ from_html(`<div><!> <span> <span></span></span> <span class="text-gray-400 text-xs svelte-4kxpm1"> </span> <!> <!></div>`);
   var root_17 = /* @__PURE__ */ from_html(`<div data-release="" class="border border-gray-200 rounded-lg overflow-hidden svelte-4kxpm1"><div class="px-4 py-3 flex items-center gap-3 flex-wrap svelte-4kxpm1"><div class="flex items-center gap-2 min-w-0 flex-1 svelte-4kxpm1"><!> <a class="font-medium text-gray-900 hover:text-black truncate svelte-4kxpm1"> </a></div> <div class="flex items-center gap-4 text-xs text-gray-500 shrink-0 flex-wrap svelte-4kxpm1"><!> <!> <time class="svelte-4kxpm1"> </time> <!> <!></div></div> <details class="border-t border-gray-100 group svelte-4kxpm1"><summary class="px-4 py-2 flex items-center gap-2 text-sm cursor-pointer list-none hover:bg-gray-50 flex-wrap svelte-4kxpm1"><!> <svg class="w-3 h-3 text-gray-400 shrink-0 ml-auto transition-transform group-open:rotate-90 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" class="svelte-4kxpm1"></path></svg></summary> <div class="px-4 py-3 border-t border-gray-100 space-y-3 svelte-4kxpm1"><!> <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-500 svelte-4kxpm1"><span class="font-mono text-gray-400 svelte-4kxpm1"> </span> <!></div></div> <!> <!></details></div>`);
-  var root_83 = /* @__PURE__ */ from_html(`<img data-avatar="" class="inline-block w-6 h-6 rounded-full object-cover bg-gray-200 shrink-0 svelte-4kxpm1"/>`);
-  var root_84 = /* @__PURE__ */ from_html(`<span data-avatar="" class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-200 text-[10px] font-semibold text-gray-500 shrink-0 svelte-4kxpm1"> </span>`);
-  var root_85 = /* @__PURE__ */ from_html(`<span class="font-mono svelte-4kxpm1"> </span>`);
-  var root_82 = /* @__PURE__ */ from_html(`<div data-release="" data-envs="" data-lane-states="" class="border border-gray-200 rounded-lg overflow-hidden opacity-75 svelte-4kxpm1"><div class="px-4 py-3 flex items-center gap-3 flex-wrap svelte-4kxpm1"><div class="flex items-center gap-2 min-w-0 flex-1 svelte-4kxpm1"><!> <a class="font-medium text-gray-900 hover:text-black truncate svelte-4kxpm1"> </a></div> <div class="flex items-center gap-4 text-xs text-gray-500 shrink-0 svelte-4kxpm1"><!> <time class="svelte-4kxpm1"> </time></div></div></div>`);
-  var root_81 = /* @__PURE__ */ from_html(`<details class="group svelte-4kxpm1"><summary class="flex items-center gap-2 py-2 px-1 text-sm text-gray-400 cursor-pointer hover:text-gray-600 list-none svelte-4kxpm1"><svg class="w-3 h-3 transition-transform group-open:rotate-90 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" class="svelte-4kxpm1"></path></svg> <span class="text-gray-300 svelte-4kxpm1">&middot;</span> <span class="group-open:hidden svelte-4kxpm1"> </span> <span class="hidden group-open:inline svelte-4kxpm1"> </span></summary> <div class="space-y-3 mt-1 svelte-4kxpm1"></div></details>`);
-  var root_86 = /* @__PURE__ */ from_html(`<div class="pt-3 svelte-4kxpm1" style="grid-row: 2; grid-column: 2;"><button type="button" class="w-full py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:text-gray-900 hover:border-gray-300 svelte-4kxpm1">Show more</button></div>`);
-  var root_87 = /* @__PURE__ */ from_html(`<div class="svelte-4kxpm1"><span class="lane-label svelte-4kxpm1"> </span></div>`);
+  var root_88 = /* @__PURE__ */ from_html(`<img data-avatar="" class="inline-block w-6 h-6 rounded-full object-cover bg-gray-200 shrink-0 svelte-4kxpm1"/>`);
+  var root_89 = /* @__PURE__ */ from_html(`<span data-avatar="" class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-200 text-[10px] font-semibold text-gray-500 shrink-0 svelte-4kxpm1"> </span>`);
+  var root_90 = /* @__PURE__ */ from_html(`<span class="font-mono svelte-4kxpm1"> </span>`);
+  var root_87 = /* @__PURE__ */ from_html(`<div data-release="" data-envs="" data-lane-states="" class="border border-gray-200 rounded-lg overflow-hidden opacity-75 svelte-4kxpm1"><div class="px-4 py-3 flex items-center gap-3 flex-wrap svelte-4kxpm1"><div class="flex items-center gap-2 min-w-0 flex-1 svelte-4kxpm1"><!> <a class="font-medium text-gray-900 hover:text-black truncate svelte-4kxpm1"> </a></div> <div class="flex items-center gap-4 text-xs text-gray-500 shrink-0 svelte-4kxpm1"><!> <time class="svelte-4kxpm1"> </time></div></div></div>`);
+  var root_86 = /* @__PURE__ */ from_html(`<details class="group svelte-4kxpm1"><summary class="flex items-center gap-2 py-2 px-1 text-sm text-gray-400 cursor-pointer hover:text-gray-600 list-none svelte-4kxpm1"><svg class="w-3 h-3 transition-transform group-open:rotate-90 svelte-4kxpm1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" class="svelte-4kxpm1"></path></svg> <span class="text-gray-300 svelte-4kxpm1">&middot;</span> <span class="group-open:hidden svelte-4kxpm1"> </span> <span class="hidden group-open:inline svelte-4kxpm1"> </span></summary> <div class="space-y-3 mt-1 svelte-4kxpm1"></div></details>`);
+  var root_91 = /* @__PURE__ */ from_html(`<div class="pt-3 svelte-4kxpm1" style="grid-row: 2; grid-column: 2;"><button type="button" class="w-full py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:text-gray-900 hover:border-gray-300 svelte-4kxpm1">Show more</button></div>`);
+  var root_92 = /* @__PURE__ */ from_html(`<div class="svelte-4kxpm1"><span class="lane-label svelte-4kxpm1"> </span></div>`);
   var root_5$1 = /* @__PURE__ */ from_html(`<div class="max-w-5xl mx-auto grid svelte-4kxpm1"><div class="swim-lane-gutter flex svelte-4kxpm1" style="grid-row: 1; grid-column: 1;"></div> <div class="space-y-3 min-w-0 svelte-4kxpm1" style="grid-row: 1; grid-column: 2;"></div> <!> <div class="swim-lane-labels flex pt-1 svelte-4kxpm1" style="grid-row: 2; grid-column: 1;"></div></div>`);
   var root$2 = /* @__PURE__ */ from_html(`<!> <!>`, 1);
   const $$css$2 = {
@@ -6048,7 +6080,7 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
           var fragment_3 = comment();
           var node_7 = first_child(fragment_3);
           {
-            var consequent_59 = ($$anchor4) => {
+            var consequent_63 = ($$anchor4) => {
               const release = /* @__PURE__ */ derived_safe_equal(() => (get(item), untrack(() => get(item).release)));
               var div_15 = root_17();
               var div_16 = child(div_15);
@@ -6540,7 +6572,7 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
               reset(div_19);
               var node_28 = sibling(div_19, 2);
               {
-                var consequent_49 = ($$anchor5) => {
+                var consequent_53 = ($$anchor5) => {
                   var div_21 = root_52();
                   each(
                     div_21,
@@ -6573,9 +6605,13 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
                           var svg_11 = root_58();
                           append($$anchor7, svg_11);
                         };
-                        var alternate_7 = ($$anchor7) => {
+                        var consequent_41 = ($$anchor7) => {
                           var svg_12 = root_59();
                           append($$anchor7, svg_12);
+                        };
+                        var alternate_7 = ($$anchor7) => {
+                          var svg_13 = root_60();
+                          append($$anchor7, svg_13);
                         };
                         if_block(node_29, ($$render) => {
                           if (get(stageStatus) === "SUCCEEDED") $$render(consequent_36);
@@ -6583,14 +6619,15 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
                           else if (get(stageStatus) === "QUEUED") $$render(consequent_38, 2);
                           else if (get(stageStatus) === "FAILED") $$render(consequent_39, 3);
                           else if (get(stageStatus) === "AWAITING_APPROVAL") $$render(consequent_40, 4);
+                          else if (get(stageStatus) === "AWAITING_SIGNAL") $$render(consequent_41, 5);
                           else $$render(alternate_7, -1);
                         });
                       }
                       var node_30 = sibling(node_29, 2);
                       {
-                        var consequent_41 = ($$anchor7) => {
+                        var consequent_42 = ($$anchor7) => {
                           const badge = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(envBadgeClasses), get(stage), untrack(() => envBadgeClasses(get(stage).environment || ""))));
-                          var fragment_18 = root_60();
+                          var fragment_18 = root_61();
                           var span_17 = first_child(fragment_18);
                           var text_19 = child(span_17, true);
                           reset(span_17);
@@ -6627,8 +6664,8 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
                           );
                           append($$anchor7, fragment_18);
                         };
-                        var consequent_42 = ($$anchor7) => {
-                          var span_20 = root_61();
+                        var consequent_43 = ($$anchor7) => {
+                          var span_20 = root_62();
                           var text_21 = child(span_20);
                           reset(span_20);
                           template_effect(
@@ -6649,7 +6686,7 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
                         };
                         var consequent_45 = ($$anchor7) => {
                           const planBadge = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(envBadgeClasses), get(stage), untrack(() => envBadgeClasses(get(stage).environment || ""))));
-                          var fragment_19 = root_62();
+                          var fragment_19 = root_63();
                           var span_21 = first_child(fragment_19);
                           var text_22 = child(span_21, true);
                           reset(span_21);
@@ -6659,8 +6696,8 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
                           reset(span_22);
                           var node_31 = sibling(span_22, 2);
                           {
-                            var consequent_43 = ($$anchor8) => {
-                              var fragment_20 = root_63();
+                            var consequent_44 = ($$anchor8) => {
+                              var fragment_20 = root_64();
                               var button_5 = first_child(fragment_20);
                               var button_6 = sibling(button_5, 2);
                               template_effect(
@@ -6680,29 +6717,7 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
                               append($$anchor8, fragment_20);
                             };
                             if_block(node_31, ($$render) => {
-                              if (deep_read_state(get(stageStatus)), deep_read_state(get(release)), deep_read_state(csrf()), untrack(() => get(stageStatus) === "AWAITING_APPROVAL" && get(release).release_intent_id && csrf())) $$render(consequent_43);
-                            });
-                          }
-                          var node_32 = sibling(node_31, 2);
-                          {
-                            var consequent_44 = ($$anchor8) => {
-                              var button_7 = root_64();
-                              var text_24 = child(button_7, true);
-                              reset(button_7);
-                              template_effect(
-                                ($0) => {
-                                  button_7.disabled = $0;
-                                  set_text(text_24, (get(planOutputs), deep_read_state(get(release)), get(stage), untrack(() => get(planOutputs)[`${get(release).release_intent_id}:${get(stage).id}`] ? "Hide plan" : "View plan")));
-                                },
-                                [
-                                  () => (get(planOutputLoading), deep_read_state(get(release)), get(stage), untrack(() => get(planOutputLoading).has(`${get(release).release_intent_id}:${get(stage).id}`)))
-                                ]
-                              );
-                              event("click", button_7, stopPropagation(() => viewPlanOutput(get(release), get(stage))));
-                              append($$anchor8, button_7);
-                            };
-                            if_block(node_32, ($$render) => {
-                              if (deep_read_state(get(stageStatus)), deep_read_state(get(release)), untrack(() => (get(stageStatus) === "AWAITING_APPROVAL" || get(stageStatus) === "SUCCEEDED" || get(stageStatus) === "FAILED") && get(release).release_intent_id)) $$render(consequent_44);
+                              if (deep_read_state(get(stageStatus)), deep_read_state(get(release)), deep_read_state(csrf()), untrack(() => get(stageStatus) === "AWAITING_APPROVAL" && get(release).release_intent_id && csrf())) $$render(consequent_44);
                             });
                           }
                           template_effect(
@@ -6734,91 +6749,162 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
                           );
                           append($$anchor7, fragment_19);
                         };
+                        var consequent_49 = ($$anchor7) => {
+                          var fragment_21 = root_65();
+                          var span_24 = first_child(fragment_21);
+                          var text_24 = child(span_24, true);
+                          reset(span_24);
+                          var node_32 = sibling(span_24, 2);
+                          {
+                            var consequent_46 = ($$anchor8) => {
+                              var fragment_22 = comment();
+                              var node_33 = first_child(fragment_22);
+                              each(node_33, 1, () => (get(stage), untrack(() => get(stage).gate_waiting_on)), index, ($$anchor9, waiting) => {
+                                var span_25 = root_67();
+                                var text_25 = child(span_25, true);
+                                reset(span_25);
+                                template_effect(() => set_text(text_25, get(waiting)));
+                                append($$anchor9, span_25);
+                              });
+                              append($$anchor8, fragment_22);
+                            };
+                            var d_8 = /* @__PURE__ */ user_derived(() => (deep_read_state(isGateAwaiting), get(stage), untrack(() => isGateAwaiting(get(stage)))));
+                            var consequent_47 = ($$anchor8) => {
+                              var span_26 = root_68();
+                              var text_26 = child(span_26, true);
+                              reset(span_26);
+                              template_effect(() => set_text(text_26, (get(stage), untrack(() => get(stage).error_message))));
+                              append($$anchor8, span_26);
+                            };
+                            if_block(node_32, ($$render) => {
+                              if (get(d_8)) $$render(consequent_46);
+                              else if (deep_read_state(get(stageStatus)), get(stage), untrack(() => get(stageStatus) === "FAILED" && get(stage).error_message)) $$render(consequent_47, 1);
+                            });
+                          }
+                          var node_34 = sibling(node_32, 2);
+                          {
+                            var consequent_48 = ($$anchor8) => {
+                              var button_7 = root_69();
+                              var text_27 = child(button_7, true);
+                              reset(button_7);
+                              template_effect(
+                                ($0) => {
+                                  button_7.disabled = $0;
+                                  set_text(text_27, (get(planOutputs), deep_read_state(get(release)), get(stage), untrack(() => get(planOutputs)[`${get(release).release_intent_id}:${get(stage).id}`] ? "Hide plan" : "View plan")));
+                                },
+                                [
+                                  () => (get(planOutputLoading), deep_read_state(get(release)), get(stage), untrack(() => get(planOutputLoading).has(`${get(release).release_intent_id}:${get(stage).id}`)))
+                                ]
+                              );
+                              event("click", button_7, stopPropagation(() => viewPlanOutput(get(release), get(stage))));
+                              append($$anchor8, button_7);
+                            };
+                            if_block(node_34, ($$render) => {
+                              if (deep_read_state(get(stageStatus)), deep_read_state(get(release)), untrack(() => (get(stageStatus) === "AWAITING_APPROVAL" || get(stageStatus) === "SUCCEEDED" || get(stageStatus) === "FAILED") && get(release).release_intent_id)) $$render(consequent_48);
+                            });
+                          }
+                          template_effect(
+                            ($0) => {
+                              set_class(
+                                span_24,
+                                1,
+                                `text-sm ${get(stageStatus) === "AWAITING_SIGNAL" ? "text-yellow-700" : get(stageStatus) === "SUCCEEDED" ? "text-gray-700" : get(stageStatus) === "FAILED" ? "text-red-700" : "text-gray-400"}`,
+                                "svelte-4kxpm1"
+                              );
+                              set_text(text_24, $0);
+                            },
+                            [
+                              () => (deep_read_state(gateStageLabel), deep_read_state(get(stageStatus)), untrack(() => gateStageLabel(get(stageStatus))))
+                            ]
+                          );
+                          append($$anchor7, fragment_21);
+                        };
                         if_block(node_30, ($$render) => {
-                          if (get(stage), untrack(() => get(stage).stage_type === "deploy")) $$render(consequent_41);
-                          else if (get(stage), untrack(() => get(stage).stage_type === "wait")) $$render(consequent_42, 1);
+                          if (get(stage), untrack(() => get(stage).stage_type === "deploy")) $$render(consequent_42);
+                          else if (get(stage), untrack(() => get(stage).stage_type === "wait")) $$render(consequent_43, 1);
                           else if (get(stage), untrack(() => get(stage).stage_type === "plan")) $$render(consequent_45, 2);
+                          else if (get(stage), untrack(() => get(stage).stage_type === "gate")) $$render(consequent_49, 3);
                         });
                       }
-                      var node_33 = sibling(node_30, 2);
+                      var node_35 = sibling(node_30, 2);
                       {
-                        var consequent_46 = ($$anchor7) => {
-                          var span_24 = root_65();
-                          var text_25 = child(span_24, true);
-                          reset(span_24);
-                          template_effect(($0) => set_text(text_25, $0), [
+                        var consequent_50 = ($$anchor7) => {
+                          var span_27 = root_70();
+                          var text_28 = child(span_27, true);
+                          reset(span_27);
+                          template_effect(($0) => set_text(text_28, $0), [
                             () => (get(stage), untrack(() => elapsedStr(get(stage).started_at, get(stage).completed_at, get(stage).status)))
                           ]);
-                          append($$anchor7, span_24);
+                          append($$anchor7, span_27);
                         };
-                        if_block(node_33, ($$render) => {
-                          if (get(stage), deep_read_state(get(stageStatus)), untrack(() => get(stage).started_at && (get(stageStatus) === "RUNNING" || get(stageStatus) === "QUEUED" || get(stageStatus) === "AWAITING_APPROVAL" || get(stage).completed_at))) $$render(consequent_46);
+                        if_block(node_35, ($$render) => {
+                          if (get(stage), deep_read_state(get(stageStatus)), untrack(() => get(stage).started_at && (get(stageStatus) === "RUNNING" || get(stageStatus) === "QUEUED" || get(stageStatus) === "AWAITING_APPROVAL" || get(stage).completed_at))) $$render(consequent_50);
                         });
                       }
                       next(2);
                       reset(div_22);
-                      var node_34 = sibling(div_22, 2);
+                      var node_36 = sibling(div_22, 2);
                       {
-                        var consequent_48 = ($$anchor7) => {
+                        var consequent_52 = ($$anchor7) => {
                           const planData = /* @__PURE__ */ derived_safe_equal(() => (get(planOutputs), deep_read_state(get(release)), get(stage), untrack(() => get(planOutputs)[`${get(release).release_intent_id}:${get(stage).id}`])));
-                          var div_23 = root_66();
+                          var div_23 = root_71();
                           var div_24 = child(div_23);
-                          var span_25 = sibling(child(div_24), 2);
-                          var text_26 = child(span_25, true);
-                          reset(span_25);
+                          var span_28 = sibling(child(div_24), 2);
+                          var text_29 = child(span_28, true);
+                          reset(span_28);
                           reset(div_24);
-                          var node_35 = sibling(div_24, 2);
+                          var node_37 = sibling(div_24, 2);
                           {
-                            var consequent_47 = ($$anchor8) => {
-                              var fragment_21 = comment();
-                              var node_36 = first_child(fragment_21);
+                            var consequent_51 = ($$anchor8) => {
+                              var fragment_23 = comment();
+                              var node_38 = first_child(fragment_23);
                               each(
-                                node_36,
+                                node_38,
                                 1,
                                 () => (deep_read_state(get(planData)), untrack(() => get(planData).outputs)),
                                 (destOutput) => destOutput.destination_id,
                                 ($$anchor9, destOutput) => {
-                                  var div_25 = root_68();
+                                  var div_25 = root_73();
                                   var div_26 = child(div_25);
-                                  var span_26 = child(div_26);
-                                  var text_27 = child(span_26, true);
-                                  reset(span_26);
-                                  var span_27 = sibling(span_26, 2);
-                                  var text_28 = child(span_27, true);
-                                  reset(span_27);
+                                  var span_29 = child(div_26);
+                                  var text_30 = child(span_29, true);
+                                  reset(span_29);
+                                  var span_30 = sibling(span_29, 2);
+                                  var text_31 = child(span_30, true);
+                                  reset(span_30);
                                   reset(div_26);
                                   var pre = sibling(div_26, 2);
-                                  var text_29 = child(pre, true);
+                                  var text_32 = child(pre, true);
                                   reset(pre);
                                   reset(div_25);
                                   template_effect(() => {
-                                    set_text(text_27, (get(destOutput), untrack(() => get(destOutput).destination_name)));
-                                    set_text(text_28, (get(destOutput), untrack(() => get(destOutput).status)));
-                                    set_text(text_29, (get(destOutput), untrack(() => get(destOutput).plan_output || "(no output)")));
+                                    set_text(text_30, (get(destOutput), untrack(() => get(destOutput).destination_name)));
+                                    set_text(text_31, (get(destOutput), untrack(() => get(destOutput).status)));
+                                    set_text(text_32, (get(destOutput), untrack(() => get(destOutput).plan_output || "(no output)")));
                                   });
                                   append($$anchor9, div_25);
                                 }
                               );
-                              append($$anchor8, fragment_21);
+                              append($$anchor8, fragment_23);
                             };
                             var alternate_8 = ($$anchor8) => {
-                              var pre_1 = root_69();
-                              var text_30 = child(pre_1, true);
+                              var pre_1 = root_74();
+                              var text_33 = child(pre_1, true);
                               reset(pre_1);
-                              template_effect(() => set_text(text_30, (deep_read_state(get(planData)), untrack(() => get(planData).plan_output || "(no output)"))));
+                              template_effect(() => set_text(text_33, (deep_read_state(get(planData)), untrack(() => get(planData).plan_output || "(no output)"))));
                               append($$anchor8, pre_1);
                             };
-                            if_block(node_35, ($$render) => {
-                              if (deep_read_state(get(planData)), untrack(() => get(planData).outputs && get(planData).outputs.length > 0)) $$render(consequent_47);
+                            if_block(node_37, ($$render) => {
+                              if (deep_read_state(get(planData)), untrack(() => get(planData).outputs && get(planData).outputs.length > 0)) $$render(consequent_51);
                               else $$render(alternate_8, -1);
                             });
                           }
                           reset(div_23);
-                          template_effect(() => set_text(text_26, (deep_read_state(get(planData)), untrack(() => get(planData).status))));
+                          template_effect(() => set_text(text_29, (deep_read_state(get(planData)), untrack(() => get(planData).status))));
                           append($$anchor7, div_23);
                         };
-                        if_block(node_34, ($$render) => {
-                          if (get(stage), get(planOutputs), deep_read_state(get(release)), untrack(() => get(stage).stage_type === "plan" && get(planOutputs)[`${get(release).release_intent_id}:${get(stage).id}`])) $$render(consequent_48);
+                        if_block(node_36, ($$render) => {
+                          if (get(stage), get(planOutputs), deep_read_state(get(release)), untrack(() => get(stage).stage_type === "plan" && get(planOutputs)[`${get(release).release_intent_id}:${get(stage).id}`])) $$render(consequent_52);
                         });
                       }
                       template_effect(() => set_class(
@@ -6834,96 +6920,96 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
                   append($$anchor5, div_21);
                 };
                 if_block(node_28, ($$render) => {
-                  if (deep_read_state(get(release)), untrack(() => get(release).has_pipeline)) $$render(consequent_49);
+                  if (deep_read_state(get(release)), untrack(() => get(release).has_pipeline)) $$render(consequent_53);
                 });
               }
-              var node_37 = sibling(node_28, 2);
+              var node_39 = sibling(node_28, 2);
               each(
-                node_37,
+                node_39,
                 3,
                 () => (deep_read_state(get(release)), untrack(() => get(release).destinations)),
                 (dest) => dest.name,
                 ($$anchor5, dest, i) => {
                   const destBadge = /* @__PURE__ */ derived_safe_equal(() => (deep_read_state(envBadgeClasses), get(dest), untrack(() => envBadgeClasses(get(dest).environment || ""))));
-                  var div_27 = root_70();
-                  var node_38 = child(div_27);
+                  var div_27 = root_75();
+                  var node_40 = child(div_27);
                   {
-                    var consequent_50 = ($$anchor6) => {
-                      var svg_13 = root_71();
-                      append($$anchor6, svg_13);
-                    };
-                    var consequent_51 = ($$anchor6) => {
-                      var span_28 = root_72();
-                      append($$anchor6, span_28);
-                    };
-                    var consequent_52 = ($$anchor6) => {
-                      var svg_14 = root_73();
+                    var consequent_54 = ($$anchor6) => {
+                      var svg_14 = root_76();
                       append($$anchor6, svg_14);
                     };
-                    var consequent_53 = ($$anchor6) => {
-                      var svg_15 = root_74();
+                    var consequent_55 = ($$anchor6) => {
+                      var span_31 = root_77();
+                      append($$anchor6, span_31);
+                    };
+                    var consequent_56 = ($$anchor6) => {
+                      var svg_15 = root_78();
                       append($$anchor6, svg_15);
                     };
-                    var alternate_9 = ($$anchor6) => {
-                      var svg_16 = root_75();
+                    var consequent_57 = ($$anchor6) => {
+                      var svg_16 = root_79();
                       append($$anchor6, svg_16);
                     };
-                    if_block(node_38, ($$render) => {
-                      if (get(dest), untrack(() => get(dest).status === "SUCCEEDED")) $$render(consequent_50);
-                      else if (get(dest), untrack(() => get(dest).status === "RUNNING" || get(dest).status === "ASSIGNED")) $$render(consequent_51, 1);
-                      else if (get(dest), untrack(() => get(dest).status === "QUEUED")) $$render(consequent_52, 2);
-                      else if (get(dest), untrack(() => get(dest).status === "FAILED")) $$render(consequent_53, 3);
+                    var alternate_9 = ($$anchor6) => {
+                      var svg_17 = root_80();
+                      append($$anchor6, svg_17);
+                    };
+                    if_block(node_40, ($$render) => {
+                      if (get(dest), untrack(() => get(dest).status === "SUCCEEDED")) $$render(consequent_54);
+                      else if (get(dest), untrack(() => get(dest).status === "RUNNING" || get(dest).status === "ASSIGNED")) $$render(consequent_55, 1);
+                      else if (get(dest), untrack(() => get(dest).status === "QUEUED")) $$render(consequent_56, 2);
+                      else if (get(dest), untrack(() => get(dest).status === "FAILED")) $$render(consequent_57, 3);
                       else $$render(alternate_9, -1);
                     });
                   }
-                  var span_29 = sibling(node_38, 2);
-                  var text_31 = child(span_29);
-                  var span_30 = sibling(text_31);
-                  reset(span_29);
-                  var span_31 = sibling(span_29, 2);
-                  var text_32 = child(span_31, true);
-                  reset(span_31);
-                  var node_39 = sibling(span_31, 2);
-                  {
-                    var consequent_54 = ($$anchor6) => {
-                      var span_32 = root_76();
-                      append($$anchor6, span_32);
-                    };
-                    var consequent_55 = ($$anchor6) => {
-                      var span_33 = root_77();
-                      append($$anchor6, span_33);
-                    };
-                    var consequent_56 = ($$anchor6) => {
-                      var span_34 = root_78();
-                      var text_33 = child(span_34);
-                      reset(span_34);
-                      template_effect(() => set_text(text_33, `Queued${(get(dest), untrack(() => get(dest).queue_position ? ` #${get(dest).queue_position}` : "")) ?? ""}`));
-                      append($$anchor6, span_34);
-                    };
-                    var consequent_57 = ($$anchor6) => {
-                      var span_35 = root_79();
-                      append($$anchor6, span_35);
-                    };
-                    if_block(node_39, ($$render) => {
-                      if (get(dest), untrack(() => get(dest).status === "SUCCEEDED")) $$render(consequent_54);
-                      else if (get(dest), untrack(() => get(dest).status === "RUNNING")) $$render(consequent_55, 1);
-                      else if (get(dest), untrack(() => get(dest).status === "QUEUED")) $$render(consequent_56, 2);
-                      else if (get(dest), untrack(() => get(dest).status === "FAILED")) $$render(consequent_57, 3);
-                    });
-                  }
-                  var node_40 = sibling(node_39, 2);
+                  var span_32 = sibling(node_40, 2);
+                  var text_34 = child(span_32);
+                  var span_33 = sibling(text_34);
+                  reset(span_32);
+                  var span_34 = sibling(span_32, 2);
+                  var text_35 = child(span_34, true);
+                  reset(span_34);
+                  var node_41 = sibling(span_34, 2);
                   {
                     var consequent_58 = ($$anchor6) => {
-                      var time_1 = root_80();
-                      var text_34 = child(time_1, true);
+                      var span_35 = root_81();
+                      append($$anchor6, span_35);
+                    };
+                    var consequent_59 = ($$anchor6) => {
+                      var span_36 = root_82();
+                      append($$anchor6, span_36);
+                    };
+                    var consequent_60 = ($$anchor6) => {
+                      var span_37 = root_83();
+                      var text_36 = child(span_37);
+                      reset(span_37);
+                      template_effect(() => set_text(text_36, `Queued${(get(dest), untrack(() => get(dest).queue_position ? ` #${get(dest).queue_position}` : "")) ?? ""}`));
+                      append($$anchor6, span_37);
+                    };
+                    var consequent_61 = ($$anchor6) => {
+                      var span_38 = root_84();
+                      append($$anchor6, span_38);
+                    };
+                    if_block(node_41, ($$render) => {
+                      if (get(dest), untrack(() => get(dest).status === "SUCCEEDED")) $$render(consequent_58);
+                      else if (get(dest), untrack(() => get(dest).status === "RUNNING")) $$render(consequent_59, 1);
+                      else if (get(dest), untrack(() => get(dest).status === "QUEUED")) $$render(consequent_60, 2);
+                      else if (get(dest), untrack(() => get(dest).status === "FAILED")) $$render(consequent_61, 3);
+                    });
+                  }
+                  var node_42 = sibling(node_41, 2);
+                  {
+                    var consequent_62 = ($$anchor6) => {
+                      var time_1 = root_85();
+                      var text_37 = child(time_1, true);
                       reset(time_1);
-                      template_effect(($0) => set_text(text_34, $0), [
+                      template_effect(($0) => set_text(text_37, $0), [
                         () => (deep_read_state(timeAgo), get(dest), untrack(() => timeAgo(get(dest).completed_at)))
                       ]);
                       append($$anchor6, time_1);
                     };
-                    if_block(node_40, ($$render) => {
-                      if (get(dest), untrack(() => get(dest).completed_at)) $$render(consequent_58);
+                    if_block(node_42, ($$render) => {
+                      if (get(dest), untrack(() => get(dest).completed_at)) $$render(consequent_62);
                     });
                   }
                   reset(div_27);
@@ -6935,19 +7021,19 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
                       "svelte-4kxpm1"
                     );
                     set_class(
-                      span_29,
+                      span_32,
                       1,
                       `inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${(deep_read_state(get(destBadge)), untrack(() => get(destBadge).bg)) ?? ""}`,
                       "svelte-4kxpm1"
                     );
-                    set_text(text_31, `${(get(dest), untrack(() => get(dest).environment)) ?? ""} `);
+                    set_text(text_34, `${(get(dest), untrack(() => get(dest).environment)) ?? ""} `);
                     set_class(
-                      span_30,
+                      span_33,
                       1,
                       `w-1.5 h-1.5 rounded-full ${(deep_read_state(get(destBadge)), untrack(() => get(destBadge).dot)) ?? ""}`,
                       "svelte-4kxpm1"
                     );
-                    set_text(text_32, (get(dest), untrack(() => get(dest).name)));
+                    set_text(text_35, (get(dest), untrack(() => get(dest).name)));
                   });
                   append($$anchor5, div_27);
                 }
@@ -6976,26 +7062,26 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
               event("toggle", details, scheduleComputeLaneBars);
               append($$anchor4, div_15);
             };
-            var consequent_62 = ($$anchor4) => {
-              var details_1 = root_81();
+            var consequent_66 = ($$anchor4) => {
+              var details_1 = root_86();
               var summary_2 = child(details_1);
-              var text_35 = sibling(child(summary_2));
-              var span_36 = sibling(text_35, 3);
-              var text_36 = child(span_36);
-              reset(span_36);
-              var span_37 = sibling(span_36, 2);
-              var text_37 = child(span_37);
-              reset(span_37);
+              var text_38 = sibling(child(summary_2));
+              var span_39 = sibling(text_38, 3);
+              var text_39 = child(span_39);
+              reset(span_39);
+              var span_40 = sibling(span_39, 2);
+              var text_40 = child(span_40);
+              reset(span_40);
               reset(summary_2);
               var div_28 = sibling(summary_2, 2);
               each(div_28, 5, () => (get(item), untrack(() => get(item).releases || [])), (release) => release.slug, ($$anchor5, release) => {
-                var div_29 = root_82();
+                var div_29 = root_87();
                 var div_30 = child(div_29);
                 var div_31 = child(div_30);
-                var node_41 = child(div_31);
+                var node_43 = child(div_31);
                 {
-                  var consequent_60 = ($$anchor6) => {
-                    var img_1 = root_83();
+                  var consequent_64 = ($$anchor6) => {
+                    var img_1 = root_88();
                     template_effect(
                       ($0) => {
                         set_attribute(img_1, "src", $0);
@@ -7009,49 +7095,49 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
                     event("error", img_1, () => avatarMissing(get(release).source_user));
                     append($$anchor6, img_1);
                   };
-                  var d_8 = /* @__PURE__ */ user_derived(() => (get(release), get(avatarFailed), untrack(() => get(release).source_user && !get(avatarFailed).has(get(release).source_user))));
+                  var d_9 = /* @__PURE__ */ user_derived(() => (get(release), get(avatarFailed), untrack(() => get(release).source_user && !get(avatarFailed).has(get(release).source_user))));
                   var alternate_10 = ($$anchor6) => {
-                    var span_38 = root_84();
-                    var text_38 = child(span_38, true);
-                    reset(span_38);
+                    var span_41 = root_89();
+                    var text_41 = child(span_41, true);
+                    reset(span_41);
                     template_effect(
                       ($0) => {
-                        set_attribute(span_38, "title", (get(release), untrack(() => get(release).source_user ? `Deployed by ${get(release).source_user}` : void 0)));
-                        set_text(text_38, $0);
+                        set_attribute(span_41, "title", (get(release), untrack(() => get(release).source_user ? `Deployed by ${get(release).source_user}` : void 0)));
+                        set_text(text_41, $0);
                       },
                       [
                         () => (get(release), untrack(() => initial(get(release).source_user)))
                       ]
                     );
-                    append($$anchor6, span_38);
+                    append($$anchor6, span_41);
                   };
-                  if_block(node_41, ($$render) => {
-                    if (get(d_8)) $$render(consequent_60);
+                  if_block(node_43, ($$render) => {
+                    if (get(d_9)) $$render(consequent_64);
                     else $$render(alternate_10, -1);
                   });
                 }
-                var a_4 = sibling(node_41, 2);
-                var text_39 = child(a_4, true);
+                var a_4 = sibling(node_43, 2);
+                var text_42 = child(a_4, true);
                 reset(a_4);
                 reset(div_31);
                 var div_32 = sibling(div_31, 2);
-                var node_42 = child(div_32);
+                var node_44 = child(div_32);
                 {
-                  var consequent_61 = ($$anchor6) => {
-                    var span_39 = root_85();
-                    var text_40 = child(span_39, true);
-                    reset(span_39);
-                    template_effect(($0) => set_text(text_40, $0), [
+                  var consequent_65 = ($$anchor6) => {
+                    var span_42 = root_90();
+                    var text_43 = child(span_42, true);
+                    reset(span_42);
+                    template_effect(($0) => set_text(text_43, $0), [
                       () => (get(release), untrack(() => get(release).commit_sha.slice(0, 7)))
                     ]);
-                    append($$anchor6, span_39);
+                    append($$anchor6, span_42);
                   };
-                  if_block(node_42, ($$render) => {
-                    if (get(release), untrack(() => get(release).commit_sha)) $$render(consequent_61);
+                  if_block(node_44, ($$render) => {
+                    if (get(release), untrack(() => get(release).commit_sha)) $$render(consequent_65);
                   });
                 }
-                var time_2 = sibling(node_42, 2);
-                var text_41 = child(time_2, true);
+                var time_2 = sibling(node_44, 2);
+                var text_44 = child(time_2, true);
                 reset(time_2);
                 reset(div_32);
                 reset(div_30);
@@ -7060,8 +7146,8 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
                   ($0, $1) => {
                     set_attribute(a_4, "href", `/orgs/${org() ?? ""}/projects/${(get(release), deep_read_state(project()), untrack(() => get(release).project_name || project())) ?? ""}/releases/${(get(release), untrack(() => get(release).slug)) ?? ""}`);
                     set_attribute(a_4, "title", (get(release), untrack(() => get(release).title)));
-                    set_text(text_39, $0);
-                    set_text(text_41, $1);
+                    set_text(text_42, $0);
+                    set_text(text_44, $1);
                   },
                   [
                     () => (get(release), untrack(() => {
@@ -7076,36 +7162,36 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
               reset(div_28);
               reset(details_1);
               template_effect(() => {
-                set_text(text_35, ` ${(get(item), untrack(() => get(item).count)) ?? ""} hidden commit${(get(item), untrack(() => get(item).count !== 1 ? "s" : "")) ?? ""} `);
-                set_text(text_36, `Show commit${(get(item), untrack(() => get(item).count !== 1 ? "s" : "")) ?? ""}`);
-                set_text(text_37, `Hide commit${(get(item), untrack(() => get(item).count !== 1 ? "s" : "")) ?? ""}`);
+                set_text(text_38, ` ${(get(item), untrack(() => get(item).count)) ?? ""} hidden commit${(get(item), untrack(() => get(item).count !== 1 ? "s" : "")) ?? ""} `);
+                set_text(text_39, `Show commit${(get(item), untrack(() => get(item).count !== 1 ? "s" : "")) ?? ""}`);
+                set_text(text_40, `Hide commit${(get(item), untrack(() => get(item).count !== 1 ? "s" : "")) ?? ""}`);
               });
               event("toggle", details_1, scheduleComputeLaneBars);
               append($$anchor4, details_1);
             };
             if_block(node_7, ($$render) => {
-              if (get(item), untrack(() => get(item).kind === "release" && get(item).release)) $$render(consequent_59);
-              else if (get(item), untrack(() => get(item).kind === "hidden")) $$render(consequent_62, 1);
+              if (get(item), untrack(() => get(item).kind === "release" && get(item).release)) $$render(consequent_63);
+              else if (get(item), untrack(() => get(item).kind === "hidden")) $$render(consequent_66, 1);
             });
           }
           append($$anchor3, fragment_3);
         });
         reset(div_14);
         bind_this(div_14, ($$value) => set(timelineEl, $$value), () => get(timelineEl));
-        var node_43 = sibling(div_14, 2);
+        var node_45 = sibling(div_14, 2);
         {
-          var consequent_63 = ($$anchor3) => {
-            var div_33 = root_86();
+          var consequent_67 = ($$anchor3) => {
+            var div_33 = root_91();
             var button_8 = child(div_33);
             reset(div_33);
             event("click", button_8, showMore);
             append($$anchor3, div_33);
           };
-          if_block(node_43, ($$render) => {
-            if (get(hasMore)) $$render(consequent_63);
+          if_block(node_45, ($$render) => {
+            if (get(hasMore)) $$render(consequent_67);
           });
         }
-        var div_34 = sibling(node_43, 2);
+        var div_34 = sibling(node_45, 2);
         each(div_34, 5, () => get(displayedLanes), (lane) => lane.name, ($$anchor3, lane) => {
           const bar = /* @__PURE__ */ derived_safe_equal(() => (get(laneBarData), get(lane), untrack(() => get(laneBarData)[get(lane).name])));
           const computed_const_1 = /* @__PURE__ */ derived_safe_equal(() => {
@@ -7115,15 +7201,15 @@ var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "acce
             }));
             return { barColor };
           });
-          var div_35 = root_87();
+          var div_35 = root_92();
           set_style(div_35, "width: 20px; margin-right: 4px; display: flex; justify-content: center;");
-          var span_40 = child(div_35);
-          var text_42 = child(span_40, true);
-          reset(span_40);
+          var span_43 = child(div_35);
+          var text_45 = child(span_43, true);
+          reset(span_43);
           reset(div_35);
           template_effect(() => {
-            set_style(span_40, `color: ${get(computed_const_1).barColor ?? ""};`);
-            set_text(text_42, (get(lane), untrack(() => get(lane).name)));
+            set_style(span_43, `color: ${get(computed_const_1).barColor ?? ""};`);
+            set_text(text_45, (get(lane), untrack(() => get(lane).name)));
           });
           append($$anchor3, div_35);
         });

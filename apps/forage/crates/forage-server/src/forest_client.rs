@@ -1146,6 +1146,46 @@ fn convert_artifact(a: forage_grpc::Artifact) -> Artifact {
     }
 }
 
+/// forest's `HealthStatus` as its name, so neither forage-core nor the
+/// frontend needs the enum.
+fn health_status_name(v: i32) -> &'static str {
+    match forage_grpc::HealthStatus::try_from(v) {
+        Ok(forage_grpc::HealthStatus::Healthy) => "HEALTHY",
+        Ok(forage_grpc::HealthStatus::Progressing) => "PROGRESSING",
+        Ok(forage_grpc::HealthStatus::Degraded) => "DEGRADED",
+        Ok(forage_grpc::HealthStatus::Unhealthy) => "UNHEALTHY",
+        Ok(forage_grpc::HealthStatus::Missing) => "MISSING",
+        _ => "UNSPECIFIED",
+    }
+}
+
+fn health_status_value(name: &str) -> i32 {
+    match name {
+        "HEALTHY" => forage_grpc::HealthStatus::Healthy as i32,
+        "PROGRESSING" => forage_grpc::HealthStatus::Progressing as i32,
+        "DEGRADED" => forage_grpc::HealthStatus::Degraded as i32,
+        "UNHEALTHY" => forage_grpc::HealthStatus::Unhealthy as i32,
+        "MISSING" => forage_grpc::HealthStatus::Missing as i32,
+        _ => forage_grpc::HealthStatus::Unspecified as i32,
+    }
+}
+
+fn gate_timeout_name(v: i32) -> String {
+    match forage_grpc::GateTimeoutBehaviour::try_from(v) {
+        Ok(forage_grpc::GateTimeoutBehaviour::Proceed) => "PROCEED".to_string(),
+        // Unspecified included: the server reads an unset value as FAIL, and
+        // showing anything else here would misdescribe what a timeout does.
+        _ => "FAIL".to_string(),
+    }
+}
+
+fn gate_timeout_value(name: &str) -> i32 {
+    match name {
+        "PROCEED" => forage_grpc::GateTimeoutBehaviour::Proceed as i32,
+        _ => forage_grpc::GateTimeoutBehaviour::Fail as i32,
+    }
+}
+
 fn convert_pipeline_stage(s: forage_grpc::PipelineStage) -> PipelineStage {
     let config = match s.config {
         Some(forage_grpc::pipeline_stage::Config::Deploy(d)) => PipelineStageConfig::Deploy {
@@ -1157,6 +1197,22 @@ fn convert_pipeline_stage(s: forage_grpc::PipelineStage) -> PipelineStage {
         Some(forage_grpc::pipeline_stage::Config::Plan(p)) => PipelineStageConfig::Plan {
             environment: p.environment,
             auto_approve: p.auto_approve,
+        },
+        Some(forage_grpc::pipeline_stage::Config::Gate(g)) => PipelineStageConfig::Gate {
+            requires: g
+                .requires
+                .into_iter()
+                .map(|r| forage_core::platform::SignalRequirement {
+                    signal: r.signal,
+                    accept: r
+                        .accept
+                        .into_iter()
+                        .map(|v| health_status_name(v).to_string())
+                        .collect(),
+                })
+                .collect(),
+            timeout_seconds: g.timeout_seconds,
+            on_timeout: gate_timeout_name(g.on_timeout),
         },
         None => PipelineStageConfig::Deploy {
             environment: String::new(),
@@ -1204,6 +1260,8 @@ fn convert_pipeline_stage_state(
         release_ids: s.release_ids,
         approval_status: s.approval_status,
         auto_approve: s.auto_approve,
+        gate_deadline: s.gate_deadline,
+        gate_waiting_on: s.gate_waiting_on,
     }
 }
 
@@ -1247,6 +1305,21 @@ fn convert_stages_to_grpc(stages: &[PipelineStage]) -> Vec<forage_grpc::Pipeline
                 } => forage_grpc::pipeline_stage::Config::Plan(forage_grpc::PlanStageConfig {
                     environment: environment.clone(),
                     auto_approve: *auto_approve,
+                }),
+                PipelineStageConfig::Gate {
+                    requires,
+                    timeout_seconds,
+                    on_timeout,
+                } => forage_grpc::pipeline_stage::Config::Gate(forage_grpc::GateStageConfig {
+                    requires: requires
+                        .iter()
+                        .map(|r| forage_grpc::SignalRequirement {
+                            signal: r.signal.clone(),
+                            accept: r.accept.iter().map(|n| health_status_value(n)).collect(),
+                        })
+                        .collect(),
+                    timeout_seconds: *timeout_seconds,
+                    on_timeout: gate_timeout_value(on_timeout),
                 }),
             }),
         })

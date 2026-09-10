@@ -24,6 +24,10 @@ export function pipelineSummary(stages) {
     if (s.stage_type === "wait" && s.status === "RUNNING") anyWaiting = true;
   }
 
+  let anyGateAwaiting = stages.some(
+    s => s.stage_type === "gate" && s.status === "RUNNING" &&
+      Array.isArray(s.gate_waiting_on) && s.gate_waiting_on.length > 0
+  );
   let anyApprovalBlocked = stages.some(s => s.blocked_by);
   let anyPlanAwaiting = stages.some(s => s.stage_type === "plan" && (s.status === "AWAITING_APPROVAL" || s.approval_status === "AWAITINGAPPROVAL" || s.approval_status === "AWAITING_APPROVAL"));
 
@@ -31,6 +35,9 @@ export function pipelineSummary(stages) {
   if (anyFailed) return { label: "Pipeline failed", color: "text-red-600", icon: "x-circle", iconColor: "text-red-500", done, total };
   if (anyPlanAwaiting) return { label: "Awaiting plan approval", color: "text-purple-700", icon: "shield", iconColor: "text-purple-500", done, total };
   if (anyApprovalBlocked) return { label: "Awaiting approval", color: "text-emerald-700", icon: "shield", iconColor: "text-emerald-500", done, total };
+  // Ahead of the plain wait stage: a gate is waiting on something a person may
+  // have to go and look at, where a wait stage just needs the clock to run out.
+  if (anyGateAwaiting) return { label: "Waiting for signals", color: "text-yellow-700", icon: "clock", iconColor: "text-yellow-500", done, total };
   if (anyWaiting) return { label: "Waiting for time window", color: "text-yellow-700", icon: "clock", iconColor: "text-yellow-500", done, total };
   if (anyRunning) return { label: "Deploying to", color: "text-yellow-700", icon: "pulse", iconColor: "text-yellow-500", done, total };
   if (anyQueued) return { label: "Queued", color: "text-blue-600", icon: "clock", iconColor: "text-blue-400", done, total };
@@ -67,11 +74,23 @@ export function deployStageLabel(status) {
   }
 }
 
+export function gateStageLabel(status) {
+  switch (status) {
+    case "SUCCEEDED": return "Signals received";
+    case "AWAITING_SIGNAL": return "Waiting for";
+    case "RUNNING": return "Checking signals";
+    case "FAILED": return "Gate timed out";
+    case "CANCELLED": return "Gate cancelled";
+    default: return "Gate";
+  }
+}
+
 export function planStageLabel(status) {
   switch (status) {
     case "SUCCEEDED": return "Plan approved";
     case "RUNNING": return "Planning";
     case "AWAITING_APPROVAL": return "Awaiting plan approval";
+    case "AWAITING_SIGNAL": return "Waiting for signals";
     case "FAILED": return "Plan failed";
     case "CANCELLED": return "Plan cancelled";
     default: return "Plan";
