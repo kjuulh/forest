@@ -12,7 +12,7 @@
     </div>
 
     <div class="border border-gray-200 rounded-lg p-6">
-        <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/policies/{{ policy.name }}" class="space-y-4">
+        <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/policies/{{ policy.id | urlencode }}" class="space-y-4">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="policy_type" value="{{ policy.policy_type }}">
 

@@ -49,8 +49,8 @@
 
                 {% if is_admin %}
                 <div class="flex items-center gap-2 shrink-0">
-                    <a href="/orgs/{{ current_org }}/projects/{{ current_project }}/policies/{{ policy.name }}" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Edit</a>
-                    <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/policies/{{ policy.name }}/toggle">
+                    <a href="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/policies/{{ policy.id | urlencode }}" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Edit</a>
+                    <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/policies/{{ policy.id | urlencode }}/toggle">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         {% if policy.enabled %}
                         <button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Disable</button>
@@ -59,7 +59,7 @@
                         <button type="submit" class="text-xs px-2.5 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50">Enable</button>
                         {% endif %}
                     </form>
-                    <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/policies/{{ policy.name }}/delete" onsubmit="return confirm('Delete policy &quot;{{ policy.name }}&quot;?')">
+                    <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/policies/{{ policy.id | urlencode }}/delete" onsubmit="return confirm('Delete policy &quot;{{ policy.name }}&quot;?')">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Delete</button>
                     </form>

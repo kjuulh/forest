@@ -118,15 +118,15 @@ pub fn router() -> Router<AppState> {
             get(triggers_page).post(create_trigger_submit),
         )
         .route(
-            "/orgs/{org}/projects/{project}/triggers/{name}",
+            "/orgs/{org}/projects/{project}/triggers/{id}",
             get(edit_trigger_page).post(edit_trigger_submit),
         )
         .route(
-            "/orgs/{org}/projects/{project}/triggers/{name}/toggle",
+            "/orgs/{org}/projects/{project}/triggers/{id}/toggle",
             post(toggle_trigger),
         )
         .route(
-            "/orgs/{org}/projects/{project}/triggers/{name}/delete",
+            "/orgs/{org}/projects/{project}/triggers/{id}/delete",
             post(delete_trigger),
         )
         .route(
@@ -134,15 +134,15 @@ pub fn router() -> Router<AppState> {
             get(policies_page).post(create_policy_submit),
         )
         .route(
-            "/orgs/{org}/projects/{project}/policies/{name}",
+            "/orgs/{org}/projects/{project}/policies/{id}",
             get(edit_policy_page).post(edit_policy_submit),
         )
         .route(
-            "/orgs/{org}/projects/{project}/policies/{name}/toggle",
+            "/orgs/{org}/projects/{project}/policies/{id}/toggle",
             post(toggle_policy),
         )
         .route(
-            "/orgs/{org}/projects/{project}/policies/{name}/delete",
+            "/orgs/{org}/projects/{project}/policies/{id}/delete",
             post(delete_policy),
         )
         .route(
@@ -158,15 +158,15 @@ pub fn router() -> Router<AppState> {
             get(pipelines_page).post(create_pipeline_submit),
         )
         .route(
-            "/orgs/{org}/projects/{project}/pipelines/{name}/toggle",
+            "/orgs/{org}/projects/{project}/pipelines/{id}/toggle",
             post(toggle_pipeline),
         )
         .route(
-            "/orgs/{org}/projects/{project}/pipelines/{name}/update",
+            "/orgs/{org}/projects/{project}/pipelines/{id}/update",
             post(update_pipeline_submit),
         )
         .route(
-            "/orgs/{org}/projects/{project}/pipelines/{name}/delete",
+            "/orgs/{org}/projects/{project}/pipelines/{id}/delete",
             post(delete_pipeline),
         )
         .route("/users/{username}", get(user_profile))
@@ -4505,6 +4505,105 @@ fn org_pipeline_example() -> String {
     .unwrap_or_else(|_| "[]".into())
 }
 
+// ─── Addressing a rule by id ────────────────────────────────────────
+//
+// Trigger, policy and pipeline names are free text, and a release rule is
+// routinely named after the pattern it matches — `(feat|feature)/.*-to-platform-dev`
+// is a real one. Interpolating a name like that into `/triggers/{name}/delete`
+// yields extra path segments, so axum matched no route at all and the
+// Edit / Disable / Delete buttons 404'd before any handler ran.
+//
+// Action URLs therefore address a rule by its id, which is opaque and
+// URL-safe. The forest gRPC API still keys these resources by name, so each
+// handler resolves the id back to a name before calling it. `name` stays the
+// human-readable label in the UI; only the addressing changed.
+//
+// Resolution costs one extra list call on the action path. That is the same
+// call the corresponding page handler already makes, and it doubles as an
+// existence check — an id that no longer resolves renders "Not found" rather
+// than forwarding a stale name to the API.
+
+async fn resolve_trigger_name(
+    state: &AppState,
+    session: &Session,
+    org: &str,
+    project: &str,
+    id: &str,
+) -> Result<String, Response> {
+    let triggers = state
+        .platform_client
+        .list_triggers(&session.access_token, org, project)
+        .await
+        .map_err(|e| internal_error(state, "list_triggers", &e))?;
+
+    triggers
+        .into_iter()
+        .find(|t| t.id == id)
+        .map(|t| t.name)
+        .ok_or_else(|| {
+            error_page(
+                state,
+                StatusCode::NOT_FOUND,
+                "Not found",
+                "Trigger not found.",
+            )
+        })
+}
+
+async fn resolve_policy_name(
+    state: &AppState,
+    session: &Session,
+    org: &str,
+    project: &str,
+    id: &str,
+) -> Result<String, Response> {
+    let policies = state
+        .platform_client
+        .list_policies(&session.access_token, org, project)
+        .await
+        .map_err(|e| internal_error(state, "list_policies", &e))?;
+
+    policies
+        .into_iter()
+        .find(|p| p.id == id)
+        .map(|p| p.name)
+        .ok_or_else(|| {
+            error_page(
+                state,
+                StatusCode::NOT_FOUND,
+                "Not found",
+                "Policy not found.",
+            )
+        })
+}
+
+async fn resolve_pipeline_name(
+    state: &AppState,
+    session: &Session,
+    org: &str,
+    project: &str,
+    id: &str,
+) -> Result<String, Response> {
+    let pipelines = state
+        .platform_client
+        .list_release_pipelines(&session.access_token, org, project)
+        .await
+        .map_err(|e| internal_error(state, "list_release_pipelines", &e))?;
+
+    pipelines
+        .into_iter()
+        .find(|p| p.id == id)
+        .map(|p| p.name)
+        .ok_or_else(|| {
+            error_page(
+                state,
+                StatusCode::NOT_FOUND,
+                "Not found",
+                "Pipeline not found.",
+            )
+        })
+}
+
 // ─── Triggers (auto-release triggers) ───────────────────────────────
 
 async fn triggers_page(
@@ -4744,7 +4843,7 @@ struct ToggleTriggerForm {
 async fn toggle_trigger(
     State(state): State<AppState>,
     session: Session,
-    Path((org, project, name)): Path<(String, String, String)>,
+    Path((org, project, id)): Path<(String, String, String)>,
     Form(form): Form<ToggleTriggerForm>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
@@ -4759,6 +4858,8 @@ async fn toggle_trigger(
             "CSRF validation failed. Please try again.",
         ));
     }
+
+    let name = resolve_trigger_name(&state, &session, &org, &project, &id).await?;
 
     let input = UpdateTriggerInput {
         enabled: Some(form.enabled.is_some()),
@@ -4790,7 +4891,7 @@ struct DeleteTriggerForm {
 async fn delete_trigger(
     State(state): State<AppState>,
     session: Session,
-    Path((org, project, name)): Path<(String, String, String)>,
+    Path((org, project, id)): Path<(String, String, String)>,
     Form(form): Form<DeleteTriggerForm>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
@@ -4806,6 +4907,8 @@ async fn delete_trigger(
         ));
     }
 
+    let name = resolve_trigger_name(&state, &session, &org, &project, &id).await?;
+
     state
         .platform_client
         .delete_trigger(&session.access_token, &org, &project, &name)
@@ -4818,7 +4921,7 @@ async fn delete_trigger(
 async fn edit_trigger_page(
     State(state): State<AppState>,
     session: Session,
-    Path((org, project, name)): Path<(String, String, String)>,
+    Path((org, project, id)): Path<(String, String, String)>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
     let current_org = require_org_membership(&state, orgs, &org)?;
@@ -4848,7 +4951,7 @@ async fn edit_trigger_page(
     let environments = warn_default("list_environments", environments);
     let pipelines = warn_default("list_release_pipelines", pipelines);
 
-    let trigger = triggers.iter().find(|t| t.name == name).ok_or_else(|| {
+    let trigger = triggers.iter().find(|t| t.id == id).ok_or_else(|| {
         error_page(
             &state,
             StatusCode::NOT_FOUND,
@@ -4858,6 +4961,7 @@ async fn edit_trigger_page(
     })?;
 
     let trigger_ctx = context! {
+        id => trigger.id,
         name => trigger.name,
         enabled => trigger.enabled,
         branch_pattern => trigger.branch_pattern,
@@ -4895,7 +4999,7 @@ async fn edit_trigger_page(
         .render(
             "pages/trigger_edit.html.jinja",
             context! {
-                page_title => format!("Edit Trigger · {} · {}", name, org),
+                page_title => format!("Edit Trigger · {} · {}", trigger.name, org),
                 user => context! {
                     username => session.user.username,
                 },
@@ -4938,7 +5042,7 @@ struct EditTriggerForm {
 async fn edit_trigger_submit(
     State(state): State<AppState>,
     session: Session,
-    Path((org, project, name)): Path<(String, String, String)>,
+    Path((org, project, id)): Path<(String, String, String)>,
     Form(form): Form<EditTriggerForm>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
@@ -4953,6 +5057,8 @@ async fn edit_trigger_submit(
             "CSRF validation failed. Please try again.",
         ));
     }
+
+    let name = resolve_trigger_name(&state, &session, &org, &project, &id).await?;
 
     let has_pattern = non_empty(&form.branch_pattern).is_some()
         || non_empty(&form.title_pattern).is_some()
@@ -5293,7 +5399,7 @@ struct TogglePolicyForm {
 async fn toggle_policy(
     State(state): State<AppState>,
     session: Session,
-    Path((org, project, name)): Path<(String, String, String)>,
+    Path((org, project, id)): Path<(String, String, String)>,
     Form(form): Form<TogglePolicyForm>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
@@ -5308,6 +5414,8 @@ async fn toggle_policy(
             "CSRF validation failed. Please try again.",
         ));
     }
+
+    let name = resolve_policy_name(&state, &session, &org, &project, &id).await?;
 
     let input = UpdatePolicyInput {
         enabled: Some(form.enabled.is_some()),
@@ -5331,7 +5439,7 @@ struct DeletePolicyForm {
 async fn delete_policy(
     State(state): State<AppState>,
     session: Session,
-    Path((org, project, name)): Path<(String, String, String)>,
+    Path((org, project, id)): Path<(String, String, String)>,
     Form(form): Form<DeletePolicyForm>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
@@ -5347,6 +5455,8 @@ async fn delete_policy(
         ));
     }
 
+    let name = resolve_policy_name(&state, &session, &org, &project, &id).await?;
+
     state
         .platform_client
         .delete_policy(&session.access_token, &org, &project, &name)
@@ -5359,7 +5469,7 @@ async fn delete_policy(
 async fn edit_policy_page(
     State(state): State<AppState>,
     session: Session,
-    Path((org, project, name)): Path<(String, String, String)>,
+    Path((org, project, id)): Path<(String, String, String)>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
     let current_org = require_org_membership(&state, orgs, &org)?;
@@ -5385,7 +5495,7 @@ async fn edit_policy_page(
     let policies = policies.map_err(|e| internal_error(&state, "list_policies", &e))?;
     let environments = warn_default("list_environments", environments);
 
-    let policy = policies.iter().find(|p| p.name == name).ok_or_else(|| {
+    let policy = policies.iter().find(|p| p.id == id).ok_or_else(|| {
         error_page(
             &state,
             StatusCode::NOT_FOUND,
@@ -5430,6 +5540,7 @@ async fn edit_policy_page(
     };
 
     let policy_ctx = context! {
+        id => policy.id,
         name => policy.name,
         enabled => policy.enabled,
         policy_type => policy_type,
@@ -5454,7 +5565,7 @@ async fn edit_policy_page(
         .render(
             "pages/policy_edit.html.jinja",
             context! {
-                page_title => format!("Edit Policy · {} · {}", name, org),
+                page_title => format!("Edit Policy · {} · {}", policy.name, org),
                 user => context! {
                     username => session.user.username,
                 },
@@ -5490,7 +5601,7 @@ struct EditPolicyForm {
 async fn edit_policy_submit(
     State(state): State<AppState>,
     session: Session,
-    Path((org, project, name)): Path<(String, String, String)>,
+    Path((org, project, id)): Path<(String, String, String)>,
     Form(form): Form<EditPolicyForm>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
@@ -5505,6 +5616,8 @@ async fn edit_policy_submit(
             "CSRF validation failed. Please try again.",
         ));
     }
+
+    let name = resolve_policy_name(&state, &session, &org, &project, &id).await?;
 
     let config = match form.policy_type.as_str() {
         "soak_time" => {
@@ -5708,11 +5821,11 @@ struct TogglePipelineForm {
     enabled: Option<String>,
 }
 
-#[tracing::instrument(skip(state, session, form), fields(org, project, name))]
+#[tracing::instrument(skip(state, session, form), fields(org, project, id))]
 async fn toggle_pipeline(
     State(state): State<AppState>,
     session: Session,
-    Path((org, project, name)): Path<(String, String, String)>,
+    Path((org, project, id)): Path<(String, String, String)>,
     Form(form): Form<TogglePipelineForm>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
@@ -5727,6 +5840,8 @@ async fn toggle_pipeline(
             "CSRF validation failed. Please try again.",
         ));
     }
+
+    let name = resolve_pipeline_name(&state, &session, &org, &project, &id).await?;
 
     let input = UpdateReleasePipelineInput {
         enabled: Some(form.enabled.is_some()),
@@ -5749,11 +5864,11 @@ struct UpdatePipelineForm {
     stages_json: String,
 }
 
-#[tracing::instrument(skip(state, session, form), fields(org, project, name))]
+#[tracing::instrument(skip(state, session, form), fields(org, project, id))]
 async fn update_pipeline_submit(
     State(state): State<AppState>,
     session: Session,
-    Path((org, project, name)): Path<(String, String, String)>,
+    Path((org, project, id)): Path<(String, String, String)>,
     Form(form): Form<UpdatePipelineForm>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
@@ -5768,6 +5883,8 @@ async fn update_pipeline_submit(
             "CSRF validation failed. Please try again.",
         ));
     }
+
+    let name = resolve_pipeline_name(&state, &session, &org, &project, &id).await?;
 
     let stages: Vec<PipelineStage> = if form.stages_json.trim().is_empty() {
         Vec::new()
@@ -5801,11 +5918,11 @@ struct DeletePipelineForm {
     _csrf: String,
 }
 
-#[tracing::instrument(skip(state, session, form), fields(org, project, name))]
+#[tracing::instrument(skip(state, session, form), fields(org, project, id))]
 async fn delete_pipeline(
     State(state): State<AppState>,
     session: Session,
-    Path((org, project, name)): Path<(String, String, String)>,
+    Path((org, project, id)): Path<(String, String, String)>,
     Form(form): Form<DeletePipelineForm>,
 ) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
@@ -5820,6 +5937,8 @@ async fn delete_pipeline(
             "CSRF validation failed. Please try again.",
         ));
     }
+
+    let name = resolve_pipeline_name(&state, &session, &org, &project, &id).await?;
 
     state
         .platform_client

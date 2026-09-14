@@ -12,7 +12,7 @@
     </div>
 
     <div class="border border-gray-200 rounded-lg p-6">
-        <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/triggers/{{ trigger.name }}" class="space-y-4">
+        <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/triggers/{{ trigger.id | urlencode }}" class="space-y-4">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
             <p class="text-sm text-gray-500 mb-2">Update filter patterns. Artifacts matching <strong>all</strong> patterns will be auto-released.</p>

@@ -72,6 +72,11 @@ pub(crate) struct MockPlatformBehavior {
     pub create_org_rule_set_result: Option<Result<OrgRuleSet, PlatformError>>,
     pub update_org_rule_set_result: Option<Result<OrgRuleSet, PlatformError>>,
     pub delete_org_rule_set_result: Option<Result<(), PlatformError>>,
+    // Records `"<op>:<name>"` for every rule CRUD call the routes make. The
+    // routes address triggers, policies and pipelines by id and resolve that
+    // id to a name before calling the API, so a test needs to see the name
+    // that actually came out the far side.
+    pub rule_action_calls: Option<Arc<Mutex<Vec<String>>>>,
     pub list_triggers_result: Option<Result<Vec<Trigger>, PlatformError>>,
     pub create_trigger_result: Option<Result<Trigger, PlatformError>>,
     pub update_trigger_result: Option<Result<Trigger, PlatformError>>,
@@ -867,6 +872,9 @@ impl ForestPlatform for MockPlatformClient {
         input: &UpdateTriggerInput,
     ) -> Result<Trigger, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        if let Some(calls) = &b.rule_action_calls {
+            calls.lock().unwrap().push(format!("update_trigger:{name}"));
+        }
         b.update_trigger_result.clone().unwrap_or(Ok(Trigger {
             id: "trigger-1".into(),
             name: name.into(),
@@ -890,9 +898,12 @@ impl ForestPlatform for MockPlatformClient {
         _access_token: &str,
         _organisation: &str,
         _project: &str,
-        _name: &str,
+        name: &str,
     ) -> Result<(), PlatformError> {
         let b = self.behavior.lock().unwrap();
+        if let Some(calls) = &b.rule_action_calls {
+            calls.lock().unwrap().push(format!("delete_trigger:{name}"));
+        }
         b.delete_trigger_result.clone().unwrap_or(Ok(()))
     }
 

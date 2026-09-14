@@ -1740,7 +1740,30 @@ async fn toggle_trigger_requires_admin() {
 
 #[tokio::test]
 async fn delete_trigger_success_redirects() {
-    let (state, sessions) = test_state();
+    use forage_core::platform::Trigger;
+
+    // The action addresses the trigger by id, so the trigger has to exist for
+    // the id to resolve.
+    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
+        list_triggers_result: Some(Ok(vec![Trigger {
+            id: "t1".into(),
+            name: "deploy-main".into(),
+            enabled: true,
+            branch_pattern: Some("main".into()),
+            title_pattern: None,
+            author_pattern: None,
+            commit_message_pattern: None,
+            source_type_pattern: None,
+            target_environments: vec!["staging".into()],
+            target_destinations: vec![],
+            force_release: false,
+            use_pipeline: false,
+            created_at: "2026-03-08T00:00:00Z".into(),
+            updated_at: "2026-03-08T00:00:00Z".into(),
+        }])),
+        ..Default::default()
+    });
+    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
@@ -1748,7 +1771,7 @@ async fn delete_trigger_success_redirects() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/projects/my-api/triggers/deploy-main/delete")
+                .uri("/orgs/testorg/projects/my-api/triggers/t1/delete")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from("csrf_token=test-csrf"))
@@ -2579,4 +2602,229 @@ async fn is_current_marks_only_the_release_the_destination_still_holds() {
         !current_of("my-api-old"),
         "the superseded release deployed here, but is no longer live"
     );
+}
+// ─── Rules are addressed by id, not by name ─────────────────────────
+//
+// A release rule is routinely named after the pattern it matches, and the
+// reported case — `(feat|feature)/.*-to-platform-dev` — contains a `/`. The
+// action URLs used to interpolate that name into
+// `/triggers/{name}/delete`, which produced extra path segments, so axum
+// matched no route and Edit / Disable / Delete returned 404 before any
+// handler ran. The buttons now carry the rule's id and the handler resolves
+// it back to the name the forest API still keys on.
+
+/// The exact rule name from the bug report. Regex alternation, a path
+/// separator and a glob — nothing about it is safe in a URL path.
+use std::sync::{Arc, Mutex};
+
+const AWKWARD_NAME: &str = "(feat|feature)/.*-to-platform-dev";
+
+fn awkward_trigger() -> forage_core::platform::Trigger {
+    forage_core::platform::Trigger {
+        id: "11111111-2222-3333-4444-555555555555".into(),
+        name: AWKWARD_NAME.into(),
+        enabled: true,
+        branch_pattern: Some(AWKWARD_NAME.into()),
+        title_pattern: None,
+        author_pattern: None,
+        commit_message_pattern: None,
+        source_type_pattern: None,
+        target_environments: vec!["platform-dev".into()],
+        target_destinations: vec![],
+        force_release: false,
+        use_pipeline: false,
+        created_at: "2026-03-08T00:00:00Z".into(),
+        updated_at: "2026-03-08T00:00:00Z".into(),
+    }
+}
+
+fn awkward_platform(calls: &Arc<Mutex<Vec<String>>>) -> MockPlatformClient {
+    MockPlatformClient::with_behavior(MockPlatformBehavior {
+        list_triggers_result: Some(Ok(vec![awkward_trigger()])),
+        rule_action_calls: Some(calls.clone()),
+        ..Default::default()
+    })
+}
+
+#[tokio::test]
+async fn delete_trigger_with_non_url_safe_name_succeeds_when_addressed_by_id() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/orgs/testorg/projects/my-api/triggers/11111111-2222-3333-4444-555555555555/delete")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("csrf_token=test-csrf"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response.headers().get("location").unwrap(),
+        "/orgs/testorg/projects/my-api/triggers"
+    );
+    // The id resolved to the one rule that holds it — name and all.
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![format!("delete_trigger:{AWKWARD_NAME}")]
+    );
+}
+
+#[tokio::test]
+async fn disable_trigger_with_non_url_safe_name_succeeds_when_addressed_by_id() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/orgs/testorg/projects/my-api/triggers/11111111-2222-3333-4444-555555555555/toggle")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("csrf_token=test-csrf"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![format!("update_trigger:{AWKWARD_NAME}")]
+    );
+}
+
+#[tokio::test]
+async fn edit_trigger_page_with_non_url_safe_name_loads_when_addressed_by_id() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects/my-api/triggers/11111111-2222-3333-4444-555555555555")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    // The name is still the label the user sees — HTML-escaped, since minijinja
+    // escapes `/` as `&#x2f;`.
+    assert!(html.contains("(feat|feature)&#x2f;.*-to-platform-dev"));
+    // ...and the form posts back to the id, not that name.
+    assert!(html.contains(
+        "action=\"/orgs/testorg/projects/my-api/triggers/11111111-2222-3333-4444-555555555555\""
+    ));
+}
+
+#[tokio::test]
+async fn edit_trigger_submit_with_non_url_safe_name_resolves_id_to_name() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/orgs/testorg/projects/my-api/triggers/11111111-2222-3333-4444-555555555555")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    "csrf_token=test-csrf\
+                     &branch_pattern=%28feat%7Cfeature%29%2F.%2A-to-platform-dev\
+                     &target_environments=platform-dev",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![format!("update_trigger:{AWKWARD_NAME}")]
+    );
+}
+
+/// The rendered page must hand the browser an id-addressed action URL. If it
+/// ever goes back to interpolating the name, the `/` in it silently
+/// reintroduces the 404 — so pin the URL the buttons actually carry.
+#[tokio::test]
+async fn triggers_page_action_urls_carry_the_id_not_the_name() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects/my-api/triggers")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+
+    let base = "/orgs/testorg/projects/my-api/triggers/11111111-2222-3333-4444-555555555555";
+    assert!(html.contains(&format!("{base}/delete")));
+    assert!(html.contains(&format!("{base}/toggle")));
+    assert!(html.contains(&format!("\"{base}\"")));
+    // No action URL carries the rule name any more.
+    assert!(!html.contains("triggers/(feat"));
+    assert!(!html.contains("triggers/%28feat"));
+}
+
+/// An id that no longer exists is a missing rule, not a server error.
+#[tokio::test]
+async fn delete_trigger_with_unknown_id_is_not_found() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/orgs/testorg/projects/my-api/triggers/no-such-id/delete")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("csrf_token=test-csrf"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    // Nothing reached the API — an unresolved id must not fall back to a name.
+    assert!(calls.lock().unwrap().is_empty());
 }
