@@ -99,6 +99,10 @@ enum PipelineStageStatus {
     // that "nothing is happening because nobody has reported" is visible
     // rather than looking like work in progress.
     PIPELINE_STAGE_STATUS_AWAITING_SIGNAL = 7;
+    // A newer release for the same target overtook this stage's releases, or an
+    // upstream stage was overtaken. Terminal, and deliberately neither FAILED
+    // nor CANCELLED — see design/SKIP-TO-LATEST.md.
+    PIPELINE_STAGE_STATUS_SUPERSEDED = 8;
 }
 
 // ── Pipeline resource ────────────────────────────────────────────────

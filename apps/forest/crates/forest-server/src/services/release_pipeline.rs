@@ -228,6 +228,12 @@ pub enum StageStatus {
     Succeeded,
     Failed,
     Cancelled,
+    /// This stage's releases were overtaken by a newer pending release for the
+    /// same target, or an upstream stage was. Terminal, and deliberately
+    /// neither Failed (nothing went wrong) nor Cancelled (nobody cancelled it)
+    /// — a collapsed queue must not page whoever owns the project.
+    /// See design/SKIP-TO-LATEST.md.
+    Superseded,
 }
 
 impl StageState {
@@ -427,12 +433,36 @@ pub fn has_failed_dependency(
     })
 }
 
+/// Whether a stage is blocked because an upstream stage was superseded.
+///
+/// Separate from [`has_failed_dependency`] so the downstream stage inherits
+/// `Superseded` rather than `Cancelled`: the run did not fail and nobody
+/// cancelled it, a newer release simply took its place, and every view over the
+/// release history reads that distinction.
+pub fn has_superseded_dependency(
+    stage_id: &str,
+    stages: &PipelineStages,
+    states: &StageStates,
+) -> bool {
+    let Some(def) = stages.get(stage_id) else {
+        return false;
+    };
+    def.depends_on.iter().any(|dep| {
+        states
+            .get(dep)
+            .is_some_and(|s| s.status == StageStatus::Superseded)
+    })
+}
+
 /// Check if the entire pipeline is finished (no PENDING or ACTIVE stages).
 pub fn is_pipeline_complete(states: &StageStates) -> bool {
     states.values().all(|s| {
         matches!(
             s.status,
-            StageStatus::Succeeded | StageStatus::Failed | StageStatus::Cancelled
+            StageStatus::Succeeded
+                | StageStatus::Failed
+                | StageStatus::Cancelled
+                | StageStatus::Superseded
         )
     })
 }

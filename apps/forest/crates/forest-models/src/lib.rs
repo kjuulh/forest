@@ -289,6 +289,11 @@ pub enum ReleaseStatus {
     Failed,
     Cancelled,
     TimedOut,
+    /// Never ran: a newer release for the same project+destination was already
+    /// pending when this one's turn came, and the supersede-pending policy
+    /// collapsed the queue to the newest. Terminal, and deliberately neither a
+    /// success nor a failure — see design/SKIP-TO-LATEST.md.
+    Superseded,
 }
 
 impl ReleaseStatus {
@@ -301,6 +306,7 @@ impl ReleaseStatus {
             ReleaseStatus::Failed => "FAILED",
             ReleaseStatus::Cancelled => "CANCELLED",
             ReleaseStatus::TimedOut => "TIMED_OUT",
+            ReleaseStatus::Superseded => "SUPERSEDED",
         }
     }
 
@@ -311,6 +317,7 @@ impl ReleaseStatus {
                 | ReleaseStatus::Failed
                 | ReleaseStatus::Cancelled
                 | ReleaseStatus::TimedOut
+                | ReleaseStatus::Superseded
         )
     }
 
@@ -345,6 +352,7 @@ impl std::str::FromStr for ReleaseStatus {
             "FAILED" => Ok(ReleaseStatus::Failed),
             "CANCELLED" => Ok(ReleaseStatus::Cancelled),
             "TIMED_OUT" => Ok(ReleaseStatus::TimedOut),
+            "SUPERSEDED" => Ok(ReleaseStatus::Superseded),
             // Backward compatibility with old status values
             "STAGED" => Ok(ReleaseStatus::Queued),
             "SUCCESS" => Ok(ReleaseStatus::Succeeded),

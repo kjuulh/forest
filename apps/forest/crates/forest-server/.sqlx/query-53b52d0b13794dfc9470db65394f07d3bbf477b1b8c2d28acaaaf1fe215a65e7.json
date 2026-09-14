@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT artifact_id FROM release_states WHERE release_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "artifact_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "artifact_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "53b52d0b13794dfc9470db65394f07d3bbf477b1b8c2d28acaaaf1fe215a65e7"
+}

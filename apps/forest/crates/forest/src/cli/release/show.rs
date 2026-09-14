@@ -730,6 +730,8 @@ fn stage_icon(status: &str) -> &'static str {
         "SUCCEEDED" => "✓",
         "ACTIVE" | "RUNNING" | "ASSIGNED" => "▶",
         "FAILED" | "CANCELLED" | "TIMED_OUT" => "✗",
+        // Neither a tick nor a cross: it did not run, and it did not go wrong.
+        "SUPERSEDED" => "⇥",
         "PENDING" | "QUEUED" => "◌",
         _ => "•",
     }
@@ -755,6 +757,7 @@ fn stage_status_name(status: i32) -> &'static str {
         Ok(forest_grpc_interface::PipelineRunStageStatus::Succeeded) => "SUCCEEDED",
         Ok(forest_grpc_interface::PipelineRunStageStatus::Failed) => "FAILED",
         Ok(forest_grpc_interface::PipelineRunStageStatus::Cancelled) => "CANCELLED",
+        Ok(forest_grpc_interface::PipelineRunStageStatus::Superseded) => "SUPERSEDED",
         Ok(forest_grpc_interface::PipelineRunStageStatus::AwaitingApproval) => "AWAITING_APPROVAL",
         _ => "UNSPECIFIED",
     }

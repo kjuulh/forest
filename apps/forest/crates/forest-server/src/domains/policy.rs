@@ -163,6 +163,26 @@ pub fn validate_policy_config(policy_type: &str, config: &serde_json::Value) -> 
             Regex::new(pattern)
                 .map_err(|e| anyhow::anyhow!("invalid regex for branch_pattern: {e}"))?;
         }
+        "supersede_pending" => {
+            let target = config
+                .get("target_environment")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if target.is_empty() {
+                bail!("target_environment is required for supersede_pending policy");
+            }
+            if config
+                .get("cancel_in_progress")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                bail!(
+                    "cancel_in_progress is not implemented: the policy lets a running deploy \
+                     finish and collapses the queue behind it — see design/SKIP-TO-LATEST.md \
+                     section 3"
+                );
+            }
+        }
         "approval" => {
             let target = config
                 .get("target_environment")

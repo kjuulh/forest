@@ -1014,7 +1014,10 @@ impl ReleaseService for ReleaseServer {
                             // check if pipeline is fully complete via stage_states
                             if !last_stage_statuses.is_empty() {
                                 let all_stages_terminal = last_stage_statuses.values().all(|s| {
-                                    matches!(s.as_str(), "SUCCEEDED" | "FAILED" | "CANCELLED")
+                                    matches!(
+                                        s.as_str(),
+                                        "SUCCEEDED" | "FAILED" | "CANCELLED" | "SUPERSEDED"
+                                    )
                                 });
                                 if all_stages_terminal {
                                     break;
@@ -1110,7 +1113,10 @@ impl ReleaseService for ReleaseServer {
                         // For pipeline releases, also check stage_states for completion
                         if !last_stage_statuses.is_empty() {
                             let all_stages_terminal = last_stage_statuses.values().all(|s| {
-                                matches!(s.as_str(), "SUCCEEDED" | "FAILED" | "CANCELLED")
+                                matches!(
+                                    s.as_str(),
+                                    "SUCCEEDED" | "FAILED" | "CANCELLED" | "SUPERSEDED"
+                                )
                             });
                             if all_finalized && all_stages_terminal {
                                 break;
@@ -1986,6 +1992,7 @@ fn stage_status_to_proto(
         StageStatus::Succeeded => forest_grpc_interface::PipelineRunStageStatus::Succeeded,
         StageStatus::Failed => forest_grpc_interface::PipelineRunStageStatus::Failed,
         StageStatus::Cancelled => forest_grpc_interface::PipelineRunStageStatus::Cancelled,
+        StageStatus::Superseded => forest_grpc_interface::PipelineRunStageStatus::Superseded,
     }
 }
 

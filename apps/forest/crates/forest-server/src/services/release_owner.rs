@@ -118,7 +118,10 @@ pub fn personal_recipient(
 
     // 3./4. Nothing claimed an author, so the credential that annotated is the
     //       best answer — but only when it belongs to a person.
-    match (actor_type, source_user_id.map(str::trim).filter(|v| !v.is_empty())) {
+    match (
+        actor_type,
+        source_user_id.map(str::trim).filter(|v| !v.is_empty()),
+    ) {
         (Some(ACTOR_TYPE_USER), Some(user_id)) => Ok(user_id.to_string()),
         (Some(ACTOR_TYPE_USER), None) | (None, _) => Err(NoOwner::Unknown),
         (Some(_), _) => Err(NoOwner::ActorIsMachine),

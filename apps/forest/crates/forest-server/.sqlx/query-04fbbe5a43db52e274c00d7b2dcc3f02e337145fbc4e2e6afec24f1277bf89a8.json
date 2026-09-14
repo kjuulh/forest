@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) as \"count!\"\n               FROM release_events\n               WHERE release_id = $1 AND event_type = 'release.superseded'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "04fbbe5a43db52e274c00d7b2dcc3f02e337145fbc4e2e6afec24f1277bf89a8"
+}

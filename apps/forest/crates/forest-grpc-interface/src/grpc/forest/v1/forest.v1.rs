@@ -3204,6 +3204,11 @@ pub enum PipelineRunStageStatus {
     /// happening because nobody has reported" is visible rather than looking like
     /// work in progress.
     AwaitingSignal = 7,
+    /// A newer release for the same target overtook this stage's releases, or an
+    /// upstream stage was overtaken. Terminal, and deliberately neither FAILED
+    /// (nothing went wrong) nor CANCELLED (nobody cancelled it) — see
+    /// design/SKIP-TO-LATEST.md.
+    Superseded = 8,
 }
 impl PipelineRunStageStatus {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -3220,6 +3225,7 @@ impl PipelineRunStageStatus {
             Self::Cancelled => "PIPELINE_RUN_STAGE_STATUS_CANCELLED",
             Self::AwaitingApproval => "PIPELINE_RUN_STAGE_STATUS_AWAITING_APPROVAL",
             Self::AwaitingSignal => "PIPELINE_RUN_STAGE_STATUS_AWAITING_SIGNAL",
+            Self::Superseded => "PIPELINE_RUN_STAGE_STATUS_SUPERSEDED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -3233,6 +3239,7 @@ impl PipelineRunStageStatus {
             "PIPELINE_RUN_STAGE_STATUS_CANCELLED" => Some(Self::Cancelled),
             "PIPELINE_RUN_STAGE_STATUS_AWAITING_APPROVAL" => Some(Self::AwaitingApproval),
             "PIPELINE_RUN_STAGE_STATUS_AWAITING_SIGNAL" => Some(Self::AwaitingSignal),
+            "PIPELINE_RUN_STAGE_STATUS_SUPERSEDED" => Some(Self::Superseded),
             _ => None,
         }
     }
@@ -3264,6 +3271,39 @@ pub struct ExternalApprovalConfig {
     pub target_environment: ::prost::alloc::string::String,
     #[prost(int32, tag="2")]
     pub required_approvals: i32,
+}
+/// Supersede older pending releases for a target: deploy the newest one and
+/// mark the ones it overtook SUPERSEDED, rather than grinding through each in
+/// turn.
+///
+/// A selection policy, not a gate: it never blocks a release, it chooses which
+/// pending release is the candidate. Every gating policy then runs against that
+/// candidate exactly as before. Default off — a policy that skips deploys must
+/// never turn itself on.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SupersedePendingConfig {
+    /// Environment this applies to. Destinations within it collapse
+    /// independently: an environment can hold several destinations and they are
+    /// separate queues, so collapsing across one would strand a pending release
+    /// at a destination a newer release never targeted.
+    #[prost(string, tag="1")]
+    pub target_environment: ::prost::alloc::string::String,
+    /// Only supersede a pending release when the newer one names the same
+    /// branch. The nearest guard against skipping a genuinely divergent release
+    /// (a hotfix off a release branch) that forest can enforce from what it
+    /// records — it has commit SHAs but no commit graph, so it cannot ask
+    /// whether one commit descends from another.
+    #[prost(bool, tag="2")]
+    pub same_branch_only: bool,
+    /// Cancel an in-flight deploy and jump to the newest, rather than letting it
+    /// finish first.
+    ///
+    /// NOT IMPLEMENTED — validation rejects `true`. forest's destinations are
+    /// not transactional: a cancelled `terraform apply` leaves infrastructure in
+    /// a state no plan describes. Carrying the field means the contract is
+    /// settled before anything can set it. See design/SKIP-TO-LATEST.md.
+    #[prost(bool, tag="3")]
+    pub cancel_in_progress: bool,
 }
 // ── External approval state ─────────────────────────────────────────
 
@@ -3305,7 +3345,7 @@ pub struct Policy {
     pub created_at: ::prost::alloc::string::String,
     #[prost(string, tag="21")]
     pub updated_at: ::prost::alloc::string::String,
-    #[prost(oneof="policy::Config", tags="10, 11, 12")]
+    #[prost(oneof="policy::Config", tags="10, 11, 12, 13")]
     pub config: ::core::option::Option<policy::Config>,
 }
 /// Nested message and enum types in `Policy`.
@@ -3318,6 +3358,8 @@ pub mod policy {
         BranchRestriction(super::BranchRestrictionConfig),
         #[prost(message, tag="12")]
         ExternalApproval(super::ExternalApprovalConfig),
+        #[prost(message, tag="13")]
+        SupersedePending(super::SupersedePendingConfig),
     }
 }
 // ── Policy evaluation result ────────────────────────────────────────
@@ -3346,7 +3388,7 @@ pub struct CreatePolicyRequest {
     pub name: ::prost::alloc::string::String,
     #[prost(enumeration="PolicyType", tag="3")]
     pub policy_type: i32,
-    #[prost(oneof="create_policy_request::Config", tags="10, 11, 12")]
+    #[prost(oneof="create_policy_request::Config", tags="10, 11, 12, 13")]
     pub config: ::core::option::Option<create_policy_request::Config>,
 }
 /// Nested message and enum types in `CreatePolicyRequest`.
@@ -3359,6 +3401,8 @@ pub mod create_policy_request {
         BranchRestriction(super::BranchRestrictionConfig),
         #[prost(message, tag="12")]
         ExternalApproval(super::ExternalApprovalConfig),
+        #[prost(message, tag="13")]
+        SupersedePending(super::SupersedePendingConfig),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -3374,7 +3418,7 @@ pub struct UpdatePolicyRequest {
     pub name: ::prost::alloc::string::String,
     #[prost(bool, optional, tag="3")]
     pub enabled: ::core::option::Option<bool>,
-    #[prost(oneof="update_policy_request::Config", tags="10, 11, 12")]
+    #[prost(oneof="update_policy_request::Config", tags="10, 11, 12, 13")]
     pub config: ::core::option::Option<update_policy_request::Config>,
 }
 /// Nested message and enum types in `UpdatePolicyRequest`.
@@ -3387,6 +3431,8 @@ pub mod update_policy_request {
         BranchRestriction(super::BranchRestrictionConfig),
         #[prost(message, tag="12")]
         ExternalApproval(super::ExternalApprovalConfig),
+        #[prost(message, tag="13")]
+        SupersedePending(super::SupersedePendingConfig),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -3492,6 +3538,9 @@ pub enum PolicyType {
     SoakTime = 1,
     BranchRestriction = 2,
     ExternalApproval = 3,
+    /// Collapse a queue of pending releases for one target to the newest.
+    /// See design/SKIP-TO-LATEST.md.
+    SupersedePending = 4,
 }
 impl PolicyType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -3504,6 +3553,7 @@ impl PolicyType {
             Self::SoakTime => "POLICY_TYPE_SOAK_TIME",
             Self::BranchRestriction => "POLICY_TYPE_BRANCH_RESTRICTION",
             Self::ExternalApproval => "POLICY_TYPE_EXTERNAL_APPROVAL",
+            Self::SupersedePending => "POLICY_TYPE_SUPERSEDE_PENDING",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -3513,6 +3563,7 @@ impl PolicyType {
             "POLICY_TYPE_SOAK_TIME" => Some(Self::SoakTime),
             "POLICY_TYPE_BRANCH_RESTRICTION" => Some(Self::BranchRestriction),
             "POLICY_TYPE_EXTERNAL_APPROVAL" => Some(Self::ExternalApproval),
+            "POLICY_TYPE_SUPERSEDE_PENDING" => Some(Self::SupersedePending),
             _ => None,
         }
     }
@@ -3752,6 +3803,10 @@ pub enum PipelineStageStatus {
     /// that "nothing is happening because nobody has reported" is visible
     /// rather than looking like work in progress.
     AwaitingSignal = 7,
+    /// A newer release for the same target overtook this stage's releases, or an
+    /// upstream stage was overtaken. Terminal, and deliberately neither FAILED
+    /// nor CANCELLED — see design/SKIP-TO-LATEST.md.
+    Superseded = 8,
 }
 impl PipelineStageStatus {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -3768,6 +3823,7 @@ impl PipelineStageStatus {
             Self::Cancelled => "PIPELINE_STAGE_STATUS_CANCELLED",
             Self::AwaitingApproval => "PIPELINE_STAGE_STATUS_AWAITING_APPROVAL",
             Self::AwaitingSignal => "PIPELINE_STAGE_STATUS_AWAITING_SIGNAL",
+            Self::Superseded => "PIPELINE_STAGE_STATUS_SUPERSEDED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -3781,6 +3837,7 @@ impl PipelineStageStatus {
             "PIPELINE_STAGE_STATUS_CANCELLED" => Some(Self::Cancelled),
             "PIPELINE_STAGE_STATUS_AWAITING_APPROVAL" => Some(Self::AwaitingApproval),
             "PIPELINE_STAGE_STATUS_AWAITING_SIGNAL" => Some(Self::AwaitingSignal),
+            "PIPELINE_STAGE_STATUS_SUPERSEDED" => Some(Self::Superseded),
             _ => None,
         }
     }
@@ -3806,7 +3863,7 @@ pub struct OrgPolicyRule {
     pub enabled: bool,
     #[prost(enumeration="PolicyType", tag="3")]
     pub policy_type: i32,
-    #[prost(oneof="org_policy_rule::Config", tags="10, 11, 12")]
+    #[prost(oneof="org_policy_rule::Config", tags="10, 11, 12, 13")]
     pub config: ::core::option::Option<org_policy_rule::Config>,
 }
 /// Nested message and enum types in `OrgPolicyRule`.
@@ -3819,6 +3876,8 @@ pub mod org_policy_rule {
         BranchRestriction(super::BranchRestrictionConfig),
         #[prost(message, tag="12")]
         ExternalApproval(super::ExternalApprovalConfig),
+        #[prost(message, tag="13")]
+        SupersedePending(super::SupersedePendingConfig),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

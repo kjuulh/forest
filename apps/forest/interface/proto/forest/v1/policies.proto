@@ -11,6 +11,9 @@ enum PolicyType {
     POLICY_TYPE_SOAK_TIME = 1;
     POLICY_TYPE_BRANCH_RESTRICTION = 2;
     POLICY_TYPE_EXTERNAL_APPROVAL = 3;
+    // Collapse a queue of pending releases for one target to the newest.
+    // See design/SKIP-TO-LATEST.md.
+    POLICY_TYPE_SUPERSEDE_PENDING = 4;
 }
 
 message SoakTimeConfig {
@@ -32,6 +35,38 @@ message BranchRestrictionConfig {
 message ExternalApprovalConfig {
     string target_environment = 1;
     int32 required_approvals = 2;
+}
+
+// Supersede older pending releases for a target: deploy the newest one and
+// mark the ones it overtook SUPERSEDED, rather than grinding through each in
+// turn.
+//
+// A selection policy, not a gate: it never blocks a release, it chooses which
+// pending release is the candidate. Every gating policy then runs against that
+// candidate exactly as before. Default off — a policy that skips deploys must
+// never turn itself on.
+message SupersedePendingConfig {
+    // Environment this applies to. Destinations within it collapse
+    // independently: an environment can hold several destinations and they are
+    // separate queues, so collapsing across one would strand a pending release
+    // at a destination a newer release never targeted.
+    string target_environment = 1;
+
+    // Only supersede a pending release when the newer one names the same
+    // branch. The nearest guard against skipping a genuinely divergent release
+    // (a hotfix off a release branch) that forest can enforce from what it
+    // records — it has commit SHAs but no commit graph, so it cannot ask
+    // whether one commit descends from another.
+    bool same_branch_only = 2;
+
+    // Cancel an in-flight deploy and jump to the newest, rather than letting it
+    // finish first.
+    //
+    // NOT IMPLEMENTED — validation rejects `true`. forest's destinations are
+    // not transactional: a cancelled `terraform apply` leaves infrastructure in
+    // a state no plan describes. Carrying the field means the contract is
+    // settled before anything can set it. See design/SKIP-TO-LATEST.md.
+    bool cancel_in_progress = 3;
 }
 
 // ── External approval state ─────────────────────────────────────────
@@ -62,6 +97,7 @@ message Policy {
         SoakTimeConfig soak_time = 10;
         BranchRestrictionConfig branch_restriction = 11;
         ExternalApprovalConfig external_approval = 12;
+        SupersedePendingConfig supersede_pending = 13;
     }
 
     string created_at = 20;
@@ -89,6 +125,7 @@ message CreatePolicyRequest {
         SoakTimeConfig soak_time = 10;
         BranchRestrictionConfig branch_restriction = 11;
         ExternalApprovalConfig external_approval = 12;
+        SupersedePendingConfig supersede_pending = 13;
     }
 }
 message CreatePolicyResponse {
@@ -103,6 +140,7 @@ message UpdatePolicyRequest {
         SoakTimeConfig soak_time = 10;
         BranchRestrictionConfig branch_restriction = 11;
         ExternalApprovalConfig external_approval = 12;
+        SupersedePendingConfig supersede_pending = 13;
     }
 }
 message UpdatePolicyResponse {

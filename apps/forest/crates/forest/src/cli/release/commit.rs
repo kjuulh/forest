@@ -443,6 +443,7 @@ impl Display for ReleaseAnnotationDisplay {
                             "ASSIGNED" => "◉",
                             "QUEUED" => "◌",
                             "FAILED" | "TIMED_OUT" | "CANCELLED" => "✗",
+                            "SUPERSEDED" => "⇥",
                             _ => "•",
                         }
                     } else {

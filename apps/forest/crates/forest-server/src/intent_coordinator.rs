@@ -11,8 +11,8 @@ use crate::State;
 use crate::services::release_event_store::{check_approval_policies, check_soak_time_policies};
 use crate::services::release_pipeline::{
     ApprovalStatus, GateTimeout, PipelineStages, SignalRequirement, StageConfig, StageState,
-    StageStates, StageStatus, find_ready_stages, has_failed_dependency, init_stage_states,
-    is_pipeline_complete,
+    StageStates, StageStatus, find_ready_stages, has_failed_dependency, has_superseded_dependency,
+    init_stage_states, is_pipeline_complete,
 };
 
 /// The IntentCoordinator is the single saga orchestrator for pipeline release intents.
@@ -221,30 +221,33 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 let all_terminal = releases.iter().all(|r| {
                     matches!(
                         r.status.as_str(),
-                        "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT"
+                        "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT" | "SUPERSEDED"
                     )
                 });
                 if !all_terminal {
                     continue; // Still in progress
                 }
 
-                let all_succeeded = releases.iter().all(|r| r.status == "SUCCEEDED");
-
                 let mut updated = current.clone();
-                if all_succeeded {
-                    updated.status = StageStatus::Succeeded;
-                    updated.completed_at = Some(now_str.clone());
-                } else {
-                    updated.status = StageStatus::Failed;
-                    updated.completed_at = Some(now_str.clone());
-                    // Aggregate error messages from failed releases
-                    let errors: Vec<String> = releases
-                        .iter()
-                        .filter(|r| r.status != "SUCCEEDED")
-                        .filter_map(|r| r.error_message.clone())
-                        .collect();
-                    if !errors.is_empty() {
-                        updated.error_message = Some(errors.join("; "));
+                updated.completed_at = Some(now_str.clone());
+
+                match outcome_of(releases) {
+                    StageOutcome::Succeeded => updated.status = StageStatus::Succeeded,
+                    StageOutcome::Superseded => {
+                        updated.status = StageStatus::Superseded;
+                        updated.error_message = first_reason(releases);
+                    }
+                    StageOutcome::Failed => {
+                        updated.status = StageStatus::Failed;
+                        // Aggregate error messages from failed releases
+                        let errors: Vec<String> = releases
+                            .iter()
+                            .filter(|r| r.status != "SUCCEEDED" && r.status != "SUPERSEDED")
+                            .filter_map(|r| r.error_message.clone())
+                            .collect();
+                        if !errors.is_empty() {
+                            updated.error_message = Some(errors.join("; "));
+                        }
                     }
                 }
                 stage_states.insert(stage_id.clone(), updated);
@@ -378,23 +381,32 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 let all_terminal = releases.iter().all(|r| {
                     matches!(
                         r.status.as_str(),
-                        "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT"
+                        "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT" | "SUPERSEDED"
                     )
                 });
                 if !all_terminal {
                     continue;
                 }
 
-                let all_succeeded = releases.iter().all(|r| r.status == "SUCCEEDED");
+                let outcome = outcome_of(releases);
                 let mut updated = current.clone();
 
-                if !all_succeeded {
+                if outcome == StageOutcome::Superseded {
+                    // A newer release overtook this plan before it ran. Not a
+                    // failure, and it must not sit waiting for an approval that
+                    // is now meaningless.
+                    updated.status = StageStatus::Superseded;
+                    updated.completed_at = Some(now_str.clone());
+                    updated.error_message = first_reason(releases);
+                    stage_states.insert(stage_id.clone(), updated);
+                    changed = true;
+                } else if outcome == StageOutcome::Failed {
                     // Plan execution itself failed
                     updated.status = StageStatus::Failed;
                     updated.completed_at = Some(now_str.clone());
                     let errors: Vec<String> = releases
                         .iter()
-                        .filter(|r| r.status != "SUCCEEDED")
+                        .filter(|r| r.status != "SUCCEEDED" && r.status != "SUPERSEDED")
                         .filter_map(|r| r.error_message.clone())
                         .collect();
                     if !errors.is_empty() {
@@ -449,12 +461,32 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
             let is_pending = stage_states
                 .get(stage_id)
                 .is_none_or(|s| s.status == StageStatus::Pending);
-            if is_pending && has_failed_dependency(stage_id, &stages, &stage_states) {
+            if !is_pending {
+                continue;
+            }
+            // Failure first: a stage downstream of both a failed and a
+            // superseded dependency is downstream of a failure.
+            if has_failed_dependency(stage_id, &stages, &stage_states) {
                 stage_states.insert(
                     stage_id.clone(),
                     StageState {
                         status: StageStatus::Cancelled,
                         error_message: Some("upstream stage failed".into()),
+                        completed_at: Some(now_str.clone()),
+                        ..StageState::pending()
+                    },
+                );
+                propagated = true;
+                changed = true;
+            } else if has_superseded_dependency(stage_id, &stages, &stage_states) {
+                // Inherits Superseded, not Cancelled: the rest of this run is
+                // moot because a newer release took its place, which is a
+                // different thing from somebody cancelling it.
+                stage_states.insert(
+                    stage_id.clone(),
+                    StageState {
+                        status: StageStatus::Superseded,
+                        error_message: Some("upstream stage superseded".into()),
                         completed_at: Some(now_str.clone()),
                         ..StageState::pending()
                     },
@@ -777,6 +809,20 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
             .all(|s| s.status == StageStatus::Succeeded)
         {
             "SUCCEEDED"
+        } else if stage_states
+            .values()
+            .any(|s| matches!(s.status, StageStatus::Failed | StageStatus::Cancelled))
+        {
+            "FAILED"
+        } else if stage_states
+            .values()
+            .any(|s| s.status == StageStatus::Superseded)
+        {
+            // Every stage terminal, nothing failed, and at least one was
+            // overtaken: the run was collapsed into a newer one. Reporting this
+            // FAILED is what would make an opt-in optimisation look like an
+            // outage in every view over the release history.
+            "SUPERSEDED"
         } else {
             "FAILED"
         }
@@ -829,6 +875,7 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 StageStatus::Succeeded => "SUCCEEDED",
                 StageStatus::Failed => "FAILED",
                 StageStatus::Cancelled => "CANCELLED",
+                StageStatus::Superseded => "SUPERSEDED",
                 _ => continue,
             };
             let mut meta = BTreeMap::new();
@@ -930,6 +977,47 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// What a stage's finished child releases add up to.
+///
+/// Three-way rather than the succeeded/failed split this used to be. A child
+/// release that was superseded — overtaken by a newer pending release for the
+/// same destination — did not fail, and rendering a collapsed queue as a red
+/// pipeline would page whoever owns the project for something that worked
+/// exactly as configured. Failure still dominates: a run that half-deployed and
+/// then failed is a failure, whatever happened to the rest of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StageOutcome {
+    Succeeded,
+    Failed,
+    Superseded,
+}
+
+fn outcome_of(releases: &[ReleaseRow]) -> StageOutcome {
+    if releases.iter().all(|r| r.status == "SUCCEEDED") {
+        return StageOutcome::Succeeded;
+    }
+    let any_failed = releases
+        .iter()
+        .any(|r| matches!(r.status.as_str(), "FAILED" | "CANCELLED" | "TIMED_OUT"));
+    if any_failed {
+        return StageOutcome::Failed;
+    }
+    if releases.iter().any(|r| r.status == "SUPERSEDED") {
+        return StageOutcome::Superseded;
+    }
+    // Every child terminal, none succeeded, none failed, none superseded is
+    // unreachable — but a stage of unknown statuses is not a success.
+    StageOutcome::Failed
+}
+
+/// The reason the first superseded child carries, for the stage to quote.
+fn first_reason(releases: &[ReleaseRow]) -> Option<String> {
+    releases
+        .iter()
+        .find(|r| r.status == "SUPERSEDED")
+        .and_then(|r| r.error_message.clone())
 }
 
 /// A destination a stage is about to release to.

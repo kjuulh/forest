@@ -68,6 +68,14 @@ fn policy_from_proto(rule: OrgPolicyRule) -> anyhow::Result<SvcOrgPolicyRule> {
                 required_approvals: c.required_approvals,
             })?,
         ),
+        (4, Some(org_policy_rule::Config::SupersedePending(c))) => (
+            "supersede_pending".to_string(),
+            serde_json::to_value(crate::services::policy::SupersedePendingConfig {
+                target_environment: c.target_environment,
+                same_branch_only: c.same_branch_only,
+                cancel_in_progress: c.cancel_in_progress,
+            })?,
+        ),
         (_, None) => anyhow::bail!("org policy rule '{}' is missing config", rule.name),
         _ => anyhow::bail!(
             "org policy rule '{}' policy_type and config do not match",
@@ -115,12 +123,24 @@ fn policy_to_proto(rule: SvcOrgPolicyRule) -> OrgPolicyRule {
                     })
                 })
         }
+        "supersede_pending" => {
+            serde_json::from_value::<crate::services::policy::SupersedePendingConfig>(rule.config)
+                .ok()
+                .map(|c| {
+                    org_policy_rule::Config::SupersedePending(SupersedePendingConfig {
+                        target_environment: c.target_environment,
+                        same_branch_only: c.same_branch_only,
+                        cancel_in_progress: c.cancel_in_progress,
+                    })
+                })
+        }
         _ => None,
     };
     let policy_type = match rule.policy_type.as_str() {
         "soak_time" => 1,
         "branch_restriction" => 2,
         "approval" => 3,
+        "supersede_pending" => 4,
         _ => 0,
     };
     OrgPolicyRule {

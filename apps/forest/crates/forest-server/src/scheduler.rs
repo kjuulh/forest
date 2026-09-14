@@ -118,6 +118,60 @@ impl SchedulerInner {
             .await?
             .context("failed to find a destination")?;
 
+        // Collapse the pending queue for this target before anything else.
+        //
+        // The single decision point for the supersede-pending policy, covering
+        // both surfaces: a pipeline run's deploy stage queues `release_states`
+        // rows here exactly as an individual deployment does, so there is one
+        // mechanism rather than two. A project without the policy pays one
+        // indexed lookup and behaves exactly as it does today.
+        //
+        // Deliberately first: superseding is *selection* — it decides which
+        // pending release is the candidate — and every gating policy below runs
+        // against whatever survives. Running a gate first would mean evaluating
+        // it against a release that is about to be retired. See
+        // design/SKIP-TO-LATEST.md.
+        match crate::services::supersede::collapse_queue(
+            &self.release_event_store,
+            &self.policy_registry,
+            &self.nats,
+            release_id,
+            release_state.project_id,
+            release_state.destination_id,
+            &dest.environment,
+        )
+        .await
+        {
+            Ok(crate::services::supersede::Verdict::Proceed) => {}
+            Ok(crate::services::supersede::Verdict::Superseded) => {
+                tracing::info!(
+                    %release_id,
+                    destination = %dest.name,
+                    "release superseded by a newer pending release for the same target"
+                );
+                return Ok(());
+            }
+            Ok(crate::services::supersede::Verdict::LeftQueue) => {
+                tracing::debug!(
+                    %release_id,
+                    destination = %dest.name,
+                    "release is no longer queued — another scheduler retired or \
+                     claimed it while this one was deciding"
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                // Never let a fault in the collapse strand a deploy: fall
+                // through and dispatch, which is forest's behaviour without the
+                // policy. Failing closed here would turn an opt-in optimisation
+                // into an outage.
+                tracing::warn!(
+                    %release_id,
+                    "supersede check failed, dispatching as normal: {e:#}"
+                );
+            }
+        }
+
         // Check soak_time policies before dispatching.
         // Branch restriction is enforced at the gRPC layer where branch info is available;
         // the scheduler only handles soak_time deferral.

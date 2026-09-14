@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-use forest_grpc_interface::{GateStageConfig, GateTimeoutBehaviour, HealthStatus, SignalRequirement, 
-    DeployStageConfig, PipelineStage, PlanStageConfig, WaitStageConfig, pipeline_stage,
+use forest_grpc_interface::{
+    DeployStageConfig, GateStageConfig, GateTimeoutBehaviour, HealthStatus, PipelineStage,
+    PlanStageConfig, SignalRequirement, WaitStageConfig, pipeline_stage,
 };
 use serde::Deserialize;
 

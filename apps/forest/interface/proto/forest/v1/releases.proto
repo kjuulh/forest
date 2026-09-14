@@ -324,6 +324,11 @@ enum PipelineRunStageStatus {
   // happening because nobody has reported" is visible rather than looking like
   // work in progress.
   PIPELINE_RUN_STAGE_STATUS_AWAITING_SIGNAL = 7;
+  // A newer release for the same target overtook this stage's releases, or an
+  // upstream stage was overtaken. Terminal, and deliberately neither FAILED
+  // (nothing went wrong) nor CANCELLED (nobody cancelled it) — see
+  // design/SKIP-TO-LATEST.md.
+  PIPELINE_RUN_STAGE_STATUS_SUPERSEDED = 8;
 }
 
 // ── Plan stage approval ──────────────────────────────────────────────

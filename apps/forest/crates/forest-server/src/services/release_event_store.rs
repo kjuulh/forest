@@ -14,6 +14,11 @@ pub enum ReleaseEventType {
     Failed,
     Cancelled,
     TimedOut,
+    /// A newer release for the same project+destination was already pending
+    /// when this one's turn came. Only valid from QUEUED — which is what makes
+    /// "never interrupt a running deploy" and "the latest is never superseded"
+    /// enforceable rather than merely intended. See services/supersede.rs.
+    Superseded,
 }
 
 impl ReleaseEventType {
@@ -26,6 +31,7 @@ impl ReleaseEventType {
             Self::Failed => "release.failed",
             Self::Cancelled => "release.cancelled",
             Self::TimedOut => "release.timed_out",
+            Self::Superseded => "release.superseded",
         }
     }
 
@@ -38,6 +44,7 @@ impl ReleaseEventType {
             Self::Failed => "FAILED",
             Self::Cancelled => "CANCELLED",
             Self::TimedOut => "TIMED_OUT",
+            Self::Superseded => "SUPERSEDED",
         }
     }
 
@@ -50,6 +57,9 @@ impl ReleaseEventType {
             Self::Failed => &["QUEUED", "ASSIGNED", "RUNNING"],
             Self::Cancelled => &["QUEUED", "ASSIGNED", "RUNNING"],
             Self::TimedOut => &["ASSIGNED", "RUNNING"],
+            // QUEUED only. A release that has left the queue is either in
+            // flight (let it finish) or already terminal (nothing to do).
+            Self::Superseded => &["QUEUED"],
         }
     }
 }
@@ -360,6 +370,23 @@ impl ReleaseEventStore {
                 .execute(&mut *tx)
                 .await?;
             }
+            ReleaseEventType::Superseded => {
+                // `reason`, not `error_message` — being overtaken is not an
+                // error, and the event payload should not call it one. The
+                // text still lands in the `error_message` column, which is the
+                // one every existing view reads for "why did this end".
+                sqlx::query!(
+                    "UPDATE release_states SET
+                        status = $2, error_message = $3,
+                        completed_at = now(), updated_at = now()
+                     WHERE release_id = $1",
+                    release_id,
+                    target_status,
+                    payload.reason,
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
             ReleaseEventType::Succeeded
             | ReleaseEventType::Failed
             | ReleaseEventType::Cancelled
@@ -502,7 +529,7 @@ impl ReleaseEventStore {
               AND NOT EXISTS (
                     SELECT 1 FROM release_states rs
                     WHERE rs.release_intent_id = ri.id
-                      AND rs.status NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT')
+                      AND rs.status NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT', 'SUPERSEDED')
               )
             "#,
             min_age_secs as f64,
@@ -541,7 +568,7 @@ impl ReleaseEventStore {
             let non_terminal = sqlx::query_scalar!(
                 r#"SELECT count(*) as "count!" FROM release_states
                  WHERE release_intent_id = $1
-                   AND status NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT')"#,
+                   AND status NOT IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT', 'SUPERSEDED')"#,
                 intent_id,
             )
             .fetch_one(&self.db)

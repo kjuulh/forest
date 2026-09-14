@@ -24,7 +24,7 @@ pub struct PoliciesServer {
 fn record_to_grpc(r: policy_svc::PolicyRecord) -> Policy {
     let config = PolicyConfig::from_record(&r.policy_type, &r.config).ok();
 
-    let (policy_type, soak_time, branch_restriction, approval) = match config {
+    let (policy_type, soak_time, branch_restriction, approval, supersede) = match config {
         Some(PolicyConfig::SoakTime(c)) => (
             1, // POLICY_TYPE_SOAK_TIME = 1
             Some(SoakTimeConfig {
@@ -32,6 +32,7 @@ fn record_to_grpc(r: policy_svc::PolicyRecord) -> Policy {
                 target_environment: c.target_environment,
                 duration_seconds: c.duration_seconds,
             }),
+            None,
             None,
             None,
         ),
@@ -43,6 +44,7 @@ fn record_to_grpc(r: policy_svc::PolicyRecord) -> Policy {
                 branch_pattern: c.branch_pattern,
             }),
             None,
+            None,
         ),
         Some(PolicyConfig::Approval(c)) => (
             3, // POLICY_TYPE_EXTERNAL_APPROVAL = 3
@@ -52,8 +54,20 @@ fn record_to_grpc(r: policy_svc::PolicyRecord) -> Policy {
                 target_environment: c.target_environment,
                 required_approvals: c.required_approvals,
             }),
+            None,
         ),
-        None => (0, None, None, None),
+        Some(PolicyConfig::SupersedePending(c)) => (
+            4, // POLICY_TYPE_SUPERSEDE_PENDING = 4
+            None,
+            None,
+            None,
+            Some(SupersedePendingConfig {
+                target_environment: c.target_environment,
+                same_branch_only: c.same_branch_only,
+                cancel_in_progress: c.cancel_in_progress,
+            }),
+        ),
+        None => (0, None, None, None, None),
     };
 
     Policy {
@@ -61,10 +75,11 @@ fn record_to_grpc(r: policy_svc::PolicyRecord) -> Policy {
         name: r.name,
         enabled: r.enabled,
         policy_type,
-        config: match (soak_time, branch_restriction, approval) {
-            (Some(st), _, _) => Some(GrpcPolicyConfig::SoakTime(st)),
-            (_, Some(br), _) => Some(GrpcPolicyConfig::BranchRestriction(br)),
-            (_, _, Some(ac)) => Some(GrpcPolicyConfig::ExternalApproval(ac)),
+        config: match (soak_time, branch_restriction, approval, supersede) {
+            (Some(st), _, _, _) => Some(GrpcPolicyConfig::SoakTime(st)),
+            (_, Some(br), _, _) => Some(GrpcPolicyConfig::BranchRestriction(br)),
+            (_, _, Some(ac), _) => Some(GrpcPolicyConfig::ExternalApproval(ac)),
+            (_, _, _, Some(sp)) => Some(GrpcPolicyConfig::SupersedePending(sp)),
             _ => None,
         },
         created_at: r.created_at.to_rfc3339(),
@@ -77,6 +92,7 @@ fn eval_to_grpc(e: policy_svc::PolicyEvaluation) -> PolicyEvaluation {
         PolicyType::SoakTime => 1,
         PolicyType::BranchRestriction => 2,
         PolicyType::Approval => 3,
+        PolicyType::SupersedePending => 4,
     };
     let external_approval_state = e.approval_state.map(|s| ExternalApprovalState {
         required_approvals: s.required_approvals,
@@ -120,6 +136,13 @@ fn extract_config(
                 branch_pattern: br.branch_pattern,
             }),
         ),
+        (4, Some(create_policy_request::Config::SupersedePending(sp))) => Ok(
+            PolicyConfig::SupersedePending(policy_svc::SupersedePendingConfig {
+                target_environment: sp.target_environment,
+                same_branch_only: sp.same_branch_only,
+                cancel_in_progress: sp.cancel_in_progress,
+            }),
+        ),
         (3, Some(create_policy_request::Config::ExternalApproval(ac))) => {
             Ok(PolicyConfig::Approval(policy_svc::ApprovalConfig {
                 target_environment: ac.target_environment,
@@ -146,6 +169,13 @@ fn extract_update_config(
             PolicyConfig::BranchRestriction(policy_svc::BranchRestrictionConfig {
                 target_environment: br.target_environment,
                 branch_pattern: br.branch_pattern,
+            }),
+        )),
+        Some(update_policy_request::Config::SupersedePending(sp)) => Ok(Some(
+            PolicyConfig::SupersedePending(policy_svc::SupersedePendingConfig {
+                target_environment: sp.target_environment,
+                same_branch_only: sp.same_branch_only,
+                cancel_in_progress: sp.cancel_in_progress,
             }),
         )),
         Some(update_policy_request::Config::ExternalApproval(ac)) => {
