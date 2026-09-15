@@ -7,8 +7,9 @@ and mounted by the MiniJinja templates.
 npm install
 npm run build          # bundle for the server to serve
 npm test               # unit tests (vitest)
-npm run gallery        # the design testbed, on :5178
+npm run gallery        # every lane state on one page, on :5178
 npm run gallery:capture  # assert rendered states + write gallery/shots/*.png
+npm run test:bundle    # check the built bundle still draws a timeline
 ```
 
 ## The state gallery
@@ -70,6 +71,15 @@ is not paranoia: a dot whose size and strand disagreed in parity inset by half a
 pixel, Chrome and Firefox rounded it differently, and the result was a visible
 shift in Firefox and nothing at all in Chrome. A single-engine suite could not
 see it, and did not.
+
+**`npm run test:bundle`** — the file the server actually serves. Everything
+above tests the sources: `npm test` imports the modules directly and
+`gallery:capture` mounts them through vite. The shipped bundle is built with
+different settings — it is minified, which it only can be because Tailwind
+stopped scanning it for class names and reads `frontend/src` instead (see
+`static/css/input.css`). Minification mangling something the component needs at
+runtime would have shipped silently, so this loads the real artifact in a
+browser with the network stubbed and checks it draws a timeline.
 
 **`cargo test -p forage-server env_lane_color`** — the server's copy of the
 palette, which feeds the timeline JSON. Kept in step with `src/lib/colors.js` by

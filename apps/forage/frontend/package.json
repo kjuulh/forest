@@ -8,7 +8,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "gallery": "vite --config vite.gallery.config.js",
-    "gallery:capture": "node gallery/capture.mjs"
+    "gallery:capture": "node gallery/capture.mjs",
+    "test:bundle": "node bundle-check.mjs"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

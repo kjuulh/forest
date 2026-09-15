@@ -11,7 +11,10 @@ export default defineConfig({
   ],
   build: {
     sourcemap: true,
-    minify: false,
+    // Safe since Tailwind stopped scanning this bundle for class names and
+    // reads frontend/src directly — see static/css/input.css. Minifying it
+    // used to mangle the very string literals the scanner depended on.
+    minify: true,
     lib: {
       entry: "src/main.js",
       formats: ["iife"],

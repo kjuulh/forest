@@ -155,18 +155,21 @@ dir = "frontend"
 run = "npm test"
 
 # Mounts the real components in Chromium and asserts what the DOM actually
-# shows. Separate from frontend:test because it needs a browser: `frontend:test`
-# stays runnable anywhere, and this one is skipped rather than failing when
-# Playwright's browsers are not installed.
+# shows, then loads the built bundle and checks that it too still draws a
+# timeline — everything else tests the sources, and the shipped file is built
+# with different settings. Separate from frontend:test because it needs a
+# browser: `frontend:test` stays runnable anywhere, and this one is skipped
+# rather than failing when Playwright's browsers are not installed.
 [tasks."frontend:test:render"]
-description = "Assert rendered component states in a real browser"
-depends = ["frontend:install"]
+description = "Assert rendered component states, and the built bundle, in a real browser"
+depends = ["frontend:install", "frontend:build"]
 dir = "frontend"
 run = """
 if ! npx playwright install chromium --dry-run >/dev/null 2>&1; then
   echo "playwright unavailable — skipping render tests"; exit 0
 fi
 npm run gallery:capture
+npm run test:bundle
 """
 
 [tasks."frontend:watch"]

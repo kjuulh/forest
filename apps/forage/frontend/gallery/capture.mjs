@@ -246,6 +246,62 @@ try {
       failures.push(`fan-out: ${fannedDots.join(", ")}`);
     }
 
+    // Each bubble answers for itself. The hit area covers the whole lane and
+    // sits above the dots, so every hover used to resolve to whatever the lane
+    // was doing — the newest release — whichever bubble you were pointing at.
+    // Fanned out, the answer also has to depend on which strand.
+    await page.locator('section[data-fixture="partial-rollout"]').scrollIntoViewIfNeeded();
+    const hovers = await lane.evaluate(async (el) => {
+      const hit = el.querySelector(".rt-lane-hit");
+      const card = () => el.closest(".fixture").querySelector(".rt-hovercard");
+      const rect = hit.getBoundingClientRect();
+      const strands = [...el.querySelectorAll(".rt-strand")];
+      const out = [];
+      for (const strand of strands) {
+        const x = rect.left + 3 + parseFloat(strand.style.left) + parseFloat(strand.style.width) / 2;
+        for (const dot of strand.querySelectorAll(".lane-dot")) {
+          const y =
+            rect.top + parseFloat(dot.style.top) + parseFloat(dot.style.height) / 2;
+          hit.dispatchEvent(new MouseEvent("mousemove", { clientX: x, clientY: y, bubbles: true }));
+          await new Promise((r) => setTimeout(r, 30));
+          const c = card();
+          out.push({
+            strand: strand.querySelector(".lane-dot") ? strand.style.left : null,
+            dot: dot.dataset.kind,
+            title: c?.querySelector(".rt-hovercard-title")?.textContent.trim().split(/\s+/)[0],
+            status: c?.querySelector("dd")?.textContent.trim(),
+            commit: c?.querySelectorAll("dd")[1]?.textContent.trim(),
+          });
+        }
+      }
+      hit.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+      return out;
+    });
+
+    // Every strand names its own placement, not the environment.
+    const genericTitles = hovers.filter((h) => !h.title || h.title === "prod");
+    if (genericTitles.length > 0) {
+      failures.push(
+        `fan-out: ${genericTitles.length} hover(s) reported the environment instead of the placement`,
+      );
+    }
+    // And the two bubbles on a strand are different releases — the bug was
+    // that every bubble reported the same one.
+    const perStrand = new Map();
+    for (const h of hovers) {
+      if (!perStrand.has(h.strand)) perStrand.set(h.strand, new Set());
+      perStrand.get(h.strand).add(h.commit);
+    }
+    for (const [strand, commits] of perStrand) {
+      if (commits.size < 2) {
+        failures.push(`fan-out: strand at ${strand} reported one release for every bubble`);
+      }
+    }
+    // us-east-1 failed on the newest release and still holds the one below it.
+    if (!hovers.some((h) => h.status === "Failed")) {
+      failures.push(`fan-out: no bubble reported the failed placement — got ${hovers.map((h) => h.status).join(", ")}`);
+    }
+
     await page.locator('section[data-fixture="partial-rollout"]').screenshot({
       path: join(SHOTS, "partial-rollout-fanned.png"),
     });

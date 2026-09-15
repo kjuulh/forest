@@ -53,6 +53,8 @@
   // rather than on top of each other — the labels, not the strands, set this.
   const STRAND_GAP = 12;
   const GUTTER_INSET = 4;
+  /** How far the lane's hit area reaches past the lane on each side. */
+  const HIT_OVERHANG = 3;
 
   /**
    * How big a dot is, given the strand it sits on.
@@ -619,45 +621,109 @@
 
   // ── Hover card ───────────────────────────────────────────────────
 
-  let hovered = null; // { env, dest, top }
+  let hovered = null; // { env, dest, row, top }
 
-  function showLaneCard(env, dest, event) {
+  /**
+   * How close the pointer has to be to a dot to be asking about it.
+   *
+   * A lane is a column of bubbles, and "what is this environment doing" is the
+   * wrong answer when the pointer is plainly on one of them — that reported the
+   * lane's head no matter which bubble you were pointing at. Past this reach
+   * there is no bubble in question and the lane summary is the right answer
+   * again.
+   */
+  const HOVER_REACH = 22;
+
+  function showLaneCard(env, event) {
     const bar = laneBarData[env];
     if (!bar) return;
+    const rect = event.currentTarget.getBoundingClientRect();
     const gutter = event.currentTarget.closest(".rt-gutter")?.getBoundingClientRect();
-    // A lane is the full height of the list, so its own box says nothing about
-    // where to put the card. Follow the pointer instead, and fall back to the
-    // lane's head when there isn't one — keyboard focus has no coordinates.
-    const pointerY = typeof event.clientY === "number" && event.clientY > 0 ? event.clientY : null;
+    // Keyboard focus has no coordinates; it gets the lane summary. Tested on
+    // the event type rather than on the coordinate being positive — a lane
+    // scrolled to the top of the viewport has a perfectly good `clientY` of
+    // zero or less, and treating that as "no pointer" silently fell back to
+    // the lane summary for the bubbles nearest the top of the page.
+    const pointed = event.type !== "focus" && typeof event.clientY === "number";
+
+    // Which strand, when the lane is fanned out. The hit area spans the whole
+    // bundle, so the pointer's x is what says which placement is being asked
+    // about.
+    const layout = laneLayout.get(env);
+    let dest = null;
+    let rows = bar.rows;
+    if (pointed && layout?.open) {
+      const localX = event.clientX - rect.left - HIT_OVERHANG;
+      const i = layout.offsets.findIndex(
+        (o) => localX >= o.left - STRAND_GAP / 2 && localX <= o.left + o.width + STRAND_GAP / 2,
+      );
+      if (i !== -1) {
+        dest = layout.dests[i];
+        rows = bar.strands.find((st) => st.name === dest)?.rows ?? rows;
+      }
+    }
+
+    // Which bubble.
+    let row = null;
+    if (pointed) {
+      const localY = event.clientY - rect.top;
+      let best = null;
+      for (const r of rows) {
+        const d = Math.abs(r.y - localY);
+        if (d <= HOVER_REACH && (!best || d < best.d)) best = { d, r };
+      }
+      row = best?.r ?? null;
+    }
+
     const top = gutter
-      ? pointerY !== null
-        ? pointerY - gutter.top - 18
+      ? pointed
+        ? event.clientY - gutter.top - 18
         : (bar.headRow?.y ?? 0)
       : 0;
-    hovered = { env, dest, top: Math.max(top, 0) };
+
+    // `mousemove` fires continuously; only re-render when the answer changes.
+    const next = { env, dest, row, top: Math.max(top, 0) };
+    if (
+      hovered &&
+      hovered.env === next.env &&
+      hovered.dest === next.dest &&
+      hovered.row === next.row &&
+      Math.abs(hovered.top - next.top) < 2
+    ) {
+      return;
+    }
+    hovered = next;
   }
 
   function hideLaneCard() {
     hovered = null;
   }
 
-  /** What the hover card says about a lane, or one strand of it. */
-  function laneCardFacts(env, dest) {
+  /**
+   * What the hover card says: about one bubble if the pointer is on one,
+   * otherwise about the lane as a whole.
+   */
+  function laneCardFacts(env, dest, row) {
     const bar = laneBarData[env];
     if (!bar) return null;
     const rows = dest ? bar.strands.find((s) => s.name === dest)?.rows || [] : bar.rows;
     const head = rows.find((r) => r.kind === "live");
-    const moving = rows.find((r) => isUnfinished(r.kind) || r.kind === "stopped");
-    const subject = moving || head;
+    // A bubble answers for itself. Without this the card reported whatever the
+    // lane was doing — usually the newest release — whichever bubble you were
+    // actually pointing at.
+    const subject = row || rows.find((r) => isUnfinished(r.kind) || r.kind === "stopped") || head;
     if (!subject) return { env, dest, empty: true };
     return {
       env,
       dest,
       empty: false,
+      // Whether this is about a bubble or the lane changes what the reader
+      // should take the status to mean.
+      pinned: Boolean(row),
       kind: subject.kind,
       release: subject.release,
       head: head?.release || null,
-      count: dest ? null : (destinationsByLane.get(env) || []).length,
+      count: dest || row ? null : (destinationsByLane.get(env) || []).length,
     };
   }
 
@@ -1069,8 +1135,9 @@
               ? `${lane.name}: ${L.dests.length} destinations, ${L.open ? "collapse" : "expand"}`
               : lane.name}
             on:click={() => L.fans && toggleLane(lane.name)}
-            on:mouseenter={(e) => showLaneCard(lane.name, null, e)}
-            on:focus={(e) => showLaneCard(lane.name, null, e)}
+            on:mouseenter={(e) => showLaneCard(lane.name, e)}
+            on:mousemove={(e) => showLaneCard(lane.name, e)}
+            on:focus={(e) => showLaneCard(lane.name, e)}
             on:mouseleave={hideLaneCard}
             on:blur={hideLaneCard}
           ></button>
@@ -1078,13 +1145,17 @@
       {/each}
 
       {#if hovered}
-        {@const facts = laneCardFacts(hovered.env, hovered.dest)}
+        {@const facts = laneCardFacts(hovered.env, hovered.dest, hovered.row)}
         {#if facts}
           {@const [light, dark] = envColorPair(hovered.env)}
           <div class="rt-hovercard env-scope" style="--env: {light}; --env-dark: {dark}; top: {hovered.top}px;">
             <p class="rt-hovercard-title">
               <span class="rt-hovercard-swatch" aria-hidden="true"></span>
               {hovered.dest || hovered.env}
+              <!-- Which question is being answered. Without it a card about one
+                   bubble and a card about the whole lane look identical, and
+                   the status line means different things in each. -->
+              <span class="rt-hovercard-scope">{facts.pinned ? "this release" : "now"}</span>
             </p>
             {#if facts.empty}
               <p class="rt-hovercard-empty">Nothing has reached this environment yet.</p>
@@ -1788,6 +1859,8 @@
 
   .rt-lane-hit {
     position: absolute;
+    /* Matches HIT_OVERHANG, which showLaneCard subtracts to map the pointer
+       back onto the lane's own coordinates. */
     inset: 0 -3px;
     z-index: 7;
     padding: 0;
@@ -1831,6 +1904,13 @@
     font-size: 13px;
     font-weight: 600;
     color: var(--ink);
+  }
+
+  .rt-hovercard-scope {
+    margin-left: auto;
+    font-size: 10.5px;
+    font-weight: 500;
+    color: var(--ink-faint);
   }
 
   .rt-hovercard-swatch {
