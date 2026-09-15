@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   releaseEnvStates, laneStatesAttr, timelineEnvStates, timelineLaneStatesAttrs,
   isUnfinished, effectiveStatus, isPlanAwaiting, isGateAwaiting, DOT_PRIORITY,
+  timelineRollbacks,
 } from "./lane-states.js";
 import { FIXTURES, byKey } from "./fixtures.js";
 
@@ -163,8 +164,12 @@ describe("a newer release supersedes an older leg on the same environment", () =
     expect(timelineOf([live, stale], "prod")).toEqual(["live", "past"]);
   });
 
-  it("demotes an older in-flight leg to `past`", () => {
-    expect(timelineOf([live, byKey("deploying").release], "prod")).toEqual(["live", "past"]);
+  // Not demoted, and deliberately so: a deploy running against an older commit
+  // while prod is live on a newer one is a rollback in progress. Demoting it
+  // would leave the one state nobody can afford to miss invisible in the
+  // gutter. Idle legs above are a different thing — nothing is executing there.
+  it("leaves an older in-flight leg alone — that is a rollback", () => {
+    expect(timelineOf([live, byKey("deploying").release], "prod")).toEqual(["live", "flight"]);
   });
 
   it("leaves an already-terminal older leg alone", () => {
@@ -281,19 +286,30 @@ describe("every lane state has a rendering", () => {
   const componentSrc = () =>
     readFileSync(new URL("../ReleaseTimeline.svelte", import.meta.url), "utf8");
 
-  it("each DOT_PRIORITY kind is handled in ReleaseTimeline.svelte", () => {
+  // A dot now carries its state as `data-kind` and CSS draws it, rather than
+  // the template branching per kind. The guard is the same one either way: a
+  // kind the stylesheet does not name falls back to the plain dot and reads as
+  // settled history, which is exactly the bug this file exists to prevent.
+  it("each DOT_PRIORITY kind is drawn distinctly in ReleaseTimeline.svelte", () => {
     const src = componentSrc();
-    // `past` is the intentional {:else} fallback and has no explicit branch.
-    const explicit = Object.keys(DOT_PRIORITY).filter((k) => k !== "past" && k !== "stopped");
-    for (const kind of explicit) {
-      expect(src, `no template branch for dot.kind === "${kind}"`)
-        .toContain(`dot.kind === "${kind}"`);
+    for (const kind of Object.keys(DOT_PRIORITY)) {
+      expect(src, `no .lane-dot rule for data-kind="${kind}"`)
+        .toContain(`.lane-dot[data-kind="${kind}"]`);
+    }
+  });
+
+  // And it must have a word for it, because the dot is also a tooltip.
+  it("each DOT_PRIORITY kind has a label", () => {
+    const src = componentSrc();
+    const words = src.slice(src.indexOf("const KIND_WORDS"), src.indexOf("};", src.indexOf("const KIND_WORDS")));
+    for (const kind of Object.keys(DOT_PRIORITY)) {
+      expect(words, `KIND_WORDS has no entry for "${kind}"`).toContain(`${kind}:`);
     }
   });
 
   it("the rail's unfinished check is driven by isUnfinished, not a local list", () => {
     const src = componentSrc();
-    expect(src).toContain("isUnfinished(laneState.status)");
+    expect(src).toContain("isUnfinished(row.kind)");
   });
 
   it("the gutter reads lane states resolved across the timeline, not per release", () => {
@@ -345,5 +361,41 @@ describe("gate stages", () => {
   it("does not mistake other stage types for gates", () => {
     expect(isGateAwaiting({ ...gate(), stage_type: "wait" })).toBe(false);
     expect(isGateAwaiting({ ...gate(), stage_type: "deploy" })).toBe(false);
+  });
+});
+
+// ── Rollbacks ───────────────────────────────────────────────────────
+
+describe("timelineRollbacks", () => {
+  const liveOnProd = byKey("complete").release;      // live on dev and prod
+  const deployingProd = byKey("deploying").release;  // prod RUNNING
+
+  it("names an older in-flight leg under a live one as a rollback", () => {
+    const [newest, older] = timelineRollbacks([liveOnProd, deployingProd]);
+    expect([...newest]).toEqual([]);
+    expect([...older]).toEqual(["prod"]);
+  });
+
+  // The ordinary case, and the one that must not be mislabelled: nothing is
+  // live on prod yet, so this deploy is going forwards.
+  it("does not call a forward deploy a rollback", () => {
+    const [only] = timelineRollbacks([deployingProd]);
+    expect([...only]).toEqual([]);
+  });
+
+  it("is per environment", () => {
+    // `deploying` is live on dev and in flight on prod. A newer release live on
+    // dev alone says nothing about prod.
+    const devOnly = {
+      destinations: [{ environment: "dev", status: "SUCCEEDED", is_current: true }],
+      pipeline_stages: [],
+    };
+    const [, older] = timelineRollbacks([devOnly, deployingProd]);
+    expect([...older]).toEqual([]);
+  });
+
+  it("survives holes and missing input rather than throwing", () => {
+    expect(timelineRollbacks(undefined)).toEqual([]);
+    expect(timelineRollbacks([null, {}]).map((s) => [...s])).toEqual([[], []]);
   });
 });

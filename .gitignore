@@ -2,3 +2,8 @@
 *.png
 overview-with-readme.png
 .env
+
+# Design references are the exception to the blanket *.png above: they are the
+# material a design was worked from, they are linked from design/*.md, and a
+# note pointing at four images nobody else has is not a note.
+!design/references/**/*.png

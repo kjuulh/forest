@@ -1016,17 +1016,7 @@ async fn project_detail(
             None => None,
         }
     };
-    let (
-        artifacts,
-        projects,
-        environments,
-        dest_states,
-        release_intents,
-        project_pipelines,
-        component_versions,
-        comp_detail,
-        project_info,
-    ) = tokio::join!(
+    let (artifacts, projects, environments, component_versions, comp_detail, project_info) = tokio::join!(
         state
             .platform_client
             .list_artifacts(&session.access_token, &org, &project),
@@ -1036,18 +1026,6 @@ async fn project_detail(
         state
             .platform_client
             .list_environments(&session.access_token, &org),
-        state
-            .platform_client
-            .get_destination_states(&session.access_token, &org, Some(&project)),
-        state.platform_client.get_release_intent_states(
-            &session.access_token,
-            &org,
-            Some(&project),
-            true
-        ),
-        state
-            .platform_client
-            .list_release_pipelines(&session.access_token, &org, &project),
         component_versions_fut,
         comp_detail_fut,
         state
@@ -1057,9 +1035,6 @@ async fn project_detail(
     let artifacts = artifacts.map_err(|e| internal_error(&state, "list_artifacts", &e))?;
     let projects = warn_default("list_projects", projects);
     let environments = warn_default("list_environments", environments);
-    let dest_states = warn_default("get_destination_states", dest_states);
-    let release_intents = warn_default("get_release_intent_states", release_intents);
-    let project_pipelines = warn_default("list_release_pipelines", project_pipelines);
     let component_versions = warn_default("list_component_versions", component_versions);
     // Project-level description + blessed metadata. A missing project
     // (Ok(None)) or a transient gRPC failure both degrade to empty —
@@ -1091,25 +1066,12 @@ async fn project_detail(
             .collect()
     };
 
-    let items: Vec<ArtifactWithProject> = artifacts
-        .into_iter()
-        .map(|a| ArtifactWithProject {
-            artifact: a,
-            project_name: project.clone(),
-        })
-        .collect();
-    let mut pipelines_map = PipelinesByProject::new();
-    if !project_pipelines.is_empty() {
-        pipelines_map.insert(project.clone(), project_pipelines);
-    }
-    let data = build_timeline(
-        items,
-        &org,
-        &environments,
-        &dest_states,
-        &release_intents,
-        &pipelines_map,
-    );
+    // Whether the Overview renders its embedded release-timeline summary at
+    // all. The component fetches everything it draws from
+    // /api/orgs/{org}/projects/{project}/timeline; this used to build a second,
+    // parallel timeline server-side — destination states, release intents and
+    // pipelines included — purely to answer a yes/no question.
+    let project_has_timeline = !artifacts.is_empty();
 
     // Project Overview folds in the canonical component's catalog data.
     // When the component exists: shape badge, install copy, README markdown,
@@ -1180,8 +1142,6 @@ async fn project_detail(
                 projects => projects,
                 current_role => &current_role,
                 active_tab => "project_overview",
-                timeline => data.timeline,
-                lanes => data.lanes,
                 env_options => env_options,
                 component_versions => component_versions,
                 summary => comp_summary,
@@ -1196,7 +1156,7 @@ async fn project_detail(
                 // releases exist so the page stays clean — the timeline
                 // component would otherwise render its own empty state
                 // and crowd the Overview's Get-started panel.
-                project_has_timeline => !data.timeline.is_empty(),
+                project_has_timeline => project_has_timeline,
             },
         )
         .map_err(|e| internal_error(&state, "template error", &e))?;
@@ -1229,7 +1189,7 @@ async fn project_releases(
         ));
     }
 
-    let (artifacts, projects, environments, dest_states, release_intents, project_pipelines) = tokio::join!(
+    let (artifacts, projects, environments) = tokio::join!(
         state
             .platform_client
             .list_artifacts(&session.access_token, &org, &project),
@@ -1239,25 +1199,10 @@ async fn project_releases(
         state
             .platform_client
             .list_environments(&session.access_token, &org),
-        state
-            .platform_client
-            .get_destination_states(&session.access_token, &org, Some(&project)),
-        state.platform_client.get_release_intent_states(
-            &session.access_token,
-            &org,
-            Some(&project),
-            true
-        ),
-        state
-            .platform_client
-            .list_release_pipelines(&session.access_token, &org, &project),
     );
     let artifacts = artifacts.map_err(|e| internal_error(&state, "list_artifacts", &e))?;
     let projects = warn_default("list_projects", projects);
     let environments = warn_default("list_environments", environments);
-    let dest_states = warn_default("get_destination_states", dest_states);
-    let release_intents = warn_default("get_release_intent_states", release_intents);
-    let project_pipelines = warn_default("list_release_pipelines", project_pipelines);
 
     let mut sorted_envs = environments.clone();
     sorted_envs.sort_by_key(|e| e.sort_order);
@@ -1276,26 +1221,6 @@ async fn project_releases(
             .collect()
     };
 
-    let items: Vec<ArtifactWithProject> = artifacts
-        .into_iter()
-        .map(|a| ArtifactWithProject {
-            artifact: a,
-            project_name: project.clone(),
-        })
-        .collect();
-    let mut pipelines_map = PipelinesByProject::new();
-    if !project_pipelines.is_empty() {
-        pipelines_map.insert(project.clone(), project_pipelines);
-    }
-    let data = build_timeline(
-        items,
-        &org,
-        &environments,
-        &dest_states,
-        &release_intents,
-        &pipelines_map,
-    );
-
     let html = state
         .templates
         .render(
@@ -1312,8 +1237,6 @@ async fn project_releases(
                 projects => projects,
                 current_role => &current_role,
                 active_tab => "project_releases",
-                timeline => data.timeline,
-                lanes => data.lanes,
                 env_options => env_options,
             },
         )
@@ -2208,11 +2131,6 @@ struct ArtifactWithProject {
     project_name: String,
 }
 
-struct TimelineData {
-    timeline: Vec<minijinja::Value>,
-    lanes: Vec<minijinja::Value>,
-}
-
 const RELEASE_TIMELINE_CONTEXT_LIMIT: usize = 20;
 
 /// Pipeline info indexed by project name, for overlaying onto releases.
@@ -2282,346 +2200,6 @@ fn topo_sort_run_stages(
     }
 
     result
-}
-
-fn build_timeline(
-    items: Vec<ArtifactWithProject>,
-    org_name: &str,
-    environments: &[forage_core::platform::Environment],
-    deployment_states: &forage_core::platform::DeploymentStates,
-    release_intents: &[forage_core::platform::ReleaseIntentState],
-    pipelines_by_project: &PipelinesByProject,
-) -> TimelineData {
-    // Index destination states by artifact_id for quick lookup.
-    let mut states_by_artifact: std::collections::HashMap<
-        &str,
-        Vec<&forage_core::platform::DestinationState>,
-    > = std::collections::HashMap::new();
-    for ds in &deployment_states.destinations {
-        if let Some(aid) = ds.artifact_id.as_deref() {
-            states_by_artifact.entry(aid).or_default().push(ds);
-        }
-    }
-
-    // Index release intent stages by artifact_id for quick lookup.
-    let mut intent_stages_by_artifact: std::collections::HashMap<
-        &str,
-        &[forage_core::platform::PipelineRunStageState],
-    > = std::collections::HashMap::new();
-    for ri in release_intents {
-        if !ri.stages.is_empty() {
-            intent_stages_by_artifact.insert(ri.artifact_id.as_str(), &ri.stages);
-        }
-    }
-
-    struct RawRelease {
-        value: minijinja::Value,
-        has_dests: bool,
-    }
-
-    let mut raw_releases: Vec<RawRelease> = Vec::new();
-
-    for item in items {
-        let artifact = item.artifact;
-        let project = &item.project_name;
-
-        // Look up deployment state from destination states instead of artifact.destinations.
-        let matching_states = states_by_artifact
-            .get(artifact.artifact_id.as_str())
-            .cloned()
-            .unwrap_or_default();
-
-        let mut release_envs = Vec::new();
-        let mut release_env_statuses = Vec::new();
-        // Dedupe: a re-deploy leaves the old terminal row alongside the new
-        // in-flight one — render one card per destination, latest state.
-        let dests: Vec<minijinja::Value> = dedupe_destinations(&matching_states)
-            .into_iter()
-            .map(|ds| {
-                release_envs.push(ds.environment.clone());
-                let status_str = ds.status.as_deref().unwrap_or("PENDING");
-                release_env_statuses.push(format!("{}:{}", ds.environment, status_str));
-                context! {
-                    name => ds.destination_name,
-                    environment => ds.environment,
-                    status => ds.status,
-                    error_message => ds.error_message,
-                    queued_at => ds.queued_at,
-                    started_at => ds.started_at,
-                    completed_at => ds.completed_at,
-                    queue_position => ds.queue_position,
-                }
-            })
-            .collect();
-
-        let has_dests = !dests.is_empty();
-        let dest_envs_str = release_env_statuses.join(",");
-        let mut seen_envs = std::collections::HashSet::new();
-        let unique_envs: Vec<String> = release_envs
-            .iter()
-            .filter(|e| seen_envs.insert(e.as_str()))
-            .cloned()
-            .collect();
-
-        // Group environments by status for the summary line.
-        // Each env gets its best (highest-priority) status.
-        let mut env_best_status: std::collections::HashMap<&str, &str> =
-            std::collections::HashMap::new();
-        for ds in &matching_states {
-            let status = ds.status.as_deref().unwrap_or("PENDING");
-            let env = ds.environment.as_str();
-            let current = env_best_status.get(env).copied().unwrap_or("PENDING");
-            let priority = |s: &str| -> u8 {
-                match s {
-                    "RUNNING" | "ASSIGNED" => 6,
-                    "QUEUED" => 5,
-                    "FAILED" => 4,
-                    "TIMED_OUT" => 3,
-                    "CANCELLED" => 2,
-                    "SUCCEEDED" => 1,
-                    _ => 0,
-                }
-            };
-            if priority(status) > priority(current) {
-                env_best_status.insert(env, status);
-            }
-        }
-        // Build groups sorted by priority (deploying first), then collect envs per group.
-        let status_order = [
-            "RUNNING",
-            "QUEUED",
-            "FAILED",
-            "TIMED_OUT",
-            "CANCELLED",
-            "SUCCEEDED",
-        ];
-        let mut env_groups: Vec<minijinja::Value> = Vec::new();
-        for &group_status in &status_order {
-            let envs_in_group: Vec<String> = unique_envs
-                .iter()
-                .filter(|e| env_best_status.get(e.as_str()).copied() == Some(group_status))
-                .cloned()
-                .collect();
-            if !envs_in_group.is_empty() {
-                // Normalize ASSIGNED to RUNNING for display
-                let display_status = if group_status == "ASSIGNED" {
-                    "RUNNING"
-                } else {
-                    group_status
-                };
-                env_groups.push(context! {
-                    status => display_status,
-                    envs => envs_in_group,
-                });
-            }
-        }
-
-        // Build pipeline stage view from pipeline run data (if available) or
-        // fall back to heuristic matching from destination states.
-        let pipeline_stages: Vec<minijinja::Value> = {
-            let mut stages = Vec::new();
-
-            // First, check if the server returned pipeline run data for this artifact.
-            if let Some(run_stages) = intent_stages_by_artifact.get(artifact.artifact_id.as_str()) {
-                let sorted = topo_sort_run_stages(run_stages);
-                for rs in sorted {
-                    let wait_until_str = rs.wait_until.as_deref();
-                    // For deploy stages the orchestrator may mark a stage as
-                    // RUNNING before the actual destinations have started.
-                    // Check destination states: if all destinations for this
-                    // environment are still QUEUED, report the stage as QUEUED.
-                    let display_status = if rs.stage_type == "deploy"
-                        && (rs.status == "RUNNING" || rs.status == "ASSIGNED")
-                    {
-                        if let Some(ref env) = rs.environment {
-                            let env_dests: Vec<&str> = matching_states
-                                .iter()
-                                .filter(|ds| ds.environment == *env)
-                                .filter_map(|ds| ds.status.as_deref())
-                                .collect();
-                            if !env_dests.is_empty() && env_dests.iter().all(|s| *s == "QUEUED") {
-                                "QUEUED"
-                            } else {
-                                &rs.status
-                            }
-                        } else {
-                            &rs.status
-                        }
-                    } else {
-                        &rs.status
-                    };
-                    stages.push(context! {
-                        id => rs.stage_id,
-                        stage_type => rs.stage_type,
-                        environment => rs.environment,
-                        duration_seconds => rs.duration_seconds,
-                        depends_on => rs.depends_on,
-                        status => display_status,
-                        started_at => rs.started_at,
-                        completed_at => rs.completed_at,
-                        error_message => rs.error_message,
-                        wait_until => wait_until_str,
-                    });
-                }
-            }
-            // No heuristic fallback: if there is no pipeline run data for
-            // this artifact we leave pipeline_stages empty.  The frontend
-            // uses env_groups to decide between "Deployed" and "Queued".
-            stages
-        };
-        // A release "has a pipeline" if we have stage data from the server,
-        // OR if the project has an enabled pipeline config (for not-yet-deployed releases).
-        let project_has_enabled_pipeline = pipelines_by_project
-            .get(project)
-            .map(|ps| ps.iter().any(|p| p.enabled))
-            .unwrap_or(false);
-        let has_pipeline = !pipeline_stages.is_empty() || project_has_enabled_pipeline;
-
-        // Compute summary status from individual destination statuses.
-        // Priority: RUNNING/ASSIGNED > QUEUED > FAILED/TIMED_OUT/CANCELLED > SUCCEEDED
-        let summary_status = if !has_dests {
-            "PENDING"
-        } else {
-            let statuses: Vec<&str> = matching_states
-                .iter()
-                .filter_map(|ds| ds.status.as_deref())
-                .collect();
-            if statuses.iter().any(|s| *s == "RUNNING" || *s == "ASSIGNED") {
-                "RUNNING"
-            } else if statuses.contains(&"QUEUED") {
-                "QUEUED"
-            } else if statuses.contains(&"FAILED") {
-                "FAILED"
-            } else if statuses.contains(&"TIMED_OUT") {
-                "TIMED_OUT"
-            } else if statuses.contains(&"CANCELLED") {
-                "CANCELLED"
-            } else if statuses.contains(&"SUCCEEDED") {
-                "SUCCEEDED"
-            } else {
-                "PENDING"
-            }
-        };
-
-        raw_releases.push(RawRelease {
-            value: context! {
-                artifact_id => artifact.artifact_id,
-                slug => artifact.slug,
-                title => artifact.context.title,
-                description => artifact.context.description,
-                web => artifact.context.web,
-                pr => artifact.context.pr,
-                project_name => project,
-                org_name => org_name,
-                created_at => artifact.created_at,
-                commit_sha => artifact.git_ref.as_ref().map(|r| r.commit_sha.clone()),
-                branch => artifact.git_ref.as_ref().and_then(|r| r.branch.clone()),
-                version => artifact.git_ref.as_ref().and_then(|r| r.version.clone()),
-                commit_message => artifact.git_ref.as_ref().and_then(|r| r.commit_message.clone()),
-                repo_url => artifact.git_ref.as_ref().and_then(|r| r.repo_url.clone()),
-                source_user => artifact.source.as_ref().and_then(|s| s.user.clone()),
-                source_email => artifact.source.as_ref().and_then(|s| s.email.clone()),
-                source_type => artifact.source.as_ref().and_then(|s| s.source_type.clone()),
-                run_url => artifact.source.as_ref().and_then(|s| s.run_url.clone()),
-                destinations => dests,
-                dest_envs => dest_envs_str,
-                unique_envs => unique_envs,
-                env_groups => env_groups,
-                summary_status => summary_status,
-                pipeline_stages => pipeline_stages,
-                has_pipeline => has_pipeline,
-            },
-            has_dests,
-        });
-    }
-
-    // Use environments from the API (sorted by sort_order), falling back to
-    // environments discovered from destination states.
-    let lanes: Vec<minijinja::Value> = if !environments.is_empty() {
-        let mut envs: Vec<_> = environments.to_vec();
-        envs.sort_by_key(|e| e.sort_order);
-        envs.iter()
-            .map(|env| {
-                context! {
-                    name => env.name,
-                    description => env.description,
-                    color => env_lane_color(&env.name),
-                }
-            })
-            .collect()
-    } else {
-        let mut env_set = std::collections::BTreeSet::new();
-        for ds in &deployment_states.destinations {
-            if !ds.environment.is_empty() {
-                env_set.insert(ds.environment.clone());
-            }
-        }
-        env_set
-            .into_iter()
-            .map(|env| {
-                let color = env_lane_color(&env);
-                context! { name => env, color => color }
-            })
-            .collect()
-    };
-
-    // Truncate: keep everything up to the last deployed release, plus enough
-    // older items for the full Releases page. The Overview component still
-    // renders only its own `limit="3"` subset.
-    let last_deployed_idx = raw_releases
-        .iter()
-        .rposition(|r| r.has_dests)
-        .map(|i| i + 1)
-        .unwrap_or(0);
-    let keep = last_deployed_idx + RELEASE_TIMELINE_CONTEXT_LIMIT;
-    if keep < raw_releases.len() {
-        raw_releases.truncate(keep);
-    }
-
-    let mut timeline_items: Vec<minijinja::Value> = Vec::new();
-    let mut hidden_buf: Vec<minijinja::Value> = Vec::new();
-    let mut seen_deployed = false;
-
-    for raw in raw_releases {
-        if raw.has_dests {
-            // Flush any hidden buffer before a deployed release
-            if !hidden_buf.is_empty() {
-                let count = hidden_buf.len();
-                timeline_items.push(context! {
-                    kind => "hidden",
-                    count => count,
-                    releases => std::mem::take(&mut hidden_buf),
-                });
-            }
-            seen_deployed = true;
-            timeline_items.push(context! {
-                kind => "release",
-                release => raw.value,
-            });
-        } else if !seen_deployed {
-            // Before any deployment: show as regular (pending) release
-            timeline_items.push(context! {
-                kind => "release",
-                release => raw.value,
-            });
-        } else {
-            // After a deployment: group as hidden
-            hidden_buf.push(raw.value);
-        }
-    }
-    if !hidden_buf.is_empty() {
-        let count = hidden_buf.len();
-        timeline_items.push(context! {
-            kind => "hidden",
-            count => count,
-            releases => std::mem::take(&mut hidden_buf),
-        });
-    }
-
-    TimelineData {
-        timeline: timeline_items,
-        lanes,
-    }
 }
 
 // ─── Serialisable API types (for the JSON timeline endpoint) ─────────
@@ -3312,48 +2890,17 @@ async fn releases_page(
     let orgs = &session.user.orgs;
     require_org_membership(&state, orgs, &org)?;
 
-    let (projects, environments, dest_states, release_intents) = tokio::join!(
+    // This page is a shell around <release-timeline>, which fetches what it
+    // draws from /api/orgs/{org}/timeline. The handler used to build the whole
+    // thing a second time for a template that never read it: every project's
+    // pipelines, one sequential request at a time, plus every artifact in the
+    // org — all discarded a few lines later.
+    let environments = warn_default(
+        "list_environments",
         state
             .platform_client
-            .list_projects(&session.access_token, &org),
-        state
-            .platform_client
-            .list_environments(&session.access_token, &org),
-        state
-            .platform_client
-            .get_destination_states(&session.access_token, &org, None),
-        state
-            .platform_client
-            .get_release_intent_states(&session.access_token, &org, None, true),
-    );
-    let projects = projects.map_err(|e| internal_error(&state, "list_projects", &e))?;
-    let environments = warn_default("list_environments", environments);
-    let dest_states = warn_default("get_destination_states", dest_states);
-    let release_intents = warn_default("get_release_intent_states", release_intents);
-
-    // Fetch pipelines for all projects.
-    let mut pipelines_by_project = PipelinesByProject::new();
-    for p in &projects {
-        let pipelines = warn_default(
-            "list_release_pipelines",
-            state
-                .platform_client
-                .list_release_pipelines(&session.access_token, &org, p)
-                .await,
-        );
-        if !pipelines.is_empty() {
-            pipelines_by_project.insert(p.clone(), pipelines);
-        }
-    }
-
-    let items = fetch_org_artifacts(&state, &session.access_token, &org, &projects).await;
-    let data = build_timeline(
-        items,
-        &org,
-        &environments,
-        &dest_states,
-        &release_intents,
-        &pipelines_by_project,
+            .list_environments(&session.access_token, &org)
+            .await,
     );
 
     let mut sorted_envs = environments.clone();
@@ -3375,8 +2922,6 @@ async fn releases_page(
                 current_org => &org,
                 orgs => orgs_context(orgs),
                 org_name => &org,
-                timeline => data.timeline,
-                lanes => data.lanes,
                 env_options => env_options,
                 active_tab => "releases",
             },
@@ -5367,21 +4912,120 @@ async fn policies_page(
     Ok(Html(html).into_response())
 }
 
-/// Map environment name to a swimlane bar color (matches ENV_COLORS in swim-lanes.js).
+/// Map an environment name to its swim-lane colour.
+///
+/// Mirrors `STAGES` in `frontend/src/lib/colors.js`, which is where the palette
+/// is actually decided — environments get cool hues so that amber and red are
+/// free to mean "a person is needed" and "it broke" wherever they appear, and
+/// production is the heaviest mark in the gutter. See
+/// `design/RELEASE-SWIMLANE.md`.
+///
+/// The browser derives its own colours (it needs a light/dark pair, and the
+/// server cannot know the viewer's theme), so this is the light-mode value and
+/// exists for any other consumer of the timeline JSON. Keep the two in step.
+///
+/// Classification is by *stage* — the last `-`/`_`-separated segment naming
+/// one — so `data-prod` is production and `platform-dev` is development. The
+/// previous substring scan got those right by luck and `prod-metrics` wrong.
 fn env_lane_color(name: &str) -> &'static str {
+    match env_stage(name) {
+        Some("prod") => "#2563eb",
+        Some("preprod") => "#7c3aed",
+        Some("staging") => "#c026d3",
+        Some("test") => "#0891b2",
+        Some("dev") => "#0d9488",
+        _ => "#64748b",
+    }
+}
+
+/// The pipeline stage an environment belongs to, or `None`.
+///
+/// Checks the last segment, then the first, then the whole name — the tail
+/// wins because forest environments are named `<domain>-<stage>`.
+fn env_stage(name: &str) -> Option<&'static str> {
+    const STAGES: &[(&str, &[&str])] = &[
+        ("prod", &["prod", "production", "live"]),
+        ("preprod", &["preprod", "preproduction", "canary"]),
+        ("staging", &["staging", "stage", "stg"]),
+        ("test", &["test", "testing", "qa", "sandbox"]),
+        ("dev", &["dev", "development", "local"]),
+    ];
+
     let lower = name.to_lowercase();
-    if lower.contains("prod") && !lower.contains("preprod") && !lower.contains("pre-prod") {
-        "#ec4899"
-    } else if lower.contains("preprod") || lower.contains("pre-prod") {
-        "#f97316"
-    } else if lower.contains("stag") {
-        "#eab308"
-    } else if lower.contains("dev") {
-        "#8b5cf6"
-    } else if lower.contains("test") {
-        "#06b6d4"
-    } else {
-        "#6b7280"
+    let parts: Vec<&str> = lower
+        .split(['-', '_', ' ', '.', '/'])
+        .filter(|p| !p.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    let whole = parts.join("-");
+    let candidates = [parts[parts.len() - 1], parts[0], whole.as_str()];
+    for candidate in candidates {
+        for (stage, names) in STAGES {
+            if names.contains(&candidate) {
+                return Some(stage);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod env_lane_color_tests {
+    use super::{env_lane_color, env_stage};
+
+    #[test]
+    fn reads_the_stage_off_the_last_segment() {
+        assert_eq!(env_stage("data-prod"), Some("prod"));
+        assert_eq!(env_stage("platform-dev"), Some("dev"));
+        assert_eq!(env_stage("platform_dev"), Some("dev"));
+    }
+
+    // The case the old substring scan got wrong: it contains "prod", but it is
+    // not production.
+    #[test]
+    fn does_not_call_prod_metrics_production() {
+        assert_eq!(env_stage("prod-metrics"), Some("prod"));
+        assert_eq!(env_stage("metrics-prod"), Some("prod"));
+        assert_eq!(env_stage("reproducible"), None);
+    }
+
+    #[test]
+    fn falls_back_to_the_first_segment() {
+        assert_eq!(env_stage("prod-eu-north-1"), Some("prod"));
+        assert_eq!(env_stage("staging-2"), Some("staging"));
+    }
+
+    #[test]
+    fn leaves_an_unstaged_environment_alone() {
+        assert_eq!(env_stage("infrastructure-hetzner"), None);
+        assert_eq!(env_stage("finance"), None);
+        assert_eq!(env_stage(""), None);
+    }
+
+    // Warm is reserved for "a person is needed" and "it broke". An environment
+    // that borrowed amber or red would make the gutter unreadable at exactly
+    // the moment it matters.
+    #[test]
+    fn never_hands_an_environment_a_warm_colour() {
+        for name in [
+            "prod",
+            "preprod",
+            "staging",
+            "test",
+            "dev",
+            "data-prod",
+            "platform-dev",
+            "finance",
+            "hetzner",
+            "",
+        ] {
+            let c = env_lane_color(name);
+            assert_ne!(c, "#d97706", "{name} took the attention colour");
+            assert_ne!(c, "#dc2626", "{name} took the failure colour");
+        }
     }
 }
 

@@ -13,10 +13,11 @@
  * it is a single command locally and in CI. Requiring a second terminal is the
  * kind of friction that keeps a suite from being run.
  */
-import { chromium } from "playwright";
+import { chromium, firefox, webkit } from "playwright";
 import { spawn } from "node:child_process";
 import { FIXTURES } from "../src/lib/fixtures.js";
 import { isUnfinished } from "../src/lib/lane-states.js";
+import { envRank } from "../src/lib/colors.js";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -74,7 +75,18 @@ const stopServer = () => {
   }
 };
 
-const browser = await chromium.launch();
+// Chromium by default, but switchable: a dot centred with a percentage and a
+// transform sat half a pixel off the bar in Firefox and exactly on it in
+// Chrome, so a suite that only ever ran one engine could not see it.
+//   GALLERY_BROWSER=firefox npm run gallery:capture
+const ENGINES = { chromium, firefox, webkit };
+const engineName = process.env.GALLERY_BROWSER || "chromium";
+const engine = ENGINES[engineName];
+if (!engine) {
+  console.error(`unknown GALLERY_BROWSER "${engineName}" — one of ${Object.keys(ENGINES).join(", ")}`);
+  process.exit(1);
+}
+const browser = await engine.launch();
 const page = await browser.newPage({ viewport: { width: 1180, height: 900 }, deviceScaleFactor: 2 });
 
 const failures = [];
@@ -82,9 +94,17 @@ try {
   await page.goto(URL, { waitUntil: "load" });
   await page.waitForSelector("body[data-gallery-ready='true']", { timeout: 20000 });
 
-  // Freeze the pulse animation so screenshots are byte-stable between runs
-  // rather than catching the keyframe at a random phase.
-  await page.addStyleTag({ content: `.lane-pulse { animation: none !important; }` });
+  // Freeze every animation so screenshots are byte-stable between runs rather
+  // than catching a keyframe at a random phase. The assertions below read
+  // whether an element *has* an animation, not what frame it is on, so
+  // stopping them costs nothing.
+  await page.addStyleTag({
+    content: `*, *::before, *::after {
+      animation-play-state: paused !important;
+      animation-delay: -0.01s !important;
+      transition: none !important;
+    }`,
+  });
 
   const observed = await page.evaluate(() => {
     const out = {};
@@ -98,9 +118,62 @@ try {
         // what is above it, so the cards below are the interesting ones.
         allLaneStates: cards.map((c) => c.dataset.laneStates ?? ""),
         dotTitles: [...(sr?.querySelectorAll(".lane-dot") ?? [])].map((d) => d.getAttribute("title")),
-        hatched: [...(sr?.querySelectorAll(".lane-bar") ?? [])]
-          .filter((b) => (b.style.backgroundImage || "").includes("svg")).length,
+        // Lane runs, by what they mean rather than by how they are painted. An
+        // earlier version sniffed for an SVG data URI in `background-image`,
+        // which quietly stopped matching anything the day the chevrons moved to
+        // a CSS mask — a green suite asserting a property no element had.
+        travelling: (sr?.querySelectorAll(".lane-run[data-direction]") ?? []).length,
+        // Runs never butt against each other: an approach run continues past
+        // where the hold begins, so the hold's rounded end lands on it. Lose
+        // that overlap and every lane grows a notch of page through its middle.
+        seams: [...(sr?.querySelectorAll(".rt-strand") ?? [])].flatMap((strand) => {
+          const runs = [...strand.querySelectorAll(".lane-run")];
+          const hold = runs.find((r) => r.dataset.layer === "hold");
+          if (!hold) return [];
+          const holdTop = parseFloat(hold.style.top);
+          return runs
+            .filter((r) => r.dataset.layer === "approach")
+            .filter((r) => parseFloat(r.style.top) + parseFloat(r.style.height) <= holdTop)
+            .map((r) => r.dataset.run);
+        }),
+        // Whether each travel segment's chevrons are animated at all. Counting
+        // elements is not enough: a lane parked on an approval kept its
+        // segment and its pulsing dot — so the count check passed — while the
+        // chevrons themselves sat perfectly still, which is the one thing a
+        // state that needs a person must never do.
+        chevronMotion: [...(sr?.querySelectorAll(".lane-run[data-direction]") ?? [])].map(
+          (el) => getComputedStyle(el, "::after").animationName,
+        ),
+        faults: (sr?.querySelectorAll('.lane-run[data-run="fault"]') ?? []).length,
         pulsing: (sr?.querySelectorAll(".lane-pulse") ?? []).length,
+        // Every dot centred on the bar it marks, and sitting on whole pixels.
+        //
+        // Both halves matter. Asymmetry is the obvious bug. The subtle one is a
+        // dot whose size and strand disagree in parity — a 7px dot in a 12px
+        // strand insets by 2.5px — which is symmetric on paper and lands half a
+        // pixel off the bar once a browser rounds it. Chrome and Firefox round
+        // it differently, so this only ever showed up in one of them.
+        offCentreDots: [...(sr?.querySelectorAll(".rt-strand") ?? [])].flatMap((strand) => {
+          const run = strand.querySelector(".lane-run");
+          if (!run) return [];
+          const rr = run.getBoundingClientRect();
+          return [...strand.querySelectorAll(".lane-dot")]
+            .map((d) => {
+              const r = d.getBoundingClientRect();
+              const left = r.left - rr.left;
+              const right = rr.right - r.right;
+              if (Math.abs(left - right) > 0.01) {
+                return `${d.dataset.kind} off centre by ${(left - right).toFixed(2)}px`;
+              }
+              if (Math.abs(left - Math.round(left)) > 0.01) {
+                return `${d.dataset.kind} inset ${left.toFixed(2)}px — not a whole pixel`;
+              }
+              return null;
+            })
+            .filter(Boolean);
+        }),
+        // Production first, then back down the pipeline — see `orderLanes`.
+        laneOrder: [...(sr?.querySelectorAll(".rt-lane") ?? [])].map((l) => l.dataset.env),
         // What each card put in its avatar slot. The lane dots anchor to
         // [data-avatar], so the tag matters less than the fact that every card
         // still has one — see the assertion below.
@@ -112,6 +185,73 @@ try {
     }
     return out;
   });
+
+  // A lane that fans out is the one piece of this design a unit test cannot
+  // reach: the strands only exist once somebody clicks. `partial-rollout` is
+  // the fixture with more than one placement in an environment.
+  {
+    const lane = page.locator('section[data-fixture="partial-rollout"] .rt-lane[data-env="prod"]');
+    const before = await lane.locator(".rt-strand").count();
+    const faultsClosed = await lane.locator('.lane-run[data-run="fault"]').count();
+
+    await lane.locator(".rt-lane-hit").click();
+    await page.waitForTimeout(400);
+
+    const after = await lane.locator(".rt-strand").count();
+    const labels = await page
+      .locator('section[data-fixture="partial-rollout"] .rt-lane-label-dest')
+      .allTextContents();
+    if (before !== 1) failures.push(`fan-out: prod should start as one strand, got ${before}`);
+    if (after !== 3) failures.push(`fan-out: prod should open into 3 strands, got ${after}`);
+    // The reason this layer exists. prod is live overall — two of three
+    // placements took the release — so the collapsed lane shows no failure,
+    // and the fanned one has to.
+    const faultsOpen = await lane.locator('.lane-run[data-run="fault"]').count();
+    if (faultsClosed !== 0) {
+      failures.push(`fan-out: collapsed prod is live overall and must not draw a failure, got ${faultsClosed}`);
+    }
+    if (faultsOpen !== 1) {
+      failures.push(`fan-out: one prod placement failed and its strand must say so, got ${faultsOpen}`);
+    }
+    if (labels.length !== 3) failures.push(`fan-out: expected 3 destination labels, got ${labels.length}`);
+    // Every placement in prod is called prod-something; the lane already says
+    // prod, so the labels must not repeat it.
+    if (labels.some((l) => l.startsWith("prod"))) {
+      failures.push(`fan-out: destination labels still carry the environment prefix — ${labels.join(", ")}`);
+    }
+    // A fanned strand is narrower than a lane, so its dots are sized
+    // differently — and that is where a dot and its strand can disagree in
+    // parity and land the dot on a half pixel. The snapshot above is taken with
+    // every lane collapsed and cannot see it.
+    const fannedDots = await lane.evaluate((el) =>
+      [...el.querySelectorAll(".rt-strand")].flatMap((strand) => {
+        const run = strand.querySelector(".lane-run");
+        if (!run) return [];
+        const rr = run.getBoundingClientRect();
+        return [...strand.querySelectorAll(".lane-dot")]
+          .map((d) => {
+            const r = d.getBoundingClientRect();
+            const left = r.left - rr.left;
+            const right = rr.right - r.right;
+            if (Math.abs(left - right) > 0.01) return `${d.dataset.kind} off centre`;
+            if (Math.abs(left - Math.round(left)) > 0.01) {
+              return `${d.dataset.kind} inset ${left.toFixed(2)}px — not a whole pixel`;
+            }
+            return null;
+          })
+          .filter(Boolean);
+      }),
+    );
+    if (fannedDots.length > 0) {
+      failures.push(`fan-out: ${fannedDots.join(", ")}`);
+    }
+
+    await page.locator('section[data-fixture="partial-rollout"]').screenshot({
+      path: join(SHOTS, "partial-rollout-fanned.png"),
+    });
+    await lane.locator(".rt-lane-hit").click(); // gather it back up
+    await page.waitForTimeout(400);
+  }
 
   for (const f of FIXTURES) {
     const o = observed[f.key];
@@ -143,11 +283,42 @@ try {
     const wantsMotion = [f.expect, ...(f.expectBelow || [])]
       .flatMap((e) => Object.values(e))
       .some(isUnfinished);
-    if (wantsMotion && (o.hatched === 0 || o.pulsing === 0)) {
-      failures.push(`${f.key}: unfinished but nothing animates (hatched=${o.hatched} pulsing=${o.pulsing})`);
+    if (wantsMotion && (o.travelling === 0 || o.pulsing === 0)) {
+      failures.push(
+        `${f.key}: unfinished but nothing is drawn moving (travelling=${o.travelling} pulsing=${o.pulsing})`,
+      );
     }
-    if (!wantsMotion && (o.hatched > 0 || o.pulsing > 0)) {
-      failures.push(`${f.key}: finished but something animates (hatched=${o.hatched} pulsing=${o.pulsing})`);
+    if (!wantsMotion && (o.travelling > 0 || o.pulsing > 0)) {
+      failures.push(
+        `${f.key}: finished but something is drawn moving (travelling=${o.travelling} pulsing=${o.pulsing})`,
+      );
+    }
+
+    // 2a1. Dots sit on the middle of their lane.
+    if (o.offCentreDots.length > 0) {
+      failures.push(`${f.key}: dot(s) off centre — ${o.offCentreDots.join(", ")}`);
+    }
+
+    // 2a2. No approach run stops short of the hold it runs into.
+    if (o.seams.length > 0) {
+      failures.push(`${f.key}: ${o.seams.join(", ")} run(s) stop short of the hold — the join will show`);
+    }
+
+    // 2a. Every travelling segment is visibly alive — marching when something
+    //     is moving, breathing when it is parked on a person. Either way, not
+    //     still.
+    const still = o.chevronMotion.filter((n) => !n || n === "none").length;
+    if (still > 0) {
+      failures.push(`${f.key}: ${still} travel segment(s) draw no motion at all`);
+    }
+
+    // 2b. Lanes read production-first, whatever order the server sent.
+    const ranked = o.laneOrder.filter(Boolean);
+    const expectedOrder = [...ranked].sort(
+      (a, b) => envRank(a) - envRank(b),
+    );
+    if (ranked.join(",") !== expectedOrder.join(",")) {
+      failures.push(`${f.key}: lanes out of order — got ${ranked.join(",")}, want ${expectedOrder.join(",")}`);
     }
 
     // 3. Every card keeps a [data-avatar] anchor, and the slot renders both
@@ -163,7 +334,7 @@ try {
 
     // 4. An awaiting state must say so, in words, on hover.
     if (Object.values(f.expect).includes("awaiting")) {
-      if (!o.dotTitles.some((t) => (t || "").startsWith("Awaiting approval for"))) {
+      if (!o.dotTitles.some((t) => (t || "").startsWith("Awaiting approval"))) {
         failures.push(`${f.key}: no "Awaiting approval" dot title — got ${JSON.stringify(o.dotTitles)}`);
       }
     }
@@ -183,6 +354,6 @@ if (failures.length) {
   for (const f of failures) console.error(`  ✗ ${f}`);
   process.exit(1);
 }
-console.log(`\nall ${FIXTURES.length} states render distinguishably; screenshots in gallery/shots/`);
+console.log(`\nall ${FIXTURES.length} states render distinguishably in ${engineName}; screenshots in gallery/shots/`);
 // Explicit: a stray handle must not turn a passing run into a hung job.
 process.exit(0);

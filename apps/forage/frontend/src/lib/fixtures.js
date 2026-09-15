@@ -23,8 +23,14 @@ const plan = (env, status, approval) => ({
 const deploy = (env, status) => ({
   id: `deploy-${env}`, stage_type: "deploy", environment: env, status,
 });
-const dest = (env, status, isCurrent = false) => ({
-  name: `${env}-dest`, environment: env, status, is_current: isCurrent,
+// Destinations are *placements within* an environment, and an environment can
+// hold several. Most fixtures only need one, so the name defaults; the ones
+// exercising a partial rollout name each placement themselves.
+const dest = (env, status, isCurrent = false, name = `${env}-main`) => ({
+  name, environment: env, status, is_current: isCurrent,
+});
+const wait = (seconds, status) => ({
+  id: `wait-${seconds}`, stage_type: "wait", duration_seconds: seconds, status,
 });
 
 export const FIXTURES = [
@@ -109,8 +115,13 @@ export const FIXTURES = [
   },
   {
     key: "superseded",
-    title: "Superseded",
-    why: "It did deploy, but a later release took over. Historical.",
+    title: "Superseded — prod has moved off this release",
+    why:
+      "It deployed to prod and prod is no longer on it: `is_current` is false " +
+      "on the destination, and something else holds it now. Rendered on top of " +
+      "the release prod went back to, which is what a finished rollback looks " +
+      "like once nothing is in flight — a solid head lower down the lane, and a " +
+      "hollow ring up here marking where this release got to.",
     expect: { prod: "past" },
     release: {
       slug: "superseded", has_pipeline: true,
@@ -201,6 +212,126 @@ export const FIXTURES = [
       },
     ],
     expectBelow: [{ dev: "past", prod: "past" }],
+  },
+
+  {
+    key: "partial-rollout",
+    title: "Partial rollout — prod is three places, and one of them failed",
+    why:
+      "The state the destination layer exists for. Two of prod's three " +
+      "placements took the release and the third blew up. At environment " +
+      "level this is just `prod`, and a single bar through it would read as " +
+      "healthy. Click the prod lane to fan it into its destinations.",
+    expect: { prod: "live", dev: "live" },
+    release: {
+      slug: "partial-rollout", has_pipeline: true,
+      destinations: [
+        dest("dev", "SUCCEEDED", true),
+        dest("staging", "SUCCEEDED", true),
+        dest("prod", "SUCCEEDED", true, "prod-eu-north-1"),
+        dest("prod", "SUCCEEDED", true, "prod-eu-west-1"),
+        dest("prod", "FAILED", false, "prod-us-east-1"),
+      ],
+      pipeline_stages: [
+        deploy("dev", "SUCCEEDED"),
+        deploy("staging", "SUCCEEDED"),
+        wait(900, "SUCCEEDED"),
+        deploy("prod", "FAILED"),
+      ],
+    },
+  },
+  {
+    key: "fanning-out",
+    title: "Rolling across prod, one placement at a time",
+    why:
+      "A release part-way through prod: eu-north has it, eu-west is taking " +
+      "it now, us-east has not been asked yet. The environment lane can only " +
+      "say `deploying`; the strands say how far.",
+    expect: { prod: "flight", dev: "live" },
+    release: {
+      slug: "fanning-out", has_pipeline: true,
+      destinations: [
+        dest("dev", "SUCCEEDED", true),
+        dest("staging", "SUCCEEDED", true),
+        dest("prod", "SUCCEEDED", true, "prod-eu-north-1"),
+        dest("prod", "RUNNING", false, "prod-eu-west-1"),
+        dest("prod", "PENDING", false, "prod-us-east-1"),
+      ],
+      pipeline_stages: [
+        deploy("dev", "SUCCEEDED"),
+        deploy("staging", "SUCCEEDED"),
+        deploy("prod", "RUNNING"),
+      ],
+    },
+  },
+  {
+    key: "soaking",
+    title: "Soaking before prod",
+    why:
+      "Nothing is running and nobody is blocking it — the pipeline is " +
+      "holding the release in staging until it has been there long enough. " +
+      "The prod stage below it is drawn, dimmed: what is going to happen is " +
+      "as much a part of reading a release as what already did.",
+    expect: { staging: "live", prod: "pending", dev: "live" },
+    release: {
+      slug: "soaking", has_pipeline: true,
+      destinations: [dest("dev", "SUCCEEDED", true), dest("staging", "SUCCEEDED", true)],
+      pipeline_stages: [
+        deploy("dev", "SUCCEEDED"),
+        deploy("staging", "SUCCEEDED"),
+        wait(1800, "RUNNING"),
+        deploy("prod", "PENDING"),
+      ],
+    },
+  },
+  {
+    key: "rolling-back",
+    title: "Rolling back",
+    why:
+      "prod is being taken back to an older release. Backwards travel is " +
+      "amber and its chevrons point the other way — a rollback must not be " +
+      "mistakable for a deploy at a glance.",
+    expect: { prod: "live", dev: "live" },
+    release: {
+      slug: "rolling-back-head", has_pipeline: true,
+      destinations: [dest("dev", "SUCCEEDED", true), dest("prod", "SUCCEEDED", true)],
+      pipeline_stages: [deploy("dev", "SUCCEEDED"), deploy("prod", "SUCCEEDED")],
+    },
+    below: [
+      {
+        slug: "rolling-back-target", has_pipeline: true,
+        title: "The release prod is going back to",
+        destinations: [dest("dev", "SUCCEEDED", false), dest("prod", "RUNNING", false)],
+        pipeline_stages: [deploy("dev", "SUCCEEDED"), deploy("prod", "RUNNING")],
+      },
+    ],
+    expectBelow: [{ prod: "flight" }],
+  },
+  {
+    key: "hidden-commits",
+    title: "Commits that changed nothing here",
+    why:
+      "Most commits in a shared repo touch nothing this project deploys. " +
+      "They are folded behind one line so the timeline stays a record of what " +
+      "moved — Uber calls the same idea \"collapsed in-between commits\". " +
+      "Open it and they render as quiet rows with no lane presence at all.",
+    expect: { prod: "live", dev: "live" },
+    release: {
+      slug: "hidden-commits", has_pipeline: true,
+      destinations: [dest("dev", "SUCCEEDED", true), dest("prod", "SUCCEEDED", true)],
+      pipeline_stages: [deploy("dev", "SUCCEEDED"), deploy("prod", "SUCCEEDED")],
+    },
+    extra: [
+      {
+        kind: "hidden",
+        count: 6,
+        releases: [
+          { slug: "h1", title: "docs: correct the retention window in the runbook", commit_sha: "4c1f0b92aa", created_at: new Date(Date.UTC(2026, 8, 15, 10, 41)).toISOString(), source_user: "kjuulh" },
+          { slug: "h2", title: "chore(deps): bump serde to 1.0.219", commit_sha: "9ae23d1177", created_at: new Date(Date.UTC(2026, 8, 15, 10, 12)).toISOString(), source_user: "octobot" },
+          { slug: "h3", title: "test: cover the empty-destination case", commit_sha: "01bb7fe340", created_at: new Date(Date.UTC(2026, 8, 15, 9, 58)).toISOString(), source_user: "kjuulh" },
+        ],
+      },
+    ],
   },
 ];
 
