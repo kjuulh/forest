@@ -40,6 +40,11 @@
                     <code class="bg-gray-100 px-1.5 py-0.5 rounded">{{ policy.config.target_environment }}</code>
                     <span class="text-gray-400">&middot;</span>
                     <span>{{ policy.config.required_approvals }} approval{{ 's' if policy.config.required_approvals != 1 }}</span>
+                    {% elif policy.policy_type == "supersede_pending" %}
+                    <span class="bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded">Supersede Pending</span>
+                    <code class="bg-gray-100 px-1.5 py-0.5 rounded">{{ policy.config.target_environment }}</code>
+                    <span class="text-gray-400">&middot;</span>
+                    <span>newest wins{{ ', same branch only' if policy.config.same_branch_only }}</span>
                     {% endif %}
                 </div>
 
@@ -93,6 +98,7 @@
                     <option value="soak_time">Soak Time</option>
                     <option value="branch_restriction">Branch Restriction</option>
                     <option value="approval">Approval Required</option>
+                    <option value="supersede_pending">Supersede Pending</option>
                 </select>
                 <p class="text-xs text-gray-500 mt-1" id="policy-type-desc">
                     Require an artifact to succeed in a source environment for a duration before deploying to target.
@@ -166,6 +172,29 @@
                 </div>
             </div>
 
+            {# Supersede pending fields #}
+            <div id="supersede-pending-fields" class="hidden">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                        <select name="target_environment" id="supersede-pending-target-env" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+                            {% for env in environments %}
+                            <option value="{{ env.name }}">{{ env.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1">
+                            <input type="checkbox" name="same_branch_only" value="1"
+                                class="rounded border-gray-300 text-gray-900 focus:ring-gray-900">
+                            Same branch only
+                        </label>
+                        <p class="text-xs text-gray-500 mt-1">Only supersede a pending release when the newer one is on the same branch, so a hotfix off another branch still deploys.</p>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 mt-3">A deploy already running is never interrupted &mdash; it finishes, and the queue behind it collapses to the newest.</p>
+            </div>
+
             <button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">
                 Create Policy
             </button>
@@ -179,6 +208,7 @@
             soak_time: document.getElementById('soak-time-fields'),
             branch_restriction: document.getElementById('branch-restriction-fields'),
             approval: document.getElementById('approval-fields'),
+            supersede_pending: document.getElementById('supersede-pending-fields'),
         };
         const desc = document.getElementById('policy-type-desc');
 
@@ -186,6 +216,7 @@
             soak_time: 'Require an artifact to succeed in a source environment for a duration before deploying to target.',
             branch_restriction: 'Only allow deployments to the target environment from a specific branch pattern.',
             approval: 'Require one or more team members to approve before deploying to the target environment.',
+            supersede_pending: 'When releases queue up for a destination, deploy the newest and mark the ones it overtook superseded instead of deploying each in turn.',
         };
 
         function toggle() {

@@ -157,6 +157,7 @@
                                 <option value="branch_restriction">Branch Restriction</option>
                                 <option value="soak_time">Soak Time</option>
                                 <option value="approval">Approval Required</option>
+                                <option value="supersede_pending">Supersede Pending</option>
                             </select>
                         </label>
                         <div id="org-policy-soak-fields" class="hidden space-y-3">
@@ -171,6 +172,14 @@
                         <div id="org-policy-approval-fields" class="hidden space-y-3">
                             <input id="org-policy-approval-target-env" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Target environment, e.g. prod">
                             <input id="org-policy-approvals" type="number" min="1" value="1" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Required approvals">
+                        </div>
+                        <div id="org-policy-supersede-fields" class="hidden space-y-3">
+                            <input id="org-policy-supersede-target-env" class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm" placeholder="Target environment, e.g. prod">
+                            <label class="flex items-center gap-2 text-sm">
+                                <input id="org-policy-supersede-same-branch" type="checkbox" class="rounded border-gray-300 text-gray-900 focus:ring-gray-900">
+                                Same branch only
+                            </label>
+                            <p class="text-xs text-gray-500">Deploys the newest pending release for a destination and marks the ones it overtook superseded. A deploy already running finishes first.</p>
                         </div>
                     </div>
                 </section>
@@ -351,6 +360,7 @@
                 soak_time: document.getElementById('org-policy-soak-fields'),
                 branch_restriction: document.getElementById('org-policy-branch-fields'),
                 approval: document.getElementById('org-policy-approval-fields'),
+                supersede_pending: document.getElementById('org-policy-supersede-fields'),
             };
             function toggle() {
                 for (const [key, el] of Object.entries(sections)) {
@@ -447,6 +457,14 @@
                     throw new Error('Approval policies require a target environment and at least one approval.');
                 }
                 return { name, enabled: true, config: { Approval: { target_environment: target, required_approvals: approvals } } };
+            }
+            if (type === 'supersede_pending') {
+                const target = document.getElementById('org-policy-supersede-target-env').value.trim();
+                if (!target) {
+                    throw new Error('Supersede pending policies require a target environment.');
+                }
+                const sameBranchOnly = document.getElementById('org-policy-supersede-same-branch').checked;
+                return { name, enabled: true, config: { SupersedePending: { target_environment: target, same_branch_only: sameBranchOnly } } };
             }
             const target = document.getElementById('org-policy-branch-target-env').value.trim();
             const branch = document.getElementById('org-policy-branch-pattern').value.trim();

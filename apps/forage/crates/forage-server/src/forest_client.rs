@@ -1361,6 +1361,7 @@ fn convert_policy(p: forage_grpc::Policy) -> Policy {
         Ok(forage_grpc::PolicyType::SoakTime) => "soak_time",
         Ok(forage_grpc::PolicyType::BranchRestriction) => "branch_restriction",
         Ok(forage_grpc::PolicyType::ExternalApproval) => "approval",
+        Ok(forage_grpc::PolicyType::SupersedePending) => "supersede_pending",
         _ => "unknown",
     };
     let config = match p.config {
@@ -1379,10 +1380,22 @@ fn convert_policy(p: forage_grpc::Policy) -> Policy {
             target_environment: c.target_environment,
             required_approvals: c.required_approvals,
         },
-        None => PolicyConfig::SoakTime {
-            source_environment: String::new(),
+        Some(forage_grpc::policy::Config::SupersedePending(c)) => {
+            PolicyConfig::SupersedePending {
+                target_environment: c.target_environment,
+                same_branch_only: c.same_branch_only,
+            }
+        }
+        // A config forage cannot read — a policy type newer than this build.
+        // Rendering it as an empty soak-time policy, which is what this used to
+        // do, invents a policy that does not exist and shows a target
+        // environment of "" for a rule that is really gating something. An
+        // empty branch restriction is the honest shape: the type string
+        // alongside it already says "unknown", and no field here claims a value
+        // the server did not send.
+        None => PolicyConfig::BranchRestriction {
             target_environment: String::new(),
-            duration_seconds: 0,
+            branch_pattern: String::new(),
         },
     };
     Policy {
@@ -1442,6 +1455,25 @@ fn policy_config_to_grpc(
                 ),
             ),
         ),
+        PolicyConfig::SupersedePending {
+            target_environment,
+            same_branch_only,
+        } => (
+            forage_grpc::PolicyType::SupersedePending as i32,
+            Some(
+                forage_grpc::create_policy_request::Config::SupersedePending(
+                    forage_grpc::SupersedePendingConfig {
+                        target_environment: target_environment.clone(),
+                        same_branch_only: *same_branch_only,
+                        // Not settable from forage: forest cannot interrupt an
+                        // in-flight deploy into a defined state, so the policy
+                        // lets a running deploy finish and collapses the queue
+                        // behind it. Validation rejects `true` server-side.
+                        cancel_in_progress: false,
+                    },
+                ),
+            ),
+        ),
     }
 }
 
@@ -1487,6 +1519,19 @@ fn policy_config_to_org_rule_grpc(
                 },
             )),
         ),
+        PolicyConfig::SupersedePending {
+            target_environment,
+            same_branch_only,
+        } => (
+            forage_grpc::PolicyType::SupersedePending as i32,
+            Some(forage_grpc::org_policy_rule::Config::SupersedePending(
+                forage_grpc::SupersedePendingConfig {
+                    target_environment: target_environment.clone(),
+                    same_branch_only: *same_branch_only,
+                    cancel_in_progress: false,
+                },
+            )),
+        ),
     }
 }
 
@@ -1507,10 +1552,18 @@ fn org_policy_rule_from_grpc(rule: forage_grpc::OrgPolicyRule) -> OrgPolicyRule 
             target_environment: c.target_environment,
             required_approvals: c.required_approvals,
         },
-        None => PolicyConfig::SoakTime {
-            source_environment: String::new(),
+        Some(forage_grpc::org_policy_rule::Config::SupersedePending(c)) => {
+            PolicyConfig::SupersedePending {
+                target_environment: c.target_environment,
+                same_branch_only: c.same_branch_only,
+            }
+        }
+        // See `convert_policy` for why this is no longer an empty soak-time
+        // config: a rule type newer than this build must not be rendered as a
+        // policy that does not exist.
+        None => PolicyConfig::BranchRestriction {
             target_environment: String::new(),
-            duration_seconds: 0,
+            branch_pattern: String::new(),
         },
     };
     OrgPolicyRule {
@@ -2659,6 +2712,9 @@ impl ForestPlatform for GrpcForestClient {
                 }
                 Some(forage_grpc::create_policy_request::Config::ExternalApproval(a)) => {
                     forage_grpc::update_policy_request::Config::ExternalApproval(a)
+                }
+                Some(forage_grpc::create_policy_request::Config::SupersedePending(sp)) => {
+                    forage_grpc::update_policy_request::Config::SupersedePending(sp)
                 }
                 None => forage_grpc::update_policy_request::Config::SoakTime(
                     forage_grpc::SoakTimeConfig::default(),
@@ -4310,6 +4366,83 @@ mod tests {
             created_at: "2026-01-01".into(),
             ..Default::default()
         }
+    }
+
+    // ── The supersede-pending policy type (DATA-817) ─────────────────
+
+    #[test]
+    fn a_supersede_pending_policy_survives_the_round_trip() {
+        let policy = forage_grpc::Policy {
+            id: "p1".into(),
+            name: "collapse-prod".into(),
+            enabled: true,
+            policy_type: forage_grpc::PolicyType::SupersedePending as i32,
+            config: Some(forage_grpc::policy::Config::SupersedePending(
+                forage_grpc::SupersedePendingConfig {
+                    target_environment: "prod".into(),
+                    same_branch_only: true,
+                    cancel_in_progress: false,
+                },
+            )),
+            ..Default::default()
+        };
+
+        let converted = convert_policy(policy);
+
+        assert_eq!(converted.policy_type, "supersede_pending");
+        match &converted.config {
+            PolicyConfig::SupersedePending {
+                target_environment,
+                same_branch_only,
+            } => {
+                assert_eq!(target_environment, "prod");
+                assert!(same_branch_only);
+            }
+            other => panic!("expected a supersede-pending config, got {other:?}"),
+        }
+
+        // And back out again, as the create form sends it.
+        let (policy_type, config) = policy_config_to_grpc(&converted.config);
+        assert_eq!(policy_type, forage_grpc::PolicyType::SupersedePending as i32);
+        match config {
+            Some(forage_grpc::create_policy_request::Config::SupersedePending(c)) => {
+                assert_eq!(c.target_environment, "prod");
+                assert!(c.same_branch_only);
+                assert!(
+                    !c.cancel_in_progress,
+                    "forage must never ask to interrupt a running deploy",
+                );
+            }
+            other => panic!("expected a supersede-pending config, got {other:?}"),
+        }
+    }
+
+    /// A policy whose config forage cannot read must not be dressed up as a
+    /// policy that does exist.
+    ///
+    /// This used to fall back to an empty `SoakTime`, so a policy type newer
+    /// than the running forage build rendered as a soak-time rule gating ""
+    /// for 0 seconds — a rule nobody wrote, shown as if they had. The type
+    /// string already says "unknown"; the config must not contradict it by
+    /// naming a shape.
+    #[test]
+    fn an_unreadable_policy_config_does_not_masquerade_as_soak_time() {
+        let policy = forage_grpc::Policy {
+            id: "p1".into(),
+            name: "from-the-future".into(),
+            enabled: true,
+            policy_type: 99,
+            config: None,
+            ..Default::default()
+        };
+
+        let converted = convert_policy(policy);
+
+        assert_eq!(converted.policy_type, "unknown");
+        assert!(
+            !matches!(converted.config, PolicyConfig::SoakTime { .. }),
+            "an unreadable config must not claim to be a soak time",
+        );
     }
 
     #[test]

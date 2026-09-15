@@ -19,6 +19,10 @@
                 <span class="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-xs font-medium">Soak Time</span>
                 {% elif policy.policy_type == "branch_restriction" %}
                 <span class="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded text-xs font-medium">Branch Restriction</span>
+                {% elif policy.policy_type == "approval" %}
+                <span class="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-xs font-medium">Approval Required</span>
+                {% elif policy.policy_type == "supersede_pending" %}
+                <span class="bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded text-xs font-medium">Supersede Pending</span>
                 {% endif %}
             </div>
 
@@ -64,6 +68,28 @@
                     </select>
                 </div>
             </div>
+
+            {% elif policy.policy_type == "supersede_pending" %}
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Target environment</label>
+                    <select name="target_environment" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+                        {% for env in environments %}
+                        <option value="{{ env.name }}" {% if env.name == policy.config.target_environment %}selected{% endif %}>{{ env.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-1">
+                        <input type="checkbox" name="same_branch_only" value="1"
+                            {% if policy.config.same_branch_only %}checked{% endif %}
+                            class="rounded border-gray-300 text-gray-900 focus:ring-gray-900">
+                        Same branch only
+                    </label>
+                    <p class="text-xs text-gray-500 mt-1">Only supersede a pending release when the newer one is on the same branch.</p>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500">A deploy already running is never interrupted &mdash; it finishes, and the queue behind it collapses to the newest.</p>
             {% endif %}
 
             <div class="flex items-center gap-3 pt-2">

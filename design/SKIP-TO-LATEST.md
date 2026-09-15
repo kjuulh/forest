@@ -508,16 +508,36 @@ Built:
   it answers "what is live at this destination", and a release that never deployed is
   not an answer to that.
 
+Also built, after the first cut shipped without it: the forage side of the policy — its
+own proto regeneration, the domain variant, both `to_grpc` directions, the project-policy
+and org-rule create forms, the edit page, and the list rendering. Worth recording as a
+lesson rather than a footnote: `apps/forest` and `apps/forage` generate protos
+separately, so "regenerate the protos" is two commands, and a policy type is not shipped
+until the surface people administer it from knows about it.
+
 Not built, and named as such: cancel-in-progress (§3), run-level supersede of a parked
-pipeline run (§3), a true descendant guard (§5), a summary notification (§5).
+pipeline run (§3), a true descendant guard (§5), a summary notification (§5), and the
+`SUPERSEDED` release status in forage's swimlanes (§8).
 
 ## 8. What a real rollout needs
 
 1. Land the proto + status + mechanism with **no policy configured anywhere**. Every
    test forest has asserts today still passes; behaviour is bit-identical.
-2. Confirm forage renders `SUPERSEDED` as a neutral terminal state, not as a failure and not
-   as a hidden commit — this is the DATA-660 lesson, and the naming question in §2 should
-   be settled before, not after.
+2. **forage.** Two separate pieces, and only one is done.
+
+   *Done (DATA-822 follow-up):* forage can create and read the policy. It has its own
+   `buf.gen.yaml` and its own generated proto crate, so the first cut of this change left
+   it blind — the create form offered three types, and a policy created by CLI or API
+   came back as type `"unknown"` whose config fell through to an empty `SoakTime`,
+   rendering a supersede rule as a soak-time rule gating `""` for 0 seconds. Fixed, with
+   the fallback changed so an unreadable config can no longer claim a shape it does not
+   have.
+
+   *Still open:* forage rendering the `SUPERSEDED` **release status** as a neutral
+   terminal state in the swimlanes — it degrades to `_ => 0` today, so nothing breaks,
+   but nothing reads right either. This is the DATA-660 lesson, and it is where the
+   naming overlap in §2 actually bites: forage already uses "superseded" for a release
+   that *did* deploy and is no longer live.
 3. Enable on one high-traffic non-critical project in dev. Watch `release.superseded` counts
    against merge rate.
 4. Decide `same_branch_only` as a default. It is off in the config; it may deserve to be

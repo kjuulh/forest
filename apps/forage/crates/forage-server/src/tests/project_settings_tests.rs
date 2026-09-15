@@ -249,3 +249,79 @@ async fn posting_to_a_legacy_section_url_still_works() {
         format!("{PROJECT}/settings/triggers").as_str()
     );
 }
+
+// ─── The supersede-pending policy type (DATA-817) ───────────────────
+
+/// The policy exists server-side but forage had no idea: the create form
+/// offered three types and reading a fourth rendered it as "unknown" with an
+/// empty soak-time config. A policy nobody can see or make is a policy nobody
+/// will use.
+#[tokio::test]
+async fn the_policies_page_offers_supersede_pending() {
+    let (_, html, _) = get(&format!("{PROJECT}/settings/policies")).await;
+
+    assert!(
+        html.contains("value=\"supersede_pending\""),
+        "the create form must offer the type",
+    );
+    assert!(
+        html.contains("name=\"same_branch_only\""),
+        "and its one knob — the newer release being on the same branch",
+    );
+    assert!(
+        html.contains("never interrupted"),
+        "and should say that a running deploy is left alone, which is the \
+         question anyone enabling this asks first",
+    );
+}
+
+/// An existing supersede-pending policy renders as itself, with its target and
+/// guard — not as "unknown".
+#[tokio::test]
+async fn an_existing_supersede_pending_policy_renders_as_itself() {
+    let policy = Policy {
+        id: POLICY_ID.into(),
+        name: "collapse-prod".into(),
+        enabled: true,
+        policy_type: "supersede_pending".into(),
+        config: PolicyConfig::SupersedePending {
+            target_environment: "prod".into(),
+            same_branch_only: true,
+        },
+        created_at: "2026-09-15T00:00:00Z".into(),
+        updated_at: "2026-09-15T00:00:00Z".into(),
+    };
+
+    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
+        list_triggers_result: Some(Ok(vec![a_trigger()])),
+        list_policies_result: Some(Ok(vec![policy])),
+        ..Default::default()
+    });
+    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("{PROJECT}/settings/policies"))
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+
+    assert!(html.contains("collapse-prod"));
+    assert!(
+        html.contains("Supersede Pending"),
+        "the badge must name the policy, not fall through to nothing",
+    );
+    assert!(html.contains("same branch only"));
+}

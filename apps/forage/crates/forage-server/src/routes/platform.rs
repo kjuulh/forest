@@ -5303,6 +5303,16 @@ async fn policies_page(
                         required_approvals => required_approvals,
                     },
                 ),
+                PolicyConfig::SupersedePending {
+                    target_environment,
+                    same_branch_only,
+                } => (
+                    "supersede_pending",
+                    context! {
+                        target_environment => target_environment,
+                        same_branch_only => same_branch_only,
+                    },
+                ),
             };
             context! {
                 id => p.id,
@@ -5411,6 +5421,9 @@ struct CreatePolicyForm {
     // Approval fields
     #[serde(default)]
     required_approvals: Option<i32>,
+    // SupersedePending fields. A checkbox, so absent means false.
+    #[serde(default)]
+    same_branch_only: Option<String>,
 }
 
 async fn create_policy_submit(
@@ -5490,6 +5503,21 @@ async fn create_policy_submit(
             PolicyConfig::Approval {
                 target_environment: target.to_string(),
                 required_approvals: required,
+            }
+        }
+        "supersede_pending" => {
+            let target = form.target_environment.trim();
+            if target.is_empty() {
+                return Err(error_page(
+                    &state,
+                    StatusCode::BAD_REQUEST,
+                    "Invalid request",
+                    "Supersede pending requires a target environment.",
+                ));
+            }
+            PolicyConfig::SupersedePending {
+                target_environment: target.to_string(),
+                same_branch_only: form.same_branch_only.is_some(),
             }
         }
         _ => {
@@ -5664,6 +5692,16 @@ async fn edit_policy_page(
                 required_approvals => required_approvals,
             },
         ),
+        PolicyConfig::SupersedePending {
+            target_environment,
+            same_branch_only,
+        } => (
+            "supersede_pending",
+            context! {
+                target_environment => target_environment,
+                same_branch_only => same_branch_only,
+            },
+        ),
     };
 
     let policy_ctx = context! {
@@ -5727,6 +5765,8 @@ struct EditPolicyForm {
     duration_seconds: Option<i64>,
     #[serde(default)]
     branch_pattern: String,
+    #[serde(default)]
+    same_branch_only: Option<String>,
 }
 
 async fn edit_policy_submit(
@@ -5783,6 +5823,21 @@ async fn edit_policy_submit(
             PolicyConfig::BranchRestriction {
                 target_environment: target.to_string(),
                 branch_pattern: pattern.to_string(),
+            }
+        }
+        "supersede_pending" => {
+            let target = form.target_environment.trim();
+            if target.is_empty() {
+                return Err(error_page(
+                    &state,
+                    StatusCode::BAD_REQUEST,
+                    "Invalid request",
+                    "Supersede pending requires a target environment.",
+                ));
+            }
+            PolicyConfig::SupersedePending {
+                target_environment: target.to_string(),
+                same_branch_only: form.same_branch_only.is_some(),
             }
         }
         _ => {

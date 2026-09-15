@@ -579,6 +579,13 @@ pub enum PolicyConfig {
         target_environment: String,
         required_approvals: i32,
     },
+    /// Deploy the newest pending release for a target and mark the ones it
+    /// overtook SUPERSEDED, rather than grinding through every queued one.
+    /// A selection policy, not a gate — see design/SKIP-TO-LATEST.md.
+    SupersedePending {
+        target_environment: String,
+        same_branch_only: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
