@@ -191,26 +191,43 @@ jobs:
     # Fork PRs get no secrets; the repository guard makes that a clean skip
     # rather than a red X on someone's fork.
     #
-    # ── Deploys are opt-in, not automatic ──────────────────────────────────
+    # ── A push to main is a deploy ─────────────────────────────────────────
     #
-    # This used to fire on every push to main. That made "merge the PR" and
-    # "roll production" the same action, which is wrong for any change that
-    # needs a window: the Mire event-store migration runs schema migrations
-    # from the application's own startup path, so an automatic rolling deploy
-    # would migrate the live database under traffic, with old and new replicas
-    # briefly serving side by side, and no restore point taken first.
+    # Deploys were made opt-in in DATA-739, so that merging and rolling
+    # production stopped being the same action: the Mire event-store
+    # compatibility migration needed a window, and an automatic rolling deploy
+    # would have taken it under traffic.
     #
-    # Merging is now safe on its own. To actually deploy, run this workflow
-    # from the Actions tab (or `gh workflow run ci.yaml --ref main -f
-    # deploy=true`) with `deploy` checked. It rebuilds from the chosen ref and
-    # then rolls both services.
+    # The cost turned out to be worse than the risk it bought. Nothing ever
+    # dispatched the workflow, so main ran a week ahead of production and the
+    # gap grew with every merge — and the first deploy after that week carries
+    # everything at once, which is the larger change, not the smaller one. A
+    # deploy step nobody remembers to press is not a safety control, it is a
+    # queue.
     #
-    # To restore automatic deploys, replace the event/input condition below
-    # with `github.ref == 'refs/heads/main'`.
+    # So merging to main deploys again, deliberately. What that means for the
+    # thing DATA-739 was right to worry about:
+    #
+    #   Forest runs `sqlx::migrate!()` from `State::new`, so every deploy
+    #   migrates the live database from the starting replica while the previous
+    #   one is still serving. That is fine for an additive migration and not
+    #   fine for one that holds a long ACCESS EXCLUSIVE lock — a whole-table
+    #   UPDATE, a SET NOT NULL, or a non-CONCURRENT CREATE INDEX on a big table
+    #   blocks writes for as long as it runs.
+    #
+    #   A migration of that shape does not get to ride a merge. Hold the PR,
+    #   take the snapshot, and run the migration as a one-off from the image
+    #   (`forest-event-migration prepare`, then `mire-migrate`) before the
+    #   application starts — see docs/architecture/mire-migration.md. Then
+    #   merge, and let the deploy be the boring part.
+    #
+    # The manual dispatch stays, for deploying a ref that is not main.
     if: >-
       github.repository == 'understory-io/forest'
-      && github.event_name == 'workflow_dispatch'
-      && inputs.deploy
+      && (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        || (github.event_name == 'workflow_dispatch' && inputs.deploy)
+      )
     runs-on: ubuntu-latest
 
     # Job-level, so a queued deploy waits for the running one instead of
