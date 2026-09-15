@@ -9,6 +9,7 @@ mod notification_consumer;
 mod notification_ingester;
 mod manifest_view;
 mod notification_worker;
+mod http_metrics;
 mod page_timing;
 mod pretty_json;
 mod routes;
@@ -72,6 +73,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::router())
         .nest_service("/static", ServeDir::new("static"))
         .fallback(fallback_404)
+        // `route_layer`, not `layer`: it reads the matched route template out
+        // of the request's extensions, and only a middleware inside the router
+        // sees it. See `http_metrics`.
+        .route_layer(axum::middleware::from_fn(http_metrics::layer))
         // Inside the compression layer on purpose: registered first means
         // innermost, so it sees uncompressed HTML and its placeholder
         // substitution can actually match. See `page_timing`.
