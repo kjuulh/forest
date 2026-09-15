@@ -1,0 +1,39 @@
+{# Start the timeline request while the component bundle is still downloading.
+
+   <release-timeline> fetches what it draws from the JSON API when it mounts,
+   which is *after* the bundle has arrived and parsed. The request and the
+   bundle therefore happen one after the other rather than at the same time,
+   and the gutter sits empty for a round trip longer than it has to.
+
+   This starts the same request during HTML parse and parks the promise where
+   the component picks it up, keyed by URL — see fetchTimeline in
+   frontend/src/lib/api.js, which consumes it once and then goes to the network
+   like normal, so live refreshes are never served a page-load payload.
+
+   It never rejects: a failure resolves to null and the component falls back to
+   fetching normally, so there is still one place that decides what a failed
+   timeline looks like.
+
+   Deliberately *not* the payload inlined into the page. That would remove the
+   request altogether, but it puts the whole timeline back on the server's
+   critical path for every page load — the work deleted in #264 — and on the
+   org-wide page that meant one request per project before the HTML could be
+   sent. This costs the server nothing.
+
+   The URL travels as a data attribute rather than interpolated into the script
+   body: these templates render with autoescaping off, and an attribute has one
+   escaping rule (`|escape`) rather than JavaScript's several. #}
+{% macro timeline_prefetch(org, project) %}
+{% set url = ("/api/orgs/" ~ org ~ "/projects/" ~ project ~ "/timeline") if project else ("/api/orgs/" ~ org ~ "/timeline") %}
+<script data-timeline-url="{{ url|escape }}">
+(function () {
+    var el = document.currentScript;
+    if (!el) return;
+    var url = el.getAttribute("data-timeline-url");
+    var store = (window.__forestTimeline = window.__forestTimeline || {});
+    store[url] = fetch(url, { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; });
+})();
+</script>
+{% endmacro %}
