@@ -32,6 +32,20 @@ use std::sync::OnceLock;
 /// label — anyone can invent paths, and each new one is a new time series.
 const UNMATCHED: &str = "<unmatched>";
 
+/// Bucket boundaries, in seconds, from the OpenTelemetry HTTP semantic
+/// conventions for `http.server.request.duration`.
+///
+/// These have to be stated. The Rust SDK does not apply the spec's recommended
+/// boundaries for a known metric name; it falls back to a default ladder of
+/// `[0, 5, 10, 25, … 10000]`, which is scaled for milliseconds. This metric is
+/// in seconds, so every real request — forage answers most of them in single-
+/// digit milliseconds — landed in the first bucket, and `histogram_quantile`
+/// then reported a p95 of 4.75 *seconds* by interpolating across an empty
+/// range. The metric shipped, and every percentile drawn from it was fiction.
+const DURATION_BUCKETS_SECONDS: &[f64] = &[
+    0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
+];
+
 fn duration_histogram() -> &'static Histogram<f64> {
     static HISTOGRAM: OnceLock<Histogram<f64>> = OnceLock::new();
     HISTOGRAM.get_or_init(|| {
@@ -42,6 +56,7 @@ fn duration_histogram() -> &'static Histogram<f64> {
                  upstream calls and template render.",
             )
             .with_unit("s")
+            .with_boundaries(DURATION_BUCKETS_SECONDS.to_vec())
             .build()
     })
 }
@@ -115,5 +130,28 @@ mod tests {
     #[test]
     fn an_unmatched_request_never_becomes_a_label() {
         assert_eq!(route_label(None), UNMATCHED);
+    }
+
+    // The boundaries are in seconds because the metric is. The SDK's default
+    // ladder tops out at 10000 and starts at 5, which for a seconds-valued
+    // metric means everything forage does lands in one bucket — the first
+    // version of this shipped that way and reported a p95 of 4.75 seconds for
+    // requests it answered in two milliseconds.
+    #[test]
+    fn the_buckets_are_scaled_for_seconds() {
+        let first = DURATION_BUCKETS_SECONDS[0];
+        let last = DURATION_BUCKETS_SECONDS[DURATION_BUCKETS_SECONDS.len() - 1];
+        assert!(
+            first < 0.01,
+            "the smallest bucket is {first}s — too coarse to separate a fast page from a slow one"
+        );
+        assert!(
+            last <= 10.0,
+            "the largest bucket is {last}s, which suggests millisecond boundaries on a seconds metric"
+        );
+        assert!(
+            DURATION_BUCKETS_SECONDS.windows(2).all(|w| w[0] < w[1]),
+            "bucket boundaries must ascend"
+        );
     }
 }
