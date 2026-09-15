@@ -1,17 +1,13 @@
 {% extends "base.html.jinja" %}
+{% from "components/project_settings.html.jinja" import project_settings_layout %}
+
+{# Policies section of the project settings shell. Rows and forms are
+   untouched — new policy types (forest#skip-to-latest) keep rendering
+   here without the shell knowing anything about them. #}
 
 {% block content %}
-<section class="app-container pt-12">
-    <div class="flex items-center justify-between mb-8">
-        <div>
-            <h1 class="text-2xl font-bold">Deployment Policies</h1>
-            <p class="text-sm text-gray-500 mt-1">
-                <a href="/orgs/{{ current_org }}/projects/{{ current_project }}" class="hover:underline">{{ current_project }}</a>
-                &middot; Gate deployments with soak times, branch restrictions, and approvals
-            </p>
-        </div>
-    </div>
-
+{% call project_settings_layout(current_org, current_project, "policies", "Policies",
+                                "Gate deployments with soak times, branch restrictions, and approvals") %}
     {% if policies | length > 0 %}
     <div class="space-y-3 mb-8">
         {% for policy in policies %}
@@ -49,8 +45,8 @@
 
                 {% if is_admin %}
                 <div class="flex items-center gap-2 shrink-0">
-                    <a href="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/policies/{{ policy.id | urlencode }}" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Edit</a>
-                    <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/policies/{{ policy.id | urlencode }}/toggle">
+                    <a href="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/settings/policies/{{ policy.id | urlencode }}" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Edit</a>
+                    <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/settings/policies/{{ policy.id | urlencode }}/toggle">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         {% if policy.enabled %}
                         <button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Disable</button>
@@ -59,7 +55,7 @@
                         <button type="submit" class="text-xs px-2.5 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50">Enable</button>
                         {% endif %}
                     </form>
-                    <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/policies/{{ policy.id | urlencode }}/delete" onsubmit="return confirm('Delete policy &quot;{{ policy.name }}&quot;?')">
+                    <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/settings/policies/{{ policy.id | urlencode }}/delete" onsubmit="return confirm('Delete policy &quot;{{ policy.name }}&quot;?')">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Delete</button>
                     </form>
@@ -81,7 +77,7 @@
     {% if is_admin %}
     <div class="border border-gray-200 rounded-lg p-6">
         <h2 class="text-lg font-semibold mb-4">Create Policy</h2>
-        <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/policies" class="space-y-4" id="policy-form">
+        <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/settings/policies" class="space-y-4" id="policy-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
             <div>
@@ -209,5 +205,5 @@
     })();
     </script>
     {% endif %}
-</section>
+{% endcall %}
 {% endblock %}

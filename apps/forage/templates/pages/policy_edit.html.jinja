@@ -1,18 +1,15 @@
 {% extends "base.html.jinja" %}
+{% from "components/project_settings.html.jinja" import project_settings_layout %}
+
+{# Edit form for one policy — same shell, same back-to-the-section rule as
+   trigger_edit. #}
 
 {% block content %}
-<section class="app-container pt-12">
-    <div class="mb-8">
-        <div class="flex items-center gap-2 text-sm text-gray-500 mb-2">
-            <a href="/orgs/{{ current_org }}/projects/{{ current_project }}/policies" class="hover:underline">Policies</a>
-            <span>&rsaquo;</span>
-            <span>{{ policy.name }}</span>
-        </div>
-        <h1 class="text-2xl font-bold">Edit Policy</h1>
-    </div>
-
+{% call project_settings_layout(current_org, current_project, "policies", "Policies",
+                                "Update the conditions this policy gates on.",
+                                policy.name) %}
     <div class="border border-gray-200 rounded-lg p-6">
-        <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/policies/{{ policy.id | urlencode }}" class="space-y-4">
+        <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/settings/policies/{{ policy.id | urlencode }}" class="space-y-4">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="policy_type" value="{{ policy.policy_type }}">
 
@@ -73,9 +70,9 @@
                 <button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">
                     Save Changes
                 </button>
-                <a href="/orgs/{{ current_org }}/projects/{{ current_project }}/policies" class="text-sm text-gray-500 hover:text-gray-900">Cancel</a>
+                <a href="/orgs/{{ current_org }}/projects/{{ current_project }}/settings/policies" class="text-sm text-gray-500 hover:text-gray-900">Cancel</a>
             </div>
         </form>
     </div>
-</section>
+{% endcall %}
 {% endblock %}

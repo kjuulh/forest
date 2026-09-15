@@ -1588,7 +1588,7 @@ async fn triggers_page_returns_200() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/orgs/testorg/projects/my-api/triggers")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers")
                 .header("cookie", &cookie)
                 .body(Body::empty())
                 .unwrap(),
@@ -1633,7 +1633,7 @@ async fn triggers_page_shows_existing_triggers() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/orgs/testorg/projects/my-api/triggers")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers")
                 .header("cookie", &cookie)
                 .body(Body::empty())
                 .unwrap(),
@@ -1659,7 +1659,7 @@ async fn create_trigger_requires_admin() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/projects/my-api/triggers")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from("csrf_token=test-csrf&name=test-trigger"))
@@ -1680,7 +1680,7 @@ async fn create_trigger_requires_csrf() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/projects/my-api/triggers")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from("csrf_token=wrong-token&name=test-trigger"))
@@ -1701,7 +1701,7 @@ async fn create_trigger_success_redirects() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/projects/my-api/triggers")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from("csrf_token=test-csrf&name=deploy-main&branch_pattern=main&target_environments=staging")
@@ -1713,7 +1713,7 @@ async fn create_trigger_success_redirects() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(
         response.headers().get("location").unwrap(),
-        "/orgs/testorg/projects/my-api/triggers"
+        "/orgs/testorg/projects/my-api/settings/triggers"
     );
 }
 
@@ -1782,7 +1782,7 @@ async fn delete_trigger_success_redirects() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(
         response.headers().get("location").unwrap(),
-        "/orgs/testorg/projects/my-api/triggers"
+        "/orgs/testorg/projects/my-api/settings/triggers"
     );
 }
 
@@ -1797,7 +1797,7 @@ async fn policies_page_returns_200() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/orgs/testorg/projects/my-api/policies")
+                .uri("/orgs/testorg/projects/my-api/settings/policies")
                 .header("cookie", &cookie)
                 .body(Body::empty())
                 .unwrap(),
@@ -1809,7 +1809,11 @@ async fn policies_page_returns_200() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    assert!(html.contains("Deployment Policies"));
+    // The heading is the section name now — "Deployment Policies" moved
+    // into the shell's description line so it reads parallel with the
+    // Triggers / Policies / Pipelines sub-nav.
+    assert!(html.contains("Policies"));
+    assert!(html.contains("Gate deployments with soak times"));
 }
 
 #[tokio::test]
@@ -1822,7 +1826,7 @@ async fn create_policy_requires_admin() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/projects/my-api/policies")
+                .uri("/orgs/testorg/projects/my-api/settings/policies")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from("csrf_token=test-csrf&name=test-policy&policy_type=soak_time"))
@@ -1843,7 +1847,7 @@ async fn create_policy_requires_csrf() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/projects/my-api/policies")
+                .uri("/orgs/testorg/projects/my-api/settings/policies")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from("csrf_token=wrong-token&name=test-policy&policy_type=soak_time"))
@@ -2669,7 +2673,7 @@ async fn delete_trigger_with_non_url_safe_name_succeeds_when_addressed_by_id() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(
         response.headers().get("location").unwrap(),
-        "/orgs/testorg/projects/my-api/triggers"
+        "/orgs/testorg/projects/my-api/settings/triggers"
     );
     // The id resolved to the one rule that holds it — name and all.
     assert_eq!(
@@ -2715,7 +2719,7 @@ async fn edit_trigger_page_with_non_url_safe_name_loads_when_addressed_by_id() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/orgs/testorg/projects/my-api/triggers/11111111-2222-3333-4444-555555555555")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers/11111111-2222-3333-4444-555555555555")
                 .header("cookie", &cookie)
                 .body(Body::empty())
                 .unwrap(),
@@ -2733,7 +2737,7 @@ async fn edit_trigger_page_with_non_url_safe_name_loads_when_addressed_by_id() {
     assert!(html.contains("(feat|feature)&#x2f;.*-to-platform-dev"));
     // ...and the form posts back to the id, not that name.
     assert!(html.contains(
-        "action=\"/orgs/testorg/projects/my-api/triggers/11111111-2222-3333-4444-555555555555\""
+        "action=\"/orgs/testorg/projects/my-api/settings/triggers/11111111-2222-3333-4444-555555555555\""
     ));
 }
 
@@ -2748,7 +2752,7 @@ async fn edit_trigger_submit_with_non_url_safe_name_resolves_id_to_name() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/projects/my-api/triggers/11111111-2222-3333-4444-555555555555")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers/11111111-2222-3333-4444-555555555555")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from(
@@ -2781,7 +2785,7 @@ async fn triggers_page_action_urls_carry_the_id_not_the_name() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/orgs/testorg/projects/my-api/triggers")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers")
                 .header("cookie", &cookie)
                 .body(Body::empty())
                 .unwrap(),
@@ -2794,7 +2798,8 @@ async fn triggers_page_action_urls_carry_the_id_not_the_name() {
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
 
-    let base = "/orgs/testorg/projects/my-api/triggers/11111111-2222-3333-4444-555555555555";
+    let base =
+        "/orgs/testorg/projects/my-api/settings/triggers/11111111-2222-3333-4444-555555555555";
     assert!(html.contains(&format!("{base}/delete")));
     assert!(html.contains(&format!("{base}/toggle")));
     assert!(html.contains(&format!("\"{base}\"")));

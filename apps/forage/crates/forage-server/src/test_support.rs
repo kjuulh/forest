@@ -78,6 +78,7 @@ pub(crate) struct MockPlatformBehavior {
     // that actually came out the far side.
     pub rule_action_calls: Option<Arc<Mutex<Vec<String>>>>,
     pub list_triggers_result: Option<Result<Vec<Trigger>, PlatformError>>,
+    pub list_policies_result: Option<Result<Vec<Policy>, PlatformError>>,
     pub create_trigger_result: Option<Result<Trigger, PlatformError>>,
     pub update_trigger_result: Option<Result<Trigger, PlatformError>>,
     pub delete_trigger_result: Option<Result<(), PlatformError>>,
@@ -913,7 +914,8 @@ impl ForestPlatform for MockPlatformClient {
         _organisation: &str,
         _project: &str,
     ) -> Result<Vec<Policy>, PlatformError> {
-        Ok(vec![])
+        let b = self.behavior.lock().unwrap();
+        b.list_policies_result.clone().unwrap_or(Ok(vec![]))
     }
 
     async fn create_policy(

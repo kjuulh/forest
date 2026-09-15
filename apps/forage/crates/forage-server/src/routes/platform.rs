@@ -113,13 +113,73 @@ pub fn router() -> Router<AppState> {
             "/orgs/{org}/projects/{project}/deploy",
             post(deploy_release),
         )
+        // ── Project settings shell ──────────────────────────────────
+        // Triggers, Policies and Pipelines are sections of one settings
+        // area rather than three standalone pages. The canonical URLs
+        // live under `/settings`; the bare `/triggers`-style paths below
+        // 303 into them so bookmarks and old links survive. Their POST
+        // routes stay mapped to the same submit handlers, so a form or
+        // script still posting to the old path keeps working.
         .route(
-            "/orgs/{org}/projects/{project}/triggers",
+            "/orgs/{org}/projects/{project}/settings",
+            get(project_settings_redirect),
+        )
+        .route(
+            "/orgs/{org}/projects/{project}/settings/triggers",
             get(triggers_page).post(create_trigger_submit),
         )
         .route(
-            "/orgs/{org}/projects/{project}/triggers/{id}",
+            "/orgs/{org}/projects/{project}/settings/triggers/{id}",
             get(edit_trigger_page).post(edit_trigger_submit),
+        )
+        .route(
+            "/orgs/{org}/projects/{project}/settings/triggers/{id}/toggle",
+            post(toggle_trigger),
+        )
+        .route(
+            "/orgs/{org}/projects/{project}/settings/triggers/{id}/delete",
+            post(delete_trigger),
+        )
+        .route(
+            "/orgs/{org}/projects/{project}/settings/policies",
+            get(policies_page).post(create_policy_submit),
+        )
+        .route(
+            "/orgs/{org}/projects/{project}/settings/policies/{id}",
+            get(edit_policy_page).post(edit_policy_submit),
+        )
+        .route(
+            "/orgs/{org}/projects/{project}/settings/policies/{id}/toggle",
+            post(toggle_policy),
+        )
+        .route(
+            "/orgs/{org}/projects/{project}/settings/policies/{id}/delete",
+            post(delete_policy),
+        )
+        .route(
+            "/orgs/{org}/projects/{project}/settings/pipelines",
+            get(pipelines_page).post(create_pipeline_submit),
+        )
+        .route(
+            "/orgs/{org}/projects/{project}/settings/pipelines/{id}/toggle",
+            post(toggle_pipeline),
+        )
+        .route(
+            "/orgs/{org}/projects/{project}/settings/pipelines/{id}/update",
+            post(update_pipeline_submit),
+        )
+        .route(
+            "/orgs/{org}/projects/{project}/settings/pipelines/{id}/delete",
+            post(delete_pipeline),
+        )
+        // Legacy standalone URLs — GET redirects into the shell above.
+        .route(
+            "/orgs/{org}/projects/{project}/triggers",
+            get(triggers_redirect).post(create_trigger_submit),
+        )
+        .route(
+            "/orgs/{org}/projects/{project}/triggers/{id}",
+            get(edit_trigger_redirect).post(edit_trigger_submit),
         )
         .route(
             "/orgs/{org}/projects/{project}/triggers/{id}/toggle",
@@ -131,11 +191,11 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/orgs/{org}/projects/{project}/policies",
-            get(policies_page).post(create_policy_submit),
+            get(policies_redirect).post(create_policy_submit),
         )
         .route(
             "/orgs/{org}/projects/{project}/policies/{id}",
-            get(edit_policy_page).post(edit_policy_submit),
+            get(edit_policy_redirect).post(edit_policy_submit),
         )
         .route(
             "/orgs/{org}/projects/{project}/policies/{id}/toggle",
@@ -155,7 +215,7 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/orgs/{org}/projects/{project}/pipelines",
-            get(pipelines_page).post(create_pipeline_submit),
+            get(pipelines_redirect).post(create_pipeline_submit),
         )
         .route(
             "/orgs/{org}/projects/{project}/pipelines/{id}/toggle",
@@ -4604,6 +4664,61 @@ async fn resolve_pipeline_name(
         })
 }
 
+// ─── Project settings shell ─────────────────────────────────────────
+//
+// `/orgs/{org}/projects/{project}/settings` is the project's release
+// configuration: Triggers, Policies and Pipelines under one header, one
+// sub-nav and one breadcrumb (see
+// `templates/components/project_settings.html.jinja`). Before this they
+// were three standalone pages with no shared chrome and no way back to
+// the project — you had to know the URL, and once there, retype it.
+//
+// `/settings` itself has no content of its own, so it 303s to the first
+// section rather than rendering an empty hub. Triggers leads because it
+// is the one people reach for most.
+
+async fn project_settings_redirect(Path((org, project)): Path<(String, String)>) -> Response {
+    Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/triggers")).into_response()
+}
+
+/// The legacy standalone section URLs. GET 303s into the settings shell;
+/// the POST routes on the same paths still reach the original submit
+/// handlers, so nothing that already posts there breaks.
+async fn triggers_redirect(Path((org, project)): Path<(String, String)>) -> Response {
+    Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/triggers")).into_response()
+}
+
+async fn policies_redirect(Path((org, project)): Path<(String, String)>) -> Response {
+    Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/policies")).into_response()
+}
+
+async fn pipelines_redirect(Path((org, project)): Path<(String, String)>) -> Response {
+    Redirect::to(&format!(
+        "/orgs/{org}/projects/{project}/settings/pipelines"
+    ))
+    .into_response()
+}
+
+async fn edit_trigger_redirect(
+    Path((org, project, id)): Path<(String, String, String)>,
+) -> Response {
+    Redirect::to(&format!(
+        "/orgs/{org}/projects/{project}/settings/triggers/{}",
+        urlencoding::encode(&id)
+    ))
+    .into_response()
+}
+
+async fn edit_policy_redirect(
+    Path((org, project, id)): Path<(String, String, String)>,
+) -> Response {
+    Redirect::to(&format!(
+        "/orgs/{org}/projects/{project}/settings/policies/{}",
+        urlencoding::encode(&id)
+    ))
+    .into_response()
+}
+
 // ─── Triggers (auto-release triggers) ───────────────────────────────
 
 async fn triggers_page(
@@ -4695,14 +4810,18 @@ async fn triggers_page(
         .render(
             "pages/triggers.html.jinja",
             context! {
-                page_title => format!("Triggers · {} · {}", project, org),
+                title => format!("Triggers - {project} - {org} - Forest"),
+                description => format!("Release triggers for {project} in {org}"),
                 user => context! {
                     username => session.user.username,
                 },
                 csrf_token => session.csrf_token,
                 orgs => orgs_context(orgs),
-                current_org => org,
-                current_project => project,
+                current_org => &org,
+                current_project => &project,
+                org_name => &org,
+                project_name => &project,
+                active_tab => "project_settings",
                 projects => projects,
                 triggers => trigger_items,
                 environments => env_options,
@@ -4830,7 +4949,7 @@ async fn create_trigger_submit(
         .await
         .map_err(|e| internal_error(&state, "failed to create trigger", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/triggers")).into_response())
+    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/triggers")).into_response())
 }
 
 #[derive(Deserialize)]
@@ -4880,7 +4999,7 @@ async fn toggle_trigger(
         .await
         .map_err(|e| internal_error(&state, "failed to toggle trigger", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/triggers")).into_response())
+    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/triggers")).into_response())
 }
 
 #[derive(Deserialize)]
@@ -4915,7 +5034,7 @@ async fn delete_trigger(
         .await
         .map_err(|e| internal_error(&state, "failed to delete trigger", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/triggers")).into_response())
+    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/triggers")).into_response())
 }
 
 async fn edit_trigger_page(
@@ -4999,14 +5118,18 @@ async fn edit_trigger_page(
         .render(
             "pages/trigger_edit.html.jinja",
             context! {
-                page_title => format!("Edit Trigger · {} · {}", trigger.name, org),
+                title => format!("Edit trigger {} - {project} - {org} - Forest", trigger.name),
+                description => format!("Edit trigger {} for {project} in {org}", trigger.name),
                 user => context! {
                     username => session.user.username,
                 },
                 csrf_token => session.csrf_token,
                 orgs => orgs_context(orgs),
-                current_org => org,
-                current_project => project,
+                current_org => &org,
+                current_project => &project,
+                org_name => &org,
+                project_name => &project,
+                active_tab => "project_settings",
                 projects => projects,
                 trigger => trigger_ctx,
                 environments => env_options,
@@ -5108,7 +5231,7 @@ async fn edit_trigger_submit(
         .await
         .map_err(|e| internal_error(&state, "failed to update trigger", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/triggers")).into_response())
+    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/triggers")).into_response())
 }
 
 // ─── Policies (deployment gating) ──────────────────────────────────
@@ -5211,14 +5334,18 @@ async fn policies_page(
         .render(
             "pages/policies.html.jinja",
             context! {
-                page_title => format!("Policies · {} · {}", project, org),
+                title => format!("Policies - {project} - {org} - Forest"),
+                description => format!("Deployment policies for {project} in {org}"),
                 user => context! {
                     username => session.user.username,
                 },
                 csrf_token => session.csrf_token,
                 orgs => orgs_context(orgs),
-                current_org => org,
-                current_project => project,
+                current_org => &org,
+                current_project => &project,
+                org_name => &org,
+                project_name => &project,
+                active_tab => "project_settings",
                 projects => projects,
                 policies => policy_items,
                 environments => env_options,
@@ -5386,7 +5513,7 @@ async fn create_policy_submit(
         .await
         .map_err(|e| internal_error(&state, "failed to create policy", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/policies")).into_response())
+    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/policies")).into_response())
 }
 
 #[derive(Deserialize)]
@@ -5428,7 +5555,7 @@ async fn toggle_policy(
         .await
         .map_err(|e| internal_error(&state, "failed to toggle policy", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/policies")).into_response())
+    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/policies")).into_response())
 }
 
 #[derive(Deserialize)]
@@ -5463,7 +5590,7 @@ async fn delete_policy(
         .await
         .map_err(|e| internal_error(&state, "failed to delete policy", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/policies")).into_response())
+    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/policies")).into_response())
 }
 
 async fn edit_policy_page(
@@ -5565,14 +5692,18 @@ async fn edit_policy_page(
         .render(
             "pages/policy_edit.html.jinja",
             context! {
-                page_title => format!("Edit Policy · {} · {}", policy.name, org),
+                title => format!("Edit policy {} - {project} - {org} - Forest", policy.name),
+                description => format!("Edit policy {} for {project} in {org}", policy.name),
                 user => context! {
                     username => session.user.username,
                 },
                 csrf_token => session.csrf_token,
                 orgs => orgs_context(orgs),
-                current_org => org,
-                current_project => project,
+                current_org => &org,
+                current_project => &project,
+                org_name => &org,
+                project_name => &project,
+                active_tab => "project_settings",
                 projects => projects,
                 policy => policy_ctx,
                 environments => env_options,
@@ -5675,7 +5806,7 @@ async fn edit_policy_submit(
         .await
         .map_err(|e| internal_error(&state, "failed to update policy", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/policies")).into_response())
+    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/policies")).into_response())
 }
 
 // ─── Release Pipelines ──────────────────────────────────────────────
@@ -5732,14 +5863,18 @@ async fn pipelines_page(
         .render(
             "pages/pipelines.html.jinja",
             context! {
-                page_title => format!("Pipelines · {} · {}", project, org),
+                title => format!("Pipelines - {project} - {org} - Forest"),
+                description => format!("Release pipelines for {project} in {org}"),
                 user => context! {
                     username => session.user.username,
                 },
                 csrf_token => session.csrf_token,
                 orgs => orgs_context(orgs),
-                current_org => org,
-                current_project => project,
+                current_org => &org,
+                current_project => &project,
+                org_name => &org,
+                project_name => &project,
+                active_tab => "project_settings",
                 projects => projects,
                 pipelines => pipeline_items,
                 is_admin => is_admin,
@@ -5811,7 +5946,10 @@ async fn create_pipeline_submit(
         .await
         .map_err(|e| internal_error(&state, "failed to create pipeline", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/pipelines")).into_response())
+    Ok(Redirect::to(&format!(
+        "/orgs/{org}/projects/{project}/settings/pipelines"
+    ))
+    .into_response())
 }
 
 #[derive(Deserialize)]
@@ -5854,7 +5992,10 @@ async fn toggle_pipeline(
         .await
         .map_err(|e| internal_error(&state, "failed to toggle pipeline", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/pipelines")).into_response())
+    Ok(Redirect::to(&format!(
+        "/orgs/{org}/projects/{project}/settings/pipelines"
+    ))
+    .into_response())
 }
 
 #[derive(Deserialize)]
@@ -5910,7 +6051,10 @@ async fn update_pipeline_submit(
         .await
         .map_err(|e| internal_error(&state, "failed to update pipeline", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/pipelines")).into_response())
+    Ok(Redirect::to(&format!(
+        "/orgs/{org}/projects/{project}/settings/pipelines"
+    ))
+    .into_response())
 }
 
 #[derive(Deserialize)]
@@ -5946,7 +6090,10 @@ async fn delete_pipeline(
         .await
         .map_err(|e| internal_error(&state, "failed to delete pipeline", &e))?;
 
-    Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/pipelines")).into_response())
+    Ok(Redirect::to(&format!(
+        "/orgs/{org}/projects/{project}/settings/pipelines"
+    ))
+    .into_response())
 }
 
 fn non_empty(s: &str) -> Option<String> {
