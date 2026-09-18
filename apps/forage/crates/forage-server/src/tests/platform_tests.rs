@@ -1018,6 +1018,125 @@ async fn artifact_detail_shows_enriched_data() {
     assert!(html.contains("Major release"));
 }
 
+/// A release whose pipeline is parked on a plan, so the page has something to
+/// ask about and something to show.
+fn awaiting_plan_fixture(plan: &str) -> MockPlatformBehavior {
+    use forage_core::platform::{PipelineRunStageState, ReleaseIntentState};
+
+    MockPlatformBehavior {
+        get_artifact_by_slug_result: Some(Ok(Artifact {
+            artifact_id: "art-plan".into(),
+            slug: "my-api-plan".into(),
+            context: ArtifactContext {
+                title: "Adopt the configuration".into(),
+                description: None,
+                web: None,
+                pr: None,
+            },
+            source: None,
+            git_ref: None,
+            destinations: vec![],
+            created_at: "2026-03-07T12:00:00Z".into(),
+        })),
+        get_release_intent_states_result: Some(Ok(vec![ReleaseIntentState {
+            release_intent_id: "intent-plan".into(),
+            artifact_id: "art-plan".into(),
+            project: "my-api".into(),
+            created_at: "2026-03-07T12:00:00Z".into(),
+            stages: vec![PipelineRunStageState {
+                stage_id: "plan-finance".into(),
+                stage_type: "plan".into(),
+                status: "AWAITING_APPROVAL".into(),
+                environment: Some("finance".into()),
+                approval_status: Some("AWAITING_APPROVAL".into()),
+                started_at: Some("2026-03-07T12:00:05Z".into()),
+                ..Default::default()
+            }],
+            steps: vec![],
+        }])),
+        get_plan_output_result: Some(Ok(forage_core::platform::PlanOutput {
+            plan_output: plan.into(),
+            status: "SUCCEEDED".into(),
+            outputs: vec![],
+        })),
+        ..Default::default()
+    }
+}
+
+async fn artifact_detail_html(behavior: MockPlatformBehavior) -> String {
+    let platform = MockPlatformClient::with_behavior(behavior);
+    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects/my-api/releases/my-api-plan")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    String::from_utf8(body.to_vec()).unwrap()
+}
+
+/// The point of a plan stage is that somebody reads the plan. This page carries
+/// the approve button, so it has to carry the plan too -- the swimlane's "View
+/// plan" button is somewhere else, and asking for agreement to an unseen change
+/// is the failure this guards against.
+#[tokio::test]
+async fn a_plan_awaiting_approval_is_shown_on_the_page_that_approves_it() {
+    let html = artifact_detail_html(awaiting_plan_fixture(
+        "impact: 3 participants change, total delta 1200",
+    ))
+    .await;
+
+    assert!(html.contains("Approve plan"), "the ask should be there");
+    assert!(
+        html.contains("impact: 3 participants change, total delta 1200"),
+        "the plan being approved should be on the page, got: {html}"
+    );
+}
+
+/// Not behind a click while it is the open question. A plan people have to
+/// expand is a plan people approve without reading.
+#[tokio::test]
+async fn a_plan_awaiting_approval_is_open_rather_than_collapsed() {
+    let html = artifact_detail_html(awaiting_plan_fixture("would change nothing")).await;
+    let details = html
+        .split("<details data-plan-output")
+        .nth(1)
+        .expect("the plan should render in a details element of its own");
+    let opening_tag = details.split('>').next().unwrap_or_default();
+    assert!(
+        opening_tag.contains("open"),
+        "a plan awaiting approval should be expanded, got: {opening_tag}"
+    );
+}
+
+/// An empty plan is not a plan. Rendering the chrome for one would say a
+/// provider reported something when it reported nothing.
+#[tokio::test]
+async fn a_stage_with_no_plan_output_renders_no_plan() {
+    let mut behavior = awaiting_plan_fixture("");
+    behavior.get_plan_output_result = Some(Ok(forage_core::platform::PlanOutput {
+        plan_output: "   \n  ".into(),
+        status: "SUCCEEDED".into(),
+        outputs: vec![],
+    }));
+    let html = artifact_detail_html(behavior).await;
+    assert!(
+        !html.contains("<details data-plan-output"),
+        "blank plan output should render nothing, got: {html}"
+    );
+}
+
 #[tokio::test]
 async fn artifact_detail_not_found_returns_404() {
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {

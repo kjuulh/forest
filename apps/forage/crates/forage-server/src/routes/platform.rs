@@ -1353,6 +1353,36 @@ async fn artifact_detail(
             } else {
                 base_status
             };
+            // A plan stage is the one place this page asks somebody to agree
+            // to something, and until DATA-863 it asked without showing what.
+            // The swimlane had a "View plan" button; this page, the one the
+            // approve link in Slack opens, rendered the stage row and nothing
+            // else -- so a reviewer approved a plan they had to go and find.
+            //
+            // Fetched per stage rather than once for the release because the
+            // output is recorded against the stage, and a pipeline may plan
+            // more than one environment. A failure is not fatal: an
+            // unreachable plan is a page without a plan on it, which is what
+            // there was before, and never a page that will not load.
+            let plan_output = if rs.stage_type == "plan" {
+                match state
+                    .platform_client
+                    .get_plan_output(&session.access_token, &ri.release_intent_id, &rs.stage_id)
+                    .await
+                {
+                    Ok(plan) => Some(plan.plan_output).filter(|output| !output.trim().is_empty()),
+                    Err(error) => {
+                        tracing::warn!(
+                            error = %error,
+                            stage_id = %rs.stage_id,
+                            "plan output unavailable for stage"
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
             pipeline_stages.push(context! {
                 id => rs.stage_id,
                 stage_type => rs.stage_type,
@@ -1364,6 +1394,7 @@ async fn artifact_detail(
                 error_message => rs.error_message,
                 wait_until => rs.wait_until,
                 approval_status => rs.approval_status,
+                plan_output => plan_output,
             });
         }
     }

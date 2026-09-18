@@ -139,6 +139,7 @@
         <h2 class="text-sm font-semibold text-gray-900 mb-3">Pipeline</h2>
         <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
             {% for stage in pipeline_stages %}
+            <div>
             <div class="px-4 py-3 flex items-center gap-3 text-sm {{ 'opacity-50' if stage.status == 'PENDING' else '' }}">
                 {# Status icon #}
                 {% if stage.status == "SUCCEEDED" %}
@@ -203,6 +204,23 @@
                 {% if stage.error_message %}
                 <span class="text-xs text-red-600 ml-auto">{{ stage.error_message }}</span>
                 {% endif %}
+            </div>
+
+            {#
+              What the approve button above actually approves.
+
+              Open by default while the stage is waiting, because a plan behind
+              a click is a plan people approve without reading, and a plan stage
+              exists for exactly one reason: somebody reads it first. Collapsed
+              once it has been decided -- then it is history, and the page is
+              about what happens next.
+            #}
+            {% if stage.plan_output %}
+            <details data-plan-output class="px-4 pb-3" {% if stage.status == "AWAITING_APPROVAL" or stage.approval_status == "AWAITING_APPROVAL" or stage.approval_status == "AWAITINGAPPROVAL" %}open{% endif %}>
+                <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700 select-none">Plan</summary>
+                <pre class="mt-2 p-3 rounded-md bg-gray-50 border border-gray-200 text-xs text-gray-800 whitespace-pre-wrap break-words overflow-x-auto">{{ stage.plan_output }}</pre>
+            </details>
+            {% endif %}
             </div>
             {% endfor %}
         </div>
