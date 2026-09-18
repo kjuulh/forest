@@ -309,6 +309,51 @@ try {
     await page.waitForTimeout(400);
   }
 
+  // A failed placement says that it failed and where to go, and nowhere on this
+  // page does it paste the provider's sentence in.
+  //
+  // The row is a nowrap flex line of fixed-size parts, and a chained provider
+  // error runs to a few hundred characters: rendered inline it wrapped inside
+  // the row and turned one placement into a paragraph -- the same shape of bug
+  // the release page had. Hence both halves of this check: the link is there,
+  // and the row is still one line tall.
+  {
+    const section = page.locator('section[data-fixture="partial-rollout"]');
+    await section.locator("details.rt-details").first().evaluate((d) => { d.open = true; });
+    await page.waitForTimeout(200);
+
+    const row = section.locator(".rt-destination", { hasText: "us-east-1" }).first();
+    const why = row.locator("a.rt-why");
+
+    if ((await why.count()) !== 1) {
+      failures.push(`failed placement: expected one "Why it failed" link, got ${await why.count()}`);
+    } else {
+      const href = await why.getAttribute("href");
+      if (!/\/releases\/partial-rollout$/.test(href || "")) {
+        failures.push(`failed placement: link should reach the release page, got "${href}"`);
+      }
+    }
+
+    const text = await row.innerText();
+    if (text.includes("exact decimal string") || text.includes("provider reported failure")) {
+      failures.push(`failed placement: the provider's message is pasted into the lane — "${text}"`);
+    }
+
+    // One line. `.rt-destination` is 11.5px at line-height 1.7 plus 1px of
+    // padding either side, so anything past ~30px means something wrapped.
+    const height = await row.evaluate((el) => el.getBoundingClientRect().height);
+    if (height > 30) {
+      failures.push(`failed placement: row grew to ${height.toFixed(1)}px — something wrapped inside it`);
+    }
+
+    // The hover checks above left a bubble open over the card.
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(200);
+    await section.screenshot({ path: join(SHOTS, "partial-rollout-failed-placement.png") });
+    await section.locator("details.rt-details").first().evaluate((d) => { d.open = false; });
+    await page.waitForTimeout(200);
+  }
+
   for (const f of FIXTURES) {
     const o = observed[f.key];
     if (!o) { failures.push(`${f.key}: not rendered`); continue; }

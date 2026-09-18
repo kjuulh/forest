@@ -1399,7 +1399,10 @@
                               <span class="rt-chip rt-chip-attention">{waiting}</span>
                             {/each}
                           {:else if stageStatus === "FAILED" && stage.error_message}
-                            <span class="rt-stage-error">{stage.error_message}</span>
+                            <a
+                              class="rt-why"
+                              href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}"
+                            >Why it failed</a>
                           {/if}
                         {/if}
 
@@ -1431,8 +1434,20 @@
                                 {#if row?.queue_position}
                                   <span class="rt-mono rt-muted">#{row.queue_position}</span>
                                 {/if}
+                                <!-- The reason, not the reason's text. A
+                                     provider error is a chained sentence a few
+                                     hundred characters long, and this row is a
+                                     nowrap flex line: pasted in, it wrapped
+                                     inside the row and turned one placement
+                                     into a paragraph. The swim lane's job is
+                                     that something failed and where to go —
+                                     the release page renders the message in
+                                     full. -->
                                 {#if row?.error_message}
-                                  <span class="rt-stage-error">{row.error_message}</span>
+                                  <a
+                                    class="rt-why"
+                                    href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}"
+                                  >Why it failed</a>
                                 {/if}
                                 {#if row?.completed_at}
                                   <time class="rt-dest-time">{timeAgo(row.completed_at)}</time>
@@ -2326,9 +2341,17 @@
     color: var(--ink-faint);
   }
 
-  .rt-stage-error {
+  /* The way out of a failure, in the space the failure text used to take. */
+  .rt-why {
     font-size: 11.5px;
     color: var(--sig-fail);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .rt-why:hover,
+  .rt-why:focus-visible {
+    border-bottom-color: currentColor;
   }
 
   /* ── Destinations ──────────────────────────────────────────────────────── */

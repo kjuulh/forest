@@ -33,6 +33,17 @@ const wait = (seconds, status) => ({
   id: `wait-${seconds}`, stage_type: "wait", duration_seconds: seconds, status,
 });
 
+// A real provider failure, kept at its real length. The swim lane must not
+// render this text -- it is a nowrap flex row, and a few hundred characters of
+// chained error turns one placement into a paragraph. The lane says that it
+// failed and links to the release page, which renders the message in full.
+export const PROVIDER_ERROR =
+  'provider reported failure: compare the candidate configuration at ' +
+  'https://commission-next.finance.understory.sh/admin/commission/compare?format=json&candidate_ref=main: ' +
+  'https://commission-next.finance.understory.sh/admin/commission/compare?format=json&candidate_ref=main ' +
+  'returned 500 Internal Server Error: comparison failed: source "sdr_revenue" ' +
+  'row 0 column "revenue_bloom_eur" must be an exact decimal string';
+
 export const FIXTURES = [
   {
     key: "complete",
@@ -230,7 +241,7 @@ export const FIXTURES = [
         dest("staging", "SUCCEEDED", true),
         dest("prod", "SUCCEEDED", true, "prod-eu-north-1"),
         dest("prod", "SUCCEEDED", true, "prod-eu-west-1"),
-        dest("prod", "FAILED", false, "prod-us-east-1"),
+        { ...dest("prod", "FAILED", false, "prod-us-east-1"), error_message: PROVIDER_ERROR },
       ],
       pipeline_stages: [
         deploy("dev", "SUCCEEDED"),
