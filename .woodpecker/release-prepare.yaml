@@ -43,9 +43,13 @@ steps:
           v*) ;;
           *) echo "RELEASE_TAG must be a v-prefixed release tag"; exit 1 ;;
         esac
-        # `--current` requires the checked-out commit to carry the release tag,
-        # so a manual run still fails safely if RELEASE_TAG and HEAD diverge.
-        git-cliff --current --strip header > RELEASE_NOTES.md
+        if [ -n "$${RELEASE_BASE:-}" ]; then
+          git-cliff "$${RELEASE_BASE}..HEAD" --tag "$$tag" --strip header > RELEASE_NOTES.md
+        else
+          # `--current` requires the checked-out commit to carry the release
+          # tag, so a manual run still fails if RELEASE_TAG and HEAD diverge.
+          git-cliff --current --strip header > RELEASE_NOTES.md
+        fi
 
   create-release:
     image: alpine:3.20
@@ -77,18 +81,20 @@ steps:
             "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases" >/dev/null
           echo "Created release for $$tag"
         fi
-      # Upload install.sh. Gitea returns 422 if an asset with the
-      # same name already exists (e.g. pipeline retry) — swallow
-      # that and keep going.
+      # Replace prior copies so a release rerun leaves exactly one installer.
       - |
         tag="$${CI_COMMIT_TAG:-$${RELEASE_TAG:-}}"
-        release_id=$(curl -fsS -H "Authorization: token $GITEA_TOKEN" \
-          "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/tags/$$tag" | jq -r .id)
-        if curl -fsS -X POST \
-            -H "Authorization: token $GITEA_TOKEN" \
-            -F "attachment=@scripts/install.sh" \
-            "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/$$release_id/assets?name=install.sh" >/dev/null; then
-          echo "Uploaded install.sh"
-        else
-          echo "install.sh upload skipped (already attached)"
-        fi
+        release=$(curl -fsS -H "Authorization: token $GITEA_TOKEN" \
+          "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/tags/$$tag")
+        release_id=$(echo "$$release" | jq -r .id)
+        echo "$$release" | jq -r '.assets[] | select(.name == "install.sh") | .id' |
+          while read -r asset_id; do
+            curl -fsS -X DELETE \
+              -H "Authorization: token $GITEA_TOKEN" \
+              "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/$$release_id/assets/$$asset_id" >/dev/null
+          done
+        curl -fsS -X POST \
+          -H "Authorization: token $GITEA_TOKEN" \
+          -F "attachment=@scripts/install.sh" \
+          "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/$$release_id/assets?name=install.sh" >/dev/null
+        echo "Uploaded install.sh"

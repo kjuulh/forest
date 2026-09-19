@@ -66,20 +66,24 @@ steps:
       - apk add --no-cache curl jq
       - |
         release_tag="$${CI_COMMIT_TAG:-$${RELEASE_TAG:-}}"
-        release_id=$(curl -fsS -H "Authorization: token $GITEA_TOKEN" \
-          "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/tags/$$release_tag" | jq -r .id)
+        release=$(curl -fsS -H "Authorization: token $GITEA_TOKEN" \
+          "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/tags/$$release_tag")
+        release_id=$(echo "$$release" | jq -r .id)
         echo "Uploading ${TARGET} artifacts to release $$release_id"
-        # Gitea returns 422 on duplicate asset names. Swallow so a
-        # retry on partial-success doesn't fail the pipeline.
         for f in \
           release-artifacts/forest-$${release_tag}-${TARGET}.tar.gz \
           release-artifacts/forest-$${release_tag}-${TARGET}.tar.gz.sha256; do
-          if curl -fsS -X POST \
-              -H "Authorization: token $GITEA_TOKEN" \
-              -F "attachment=@$$f" \
-              "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/$$release_id/assets?name=$$(basename "$$f")" >/dev/null; then
-            echo "Uploaded $$(basename "$$f")"
-          else
-            echo "$$(basename "$$f") upload skipped (already attached)"
-          fi
+          asset_name=$$(basename "$$f")
+          echo "$$release" | jq -r --arg name "$$asset_name" \
+            '.assets[] | select(.name == $name) | .id' |
+            while read -r asset_id; do
+              curl -fsS -X DELETE \
+                -H "Authorization: token $GITEA_TOKEN" \
+                "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/$$release_id/assets/$$asset_id" >/dev/null
+            done
+          curl -fsS -X POST \
+            -H "Authorization: token $GITEA_TOKEN" \
+            -F "attachment=@$$f" \
+            "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/$$release_id/assets?name=$$asset_name" >/dev/null
+          echo "Uploaded $$asset_name"
         done
