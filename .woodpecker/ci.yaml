@@ -53,14 +53,14 @@ steps:
       # Single platform — routed to the matching agent by the
       # `platform` label above. No QEMU emulation.
       platforms: linux/${ARCH}
-      # Per-arch cache. Separate caches per arch avoid cross-arch
-      # pollution and keep each cache focused on what its runner builds.
-      cache_images:
-        - git.kjuulh.io/kjuulh/${APP}:buildcache-${ARCH}
+      # Rust compilation is already shared through sccache above. Avoid a
+      # second BuildKit registry cache: Gitea returns HTTP 500 while committing
+      # the large cache manifest, which marks otherwise-successful image pushes
+      # as failed.
       # Per-arch tags only. The manifest.yaml workflow consumes these
       # and emits the user-facing multi-arch tags (latest, rawpotion,
       # rawpotion-<sha>, etc.).
       tags:
         - rawpotion-${ARCH}
-        - rawpotion-${ARCH}-${CI_COMMIT_SHA_SHORT}
+        - rawpotion-${ARCH}-${CI_COMMIT_SHA}
       auto_tag: false

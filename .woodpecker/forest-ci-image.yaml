@@ -41,5 +41,5 @@ steps:
         - git.kjuulh.io/kjuulh/forest-ci:buildcache-${ARCH}
       tags:
         - rawpotion-${ARCH}
-        - rawpotion-${ARCH}-${CI_COMMIT_SHA_SHORT}
+        - rawpotion-${ARCH}-${CI_COMMIT_SHA}
       auto_tag: false

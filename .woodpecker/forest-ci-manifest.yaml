@@ -21,7 +21,6 @@ steps:
         docker buildx imagetools create
         -t git.kjuulh.io/kjuulh/forest-ci:latest
         -t git.kjuulh.io/kjuulh/forest-ci:rawpotion
-        -t git.kjuulh.io/kjuulh/forest-ci:rawpotion-${CI_COMMIT_SHA_SHORT}
         -t git.kjuulh.io/kjuulh/forest-ci:rawpotion-${CI_COMMIT_SHA}
-        git.kjuulh.io/kjuulh/forest-ci:rawpotion-amd64-${CI_COMMIT_SHA_SHORT}
-        git.kjuulh.io/kjuulh/forest-ci:rawpotion-arm64-${CI_COMMIT_SHA_SHORT}
+        git.kjuulh.io/kjuulh/forest-ci:rawpotion-amd64-${CI_COMMIT_SHA}
+        git.kjuulh.io/kjuulh/forest-ci:rawpotion-arm64-${CI_COMMIT_SHA}

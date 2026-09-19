@@ -30,9 +30,8 @@ steps:
         docker buildx imagetools create
         -t git.kjuulh.io/kjuulh/${APP}:latest
         -t git.kjuulh.io/kjuulh/${APP}:rawpotion
-        -t git.kjuulh.io/kjuulh/${APP}:rawpotion-${CI_COMMIT_SHA_SHORT}
         -t git.kjuulh.io/kjuulh/${APP}:rawpotion-${CI_COMMIT_SHA}
         -t git.kjuulh.io/kjuulh/${APP}:rawpotion-build${CI_PIPELINE_NUMBER}
         -t git.kjuulh.io/kjuulh/${APP}:rawpotion-ts${CI_PIPELINE_CREATED}
-        git.kjuulh.io/kjuulh/${APP}:rawpotion-amd64-${CI_COMMIT_SHA_SHORT}
-        git.kjuulh.io/kjuulh/${APP}:rawpotion-arm64-${CI_COMMIT_SHA_SHORT}
+        git.kjuulh.io/kjuulh/${APP}:rawpotion-amd64-${CI_COMMIT_SHA}
+        git.kjuulh.io/kjuulh/${APP}:rawpotion-arm64-${CI_COMMIT_SHA}
