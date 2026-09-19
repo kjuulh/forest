@@ -731,6 +731,18 @@ async fn run_local(
 
 // ====== GIT MODE ======
 
+const MAX_PUSH_ATTEMPTS: usize = 3;
+
+struct GitopsMutation<'a> {
+    meta: &'a FluxMetadata,
+    manifest_files: &'a [(String, String)],
+    forest_metadata: &'a ForestMetadataFiles,
+    env: &'a str,
+    destination_name: &'a str,
+    project: &'a str,
+    identity: Option<&'a crate::backend::ReleaseIdentity>,
+}
+
 async fn run_git(
     backend: &dyn DestinationBackend,
     meta: &FluxMetadata,
@@ -746,7 +758,6 @@ async fn run_git(
     let git_env = meta.git_env();
     let effective_url = meta.effective_git_url()?;
 
-    // Step 1: Clone
     backend.log_stdout(&format!(
         "[flux@1] cloning gitops repo (branch: {})",
         meta.git_branch
@@ -770,56 +781,23 @@ async fn run_git(
     .context("git clone")?;
 
     let repo_dir = clone_dir.join("repo");
+    let mutation = GitopsMutation {
+        meta,
+        manifest_files,
+        forest_metadata,
+        env,
+        destination_name,
+        project,
+        identity,
+    };
+    apply_gitops_mutation(backend, &repo_dir, &mutation).await?;
 
-    let releases_rel = meta.releases_path(env, destination_name, project);
-    let clusters_dir_rel = meta.clusters_dir(env, destination_name);
-
-    let releases_abs = repo_dir.join(&releases_rel);
-    let clusters_dir_abs = repo_dir.join(&clusters_dir_rel);
-
-    // Step 2: Clear and write release manifests + .forest/ metadata
-    if releases_abs.exists() {
-        tokio::fs::remove_dir_all(&releases_abs).await?;
-    }
-    tokio::fs::create_dir_all(&releases_abs).await?;
-    write_manifest_files(&releases_abs, manifest_files).await?;
-    write_forest_metadata(&releases_abs, forest_metadata).await?;
-    FluxV1Handler::write_releases_kustomize_yaml(&releases_abs, manifest_files).await?;
-
-    // Step 3: Write Flux CR as <project>.yaml and regenerate kustomization.yaml
-    tokio::fs::create_dir_all(&clusters_dir_abs).await?;
-    let kustomization_cr =
-        FluxV1Handler::generate_kustomization_cr(&meta.namespace, project, &releases_rel, identity);
-    let cr_filename = format!("{project}.yaml");
-    tokio::fs::write(
-        clusters_dir_abs.join(&cr_filename),
-        kustomization_cr.as_bytes(),
-    )
-    .await?;
-    FluxV1Handler::write_notification_crs(&clusters_dir_abs, meta, project, backend).await?;
-    FluxV1Handler::write_kustomize_yaml(&clusters_dir_abs).await?;
-
-    // Step 4: Stage changes
-    run_command(backend, &repo_dir, &["add", "-A"], &git_env)
-        .await
-        .context("git add")?;
-
-    // Step 5: Check if there are changes
-    // git diff --cached --quiet returns non-zero when there are diffs
-    let has_changes = run_command(
-        backend,
-        &repo_dir,
-        &["diff", "--cached", "--quiet"],
-        &git_env,
-    )
-    .await
-    .is_err();
+    let has_changes = stage_gitops_changes(backend, &repo_dir, &git_env).await?;
 
     match mode {
         Mode::Prepare => {
             if has_changes {
                 backend.log_stdout("[flux@1] changes detected:");
-                // Show summary - ignore exit code (diff returns 1 when there are diffs)
                 let _ = run_command(
                     backend,
                     &repo_dir,
@@ -837,36 +815,14 @@ async fn run_git(
                     "release: {}/{} to {}/{}",
                     env, project, destination_name, meta.cluster_name
                 );
-                run_command(
-                    backend,
-                    &repo_dir,
-                    &[
-                        "-c",
-                        &format!("user.name={}", meta.git_author_name),
-                        "-c",
-                        &format!("user.email={}", meta.git_author_email),
-                        "commit",
-                        "-m",
-                        &commit_msg,
-                    ],
-                    &git_env,
-                )
-                .await
-                .context("git commit")?;
+                commit_gitops_changes(backend, &repo_dir, meta, &git_env, &commit_msg).await?;
 
                 backend.log_stdout("[flux@1] pushing to remote");
-                run_command(
-                    backend,
-                    &repo_dir,
-                    &["push", "origin", &meta.git_branch],
-                    &git_env,
-                )
-                .await
-                .context("git push")?;
+                push_gitops_commit_with_retry(backend, &repo_dir, &mutation, &git_env, &commit_msg)
+                    .await?;
 
                 backend.log_stdout("[flux@1] release pushed successfully");
 
-                // Trigger Flux reconciliation if a webhook URL is configured
                 if let Some(url) = &meta.reconcile_url {
                     trigger_reconciliation(backend, url).await;
                 }
@@ -877,6 +833,183 @@ async fn run_git(
     }
 
     Ok(())
+}
+
+async fn apply_gitops_mutation(
+    backend: &dyn DestinationBackend,
+    repo_dir: &Path,
+    mutation: &GitopsMutation<'_>,
+) -> anyhow::Result<()> {
+    let releases_rel =
+        mutation
+            .meta
+            .releases_path(mutation.env, mutation.destination_name, mutation.project);
+    let clusters_dir_rel = mutation
+        .meta
+        .clusters_dir(mutation.env, mutation.destination_name);
+    let releases_abs = repo_dir.join(&releases_rel);
+    let clusters_dir_abs = repo_dir.join(clusters_dir_rel);
+
+    if releases_abs.exists() {
+        tokio::fs::remove_dir_all(&releases_abs).await?;
+    }
+    tokio::fs::create_dir_all(&releases_abs).await?;
+    write_manifest_files(&releases_abs, mutation.manifest_files).await?;
+    write_forest_metadata(&releases_abs, mutation.forest_metadata).await?;
+    FluxV1Handler::write_releases_kustomize_yaml(&releases_abs, mutation.manifest_files).await?;
+
+    tokio::fs::create_dir_all(&clusters_dir_abs).await?;
+    let kustomization_cr = FluxV1Handler::generate_kustomization_cr(
+        &mutation.meta.namespace,
+        mutation.project,
+        &releases_rel,
+        mutation.identity,
+    );
+    tokio::fs::write(
+        clusters_dir_abs.join(format!("{}.yaml", mutation.project)),
+        kustomization_cr.as_bytes(),
+    )
+    .await?;
+    FluxV1Handler::write_notification_crs(
+        &clusters_dir_abs,
+        mutation.meta,
+        mutation.project,
+        backend,
+    )
+    .await?;
+    FluxV1Handler::write_kustomize_yaml(&clusters_dir_abs).await?;
+
+    Ok(())
+}
+
+async fn stage_gitops_changes(
+    backend: &dyn DestinationBackend,
+    repo_dir: &Path,
+    git_env: &HashMap<String, String>,
+) -> anyhow::Result<bool> {
+    run_command(backend, repo_dir, &["add", "-A"], git_env)
+        .await
+        .context("git add")?;
+
+    let output = execute_command(backend, repo_dir, &["diff", "--cached", "--quiet"], git_env)
+        .await
+        .context("git diff")?;
+
+    match output.status.code() {
+        Some(0) => Ok(false),
+        Some(1) => Ok(true),
+        _ => {
+            ensure_command_success(&output, &["diff", "--cached", "--quiet"])?;
+            unreachable!("successful git diff must have exit status 0")
+        }
+    }
+}
+
+async fn commit_gitops_changes(
+    backend: &dyn DestinationBackend,
+    repo_dir: &Path,
+    meta: &FluxMetadata,
+    git_env: &HashMap<String, String>,
+    commit_msg: &str,
+) -> anyhow::Result<()> {
+    run_command(
+        backend,
+        repo_dir,
+        &[
+            "-c",
+            &format!("user.name={}", meta.git_author_name),
+            "-c",
+            &format!("user.email={}", meta.git_author_email),
+            "commit",
+            "-m",
+            commit_msg,
+        ],
+        git_env,
+    )
+    .await
+    .context("git commit")
+}
+
+async fn push_gitops_commit_with_retry(
+    backend: &dyn DestinationBackend,
+    repo_dir: &Path,
+    mutation: &GitopsMutation<'_>,
+    git_env: &HashMap<String, String>,
+    commit_msg: &str,
+) -> anyhow::Result<()> {
+    for attempt in 1..=MAX_PUSH_ATTEMPTS {
+        let push_args = ["push", "origin", &mutation.meta.git_branch];
+        let output = execute_command(backend, repo_dir, &push_args, git_env)
+            .await
+            .context("git push")?;
+
+        if output.status.success() {
+            return Ok(());
+        }
+
+        if !is_concurrent_push_rejection(&output.stderr) {
+            return ensure_command_success(&output, &push_args).context("git push");
+        }
+
+        if attempt == MAX_PUSH_ATTEMPTS {
+            anyhow::bail!(
+                "git push conflict persisted after {MAX_PUSH_ATTEMPTS} attempts for branch '{}'",
+                mutation.meta.git_branch
+            );
+        }
+
+        backend.log_stdout(&format!(
+            "[flux@1] remote branch advanced during push; refreshing and retrying ({}/{})",
+            attempt + 1,
+            MAX_PUSH_ATTEMPTS
+        ));
+
+        let remote_ref = format!(
+            "refs/heads/{}:refs/remotes/origin/{}",
+            mutation.meta.git_branch, mutation.meta.git_branch
+        );
+        run_command(
+            backend,
+            repo_dir,
+            &["fetch", "origin", &remote_ref],
+            git_env,
+        )
+        .await
+        .context("git fetch after push conflict")?;
+
+        let remote_branch = format!("origin/{}", mutation.meta.git_branch);
+        run_command(
+            backend,
+            repo_dir,
+            &["reset", "--hard", &remote_branch],
+            git_env,
+        )
+        .await
+        .context("git reset after push conflict")?;
+
+        apply_gitops_mutation(backend, repo_dir, mutation).await?;
+
+        if !stage_gitops_changes(backend, repo_dir, git_env).await? {
+            backend.log_stdout(
+                "[flux@1] desired release already present after refreshing remote branch",
+            );
+            return Ok(());
+        }
+
+        commit_gitops_changes(backend, repo_dir, mutation.meta, git_env, commit_msg).await?;
+    }
+
+    unreachable!("bounded push loop always returns")
+}
+
+fn is_concurrent_push_rejection(stderr: &[u8]) -> bool {
+    let stderr = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    stderr.contains("non-fast-forward")
+        || (stderr.contains("[rejected]") && stderr.contains("(fetch first)"))
+        || (stderr.contains("cannot lock ref")
+            && stderr.contains("is at")
+            && stderr.contains("but expected"))
+        || stderr.contains("incorrect old value provided")
 }
 
 // ====== RECONCILIATION ======
@@ -955,16 +1088,15 @@ fn scrub_url_credentials(text: &str) -> String {
     out
 }
 
-async fn run_command(
+async fn execute_command(
     backend: &dyn DestinationBackend,
     cwd: &Path,
     args: &[&str],
     env: &HashMap<String, String>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<std::process::Output> {
     let exe = std::env::var("GIT_EXE").unwrap_or_else(|_| "git".to_string());
-    // Never log or surface raw argv: the clone URL carries git credentials.
+    // Never log raw argv: the clone URL may carry git credentials.
     let safe_args = scrub_url_credentials(&args.join(" "));
-
     tracing::debug!(cwd =% cwd.display(), "running {} {}", exe, safe_args);
 
     let output = tokio::process::Command::new(&exe)
@@ -987,7 +1119,13 @@ async fn run_command(
         backend.log_stderr(line);
     }
 
+    Ok(output)
+}
+
+fn ensure_command_success(output: &std::process::Output, args: &[&str]) -> anyhow::Result<()> {
     if !output.status.success() {
+        let exe = std::env::var("GIT_EXE").unwrap_or_else(|_| "git".to_string());
+        let safe_args = scrub_url_credentials(&args.join(" "));
         anyhow::bail!(
             "{} {} failed: {}",
             exe,
@@ -998,6 +1136,16 @@ async fn run_command(
 
     tracing::debug!("git command success");
     Ok(())
+}
+
+async fn run_command(
+    backend: &dyn DestinationBackend,
+    cwd: &Path,
+    args: &[&str],
+    env: &HashMap<String, String>,
+) -> anyhow::Result<()> {
+    let output = execute_command(backend, cwd, args, env).await?;
+    ensure_command_success(&output, args)
 }
 
 // ====== FILE I/O HELPERS ======
@@ -1127,6 +1275,50 @@ impl RunnerDestination for FluxV1RunnerDestination {
 mod tests {
     use super::*;
     use std::process::Stdio;
+
+    struct TestBackend;
+
+    #[async_trait::async_trait]
+    impl DestinationBackend for TestBackend {
+        async fn get_deployment_files(&self) -> anyhow::Result<Vec<(PathBuf, String)>> {
+            anyhow::bail!("not used")
+        }
+
+        async fn get_spec_files(&self) -> anyhow::Result<Vec<(PathBuf, String)>> {
+            anyhow::bail!("not used")
+        }
+
+        async fn get_release_annotation(&self) -> anyhow::Result<ReleaseAnnotation> {
+            anyhow::bail!("not used")
+        }
+
+        async fn get_project_info(&self) -> anyhow::Result<crate::backend::ProjectInfo> {
+            anyhow::bail!("not used")
+        }
+
+        fn log_stdout(&self, _line: &str) {}
+
+        fn log_stderr(&self, _line: &str) {}
+
+        async fn create_temp_dir(&self) -> anyhow::Result<PathBuf> {
+            anyhow::bail!("not used")
+        }
+    }
+
+    async fn run_test_git(cwd: &Path, args: &[&str]) {
+        let output = tokio::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     fn make_metadata(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs
@@ -1861,6 +2053,167 @@ mod tests {
         assert!(verify_repo.join("README.md").exists());
     }
 
+    #[tokio::test]
+    async fn concurrent_stale_gitops_writers_preserve_both_releases() {
+        let bare_dir = tempfile::tempdir().unwrap();
+        let bare_path = bare_dir.path().join("gitops.git");
+        let bare_path_string = bare_path.to_string_lossy().into_owned();
+        let remote_url = format!("file://{bare_path_string}");
+        run_test_git(bare_dir.path(), &["init", "--bare", &bare_path_string]).await;
+
+        let bootstrap_dir = tempfile::tempdir().unwrap();
+        run_test_git(bootstrap_dir.path(), &["clone", &remote_url, "bootstrap"]).await;
+        let bootstrap_repo = bootstrap_dir.path().join("bootstrap");
+        tokio::fs::write(bootstrap_repo.join("README.md"), "# GitOps\n")
+            .await
+            .unwrap();
+        run_test_git(&bootstrap_repo, &["add", "-A"]).await;
+        run_test_git(
+            &bootstrap_repo,
+            &[
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@test",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        )
+        .await;
+        run_test_git(&bootstrap_repo, &["push", "origin", "HEAD:main"]).await;
+
+        let writers_dir = tempfile::tempdir().unwrap();
+        for writer in ["writer-a", "writer-b"] {
+            run_test_git(
+                writers_dir.path(),
+                &[
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--branch",
+                    "main",
+                    "--single-branch",
+                    &remote_url,
+                    writer,
+                ],
+            )
+            .await;
+        }
+
+        let mut metadata = valid_git_metadata();
+        metadata.insert("git_url".into(), remote_url.clone());
+        metadata.insert("git_author_name".into(), "test".into());
+        metadata.insert("git_author_email".into(), "test@test".into());
+        let meta = FluxMetadata::from_metadata(&metadata).unwrap();
+        let backend = TestBackend;
+        let git_env = meta.git_env();
+        let writer_a = writers_dir.path().join("writer-a");
+        let writer_b = writers_dir.path().join("writer-b");
+        let manifests_a = vec![(
+            "deployment.yaml".to_string(),
+            "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: project-a\n".to_string(),
+        )];
+        let manifests_b = vec![(
+            "deployment.yaml".to_string(),
+            "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: project-b\n".to_string(),
+        )];
+        let forest_metadata_a = ForestMetadataFiles {
+            config_yaml: None,
+            release_yaml: "slug: release-a\n".to_string(),
+            spec_yaml: "{}\n".to_string(),
+        };
+        let forest_metadata_b = ForestMetadataFiles {
+            config_yaml: None,
+            release_yaml: "slug: release-b\n".to_string(),
+            spec_yaml: "{}\n".to_string(),
+        };
+        let mutation_a = GitopsMutation {
+            meta: &meta,
+            manifest_files: &manifests_a,
+            forest_metadata: &forest_metadata_a,
+            env: "dev",
+            destination_name: "destination",
+            project: "project-a",
+            identity: None,
+        };
+        let mutation_b = GitopsMutation {
+            meta: &meta,
+            manifest_files: &manifests_b,
+            forest_metadata: &forest_metadata_b,
+            env: "dev",
+            destination_name: "destination",
+            project: "project-b",
+            identity: None,
+        };
+
+        apply_gitops_mutation(&backend, &writer_a, &mutation_a)
+            .await
+            .unwrap();
+        assert!(
+            stage_gitops_changes(&backend, &writer_a, &git_env)
+                .await
+                .unwrap()
+        );
+        commit_gitops_changes(&backend, &writer_a, &meta, &git_env, "release project-a")
+            .await
+            .unwrap();
+
+        apply_gitops_mutation(&backend, &writer_b, &mutation_b)
+            .await
+            .unwrap();
+        assert!(
+            stage_gitops_changes(&backend, &writer_b, &git_env)
+                .await
+                .unwrap()
+        );
+        commit_gitops_changes(&backend, &writer_b, &meta, &git_env, "release project-b")
+            .await
+            .unwrap();
+
+        push_gitops_commit_with_retry(
+            &backend,
+            &writer_a,
+            &mutation_a,
+            &git_env,
+            "release project-a",
+        )
+        .await
+        .unwrap();
+        push_gitops_commit_with_retry(
+            &backend,
+            &writer_b,
+            &mutation_b,
+            &git_env,
+            "release project-b",
+        )
+        .await
+        .unwrap();
+
+        let verify_dir = tempfile::tempdir().unwrap();
+        run_test_git(
+            verify_dir.path(),
+            &["clone", "--branch", "main", &remote_url, "verify"],
+        )
+        .await;
+        let verify_repo = verify_dir.path().join("verify");
+        let releases_root =
+            verify_repo.join("releases/dev/destination/prod-eu-west-1/rust-podinfo");
+        assert!(releases_root.join("project-a/deployment.yaml").exists());
+        assert!(releases_root.join("project-b/deployment.yaml").exists());
+
+        let clusters_root =
+            verify_repo.join("clusters/dev/destination/prod-eu-west-1/rust-podinfo");
+        assert!(clusters_root.join("project-a.yaml").exists());
+        assert!(clusters_root.join("project-b.yaml").exists());
+        let kustomization = tokio::fs::read_to_string(clusters_root.join("kustomization.yaml"))
+            .await
+            .unwrap();
+        assert!(kustomization.contains("project-a.yaml"));
+        assert!(kustomization.contains("project-b.yaml"));
+        assert!(verify_repo.join("README.md").exists());
+    }
+
     // ====== NOTIFICATION CR GENERATION ======
 
     #[test]
@@ -2038,7 +2391,10 @@ mod credential_scrubbing_tests {
         .unwrap();
 
         let url = meta.effective_git_url().unwrap();
-        assert!(url.contains("ghp_supersecret"), "precondition: token is embedded");
+        assert!(
+            url.contains("ghp_supersecret"),
+            "precondition: token is embedded"
+        );
 
         assert!(!scrub_url_credentials(&url).contains("ghp_supersecret"));
     }
