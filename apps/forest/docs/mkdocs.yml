@@ -1,5 +1,5 @@
 site_name: Forest
-site_description: Private component exchange for platform teams
+site_description: Release applications on Forest Runtime or customer infrastructure through versioned providers
 site_url: https://forest.sh/docs
 repo_url: https://git.kjuulh.io/kjuulh/forest
 repo_name: kjuulh/forest

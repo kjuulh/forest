@@ -2,7 +2,13 @@
 
 ## Current trust model
 
-Forest components are native executables. Today `forest run`, release runners, publish-time descriptor probes, global-tool shims, and shell-integration capture can execute component-controlled code with the host process's privileges.
+Forest components are native executables. Today `forest run`, release runners,
+publish-time descriptor probes, global-tool shims, and shell-integration capture
+can execute component-controlled code with the host process's privileges.
+In-process destination handlers can also perform privileged target-specific
+operations from `forest-server`. Forest Runtime and external-provider adapters
+cross into systems that receive application configuration, artifacts, and
+release-scoped credentials.
 
 Therefore:
 
@@ -39,11 +45,60 @@ Protect:
 - registry credentials, refresh tokens, machine tokens, and signing keys;
 - source trees, developer home directories, SSH agents, cloud credentials, and CI secrets;
 - component artifacts, manifests, lock files, and provenance;
-- organisation membership, private metadata, release history, and audit records;
-- runner hosts, control-plane services, PostgreSQL, NATS, and object storage;
+- organisation membership, private metadata, release history, destination
+  configuration, provider credentials, and audit records;
+- Forest Runtime workloads, namespaces, secrets, images, networks, logs, and
+  control APIs;
+- runner/provider hosts, control-plane services, PostgreSQL, NATS, and object
+  storage;
 - availability of component resolution, publication, and release workflows.
 
 Design for malicious publishers, compromised publisher accounts, dependency substitution, tampered object storage, a hostile component process, cross-tenant API access, stolen CI credentials, vulnerable dependencies, and operator mistakes. A public arbitrary-code marketplace adds substantially more abuse and moderation work and is not an initial goal.
+
+## Release execution boundaries
+
+The two deployment modes have different ownership but share one control-plane
+threat model.
+
+### Forest Runtime
+
+Forest operates the application workload and therefore owns workload isolation,
+image admission, secret delivery, network policy, resource enforcement,
+tenant-safe logs, health, rollout, cleanup, regional capacity, and incident
+response. A sandbox for short-lived component jobs is not sufficient proof for
+a long-running application runtime.
+
+The current `forage/containers@1` adapter creates a basic container-service
+resource and follows its reported rollout. Treat it as a trusted private
+integration until the runtime independently enforces the controls above and
+reconciles reported state with observed workload health.
+
+### Customer-infrastructure providers
+
+Forest may call a built-in destination handler or dial an external
+`forest.provider.v1.DestinationProvider`. In the current generic path,
+`FOREST_GENERIC_PROVIDER_ALLOWED_HOSTS` fails closed when unset and restricts
+which endpoint Forest may dial. That is an important SSRF and token-disclosure
+control, but an allowlist alone does not authenticate the provider.
+
+Before external use:
+
+- providers use scoped workload identity and mutually authenticated transport;
+- release tokens are single-purpose, audience-bound, short-lived, revocable,
+  and unusable against another destination or organisation;
+- provider endpoints are operator-controlled, not arbitrary tenant URLs;
+- provider configuration and responses have size, schema, log, and timeout
+  bounds;
+- prepare/plan/apply/status/cancel operations are idempotent and replay-safe;
+- credentials for customer infrastructure stay with the provider or isolated
+  runner where possible rather than transiting the general control plane;
+- completion is reconciled against independently observed target state;
+- provider compromise and outage have isolation, revocation, rollback, and
+  incident runbooks.
+
+Customer ownership of the cloud account does not make the provider trusted by
+default. The provider receives a privileged release request and may be able to
+change production infrastructure.
 
 ## Execution profiles
 
@@ -225,15 +280,25 @@ No external preview until:
 - every native execution path—including probes, warm/update, shell capture and
   sourcing—requires an existing trust decision for the exact publisher and
   digest;
-- externally operated jobs use the sandboxed single-tenant profile and fail
-  closed rather than running in the control plane;
+- externally operated component and release jobs use the sandboxed
+  single-tenant profile and fail closed rather than running in the control
+  plane;
+- Forest Runtime enforces workload, tenant, secret, network, resource, image,
+  log, and cleanup boundaries independently of the release adapter;
+- external providers use operator-controlled endpoints, scoped workload
+  identity, mutually authenticated transport, audience-bound release tokens,
+  idempotent operations, and independently reconciled status;
 - security contact and incident owner are named.
 
 No paid multi-organisation beta until:
 
-- all customer-controlled jobs use the hardened managed profile with one
-  disposable sandbox per invocation;
-- scoped machine identities and audit export ship;
+- all customer-controlled component and release jobs use the hardened managed
+  profile with one disposable sandbox per invocation;
+- Forest Runtime has passed workload-isolation, tenant-boundary, network,
+  secret, image-admission, capacity, and incident-response exercises;
+- provider conformance, compromise, outage, replay, cancellation, and negative
+  cross-tenant suites pass;
+- scoped machine, runner, and provider identities plus audit export ship;
 - backup/restore and credential-compromise exercises pass;
 - an independent reviewer has no unresolved critical or high findings.
 

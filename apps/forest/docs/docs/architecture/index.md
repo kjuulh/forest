@@ -4,18 +4,23 @@ An overview of Forest's internal architecture for contributors and operators.
 
 ## System Overview
 
-```
-                    ┌─────────────┐
-                    │  forest CLI │
-                    └──────┬──────┘
-                           │ gRPC
-                    ┌──────▼──────┐
-                    │forest-server│
-                    └──┬───┬───┬──┘
-                       │   │   │
-              ┌────────┘   │   └────────┐
-              ▼            ▼            ▼
-         PostgreSQL      NATS     forest-runner(s)
+```text
+                         ┌─────────────┐
+                         │  forest CLI │
+                         └──────┬──────┘
+                                │ gRPC
+                         ┌──────▼──────┐
+                         │forest-server│
+                         └─┬──┬──┬──┬─┘
+                           │  │  │  │
+             ┌─────────────┘  │  │  └──────────────┐
+             ▼                ▼  ▼                 ▼
+        PostgreSQL          NATS forest-runner   destination adapter
+                                                    │
+                                      ┌─────────────┴─────────────┐
+                                      ▼                           ▼
+                                Forest Runtime          external provider /
+                                                        customer platform
 ```
 
 ## Crates
@@ -56,6 +61,18 @@ Releases use a dedicated event store (`release_events` + `release_states` projec
 3. Runner executes → Running
 4. Runner reports result → Succeeded / Failed
 5. ReleaseReaper catches stuck releases → TimedOut
+
+The execution path depends on destination type:
+
+- authenticated runners claim supported destinations and execute release work;
+- built-in destination handlers currently execute from `forest-server`;
+- `forage/containers@1` calls the managed runtime's `ForageService`;
+- `forest/generic@1` calls an external
+  `forest.provider.v1.DestinationProvider`.
+
+Moving privileged destination work out of the control-plane process, adding
+provider/runner workload identity, and reconciling target health independently
+are productization gates.
 
 ## IntentCoordinator (Saga Orchestrator)
 

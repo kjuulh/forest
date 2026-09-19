@@ -1,20 +1,27 @@
 # Forest CLI, control plane, and component SDK
 
 This workspace implements the executable core of
-[Forest](../../README.md): a private component exchange for platform teams.
+[Forest](../../README.md): a release control plane and private component
+exchange for platform teams.
 
 The primary product workflow is:
 
 ```text
-author component → build platform artifacts → publish version
-       ↓                                          ↓
-typed `forest run` dependency           verified `forest global` tool
+publish build/deploy capabilities → lock them in an application
+                                      |
+                           forest release create
+                                      |
+                    +-----------------+------------------+
+                    |                                    |
+             Forest Runtime                   customer infrastructure
+                                         through a deployment provider
 ```
 
-The workspace also contains release orchestration and deployment integrations.
-Those capabilities are operationally useful, but they are outside the first
-supported Component Exchange boundary until the isolation, tenancy, and support
-gates in the [productization plan](docs/docs/product/readiness.md) pass.
+The same component system also powers typed `forest run` commands and verified
+`forest global` developer tools. Release orchestration is a first-class product
+surface: components define reusable delivery behaviour, while destinations,
+pipelines, policies, approvals, and runners move application code to a managed
+or customer-owned runtime.
 
 > [!WARNING]
 > Components currently execute as native child processes with the permissions,
@@ -146,6 +153,29 @@ forest global add acme/policy-check@0.1.0
 eval "$(forest shell zsh)"
 policy-check --help
 ```
+
+## Release an application
+
+Application projects map environments to destinations. The same command targets
+the managed Forest Runtime or customer infrastructure because the destination
+owns the target-specific implementation:
+
+```bash
+forest release create --environment dev
+forest release create --environment prod --pipeline
+```
+
+Current destination implementations include:
+
+- `forage/containers@1` for the managed Forest Runtime preview;
+- built-in Flux, Kubernetes, and Terraform integrations;
+- `forest/generic@1` for an external service implementing
+  `forest.provider.v1.DestinationProvider`.
+
+These paths are active development-preview capabilities. They do not yet carry
+production isolation, tenancy, availability, or support guarantees. See the
+[product direction](docs/docs/product/index.md), [destinations](docs/docs/concepts/destinations.md),
+and [readiness plan](docs/docs/product/readiness.md).
 
 ## Verification
 

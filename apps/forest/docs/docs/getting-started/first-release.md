@@ -2,6 +2,23 @@
 
 Releases in Forest follow a three-step lifecycle: **prepare**, **annotate**, and **release**. The `forest release create` command bundles all three into a single operation.
 
+The release workflow is target-independent:
+
+- **Forest Runtime:** the `forage/containers@1` destination submits the
+  application to the managed container runtime.
+- **Customer infrastructure:** a built-in destination or an external
+  `forest.provider.v1.DestinationProvider` applies the release to the
+  customer's platform.
+
+The project selects an environment; its destination configuration selects the
+runtime. Application CI does not need separate release scripts for the two
+paths.
+
+> **Private preview:** both paths are development-preview capabilities. Forest
+> Runtime does not yet carry a production hosting SLA, and customer providers
+> must be operator-approved and reachable from the control plane or an
+> authenticated runner.
+
 ## The Quick Way
 
 From your project directory:

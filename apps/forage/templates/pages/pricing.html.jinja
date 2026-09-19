@@ -19,12 +19,12 @@
             </a>
         </div>
         <ul class="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-            <li>Private component exchange</li>
-            <li>Typed project and CI dependencies</li>
-            <li>Developer-tool catalogues</li>
+            <li>Private release control plane</li>
+            <li>Versioned component exchange</li>
+            <li>Forest Runtime where enabled</li>
+            <li>Customer-infrastructure providers</li>
             <li>Limits agreed during onboarding</li>
-            <li>Community support</li>
-            <li>Customer-run execution is unmetered</li>
+            <li>No charge during preview</li>
         </ul>
     </div>
 </section>
@@ -33,24 +33,24 @@
     <h2 class="text-2xl font-bold text-center">How paid pricing is being designed</h2>
     <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
         <div class="p-5 border border-gray-200 rounded-lg">
-            <h3 class="font-bold">Managed exchange</h3>
-            <p class="mt-2 text-sm text-gray-600">Future pricing will cover the private registry, control plane, collaboration, policy, and support—not compute Forest does not provide.</p>
+            <h3 class="font-bold">Platform subscription</h3>
+            <p class="mt-2 text-sm text-gray-600">The leading subscription metric counts an active human developer once per UTC month. It covers the release control plane, component exchange, policy, audit, and support.</p>
         </div>
         <div class="p-5 border border-gray-200 rounded-lg">
-            <h3 class="font-bold">Active developers</h3>
-            <p class="mt-2 text-sm text-gray-600">The leading seat metric counts a human once per active UTC month. Machine identities will not consume human seats.</p>
+            <h3 class="font-bold">Forest Runtime</h3>
+            <p class="mt-2 text-sm text-gray-600">Managed application compute will use a separate transparent consumption meter with included credit, budget alerts, hard limits, and advance notice before overages.</p>
         </div>
         <div class="p-5 border border-gray-200 rounded-lg">
-            <h3 class="font-bold">Transparent usage</h3>
-            <p class="mt-2 text-sm text-gray-600">Storage and artifact egress may have allowances. Usage export, budget alerts, and advance notice must exist before overage charging.</p>
+            <h3 class="font-bold">Your infrastructure</h3>
+            <p class="mt-2 text-sm text-gray-600">Provider work on customer-owned infrastructure is not billed as Forest compute. Customers still pay for the control plane, private artifacts, policy, audit, and support.</p>
         </div>
     </div>
 </section>
 
 <section class="max-w-4xl mx-auto px-4 py-12">
     <div class="p-6 border border-amber-200 bg-amber-50 rounded-lg">
-        <h2 class="font-bold text-lg">Trusted components only</h2>
-        <p class="mt-2 text-sm text-gray-700">Forest is currently suitable only for trusted internal evaluation on a private network. Native components run with the invoking user's privileges, and runner/artifact authorization is not ready for mutually untrusted tenants. Sandboxed managed execution, workload identity, permanent coordinates, provenance, and artifact scanning are productization gates—not paid add-ons or shipped preview guarantees.</p>
+        <h2 class="font-bold text-lg">Trusted preview environments only</h2>
+        <p class="mt-2 text-sm text-gray-700">Forest Runtime and provider-backed releases exist, but neither carries a production hosting guarantee. Native components and release providers are trusted code, and runner, provider, artifact, workload, and tenant isolation require further hardening. Those controls are productization gates—not paid add-ons or shipped preview guarantees.</p>
     </div>
 </section>
 {% endblock %}

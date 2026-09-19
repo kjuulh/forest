@@ -2,13 +2,14 @@
 
 {% block content %}
 <section class="max-w-4xl mx-auto px-4 pt-24 pb-12 text-center">
-    <p class="text-xs font-semibold uppercase tracking-wider text-gray-500">Private component exchange</p>
+    <p class="text-xs font-semibold uppercase tracking-wider text-gray-500">Release platform + component exchange</p>
     <h1 class="mt-3 text-5xl font-bold tracking-tight leading-tight">
-        Publish once.<br>Run everywhere your team works.
+        From code to a running app.<br>Your runtime or ours.
     </h1>
     <p class="mt-6 text-xl text-gray-600 max-w-3xl mx-auto">
-        Forest packages typed automation and developer tools as one versioned component.
-        Lock it in repositories, invoke it in CI, or install its verified tool directly on your workstation.
+        Forest gives application teams one fast release path. Run on Forest Runtime,
+        or deploy to your own infrastructure through a versioned provider—using the same
+        components, policy, pipeline, and release history.
     </p>
     <div class="mt-8 flex flex-wrap justify-center gap-3">
         <a href="mailto:contact@kjuulh.io?subject=Forest%20private%20preview" class="px-5 py-2.5 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800">Join the waitlist</a>
@@ -19,39 +20,40 @@
 <section class="max-w-4xl mx-auto px-4 py-12">
     {# `code-surface` keeps this block dark in both light and dark mode. #}
     <div class="code-surface rounded-lg p-6 text-sm font-mono overflow-x-auto">
-        <pre><span class="text-gray-500"># One versioned capability in a repository</span>
-<span class="text-green-400">$</span> forest add acme/policy-check@1.4.0
+        <pre><span class="text-gray-500"># Adopt the platform team's versioned delivery contract</span>
+<span class="text-green-400">$</span> forest add acme/service-standard@1.4.0
 <span class="text-green-400">$</span> forest validate
-<span class="text-green-400">$</span> forest run check --policy production
 
-<span class="text-gray-500"># The same private catalogue on a workstation</span>
-<span class="text-green-400">$</span> forest global add acme/devctl@2.1.0
-<span class="text-green-400">$</span> devctl release status</pre>
+<span class="text-gray-500"># Managed Forest Runtime in dev</span>
+<span class="text-green-400">$</span> forest release create --environment dev
+
+<span class="text-gray-500"># Customer-owned infrastructure behind the production provider</span>
+<span class="text-green-400">$</span> forest release create --environment prod --pipeline</pre>
     </div>
     <p class="mt-4 text-center text-sm text-gray-500">
-        CUE contracts make inputs inspectable. Lock files and checksums make resolution reproducible.
+        The destination changes. The application release workflow does not.
     </p>
 </section>
 
 <section class="max-w-6xl mx-auto px-4 py-16">
-    <h2 class="text-3xl font-bold text-center mb-12">A distribution contract for platform capabilities</h2>
+    <h2 class="text-3xl font-bold text-center mb-12">One delivery contract, two ways to run</h2>
     <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
         <div class="p-6 border border-gray-200 rounded-lg">
-            <h3 class="font-bold text-lg mb-2">Typed components</h3>
+            <h3 class="font-bold text-lg mb-2">Versioned release capabilities</h3>
             <p class="text-gray-600 text-sm">
-                Define commands, inputs, outputs, and configuration in CUE. Generate SDK bindings and catch invalid configuration before execution.
+                Package build, deployment, policy, and developer tooling as typed components. Lock exact versions in each application.
             </p>
         </div>
         <div class="p-6 border border-gray-200 rounded-lg">
-            <h3 class="font-bold text-lg mb-2">Private, versioned artifacts</h3>
+            <h3 class="font-bold text-lg mb-2">Forest Runtime</h3>
             <p class="text-gray-600 text-sm">
-                Publish per-platform artifacts to an organisation catalogue. Consumers resolve intentional versions into a checked-in lock file.
+                Take the managed path from a release declaration to a running container service without operating the destination yourself.
             </p>
         </div>
         <div class="p-6 border border-gray-200 rounded-lg">
-            <h3 class="font-bold text-lg mb-2">Repository and workstation</h3>
+            <h3 class="font-bold text-lg mb-2">Your infrastructure</h3>
             <p class="text-gray-600 text-sm">
-                Use the same component through <code>forest run</code> in CI and through a lazily installed <code>forest global</code> tool on developer machines.
+                Keep your clusters, cloud accounts, and spend. Forest providers translate the same release into your target platform.
             </p>
         </div>
     </div>
@@ -59,9 +61,9 @@
 
 <section class="max-w-4xl mx-auto px-4 py-12">
     <div class="p-6 border border-amber-200 bg-amber-50 rounded-lg">
-        <h2 class="font-bold text-lg">Private preview: trusted components only</h2>
+        <h2 class="font-bold text-lg">Private development preview</h2>
         <p class="mt-2 text-sm text-gray-700">
-            Forest is currently suitable only for trusted internal evaluation on a private network. Native components run with the invoking user's privileges, global-tool warming may persist publisher-controlled shell code, and runner/artifact authorization is not ready for mutually untrusted tenants. Sandboxing, workload identity, permanent coordinates, provenance, and scanning are launch gates—not features we pretend already exist.
+            Forest Runtime and provider-backed releases exist, but neither carries a production hosting guarantee yet. Forest is currently suitable only for trusted internal evaluation on a private network. Native components run with the invoking user's privileges, and runner, provider, artifact, and tenant isolation require further hardening before external use.
         </p>
     </div>
 </section>

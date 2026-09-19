@@ -1,43 +1,65 @@
 # Forest
 
-**A private component exchange for platform teams.**
+**The express path from code to a running release—on Forest Runtime or your
+own infrastructure.**
 
-Publish a versioned executable capability once, then use it in two places:
+Forest combines release orchestration with a private component exchange.
+Platform teams publish versioned build, deployment, policy, and developer-tool
+capabilities once. Application teams consume those contracts and release code
+through one workflow:
 
-- as a typed, locked dependency in a repository or CI workflow;
-- as a verified, lazily installed developer tool.
+- run the application on the managed Forest Runtime;
+- deploy it to customer-owned infrastructure through a Forest deployment
+  provider;
+- reuse the same typed capabilities in repositories, CI, and developer
+  workstations.
 
-Forest combines a CUE-defined interface, native component binaries, a private
-registry, project dependency locking, and release orchestration. The same
-component can expose typed automation through `forest run` and a tool facet
-through `forest global add`.
+CUE-defined interfaces, native component binaries, a private registry, project
+locking, release history, pipelines, approvals, runners, and destinations form
+one delivery contract. Components expose typed automation through `forest run`,
+developer tools through `forest global add`, and deployment hooks used by
+`forest release`.
 
 > [!WARNING]
 > Forest is a private development preview, not a security boundary. Component
 > binaries and installed tools execute with the invoking user's privileges;
 > global-tool warming can execute a binary and persist its output into future
-> shells. Runner enrolment and artifact lifecycle authorization also have known
-> multi-tenant blockers. Use only trusted publishers, runners, operators, and
-> non-sensitive fixtures on a trusted private network. See
+> shells. Runner enrolment, provider identity, artifact lifecycle
+> authorization, managed workload isolation, and tenant boundaries have known
+> productization blockers. Use only trusted publishers, runners, providers,
+> operators, and non-sensitive fixtures on a trusted private network. See
 > [Security and sandboxing](apps/forest/docs/docs/product/security-and-sandboxing.md).
 
 ## Why Forest
 
-Platform capabilities usually fragment into CI snippets, shell scripts,
-container images, internal CLIs, and documentation that drift independently.
-Forest gives them one versioned distribution and execution contract:
+The difficult part of shipping an application is rarely one deploy command. A
+team must standardize builds, configuration, credentials, environments,
+approvals, rollout status, and the target-specific API—then keep local tooling
+and CI aligned.
 
-1. an author defines typed inputs, outputs, and commands in CUE;
-2. CI builds platform-specific binaries and publishes versioned artifacts;
-3. a project resolves and locks the component;
-4. developers and CI invoke the same typed command;
-5. tool-shaped components can also install a checksum-verified shim on `PATH`.
+Forest turns those concerns into versioned contracts:
 
-The first product boundary is deliberately narrower than the full repository:
-the **Component Exchange** comprises the CLI, component protocol and SDK,
-registry, artifact storage, resolver, lock file, and global-tool experience.
-Hosted deployment orchestration, destinations, and the web application remain
-preview capabilities until their operational and security contracts are ready.
+1. a platform author publishes typed build, deployment, policy, or tool
+   components;
+2. an application locks the exact capabilities it uses;
+3. `forest release prepare` renders the release artifact from application code
+   and configuration;
+4. Forest records the source revision and release intent;
+5. a pipeline sends the release to either Forest Runtime or a deployment
+   provider for customer-owned infrastructure;
+6. Forest streams status and retains the release history.
+
+The product has two inseparable pillars:
+
+- **Component Exchange:** distribute the reusable capabilities that define how
+  software is built, checked, and deployed.
+- **Release Control Plane:** provide one fast, observable release path across
+  managed Forest Runtime and customer-owned destinations.
+
+The managed runtime is not a promise of a broad Heroku-style platform.
+Customer-owned destinations are not second-class. Both implement the same
+release contract, so an application can change where it runs without replacing
+its release workflow.
 
 ## Core workflow
 
@@ -98,6 +120,34 @@ version cannot be overwritten, but an administrator can currently unpublish and
 reuse the same coordinate; permanent coordinate immutability remains a
 productization gate.
 
+## Release an application
+
+A project maps environments to destinations in `forest.cue`. The destination
+selects the execution path:
+
+- `forage/containers@1` is the current implementation coordinate for the
+  managed Forest Runtime preview;
+- built-in Flux, Kubernetes, and Terraform destination types deploy to
+  customer-owned infrastructure;
+- `forest/generic@1` delegates a release to an external service implementing
+  the versioned `forest.provider.v1.DestinationProvider` protocol.
+
+Once an operator has configured the environments and destinations:
+
+```bash
+# Prepare, annotate, schedule, and follow the release.
+forest release create --environment dev
+
+# Route a production release through its configured pipeline and approval gates.
+forest release create --environment prod --pipeline
+```
+
+The command stays the same whether the destination is Forest Runtime or a
+provider. Only the destination configuration and credentials change. These
+deployment paths are present in the repository but remain private-preview
+capabilities until the runner, isolation, tenancy, and operational gates in the
+readiness plan pass.
+
 ## Current capabilities
 
 | Surface | Current capability |
@@ -106,9 +156,11 @@ productization gate.
 | Registry | Private component metadata, manifests, files, and per-platform binaries |
 | Project consumption | Exact registry versions, `forest.lock`, local-path development, typed command dispatch |
 | Developer tools | Per-tool installs, organisation catalogue subscriptions, lazy verified downloads, shell integration |
+| Release control plane | Prepare, annotate, schedule, observe, approve, reject, and record releases |
+| Deployment providers | Built-in Flux, Kubernetes, Terraform, generic external-provider protocol, and destination-specific configuration |
+| Forest Runtime | `forage/containers@1` translates a release into a managed container-service rollout; production isolation and operating guarantees remain gates |
 | Authentication | Browser device login, password login, contexts, personal access tokens |
-| Releases | Annotation, destinations, pipelines, approval gates, rollback, event history |
-| Web application | Organisation, project, component, release, and account management |
+| Web application | Organisation, project, component, destination, pipeline, and release management |
 
 The repository contains more than the initial supported product boundary.
 Availability in source does not imply a stability, isolation, or support
@@ -203,10 +255,12 @@ reconciliation, so it must not be made public in place. Publication requires a
 fresh allow-listed repository, credential rotation, a chosen licence, and the
 security gates in the readiness plan.
 
-Pricing is not active and future paid prices have not been set. The public
-[pricing strategy](apps/forest/docs/docs/product/pricing.md) defines the
-candidate active-developer meter and validation gates. Concrete figures remain
-an internal hypothesis in [`design/PRICING.md`](design/PRICING.md) until paid
+Pricing is not active and future paid prices and runtime rates have not been
+set. The public
+[pricing strategy](apps/forest/docs/docs/product/pricing.md) separates the
+active-developer control-plane subscription, managed Forest Runtime
+consumption, and unmetered customer-owned execution. Concrete figures remain an
+internal hypothesis in [`design/PRICING.md`](design/PRICING.md) until paid
 design partners and observed unit economics validate them.
 
 ## Licence

@@ -1,22 +1,29 @@
-# Component Exchange quickstart
+# Forest quickstart
 
-This walkthrough exercises Forest's core product loop:
+This walkthrough exercises Forest's two connected product loops:
 
 ```text
-discover → add and lock → typed run → install tool facet
+discover capability → add and lock → typed run / developer tool
+                                      |
+                              prepare and release
+                                      |
+                     Forest Runtime or a provider
 ```
 
 It requires access to a Forest server where your organisation has published a
-component with both a command and a tool facet. Replace the `acme/*` examples
-with coordinates supplied by your operator. A fresh local server is not seeded
-with these example components automatically.
+trusted component. The release step additionally requires an application
+project with an environment and destination configured by its operator. Replace
+the `acme/*` examples with coordinates supplied by your operator. A fresh local
+server is not seeded with these examples automatically.
 
 ## Prerequisites
 
 - the `forest` CLI from the [installation guide](getting-started/installation.md);
 - CUE available on `PATH`;
 - a server URL and an invited or registered account;
-- a component coordinate and version from a trusted publisher.
+- a component coordinate and version from a trusted publisher;
+- for the release step, a configured project environment and either a Forest
+  Runtime or provider-backed destination.
 
 ## 1. Select the server
 
@@ -106,7 +113,31 @@ warming to capture output that later shells source. This verifies artifact
 identity; it does not sandbox the binary or its shell code. See
 [Security and sandboxing](product/security-and-sandboxing.md).
 
-## 6. Verify reproducibility
+## 6. Release the application
+
+Forest uses the same release command for both deployment modes. The configured
+destination decides whether the release goes to Forest Runtime or to
+customer-owned infrastructure through a provider:
+
+```bash
+forest release create --environment dev
+```
+
+For an environment with a staged pipeline and approval gates:
+
+```bash
+forest release create --environment prod --pipeline
+```
+
+The command prepares deployment files, records the source revision and actor,
+schedules each destination, streams rollout state, and leaves an auditable
+release history. During private preview, use only operator-approved runtimes,
+providers, runners, and destinations.
+
+See [Your First Release](getting-started/first-release.md) and
+[Destinations](concepts/destinations.md) for configuration.
+
+## 7. Verify reproducibility
 
 In a second clean checkout:
 
@@ -116,9 +147,10 @@ forest run status
 ```
 
 Success means the checked-in exact version and recorded hashes resolve without
-manual component setup. If Forest rewrites the lock unexpectedly, downloads a
-different checksum, or needs an author's untracked files, the workflow is not
-reproducible.
+manual component setup, and an equivalent release targets the same declared
+environment and destination set. If Forest rewrites the lock unexpectedly,
+downloads a different checksum, or needs an author's untracked files, the
+workflow is not reproducible.
 
 ## Publish your own
 

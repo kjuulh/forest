@@ -1,97 +1,187 @@
-# Destinations
+# Destinations and deployment providers
 
-A destination is a physical or logical deployment target within an environment. It's where your code actually runs.
+A destination is the configured place where an application release goes. It
+binds an environment to a versioned destination type and its credentials.
 
-## What Is a Destination?
+Examples:
 
-While an [environment](environments.md) is a logical stage (dev, staging, prod), a destination is a specific place within that stage:
+- a Forest Runtime namespace and region;
+- a customer's Kubernetes cluster;
+- a Flux GitOps repository;
+- a Terraform workspace;
+- an external deployment-provider service.
 
-- A Kubernetes cluster
-- A Terraform workspace
-- An ECS service
-- A Flux GitOps repository
+Application teams use the same `forest release` workflow for every destination.
+The destination type owns target-specific planning, apply, and status behaviour;
+rollback is available only where the provider/runtime implements it.
 
-Each destination has a **type** that determines which component handles its deployment hooks.
+## Two deployment modes
 
-## Creating Destinations
+### Forest Runtime
+
+`forage/containers@1` is the current managed-runtime implementation. It sends a
+container-service resource to a configured Forage cluster and follows the
+rollout until success or failure.
+
+This coordinate exposes implementation history; the product name is **Forest
+Runtime**. It is a development preview. It currently creates a basic container
+service from release and destination metadata and does not yet carry the
+isolation, networking, secrets, observability, scaling, durability, or SLO
+guarantees required for production hosting.
+
+### Customer infrastructure
+
+Customer-owned infrastructure stays behind a destination provider. Forest
+retains the release record, pipeline, policy, approval, scheduling, and status
+model while the provider performs the target-specific work.
+
+Current destination types include:
+
+| Type | Execution target |
+|---|---|
+| `forest/flux@1` | Customer GitOps repository and Flux-managed cluster |
+| `forest/kubernetes@1` | Customer Kubernetes cluster |
+| `forest/terraform@1` | Customer Terraform/OpenTofu workspace |
+| `forest/generic@1` | External service implementing the Forest provider protocol |
+| `forage/containers@1` | Managed Forest Runtime preview |
+
+The list reports code that exists, not a production support matrix. Operators
+must explicitly approve and configure the types they expose.
+
+## External provider protocol
+
+`forest/generic@1` connects to a service implementing
+`forest.provider.v1.DestinationProvider`. The provider owns its metadata schema
+and deployment implementation, so adding a target does not require compiling it
+into Forest.
+
+The current call direction is control plane → provider. The provider must be
+reachable from `forest-server`. `FOREST_GENERIC_PROVIDER_ALLOWED_HOSTS` is
+deny-by-default and must allow the endpoint before Forest will send it a
+release-scoped token. A provider that can only dial outward requires the
+authenticated runner model rather than the current generic-provider path.
+
+Example:
 
 ```bash
 forest destination create \
-  --organisation my-org \
+  --organisation acme \
+  --name prod-ecs \
+  --environment prod \
+  --type forest/generic@1 \
+  --metadata provider_url=https://forest-ecs-provider.internal:4060 \
+  --metadata provider_token="$PROVIDER_TOKEN"
+```
+
+Provider authentication, mTLS, identity, release-token audience binding,
+revocation, callback authorization, and cross-tenant tests remain launch gates.
+Do not expose an arbitrary provider URL allowlist to untrusted organisation
+members.
+
+## Creating a Forest Runtime destination
+
+An operator with a configured runtime endpoint can create:
+
+```bash
+forest destination create \
+  --organisation acme \
+  --name forest-dev \
+  --environment dev \
+  --type forage/containers@1 \
+  --metadata forage_url=https://runtime.internal.example:4050 \
+  --metadata namespace=acme \
+  --metadata region=eu-west-1
+```
+
+This is operator setup, not a claim that the example host exists or that the
+runtime is ready for production traffic.
+
+## Creating a customer-infrastructure destination
+
+For a built-in type:
+
+```bash
+forest destination create \
+  --organisation acme \
   --name k8s-prod-eu \
   --environment prod \
   --type forest/kubernetes@1
-
-forest destination create \
-  --organisation my-org \
-  --name infrastructure-prod \
-  --environment prod \
-  --type forest/terraform@1
 ```
 
-## Destination Types
-
-Destination types follow the format `{provider}/{name}@{version}`:
+Use `forest destination types` to inspect the configured server's actual types
+and required metadata:
 
 ```bash
-# List available types
 forest destination types
 ```
 
-Common types:
+Secrets belong in destination-sensitive metadata or an external secret
+exchange. Never commit cloud credentials to `forest.cue`.
 
-| Type | Description |
-|------|-------------|
-| `forest/flux@1` | GitOps deployment via Flux v2 |
-| `forest/kubernetes@1` | Kubernetes deployment via manifests |
-| `forest/terraform@1` | Terraform apply/plan |
+## Mapping destinations in a project
 
-## Mapping in Configuration
-
-In `forest.cue`, destinations are mapped per environment:
+`forest.cue` declares which destinations an environment targets:
 
 ```cue
 env: {
+    dev: {
+        destinations: [
+            {destination: "forest-dev", type: "forage/containers@1"},
+        ]
+    }
     prod: {
         destinations: [
-            {destination: "k8s-prod-eu", type: "forest/kubernetes@1"},
-            {destination: "k8s-prod-us", type: "forest/kubernetes@1"},
-            {destination: "infrastructure-prod", type: "forest/terraform@1"},
+            {destination: "prod-ecs", type: "forest/generic@1"},
         ]
     }
 }
 ```
 
-Destination names support glob patterns in trigger configurations — for example, `infrastructure-prod.*` matches all destinations starting with `infrastructure-prod`.
+Destination names can use the selector forms supported by release and trigger
+configuration. The destination represents a place—account, region, cluster, or
+runtime namespace—while project configuration supplies application-specific
+values such as service or image identity.
 
-## Release Targeting
+## Releasing
 
-When releasing, you can target by environment (all destinations) or specific destinations:
+Target all destinations in an environment:
 
 ```bash
-# Release to all destinations in prod
-forest release release --environment prod
-
-# Release to specific destinations
-forest release release --destination k8s-prod-eu --destination k8s-prod-us
+forest release create --environment dev
 ```
 
-## Destination State
-
-View what's currently deployed to each destination:
+Target an explicitly named destination:
 
 ```bash
-forest project releases --organisation my-org --project my-service
+forest release release --destination k8s-prod-eu
 ```
 
-This shows the current release state per destination — what version is deployed, when it was last updated, and the release status.
-
-## CLI Commands
+Route the environment through its configured pipeline:
 
 ```bash
-forest destination create --organisation my-org --name k8s-dev --environment dev --type forest/kubernetes@1
-forest destination update --organisation my-org --name k8s-dev
-forest destination delete --organisation my-org --name k8s-dev
-forest destination list --organisation my-org
+forest release create --environment prod --pipeline
+```
+
+## Destination state
+
+View the latest known release state:
+
+```bash
+forest project releases \
+  --organisation acme \
+  --project my-service
+```
+
+Forest records what was requested and the provider/runtime's reported outcome.
+Production readiness also requires independent health signals and reconciliation
+so a successful API call cannot be mistaken for a healthy rollout.
+
+## CLI commands
+
+```bash
+forest destination create --organisation acme --name k8s-dev --environment dev --type forest/kubernetes@1
+forest destination update --organisation acme --name k8s-dev
+forest destination delete --organisation acme --name k8s-dev
+forest destination list --organisation acme
 forest destination types
 ```

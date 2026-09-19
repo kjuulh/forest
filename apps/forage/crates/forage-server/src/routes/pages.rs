@@ -24,8 +24,8 @@ async fn landing(
     let html = state
         .templates
         .render("pages/landing.html.jinja", context! {
-            title => "Forest - private component exchange",
-            description => "Publish typed automation once, then use it in repositories, CI, and developer tools.",
+            title => "Forest - release on your runtime or ours",
+            description => "Release applications on Forest Runtime or customer infrastructure through one versioned delivery workflow.",
             is_landing => true,
         })
         .map_err(|e| {
