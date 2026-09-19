@@ -1,8 +1,8 @@
-# Tag-driven release pipeline — build stage.
+# Release build workflow.
 #
 # Matrix runs the forest CLI build natively per arch (amd64 and arm64
 # agents), then uploads the per-arch tarball + sha256 to the release
-# that release-prepare.yaml created.
+# that release-prepare.yaml created. Supports the same manual fallback.
 #
 # `depends_on: [release-prepare]` ensures the release object exists
 # before any matrix entry tries to attach assets, and that release
@@ -15,6 +15,7 @@
 when:
   - event: tag
     ref: refs/tags/v*
+  - event: manual
 
 depends_on:
   - release-prepare
@@ -42,13 +43,19 @@ steps:
       # The release commit updates Cargo.toml and syncs Cargo.lock with
       # `cargo update -p forest`. Re-resolve only the forest entry here as a
       # defensive check; external dependencies stay pinned under `--locked`.
+      - |
+        release_tag="$${CI_COMMIT_TAG:-$${RELEASE_TAG:-}}"
+        case "$$release_tag" in
+          v*) ;;
+          *) echo "RELEASE_TAG must be a v-prefixed release tag"; exit 1 ;;
+        esac
       - cd apps/forest && cargo update -p forest
       - cargo build --release --locked -p forest
       - mkdir -p ../../release-artifacts
       - cd target/release
-      - tar czf "../../../../release-artifacts/forest-${CI_COMMIT_TAG}-${TARGET}.tar.gz" forest
+      - tar czf "../../../../release-artifacts/forest-$${release_tag}-${TARGET}.tar.gz" forest
       - cd ../../../../release-artifacts
-      - sha256sum "forest-${CI_COMMIT_TAG}-${TARGET}.tar.gz" > "forest-${CI_COMMIT_TAG}-${TARGET}.tar.gz.sha256"
+      - sha256sum "forest-$${release_tag}-${TARGET}.tar.gz" > "forest-$${release_tag}-${TARGET}.tar.gz.sha256"
 
   upload:
     image: alpine:3.20
@@ -58,20 +65,21 @@ steps:
     commands:
       - apk add --no-cache curl jq
       - |
+        release_tag="$${CI_COMMIT_TAG:-$${RELEASE_TAG:-}}"
         release_id=$(curl -fsS -H "Authorization: token $GITEA_TOKEN" \
-          "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/tags/${CI_COMMIT_TAG}" | jq -r .id)
-        echo "Uploading ${TARGET} artifacts to release $release_id"
+          "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/tags/$$release_tag" | jq -r .id)
+        echo "Uploading ${TARGET} artifacts to release $$release_id"
         # Gitea returns 422 on duplicate asset names. Swallow so a
         # retry on partial-success doesn't fail the pipeline.
         for f in \
-          release-artifacts/forest-${CI_COMMIT_TAG}-${TARGET}.tar.gz \
-          release-artifacts/forest-${CI_COMMIT_TAG}-${TARGET}.tar.gz.sha256; do
+          release-artifacts/forest-$${release_tag}-${TARGET}.tar.gz \
+          release-artifacts/forest-$${release_tag}-${TARGET}.tar.gz.sha256; do
           if curl -fsS -X POST \
               -H "Authorization: token $GITEA_TOKEN" \
-              -F "attachment=@$f" \
-              "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/$release_id/assets?name=$(basename "$f")" >/dev/null; then
-            echo "Uploaded $(basename "$f")"
+              -F "attachment=@$$f" \
+              "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/$$release_id/assets?name=$$(basename "$$f")" >/dev/null; then
+            echo "Uploaded $$(basename "$$f")"
           else
-            echo "$(basename "$f") upload skipped (already attached)"
+            echo "$$(basename "$$f") upload skipped (already attached)"
           fi
         done

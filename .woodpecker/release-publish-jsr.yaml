@@ -1,9 +1,9 @@
-# Tag-driven release pipeline — JSR publish stage.
+# JSR release workflow.
 #
-# Publishes the TypeScript SDK at apps/forest/sdk/typescript to JSR
-# under @rawpotion/forest-sdk. Runs once per `v*` tag, independent of
-# the Rust binary build (no `depends_on` — JSR publish doesn't need
-# the gitea release object).
+# Publishes the TypeScript SDK at apps/forest/sdk/typescript to JSR under
+# @rawpotion/forest-sdk. Runs on `v*` tags or through the authenticated manual
+# fallback with `RELEASE_TAG=vX.Y.Z`; it is independent of the Rust binary
+# build because publishing does not need the Gitea release object.
 #
 # The package version in apps/forest/sdk/typescript/deno.json must match the
 # tag. The publish step verifies this before calling `deno publish` so a stale
@@ -16,6 +16,7 @@
 when:
   - event: tag
     ref: refs/tags/v*
+  - event: manual
 
 labels:
   platform: linux/amd64
@@ -27,15 +28,19 @@ steps:
       JSR_TOKEN:
         from_secret: jsr_token
     commands:
-      - cd apps/forest/sdk/typescript
-      # Strip leading `v` from the tag and compare with deno.json. If
-      # they diverge, refuse to publish — the wrong version on JSR is
-      # painful to recover from (yanks aren't deletes).
-      - tag_version="${CI_COMMIT_TAG##v}"
-      - pkg_version=$(deno eval "console.log(JSON.parse(Deno.readTextFileSync('deno.json')).version)")
       - |
-        if [ "$tag_version" != "$pkg_version" ]; then
-          echo "version mismatch: tag=$tag_version deno.json=$pkg_version"
+        release_tag="$${CI_COMMIT_TAG:-$${RELEASE_TAG:-}}"
+        case "$$release_tag" in
+          v*) ;;
+          *) echo "RELEASE_TAG must be a v-prefixed release tag"; exit 1 ;;
+        esac
+        cd apps/forest/sdk/typescript
+        # Strip leading `v` from the tag and compare with deno.json. If they
+        # diverge, refuse to publish: yanks cannot delete a wrong JSR version.
+        tag_version="$${release_tag#v}"
+        pkg_version=$$(deno eval "console.log(JSON.parse(Deno.readTextFileSync('deno.json')).version)")
+        if [ "$$tag_version" != "$$pkg_version" ]; then
+          echo "version mismatch: tag=$$tag_version deno.json=$$pkg_version"
           exit 1
         fi
-      - deno publish --token "$JSR_TOKEN"
+        deno publish --token "$JSR_TOKEN"

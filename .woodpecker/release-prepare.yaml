@@ -1,9 +1,9 @@
-# Tag-driven release pipeline — prepare stage.
+# Release preparation workflow.
 #
-# Runs once per `v*` tag. Generates the release notes via git-cliff,
-# creates the release on src.rawpotion.io (idempotent — reuses an
-# existing release if a previous pipeline ran), and uploads install.sh
-# (which is arch-agnostic).
+# Runs on `v*` tags, with an authenticated manual fallback that requires a
+# `RELEASE_TAG=vX.Y.Z` pipeline variable. Generates release notes via git-cliff,
+# creates the release on src.rawpotion.io (idempotent — reuses an existing
+# release if a previous pipeline ran), and uploads install.sh.
 #
 # The per-arch binary tarballs are uploaded by release-build.yaml,
 # which `depends_on` this workflow so the release exists before the
@@ -16,6 +16,7 @@
 when:
   - event: tag
     ref: refs/tags/v*
+  - event: manual
 
 # Any platform — this workflow doesn't compile anything.
 labels:
@@ -28,7 +29,13 @@ steps:
       # `git-cliff` is the standalone binary. `--strip header` removes
       # the top-level "# Changelog" line so the body slots cleanly
       # into the gitea release notes panel.
-      - git-cliff --tag ${CI_COMMIT_TAG} --strip header --unreleased > RELEASE_NOTES.md
+      - |
+        tag="$${CI_COMMIT_TAG:-$${RELEASE_TAG:-}}"
+        case "$$tag" in
+          v*) ;;
+          *) echo "RELEASE_TAG must be a v-prefixed release tag"; exit 1 ;;
+        esac
+        git-cliff --tag "$$tag" --strip header --unreleased > RELEASE_NOTES.md
 
   create-release:
     image: alpine:3.20
@@ -40,29 +47,31 @@ steps:
       # Create-or-reuse: GET first, POST only if missing. Makes
       # pipeline retries safe.
       - |
+        tag="$${CI_COMMIT_TAG:-$${RELEASE_TAG:-}}"
         existing=$(curl -fsS -H "Authorization: token $GITEA_TOKEN" \
-          "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/tags/${CI_COMMIT_TAG}" 2>/dev/null || echo "")
+          "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/tags/$$tag" 2>/dev/null || echo "")
         if echo "$existing" | jq -e .id >/dev/null 2>&1; then
-          echo "Release for ${CI_COMMIT_TAG} already exists — reusing"
+          echo "Release for $$tag already exists — reusing"
         else
           body=$(jq -Rs . < RELEASE_NOTES.md)
           curl -fsS -X POST \
             -H "Authorization: token $GITEA_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{\"tag_name\":\"${CI_COMMIT_TAG}\",\"name\":\"${CI_COMMIT_TAG}\",\"body\":$body,\"draft\":false,\"prerelease\":false}" \
+            -d "{\"tag_name\":\"$$tag\",\"name\":\"$$tag\",\"body\":$$body,\"draft\":false,\"prerelease\":false}" \
             "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases" >/dev/null
-          echo "Created release for ${CI_COMMIT_TAG}"
+          echo "Created release for $$tag"
         fi
       # Upload install.sh. Gitea returns 422 if an asset with the
       # same name already exists (e.g. pipeline retry) — swallow
       # that and keep going.
       - |
+        tag="$${CI_COMMIT_TAG:-$${RELEASE_TAG:-}}"
         release_id=$(curl -fsS -H "Authorization: token $GITEA_TOKEN" \
-          "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/tags/${CI_COMMIT_TAG}" | jq -r .id)
+          "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/tags/$$tag" | jq -r .id)
         if curl -fsS -X POST \
             -H "Authorization: token $GITEA_TOKEN" \
             -F "attachment=@scripts/install.sh" \
-            "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/$release_id/assets?name=install.sh" >/dev/null; then
+            "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/$$release_id/assets?name=install.sh" >/dev/null; then
           echo "Uploaded install.sh"
         else
           echo "install.sh upload skipped (already attached)"
