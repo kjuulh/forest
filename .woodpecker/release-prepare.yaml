@@ -19,6 +19,14 @@ when:
   - event: manual
 
 # Any platform — this workflow doesn't compile anything.
+
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    settings:
+      partial: false
+      depth: 0
+      tags: true
 labels:
   platform: linux/amd64
 
@@ -35,7 +43,13 @@ steps:
           v*) ;;
           *) echo "RELEASE_TAG must be a v-prefixed release tag"; exit 1 ;;
         esac
-        git-cliff --tag "$$tag" --strip header --unreleased > RELEASE_NOTES.md
+        tag_sha=$$(git rev-list -n 1 "$$tag")
+        head_sha=$$(git rev-parse HEAD)
+        if [ "$$tag_sha" != "$$head_sha" ]; then
+          echo "release tag $$tag points at $$tag_sha, but the pipeline is building $$head_sha"
+          exit 1
+        fi
+        git-cliff --current --strip header > RELEASE_NOTES.md
 
   create-release:
     image: alpine:3.20
@@ -50,10 +64,16 @@ steps:
         tag="$${CI_COMMIT_TAG:-$${RELEASE_TAG:-}}"
         existing=$(curl -fsS -H "Authorization: token $GITEA_TOKEN" \
           "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/tags/$$tag" 2>/dev/null || echo "")
+        body=$(jq -Rs . < RELEASE_NOTES.md)
         if echo "$existing" | jq -e .id >/dev/null 2>&1; then
-          echo "Release for $$tag already exists — reusing"
+          release_id=$(echo "$existing" | jq -r .id)
+          curl -fsS -X PATCH \
+            -H "Authorization: token $GITEA_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"name\":\"$$tag\",\"body\":$$body,\"draft\":false,\"prerelease\":false}" \
+            "https://src.rawpotion.io/api/v1/repos/rawpotion/forest/releases/$$release_id" >/dev/null
+          echo "Updated release for $$tag"
         else
-          body=$(jq -Rs . < RELEASE_NOTES.md)
           curl -fsS -X POST \
             -H "Authorization: token $GITEA_TOKEN" \
             -H "Content-Type: application/json" \
