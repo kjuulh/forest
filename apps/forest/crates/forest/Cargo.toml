@@ -6,12 +6,11 @@ repository = "https://git.kjuulh.io/kjuulh/forest"
 readme = "../../README.md"
 license = "MIT"
 
-# `forest` carries its own version — release-please owns this number
-# and bumps it on each release-please PR merge. The rest of the
-# workspace continues to use `version.workspace = true` for now;
-# they're not distributed externally so their version doesn't matter
-# for users.
-version = "0.3.13"
+# `forest` carries its own version. Tag-driven Woodpecker releases require this
+# value and the TypeScript SDK version to match the `vX.Y.Z` tag. The rest of
+# the workspace continues to use `version.workspace = true`; those crates are
+# not distributed independently.
+version = "0.3.14"
 
 [dependencies]
 forest-grpc-interface.workspace = true

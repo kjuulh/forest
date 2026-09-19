@@ -5,9 +5,8 @@
 # the Rust binary build (no `depends_on` — JSR publish doesn't need
 # the gitea release object).
 #
-# The package version in apps/forest/sdk/typescript/deno.json must
-# match the tag (release-please bumps both together). The publish
-# step verifies this before calling `deno publish` so a stale
+# The package version in apps/forest/sdk/typescript/deno.json must match the
+# tag. The publish step verifies this before calling `deno publish` so a stale
 # deno.json fails fast instead of pushing the wrong version to JSR.
 #
 # Required woodpecker secrets:
@@ -23,7 +22,7 @@ labels:
 
 steps:
   publish:
-    image: denoland/deno:2.1.4
+    image: denoland/deno:2.7.1
     environment:
       JSR_TOKEN:
         from_secret: jsr_token

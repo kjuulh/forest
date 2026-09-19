@@ -1,6 +1,6 @@
 {
   "name": "@rawpotion/forest-sdk",
-  "version": "0.1.14",
+  "version": "0.3.14",
   "license": "MIT",
   "exports": "./forest-sdk.ts",
   "publish": {

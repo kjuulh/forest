@@ -241,7 +241,6 @@ description = "Run CI PR pipeline via Dagger"
 run = "cargo run -p ci -- main"
 description = "Run CI main pipeline via Dagger"
 
-# Forest CLI releases are driven by GitHub Actions
-# (.github/workflows/release.yml + release-please.yml). No local
-# `release` task here — cut a release by merging the auto-generated
-# release-please PR on main.
+# Forest CLI releases are driven by `v*` tags through the Woodpecker release
+# workflows at the repository root. Follow `apps/forest/CLAUDE.md` when cutting
+# a release.

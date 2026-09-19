@@ -15,7 +15,7 @@ Or pin the version via `deno.json`:
 ```json
 {
   "imports": {
-    "@rawpotion/forest-sdk": "jsr:@rawpotion/forest-sdk@^0.1"
+    "@rawpotion/forest-sdk": "jsr:@rawpotion/forest-sdk@^0.3"
   }
 }
 ```

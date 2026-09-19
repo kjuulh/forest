@@ -2,8 +2,16 @@
 
 ## Private preview
 
-Forest does not yet have a supported anonymous binary distribution. Install it
-from the private repository:
+Prebuilt Forest CLI releases support glibc-based Linux on x86_64 and arm64.
+The installer verifies the release checksum and installs to `$HOME/.local/bin`
+by default:
+
+```bash
+curl -fsSL https://src.rawpotion.io/rawpotion/forest/releases/latest/download/install.sh | bash
+```
+
+The hosted Forest service remains a private preview and requires an account.
+To build from the private repository instead:
 
 ```bash
 git clone git@git.kjuulh.io:kjuulh/forest.git

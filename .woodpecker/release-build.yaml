@@ -32,17 +32,16 @@ labels:
 
 steps:
   build:
-    image: rust:1.93-bookworm
+    image: rust:1.98-trixie
     environment:
       # forest CLI doesn't use sqlx but other workspace members do.
       # Set defensively so a workspace-level build.rs can't fail on
       # the lack of a database during the release build.
       SQLX_OFFLINE: "true"
     commands:
-      # release-please used to bump Cargo.toml + sync Cargo.lock via
-      # `cargo update -p forest`. Without it the lockfile may still
-      # carry the previous version; re-resolve the forest entry only
-      # so `--locked` accepts it. External deps stay pinned.
+      # The release commit updates Cargo.toml and syncs Cargo.lock with
+      # `cargo update -p forest`. Re-resolve only the forest entry here as a
+      # defensive check; external dependencies stay pinned under `--locked`.
       - cd apps/forest && cargo update -p forest
       - cargo build --release --locked -p forest
       - mkdir -p ../../release-artifacts

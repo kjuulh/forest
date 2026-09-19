@@ -58,15 +58,23 @@ mise install
 cargo build --locked --workspace
 ```
 
-## Install the CLI from this checkout
+## Install the CLI
+
+Prebuilt releases support glibc-based Linux on x86_64 and arm64:
+
+```bash
+curl -fsSL https://src.rawpotion.io/rawpotion/forest/releases/latest/download/install.sh | bash
+forest --version
+```
+
+To build from this checkout instead:
 
 ```bash
 cargo install --path crates/forest --locked
 forest --version
 ```
 
-No public package or anonymous binary channel is supported during the private
-preview.
+The hosted Forest service remains a private preview and requires an account.
 
 ## Start a local control plane
 

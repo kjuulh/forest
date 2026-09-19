@@ -169,20 +169,31 @@ records the gates for making those guarantees.
 
 ## Install the private preview
 
-Prerequisites:
+The CLI has prebuilt releases for glibc-based Linux on x86_64 and arm64. The
+installer verifies the published SHA-256 checksum and installs to
+`$HOME/.local/bin` by default:
 
-- Rust `1.98.1` as pinned by `apps/forest/mise.toml`;
-- [CUE](https://cuelang.org/) for component and project evaluation;
-- Git;
-- access to the private Gitea repository and a Forest server.
+```bash
+curl -fsSL https://src.rawpotion.io/rawpotion/forest/releases/latest/download/install.sh | bash
+forest --version
+```
 
-Build the CLI from the repository:
+Pin both the installer and binary to a specific release when reproducibility
+matters:
+
+```bash
+curl -fsSL https://src.rawpotion.io/rawpotion/forest/releases/download/v0.3.14/install.sh \
+  | bash -s -- v0.3.14
+```
+
+The hosted Forest service remains a private preview and requires an account.
+To build the CLI from source, install Rust `1.98.1`, CUE, and Git, then use the
+private repository:
 
 ```bash
 git clone git@git.kjuulh.io:kjuulh/forest.git
 cd forest
 cargo install --path apps/forest/crates/forest --locked
-forest --version
 ```
 
 For repository development, install the pinned tools with
@@ -193,10 +204,6 @@ cd apps/forest
 mise install
 cargo build --locked --workspace
 ```
-
-There is no supported anonymous binary distribution yet. Do not copy the old
-Rawpotion or Understory installation snippets: they target historical release
-channels and credentials.
 
 ## Local services
 
