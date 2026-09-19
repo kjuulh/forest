@@ -50,17 +50,20 @@ When adding a new aggregate:
 
 ## Release
 
-Releases are tag-driven (`v*` tags fire `.woodpecker/release-prepare.yaml` +
-`release-build.yaml` + `release-publish-jsr.yaml`). A release commit must
-bump **both** version strings — they're checked against the tag during
-publish-jsr:
+Releases normally run from `v*` tags through
+`.woodpecker/release-prepare.yaml`, `release-build.yaml`, and
+`release-publish-jsr.yaml`. The workflows also accept an authenticated manual
+run with `RELEASE_TAG=vX.Y.Z`; use `RELEASE_BASE=<previous-tag-or-commit>` only
+when the previous release tag is absent from the Gitea repository.
+
+A release commit must bump both version strings:
 
 - `apps/forest/crates/forest/Cargo.toml` — the CLI binary version
 - `apps/forest/sdk/typescript/deno.json` — the `@rawpotion/forest-sdk`
-  jsr package version
+  JSR package version
 
-If only one is bumped, `release-publish-jsr.yaml` aborts with
+If only one is bumped, the JSR workflow aborts with
 `version mismatch: tag=X deno.json=Y`. After bumping, run
-`cd apps/forest && cargo update -p forest` to sync `Cargo.lock` and
-commit both files plus the lock together. The release commit subject
-convention is `chore(release): vX.Y.Z`.
+`cd apps/forest && cargo update -p forest` to sync `Cargo.lock` and commit both
+files plus the lock together. The release commit subject convention is
+`chore(release): vX.Y.Z`.
