@@ -6,7 +6,7 @@
 # editing the Dockerfile. The tag pattern in .woodpecker/forest-ci-image.yaml
 # is `:rawpotion` (rolling) + `:rawpotion-<sha>` (immutable).
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 ARG FOREST_VERSION=v0.3.14
 ARG CUE_VERSION=v0.15.4
