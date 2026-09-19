@@ -45,7 +45,7 @@ steps:
         fi
         if deno eval --allow-net=jsr.io --allow-read=deno.json '
           const pkg = JSON.parse(Deno.readTextFileSync("deno.json"));
-          const response = await fetch(`https://jsr.io/${pkg.name}/meta.json`);
+          const response = await fetch("https://jsr.io/" + pkg.name + "/meta.json");
           if (!response.ok) Deno.exit(1);
           const metadata = await response.json();
           Deno.exit(metadata.versions?.[pkg.version] ? 0 : 1);
