@@ -35,7 +35,7 @@ pub struct BuildInfo {
 
 /// Environment variable carrying the git commit, set on the image.
 const COMMIT_VAR: &str = "FOREST_GIT_SHA";
-/// Environment variable carrying the RFC 3339 build timestamp.
+/// Environment variable carrying an RFC 3339 timestamp or Unix epoch.
 const BUILD_TIME_VAR: &str = "FOREST_BUILD_TIME";
 
 impl BuildInfo {
@@ -44,7 +44,7 @@ impl BuildInfo {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
             commit: read(COMMIT_VAR),
-            build_time: read(BUILD_TIME_VAR),
+            build_time: normalize_build_time(&read(BUILD_TIME_VAR)),
         }
     }
 }
@@ -66,6 +66,18 @@ fn read(key: &str) -> String {
         }
         Err(_) => String::new(),
     }
+}
+
+/// Convert Woodpecker's Unix timestamp to the RFC 3339 contract exposed by
+/// status responses and HTML `<time datetime>` attributes.
+fn normalize_build_time(value: &str) -> String {
+    let Ok(timestamp) = value.parse::<i64>() else {
+        return value.to_string();
+    };
+
+    chrono::DateTime::from_timestamp(timestamp, 0)
+        .map(|timestamp| timestamp.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .unwrap_or_else(|| value.to_string())
 }
 
 #[cfg(test)]
@@ -96,6 +108,11 @@ mod tests {
         unsafe { std::env::set_var("FOREST_BUILD_INFO_TEST2", "  437c7b1\n") };
         assert_eq!(read("FOREST_BUILD_INFO_TEST2"), "437c7b1");
         unsafe { std::env::remove_var("FOREST_BUILD_INFO_TEST2") };
+    }
+
+    #[test]
+    fn unix_build_timestamp_is_normalized_to_rfc3339() {
+        assert_eq!(normalize_build_time("1700000000"), "2023-11-14T22:13:20Z");
     }
 
     #[test]
