@@ -1,9 +1,6 @@
-# Build + push per-arch docker images for forest and forage on every
-# push to the fork's rolling head. Matrix splits into 4 parallel
-# workflows (forest×{amd64,arm64}, forage×{amd64,arm64}), each routed
-# to a native runner via the built-in `platform` label — no QEMU.
-# The `.woodpecker/manifest.yaml` workflow then fuses the per-arch
-# images into multi-arch manifest lists under the user-facing tags.
+# Build + push amd64 deployment images for forest and forage on every
+# push to the fork's rolling head. The production cluster is amd64-only;
+# CLI release binaries remain multi-architecture in release-build.yaml.
 #
 # Required woodpecker secrets:
 #   registry_token       — token with package:write on git.kjuulh.io/kjuulh
@@ -11,8 +8,7 @@
 # Required woodpecker server config (admin):
 #   WOODPECKER_PLUGINS_PRIVILEGED=woodpeckerci/plugin-docker-buildx
 #
-# Required woodpecker runners:
-#   one linux/amd64, one linux/arm64 (auto-advertised by each agent).
+# Required woodpecker runner: one linux/amd64 runner.
 
 when:
   - event: push
@@ -22,12 +18,9 @@ matrix:
   APP:
     - forest
     - forage
-  ARCH:
-    - amd64
-    - arm64
 
 labels:
-  platform: linux/${ARCH}
+  platform: linux/amd64
 
 steps:
   build-and-push:
@@ -42,25 +35,23 @@ steps:
         from_secret: registry_token
       build_args:
         - CARGO_NET_GIT_FETCH_WITH_CLI=true
-        # Point rustc-wrapper at the homelab memcached server so cargo
-        # builds amortize across pipelines. Same endpoint that the
-        # forage-postgresql-controller's Dagger pipeline uses; the
-        # clank-sccache host is on the internal VLAN reachable from
-        # both amd64 and arm64 woodpecker runners.
+        # Point rustc-wrapper at clank-sccache so cargo builds amortize
+        # across pipelines.
         - SCCACHE_MEMCACHED_ENDPOINT=tcp://10.0.10.13:11211
         - GIT_SHA=${CI_COMMIT_SHA}
         - BUILD_TIME=${CI_PIPELINE_CREATED}
-      # Single platform — routed to the matching agent by the
-      # `platform` label above. No QEMU emulation.
-      platforms: linux/${ARCH}
+      # Production workloads run on the amd64 homelab node.
+      platforms: linux/amd64
       # Rust compilation is already shared through sccache above. Avoid a
       # second BuildKit registry cache: Gitea returns HTTP 500 while committing
       # the large cache manifest, which marks otherwise-successful image pushes
       # as failed.
-      # Per-arch tags only. The manifest.yaml workflow consumes these
-      # and emits the user-facing multi-arch tags (latest, rawpotion,
-      # rawpotion-<sha>, etc.).
+      # Publish the deployment tags directly; no multi-arch manifest stage
+      # is needed for the amd64-only cluster.
       tags:
-        - rawpotion-${ARCH}
-        - rawpotion-${ARCH}-${CI_COMMIT_SHA}
+        - latest
+        - rawpotion
+        - rawpotion-${CI_COMMIT_SHA}
+        - rawpotion-build${CI_PIPELINE_NUMBER}
+        - rawpotion-ts${CI_PIPELINE_CREATED}
       auto_tag: false

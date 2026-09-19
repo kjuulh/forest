@@ -10,9 +10,8 @@ only need to declare the action and its inputs.
 
 ## Image
 
-`git.kjuulh.io/kjuulh/forest-ci:<tag>` — built by
-`.woodpecker/forest-ci-image.yaml` on every push that touches
-`apps/forest-ci/*`. Multi-arch (amd64 + arm64).
+`git.kjuulh.io/kjuulh/forest-ci:<tag>` — built for amd64 by
+`.woodpecker/forest-ci-image.yaml` on every push to the rolling fork branch.
 
 Tags:
 - `:rawpotion` — rolling head of the fork branch
@@ -26,7 +25,7 @@ steps:
     image: git.kjuulh.io/kjuulh/forest-ci:rawpotion
     settings:
       action: release-create
-      forest_server: https://forest.i.kjuulh.io
+      forest_server: https://api.forest.kjuulh.io
       forest_token:
         from_secret: forest_token
       environment: dev
@@ -56,7 +55,7 @@ any code change.
 | Input            | Required          | Description |
 |------------------|-------------------|-------------|
 | `action`         | yes               | `release-create` / `release-prepare` / `release-annotate` |
-| `forest_server`  | yes               | URL of the forest server (e.g. `https://forest.i.kjuulh.io`) |
+| `forest_server`  | yes               | URL of the forest server (e.g. `https://api.forest.kjuulh.io`) |
 | `forest_token`   | yes (secret)      | Token with release+annotate scope |
 | `environment`    | yes for `release-create` | Forest env name (`dev`, `prod`, …) |
 | `projects_dir`   | no (default `deployment/projects`) | Where to look for projects. If this dir itself contains `forest.cue`, treat it as a single project; otherwise iterate subdirs that contain one |

@@ -1,5 +1,5 @@
-# Forest deployment — runs after the multi-arch manifest stage publishes
-# the user-facing image tags. Iterates every project under deployment/
+# Forest deployment — runs after ci.yaml publishes the amd64 image tags.
+# Iterates every project under deployment/
 # and, for each, runs `forest release prepare` once (pinning the image
 # tag to the SHA we just built) then `forest release annotate` to publish
 # the prepared manifests as a single annotated artifact. No human
@@ -19,18 +19,17 @@
 # Required woodpecker secrets:
 #   forest_token — token for FOREST_SERVER (api.forest.kjuulh.io)
 #
-# Trigger: only on push to kjuulh/gitea-fork. PRs build images (via
-# ci + manifest) but don't deploy.
+# Trigger: only on push to kjuulh/gitea-fork. Other branches don't deploy.
 
 when:
   - event: push
     branch: kjuulh/gitea-fork
 
 depends_on:
-  - manifest
+  - ci
 
-# Deployment must run inside the homelab network: the CUE registry resolves
-# to 10.0.9.1 and is not reachable from the external ARM runner.
+# Deployment runs on the amd64 homelab runner, which can reach the internal
+# CUE registry at 10.0.9.1.
 labels:
   platform: linux/amd64
 
@@ -83,17 +82,9 @@ steps:
       - export PATH="$CI_WORKSPACE/.ci-bin:$PATH"
       - forest --version
       - deno --version | head -1
-      # The multi-arch tag set published by manifest.yaml includes
-      # rawpotion-<short-sha>, which is what we pin every project to.
-      # Same tag for forage + forest — both apps are built from this
-      # commit in lockstep by ci.yaml.
-      # Block-scalar because `:` followed by a space in an unquoted YAML
-      # scalar terminates the scalar and starts a map.
-      #
-      # Use the full CI_COMMIT_SHA — manifest.yaml publishes both
-      # `:rawpotion-<short>` and `:rawpotion-<full>`, so pinning to the
-      # full SHA works and avoids needing bash-specific substring syntax
-      # (the runner's /bin/sh rejects ${VAR:0:7} as "Bad substitution").
+      # ci.yaml publishes the same immutable full-SHA tag for forage and
+      # forest, so both projects deploy the images built from this commit.
+      # The runner's /bin/sh does not support short-SHA substring syntax.
       #
       # annotate requires org/project/title explicitly — unlike `release
       # create` it does not auto-detect them from forest.cue. The org is
@@ -127,6 +118,3 @@ steps:
               --source-type "woodpecker" \
               --run-url "$$CI_PIPELINE_URL" )
         done
-
-# Retrigger CI — second build after the sccache integration so we
-# can read the hit rate off the cargo build's `sccache --show-stats`.
