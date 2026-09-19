@@ -366,7 +366,11 @@ pub struct DestinationState {
 }
 
 /// Runtime status of a single pipeline stage.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `Default` is derived so a construction site — a test fixture especially —
+/// can state only the fields it cares about and let the rest fall out. Every
+/// field added here would otherwise have to be spelled into all of them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PipelineRunStageState {
     pub stage_id: String,
     pub depends_on: Vec<String>,
@@ -385,6 +389,13 @@ pub struct PipelineRunStageState {
     pub approval_status: Option<String>,
     #[serde(default)]
     pub auto_approve: Option<bool>,
+    /// Gate stages: when `on_timeout` decides.
+    #[serde(default)]
+    pub gate_deadline: Option<String>,
+    /// Gate stages: the requirements not yet satisfied, already rendered for a
+    /// human — "rollout to be HEALTHY (currently UNHEALTHY)".
+    #[serde(default)]
+    pub gate_waiting_on: Vec<String>,
 }
 
 /// Combined response from get_destination_states: destinations only.
@@ -568,6 +579,13 @@ pub enum PolicyConfig {
         target_environment: String,
         required_approvals: i32,
     },
+    /// Deploy the newest pending release for a target and mark the ones it
+    /// overtook SUPERSEDED, rather than grinding through every queued one.
+    /// A selection policy, not a gate — see design/SKIP-TO-LATEST.md.
+    SupersedePending {
+        target_environment: String,
+        same_branch_only: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -656,6 +674,31 @@ pub enum PipelineStageConfig {
         environment: String,
         auto_approve: bool,
     },
+    /// Waits for reported signals rather than a duration. See forest#252.
+    ///
+    /// Structured rather than pre-rendered, because forage writes pipelines
+    /// back as well as reading them (`convert_stages_to_grpc`) — a display
+    /// string here would not survive the round trip, and a stage that changes
+    /// when you edit an unrelated one is the kind of thing nobody finds until
+    /// it has already happened.
+    Gate {
+        requires: Vec<SignalRequirement>,
+        timeout_seconds: i64,
+        /// "FAIL" or "PROCEED".
+        on_timeout: String,
+    },
+}
+
+/// One thing a gate waits to be told, and the states it accepts.
+///
+/// Statuses are carried as their forest `HealthStatus` names so neither this
+/// crate nor the frontend needs the enum. An empty `accept` means HEALTHY,
+/// which is how the server reads it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignalRequirement {
+    pub signal: String,
+    #[serde(default)]
+    pub accept: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

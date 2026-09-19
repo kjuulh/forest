@@ -5,3 +5,9 @@ version: v2
 # reflect the upstream definitions without manual copy-paste.
 modules:
   - path: interface/proto
+    # forest/provider/v1 is the contract an external destination provider
+    # implements. forage is not one, and generating a client and server for it
+    # here would be several hundred lines of bindings nothing calls — which
+    # `buf generate` would then re-add on every run.
+    excludes:
+      - interface/proto/forest/provider

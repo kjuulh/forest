@@ -1052,6 +1052,125 @@ async fn artifact_detail_shows_enriched_data() {
     assert!(html.contains("Major release"));
 }
 
+/// A release whose pipeline is parked on a plan, so the page has something to
+/// ask about and something to show.
+fn awaiting_plan_fixture(plan: &str) -> MockPlatformBehavior {
+    use forage_core::platform::{PipelineRunStageState, ReleaseIntentState};
+
+    MockPlatformBehavior {
+        get_artifact_by_slug_result: Some(Ok(Artifact {
+            artifact_id: "art-plan".into(),
+            slug: "my-api-plan".into(),
+            context: ArtifactContext {
+                title: "Adopt the configuration".into(),
+                description: None,
+                web: None,
+                pr: None,
+            },
+            source: None,
+            git_ref: None,
+            destinations: vec![],
+            created_at: "2026-03-07T12:00:00Z".into(),
+        })),
+        get_release_intent_states_result: Some(Ok(vec![ReleaseIntentState {
+            release_intent_id: "intent-plan".into(),
+            artifact_id: "art-plan".into(),
+            project: "my-api".into(),
+            created_at: "2026-03-07T12:00:00Z".into(),
+            stages: vec![PipelineRunStageState {
+                stage_id: "plan-finance".into(),
+                stage_type: "plan".into(),
+                status: "AWAITING_APPROVAL".into(),
+                environment: Some("finance".into()),
+                approval_status: Some("AWAITING_APPROVAL".into()),
+                started_at: Some("2026-03-07T12:00:05Z".into()),
+                ..Default::default()
+            }],
+            steps: vec![],
+        }])),
+        get_plan_output_result: Some(Ok(forage_core::platform::PlanOutput {
+            plan_output: plan.into(),
+            status: "SUCCEEDED".into(),
+            outputs: vec![],
+        })),
+        ..Default::default()
+    }
+}
+
+async fn artifact_detail_html(behavior: MockPlatformBehavior) -> String {
+    let platform = MockPlatformClient::with_behavior(behavior);
+    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects/my-api/releases/my-api-plan")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    String::from_utf8(body.to_vec()).unwrap()
+}
+
+/// The point of a plan stage is that somebody reads the plan. This page carries
+/// the approve button, so it has to carry the plan too -- the swimlane's "View
+/// plan" button is somewhere else, and asking for agreement to an unseen change
+/// is the failure this guards against.
+#[tokio::test]
+async fn a_plan_awaiting_approval_is_shown_on_the_page_that_approves_it() {
+    let html = artifact_detail_html(awaiting_plan_fixture(
+        "impact: 3 participants change, total delta 1200",
+    ))
+    .await;
+
+    assert!(html.contains("Approve plan"), "the ask should be there");
+    assert!(
+        html.contains("impact: 3 participants change, total delta 1200"),
+        "the plan being approved should be on the page, got: {html}"
+    );
+}
+
+/// Not behind a click while it is the open question. A plan people have to
+/// expand is a plan people approve without reading.
+#[tokio::test]
+async fn a_plan_awaiting_approval_is_open_rather_than_collapsed() {
+    let html = artifact_detail_html(awaiting_plan_fixture("would change nothing")).await;
+    let details = html
+        .split("<details data-plan-output")
+        .nth(1)
+        .expect("the plan should render in a details element of its own");
+    let opening_tag = details.split('>').next().unwrap_or_default();
+    assert!(
+        opening_tag.contains("open"),
+        "a plan awaiting approval should be expanded, got: {opening_tag}"
+    );
+}
+
+/// An empty plan is not a plan. Rendering the chrome for one would say a
+/// provider reported something when it reported nothing.
+#[tokio::test]
+async fn a_stage_with_no_plan_output_renders_no_plan() {
+    let mut behavior = awaiting_plan_fixture("");
+    behavior.get_plan_output_result = Some(Ok(forage_core::platform::PlanOutput {
+        plan_output: "   \n  ".into(),
+        status: "SUCCEEDED".into(),
+        outputs: vec![],
+    }));
+    let html = artifact_detail_html(behavior).await;
+    assert!(
+        !html.contains("<details data-plan-output"),
+        "blank plan output should render nothing, got: {html}"
+    );
+}
+
 #[tokio::test]
 async fn artifact_detail_not_found_returns_404() {
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
@@ -1622,7 +1741,7 @@ async fn triggers_page_returns_200() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/orgs/testorg/projects/my-api/triggers")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers")
                 .header("cookie", &cookie)
                 .body(Body::empty())
                 .unwrap(),
@@ -1667,7 +1786,7 @@ async fn triggers_page_shows_existing_triggers() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/orgs/testorg/projects/my-api/triggers")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers")
                 .header("cookie", &cookie)
                 .body(Body::empty())
                 .unwrap(),
@@ -1693,7 +1812,7 @@ async fn create_trigger_requires_admin() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/projects/my-api/triggers")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from("csrf_token=test-csrf&name=test-trigger"))
@@ -1714,7 +1833,7 @@ async fn create_trigger_requires_csrf() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/projects/my-api/triggers")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from("csrf_token=wrong-token&name=test-trigger"))
@@ -1735,7 +1854,7 @@ async fn create_trigger_success_redirects() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/projects/my-api/triggers")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from("csrf_token=test-csrf&name=deploy-main&branch_pattern=main&target_environments=staging")
@@ -1747,7 +1866,7 @@ async fn create_trigger_success_redirects() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(
         response.headers().get("location").unwrap(),
-        "/orgs/testorg/projects/my-api/triggers"
+        "/orgs/testorg/projects/my-api/settings/triggers"
     );
 }
 
@@ -1774,7 +1893,30 @@ async fn toggle_trigger_requires_admin() {
 
 #[tokio::test]
 async fn delete_trigger_success_redirects() {
-    let (state, sessions) = test_state();
+    use forage_core::platform::Trigger;
+
+    // The action addresses the trigger by id, so the trigger has to exist for
+    // the id to resolve.
+    let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
+        list_triggers_result: Some(Ok(vec![Trigger {
+            id: "t1".into(),
+            name: "deploy-main".into(),
+            enabled: true,
+            branch_pattern: Some("main".into()),
+            title_pattern: None,
+            author_pattern: None,
+            commit_message_pattern: None,
+            source_type_pattern: None,
+            target_environments: vec!["staging".into()],
+            target_destinations: vec![],
+            force_release: false,
+            use_pipeline: false,
+            created_at: "2026-03-08T00:00:00Z".into(),
+            updated_at: "2026-03-08T00:00:00Z".into(),
+        }])),
+        ..Default::default()
+    });
+    let (state, sessions) = test_state_with(MockForestClient::new(), platform);
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
@@ -1782,7 +1924,7 @@ async fn delete_trigger_success_redirects() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/projects/my-api/triggers/deploy-main/delete")
+                .uri("/orgs/testorg/projects/my-api/triggers/t1/delete")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from("csrf_token=test-csrf"))
@@ -1793,7 +1935,7 @@ async fn delete_trigger_success_redirects() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(
         response.headers().get("location").unwrap(),
-        "/orgs/testorg/projects/my-api/triggers"
+        "/orgs/testorg/projects/my-api/settings/triggers"
     );
 }
 
@@ -1808,7 +1950,7 @@ async fn policies_page_returns_200() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/orgs/testorg/projects/my-api/policies")
+                .uri("/orgs/testorg/projects/my-api/settings/policies")
                 .header("cookie", &cookie)
                 .body(Body::empty())
                 .unwrap(),
@@ -1820,7 +1962,11 @@ async fn policies_page_returns_200() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    assert!(html.contains("Deployment Policies"));
+    // The heading is the section name now — "Deployment Policies" moved
+    // into the shell's description line so it reads parallel with the
+    // Triggers / Policies / Pipelines sub-nav.
+    assert!(html.contains("Policies"));
+    assert!(html.contains("Gate deployments with soak times"));
 }
 
 #[tokio::test]
@@ -1833,7 +1979,7 @@ async fn create_policy_requires_admin() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/projects/my-api/policies")
+                .uri("/orgs/testorg/projects/my-api/settings/policies")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from("csrf_token=test-csrf&name=test-policy&policy_type=soak_time"))
@@ -1854,7 +2000,7 @@ async fn create_policy_requires_csrf() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/orgs/testorg/projects/my-api/policies")
+                .uri("/orgs/testorg/projects/my-api/settings/policies")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
                 .body(Body::from("csrf_token=wrong-token&name=test-policy&policy_type=soak_time"))
@@ -2613,4 +2759,230 @@ async fn is_current_marks_only_the_release_the_destination_still_holds() {
         !current_of("my-api-old"),
         "the superseded release deployed here, but is no longer live"
     );
+}
+// ─── Rules are addressed by id, not by name ─────────────────────────
+//
+// A release rule is routinely named after the pattern it matches, and the
+// reported case — `(feat|feature)/.*-to-platform-dev` — contains a `/`. The
+// action URLs used to interpolate that name into
+// `/triggers/{name}/delete`, which produced extra path segments, so axum
+// matched no route and Edit / Disable / Delete returned 404 before any
+// handler ran. The buttons now carry the rule's id and the handler resolves
+// it back to the name the forest API still keys on.
+
+/// The exact rule name from the bug report. Regex alternation, a path
+/// separator and a glob — nothing about it is safe in a URL path.
+use std::sync::{Arc, Mutex};
+
+const AWKWARD_NAME: &str = "(feat|feature)/.*-to-platform-dev";
+
+fn awkward_trigger() -> forage_core::platform::Trigger {
+    forage_core::platform::Trigger {
+        id: "11111111-2222-3333-4444-555555555555".into(),
+        name: AWKWARD_NAME.into(),
+        enabled: true,
+        branch_pattern: Some(AWKWARD_NAME.into()),
+        title_pattern: None,
+        author_pattern: None,
+        commit_message_pattern: None,
+        source_type_pattern: None,
+        target_environments: vec!["platform-dev".into()],
+        target_destinations: vec![],
+        force_release: false,
+        use_pipeline: false,
+        created_at: "2026-03-08T00:00:00Z".into(),
+        updated_at: "2026-03-08T00:00:00Z".into(),
+    }
+}
+
+fn awkward_platform(calls: &Arc<Mutex<Vec<String>>>) -> MockPlatformClient {
+    MockPlatformClient::with_behavior(MockPlatformBehavior {
+        list_triggers_result: Some(Ok(vec![awkward_trigger()])),
+        rule_action_calls: Some(calls.clone()),
+        ..Default::default()
+    })
+}
+
+#[tokio::test]
+async fn delete_trigger_with_non_url_safe_name_succeeds_when_addressed_by_id() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/orgs/testorg/projects/my-api/triggers/11111111-2222-3333-4444-555555555555/delete")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("csrf_token=test-csrf"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response.headers().get("location").unwrap(),
+        "/orgs/testorg/projects/my-api/settings/triggers"
+    );
+    // The id resolved to the one rule that holds it — name and all.
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![format!("delete_trigger:{AWKWARD_NAME}")]
+    );
+}
+
+#[tokio::test]
+async fn disable_trigger_with_non_url_safe_name_succeeds_when_addressed_by_id() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/orgs/testorg/projects/my-api/triggers/11111111-2222-3333-4444-555555555555/toggle")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("csrf_token=test-csrf"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![format!("update_trigger:{AWKWARD_NAME}")]
+    );
+}
+
+#[tokio::test]
+async fn edit_trigger_page_with_non_url_safe_name_loads_when_addressed_by_id() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects/my-api/settings/triggers/11111111-2222-3333-4444-555555555555")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    // The name is still the label the user sees — HTML-escaped, since minijinja
+    // escapes `/` as `&#x2f;`.
+    assert!(html.contains("(feat|feature)&#x2f;.*-to-platform-dev"));
+    // ...and the form posts back to the id, not that name.
+    assert!(html.contains(
+        "action=\"/orgs/testorg/projects/my-api/settings/triggers/11111111-2222-3333-4444-555555555555\""
+    ));
+}
+
+#[tokio::test]
+async fn edit_trigger_submit_with_non_url_safe_name_resolves_id_to_name() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/orgs/testorg/projects/my-api/settings/triggers/11111111-2222-3333-4444-555555555555")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    "csrf_token=test-csrf\
+                     &branch_pattern=%28feat%7Cfeature%29%2F.%2A-to-platform-dev\
+                     &target_environments=platform-dev",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![format!("update_trigger:{AWKWARD_NAME}")]
+    );
+}
+
+/// The rendered page must hand the browser an id-addressed action URL. If it
+/// ever goes back to interpolating the name, the `/` in it silently
+/// reintroduces the 404 — so pin the URL the buttons actually carry.
+#[tokio::test]
+async fn triggers_page_action_urls_carry_the_id_not_the_name() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/orgs/testorg/projects/my-api/settings/triggers")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+
+    let base =
+        "/orgs/testorg/projects/my-api/settings/triggers/11111111-2222-3333-4444-555555555555";
+    assert!(html.contains(&format!("{base}/delete")));
+    assert!(html.contains(&format!("{base}/toggle")));
+    assert!(html.contains(&format!("\"{base}\"")));
+    // No action URL carries the rule name any more.
+    assert!(!html.contains("triggers/(feat"));
+    assert!(!html.contains("triggers/%28feat"));
+}
+
+/// An id that no longer exists is a missing rule, not a server error.
+#[tokio::test]
+async fn delete_trigger_with_unknown_id_is_not_found() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let (state, sessions) = test_state_with(MockForestClient::new(), awkward_platform(&calls));
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/orgs/testorg/projects/my-api/triggers/no-such-id/delete")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("csrf_token=test-csrf"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    // Nothing reached the API — an unresolved id must not fall back to a name.
+    assert!(calls.lock().unwrap().is_empty());
 }

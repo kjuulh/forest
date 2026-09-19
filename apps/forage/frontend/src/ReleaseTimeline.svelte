@@ -3,13 +3,15 @@
 <script>
   import { onMount, onDestroy, tick } from "svelte";
   import { fetchTimeline, connectSSE, formatElapsed, timeAgo } from "./lib/api.js";
-  import { envColors, envLaneColor, envBadgeClasses, statusDotColor } from "./lib/colors.js";
+  import { envColorPair, envChipStyle, orderLanes, envRank } from "./lib/colors.js";
   import {
     IN_FLIGHT, DEPLOYED, STOPPED,
-    effectiveStatus, isPlanAwaiting, releaseEnvStates, laneStatesAttr,
-    timelineLaneStatesAttrs, isUnfinished,
+    effectiveStatus, isPlanAwaiting, isGateAwaiting, releaseEnvStates, laneStatesAttr,
+    timelineLaneStatesAttrs, isUnfinished, timelineDestinations, timelineDestinationStates,
+    destinationsByEnv, releaseStoppedEnvs, releaseDestinationStates, timelineRollbacks,
   } from "./lib/lane-states.js";
-  import { pipelineSummary, deployStageLabel, waitStageLabel, planStageLabel, STATUS_CONFIG } from "./lib/status.js";
+  import { laneGeometry } from "./lib/lane-geometry.js";
+  import { pipelineSummary, deployStageLabel, waitStageLabel, planStageLabel, gateStageLabel, STATUS_CONFIG } from "./lib/status.js";
 
   // Props from attributes
   export let org = "";
@@ -40,9 +42,76 @@
   let laneBarScheduled = false;
   let laneBarRetryCount = 0;
 
-  const BAR_WIDTH = 20;
-  const BAR_GAP = 4;
-  const DOT_SIZE = 12;
+  // Gutter metrics. A lane is a pill in a slot; fanned out, the slot holds one
+  // thin strand per destination instead of one fat one.
+  const LANE_W = 14;
+  const LANE_GAP = 6;
+  // Wide enough that a fanned strand's dots keep the same proportion of
+  // clearance a collapsed lane gives them — see `dotSize`.
+  const STRAND_W = 12;
+  // Wide enough that a fanned lane's vertical labels sit beside each other
+  // rather than on top of each other — the labels, not the strands, set this.
+  const STRAND_GAP = 12;
+  const GUTTER_INSET = 4;
+  /** How far the lane's hit area reaches past the lane on each side. */
+  const HIT_OVERHANG = 3;
+
+  /**
+   * How big a dot is, given the strand it sits on.
+   *
+   * Every dot has to fit *inside* its strand. A fixed size does not: the head
+   * dot used to be as wide as a collapsed lane and nearly twice as wide as a
+   * fanned strand, so it bulged out of the capsule and the lane read as a
+   * lollipop rather than a rail with a marker on it.
+   *
+   * The states that mark where an environment *is* get the larger size; the
+   * ones that are history or not-yet get the smaller one.
+   */
+  const HEAD_KINDS = new Set(["live", "stopped", "awaiting"]);
+
+  function dotSize(kind, strandWidth) {
+    const head = HEAD_KINDS.has(kind);
+    // A proportion of the strand rather than a fixed inset, so the clearance
+    // around a dot scales with the lane it sits in. Subtracting a constant left
+    // only 2px of lane around a head dot: the dot all but filled the bar, the
+    // rounded end became a thin arc hugging it, and the track showed through at
+    // the shoulders where the arc had not yet reached full width.
+    const size = Math.max(Math.round(strandWidth * (head ? 0.58 : 0.43)), head ? 5 : 4);
+    // Same parity as the strand it sits in, so the margin either side is a
+    // whole pixel. See `dotInset`.
+    return (strandWidth - size) % 2 === 0 ? size : size + 1;
+  }
+
+  /**
+   * Where a dot sits across its strand, in whole pixels.
+   *
+   * Not `left: 50%` with a `translateX(-50%)`, which is the obvious way and was
+   * wrong: the runs are laid out as `left: 0; width: 100%`, and Firefox rounds
+   * a percentage-positioned box differently from a full-width one, so the dot
+   * landed half a pixel off the bar it is supposed to be centred on. Chrome
+   * rounds both the same way and showed nothing — the bug was only ever visible
+   * in one browser. An integer offset cannot disagree with anything.
+   */
+  function dotInset(size, strandWidth) {
+    return (strandWidth - size) / 2;
+  }
+
+  /**
+   * What the geometry needs to know about the size of things.
+   *
+   * `cap` is exactly the strand's radius, which puts the marker dot at the
+   * cap's own centre of curvature — the dot and the rounded end become
+   * concentric, so the clearance around the dot is the same at the sides as it
+   * is above: `(strand - dot) / 2` in every direction.
+   *
+   * Anything larger pushes the dot below the centre of the arc and leaves a
+   * visible gap above it that is not there at the sides. Anything smaller — or
+   * a dot as wide as its strand, which is what it used to be — wraps the cap
+   * tight around the dot and the lane ends in a map pin.
+   */
+  function metricsFor(strandWidth) {
+    return { cap: strandWidth / 2, dot: dotSize("live", strandWidth) };
+  }
   const MAX_LANE_BAR_RETRIES = 8;
 
   // ── Approval action ──────────────────────────────────────────────
@@ -370,30 +439,12 @@
     if (changed) scheduleComputeLaneBars();
   }
 
-  // ── Swim lane bar computation ────────────────────────────────────
-
-  function parseEnvs(raw) {
-    if (!raw) return [];
-    return raw.split(",").map(s => s.trim()).filter(Boolean).map(entry => {
-      const colon = entry.indexOf(":");
-      if (colon === -1) return { env: entry, status: "SUCCEEDED" };
-      return { env: entry.slice(0, colon), status: entry.slice(colon + 1) };
-    });
-  }
-
-  // ── Lane dot state ───────────────────────────────────────────────
+  // ── The gutter ───────────────────────────────────────────────────
   //
-  // What a release is to one environment, which is not the same question as
-  // "did it deploy". Four answers worth telling apart in the gutter:
-  //
-  //   live    it is on that environment right now
-  //   flight  a deploy is queued, assigned or running
-  //   pending it is headed there but has not started — awaiting approval, or
-  //           an upstream stage has not finished
-  //   past    it was released there, and a later release has since taken over
-  //
-  // Terminal failures render as `past` — "not live here", which is true. The
-
+  // Measuring is all this does. Where each release sits is a DOM question, and
+  // what each lane should draw given those positions is not — that half lives
+  // in lib/lane-geometry.js, where it can be tested. See
+  // design/RELEASE-SWIMLANE.md for what the segments mean.
 
   // Debounce lane bar computation to one per frame. Waiting for Svelte's
   // flush before rAF keeps measurements out of first-paint zero-size races.
@@ -415,113 +466,354 @@
     scheduleComputeLaneBars();
   }
 
-  function computeLaneBars() {
-    if (!displayedLanes.length) {
-      laneBarData = {};
-      laneBarRetryCount = 0;
-      return;
-    }
-    if (!timelineEl) {
-      retryComputeLaneBars();
-      return;
-    }
-
+  /**
+   * Where each release's row sits, in pixels from the top of the card column.
+   * Anchored to the avatar so a dot lines up with the face that deployed it.
+   */
+  function measureRows() {
     const timelineRect = timelineEl.getBoundingClientRect();
     const cards = Array.from(timelineEl.querySelectorAll("[data-release]"));
-    if (timelineRect.height === 0 || cards.length === 0) {
-      retryComputeLaneBars();
+    if (timelineRect.height === 0 || cards.length === 0) return null;
+
+    const ys = new Map();
+    for (const card of cards) {
+      const slug = card.dataset.releaseSlug;
+      if (!slug) continue;
+      const anchor = card.querySelector("[data-avatar]") || card;
+      const r = anchor.getBoundingClientRect();
+      ys.set(slug, r.top + r.height / 2 - timelineRect.top);
+    }
+    return { height: timelineRect.height, ys };
+  }
+
+  function computeLaneBars() {
+    if (!displayedLanes.length || !timelineEl) {
+      if (displayedLanes.length) retryComputeLaneBars();
+      else { laneBarData = {}; laneBarRetryCount = 0; }
       return;
     }
-    const timelineH = timelineRect.height;
-    const newBarData = {};
 
+    const measured = measureRows();
+    if (!measured) { retryComputeLaneBars(); return; }
+    const { height, ys } = measured;
+
+    const next = {};
     for (const lane of displayedLanes) {
       const env = lane.name;
-      let deployedCard = null, flightCard = null, stoppedCard = null;
-      let deployedIdx = -1, flightIdx = -1;
+      const destNames = destinationsByLane.get(env) || [];
 
-      for (let i = 0; i < cards.length; i++) {
-        // The resolved lane state is the authority on "is this release still
-        // going?", because it is the only place that knows a plan is parked on
-        // approval — `data-envs` carries destination status, which for an
-        // approval-gated environment is just PENDING.
-        const laneState = parseEnvs(cards[i].dataset.laneStates).find(e => e.env === env);
-        if (laneState && isUnfinished(laneState.status) && !flightCard) {
-          flightCard = cards[i];
-          flightIdx = i;
+      // The environment strand.
+      const rows = [];
+      for (const release of visibleReleaseList) {
+        const y = ys.get(release.slug);
+        if (y === undefined) continue;
+        const kind = laneStateFor(release.slug, env);
+        if (!kind) continue;
+        rows.push({ y, kind, slug: release.slug, release });
+      }
+      markStopped(rows, env);
+
+      const geometry = laneGeometry(rows, height, metricsFor(LANE_W));
+
+      // One strand per destination, resolved the same way a lane is. Computed
+      // whether or not the lane is open: the collapsed lane needs to know
+      // whether its destinations disagree in order to say so.
+      const strands = destNames.map((name) => {
+        const drows = [];
+        for (const release of visibleReleaseList) {
+          const y = ys.get(release.slug);
+          if (y === undefined) continue;
+          const kind = destStatesBySlug.get(release.slug)?.get(name);
+          if (!kind) continue;
+          drows.push({ y, kind, slug: release.slug, release });
         }
+        const strandW = expandedLanes.has(env) && destNames.length > 1 ? STRAND_W : LANE_W;
+        return { name, geometry: laneGeometry(drows, height, metricsFor(strandW)), rows: drows };
+      });
 
-        // `past` on a card whose *destination* still reads QUEUED/RUNNING only
-        // happens one way: `timelineLaneStatesAttrs` superseded it because a
-        // newer release went live here. Without this gate the raw destination
-        // status below would put the amber hatch straight back on a healthy
-        // lane — the resolved state is the authority, so honour it here too.
-        const superseded = laneState?.status === "past";
+      const headRow = rows.find((r) => r.kind === "live") || null;
+      const movingRow = rows.find((r) => isUnfinished(r.kind)) || null;
 
-        const entries = parseEnvs(cards[i].dataset.envs);
-        for (const entry of entries) {
-          if (entry.env !== env) continue;
-          if (DEPLOYED.has(entry.status) && !deployedCard) { deployedCard = cards[i]; deployedIdx = i; }
-          if (!superseded && IN_FLIGHT.has(entry.status) && !flightCard) { flightCard = cards[i]; flightIdx = i; }
-          if (STOPPED.has(entry.status) && !stoppedCard) stoppedCard = cards[i];
-        }
-      }
+      // The road stops at the topmost marker on the lane, consuming it like any
+      // other run. It used to span the whole list, so a lane with nothing left
+      // to do still trailed a pale stub above its head — background where there
+      // is no road. When the head *is* the topmost marker the track and the
+      // hold now coincide, and there is nothing to see.
+      const marks = [...rows, ...strands.flatMap((st) => st.rows)].map((r) => r.y);
+      const trackTop = marks.length ? Math.max(Math.min(...marks) - metricsFor(LANE_W).cap, 0) : null;
 
-      const deployedTop = deployedCard ? deployedCard.getBoundingClientRect().top - timelineRect.top : null;
-      const flightTop = flightCard ? flightCard.getBoundingClientRect().top - timelineRect.top : null;
-      const stoppedTop = stoppedCard ? stoppedCard.getBoundingClientRect().top - timelineRect.top : null;
-
-      let solidH = 0;
-      if (deployedTop !== null && flightTop !== null) {
-        solidH = timelineH - Math.max(deployedTop, flightTop);
-      } else if (deployedTop !== null) {
-        solidH = timelineH - deployedTop;
-      } else if (stoppedTop !== null) {
-        solidH = timelineH - stoppedTop;
-      }
-
-      const hasHatch = !!flightCard;
-      let hatchTop = 0, hatchH = 0, isForward = false;
-      if (flightCard) {
-        isForward = deployedIdx === -1 || flightIdx < deployedIdx;
-        const anchorY = deployedTop !== null ? deployedTop : timelineH;
-        const topY = Math.min(anchorY, flightTop);
-        const bottomY = Math.max(anchorY, flightTop);
-        hatchTop = topY;
-        hatchH = Math.max(bottomY - topY, 4);
-      }
-
-      const dots = [];
-      for (const card of cards) {
-        // `data-lane-states` already carries the resolved per-env state — see
-        // `releaseEnvStates`. Reuses the `env:value` encoding parseEnvs reads.
-        const entry = parseEnvs(card.dataset.laneStates).find(e => e.env === env);
-        if (!entry) continue;
-        const avatar = card.querySelector("[data-avatar]");
-        const anchor = avatar || card;
-        const r = anchor.getBoundingClientRect();
-        dots.push({ y: r.top + r.height / 2 - timelineRect.top, kind: entry.status });
-      }
-
-      newBarData[env] = { solidH, hasHatch, hatchTop, hatchH, isForward, dots, color: envColors(env) };
+      next[env] = {
+        geometry,
+        rows,
+        strands,
+        trackTop,
+        headRow,
+        movingRow,
+        color: envColorPair(env),
+      };
     }
 
     laneBarRetryCount = 0;
-    laneBarData = newBarData;
+    laneBarData = next;
   }
 
-  // ── Hatch pattern SVG ────────────────────────────────────────────
+  /**
+   * Promote the newest row of a broken environment from `past` to `stopped`.
+   *
+   * `releaseEnvStates` deliberately resolves a terminal failure to `past`, and
+   * supersession relies on that meaning exactly one thing. But an environment
+   * nothing has replaced since it broke has to look different from one that
+   * simply moved on — see `releaseStoppedEnvs`.
+   */
+  function markStopped(rows, env) {
+    const headIdx = rows.findIndex((r) => r.kind === "live");
+    for (let i = 0; i < rows.length; i++) {
+      if (headIdx !== -1 && i > headIdx) break;
+      if (rows[i].kind !== "past") continue;
+      if (!releaseStoppedEnvs(rows[i].release).has(env)) continue;
+      rows[i] = { ...rows[i], kind: "stopped" };
+      break;
+    }
+  }
 
-  // Cache hatch pattern data URIs to avoid re-encoding on every render
-  const hatchCache = new Map();
-  function hatchPattern(color, bgColor) {
-    const key = `${color}|${bgColor}`;
-    let cached = hatchCache.get(key);
-    if (cached) return cached;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="${bgColor}"/><path d="M-2,2 l4,-4 M0,8 l8,-8 M6,10 l4,-4" stroke="${color}" stroke-width="1.5" opacity="0.6"/></svg>`;
-    cached = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
-    hatchCache.set(key, cached);
-    return cached;
+  // ── Fanning a lane out ───────────────────────────────────────────
+
+  let expandedLanes = new Set();
+
+  function toggleLane(env) {
+    const next = new Set(expandedLanes);
+    if (next.has(env)) next.delete(env);
+    else next.add(env);
+    expandedLanes = next;
+    scheduleComputeLaneBars();
+  }
+
+  /**
+   * Every lane's geometry, as one derived value.
+   *
+   * Deliberately a map rather than helper functions the template calls. Svelte
+   * decides whether an attribute needs an update effect from what its
+   * expression *mentions*, and a width helper taking only the lane name
+   * mentions neither `expandedLanes` nor `destinationsByLane` — so the width
+   * was computed once and a fanned-out lane kept its collapsed 14px forever.
+   * A derived map is read directly, so it cannot go stale.
+   */
+  $: laneLayout = (() => {
+    const map = new Map();
+    for (const lane of displayedLanes) {
+      const dests = destinationsByLane.get(lane.name) || [];
+      const fans = dests.length > 1;
+      const open = fans && expandedLanes.has(lane.name);
+      map.set(lane.name, {
+        dests,
+        fans,
+        open,
+        width: open ? dests.length * STRAND_W + (dests.length - 1) * STRAND_GAP : LANE_W,
+        offsets: dests.map((_, i) =>
+          open
+            ? { left: i * (STRAND_W + STRAND_GAP), width: STRAND_W }
+            : { left: 0, width: LANE_W },
+        ),
+      });
+    }
+    return map;
+  })();
+
+  // ── Hover card ───────────────────────────────────────────────────
+
+  let hovered = null; // { env, dest, row, top }
+
+  /**
+   * How close the pointer has to be to a dot to be asking about it.
+   *
+   * A lane is a column of bubbles, and "what is this environment doing" is the
+   * wrong answer when the pointer is plainly on one of them — that reported the
+   * lane's head no matter which bubble you were pointing at. Past this reach
+   * there is no bubble in question and the lane summary is the right answer
+   * again.
+   */
+  const HOVER_REACH = 22;
+
+  function showLaneCard(env, event) {
+    const bar = laneBarData[env];
+    if (!bar) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const gutter = event.currentTarget.closest(".rt-gutter")?.getBoundingClientRect();
+    // Keyboard focus has no coordinates; it gets the lane summary. Tested on
+    // the event type rather than on the coordinate being positive — a lane
+    // scrolled to the top of the viewport has a perfectly good `clientY` of
+    // zero or less, and treating that as "no pointer" silently fell back to
+    // the lane summary for the bubbles nearest the top of the page.
+    const pointed = event.type !== "focus" && typeof event.clientY === "number";
+
+    // Which strand, when the lane is fanned out. The hit area spans the whole
+    // bundle, so the pointer's x is what says which placement is being asked
+    // about.
+    const layout = laneLayout.get(env);
+    let dest = null;
+    let rows = bar.rows;
+    if (pointed && layout?.open) {
+      const localX = event.clientX - rect.left - HIT_OVERHANG;
+      const i = layout.offsets.findIndex(
+        (o) => localX >= o.left - STRAND_GAP / 2 && localX <= o.left + o.width + STRAND_GAP / 2,
+      );
+      if (i !== -1) {
+        dest = layout.dests[i];
+        rows = bar.strands.find((st) => st.name === dest)?.rows ?? rows;
+      }
+    }
+
+    // Which bubble.
+    let row = null;
+    if (pointed) {
+      const localY = event.clientY - rect.top;
+      let best = null;
+      for (const r of rows) {
+        const d = Math.abs(r.y - localY);
+        if (d <= HOVER_REACH && (!best || d < best.d)) best = { d, r };
+      }
+      row = best?.r ?? null;
+    }
+
+    const top = gutter
+      ? pointed
+        ? event.clientY - gutter.top - 18
+        : (bar.headRow?.y ?? 0)
+      : 0;
+
+    // `mousemove` fires continuously; only re-render when the answer changes.
+    const next = { env, dest, row, top: Math.max(top, 0) };
+    if (
+      hovered &&
+      hovered.env === next.env &&
+      hovered.dest === next.dest &&
+      hovered.row === next.row &&
+      Math.abs(hovered.top - next.top) < 2
+    ) {
+      return;
+    }
+    hovered = next;
+  }
+
+  function hideLaneCard() {
+    hovered = null;
+  }
+
+  /**
+   * What the hover card says: about one bubble if the pointer is on one,
+   * otherwise about the lane as a whole.
+   */
+  function laneCardFacts(env, dest, row) {
+    const bar = laneBarData[env];
+    if (!bar) return null;
+    const rows = dest ? bar.strands.find((s) => s.name === dest)?.rows || [] : bar.rows;
+    const head = rows.find((r) => r.kind === "live");
+    // A bubble answers for itself. Without this the card reported whatever the
+    // lane was doing — usually the newest release — whichever bubble you were
+    // actually pointing at.
+    const subject = row || rows.find((r) => isUnfinished(r.kind) || r.kind === "stopped") || head;
+    if (!subject) return { env, dest, empty: true };
+    return {
+      env,
+      dest,
+      empty: false,
+      // Whether this is about a bubble or the lane changes what the reader
+      // should take the status to mean.
+      pinned: Boolean(row),
+      kind: subject.kind,
+      release: subject.release,
+      head: head?.release || null,
+      count: dest || row ? null : (destinationsByLane.get(env) || []).length,
+    };
+  }
+
+  /**
+   * A destination label with the environment it is in stripped off.
+   *
+   * Every placement in `prod` is called `prod-something`, and stacking three
+   * labels that all start with the same six characters wastes the only axis a
+   * vertical label has. The lane above them already says `prod`.
+   */
+  function shortDestination(env, name) {
+    for (const sep of ["-", "_", "/", "."]) {
+      const prefix = `${env}${sep}`;
+      if (name.startsWith(prefix) && name.length > prefix.length) return name.slice(prefix.length);
+    }
+    return name;
+  }
+
+  /** Shared empty set, so a card without a rollback allocates nothing. */
+  const EMPTY_SET = new Set();
+
+  // The gutter answers "what is this environment doing", so its words are about
+  // the environment.
+  const KIND_WORDS = {
+    live: "Live here",
+    flight: "Deploying",
+    awaiting: "Awaiting approval",
+    pending: "Queued",
+    stopped: "Failed",
+    past: "Previously released",
+  };
+
+  // A destination row inside a card answers a different question — what did
+  // *this release* do here — so it needs its own words. "Live here" under a
+  // release from last week is true of the environment and false of the release.
+  const DEST_WORDS = {
+    live: "Deployed",
+    flight: "Deploying",
+    awaiting: "Waiting for approval",
+    pending: "Not started",
+    stopped: "Failed",
+    past: "Deployed, since replaced",
+  };
+
+  /**
+   * Is the destination breakdown worth showing under this environment's stage?
+   *
+   * One placement that went fine is already described by the stage row above
+   * it, and repeating it is the kind of noise that stops people expanding
+   * cards at all. More than one, or anything with something to say — an error,
+   * a queue position — earns the space.
+   */
+  function showsDestinations(dests, release) {
+    if (dests.length > 1) return true;
+    return dests.some((d) => {
+      const row = (release.destinations || []).find((x) => x.name === d.name);
+      return d.kind === "stopped" || row?.error_message || row?.queue_position;
+    });
+  }
+
+
+  /** Map the status module's icon names onto the three signal colours. */
+  function glyphSignal(icon) {
+    switch (icon) {
+      case "check-circle": return "ok";
+      case "x-circle": return "fail";
+      case "pulse": return "running";
+      case "shield": return "attention";
+      case "clock": return "waiting";
+      default: return "queued";
+    }
+  }
+
+  function stageSignal(status) {
+    switch (status) {
+      case "SUCCEEDED": return "ok";
+      case "RUNNING": return "running";
+      case "QUEUED": return "waiting";
+      case "FAILED":
+      case "TIMED_OUT": return "fail";
+      case "AWAITING_APPROVAL": return "attention";
+      case "AWAITING_SIGNAL": return "waiting";
+      case "CANCELLED": return "cancelled";
+      default: return "queued";
+    }
+  }
+
+  /** Destination rows for a release with no pipeline to hang them under. */
+  function releaseDestinationRows(release) {
+    return releaseDestinationStates(release);
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────
@@ -560,7 +852,7 @@
   // picture falls back to their initial, so the slot is never a broken image.
   //
   // Whatever renders here must keep the `data-avatar` attribute:
-  // `computeLaneBars()` anchors each swim-lane dot to it.
+  // `measureRows()` anchors each swim-lane dot to it.
   let avatarFailed = new Set();
 
   function avatarSrc(user) {
@@ -643,6 +935,31 @@
     return bySlug;
   }
 
+  function parseEnvs(raw) {
+    if (!raw) return [];
+    return raw.split(",").map(s => s.trim()).filter(Boolean).map(entry => {
+      const colon = entry.indexOf(":");
+      if (colon === -1) return { env: entry, status: "SUCCEEDED" };
+      return { env: entry.slice(0, colon), status: entry.slice(colon + 1) };
+    });
+  }
+
+  function laneStateFor(slug, env) {
+    return parseEnvs(laneStatesBySlug.get(slug)).find(e => e.env === env)?.status || null;
+  }
+
+  /**
+   * The environment this release most recently reached, for the accent on the
+   * left edge of its card. Ranked, so a release live on prod is marked by prod
+   * even when it is also live on dev — the card should say the furthest it got.
+   */
+  function cardAccent(release) {
+    const live = releaseEnvStates(release)
+      .filter((s) => s.kind === "live")
+      .sort((a, b) => envRank(a.env) - envRank(b.env));
+    return live[0]?.env || null;
+  }
+
   // ── Progressive reveal ───────────────────────────────────────────
   //
   // The full views start at the most recent PAGE_SIZE releases and grow
@@ -692,435 +1009,536 @@
   $: hasMore = !hardLimit && renderedTimeline.length < timeline.length;
   $: renderedLaneNames = laneNamesInTimeline(renderedTimeline);
   $: laneStatesBySlug = resolveLaneStates(renderedTimeline);
-  $: displayedLanes = lanes.filter(lane => renderedLaneNames.has(lane.name));
 
+  // The releases the gutter draws against, newest first — the same list, in the
+  // same order, that `timelineLaneStatesAttrs` resolved.
+  $: visibleReleaseList = renderedTimeline
+    .filter(i => i.kind === "release" && i.release)
+    .map(i => i.release);
+  $: destinationsByLane = timelineDestinations(visibleReleaseList);
+  // Which environments each release is taking *backwards*. A shape in the
+  // timeline rather than a flag on a release — see `timelineRollbacks`.
+  $: rollbacksBySlug = (() => {
+    const sets = timelineRollbacks(visibleReleaseList);
+    const bySlug = new Map();
+    visibleReleaseList.forEach((r, i) => bySlug.set(r.slug, sets[i]));
+    return bySlug;
+  })();
+  $: destStatesBySlug = (() => {
+    const states = timelineDestinationStates(visibleReleaseList);
+    const bySlug = new Map();
+    visibleReleaseList.forEach((r, i) => bySlug.set(r.slug, states[i]));
+    return bySlug;
+  })();
+
+  // Production first, then back down the pipeline — see `orderLanes`.
+  $: displayedLanes = orderLanes(lanes.filter(lane => renderedLaneNames.has(lane.name)));
   $: laneCount = displayedLanes.length;
-  $: gutterWidth = laneCount > 0 ? laneCount * (BAR_WIDTH + BAR_GAP) + 8 : 0;
+  // +GUTTER_INSET matches the CSS custom property of the same name; the grid
+  // column has to allow for the padding the gutter draws inside it.
+  $: gutterWidth = laneCount > 0
+    ? [...laneLayout.values()].reduce((w, l) => w + l.width + LANE_GAP, 0) + GUTTER_INSET + 4
+    : 0;
 </script>
 
 <svelte:window on:resize={handleResize} />
 
 {#if approvalError}
-  <div class="max-w-5xl mx-auto mb-4 px-4 py-3 border border-red-200 bg-red-50 rounded-lg flex items-center gap-2 text-sm text-red-700">
-    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+  <div class="rt-alert" role="alert">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
     {approvalError}
-    <button class="ml-auto text-red-400 hover:text-red-600" aria-label="Dismiss approval error" on:click={() => approvalError = null}>
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    <button class="rt-alert-close" aria-label="Dismiss approval error" on:click={() => approvalError = null}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
     </button>
   </div>
 {/if}
 
 {#if initialLoading}
-  <div class="max-w-5xl mx-auto p-12 text-center text-gray-400">
-    <span class="w-5 h-5 inline-block border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></span>
-    <p class="mt-2 text-sm">Loading releases...</p>
+  <div class="rt-placeholder">
+    <span class="rt-spinner" aria-hidden="true"></span>
+    <p>Loading releases…</p>
   </div>
 {:else if error}
-  <div class="max-w-5xl mx-auto p-6 border border-red-200 rounded-lg text-center">
-    <p class="text-red-600">{error}</p>
-    <button class="mt-2 text-sm text-gray-500 hover:text-gray-900 underline" on:click={loadData}>Retry</button>
+  <div class="rt-placeholder rt-placeholder-error">
+    <p>{error}</p>
+    <button class="rt-link-button" on:click={loadData}>Try again</button>
   </div>
 {:else if timeline.length === 0}
-  <div class="max-w-5xl mx-auto p-6 border border-gray-200 rounded-lg text-center">
-    <p class="text-gray-600">No releases yet.</p>
-    <p class="text-sm text-gray-400 mt-2">Create a release with <code class="bg-gray-100 px-1 rounded">forest release create</code></p>
+  <div class="rt-placeholder">
+    <p class="rt-empty-title">No releases yet</p>
+    <p>Ship one with <code>forest release create</code>.</p>
   </div>
 {:else}
-  <div class="max-w-5xl mx-auto grid" style="grid-template-columns: {gutterWidth}px minmax(0, 1fr); grid-template-rows: 1fr auto;">
-    <!-- Swim lane gutter -->
-    <div class="swim-lane-gutter flex" style="grid-row: 1; grid-column: 1;">
+  <div
+    class="rt"
+    style="grid-template-columns: {gutterWidth}px minmax(0, 1fr);"
+    class:rt-limited={hardLimit > 0}
+  >
+    <!-- ── The gutter ───────────────────────────────────────────────
+         One pill per environment, drawn from measured card positions.
+         Click one to fan it into its destinations. -->
+    <div class="rt-gutter" style="grid-row: 1; grid-column: 1;">
       {#each displayedLanes as lane (lane.name)}
         {@const bar = laneBarData[lane.name]}
-        {@const [barColor, lightColor] = bar?.color || envColors(lane.name)}
-        <div class="swim-lane" style="width: {BAR_WIDTH}px; margin-right: {BAR_GAP}px;">
+        {@const [light, dark] = bar?.color || envColorPair(lane.name)}
+        {@const L = laneLayout.get(lane.name) || { open: false, fans: false, width: LANE_W, offsets: [], dests: [] }}
+        <div
+          class="rt-lane env-scope"
+          class:rt-lane-open={L.open}
+          data-env={lane.name}
+          style="--env: {light}; --env-dark: {dark}; width: {L.width}px; margin-right: {LANE_GAP}px;"
+        >
+          <!-- The road. Runs from the topmost marker on this lane down to the
+               bottom of the list — no further up, or a finished lane shows
+               background above its head with nothing travelling on it. -->
+          {#if bar?.trackTop !== null && bar?.trackTop !== undefined}
+            <div class="rt-track" style="top: {bar.trackTop}px;" aria-hidden="true"></div>
+          {/if}
+
           {#if bar}
-            {#if bar.hasHatch}
-              <div class="lane-bar lane-pulse" style="position: absolute; left: 0; width: 100%; top: {bar.hatchTop}px; height: {bar.hatchH + (bar.solidH > 0 ? BAR_WIDTH / 2 : 0)}px; background-image: {bar.isForward ? hatchPattern(barColor, lightColor) : hatchPattern('#f59e0b', '#fef3c7')}; background-size: 8px 8px; background-repeat: repeat; border-radius: 9999px; z-index: 0;"></div>
-            {/if}
-            {#if bar.solidH > 0}
-              <div class="lane-bar" style="position: absolute; bottom: 0; left: 0; width: 100%; height: {bar.solidH + (bar.hasHatch ? BAR_WIDTH / 2 : 0)}px; background: {barColor}; border-radius: 9999px; z-index: 1;"></div>
-            {/if}
-            {#each bar.dots as dot, di (di)}
-              {#if dot.kind === "live"}
-                <!-- On that environment now: a filled pip, ringed in white so
-                     it reads against the solid bar behind it. -->
-                <div class="lane-dot" title="Live on {lane.name}" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dot.y - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: {barColor}; border: 2px solid #fff; box-shadow: 0 0 0 1.5px {barColor}; z-index: 3;"></div>
-              {:else if dot.kind === "flight"}
-                <div class="lane-dot lane-pulse" title="Deploying to {lane.name}" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dot.y - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: #fff; border: 2px solid {barColor}; z-index: 2;"></div>
-              {:else if dot.kind === "awaiting"}
-                <!-- Parked on a person. Pulses like an in-flight deploy, because
-                     the pipeline genuinely has not finished — but ringed rather
-                     than hollow so it reads as "blocked", not "working". -->
-                <div class="lane-dot lane-pulse" title="Awaiting approval for {lane.name}" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dot.y - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: #fff; border: 2px solid {barColor}; box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px {barColor}; z-index: 3;"></div>
-              {:else if dot.kind === "pending"}
-                <!-- Headed there, not started. Dashed and faded: provisional. -->
-                <div class="lane-dot" title="Pending on {lane.name}" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dot.y - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: #fff; border: 2px dashed {barColor}; opacity: 0.55; z-index: 2;"></div>
-              {:else}
-                <div class="lane-dot" title="Previously released to {lane.name}" style="position: absolute; left: 50%; transform: translateX(-50%); top: {dot.y - DOT_SIZE/2}px; width: {DOT_SIZE}px; height: {DOT_SIZE}px; border-radius: 50%; background: #fff; border: 2px solid {barColor}; z-index: 2;"></div>
-              {/if}
+            {#each (L.open ? bar.strands : [{ name: null, geometry: bar.geometry, rows: bar.rows }]) as strand, si (strand.name ?? "env")}
+              {@const off = L.offsets[si] || { left: 0, width: LANE_W }}
+              {@const g = strand.geometry}
+              <div class="rt-strand" style="left: {off.left}px; width: {off.width}px;">
+                {#each g.runs as run, ri (`${run.layer}:${run.kind}:${ri}`)}
+                  <div
+                    class="lane-run"
+                    data-run={run.kind}
+                    data-layer={run.layer}
+                    data-direction={run.direction}
+                    data-motion={run.motion}
+                    style="top: {run.top}px; height: {run.height}px;"
+                  ></div>
+                {/each}
+                {#each g.dots as row (row.slug)}
+                  {@const size = dotSize(row.kind, off.width)}
+                  <span
+                    class="lane-dot"
+                    class:lane-pulse={isUnfinished(row.kind)}
+                    data-kind={row.kind}
+                    data-tone={row.tone}
+                    style="top: {row.y - size / 2}px; left: {dotInset(size, off.width)}px; width: {size}px; height: {size}px;"
+                    title={`${KIND_WORDS[row.kind] || row.kind} — ${strand.name || lane.name}`}
+                  ></span>
+                {/each}
+              </div>
             {/each}
           {/if}
+
+          <!-- The hit area sits above the paint so hover and click work
+               anywhere along the lane, including its empty upper stretch. -->
+          <button
+            type="button"
+            class="rt-lane-hit"
+            aria-expanded={L.fans ? L.open : undefined}
+            aria-label={L.fans
+              ? `${lane.name}: ${L.dests.length} destinations, ${L.open ? "collapse" : "expand"}`
+              : lane.name}
+            on:click={() => L.fans && toggleLane(lane.name)}
+            on:mouseenter={(e) => showLaneCard(lane.name, e)}
+            on:mousemove={(e) => showLaneCard(lane.name, e)}
+            on:focus={(e) => showLaneCard(lane.name, e)}
+            on:mouseleave={hideLaneCard}
+            on:blur={hideLaneCard}
+          ></button>
         </div>
       {/each}
+
+      {#if hovered}
+        {@const facts = laneCardFacts(hovered.env, hovered.dest, hovered.row)}
+        {#if facts}
+          {@const [light, dark] = envColorPair(hovered.env)}
+          <div class="rt-hovercard env-scope" style="--env: {light}; --env-dark: {dark}; top: {hovered.top}px;">
+            <p class="rt-hovercard-title">
+              <span class="rt-hovercard-swatch" aria-hidden="true"></span>
+              {hovered.dest || hovered.env}
+              <!-- Which question is being answered. Without it a card about one
+                   bubble and a card about the whole lane look identical, and
+                   the status line means different things in each. -->
+              <span class="rt-hovercard-scope">{facts.pinned ? "this release" : "now"}</span>
+            </p>
+            {#if facts.empty}
+              <p class="rt-hovercard-empty">Nothing has reached this environment yet.</p>
+            {:else}
+              <dl class="rt-hovercard-facts">
+                <dt>Status</dt>
+                <dd data-kind={facts.kind}>{KIND_WORDS[facts.kind] || facts.kind}</dd>
+                <dt>Commit</dt>
+                <dd class="rt-mono">{facts.release.commit_sha ? facts.release.commit_sha.slice(0, 7) : facts.release.slug}</dd>
+                <dt>Release</dt>
+                <dd class="rt-hovercard-release">{facts.release.title}</dd>
+                {#if facts.release.source_user}
+                  <dt>By</dt>
+                  <dd>{facts.release.source_user}</dd>
+                {/if}
+                <dt>Started</dt>
+                <dd>{timeAgo(facts.release.created_at)}</dd>
+                {#if facts.count && facts.count > 1}
+                  <dt>Placements</dt>
+                  <dd>{facts.count} destinations — click to fan out</dd>
+                {/if}
+              </dl>
+            {/if}
+          </div>
+        {/if}
+      {/if}
     </div>
 
-    <!-- Timeline cards. When `limit` is set (Overview summary use case),
-         render only the first N items; the rest are accessible via the
-         full Releases tab. Otherwise render the revealed window — see
-         "Show more" below. Note this element is what the lane bars
-         measure against, so nothing but cards belongs inside it. -->
-    <div bind:this={timelineEl} class="space-y-3 min-w-0" style="grid-row: 1; grid-column: 2;">
+    <!-- ── The cards ────────────────────────────────────────────────
+         This element is what the lanes measure against, so nothing but
+         release rows belongs inside it. -->
+    <div bind:this={timelineEl} class="rt-cards" style="grid-row: 1; grid-column: 2;">
       {#each renderedTimeline as item (itemKey(item))}
         {#if item.kind === "release" && item.release}
           {@const release = item.release}
-          <div data-release data-envs={release.dest_envs} data-lane-states={laneStatesBySlug.get(release.slug) ?? laneStatesAttr(release)} class="border border-gray-200 rounded-lg overflow-hidden">
-            <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
-              <div class="flex items-center gap-2 min-w-0 flex-1">
-                {#if release.source_user && !avatarFailed.has(release.source_user)}
-                  <img
-                    data-avatar
-                    src={avatarSrc(release.source_user)}
-                    alt={release.source_user}
-                    title="Deployed by {release.source_user}"
-                    class="inline-block w-6 h-6 rounded-full object-cover bg-gray-200 shrink-0"
-                    on:error={() => avatarMissing(release.source_user)}
-                  />
-                {:else}
-                  <span
-                    data-avatar
-                    title={release.source_user ? `Deployed by ${release.source_user}` : undefined}
-                    class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-200 text-[10px] font-semibold text-gray-500 shrink-0"
-                  >{initial(release.source_user)}</span>
-                {/if}
-                <a href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}" class="font-medium text-gray-900 hover:text-black truncate" title={release.title}>
-                  {release.title?.length > 80 ? release.title.slice(0, 80) + "…" : release.title}
-                </a>
-              </div>
-              <div class="flex items-center gap-4 text-xs text-gray-500 shrink-0 flex-wrap">
+          {@const accent = cardAccent(release)}
+          {@const accentPair = accent ? envColorPair(accent) : null}
+          {@const summary = release.has_pipeline ? pipelineSummary(release.pipeline_stages) : null}
+          {@const backwards = rollbacksBySlug.get(release.slug) ?? EMPTY_SET}
+          {@const destEnvs = destinationsByEnv(release)}
+          <article
+            data-release
+            data-release-slug={release.slug}
+            data-envs={release.dest_envs}
+            data-lane-states={laneStatesBySlug.get(release.slug) ?? laneStatesAttr(release)}
+            class="rt-card env-scope"
+            class:rt-card-accented={!!accent}
+            style={accentPair ? `--env: ${accentPair[0]}; --env-dark: ${accentPair[1]};` : ""}
+          >
+            <header class="rt-card-head">
+              {#if release.source_user && !avatarFailed.has(release.source_user)}
+                <img
+                  data-avatar
+                  src={avatarSrc(release.source_user)}
+                  alt=""
+                  title="Released by {release.source_user}"
+                  class="rt-avatar"
+                  on:error={() => avatarMissing(release.source_user)}
+                />
+              {:else}
+                <span
+                  data-avatar
+                  title={release.source_user ? `Released by ${release.source_user}` : undefined}
+                  class="rt-avatar rt-avatar-initial"
+                >{initial(release.source_user)}</span>
+              {/if}
+
+              <a
+                href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}"
+                class="rt-card-title"
+                title={release.title}
+              >{release.title}</a>
+
+              <div class="rt-meta">
                 {#if release.branch}
-                  <span class="flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/></svg>
+                  <span class="rt-meta-item" title="Branch">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 3v12m0 0a3 3 0 103 3m-3-3a3 3 0 113-3m9-6a3 3 0 11-3 3m3-3v6a6 6 0 01-6 6"/></svg>
                     {release.branch}
                   </span>
                 {/if}
                 {#if release.commit_sha}
-                  <span class="font-mono">{release.commit_sha.slice(0, 7)}</span>
+                  <span class="rt-meta-item rt-mono" title={release.commit_sha}>{release.commit_sha.slice(0, 7)}</span>
                 {/if}
-                <time>{timeAgo(release.created_at)}</time>
+                <time class="rt-meta-item" datetime={release.created_at}>{timeAgo(release.created_at)}</time>
                 {#if release.source_user}
-                  <span class="flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-                    <a href="/users/{release.source_user}" class="hover:underline">{release.source_user}</a>
-                  </span>
+                  <a class="rt-meta-item" href="/users/{release.source_user}">{release.source_user}</a>
                 {/if}
                 {#if release.project_name && release.project_name !== project}
-                  <a href="/orgs/{org}/projects/{release.project_name}" class="hover:underline">{release.project_name}</a>
+                  <a class="rt-meta-item" href="/orgs/{org}/projects/{release.project_name}">{release.project_name}</a>
                 {/if}
               </div>
-            </div>
+            </header>
 
-            <!-- Summary + details -->
-            <details class="border-t border-gray-100 group" on:toggle={scheduleComputeLaneBars}>
-              <summary class="px-4 py-2 flex items-center gap-2 text-sm cursor-pointer list-none hover:bg-gray-50 flex-wrap">
-                {#if release.has_pipeline && !pipelineSummary(release.pipeline_stages)}
-                  <!-- Pipeline exists but not triggered yet -->
+            <details class="rt-details" on:toggle={scheduleComputeLaneBars}>
+              <summary class="rt-summary">
+                <!-- What this release is doing right now, in one line. -->
+                {#if release.has_pipeline && !summary}
                   {@const envAllDone = release.env_groups && release.env_groups.length > 0 && release.env_groups.every(g => g.status === "SUCCEEDED")}
-                  <svg class="w-3.5 h-3.5 text-purple-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                  {#if envAllDone}
-                    <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    <span class="text-gray-500 text-sm">Deployed</span>
-                  {:else}
-                    <svg class="w-4 h-4 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    <span class="text-blue-600 text-sm">Queued</span>
-                  {/if}
-                {:else if release.has_pipeline && pipelineSummary(release.pipeline_stages)}
-                  {@const summary = pipelineSummary(release.pipeline_stages)}
-                  <svg class="w-3.5 h-3.5 text-purple-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                  {#if summary.icon === "pulse"}
-                    <span class="w-4 h-4 shrink-0 flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse"></span></span>
-                  {:else if summary.icon === "check-circle"}
-                    <svg class="w-4 h-4 {summary.iconColor} shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  {:else if summary.icon === "x-circle"}
-                    <svg class="w-4 h-4 {summary.iconColor} shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  {:else if summary.icon === "clock"}
-                    <svg class="w-4 h-4 {summary.iconColor} shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  {:else if summary.icon === "shield"}
-                    <svg class="w-4 h-4 {summary.iconColor} shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-                  {:else}
-                    <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/></svg>
-                  {/if}
-                  <span class="{summary.color} text-sm">{summary.label}</span>
+                  <span class="rt-glyph" data-signal={envAllDone ? "ok" : "queued"} aria-hidden="true"></span>
+                  <span class="rt-summary-label">{envAllDone ? "Released" : "Queued"}</span>
+                {:else if summary}
+                  <span class="rt-glyph" data-signal={backwards.size ? "attention" : glyphSignal(summary.icon)} aria-hidden="true"></span>
+                  <span
+                    class="rt-summary-label"
+                    data-signal={backwards.size ? "attention" : glyphSignal(summary.icon)}
+                  >{backwards.size && summary.label === "Deploying to" ? "Rolling back to" : summary.label}</span>
 
                   {#each release.pipeline_stages as stage, i (stage.id || `${stage.stage_type}-${stage.environment}-${i}`)}
                     {#if stage.stage_type === "deploy" && summaryShowsStage(summary, stage.status)}
-                      {@const badge = envBadgeClasses(stage.environment || "")}
-                      {@const dot = statusDotColor(stage.status) || badge.dot}
-                      <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full {badge.bg}">
+                      {@const dests = destEnvs.get(stage.environment) || []}
+                      <span class="rt-chip env-scope" class:rt-chip-back={backwards.has(stage.environment)} style={envChipStyle(stage.environment)}>
                         {stage.environment}
-                        <span class="w-1.5 h-1.5 rounded-full {dot}"></span>
+                        <span
+                          class="rt-chip-mark"
+                          data-status={stage.status}
+                          data-direction={backwards.has(stage.environment) ? "reverse" : "forward"}
+                          aria-hidden="true"
+                        ></span>
+                        {#if dests.length > 1}
+                          <!-- How many placements this release actually reached.
+                               Counting only the ones it still holds would read
+                               0/2 on every superseded release, which says
+                               nothing about how that release went. -->
+                          <span class="rt-chip-count rt-mono" title="reached {dests.filter(d => d.kind === 'live' || d.kind === 'past').length} of {dests.length} destinations">{dests.filter(d => d.kind === "live" || d.kind === "past").length}/{dests.length}</span>
+                        {/if}
                       </span>
                     {/if}
                     {#if stage.stage_type === "plan" && isPlanAwaiting(stage) && release.release_intent_id && csrf}
-                      {@const planBadge = envBadgeClasses(stage.environment || "")}
-                      <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-purple-100">
-                        {stage.environment} plan
-                        <span class="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
-                      </span>
+                      <span class="rt-chip rt-chip-attention">{stage.environment} plan</span>
                       <button
-                        class="text-xs px-2 py-0.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
+                        class="rt-button rt-button-go"
                         disabled={approving.has(`plan:${release.release_intent_id}:${stage.id}`)}
-                        on:click|stopPropagation={() => approvePlanStage(release, stage)}
+                        on:click|preventDefault|stopPropagation={() => approvePlanStage(release, stage)}
                       >Approve plan</button>
                     {/if}
                     {#if stage.blocked_by && release.release_intent_id && csrf}
                       {#if isAuthor(release) && isAdmin()}
                         <button
-                          class="text-xs px-2 py-0.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+                          class="rt-button rt-button-warn"
                           disabled={approving.has(`${release.release_intent_id}:${stage.environment}`)}
-                          on:click|stopPropagation={() => { if (confirm('You are the release author. Bypass approval?')) approveRelease(release, stage, true); }}
+                          on:click|preventDefault|stopPropagation={() => { if (confirm('You are the release author. Bypass approval?')) approveRelease(release, stage, true); }}
                         >Bypass</button>
                       {:else if !isAuthor(release)}
                         <button
-                          class="text-xs px-2 py-0.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
+                          class="rt-button rt-button-go"
                           disabled={approving.has(`${release.release_intent_id}:${stage.environment}`)}
-                          on:click|stopPropagation={() => approveRelease(release, stage)}
+                          on:click|preventDefault|stopPropagation={() => approveRelease(release, stage)}
                         >Approve</button>
                       {/if}
                     {/if}
                   {/each}
 
-                  <span class="text-xs text-gray-400">{summary.done}/{summary.total}</span>
-
+                  <span class="rt-progress rt-mono" title="{summary.done} of {summary.total} stages finished">
+                    {summary.done}/{summary.total}
+                  </span>
                 {:else if release.env_groups && release.env_groups.length > 0}
                   {@const allSucceeded = release.env_groups.every(g => g.status === "SUCCEEDED")}
                   {#if allSucceeded}
-                    <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    <span class="text-gray-500 text-sm">Deployed</span>
+                    <span class="rt-glyph" data-signal="ok" aria-hidden="true"></span>
+                    <span class="rt-summary-label">Released</span>
+                    {#each release.env_groups as group, gi (gi)}
+                      {#each group.envs as env (env)}
+                        <span class="rt-chip env-scope" style={envChipStyle(env)}>
+                          {env}<span class="rt-chip-mark" data-status="SUCCEEDED" aria-hidden="true"></span>
+                        </span>
+                      {/each}
+                    {/each}
                   {:else}
                     {#each release.env_groups as group, gi (gi)}
                       {#if group.status !== "SUCCEEDED"}
                         {@const cfg = STATUS_CONFIG[group.status] || STATUS_CONFIG.SUCCEEDED}
-                        {#if cfg.icon === "pulse"}
-                          <span class="w-4 h-4 shrink-0 flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse"></span></span>
-                        {:else if cfg.icon === "check-circle"}
-                          <svg class="w-4 h-4 {cfg.iconColor} shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                        {:else}
-                          <svg class="w-4 h-4 {cfg.iconColor} shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                        {/if}
-                        <span class="{cfg.color} text-sm">{cfg.label}</span>
+                        <span class="rt-glyph" data-signal={glyphSignal(cfg.icon)} aria-hidden="true"></span>
+                        <span class="rt-summary-label">{cfg.label}</span>
                         {#each group.envs as env (env)}
-                          {@const badge = envBadgeClasses(env)}
-                          <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full {badge.bg}">
-                            {env}
-                            <span class="w-1.5 h-1.5 rounded-full {badge.dot}"></span>
+                          <span class="rt-chip env-scope" style={envChipStyle(env)}>
+                            {env}<span class="rt-chip-mark" data-status={group.status} aria-hidden="true"></span>
                           </span>
                         {/each}
                       {/if}
                     {/each}
                   {/if}
                 {:else}
-                  <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  <span class="text-gray-400 text-sm">Pending</span>
+                  <span class="rt-glyph" data-signal="queued" aria-hidden="true"></span>
+                  <span class="rt-summary-label rt-muted">Not released yet</span>
                 {/if}
 
-                <svg class="w-3 h-3 text-gray-400 shrink-0 ml-auto transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                <span class="rt-disclosure" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </span>
               </summary>
 
-              <!-- Release details — clamp the body to ~400 chars so
-                   very long commit messages don't dominate the page.
-                   Full text in a `title=` tooltip for hover. -->
-              <div class="px-4 py-3 border-t border-gray-100 space-y-3">
+              <div class="rt-body">
                 {#if release.description}
-                  {@const desc = release.description}
-                  <p class="text-sm text-gray-700 whitespace-pre-wrap break-words" title={desc}>
-                    {desc.length > 400 ? desc.slice(0, 400) + "…" : desc}
-                  </p>
+                  <p class="rt-description" title={release.description}>{release.description}</p>
                 {/if}
-                <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-500">
-                  <span class="font-mono text-gray-400">{release.slug}</span>
-                  {#if release.version}
-                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">{release.version}</span>
-                  {/if}
-                </div>
-              </div>
 
-              <!-- Pipeline stages -->
-              {#if release.has_pipeline}
-                <div class="border-t border-gray-100">
-                  {#each release.pipeline_stages as stage, i (stage.id || `${stage.stage_type}-${stage.environment}-${i}`)}
-                    {@const stageStatus = effectiveStatus(stage)}
-                    <div class="px-4 py-2.5 flex items-center gap-3 text-sm {i < release.pipeline_stages.length - 1 ? 'border-b border-gray-50' : ''} {stageStatus === 'PENDING' ? 'opacity-50' : ''}">
-                      {#if stageStatus === "SUCCEEDED"}
-                        <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                      {:else if stageStatus === "RUNNING"}
-                        <span class="w-4 h-4 shrink-0 flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse"></span></span>
-                      {:else if stageStatus === "QUEUED"}
-                        <svg class="w-4 h-4 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                      {:else if stageStatus === "FAILED"}
-                        <svg class="w-4 h-4 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                      {:else if stageStatus === "AWAITING_APPROVAL"}
-                        <svg class="w-4 h-4 text-purple-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-                      {:else}
-                        <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/></svg>
-                      {/if}
+                <!-- The stage ledger. Stages that have not happened yet are
+                     listed in their place, dimmed: what is *going* to happen to
+                     a release is as much a part of reading it as what already
+                     did. -->
+                {#if release.has_pipeline}
+                  <ol class="rt-stages">
+                    {#each release.pipeline_stages as stage, i (stage.id || `${stage.stage_type}-${stage.environment}-${i}`)}
+                      {@const stageStatus = effectiveStatus(stage)}
+                      {@const future = stageStatus === "PENDING"}
+                      <li class="rt-stage" class:rt-stage-future={future}>
+                        <span class="rt-glyph" data-signal={stageSignal(stageStatus)} aria-hidden="true"></span>
 
-                      {#if stage.stage_type === "deploy"}
-                        <span class="text-sm {stage.status === 'SUCCEEDED' ? 'text-gray-700' : stage.status === 'RUNNING' ? 'text-yellow-700' : stage.status === 'FAILED' ? 'text-red-700' : 'text-gray-400'}">
-                          {deployStageLabel(stage.status)}
-                        </span>
-                        {@const badge = envBadgeClasses(stage.environment || "")}
-                        <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full {badge.bg}">
-                          {stage.environment}
-                          <span class="w-1.5 h-1.5 rounded-full {badge.dot}"></span>
-                        </span>
-                      {:else if stage.stage_type === "wait"}
-                        <span class="text-sm {stage.status === 'SUCCEEDED' ? 'text-gray-700' : stage.status === 'RUNNING' ? 'text-yellow-700' : 'text-gray-400'}">
-                          {waitStageLabel(stage.status)} {stage.duration_seconds}s
-                        </span>
-                      {:else if stage.stage_type === "plan"}
-                        <span class="text-sm {stageStatus === 'AWAITING_APPROVAL' ? 'text-purple-700' : stageStatus === 'SUCCEEDED' ? 'text-gray-700' : stageStatus === 'RUNNING' ? 'text-yellow-700' : stageStatus === 'FAILED' ? 'text-red-700' : 'text-gray-400'}">
-                          {planStageLabel(stageStatus)}
-                        </span>
-                        {@const planBadge = envBadgeClasses(stage.environment || "")}
-                        <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full {planBadge.bg}">
-                          {stage.environment}
-                          <span class="w-1.5 h-1.5 rounded-full {planBadge.dot}"></span>
-                        </span>
-                        {#if stageStatus === "AWAITING_APPROVAL" && release.release_intent_id && csrf}
-                          <button
-                            class="text-xs px-2 py-0.5 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
-                            disabled={approving.has(`plan:${release.release_intent_id}:${stage.id}`)}
-                            on:click|stopPropagation={() => approvePlanStage(release, stage)}
-                          >Approve plan</button>
-                          <button
-                            class="text-xs px-2 py-0.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50"
-                            disabled={approving.has(`plan:${release.release_intent_id}:${stage.id}`)}
-                            on:click|stopPropagation={() => { if (confirm('Reject this plan?')) approvePlanStage(release, stage, true); }}
-                          >Reject</button>
+                        {#if stage.stage_type === "deploy"}
+                          <span class="rt-stage-label">{deployStageLabel(stage.status)}</span>
+                          <span class="rt-chip env-scope" style={envChipStyle(stage.environment || "")}>
+                            {stage.environment}<span class="rt-chip-mark" data-status={stage.status} aria-hidden="true"></span>
+                          </span>
+                        {:else if stage.stage_type === "wait"}
+                          <span class="rt-stage-label">{waitStageLabel(stage.status)} {stage.duration_seconds}s</span>
+                        {:else if stage.stage_type === "plan"}
+                          <span class="rt-stage-label">{planStageLabel(stageStatus)}</span>
+                          <span class="rt-chip env-scope" style={envChipStyle(stage.environment || "")}>
+                            {stage.environment}<span class="rt-chip-mark" data-status={stage.status} aria-hidden="true"></span>
+                          </span>
+                          {#if stageStatus === "AWAITING_APPROVAL" && release.release_intent_id && csrf}
+                            <button
+                              class="rt-button rt-button-go"
+                              disabled={approving.has(`plan:${release.release_intent_id}:${stage.id}`)}
+                              on:click|stopPropagation={() => approvePlanStage(release, stage)}
+                            >Approve plan</button>
+                            <button
+                              class="rt-button rt-button-warn"
+                              disabled={approving.has(`plan:${release.release_intent_id}:${stage.id}`)}
+                              on:click|stopPropagation={() => { if (confirm('Reject this plan?')) approvePlanStage(release, stage, true); }}
+                            >Reject</button>
+                          {/if}
+                        {:else if stage.stage_type === "gate"}
+                          <span class="rt-stage-label">{gateStageLabel(stageStatus)}</span>
+                          <!-- What it is parked on, in the server's own words. A
+                               gate whose state you cannot see is worse than the
+                               sleep it replaced, so this is the point of the
+                               stage rendering rather than a nicety. -->
+                          {#if isGateAwaiting(stage)}
+                            {#each stage.gate_waiting_on as waiting}
+                              <span class="rt-chip rt-chip-attention">{waiting}</span>
+                            {/each}
+                          {:else if stageStatus === "FAILED" && stage.error_message}
+                            <a
+                              class="rt-why"
+                              href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}"
+                            >Why it failed</a>
+                          {/if}
                         {/if}
-                        {#if (stageStatus === "AWAITING_APPROVAL" || stageStatus === "SUCCEEDED" || stageStatus === "FAILED") && release.release_intent_id}
+
+                        {#if stage.stage_type === "plan" && (stageStatus === "AWAITING_APPROVAL" || stageStatus === "SUCCEEDED" || stageStatus === "FAILED") && release.release_intent_id}
                           <button
-                            class="text-xs px-2 py-0.5 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                            class="rt-button"
                             disabled={planOutputLoading.has(`${release.release_intent_id}:${stage.id}`)}
                             on:click|stopPropagation={() => viewPlanOutput(release, stage)}
                           >{planOutputs[`${release.release_intent_id}:${stage.id}`] ? "Hide plan" : "View plan"}</button>
                         {/if}
-                      {/if}
 
-                      {#if stage.started_at && (stageStatus === "RUNNING" || stageStatus === "QUEUED" || stageStatus === "AWAITING_APPROVAL" || stage.completed_at)}
-                        <span class="text-xs text-gray-400 tabular-nums">{elapsedStr(stage.started_at, stage.completed_at, stage.status)}</span>
-                      {/if}
-
-                      <span class="ml-auto flex items-center gap-1 text-xs text-gray-400 shrink-0">
-                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                        pipeline
-                      </span>
-                    </div>
-                    {#if stage.stage_type === "plan" && planOutputs[`${release.release_intent_id}:${stage.id}`]}
-                      {@const planData = planOutputs[`${release.release_intent_id}:${stage.id}`]}
-                      <div class="px-4 py-3 bg-gray-50 border-t border-gray-100 space-y-3">
-                        <div class="flex items-center gap-2">
-                          <span class="text-xs font-medium text-gray-500">Plan output</span>
-                          <span class="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">{planData.status}</span>
-                        </div>
-                        {#if planData.outputs && planData.outputs.length > 0}
-                          {#each planData.outputs as destOutput (destOutput.destination_id)}
-                            <div>
-                              <div class="flex items-center gap-2 mb-1">
-                                <span class="text-xs font-medium text-gray-600">{destOutput.destination_name}</span>
-                                <span class="text-xs text-gray-400">{destOutput.status}</span>
-                              </div>
-                              <pre class="text-xs font-mono text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded p-3 max-h-48 overflow-auto">{destOutput.plan_output || "(no output)"}</pre>
-                            </div>
-                          {/each}
-                        {:else}
-                          <pre class="text-xs font-mono text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded p-3 max-h-64 overflow-auto">{planData.plan_output || "(no output)"}</pre>
+                        {#if stage.started_at && (stageStatus === "RUNNING" || stageStatus === "QUEUED" || stageStatus === "AWAITING_APPROVAL" || stage.completed_at)}
+                          <span class="rt-stage-elapsed rt-mono">{elapsedStr(stage.started_at, stage.completed_at, stage.status)}</span>
                         {/if}
-                      </div>
-                    {/if}
-                  {/each}
-                </div>
-              {/if}
 
-              <!-- Destinations -->
-              {#each release.destinations as dest, i (dest.name)}
-                {@const destBadge = envBadgeClasses(dest.environment || "")}
-                <div class="px-4 py-2 flex items-center gap-3 text-sm {i < release.destinations.length - 1 ? 'border-b border-gray-50' : ''} border-t border-gray-100">
-                  {#if dest.status === "SUCCEEDED"}
-                    <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  {:else if dest.status === "RUNNING" || dest.status === "ASSIGNED"}
-                    <span class="w-4 h-4 shrink-0 flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse"></span></span>
-                  {:else if dest.status === "QUEUED"}
-                    <svg class="w-4 h-4 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  {:else if dest.status === "FAILED"}
-                    <svg class="w-4 h-4 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  {:else}
-                    <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  {/if}
-                  <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full {destBadge.bg}">
-                    {dest.environment}
-                    <span class="w-1.5 h-1.5 rounded-full {destBadge.dot}"></span>
-                  </span>
-                  <span class="text-gray-400 text-xs">{dest.name}</span>
-                  {#if dest.status === "SUCCEEDED"}
-                    <span class="text-xs text-green-600">Deployed</span>
-                  {:else if dest.status === "RUNNING"}
-                    <span class="text-xs text-yellow-600">Deploying</span>
-                  {:else if dest.status === "QUEUED"}
-                    <span class="text-xs text-blue-600">Queued{dest.queue_position ? ` #${dest.queue_position}` : ""}</span>
-                  {:else if dest.status === "FAILED"}
-                    <span class="text-xs text-red-600">Failed</span>
-                  {/if}
-                  {#if dest.completed_at}
-                    <time class="text-xs text-gray-400 ml-auto">{timeAgo(dest.completed_at)}</time>
-                  {/if}
-                </div>
-              {/each}
+                        <!-- Destinations, nested under the environment stage
+                             that carries them. An environment is a set of
+                             placements, and a deploy that reached two of three
+                             must not read the same as one that reached all
+                             three — see design/RELEASE-SWIMLANE.md. -->
+                        {#if stage.stage_type === "deploy" && showsDestinations(destEnvs.get(stage.environment) || [], release)}
+                          <ul class="rt-destinations">
+                            {#each destEnvs.get(stage.environment) as dest (dest.name)}
+                              {@const row = (release.destinations || []).find(d => d.name === dest.name)}
+                              <li class="rt-destination" data-kind={dest.kind}>
+                                <span class="rt-dest-pip" aria-hidden="true"></span>
+                                <span class="rt-mono rt-dest-name">{dest.name}</span>
+                                <span class="rt-dest-state">{DEST_WORDS[dest.kind] || dest.kind}</span>
+                                {#if row?.queue_position}
+                                  <span class="rt-mono rt-muted">#{row.queue_position}</span>
+                                {/if}
+                                <!-- The reason, not the reason's text. A
+                                     provider error is a chained sentence a few
+                                     hundred characters long, and this row is a
+                                     nowrap flex line: pasted in, it wrapped
+                                     inside the row and turned one placement
+                                     into a paragraph. The swim lane's job is
+                                     that something failed and where to go —
+                                     the release page renders the message in
+                                     full. -->
+                                {#if row?.error_message}
+                                  <a
+                                    class="rt-why"
+                                    href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}"
+                                  >Why it failed</a>
+                                {/if}
+                                {#if row?.completed_at}
+                                  <time class="rt-dest-time">{timeAgo(row.completed_at)}</time>
+                                {/if}
+                              </li>
+                            {/each}
+                          </ul>
+                        {/if}
+                      </li>
+
+                      {#if stage.stage_type === "plan" && planOutputs[`${release.release_intent_id}:${stage.id}`]}
+                        {@const planData = planOutputs[`${release.release_intent_id}:${stage.id}`]}
+                        <li class="rt-plan-output">
+                          <div class="rt-plan-head">
+                            <span>Plan output</span>
+                            <span class="rt-chip rt-chip-attention">{planData.status}</span>
+                          </div>
+                          {#if planData.outputs && planData.outputs.length > 0}
+                            {#each planData.outputs as destOutput (destOutput.destination_id)}
+                              <div class="rt-plan-block">
+                                <div class="rt-plan-block-head">
+                                  <span class="rt-mono">{destOutput.destination_name}</span>
+                                  <span class="rt-muted">{destOutput.status}</span>
+                                </div>
+                                <pre>{destOutput.plan_output || "(no output)"}</pre>
+                              </div>
+                            {/each}
+                          {:else}
+                            <pre>{planData.plan_output || "(no output)"}</pre>
+                          {/if}
+                        </li>
+                      {/if}
+                    {/each}
+                  </ol>
+                {:else if release.destinations.length > 0}
+                  <!-- No pipeline: the destinations are the whole story. -->
+                  <ul class="rt-destinations rt-destinations-flat">
+                    {#each releaseDestinationRows(release) as dest (dest.name)}
+                      <li class="rt-destination" data-kind={dest.kind}>
+                        <span class="rt-dest-pip" aria-hidden="true"></span>
+                        <span class="rt-chip env-scope" style={envChipStyle(dest.env)}>
+                          {dest.env}<span class="rt-chip-mark" data-status={dest.kind === "live" ? "SUCCEEDED" : ""} aria-hidden="true"></span>
+                        </span>
+                        <span class="rt-mono rt-dest-name">{dest.name}</span>
+                        <span class="rt-dest-state">{DEST_WORDS[dest.kind] || dest.kind}</span>
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+
+                <p class="rt-footnote">
+                  <span class="rt-mono">{release.slug}</span>
+                  {#if release.version}<span class="rt-mono rt-version">{release.version}</span>{/if}
+                </p>
+              </div>
             </details>
-          </div>
+          </article>
 
         {:else if item.kind === "hidden"}
-          <details class="group" on:toggle={scheduleComputeLaneBars}>
-            <summary class="flex items-center gap-2 py-2 px-1 text-sm text-gray-400 cursor-pointer hover:text-gray-600 list-none">
-              <svg class="w-3 h-3 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-              {item.count} hidden commit{item.count !== 1 ? "s" : ""}
-              <span class="text-gray-300">&middot;</span>
-              <span class="group-open:hidden">Show commit{item.count !== 1 ? "s" : ""}</span>
-              <span class="hidden group-open:inline">Hide commit{item.count !== 1 ? "s" : ""}</span>
+          <!-- Commits that touched nothing this project deploys. Folded away by
+               default: the point of the timeline is what moved. -->
+          <details class="rt-hidden" on:toggle={scheduleComputeLaneBars}>
+            <summary>
+              <span class="rt-hidden-rule" aria-hidden="true"></span>
+              <span class="rt-hidden-count">{item.count} hidden commit{item.count !== 1 ? "s" : ""}</span>
+              <span class="rt-hidden-action">Show</span>
+              <span class="rt-hidden-rule" aria-hidden="true"></span>
             </summary>
-            <div class="space-y-3 mt-1">
+            <div class="rt-hidden-list">
               {#each item.releases || [] as release (release.slug)}
-                <div data-release data-envs="" data-lane-states="" class="border border-gray-200 rounded-lg overflow-hidden opacity-75">
-                  <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
-                    <div class="flex items-center gap-2 min-w-0 flex-1">
-                      {#if release.source_user && !avatarFailed.has(release.source_user)}
-                        <img
-                          data-avatar
-                          src={avatarSrc(release.source_user)}
-                          alt={release.source_user}
-                          title="Deployed by {release.source_user}"
-                          class="inline-block w-6 h-6 rounded-full object-cover bg-gray-200 shrink-0"
-                          on:error={() => avatarMissing(release.source_user)}
-                        />
-                      {:else}
-                        <span
-                          data-avatar
-                          title={release.source_user ? `Deployed by ${release.source_user}` : undefined}
-                          class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-200 text-[10px] font-semibold text-gray-500 shrink-0"
-                        >{initial(release.source_user)}</span>
-                      {/if}
-                      <a href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}" class="font-medium text-gray-900 hover:text-black truncate" title={release.title}>
-                        {release.title?.length > 80 ? release.title.slice(0, 80) + "…" : release.title}
-                      </a>
+                <article data-release data-release-slug={release.slug} data-envs="" data-lane-states="" class="rt-card rt-card-quiet">
+                  <header class="rt-card-head">
+                    {#if release.source_user && !avatarFailed.has(release.source_user)}
+                      <img
+                        data-avatar
+                        src={avatarSrc(release.source_user)}
+                        alt=""
+                        title="Committed by {release.source_user}"
+                        class="rt-avatar"
+                        on:error={() => avatarMissing(release.source_user)}
+                      />
+                    {:else}
+                      <span data-avatar class="rt-avatar rt-avatar-initial">{initial(release.source_user)}</span>
+                    {/if}
+                    <a href="/orgs/{org}/projects/{release.project_name || project}/releases/{release.slug}" class="rt-card-title" title={release.title}>{release.title}</a>
+                    <div class="rt-meta">
+                      {#if release.commit_sha}<span class="rt-meta-item rt-mono">{release.commit_sha.slice(0, 7)}</span>{/if}
+                      <time class="rt-meta-item">{timeAgo(release.created_at)}</time>
                     </div>
-                    <div class="flex items-center gap-4 text-xs text-gray-500 shrink-0">
-                      {#if release.commit_sha}
-                        <span class="font-mono">{release.commit_sha.slice(0, 7)}</span>
-                      {/if}
-                      <time>{timeAgo(release.created_at)}</time>
-                    </div>
-                  </div>
-                </div>
+                  </header>
+                </article>
               {/each}
             </div>
           </details>
@@ -1131,60 +1549,1093 @@
     <!-- Show more (row 2, column 2). Deliberately outside the measured
          card list so revealing more doesn't skew the lane geometry. -->
     {#if hasMore}
-      <div class="pt-3" style="grid-row: 2; grid-column: 2;">
-        <button
-          type="button"
-          class="w-full py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:text-gray-900 hover:border-gray-300"
-          on:click={showMore}
-        >
-          Show more
-        </button>
+      <div class="rt-more" style="grid-row: 2; grid-column: 2;">
+        <button type="button" on:click={showMore}>Show more releases</button>
       </div>
     {/if}
 
     <!-- Lane labels (row 2, column 1) -->
-    <div class="swim-lane-labels flex pt-1" style="grid-row: 2; grid-column: 1;">
+    <div class="rt-labels" style="grid-row: 2; grid-column: 1;">
       {#each displayedLanes as lane (lane.name)}
-        {@const bar = laneBarData[lane.name]}
-        {@const [barColor] = bar?.color || envColors(lane.name)}
-        <div style="width: {BAR_WIDTH}px; margin-right: {BAR_GAP}px; display: flex; justify-content: center;">
-          <span class="lane-label" style="color: {barColor};">{lane.name}</span>
+        {@const [light, dark] = envColorPair(lane.name)}
+        {@const L = laneLayout.get(lane.name) || { open: false, width: LANE_W, offsets: [], dests: [] }}
+        <div class="rt-label-slot env-scope" style="--env: {light}; --env-dark: {dark}; width: {L.width}px; margin-right: {LANE_GAP}px;">
+          {#if L.open}
+            {#each L.dests as dest, di (dest)}
+              <span class="rt-lane-label rt-lane-label-dest" style="left: {L.offsets[di]?.left ?? 0}px;" title={dest}>{shortDestination(lane.name, dest)}</span>
+            {/each}
+          {:else}
+            <!-- The count is how a collapsed lane says it has something to
+                 open. It used to be a hairline down the middle of the bar,
+                 which read as a rendering seam rather than a signal. -->
+            <span class="rt-lane-label">{lane.name}{L.fans ? ` ${L.dests.length}` : ""}</span>
+          {/if}
         </div>
       {/each}
     </div>
-
   </div>
 {/if}
 
 <style>
-  :global(.swim-lane-gutter) {
-    align-self: stretch;
+  /* ── Tokens ─────────────────────────────────────────────────────────────
+     Neutrals come from the app's own palette. Tailwind emits `--color-*` and
+     input.css remaps them under `prefers-color-scheme: dark`, so borrowing
+     them means the timeline follows the app into dark mode for free — and,
+     more to the point, cannot drift out of step with it. Restating the greys
+     here is how a component ends up a shade darker than the page it sits on.
+
+     Signal colours are the timeline's own, because the app has no opinion
+     about them. Warm is reserved: amber means a person is needed, red means it
+     broke, and no environment is ever allowed either. See src/lib/colors.js. */
+  .rt {
+    /* Room for the vertical lane labels, whose glyphs sit a little to the left
+       of the strand they name. Without it the first label is clipped. */
+    --gutter-inset: 4px;
+
+    --surface: var(--color-white, #fff);
+    --surface-sunken: var(--color-gray-50, #f9fafb);
+    --line: var(--color-gray-200, #e5e7eb);
+    --line-soft: var(--color-gray-100, #f3f4f6);
+    --ink: var(--color-gray-900, #111827);
+    --ink-soft: var(--color-gray-600, #4b5563);
+    --ink-faint: var(--color-gray-400, #9ca3af);
+
+    --sig-ok: #059669;
+    --sig-fail: #dc2626;
+    --sig-attn: #d97706;
+    --sig-attn-bg: #fde68a;
+    --sig-run: #0284c7;
+    --sig-idle: #9ca3af;
   }
 
-  :global(.swim-lane) {
+  @media (prefers-color-scheme: dark) {
+    .rt {
+      --sig-ok: #34d399;
+      --sig-fail: #f87171;
+      --sig-attn: #fbbf24;
+      --sig-attn-bg: #a16207;
+      --sig-run: #38bdf8;
+      --sig-idle: #6b7280;
+    }
+  }
+
+  /* The design gallery sets `data-theme` so dark mode can be switched without
+     touching an OS setting; these come after the media query so the explicit
+     choice wins in both directions. */
+  :global(:root[data-theme="dark"]) .rt {
+    --sig-ok: #34d399;
+    --sig-fail: #f87171;
+    --sig-attn: #fbbf24;
+    --sig-attn-bg: #a16207;
+    --sig-run: #38bdf8;
+    --sig-idle: #6b7280;
+  }
+
+  :global(:root[data-theme="light"]) .rt {
+    --sig-ok: #059669;
+    --sig-fail: #dc2626;
+    --sig-attn: #d97706;
+    --sig-attn-bg: #fde68a;
+    --sig-run: #0284c7;
+    --sig-idle: #9ca3af;
+  }
+
+  /* An environment's colour arrives as a light/dark pair on the element that
+     needs it; this picks one. Declared on the elements that *set* the pair,
+     because a custom property that references another is resolved where it is
+     declared, not where it is used. */
+  .env-scope { --env-c: var(--env); }
+  @media (prefers-color-scheme: dark) {
+    .env-scope { --env-c: var(--env-dark); }
+  }
+  :global(:root[data-theme="dark"]) .env-scope { --env-c: var(--env-dark); }
+  :global(:root[data-theme="light"]) .env-scope { --env-c: var(--env); }
+
+  /* ── Frame ─────────────────────────────────────────────────────────────── */
+
+  .rt {
+    display: grid;
+    grid-template-rows: 1fr auto;
+    max-width: 64rem;
+    margin: 0 auto;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .rt-mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.92em;
+  }
+
+  .rt-muted { color: var(--ink-faint); }
+
+  /* ── Gutter ────────────────────────────────────────────────────────────── */
+
+  .rt-gutter {
+    position: relative;
+    display: flex;
+    align-self: stretch;
+    padding-left: var(--gutter-inset);
+  }
+
+  .rt-lane {
     position: relative;
     min-height: 100%;
+    transition: width 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
-  :global(.swim-lane-labels) {
-    min-height: 56px;
+  /* The road the lane travels, drawn whether or not anything is on it. */
+  .rt-track {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--env-c) 12%, transparent);
+    transition: top 620ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
-  :global(.lane-label) {
+  .rt-strand {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    transition:
+      left 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      width 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  /* ── Runs ───────────────────────────────────────────────────────────────
+     One element per run, and the layer it belongs to decides what paints over
+     what. Every run is a pill: the layer beneath always covers its ends, so a
+     rounded end can only ever reveal the track or the hold, never the page.
+     See lib/lane-geometry.js. */
+  .lane-run {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    border-radius: 999px;
+    overflow: hidden;
+    /* The one orchestrated moment: when a deploy lands, the run grows into its
+       new extent rather than blinking there. */
+    transition:
+      top 620ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      height 620ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .lane-run[data-layer="approach"] { z-index: 1; }
+  .lane-run[data-layer="hold"] { z-index: 2; }
+  .lane-run[data-layer="override"] { z-index: 3; }
+
+  /* What the environment is running, and its history below. */
+  .lane-run[data-run="solid"] {
+    background: var(--env-c);
+  }
+
+  /* On its way up. Tinted rather than solid — it is not here yet. */
+  .lane-run[data-run="travel"] {
+    background: color-mix(in oklab, var(--env-c) 20%, var(--surface));
+  }
+
+  /* Parked on a person, and a rollback: the same yellow, because both are
+     states somebody has to know about rather than states the pipeline is
+     quietly working through. */
+  .lane-run[data-run="wait"],
+  .lane-run[data-run="reverse"] {
+    background: var(--sig-attn-bg);
+  }
+
+  /* A deploy failed here and nothing has replaced it since. */
+  .lane-run[data-run="fault"] {
+    background: var(--sig-fail);
+  }
+
+  /* ── Chevrons ───────────────────────────────────────────────────────────
+     A run that is going somewhere says which way, in the run's own colour. */
+  .lane-run[data-direction]::after {
+    content: "";
+    position: absolute;
+    inset: -14px 0;
+    -webkit-mask-image: var(--chevron);
+    mask-image: var(--chevron);
+    -webkit-mask-size: 100% 14px;
+    mask-size: 100% 14px;
+    -webkit-mask-repeat: repeat-y;
+    mask-repeat: repeat-y;
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' preserveAspectRatio='none'%3E%3Cpath d='M1.5 9.5 L7 4 L12.5 9.5' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+
+  .lane-run[data-direction="up"]::after {
+    background: var(--env-c);
+    opacity: 0.75;
+  }
+
+  /* Down is always the attention colour, never an environment's: a rollback
+     must not be mistakable for a deploy at a glance. */
+  .lane-run[data-direction="down"]::after {
+    background: var(--sig-attn);
+    transform: scaleY(-1);
+  }
+
+  .lane-run[data-run="wait"]::after {
+    background: var(--sig-attn);
+  }
+
+  /* Moving, versus parked and waiting on somebody. Both animate: a pipeline
+     that needs a person looking exactly like a finished one is the bug this
+     component was written to prevent. */
+  .lane-run[data-motion="march"]::after {
+    animation: lane-march 1.15s linear infinite;
+  }
+
+  .lane-run[data-motion="breathe"]::after {
+    animation: lane-breathe 2.1s ease-in-out infinite;
+  }
+
+  @keyframes lane-march {
+    to {
+      -webkit-mask-position: 0 -14px;
+      mask-position: 0 -14px;
+    }
+  }
+
+  /* Dots are rings, not shadows, so `pending` can be dashed — the one state
+     that has to look provisional. `border-box` keeps every ring the same
+     outside diameter whatever its width, and nothing is allowed to paint
+     outside that diameter: a dot wider than its strand turns the lane into a
+     lollipop. Size comes from `dotSize`. */
+  .lane-dot {
+    position: absolute;
+    /* `left` is set per dot, in whole pixels — see `dotInset`. */
+    box-sizing: border-box;
+    border-radius: 50%;
+    z-index: 4;
+    transition: top 620ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  /* Where the environment is right now. A bullseye punched out of the bar:
+     the ring is the page colour, so it reads as a hole in the trail rather
+     than as something sitting on top of it. */
+  .lane-dot[data-kind="live"] {
+    background: var(--env-c);
+    border: 2px solid var(--surface);
+    z-index: 6;
+  }
+
+  .lane-dot[data-kind="flight"] {
+    background: var(--surface);
+    border: 2px solid var(--env-c);
+    z-index: 5;
+  }
+
+  .lane-dot[data-kind="awaiting"] {
+    background: var(--sig-attn);
+    border: 2px solid var(--surface);
+    z-index: 6;
+  }
+
+  .lane-dot[data-kind="stopped"] {
+    background: var(--sig-fail);
+    border: 2px solid var(--surface);
+    z-index: 6;
+  }
+
+  /* Where a rollback is heading. It sits inside the yellow run, so it takes
+     the yellow with it: the destination is part of the rollback, not an
+     ordinary deploy that happens to be underneath one. */
+  .lane-dot[data-tone="attention"] {
+    background: var(--sig-attn);
+    border-color: var(--surface);
+  }
+
+  /* Headed here, nothing started. Dashed: provisional, and unmistakable for
+     `past` — which is the same shape but did actually happen. */
+  .lane-dot[data-kind="pending"] {
+    background: var(--surface);
+    border: 1.5px dashed color-mix(in oklab, var(--env-c) 60%, transparent);
+    opacity: 0.75;
+  }
+
+  /* The environment held this release once. A solid ring, because it happened;
+     quiet, because there are a lot of them and they are history. */
+  .lane-dot[data-kind="past"] {
+    background: var(--surface);
+    border: 1.5px solid color-mix(in oklab, var(--env-c) 55%, transparent);
+    opacity: 0.85;
+  }
+
+  .lane-pulse {
+    animation: lane-breathe 2.1s ease-in-out infinite;
+  }
+
+  @keyframes lane-breathe {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
+
+  .rt-lane-hit {
+    position: absolute;
+    /* Matches HIT_OVERHANG, which showLaneCard subtracts to map the pointer
+       back onto the lane's own coordinates. */
+    inset: 0 -3px;
+    z-index: 7;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 999px;
+  }
+
+  .rt-lane-hit:focus-visible {
+    outline: 2px solid var(--env-c);
+    outline-offset: 2px;
+  }
+
+  .rt-lane:hover .rt-track {
+    background: color-mix(in oklab, var(--env-c) 20%, transparent);
+  }
+
+  /* ── Hover card ────────────────────────────────────────────────────────── */
+
+  .rt-hovercard {
+    position: absolute;
+    left: calc(100% + 10px);
+    z-index: 30;
+    width: 17rem;
+    padding: 10px 12px 11px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: 0 8px 28px -8px rgb(0 0 0 / 0.28);
+    pointer-events: none;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .rt-hovercard-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 7px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .rt-hovercard-scope {
+    margin-left: auto;
+    font-size: 10.5px;
+    font-weight: 500;
+    color: var(--ink-faint);
+  }
+
+  .rt-hovercard-swatch {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    background: var(--env-c);
+    flex: none;
+  }
+
+  .rt-hovercard-facts {
+    display: grid;
+    grid-template-columns: 4.6rem minmax(0, 1fr);
+    gap: 2px 8px;
+    margin: 0;
+  }
+
+  .rt-hovercard-facts dt {
+    color: var(--ink-faint);
+  }
+
+  .rt-hovercard-facts dd {
+    margin: 0;
+    color: var(--ink-soft);
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .rt-hovercard-facts dd[data-kind="live"] { color: var(--env-c); font-weight: 600; }
+  .rt-hovercard-facts dd[data-kind="flight"] { color: var(--sig-run); font-weight: 600; }
+  .rt-hovercard-facts dd[data-kind="awaiting"] { color: var(--sig-attn); font-weight: 600; }
+  .rt-hovercard-facts dd[data-kind="stopped"] { color: var(--sig-fail); font-weight: 600; }
+
+  .rt-hovercard-release {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .rt-hovercard-empty {
+    margin: 0;
+    color: var(--ink-faint);
+  }
+
+  /* ── Lane labels ───────────────────────────────────────────────────────── */
+
+  .rt-labels {
+    display: flex;
+    padding-top: 8px;
+    padding-left: var(--gutter-inset);
+    min-height: 82px;
+  }
+
+  .rt-label-slot {
+    position: relative;
+    transition: width 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .rt-lane-label {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
     writing-mode: vertical-rl;
     transform: rotate(180deg);
     font-size: 10px;
-    font-weight: 500;
+    font-weight: 600;
+    letter-spacing: 0.01em;
     line-height: 1;
-    pointer-events: none;
+    color: var(--env-c);
+    white-space: nowrap;
+    text-align: right;
+  }
+
+  /* Sized to its strand, not to its text: a negative margin to centre the
+     glyphs pushed the leftmost label off the edge of the page. */
+  .rt-lane-label-dest {
+    right: auto;
+    width: 8px;
+    font-weight: 500;
+    font-size: 9px;
+    letter-spacing: 0;
+    opacity: 0.85;
+  }
+
+  /* ── Cards ─────────────────────────────────────────────────────────────── */
+
+  .rt-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .rt-card {
+    position: relative;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+
+  /* The card carries the colour of the furthest environment it reached, as a
+     seam down its left edge. It is the one thing tying a row in the list to a
+     lane in the gutter without drawing a line across the page. */
+  .rt-card-accented::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 2px;
+    background: var(--env-c);
+  }
+
+  .rt-card-quiet {
+    opacity: 0.72;
+    background: var(--surface-sunken);
+  }
+
+  .rt-card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 11px 14px;
+  }
+
+  .rt-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    object-fit: cover;
+    background: var(--line-soft);
+    flex: none;
+  }
+
+  .rt-avatar-initial {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--ink-faint);
+  }
+
+  .rt-card-title {
+    flex: 1 1 14rem;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 550;
+    color: var(--ink);
+    text-decoration: none;
+    letter-spacing: -0.006em;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  @keyframes lane-pulse {
-    0%, 100% { opacity: 0.6; }
-    50% { opacity: 1; }
+  .rt-card-title:hover { text-decoration: underline; }
+
+  .rt-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: none;
+    font-size: 11.5px;
+    color: var(--ink-faint);
   }
-  :global(.lane-pulse) {
-    animation: lane-pulse 2s ease-in-out infinite;
+
+  .rt-meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: inherit;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  a.rt-meta-item:hover { color: var(--ink-soft); text-decoration: underline; }
+
+  .rt-meta-item svg {
+    width: 12px;
+    height: 12px;
+    flex: none;
+  }
+
+  /* ── Summary line ──────────────────────────────────────────────────────── */
+
+  .rt-details { border-top: 1px solid var(--line-soft); }
+
+  .rt-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 8px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .rt-summary::-webkit-details-marker { display: none; }
+  .rt-summary:hover { background: var(--surface-sunken); }
+
+  .rt-summary-label { color: var(--ink-soft); }
+  .rt-summary-label[data-signal="fail"] { color: var(--sig-fail); }
+  .rt-summary-label[data-signal="attention"] { color: var(--sig-attn); }
+
+  /* One glyph vocabulary for every status in the component: a filled ring for
+     done, a hollow one for not started, an amber ring for you. */
+  .rt-glyph {
+    width: 13px;
+    height: 13px;
+    border-radius: 999px;
+    flex: none;
+    box-shadow: inset 0 0 0 2px var(--sig-idle);
+  }
+
+  .rt-glyph[data-signal="ok"] {
+    background: var(--sig-ok);
+    box-shadow: inset 0 0 0 2px var(--sig-ok);
+  }
+  .rt-glyph[data-signal="fail"] {
+    background: var(--sig-fail);
+    box-shadow: inset 0 0 0 2px var(--sig-fail);
+  }
+  .rt-glyph[data-signal="attention"] {
+    box-shadow: inset 0 0 0 3px var(--sig-attn);
+  }
+  .rt-glyph[data-signal="running"] {
+    box-shadow: inset 0 0 0 3px var(--sig-run);
+    animation: lane-breathe 1.7s ease-in-out infinite;
+  }
+  .rt-glyph[data-signal="waiting"] {
+    box-shadow: inset 0 0 0 2px var(--sig-run);
+    opacity: 0.6;
+  }
+  .rt-glyph[data-signal="cancelled"] {
+    box-shadow: inset 0 0 0 2px var(--sig-idle);
+    opacity: 0.5;
+  }
+
+  /* Pushed to the far end, away from the chip's destination count: two
+     fractions sitting next to each other read as one muddled number. */
+  .rt-progress {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+
+  .rt-disclosure {
+    margin-left: auto;
+    display: inline-flex;
+    padding-left: 10px;
+    color: var(--ink-faint);
+    transition: transform 180ms ease;
+  }
+
+  .rt-disclosure svg { width: 14px; height: 14px; }
+
+  .rt-details[open] .rt-disclosure { transform: rotate(180deg); }
+
+  /* ── Chips ─────────────────────────────────────────────────────────────── */
+
+  .rt-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 550;
+    line-height: 1.6;
+    white-space: nowrap;
+    color: var(--env-c);
+    background: color-mix(in oklab, var(--env-c) 13%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--env-c) 25%, transparent);
+  }
+
+  /* A chip for an environment being taken backwards wears the attention colour,
+     not its environment's. Where it is going matters less than which way. */
+  .rt-chip-back {
+    color: var(--sig-attn);
+    background: color-mix(in oklab, var(--sig-attn) 14%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--sig-attn) 30%, transparent);
+  }
+
+  .rt-chip-attention {
+    color: var(--sig-attn);
+    background: color-mix(in oklab, var(--sig-attn) 14%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--sig-attn) 30%, transparent);
+  }
+
+  .rt-chip-mark {
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: currentColor;
+    flex: none;
+  }
+
+  /* A moving deploy points where it is going. Same convention as the lane it
+     belongs to, so the chip and the gutter never disagree about direction. */
+  .rt-chip-mark[data-status="RUNNING"],
+  .rt-chip-mark[data-status="ASSIGNED"] {
+    width: 7px;
+    height: 6px;
+    border-radius: 1px;
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  }
+
+  .rt-chip-mark[data-direction="reverse"] {
+    clip-path: polygon(50% 100%, 100% 0, 0 0);
+  }
+
+  .rt-chip-mark[data-status="RUNNING"],
+  .rt-chip-mark[data-status="ASSIGNED"] {
+    animation: lane-breathe 1.6s ease-in-out infinite;
+  }
+
+  .rt-chip-mark[data-status="FAILED"],
+  .rt-chip-mark[data-status="TIMED_OUT"] { background: var(--sig-fail); }
+
+  .rt-chip-mark[data-status="PENDING"],
+  .rt-chip-mark[data-status=""] {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px currentColor;
+  }
+
+  .rt-chip-count {
+    font-size: 10px;
+    opacity: 0.75;
+  }
+
+  /* ── Buttons ───────────────────────────────────────────────────────────── */
+
+  .rt-button {
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 550;
+    padding: 2px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+
+  .rt-button:hover { background: var(--surface-sunken); color: var(--ink); }
+  .rt-button:disabled { opacity: 0.5; cursor: default; }
+
+  .rt-button-go {
+    border-color: transparent;
+    background: var(--sig-ok);
+    color: #fff;
+  }
+  .rt-button-go:hover { filter: brightness(0.94); background: var(--sig-ok); color: #fff; }
+
+  .rt-button-warn {
+    border-color: transparent;
+    background: var(--sig-fail);
+    color: #fff;
+  }
+  .rt-button-warn:hover { filter: brightness(0.94); background: var(--sig-fail); color: #fff; }
+
+  /* ── Expanded body ─────────────────────────────────────────────────────── */
+
+  .rt-body {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .rt-description {
+    margin: 0;
+    padding: 11px 14px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--ink-soft);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 11rem;
+    overflow: auto;
+  }
+
+  .rt-stages {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .rt-stage {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex-wrap: wrap;
+    padding: 6px 14px;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+
+  .rt-stage + .rt-stage { border-top: 1px solid var(--line-soft); }
+
+  /* What has not happened yet, in its place in the order. */
+  .rt-stage-future { opacity: 0.45; }
+
+  .rt-stage-label { color: inherit; }
+
+  .rt-stage-elapsed {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+
+  /* The way out of a failure, in the space the failure text used to take. */
+  .rt-why {
+    font-size: 11.5px;
+    color: var(--sig-fail);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .rt-why:hover,
+  .rt-why:focus-visible {
+    border-bottom-color: currentColor;
+  }
+
+  /* ── Destinations ──────────────────────────────────────────────────────── */
+
+  .rt-destinations {
+    flex-basis: 100%;
+    margin: 3px 0 1px 6px;
+    padding: 0 0 0 18px;
+    list-style: none;
+    border-left: 1px solid var(--line);
+  }
+
+  .rt-destinations-flat {
+    flex-basis: auto;
+    margin: 0;
+    padding: 6px 14px;
+    border-left: 0;
+  }
+
+  .rt-destination {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 1px 0;
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: var(--ink-faint);
+  }
+
+  .rt-dest-pip {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    flex: none;
+    box-shadow: inset 0 0 0 1.5px var(--ink-faint);
+  }
+
+  .rt-destination[data-kind="live"] .rt-dest-pip { background: var(--sig-ok); box-shadow: none; }
+  .rt-destination[data-kind="flight"] .rt-dest-pip { background: var(--sig-run); box-shadow: none; animation: lane-breathe 1.6s ease-in-out infinite; }
+  .rt-destination[data-kind="awaiting"] .rt-dest-pip { box-shadow: inset 0 0 0 2px var(--sig-attn); }
+  .rt-destination[data-kind="stopped"] .rt-dest-pip { background: var(--sig-fail); box-shadow: none; }
+
+  .rt-destination[data-kind="live"] .rt-dest-state { color: var(--sig-ok); }
+  .rt-destination[data-kind="stopped"] .rt-dest-state { color: var(--sig-fail); }
+  .rt-destination[data-kind="awaiting"] .rt-dest-state { color: var(--sig-attn); }
+
+  .rt-dest-name { color: var(--ink-soft); }
+
+  .rt-dest-time { margin-left: auto; }
+
+  /* ── Plan output ───────────────────────────────────────────────────────── */
+
+  .rt-plan-output {
+    padding: 10px 14px;
+    background: var(--surface-sunken);
+    border-top: 1px solid var(--line-soft);
+    font-size: 12px;
+  }
+
+  .rt-plan-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 7px;
+    color: var(--ink-faint);
+  }
+
+  .rt-plan-block-head {
+    display: flex;
+    gap: 8px;
+    margin: 6px 0 4px;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+  }
+
+  .rt-plan-output pre {
+    margin: 0;
+    padding: 9px 11px;
+    max-height: 16rem;
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    white-space: pre-wrap;
+  }
+
+  .rt-footnote {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin: 0;
+    padding: 8px 14px;
+    border-top: 1px solid var(--line-soft);
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+
+  .rt-version {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--sig-ok) 14%, transparent);
+    color: var(--sig-ok);
+  }
+
+  /* ── Hidden commits ────────────────────────────────────────────────────── */
+
+  .rt-hidden summary {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 2px 4px;
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .rt-hidden summary::-webkit-details-marker { display: none; }
+  .rt-hidden summary:hover { color: var(--ink-soft); }
+
+  .rt-hidden-rule {
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+
+  .rt-hidden-count { flex: none; }
+
+  .rt-hidden-action {
+    flex: none;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .rt-hidden[open] .rt-hidden-action::after { content: " less"; }
+  .rt-hidden:not([open]) .rt-hidden-action::after { content: " commits"; }
+
+  .rt-hidden-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 8px;
+  }
+
+  /* ── Chrome ────────────────────────────────────────────────────────────── */
+
+  .rt-more {
+    padding-top: 10px;
+  }
+
+  .rt-more button {
+    width: 100%;
+    font: inherit;
+    font-size: 12.5px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink-faint);
+    cursor: pointer;
+  }
+
+  .rt-more button:hover { color: var(--ink); border-color: var(--ink-faint); }
+
+  .rt-alert {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 64rem;
+    margin: 0 auto 14px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in oklab, #dc2626 35%, transparent);
+    background: color-mix(in oklab, #dc2626 8%, transparent);
+    color: #b91c1c;
+    font-size: 13px;
+  }
+
+  .rt-alert svg { width: 16px; height: 16px; flex: none; }
+
+  .rt-alert-close {
+    margin-left: auto;
+    border: 0;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.6;
+  }
+
+  .rt-alert-close:hover { opacity: 1; }
+  .rt-alert-close svg { width: 15px; height: 15px; }
+
+  .rt-placeholder {
+    max-width: 64rem;
+    margin: 0 auto;
+    padding: 44px 20px;
+    text-align: center;
+    color: var(--ink-faint);
+    font-size: 13px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+
+  .rt-placeholder p { margin: 4px 0 0; }
+
+  .rt-empty-title {
+    color: var(--ink);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .rt-placeholder code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--surface-sunken);
+  }
+
+  .rt-placeholder-error { border-color: color-mix(in oklab, #dc2626 35%, transparent); }
+  .rt-placeholder-error p { color: var(--sig-fail); }
+
+  .rt-link-button {
+    margin-top: 8px;
+    font: inherit;
+    font-size: 12.5px;
+    border: 0;
+    background: none;
+    color: var(--ink-soft);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .rt-spinner {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 2px solid var(--line);
+    border-top-color: var(--ink-faint);
+    animation: rt-spin 0.8s linear infinite;
+  }
+
+  @keyframes rt-spin { to { transform: rotate(360deg); } }
+
+  /* ── Narrow ────────────────────────────────────────────────────────────── */
+
+  @media (max-width: 40rem) {
+    /* The meta row drops below; the title stays beside the avatar and wraps
+       inside its own box, rather than being pushed onto a second line and
+       leaving the avatar sitting alone above it. */
+    .rt-meta { flex-basis: 100%; gap: 10px; }
+    .rt-card-title {
+      flex: 1 1 0;
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+    }
+    /* A hover card needs a pointer and somewhere to sit. There is neither
+       here; the dots keep their titles, and the card itself says the rest. */
+    .rt-hovercard { display: none; }
+  }
+
+  /* ── Reduced motion ────────────────────────────────────────────────────── */
+
+  @media (prefers-reduced-motion: reduce) {
+    .lane-run::after,
+    .lane-pulse,
+    .rt-glyph,
+    .rt-chip-mark,
+    .rt-dest-pip,
+    .rt-spinner {
+      animation: none !important;
+    }
+    .lane-run,
+    .lane-dot,
+    .rt-lane,
+    .rt-strand,
+    .rt-label-slot,
+    .rt-disclosure {
+      transition: none !important;
+    }
   }
 </style>

@@ -1,4 +1,4 @@
-FROM rust:1.93-trixie AS builder
+FROM rust:1.98-trixie AS builder
 
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 

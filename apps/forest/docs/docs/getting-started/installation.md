@@ -96,7 +96,7 @@ bash and fish work the same way via `forest shell bash` / `forest shell fish`.
 
 ## Requirements
 
-- **Rust 1.93+** — Forest uses recent Rust features
+- **Rust 1.98.1+** — Forest uses recent Rust features
 - **CUE** — Required for evaluating component specs (`cue` CLI)
 - **Git** — For release context (commit SHA, branch, etc.)
 

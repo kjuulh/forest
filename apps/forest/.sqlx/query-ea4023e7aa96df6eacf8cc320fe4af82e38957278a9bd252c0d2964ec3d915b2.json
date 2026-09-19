@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE destinations\n                SET\n                    metadata = $1\n                WHERE\n                    organisation = $2 AND name = $3\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ea4023e7aa96df6eacf8cc320fe4af82e38957278a9bd252c0d2964ec3d915b2"
+}

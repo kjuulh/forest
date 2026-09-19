@@ -1,5 +1,7 @@
 use anyhow::Context;
-use forest_grpc_interface::{BranchRestrictionConfig, SoakTimeConfig, create_policy_request};
+use forest_grpc_interface::{
+    BranchRestrictionConfig, SoakTimeConfig, SupersedePendingConfig, create_policy_request,
+};
 
 use crate::{cli::prompts, grpc::GrpcClientState, state::State};
 
@@ -15,7 +17,7 @@ pub struct CreateCommand {
     #[arg(long)]
     name: Option<String>,
 
-    /// Policy type: soak_time or branch_restriction
+    /// Policy type: soak_time, branch_restriction, or supersede_pending
     #[arg(long = "type", short = 't')]
     policy_type: String,
 
@@ -36,6 +38,13 @@ pub struct CreateCommand {
     /// Branch pattern regex (for branch_restriction)
     #[arg(long)]
     branch_pattern: Option<String>,
+
+    // ── supersede_pending fields ────────────
+    /// Only supersede a pending release when the newer one is on the same
+    /// branch (for supersede_pending). Off by default: every pending release
+    /// for the target collapses to the newest, whatever branch it came from.
+    #[arg(long)]
+    same_branch_only: bool,
 }
 
 impl CreateCommand {
@@ -98,8 +107,30 @@ impl CreateCommand {
                     )),
                 )
             }
+            "supersede_pending" => {
+                let target = self
+                    .target_environment
+                    .as_ref()
+                    .context("--target-environment is required for supersede_pending")?;
+
+                (
+                    4,
+                    Some(create_policy_request::Config::SupersedePending(
+                        SupersedePendingConfig {
+                            target_environment: target.clone(),
+                            same_branch_only: self.same_branch_only,
+                            // Not settable: forest cannot interrupt an in-flight
+                            // deploy into a defined state, so the policy lets a
+                            // running deploy finish and collapses the queue
+                            // behind it. See design/SKIP-TO-LATEST.md.
+                            cancel_in_progress: false,
+                        },
+                    )),
+                )
+            }
             other => anyhow::bail!(
-                "unknown policy type: {other} (expected: soak_time, branch_restriction)"
+                "unknown policy type: {other} \
+                 (expected: soak_time, branch_restriction, supersede_pending)"
             ),
         };
 
@@ -120,6 +151,8 @@ fn print_policy_details(policy: &forest_grpc_interface::Policy) {
     let type_name = match policy.policy_type {
         1 => "soak_time",
         2 => "branch_restriction",
+        3 => "external_approval",
+        4 => "supersede_pending",
         _ => "unknown",
     };
     println!("  type:           {type_name}");
@@ -137,6 +170,11 @@ fn print_policy_details(policy: &forest_grpc_interface::Policy) {
         Some(forest_grpc_interface::policy::Config::ExternalApproval(ea)) => {
             println!("  target env:          {}", ea.target_environment);
             println!("  required approvals:  {}", ea.required_approvals);
+        }
+        Some(forest_grpc_interface::policy::Config::SupersedePending(sp)) => {
+            println!("  target env:       {}", sp.target_environment);
+            println!("  same branch only: {}", sp.same_branch_only);
+            println!("  in-progress:      let it finish (never interrupted)");
         }
         None => {}
     }

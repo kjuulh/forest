@@ -1,18 +1,13 @@
 {% extends "base.html.jinja" %}
 {% from "components/timestamp.html.jinja" import timeago as ts %}
+{% from "components/project_settings.html.jinja" import project_settings_layout %}
+
+{# Pipelines section of the project settings shell. The <details> rows and
+   the pipeline-builder are unchanged. #}
 
 {% block content %}
-<section class="app-container pt-12">
-    <div class="flex items-center justify-between mb-8">
-        <div>
-            <h1 class="text-2xl font-bold">Release Pipelines</h1>
-            <p class="text-sm text-gray-500 mt-1">
-                <a href="/orgs/{{ current_org }}/projects/{{ current_project }}" class="hover:underline">{{ current_project }}</a>
-                &middot; Define multi-stage deployment pipelines as a DAG
-            </p>
-        </div>
-    </div>
-
+{% call project_settings_layout(current_org, current_project, "pipelines", "Pipelines",
+                                "Define multi-stage deployment pipelines as a DAG") %}
     {% if pipelines | length > 0 %}
     <div class="space-y-3 mb-8">
         {% for pipeline in pipelines %}
@@ -38,7 +33,7 @@
 
                 {% if is_admin %}
                 <div class="flex items-center gap-2 shrink-0" onclick="event.stopPropagation()">
-                    <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/pipelines/{{ pipeline.name }}/toggle">
+                    <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/settings/pipelines/{{ pipeline.id | urlencode }}/toggle">
                         <input type="hidden" name="_csrf" value="{{ csrf_token }}">
                         {% if pipeline.enabled %}
                         <button type="submit" class="text-xs px-2.5 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Disable</button>
@@ -47,7 +42,7 @@
                         <button type="submit" class="text-xs px-2.5 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50">Enable</button>
                         {% endif %}
                     </form>
-                    <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/pipelines/{{ pipeline.name }}/delete" onsubmit="return confirm('Delete pipeline &quot;{{ pipeline.name }}&quot;?')">
+                    <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/settings/pipelines/{{ pipeline.id | urlencode }}/delete" onsubmit="return confirm('Delete pipeline &quot;{{ pipeline.name }}&quot;?')">
                         <input type="hidden" name="_csrf" value="{{ csrf_token }}">
                         <button type="submit" class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">Delete</button>
                     </form>
@@ -60,7 +55,7 @@
             <div class="border-t border-gray-100 px-4 py-3">
                 {% if pipeline.stages_json %}
                 {% if is_admin %}
-                <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/pipelines/{{ pipeline.name }}/update" class="space-y-3">
+                <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/settings/pipelines/{{ pipeline.id | urlencode }}/update" class="space-y-3">
                     <input type="hidden" name="_csrf" value="{{ csrf_token }}">
                     <pipeline-builder data-target="edit-{{ pipeline.name }}"></pipeline-builder>
                     <textarea id="edit-{{ pipeline.name }}" name="stages_json" hidden>{{ pipeline.stages_json }}</textarea>
@@ -72,7 +67,7 @@
                 {% endif %}
                 {% else %}
                 {% if is_admin %}
-                <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/pipelines/{{ pipeline.name }}/update" class="space-y-3">
+                <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/settings/pipelines/{{ pipeline.id | urlencode }}/update" class="space-y-3">
                     <input type="hidden" name="_csrf" value="{{ csrf_token }}">
                     <pipeline-builder data-target="edit-{{ pipeline.name }}"></pipeline-builder>
                     <textarea id="edit-{{ pipeline.name }}" name="stages_json" hidden></textarea>
@@ -98,7 +93,7 @@
     {% if is_admin %}
     <div class="border border-gray-200 rounded-lg p-6">
         <h2 class="text-lg font-semibold mb-4">Create Pipeline</h2>
-        <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/pipelines" class="space-y-4">
+        <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/settings/pipelines" class="space-y-4">
             <input type="hidden" name="_csrf" value="{{ csrf_token }}">
 
             <div>
@@ -120,6 +115,6 @@
         </form>
     </div>
     {% endif %}
-</section>
+{% endcall %}
 <script src="/static/js/pipeline-builder.js"></script>
 {% endblock %}

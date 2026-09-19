@@ -47,12 +47,6 @@ impl BuildInfo {
             build_time: read(BUILD_TIME_VAR),
         }
     }
-
-    /// True when neither the commit nor the build time was stamped — a local
-    /// or otherwise unstamped build.
-    pub fn is_unstamped(&self) -> bool {
-        self.commit.is_empty() && self.build_time.is_empty()
-    }
 }
 
 /// Read a stamp variable, treating blank/placeholder values as absent.
@@ -107,21 +101,5 @@ mod tests {
     #[test]
     fn an_unset_variable_is_absent_not_a_panic() {
         assert_eq!(read("FOREST_BUILD_INFO_DEFINITELY_UNSET_XYZ"), "");
-    }
-
-    #[test]
-    fn is_unstamped_only_when_both_stamps_are_missing() {
-        let bare = BuildInfo {
-            version: "0.2.7".into(),
-            commit: String::new(),
-            build_time: String::new(),
-        };
-        assert!(bare.is_unstamped());
-
-        let partial = BuildInfo {
-            commit: "437c7b1".into(),
-            ..bare.clone()
-        };
-        assert!(!partial.is_unstamped());
     }
 }

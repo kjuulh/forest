@@ -1,5 +1,5 @@
 {# Shared UI macros for consistent styling across templates.
-   Usage: {% from "components/ui.html.jinja" import badge, env_badge, alert, empty_state, pagination, code_block %}
+   Usage: {% from "components/ui.html.jinja" import badge, env_badge, alert, error_block, empty_state, pagination, code_block %}
 #}
 
 {# ── Badge ─────────────────────────────────────────────────────── #}
@@ -53,6 +53,53 @@
 <div class="mb-6 p-4 border rounded-md text-sm {{ styles[variant] | default(styles.error) }}">
     {{ message }}
 </div>
+{%- endmacro %}
+
+{# ── Error block ───────────────────────────────────────────────── #}
+{# Renders a failure reason — a stage error, a destination error, a webhook
+   delivery error — the same way everywhere.
+
+   The rule it encodes: a failure reason is never a cell inside a flex row.
+   A row is fixed-height furniture; an error is arbitrary-length prose, and
+   putting one inside the other is what made a failed pipeline stage three
+   times the height of a successful one. Callers place this *beneath* the
+   row it belongs to.
+
+   Two shapes, chosen by length:
+
+   * A short reason ("upstream stage failed") is a plain red line. Four
+     words wrapped in a bordered, tinted panel is more chrome than content
+     — the panel would be louder than the thing it contains.
+   * A long one gets the panel, because it needs the room: the tint and
+     border say where the message starts and stops when it runs to several
+     lines.
+
+   Nothing is truncated. The actionable clause of a chained error is
+   usually the *last* one — `column "x" must be an exact decimal string`,
+   after two hundred characters of URL — so cutting the tail off and
+   parking it in a `title` tooltip hides the one sentence worth reading,
+   and a tooltip cannot be selected or copied. `max-h-80` is only a safety
+   valve for a pathological message: it scrolls, so the tail stays
+   reachable and selectable either way.
+
+   `break-words` is load-bearing: error chains carry long unbroken URLs,
+   which would otherwise force horizontal overflow in a narrow container.
+
+   Colors are palette classes, never literal hex — `static/css/input.css`
+   remaps the Tailwind color variables under `prefers-color-scheme: dark`,
+   so `text-red-700` / `bg-red-50` follow the theme and a hex would not.
+
+   Usage: {{ error_block(stage.error_message) }}
+          {{ error_block(d.error_message, class="max-w-md") }}
+#}
+{% macro error_block(message, class="", short_limit=64) %}
+{%- set text = message | trim -%}
+{%- if not text -%}
+{%- elif text | length <= short_limit and "\n" not in text -%}
+<p class="text-xs text-red-600 break-words {{ class }}">{{ text }}</p>
+{%- else -%}
+<div class="text-xs leading-relaxed text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2 max-h-80 overflow-y-auto whitespace-pre-wrap break-words {{ class }}">{{ text }}</div>
+{%- endif -%}
 {%- endmacro %}
 
 {# ── Empty state ───────────────────────────────────────────────── #}

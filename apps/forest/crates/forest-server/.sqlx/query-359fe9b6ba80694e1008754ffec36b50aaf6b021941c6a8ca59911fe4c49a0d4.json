@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE release_states SET status = 'RUNNING', started_at = now()\n         WHERE release_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "359fe9b6ba80694e1008754ffec36b50aaf6b021941c6a8ca59911fe4c49a0d4"
+}

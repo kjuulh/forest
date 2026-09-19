@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE organisation_allowed_domains\n            SET dns_verified_at = now()\n            WHERE organisation_id = $1\n              AND domain = $2\n              AND dns_verified_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2708bc08509179bc81ac8b2ef938f7378ee3274858d6980c8d281abb3ce01070"
+}

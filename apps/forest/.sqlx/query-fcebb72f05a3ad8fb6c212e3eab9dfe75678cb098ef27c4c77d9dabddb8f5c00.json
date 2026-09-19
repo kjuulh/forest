@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE oauth_client_tokens\n            SET revoked_at = now()\n            WHERE app_id = $1 AND revoked_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fcebb72f05a3ad8fb6c212e3eab9dfe75678cb098ef27c4c77d9dabddb8f5c00"
+}

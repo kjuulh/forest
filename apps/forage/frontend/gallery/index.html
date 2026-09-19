@@ -2,19 +2,24 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Release timeline — lane states</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-      body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; margin: 0; padding: 32px; background: #fff; color: #111; }
-      .fixture { margin-bottom: 44px; padding-bottom: 32px; border-bottom: 1px solid #eee; }
-      .fixture h2 { font-size: 17px; font-weight: 700; margin: 0 0 4px; }
-      .why { font-size: 13px; color: #555; margin: 0 0 6px; max-width: 62ch; line-height: 1.5; }
-      .expect code { font-size: 12px; background: #f3f4f6; padding: 2px 6px; border-radius: 4px; margin-right: 4px; }
-      .expect { margin: 0 0 14px; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Release timeline — rendered states</title>
+    <link rel="stylesheet" href="./gallery.css" />
+    <!-- The app's dark palette, re-scoped so the toggle can switch it.
+         Generated from static/css/input.css — see gallery/dark-mirror.js. -->
+    <link rel="stylesheet" href="/@gallery/dark-mirror.css" />
   </head>
   <body>
-    <div id="gallery"></div>
+    <div class="gal-bar">
+      <strong>release-timeline</strong>
+      <span class="gal-group" data-control="theme">
+        Theme
+        <button type="button" data-value="light">Light</button>
+        <button type="button" data-value="dark">Dark</button>
+      </span>
+    </div>
+
+    <div class="gal-stage" id="gallery"></div>
     <script type="module" src="./main.js"></script>
   </body>
 </html>

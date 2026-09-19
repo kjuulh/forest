@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO org_events (organisation, project, resource_type, action, resource_id, metadata)\n                   VALUES ($1, $2, 'release', 'status_changed', $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6316fb5145a3f4b14bf9a685baf8136edd153c77f36f044bceb81399b46d3eb0"
+}

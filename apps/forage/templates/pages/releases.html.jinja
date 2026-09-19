@@ -1,4 +1,5 @@
 {% extends "base.html.jinja" %}
+{% from "components/timeline_prefetch.html.jinja" import timeline_prefetch %}
 
 {% block content %}
 <section class="app-container py-12">
@@ -6,6 +7,7 @@
         <h1 class="text-2xl font-bold">Continuous deployment</h1>
     </div>
 
+    {{ timeline_prefetch(org_name, none) }}
     <release-timeline org="{{ org_name }}"></release-timeline>
 </section>
 <script src="/static/js/components/forage-components.js?v={{ components_js_hash }}"></script>

@@ -1,5 +1,5 @@
 use anyhow::bail;
-use forest_event_store::{Aggregate, AggregateRoot, EventData, IntoStreamCategory, StreamCategory};
+use mire::{Aggregate, AggregateRoot, EventData};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -88,8 +88,8 @@ impl Default for AppAggregate {
 impl Aggregate for AppAggregate {
     type Event = AppEvent;
 
-    fn stream_category() -> StreamCategory {
-        "app".into_stream_category()
+    fn stream_category() -> &'static str {
+        "app"
     }
 
     fn apply(&mut self, event: &AppEvent) {
@@ -249,10 +249,10 @@ pub fn stream_key(organisation_id: &Uuid, name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use forest_event_store::AggregateRoot;
+    use mire::AggregateRoot;
 
     fn new_root() -> AggregateRoot<AppAggregate> {
-        AggregateRoot::new("app-org123/my-app".into())
+        AggregateRoot::new("org123/my-app")
     }
 
     fn default_params() -> CreateAppParams {
@@ -368,13 +368,14 @@ mod tests {
             .take_pending()
             .into_iter()
             .enumerate()
-            .map(|(i, e)| forest_event_store::RecordedEvent {
+            .map(|(i, e)| mire::RecordedEvent {
                 global_position: i as i64 + 1,
                 stream_id: "app-org123/my-app".into(),
                 stream_version: i as i64 + 1,
                 event_type: e.event_type().into(),
                 data: serde_json::to_value(&e).unwrap(),
                 metadata: serde_json::json!({}),
+                transaction_id: (i as i64 + 1) as u64,
                 created_at: chrono::Utc::now(),
             })
             .collect();
@@ -385,7 +386,8 @@ mod tests {
             "app-org123/my-app".into(),
             &events,
             events.len() as i64,
-        );
+        )
+        .expect("valid contiguous event history");
 
         assert_eq!(replayed.state.status, AppStatus::Deleted);
         assert_eq!(replayed.state.app_id, Some(app_id));

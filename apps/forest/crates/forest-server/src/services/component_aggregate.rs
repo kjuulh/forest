@@ -1,8 +1,9 @@
 use std::pin::Pin;
 
+use crate::event_store::EventStoreExt;
 use anyhow::Context;
-use forest_event_store::EventStore;
 use futures::{SinkExt, Stream};
+use mire::EventStore;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -282,7 +283,7 @@ impl ComponentService {
         let version_owned = version.to_string();
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query(
                         "INSERT INTO component_staging (id, name, organisation, version, status)
@@ -349,7 +350,7 @@ impl ComponentService {
         // Record metadata in DB (file_content is empty — content is in S3)
         let db_result = self
             .event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query(
                         "INSERT INTO component_files (component_id, file_path, file_content)
@@ -425,7 +426,7 @@ impl ComponentService {
         let version_owned = version.to_string();
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     // Delete the projection row so read paths skip it.
                     // The aggregate retains the events for audit / replay.
@@ -486,7 +487,7 @@ impl ComponentService {
         }
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query(
                         "UPDATE component_staging SET status = 'aborted', updated = now()
@@ -550,7 +551,7 @@ impl ComponentService {
         let version_for_oci = version.clone();
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     // Detect kind:
                     //   - "binary": at least one binary artifact uploaded
@@ -937,7 +938,7 @@ impl ComponentService {
             .map_err(|e| anyhow::anyhow!("hashing manifest: {e:?}"))?;
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query(
                         "INSERT INTO component_manifests (component_id, version, manifest_json, manifest_hash)

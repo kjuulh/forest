@@ -26,7 +26,7 @@
 
 use anyhow::bail;
 use chrono::{DateTime, Utc};
-use forest_event_store::{Aggregate, AggregateRoot, EventData, IntoStreamCategory, StreamCategory};
+use mire::{Aggregate, AggregateRoot, EventData};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -135,8 +135,8 @@ impl Default for DeviceGrantAggregate {
 impl Aggregate for DeviceGrantAggregate {
     type Event = DeviceGrantEvent;
 
-    fn stream_category() -> StreamCategory {
-        "device_grant".into_stream_category()
+    fn stream_category() -> &'static str {
+        "device_grant"
     }
 
     fn apply(&mut self, event: &DeviceGrantEvent) {
@@ -448,7 +448,7 @@ mod tests {
     use rand::{SeedableRng, rngs::StdRng};
 
     fn fresh_root() -> AggregateRoot<DeviceGrantAggregate> {
-        AggregateRoot::new("device_grant-0190abcd".into())
+        AggregateRoot::new("0190abcd")
     }
 
     fn t0() -> DateTime<Utc> {
@@ -735,13 +735,14 @@ mod tests {
             .take_pending()
             .into_iter()
             .enumerate()
-            .map(|(i, e)| forest_event_store::RecordedEvent {
+            .map(|(i, e)| mire::RecordedEvent {
                 global_position: i as i64 + 1,
                 stream_id: "device_grant-0190abcd".into(),
                 stream_version: i as i64 + 1,
                 event_type: e.event_type().into(),
                 data: serde_json::to_value(&e).unwrap(),
                 metadata: serde_json::json!({}),
+                transaction_id: (i as i64 + 1) as u64,
                 created_at: Utc::now(),
             })
             .collect();
@@ -752,7 +753,8 @@ mod tests {
             "device_grant-0190abcd".into(),
             &events,
             events.len() as i64,
-        );
+        )
+        .expect("valid contiguous event history");
 
         assert_eq!(replayed.state.status, DeviceGrantStatus::Consumed);
         assert_eq!(replayed.state.grant_id, Some(id));

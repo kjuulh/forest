@@ -1,4 +1,4 @@
-FROM rust:1.93-trixie AS builder
+FROM rust:1.98-trixie AS builder
 
 WORKDIR /app
 
@@ -50,7 +50,8 @@ COPY . .
 # Probe the sccache backend before building. If SCCACHE_MEMCACHED_ENDPOINT
 # is empty, remove it so sccache uses its default disk cache. If it is set but
 # unreachable, drop RUSTC_WRAPPER so cargo builds normally instead of failing.
-RUN set -e; \
+# The SSH mount remains available for private Git dependencies while they exist.
+RUN --mount=type=ssh set -e; \
     if [ -n "$SCCACHE_MEMCACHED_ENDPOINT" ]; then \
       hostport="${SCCACHE_MEMCACHED_ENDPOINT#tcp://}"; \
       host="${hostport%%:*}"; port="${hostport##*:}"; \
@@ -63,7 +64,7 @@ RUN set -e; \
     else \
       unset SCCACHE_MEMCACHED_ENDPOINT; \
     fi; \
-    cargo build --release --locked --bin forest-server; \
+    cargo build --release --locked --bin forest-server --bin forest-event-migration; \
     if [ -n "${RUSTC_WRAPPER:-}" ]; then sccache --show-stats; fi
 
 FROM debian:13-slim AS production
@@ -88,6 +89,7 @@ deb-src [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-rep
 WORKDIR /app
 
 COPY --from=builder /app/target/release/forest-server /usr/local/bin/forest-server
+COPY --from=builder /app/target/release/forest-event-migration /usr/local/bin/forest-event-migration
 
 RUN groupadd -r appuser && useradd -r -g appuser appuser \
     && chown -R appuser:appuser /app \

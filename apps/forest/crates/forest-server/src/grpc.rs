@@ -13,8 +13,8 @@ use forest_grpc_interface::{
     release_health_service_server::ReleaseHealthServiceServer,
     release_pipeline_service_server::ReleasePipelineServiceServer,
     release_service_server::ReleaseServiceServer, runner_service_server::RunnerServiceServer,
-    status_service_server::StatusServiceServer, trigger_service_server::TriggerServiceServer,
-    users_service_server::UsersServiceServer,
+    signal_service_server::SignalServiceServer, status_service_server::StatusServiceServer,
+    trigger_service_server::TriggerServiceServer, users_service_server::UsersServiceServer,
 };
 use notmad::MadError;
 use organisations::OrganisationsServer;
@@ -47,7 +47,8 @@ mod policies;
 mod registry;
 mod release;
 mod release_health;
-mod release_pipelines;
+pub(crate) mod release_pipelines;
+mod release_signals;
 pub mod runner;
 mod status;
 mod triggers;
@@ -157,6 +158,9 @@ impl GrpcServer {
                     state: self.state.clone(),
                 },
             ))
+            .add_service(SignalServiceServer::new(release_signals::SignalServer {
+                state: self.state.clone(),
+            }))
             .serve_with_shutdown(
                 self.host,
                 async move { cancellation_token.cancelled().await },

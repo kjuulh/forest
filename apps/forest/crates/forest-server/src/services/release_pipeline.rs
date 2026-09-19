@@ -41,6 +41,55 @@ pub enum StageConfig {
         #[serde(default)]
         auto_approve: bool,
     },
+    /// Wait for evidence rather than for a duration.
+    ///
+    /// What `Wait` should have been. A wait stage sleeps and then declares the
+    /// release fine, which is a guess; a gate waits to be told, by a provider
+    /// or an agent, that the things it requires are in the states it requires.
+    /// See `services/release_signals.rs` and forest#252.
+    Gate {
+        requires: Vec<SignalRequirement>,
+        timeout_seconds: i64,
+        #[serde(default)]
+        on_timeout: GateTimeout,
+    },
+}
+
+/// One thing a gate waits to be told, and the states it will accept.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignalRequirement {
+    /// The signal's name, as its reporter calls it — `rollout`, `smoke`.
+    pub signal: String,
+
+    /// Any one of these satisfies it. Empty means `["HEALTHY"]`, which is the
+    /// only reading of "wait for this signal" that is not a trap: treating an
+    /// empty list as "any status" would open the gate on UNHEALTHY.
+    #[serde(default, rename = "in")]
+    pub accept: Vec<String>,
+}
+
+impl SignalRequirement {
+    /// The statuses that satisfy this requirement, with the empty case
+    /// resolved.
+    pub fn accepted(&self) -> Vec<String> {
+        if self.accept.is_empty() {
+            vec!["HEALTHY".to_string()]
+        } else {
+            self.accept.clone()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateTimeout {
+    /// The default, and deliberately so: a gate whose timeout quietly let the
+    /// pipeline through would be a gate that stopped gating without saying so.
+    #[default]
+    Fail,
+    /// Carry on anyway, recording that the gate timed out. For a signal that
+    /// is informative rather than load-bearing.
+    Proceed,
 }
 
 impl StageDefinition {
@@ -70,6 +119,22 @@ impl StageDefinition {
             config: StageConfig::Plan {
                 environment: environment.into(),
                 auto_approve,
+            },
+        }
+    }
+
+    pub fn gate(
+        requires: Vec<SignalRequirement>,
+        timeout_seconds: i64,
+        on_timeout: GateTimeout,
+        depends_on: Vec<String>,
+    ) -> Self {
+        Self {
+            depends_on,
+            config: StageConfig::Gate {
+                requires,
+                timeout_seconds,
+                on_timeout,
             },
         }
     }
@@ -117,6 +182,19 @@ pub struct StageState {
     /// Who approved/rejected (actor_id).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approved_by: Option<String>,
+
+    /// For gate stages: when waiting stops and `on_timeout` decides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_deadline: Option<String>,
+
+    /// For gate stages: which requirements are not yet satisfied, refreshed on
+    /// every evaluation.
+    ///
+    /// Stored rather than recomputed for display because the whole complaint
+    /// about a parked pipeline is not knowing what it is parked on — a gate
+    /// whose state you cannot see is worse than the sleep it replaced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_waiting_on: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +228,12 @@ pub enum StageStatus {
     Succeeded,
     Failed,
     Cancelled,
+    /// This stage's releases were overtaken by a newer pending release for the
+    /// same target, or an upstream stage was. Terminal, and deliberately
+    /// neither Failed (nothing went wrong) nor Cancelled (nobody cancelled it)
+    /// — a collapsed queue must not page whoever owns the project.
+    /// See design/SKIP-TO-LATEST.md.
+    Superseded,
 }
 
 impl StageState {
@@ -165,6 +249,8 @@ impl StageState {
             approval_status: None,
             approval_at: None,
             approved_by: None,
+            gate_deadline: None,
+            gate_waiting_on: None,
         }
     }
 }
@@ -176,6 +262,7 @@ pub enum StageType {
     Deploy,
     Wait,
     Plan,
+    Gate,
 }
 
 impl StageType {
@@ -184,6 +271,7 @@ impl StageType {
             Self::Deploy => "deploy",
             Self::Wait => "wait",
             Self::Plan => "plan",
+            Self::Gate => "gate",
         }
     }
 }
@@ -200,6 +288,7 @@ impl StageConfig {
             Self::Deploy { .. } => StageType::Deploy,
             Self::Wait { .. } => StageType::Wait,
             Self::Plan { .. } => StageType::Plan,
+            Self::Gate { .. } => StageType::Gate,
         }
     }
 }
@@ -215,7 +304,47 @@ pub fn validate_pipeline(stages: &PipelineStages) -> anyhow::Result<()> {
 
     let ids: HashSet<&str> = stages.keys().map(|s| s.as_str()).collect();
 
+    // Gate configuration is checked here rather than left to the coordinator,
+    // because every way of getting it wrong produces a gate that looks fine
+    // until a release is waiting on it: one with no requirements opens
+    // instantly, one with no timeout never opens, and one naming a status
+    // forest does not know waits for something no reporter can ever send.
     for (id, def) in stages {
+        if let StageConfig::Gate {
+            requires,
+            timeout_seconds,
+            ..
+        } = &def.config
+        {
+            if requires.is_empty() {
+                anyhow::bail!(
+                    "gate stage '{id}' requires no signals, so it would open the moment it \
+                     is reached — give it a requirement or use a wait stage"
+                );
+            }
+            if *timeout_seconds <= 0 {
+                anyhow::bail!(
+                    "gate stage '{id}' has timeout_seconds {timeout_seconds}; a gate that \
+                     never times out blocks the pipeline with nothing reporting why"
+                );
+            }
+            for req in requires {
+                if req.signal.trim().is_empty() {
+                    anyhow::bail!("gate stage '{id}' has a requirement with no signal name");
+                }
+                for status in req.accepted() {
+                    if !crate::services::release_signals::is_valid_status(&status) {
+                        anyhow::bail!(
+                            "gate stage '{id}' waits for signal '{}' to be '{status}', which \
+                             is not a status any reporter can send — expected one of {:?}",
+                            req.signal,
+                            crate::services::release_signals::VALID_STATUSES,
+                        );
+                    }
+                }
+            }
+        }
+
         for dep in &def.depends_on {
             if !ids.contains(dep.as_str()) {
                 anyhow::bail!("stage '{id}' depends on '{dep}' which does not exist");
@@ -304,12 +433,36 @@ pub fn has_failed_dependency(
     })
 }
 
+/// Whether a stage is blocked because an upstream stage was superseded.
+///
+/// Separate from [`has_failed_dependency`] so the downstream stage inherits
+/// `Superseded` rather than `Cancelled`: the run did not fail and nobody
+/// cancelled it, a newer release simply took its place, and every view over the
+/// release history reads that distinction.
+pub fn has_superseded_dependency(
+    stage_id: &str,
+    stages: &PipelineStages,
+    states: &StageStates,
+) -> bool {
+    let Some(def) = stages.get(stage_id) else {
+        return false;
+    };
+    def.depends_on.iter().any(|dep| {
+        states
+            .get(dep)
+            .is_some_and(|s| s.status == StageStatus::Superseded)
+    })
+}
+
 /// Check if the entire pipeline is finished (no PENDING or ACTIVE stages).
 pub fn is_pipeline_complete(states: &StageStates) -> bool {
     states.values().all(|s| {
         matches!(
             s.status,
-            StageStatus::Succeeded | StageStatus::Failed | StageStatus::Cancelled
+            StageStatus::Succeeded
+                | StageStatus::Failed
+                | StageStatus::Cancelled
+                | StageStatus::Superseded
         )
     })
 }
@@ -749,6 +902,192 @@ mod tests {
         assert_eq!(
             parsed.approval_status,
             Some(ApprovalStatus::AwaitingApproval)
+        );
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    fn req(signal: &str, accept: &[&str]) -> SignalRequirement {
+        SignalRequirement {
+            signal: signal.to_string(),
+            accept: accept.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    fn gate_pipeline(requires: Vec<SignalRequirement>, timeout_seconds: i64) -> PipelineStages {
+        let mut stages = PipelineStages::new();
+        stages.insert(
+            "deploy-demo".into(),
+            StageDefinition::deploy("demo", vec![]),
+        );
+        stages.insert(
+            "await-demo".into(),
+            StageDefinition::gate(
+                requires,
+                timeout_seconds,
+                GateTimeout::Fail,
+                vec!["deploy-demo".into()],
+            ),
+        );
+        stages
+    }
+
+    #[test]
+    fn a_well_formed_gate_validates() {
+        let stages = gate_pipeline(vec![req("rollout", &["HEALTHY"])], 600);
+        validate_pipeline(&stages).expect("should validate");
+    }
+
+    /// A gate with nothing to wait for opens the instant it is reached, which
+    /// is a wait stage with extra steps — and looks like it is gating.
+    #[test]
+    fn a_gate_with_no_requirements_is_rejected() {
+        let stages = gate_pipeline(vec![], 600);
+        let err = validate_pipeline(&stages).unwrap_err().to_string();
+        assert!(err.contains("requires no signals"), "got: {err}");
+    }
+
+    /// A gate that never times out blocks the pipeline with nothing reporting
+    /// why — the failure mode gates exist to remove.
+    #[test]
+    fn a_gate_without_a_timeout_is_rejected() {
+        for timeout in [0, -1] {
+            let stages = gate_pipeline(vec![req("rollout", &["HEALTHY"])], timeout);
+            let err = validate_pipeline(&stages).unwrap_err().to_string();
+            assert!(err.contains("never times out"), "got: {err}");
+        }
+    }
+
+    /// The typo case: a status no reporter can ever send means a gate that
+    /// waits forever for nothing, and it should be caught when the pipeline is
+    /// written rather than when a release is stuck behind it.
+    #[test]
+    fn a_gate_waiting_for_an_impossible_status_is_rejected() {
+        let stages = gate_pipeline(vec![req("rollout", &["HEALTY"])], 600);
+        let err = validate_pipeline(&stages).unwrap_err().to_string();
+        assert!(
+            err.contains("not a status any reporter can send"),
+            "got: {err}"
+        );
+        assert!(
+            err.contains("HEALTY"),
+            "should name the offending value: {err}"
+        );
+    }
+
+    #[test]
+    fn a_requirement_with_no_signal_name_is_rejected() {
+        let stages = gate_pipeline(vec![req("  ", &["HEALTHY"])], 600);
+        let err = validate_pipeline(&stages).unwrap_err().to_string();
+        assert!(err.contains("no signal name"), "got: {err}");
+    }
+
+    /// Omitting `in` means HEALTHY. The alternative reading — "any status" —
+    /// would open the gate on UNHEALTHY, which is the opposite of gating.
+    #[test]
+    fn an_omitted_accept_list_means_healthy() {
+        assert_eq!(req("rollout", &[]).accepted(), vec!["HEALTHY".to_string()]);
+        let stages = gate_pipeline(vec![req("rollout", &[])], 600);
+        validate_pipeline(&stages).expect("should validate");
+    }
+
+    #[test]
+    fn on_timeout_defaults_to_fail() {
+        assert_eq!(GateTimeout::default(), GateTimeout::Fail);
+    }
+
+    /// The JSON a user writes has to produce the stage they meant.
+    #[test]
+    fn a_gate_round_trips_through_the_stored_json() {
+        let json = r#"{
+            "deploy-demo": {"type": "deploy", "environment": "platform-dev"},
+            "await-demo": {
+                "type": "gate",
+                "requires": [{"signal": "rollout", "in": ["HEALTHY"]}],
+                "timeout_seconds": 600,
+                "depends_on": ["deploy-demo"]
+            },
+            "deploy-finance": {
+                "type": "deploy", "environment": "finance",
+                "depends_on": ["await-demo"]
+            }
+        }"#;
+        let stages: PipelineStages = serde_json::from_str(json).expect("parses");
+        validate_pipeline(&stages).expect("validates");
+
+        let gate = &stages["await-demo"];
+        assert_eq!(gate.depends_on, vec!["deploy-demo".to_string()]);
+        assert_eq!(gate.config.stage_type(), StageType::Gate);
+        match &gate.config {
+            StageConfig::Gate {
+                requires,
+                timeout_seconds,
+                on_timeout,
+            } => {
+                assert_eq!(requires.len(), 1);
+                assert_eq!(requires[0].signal, "rollout");
+                assert_eq!(requires[0].accepted(), vec!["HEALTHY".to_string()]);
+                assert_eq!(*timeout_seconds, 600);
+                assert_eq!(*on_timeout, GateTimeout::Fail);
+            }
+            other => panic!("expected a gate, got {other:?}"),
+        }
+
+        // And survives the round trip back out, since this is what is stored.
+        let back = serde_json::to_string(&stages).expect("serialises");
+        let again: PipelineStages = serde_json::from_str(&back).expect("re-parses");
+        assert_eq!(again["await-demo"].config.stage_type(), StageType::Gate);
+    }
+
+    /// `find_ready_stages` must not run a stage behind an unfinished gate —
+    /// the whole point of the thing.
+    #[test]
+    fn a_stage_behind_an_unsatisfied_gate_is_not_ready() {
+        let stages = {
+            let mut s = gate_pipeline(vec![req("rollout", &["HEALTHY"])], 600);
+            s.insert(
+                "deploy-finance".into(),
+                StageDefinition::deploy("finance", vec!["await-demo".into()]),
+            );
+            s
+        };
+        let mut states = init_stage_states(&stages);
+        states.insert(
+            "deploy-demo".into(),
+            StageState {
+                status: StageStatus::Succeeded,
+                ..StageState::pending()
+            },
+        );
+        states.insert(
+            "await-demo".into(),
+            StageState {
+                status: StageStatus::Active,
+                ..StageState::pending()
+            },
+        );
+
+        let ready = find_ready_stages(&stages, &states);
+        assert!(
+            !ready.contains(&"deploy-finance".to_string()),
+            "finance must wait for the gate; ready = {ready:?}"
+        );
+
+        // Once the gate succeeds, it may proceed.
+        states.insert(
+            "await-demo".into(),
+            StageState {
+                status: StageStatus::Succeeded,
+                ..StageState::pending()
+            },
+        );
+        let ready = find_ready_stages(&stages, &states);
+        assert!(
+            ready.contains(&"deploy-finance".to_string()),
+            "ready = {ready:?}"
         );
     }
 }

@@ -1,4 +1,5 @@
 {% extends "base.html.jinja" %}
+{% from "components/ui.html.jinja" import error_block %}
 
 {% block content %}
 <section class="app-container py-12">
@@ -124,7 +125,7 @@
                 <tbody class="bg-white divide-y divide-gray-100">
                     {% for d in deliveries %}
                     <tr>
-                        <td class="px-4 py-2 whitespace-nowrap">
+                        <td class="px-4 py-2 align-top whitespace-nowrap">
                             {% if d.status == "delivered" %}
                             <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700">Delivered</span>
                             {% elif d.status == "failed" %}
@@ -133,9 +134,16 @@
                             <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-50 text-yellow-700">Pending</span>
                             {% endif %}
                         </td>
-                        <td class="px-4 py-2 text-sm text-gray-700 font-mono truncate max-w-[200px]" title="{{ d.notification_id }}">{{ d.notification_id[:12] }}{% if d.notification_id | length > 12 %}&hellip;{% endif %}</td>
-                        <td class="px-4 py-2 text-sm text-gray-500 whitespace-nowrap">{{ d.attempted_at[:19] | replace("T", " ") }} UTC</td>
-                        <td class="px-4 py-2 text-sm text-red-600 truncate max-w-[250px]" title="{{ d.error_message }}">{{ d.error_message | default("—", true) }}</td>
+                        <td class="px-4 py-2 align-top text-sm text-gray-700 font-mono truncate max-w-[200px]" title="{{ d.notification_id }}">{{ d.notification_id[:12] }}{% if d.notification_id | length > 12 %}&hellip;{% endif %}</td>
+                        <td class="px-4 py-2 align-top text-sm text-gray-500 whitespace-nowrap">{{ d.attempted_at[:19] | replace("T", " ") }} UTC</td>
+                        {# The same error_block as the release page. The cell is
+                           capped rather than truncated: a delivery error is a
+                           chained message whose last clause is the useful one,
+                           and `truncate max-w-[250px]` showed the first clause
+                           and hid that. Cells in this row are top-aligned so a
+                           two-line reason doesn't drag its neighbours to the
+                           middle. #}
+                        <td class="px-4 py-2 align-top">{% if d.error_message %}{{ error_block(d.error_message) }}{% else %}<span class="text-sm text-gray-400">—</span>{% endif %}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

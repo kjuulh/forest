@@ -31,6 +31,9 @@ pub enum PolicyType {
     SoakTime,
     BranchRestriction,
     Approval,
+    /// Collapse a queue of pending releases for one target to the newest.
+    /// A *selection* policy, not a gate — see design/SKIP-TO-LATEST.md §6.
+    SupersedePending,
 }
 
 impl PolicyType {
@@ -39,6 +42,7 @@ impl PolicyType {
             PolicyType::SoakTime => "soak_time",
             PolicyType::BranchRestriction => "branch_restriction",
             PolicyType::Approval => "approval",
+            PolicyType::SupersedePending => "supersede_pending",
         }
     }
 }
@@ -51,6 +55,7 @@ impl std::str::FromStr for PolicyType {
             "soak_time" => Ok(PolicyType::SoakTime),
             "branch_restriction" => Ok(PolicyType::BranchRestriction),
             "approval" => Ok(PolicyType::Approval),
+            "supersede_pending" => Ok(PolicyType::SupersedePending),
             other => anyhow::bail!("unknown policy type: {other}"),
         }
     }
@@ -75,11 +80,33 @@ pub struct ApprovalConfig {
     pub required_approvals: i32,
 }
 
+/// Deploy the newest pending release for a target and mark the ones it
+/// overtook SUPERSEDED, instead of grinding through every queued one.
+///
+/// Default off, and there is no default-on path: a project with no such policy
+/// behaves exactly as it does today. See design/SKIP-TO-LATEST.md.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupersedePendingConfig {
+    pub target_environment: String,
+
+    /// Only supersede a pending release when the newer one names the same
+    /// branch — the nearest guard against skipping a genuinely divergent
+    /// release that forest can enforce from what it records.
+    #[serde(default)]
+    pub same_branch_only: bool,
+
+    /// Not implemented; `validate_config` rejects `true`. Carried so the
+    /// contract is settled before anything can set it. See §3 of the design.
+    #[serde(default)]
+    pub cancel_in_progress: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum PolicyConfig {
     SoakTime(SoakTimeConfig),
     BranchRestriction(BranchRestrictionConfig),
     Approval(ApprovalConfig),
+    SupersedePending(SupersedePendingConfig),
 }
 
 impl PolicyConfig {
@@ -88,6 +115,7 @@ impl PolicyConfig {
             PolicyConfig::SoakTime(_) => PolicyType::SoakTime,
             PolicyConfig::BranchRestriction(_) => PolicyType::BranchRestriction,
             PolicyConfig::Approval(_) => PolicyType::Approval,
+            PolicyConfig::SupersedePending(_) => PolicyType::SupersedePending,
         }
     }
 
@@ -101,6 +129,9 @@ impl PolicyConfig {
             }
             PolicyConfig::Approval(c) => {
                 serde_json::to_value(c).context("serialize approval config")
+            }
+            PolicyConfig::SupersedePending(c) => {
+                serde_json::to_value(c).context("serialize supersede_pending config")
             }
         }
     }
@@ -121,6 +152,11 @@ impl PolicyConfig {
                 let c: ApprovalConfig =
                     serde_json::from_value(config.clone()).context("parse approval config")?;
                 Ok(PolicyConfig::Approval(c))
+            }
+            "supersede_pending" => {
+                let c: SupersedePendingConfig = serde_json::from_value(config.clone())
+                    .context("parse supersede_pending config")?;
+                Ok(PolicyConfig::SupersedePending(c))
             }
             other => anyhow::bail!("unknown policy type: {other}"),
         }
@@ -318,10 +354,75 @@ impl PolicyRegistry {
                         .await?;
                     evaluations.push(eval);
                 }
+                PolicyConfig::SupersedePending(ref c) => {
+                    if c.target_environment != target_environment {
+                        continue;
+                    }
+                    // A selection policy, not a gate: it chooses which pending
+                    // release is the candidate and never blocks one. Reported
+                    // as passed so it is visible in `policy evaluate` without
+                    // ever flipping `all_passed` — the collapse itself is
+                    // driven from services/supersede.rs, not from here.
+                    evaluations.push(PolicyEvaluation {
+                        policy_name: policy.name.clone(),
+                        policy_type: PolicyType::SupersedePending,
+                        passed: true,
+                        reason: format!(
+                            "supersede-pending is active for {}: older pending releases \
+                             collapse to the newest for each destination",
+                            c.target_environment,
+                        ),
+                        approval_state: None,
+                    });
+                }
             }
         }
 
         Ok(evaluations)
+    }
+
+    /// The enabled supersede-pending policy for this project+environment, if
+    /// there is one, with the name the reason text will quote.
+    ///
+    /// Read directly rather than through `evaluate_for_environment`, because
+    /// this policy is not a gate: there is no pass/fail to report, only a
+    /// configuration to act on. Returns `None` — meaning "behave exactly as
+    /// forest does today" — for every project that has not opted in.
+    pub async fn supersede_pending_for_environment(
+        &self,
+        project_id: &Uuid,
+        target_environment: &str,
+    ) -> anyhow::Result<Option<(String, SupersedePendingConfig)>> {
+        let policies = sqlx::query!(
+            r#"SELECT name, config
+               FROM policies
+               WHERE project_id = $1 AND enabled = true AND policy_type = 'supersede_pending'
+               ORDER BY name"#,
+            project_id,
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("load supersede_pending policies")?;
+
+        for policy in policies {
+            let config: SupersedePendingConfig = match serde_json::from_value(policy.config) {
+                Ok(c) => c,
+                Err(e) => {
+                    // A policy we cannot parse must not silently start
+                    // superseding deploys on a default config.
+                    tracing::warn!(
+                        policy = %policy.name,
+                        "skipping unparseable supersede_pending config: {e}"
+                    );
+                    continue;
+                }
+            };
+            if config.target_environment == target_environment {
+                return Ok(Some((policy.name, config)));
+            }
+        }
+
+        Ok(None)
     }
 
     // ── Internal helpers ────────────────────────────────────────────
@@ -354,6 +455,20 @@ impl PolicyRegistry {
                 }
                 if c.required_approvals < 1 {
                     anyhow::bail!("required_approvals must be >= 1 for approval policy");
+                }
+            }
+            PolicyConfig::SupersedePending(c) => {
+                if c.target_environment.is_empty() {
+                    anyhow::bail!("target_environment is required for supersede_pending policy");
+                }
+                if c.cancel_in_progress {
+                    anyhow::bail!(
+                        "cancel_in_progress is not implemented: forest cannot interrupt an \
+                         in-flight deploy into a defined state (a cancelled terraform apply \
+                         leaves infrastructure no plan describes). The policy lets a running \
+                         deploy finish and collapses the queue behind it — see \
+                         design/SKIP-TO-LATEST.md section 3"
+                    );
                 }
             }
         }

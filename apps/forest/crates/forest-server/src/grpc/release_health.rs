@@ -167,7 +167,7 @@ impl ReleaseHealthService for ReleaseHealthServer {
             tonic::Status::invalid_argument(format!("invalid release_intent_id: {e}"))
         })?;
 
-        authorize_intent(&self.state.db, &actor, release_intent_id).await?;
+        authorize::require_intent_access(&self.state.db, &actor, release_intent_id).await?;
 
         let rows = release_health::get_observations_for_intent(&self.state.db, release_intent_id)
             .await
@@ -205,7 +205,7 @@ impl ReleaseHealthService for ReleaseHealthServer {
             tonic::Status::invalid_argument(format!("invalid release_intent_id: {e}"))
         })?;
 
-        authorize_intent(&self.state.db, &actor, release_intent_id).await?;
+        authorize::require_intent_access(&self.state.db, &actor, release_intent_id).await?;
 
         let nats = self.state.nats.clone();
         let (tx, rx) = tokio::sync::mpsc::channel(32);
@@ -245,30 +245,4 @@ impl ReleaseHealthService for ReleaseHealthServer {
             tokio_stream::wrappers::ReceiverStream::new(rx),
         ))
     }
-}
-
-/// Resolve a release intent's owning organisation and check membership.
-/// Returns NotFound if the intent doesn't exist (avoiding a probing
-/// oracle for unauthenticated callers).
-async fn authorize_intent(
-    db: &sqlx::PgPool,
-    actor: &crate::actor::Actor,
-    release_intent_id: Uuid,
-) -> Result<(), tonic::Status> {
-    let org = sqlx::query_scalar!(
-        "SELECT p.organisation FROM release_intents ri
-         JOIN projects p ON p.id = ri.project_id
-         WHERE ri.id = $1",
-        release_intent_id,
-    )
-    .fetch_optional(db)
-    .await
-    .map_err(|e| {
-        tracing::error!("authz: resolve intent org failed: {e}");
-        tonic::Status::internal("authorization lookup failed")
-    })?
-    .ok_or_else(|| tonic::Status::not_found("release intent not found"))?;
-
-    authorize::require_org_access(db, actor, &org, authorize::OrgRole::Member).await?;
-    Ok(())
 }

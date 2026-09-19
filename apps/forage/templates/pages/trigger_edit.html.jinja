@@ -1,18 +1,16 @@
 {% extends "base.html.jinja" %}
+{% from "components/project_settings.html.jinja" import project_settings_layout %}
+
+{# Edit form for one trigger. Sits inside the settings shell a level below
+   the Triggers section, so `crumb` points Back at Triggers rather than at
+   the project — "back" means the list you came from. #}
 
 {% block content %}
-<section class="app-container pt-12">
-    <div class="mb-8">
-        <div class="flex items-center gap-2 text-sm text-gray-500 mb-2">
-            <a href="/orgs/{{ current_org }}/projects/{{ current_project }}/triggers" class="hover:underline">Triggers</a>
-            <span>&rsaquo;</span>
-            <span>{{ trigger.name }}</span>
-        </div>
-        <h1 class="text-2xl font-bold">Edit Trigger</h1>
-    </div>
-
+{% call project_settings_layout(current_org, current_project, "triggers", "Triggers",
+                                "Update filter patterns and targets for this trigger.",
+                                trigger.name) %}
     <div class="border border-gray-200 rounded-lg p-6">
-        <form method="post" action="/orgs/{{ current_org }}/projects/{{ current_project }}/triggers/{{ trigger.name }}" class="space-y-4">
+        <form method="post" action="/orgs/{{ current_org | urlencode }}/projects/{{ current_project | urlencode }}/settings/triggers/{{ trigger.id | urlencode }}" class="space-y-4">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
             <p class="text-sm text-gray-500 mb-2">Update filter patterns. Artifacts matching <strong>all</strong> patterns will be auto-released.</p>
@@ -87,9 +85,9 @@
                 <button type="submit" class="bg-gray-900 text-white px-4 py-2 rounded-md text-sm hover:bg-gray-800 transition-colors">
                     Save Changes
                 </button>
-                <a href="/orgs/{{ current_org }}/projects/{{ current_project }}/triggers" class="text-sm text-gray-500 hover:text-gray-900">Cancel</a>
+                <a href="/orgs/{{ current_org }}/projects/{{ current_project }}/settings/triggers" class="text-sm text-gray-500 hover:text-gray-900">Cancel</a>
             </div>
         </form>
     </div>
-</section>
+{% endcall %}
 {% endblock %}

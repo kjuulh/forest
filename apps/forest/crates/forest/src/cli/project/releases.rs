@@ -110,6 +110,7 @@ impl ReleasesCommand {
                                 "ASSIGNED" => "◉",
                                 "QUEUED" => "◌",
                                 "FAILED" | "TIMED_OUT" | "CANCELLED" => "✗",
+                                "SUPERSEDED" => "⇥",
                                 _ => "•",
                             };
                             println!(
@@ -136,6 +137,7 @@ impl ReleasesCommand {
                         "ASSIGNED" => "◉",
                         "QUEUED" => "◌",
                         "FAILED" | "TIMED_OUT" | "CANCELLED" => "✗",
+                        "SUPERSEDED" => "⇥",
                         _ => "•",
                     };
 

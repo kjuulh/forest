@@ -1,5 +1,6 @@
+use crate::event_store::EventStoreExt;
 use anyhow::Context;
-use forest_event_store::EventStore;
+use mire::EventStore;
 use sha2::Digest;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -56,7 +57,7 @@ impl AppAggregateService {
         let perms = permissions.clone();
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query(
                         "INSERT INTO apps (id, organisation_id, name, description, permissions, created_by)
@@ -92,7 +93,7 @@ impl AppAggregateService {
         AppAggregate::delete(&mut root)?;
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query("DELETE FROM apps WHERE id = $1")
                         .bind(app_id)
@@ -126,7 +127,7 @@ impl AppAggregateService {
         }
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query("UPDATE apps SET suspended = $2, updated_at = now() WHERE id = $1")
                         .bind(app_id)
@@ -166,7 +167,7 @@ impl AppAggregateService {
         let name_owned = name.to_string();
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query(
                         "INSERT INTO app_tokens (id, app_id, name, token_hash, expires_at)
@@ -213,7 +214,7 @@ impl AppAggregateService {
         AppAggregate::revoke_token(&mut root, token_id)?;
 
         self.event_store
-            .save_with(&mut root, move |_events, tx| {
+            .save_with(&mut root, move |tx| {
                 Box::pin(async move {
                     sqlx::query("UPDATE app_tokens SET revoked = true WHERE id = $1")
                         .bind(token_id)

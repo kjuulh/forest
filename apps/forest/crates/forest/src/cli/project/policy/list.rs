@@ -45,6 +45,8 @@ impl ListCommand {
             let type_name = match policy.policy_type {
                 1 => "soak_time",
                 2 => "branch_restriction",
+                3 => "external_approval",
+                4 => "supersede_pending",
                 _ => "unknown",
             };
             println!("{} ({}, {})", policy.name, type_name, status);
@@ -62,6 +64,10 @@ impl ListCommand {
                 Some(forest_grpc_interface::policy::Config::ExternalApproval(ea)) => {
                     println!("  target env:          {}", ea.target_environment);
                     println!("  required approvals:  {}", ea.required_approvals);
+                }
+                Some(forest_grpc_interface::policy::Config::SupersedePending(sp)) => {
+                    println!("  target env:       {}", sp.target_environment);
+                    println!("  same branch only: {}", sp.same_branch_only);
                 }
                 None => {}
             }

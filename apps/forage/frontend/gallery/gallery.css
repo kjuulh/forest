@@ -1,0 +1,138 @@
+/* The gallery renders with the app's real stylesheet.
+ *
+ * It used to load Tailwind v3 from a CDN, which meant the gallery and the app
+ * disagreed about the one thing the gallery exists to show: what the component
+ * looks like. The app is on Tailwind v4 with a dark-mode palette remap and a
+ * handful of custom utilities, none of which the CDN build had — so a colour
+ * checked here could be wrong in production, and dark mode could not be seen at
+ * all.
+ *
+ * Importing the app's own input.css fixes that. `@source` paths inside it
+ * resolve relative to that file, so the app's template and script globs still
+ * work; the extra source below adds the Svelte components, which in the real
+ * build are scanned via the non-minified bundle instead.
+ */
+@import "../../static/css/input.css";
+
+@source "../src/**/*.svelte";
+@source "./*.js";
+
+/* ── Gallery chrome ───────────────────────────────────────────────────────
+ * Deliberately plain, and deliberately not Tailwind: nothing here should be
+ * mistakable for the component under test.
+ */
+
+/* The page behind the component is the app's page, not a stand-in for it. A
+ * gallery with its own background is how a card ends up looking elevated here
+ * and recessed in production — these follow the app's palette, which the dark
+ * mirror re-themes along with everything else. */
+:root {
+  --gal-bg: var(--color-white, #fff);
+  --gal-fg: var(--color-gray-900, #111827);
+  --gal-muted: var(--color-gray-500, #6b7280);
+  --gal-line: var(--color-gray-200, #e5e7eb);
+  --gal-chrome: var(--color-gray-50, #f9fafb);
+}
+
+html,
+body {
+  background: var(--gal-bg);
+  color: var(--gal-fg);
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+.gal-bar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 10px 20px;
+  background: var(--gal-chrome);
+  border-bottom: 1px solid var(--gal-line);
+  font-size: 12px;
+}
+
+.gal-bar strong {
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  margin-right: 4px;
+}
+
+.gal-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--gal-muted);
+}
+
+.gal-group button {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 5px;
+  border: 1px solid var(--gal-line);
+  background: var(--gal-bg);
+  color: var(--gal-fg);
+  cursor: pointer;
+}
+
+.gal-group button[aria-pressed="true"] {
+  background: var(--gal-fg);
+  color: var(--gal-bg);
+  border-color: var(--gal-fg);
+}
+
+.gal-stage {
+  margin: 0 auto;
+  padding: 28px 20px 80px;
+  transition: max-width 220ms ease;
+}
+
+.fixture {
+  margin-bottom: 40px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--gal-line);
+}
+
+.fixture:last-child {
+  border-bottom: 0;
+}
+
+.fixture h2 {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin: 0 0 5px;
+}
+
+.why {
+  font-size: 13px;
+  color: var(--gal-muted);
+  margin: 0 0 8px;
+  max-width: 64ch;
+  line-height: 1.55;
+}
+
+.expect {
+  margin: 0 0 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.expect code {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--gal-chrome);
+  border: 1px solid var(--gal-line);
+  color: var(--gal-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+}

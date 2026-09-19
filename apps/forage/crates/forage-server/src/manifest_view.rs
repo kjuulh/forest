@@ -67,17 +67,6 @@ impl ManifestView {
         serde_json::from_str(json).ok()
     }
 
-    /// `true` when no native UI section will render anything useful; the
-    /// caller can decide to suppress the wrapper card entirely.
-    pub fn is_empty(&self) -> bool {
-        self.platforms.is_empty()
-            && self.methods.is_empty()
-            && self.url.is_none()
-            && self.archive.is_none()
-            && self.binary_in_archive.is_none()
-            && self.include.env.is_empty()
-    }
-
     /// Render a sha256 in a compact human form: `5df1c9…ec945` (first 6 +
     /// last 5 of the hex digest). Manifest displays use the full digest
     /// elsewhere (clipboard copy), this is for inline chips.
@@ -146,7 +135,6 @@ mod tests {
             m.include.env.get("FUNGUS_SERVER").map(String::as_str),
             Some("https://fungus.understory.sh")
         );
-        assert!(!m.is_empty());
     }
 
     #[test]
@@ -192,15 +180,6 @@ mod tests {
     fn parse_returns_none_for_garbage() {
         assert!(ManifestView::parse("not json").is_none());
         assert!(ManifestView::parse("").is_none());
-    }
-
-    #[test]
-    fn is_empty_when_nothing_to_render() {
-        let m = ManifestView::default();
-        assert!(m.is_empty());
-
-        let m = ManifestView::parse(r#"{"kind": "files"}"#).unwrap();
-        assert!(m.is_empty(), "files manifest with no other fields renders nothing");
     }
 
     #[test]

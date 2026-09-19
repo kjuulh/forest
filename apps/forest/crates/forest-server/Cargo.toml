@@ -8,7 +8,10 @@ forest-grpc-interface.workspace = true
 forest-manifest.workspace = true
 forest-models.workspace = true
 forest-runner.workspace = true
-forest-event-store.workspace = true
+rustls.workspace = true
+mire.workspace = true
+mire-sagas.workspace = true
+
 
 anyhow.workspace = true
 tokio.workspace = true
@@ -38,13 +41,7 @@ uuid = { version = "1.7.0", features = ["v4", "v7", "serde"] }
 inquire = "0.9.0"
 reqwest = "0.13.0"
 tokio-util = "0.7.15"
-sqlx = { version = "0.8.6", features = [
-  "chrono",
-  "postgres",
-  "runtime-tokio",
-  "uuid",
-  "tls-rustls",
-] }
+sqlx.workspace = true
 serde_json = "1.0.145"
 petname = "2.0.2"
 regex = "1.12.2"
@@ -84,5 +81,5 @@ tempfile = "3"
 tokio-stream = "0.1"
 proptest = "1.11"
 uuid = { version = "1.7.0", features = ["v7"] }
-sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio", "uuid", "tls-rustls"] }
+sqlx.workspace = true
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

@@ -33,6 +33,7 @@ async fn main() -> anyhow::Result<()> {
         support_url: env_or_empty("PROJECT_SUPPORT_URL"),
         domain: env_or_empty("PROJECT_DOMAIN"),
         owner: env_or_empty("PROJECT_OWNER"),
+        tags: vec![],
     };
     let description = env_or_empty("PROJECT_DESCRIPTION");
 

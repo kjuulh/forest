@@ -1,12 +1,14 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @source "../../templates";
-/* Both globs are needed. The recursive one only reaches files nested under a
-   directory, so scripts sitting directly in static/js — where the hand-written
-   progressive-enhancement scripts live — would have their utility classes
-   silently dropped from the build. */
+/* The hand-written progressive-enhancement scripts, which sit directly in
+   static/js. Not recursive on purpose: static/js/components holds the built
+   Svelte bundle, and scanning *that* is what forced it to ship unminified —
+   minification mangles the string literals the scanner reads class names out
+   of. The components' own sources are scanned below instead, so the bundle is
+   free to be minified. */
 @source "../js/*.js";
-@source "../js/**/*.js";
+@source "../../frontend/src";
 
 /* ── Compact text utilities ───────────────────────────────────────────────
    Small font sizes used by the pipeline-builder node editor. Tailwind's

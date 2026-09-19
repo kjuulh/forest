@@ -21,6 +21,7 @@ message OrgPolicyRule {
     SoakTimeConfig soak_time = 10;
     BranchRestrictionConfig branch_restriction = 11;
     ExternalApprovalConfig external_approval = 12;
+    SupersedePendingConfig supersede_pending = 13;
   }
 }
 

@@ -1,5 +1,6 @@
 {% extends "base.html.jinja" %}
 {% from "components/timestamp.html.jinja" import timeago as ts %}
+{% from "components/ui.html.jinja" import error_block %}
 
 {% block content %}
 <section class="app-container pt-12 pb-12">
@@ -139,6 +140,7 @@
         <h2 class="text-sm font-semibold text-gray-900 mb-3">Pipeline</h2>
         <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
             {% for stage in pipeline_stages %}
+            <div>
             <div class="px-4 py-3 flex items-center gap-3 text-sm {{ 'opacity-50' if stage.status == 'PENDING' else '' }}">
                 {# Status icon #}
                 {% if stage.status == "SUCCEEDED" %}
@@ -198,11 +200,40 @@
                 {% if stage.started_at %}
                 <span class="text-xs text-gray-400 tabular-nums">{{ ts(stage.started_at) }}</span>
                 {% endif %}
+            </div>
 
-                {# Error message #}
-                {% if stage.error_message %}
-                <span class="text-xs text-red-600 ml-auto">{{ stage.error_message }}</span>
-                {% endif %}
+            {#
+              Why the reason lives here and not in the row above.
+
+              The row is a flex line of fixed-size furniture -- icon, label,
+              environment badge, timestamp. An error message is prose of
+              unknown length, and a failed stage's message is routinely a
+              chained one several hundred characters long. As a flex child it
+              wrapped inside the row, tripled its height, and shoved the badge
+              and the timestamp around; the stage you were trying to read
+              became the one hardest to read. Beneath the row it has the full
+              width to itself and the row stays exactly as tall as a
+              successful one.
+            #}
+            {% if stage.error_message %}
+            <div class="px-4 pb-3">{{ error_block(stage.error_message) }}</div>
+            {% endif %}
+
+            {#
+              What the approve button above actually approves.
+
+              Open by default while the stage is waiting, because a plan behind
+              a click is a plan people approve without reading, and a plan stage
+              exists for exactly one reason: somebody reads it first. Collapsed
+              once it has been decided -- then it is history, and the page is
+              about what happens next.
+            #}
+            {% if stage.plan_output %}
+            <details data-plan-output class="px-4 pb-3" {% if stage.status == "AWAITING_APPROVAL" or stage.approval_status == "AWAITING_APPROVAL" or stage.approval_status == "AWAITINGAPPROVAL" %}open{% endif %}>
+                <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700 select-none">Plan</summary>
+                <pre class="mt-2 p-3 rounded-md bg-gray-50 border border-gray-200 text-xs text-gray-800 whitespace-pre-wrap break-words overflow-x-auto">{{ stage.plan_output }}</pre>
+            </details>
+            {% endif %}
             </div>
             {% endfor %}
         </div>
@@ -374,6 +405,7 @@
         <h2 class="text-sm font-semibold text-gray-900 mb-3">Destinations</h2>
         <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
             {% for dest in destinations %}
+            <div>
             <div class="px-4 py-3 flex items-center gap-3 text-sm">
                 {# Status icon #}
                 {% if dest.status == "SUCCEEDED" %}
@@ -410,17 +442,21 @@
                 <span class="text-xs text-gray-500">Cancelled</span>
                 {% endif %}
 
-                {# Error message #}
-                {% if dest.error_message %}
-                <span class="text-xs text-red-600 truncate ml-auto max-w-xs" title="{{ dest.error_message }}">{{ dest.error_message }}</span>
-                {% endif %}
-
                 {# Timestamp #}
                 {% if dest.completed_at %}
                 <time class="text-xs text-gray-400 ml-auto tabular-nums">{{ ts(dest.completed_at) }}</time>
                 {% elif dest.started_at %}
                 <time class="text-xs text-gray-400 ml-auto tabular-nums">{{ ts(dest.started_at) }}</time>
                 {% endif %}
+            </div>
+
+            {# Same treatment as a pipeline stage: the reason gets its own
+               line under the row rather than a `truncate max-w-xs` cell
+               inside it, which cut the message off at the head -- exactly
+               where a chained error keeps the clause worth reading. #}
+            {% if dest.error_message %}
+            <div class="px-4 pb-3">{{ error_block(dest.error_message) }}</div>
+            {% endif %}
             </div>
             {% endfor %}
         </div>

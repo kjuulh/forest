@@ -1,6 +1,6 @@
 use anyhow::Context;
 use drop_queue::DropQueue;
-use forest_event_store::EventStore;
+use mire::EventStore;
 use sqlx::PgPool;
 
 /// Connect to NATS with optional authentication.
@@ -118,11 +118,10 @@ impl State {
         )
         .await?;
 
-        // TODO: As we cannot lock with cockroach, we should consider sending it to a migration queue instead
-        sqlx::migrate!("./migrations/")
-            .set_locking(false)
-            .run(&pool)
-            .await?;
+        // Aurora PostgreSQL supports SQLx's advisory migration lock. Keep it
+        // enabled so rolling deployments cannot execute schema changes from
+        // multiple replicas concurrently.
+        sqlx::migrate!("./migrations/").run(&pool).await?;
 
         let event_store = EventStore::new(pool.clone());
         event_store
@@ -168,10 +167,7 @@ impl State {
         )
         .await?;
 
-        sqlx::migrate!("./migrations/")
-            .set_locking(false)
-            .run(&pool)
-            .await?;
+        sqlx::migrate!("./migrations/").run(&pool).await?;
 
         let event_store = EventStore::new(pool.clone());
         event_store

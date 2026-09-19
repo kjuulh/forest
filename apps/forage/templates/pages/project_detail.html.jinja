@@ -1,4 +1,5 @@
 {% extends "base.html.jinja" %}
+{% from "components/timeline_prefetch.html.jinja" import timeline_prefetch %}
 {% from "components/timestamp.html.jinja" import timeago as ts %}
 {% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, tool_shape_badge, empty_state, code_block, pretty_json_block, about_block %}
 
@@ -96,6 +97,7 @@
             <h2 class="text-lg font-bold">Recent releases</h2>
             <a href="/orgs/{{ org_name }}/projects/{{ project_name }}/releases" class="text-sm text-gray-500 hover:text-gray-900">View all &rarr;</a>
         </div>
+        {{ timeline_prefetch(org_name, project_name) }}
         <release-timeline org="{{ org_name }}" project="{{ project_name }}" csrf="{{ csrf_token }}" username="{{ user.username }}" role="{{ current_role }}" limit="3"></release-timeline>
     </div>
     <script src="/static/js/components/forage-components.js?v={{ components_js_hash }}"></script>

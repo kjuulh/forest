@@ -2776,6 +2776,14 @@ pub struct PipelineStageState {
     /// plan stages
     #[prost(bool, optional, tag="14")]
     pub auto_approve: ::core::option::Option<bool>,
+    /// gate stages: when on_timeout decides
+    #[prost(string, optional, tag="15")]
+    pub gate_deadline: ::core::option::Option<::prost::alloc::string::String>,
+    /// gate stages: the requirements not yet satisfied, rendered for a human —
+    /// "rollout to be HEALTHY (currently UNHEALTHY)". A parked pipeline should
+    /// say what it is parked on rather than look hung.
+    #[prost(string, repeated, tag="16")]
+    pub gate_waiting_on: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// Status of a single release step (release_states row).
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2888,6 +2896,14 @@ pub struct PipelineRunStage {
     /// plan stages
     #[prost(bool, optional, tag="14")]
     pub auto_approve: ::core::option::Option<bool>,
+    /// gate stages: when on_timeout decides
+    #[prost(string, optional, tag="15")]
+    pub gate_deadline: ::core::option::Option<::prost::alloc::string::String>,
+    /// gate stages: the requirements not yet satisfied, rendered for a human —
+    /// "rollout to be HEALTHY (currently UNHEALTHY)". A parked pipeline should
+    /// say what it is parked on rather than look hung.
+    #[prost(string, repeated, tag="16")]
+    pub gate_waiting_on: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 // ── Plan stage approval ──────────────────────────────────────────────
 
@@ -3146,6 +3162,7 @@ pub enum PipelineRunStageType {
     Deploy = 1,
     Wait = 2,
     Plan = 3,
+    Gate = 4,
 }
 impl PipelineRunStageType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -3158,6 +3175,7 @@ impl PipelineRunStageType {
             Self::Deploy => "PIPELINE_RUN_STAGE_TYPE_DEPLOY",
             Self::Wait => "PIPELINE_RUN_STAGE_TYPE_WAIT",
             Self::Plan => "PIPELINE_RUN_STAGE_TYPE_PLAN",
+            Self::Gate => "PIPELINE_RUN_STAGE_TYPE_GATE",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -3167,6 +3185,7 @@ impl PipelineRunStageType {
             "PIPELINE_RUN_STAGE_TYPE_DEPLOY" => Some(Self::Deploy),
             "PIPELINE_RUN_STAGE_TYPE_WAIT" => Some(Self::Wait),
             "PIPELINE_RUN_STAGE_TYPE_PLAN" => Some(Self::Plan),
+            "PIPELINE_RUN_STAGE_TYPE_GATE" => Some(Self::Gate),
             _ => None,
         }
     }
@@ -3181,6 +3200,15 @@ pub enum PipelineRunStageStatus {
     Failed = 4,
     Cancelled = 5,
     AwaitingApproval = 6,
+    /// Parked waiting to be told. Distinct from ACTIVE so that "nothing is
+    /// happening because nobody has reported" is visible rather than looking like
+    /// work in progress.
+    AwaitingSignal = 7,
+    /// A newer release for the same target overtook this stage's releases, or an
+    /// upstream stage was overtaken. Terminal, and deliberately neither FAILED
+    /// (nothing went wrong) nor CANCELLED (nobody cancelled it) — see
+    /// design/SKIP-TO-LATEST.md.
+    Superseded = 8,
 }
 impl PipelineRunStageStatus {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -3196,6 +3224,8 @@ impl PipelineRunStageStatus {
             Self::Failed => "PIPELINE_RUN_STAGE_STATUS_FAILED",
             Self::Cancelled => "PIPELINE_RUN_STAGE_STATUS_CANCELLED",
             Self::AwaitingApproval => "PIPELINE_RUN_STAGE_STATUS_AWAITING_APPROVAL",
+            Self::AwaitingSignal => "PIPELINE_RUN_STAGE_STATUS_AWAITING_SIGNAL",
+            Self::Superseded => "PIPELINE_RUN_STAGE_STATUS_SUPERSEDED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -3208,6 +3238,8 @@ impl PipelineRunStageStatus {
             "PIPELINE_RUN_STAGE_STATUS_FAILED" => Some(Self::Failed),
             "PIPELINE_RUN_STAGE_STATUS_CANCELLED" => Some(Self::Cancelled),
             "PIPELINE_RUN_STAGE_STATUS_AWAITING_APPROVAL" => Some(Self::AwaitingApproval),
+            "PIPELINE_RUN_STAGE_STATUS_AWAITING_SIGNAL" => Some(Self::AwaitingSignal),
+            "PIPELINE_RUN_STAGE_STATUS_SUPERSEDED" => Some(Self::Superseded),
             _ => None,
         }
     }
@@ -3239,6 +3271,39 @@ pub struct ExternalApprovalConfig {
     pub target_environment: ::prost::alloc::string::String,
     #[prost(int32, tag="2")]
     pub required_approvals: i32,
+}
+/// Supersede older pending releases for a target: deploy the newest one and
+/// mark the ones it overtook SUPERSEDED, rather than grinding through each in
+/// turn.
+///
+/// A selection policy, not a gate: it never blocks a release, it chooses which
+/// pending release is the candidate. Every gating policy then runs against that
+/// candidate exactly as before. Default off — a policy that skips deploys must
+/// never turn itself on.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SupersedePendingConfig {
+    /// Environment this applies to. Destinations within it collapse
+    /// independently: an environment can hold several destinations and they are
+    /// separate queues, so collapsing across one would strand a pending release
+    /// at a destination a newer release never targeted.
+    #[prost(string, tag="1")]
+    pub target_environment: ::prost::alloc::string::String,
+    /// Only supersede a pending release when the newer one names the same
+    /// branch. The nearest guard against skipping a genuinely divergent release
+    /// (a hotfix off a release branch) that forest can enforce from what it
+    /// records — it has commit SHAs but no commit graph, so it cannot ask
+    /// whether one commit descends from another.
+    #[prost(bool, tag="2")]
+    pub same_branch_only: bool,
+    /// Cancel an in-flight deploy and jump to the newest, rather than letting it
+    /// finish first.
+    ///
+    /// NOT IMPLEMENTED — validation rejects `true`. forest's destinations are
+    /// not transactional: a cancelled `terraform apply` leaves infrastructure in
+    /// a state no plan describes. Carrying the field means the contract is
+    /// settled before anything can set it. See design/SKIP-TO-LATEST.md.
+    #[prost(bool, tag="3")]
+    pub cancel_in_progress: bool,
 }
 // ── External approval state ─────────────────────────────────────────
 
@@ -3280,7 +3345,7 @@ pub struct Policy {
     pub created_at: ::prost::alloc::string::String,
     #[prost(string, tag="21")]
     pub updated_at: ::prost::alloc::string::String,
-    #[prost(oneof="policy::Config", tags="10, 11, 12")]
+    #[prost(oneof="policy::Config", tags="10, 11, 12, 13")]
     pub config: ::core::option::Option<policy::Config>,
 }
 /// Nested message and enum types in `Policy`.
@@ -3293,6 +3358,8 @@ pub mod policy {
         BranchRestriction(super::BranchRestrictionConfig),
         #[prost(message, tag="12")]
         ExternalApproval(super::ExternalApprovalConfig),
+        #[prost(message, tag="13")]
+        SupersedePending(super::SupersedePendingConfig),
     }
 }
 // ── Policy evaluation result ────────────────────────────────────────
@@ -3321,7 +3388,7 @@ pub struct CreatePolicyRequest {
     pub name: ::prost::alloc::string::String,
     #[prost(enumeration="PolicyType", tag="3")]
     pub policy_type: i32,
-    #[prost(oneof="create_policy_request::Config", tags="10, 11, 12")]
+    #[prost(oneof="create_policy_request::Config", tags="10, 11, 12, 13")]
     pub config: ::core::option::Option<create_policy_request::Config>,
 }
 /// Nested message and enum types in `CreatePolicyRequest`.
@@ -3334,6 +3401,8 @@ pub mod create_policy_request {
         BranchRestriction(super::BranchRestrictionConfig),
         #[prost(message, tag="12")]
         ExternalApproval(super::ExternalApprovalConfig),
+        #[prost(message, tag="13")]
+        SupersedePending(super::SupersedePendingConfig),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -3349,7 +3418,7 @@ pub struct UpdatePolicyRequest {
     pub name: ::prost::alloc::string::String,
     #[prost(bool, optional, tag="3")]
     pub enabled: ::core::option::Option<bool>,
-    #[prost(oneof="update_policy_request::Config", tags="10, 11, 12")]
+    #[prost(oneof="update_policy_request::Config", tags="10, 11, 12, 13")]
     pub config: ::core::option::Option<update_policy_request::Config>,
 }
 /// Nested message and enum types in `UpdatePolicyRequest`.
@@ -3362,6 +3431,8 @@ pub mod update_policy_request {
         BranchRestriction(super::BranchRestrictionConfig),
         #[prost(message, tag="12")]
         ExternalApproval(super::ExternalApprovalConfig),
+        #[prost(message, tag="13")]
+        SupersedePending(super::SupersedePendingConfig),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -3467,6 +3538,9 @@ pub enum PolicyType {
     SoakTime = 1,
     BranchRestriction = 2,
     ExternalApproval = 3,
+    /// Collapse a queue of pending releases for one target to the newest.
+    /// See design/SKIP-TO-LATEST.md.
+    SupersedePending = 4,
 }
 impl PolicyType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -3479,6 +3553,7 @@ impl PolicyType {
             Self::SoakTime => "POLICY_TYPE_SOAK_TIME",
             Self::BranchRestriction => "POLICY_TYPE_BRANCH_RESTRICTION",
             Self::ExternalApproval => "POLICY_TYPE_EXTERNAL_APPROVAL",
+            Self::SupersedePending => "POLICY_TYPE_SUPERSEDE_PENDING",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -3488,6 +3563,7 @@ impl PolicyType {
             "POLICY_TYPE_SOAK_TIME" => Some(Self::SoakTime),
             "POLICY_TYPE_BRANCH_RESTRICTION" => Some(Self::BranchRestriction),
             "POLICY_TYPE_EXTERNAL_APPROVAL" => Some(Self::ExternalApproval),
+            "POLICY_TYPE_SUPERSEDE_PENDING" => Some(Self::SupersedePending),
             _ => None,
         }
     }
@@ -3511,20 +3587,53 @@ pub struct PlanStageConfig {
     #[prost(bool, tag="2")]
     pub auto_approve: bool,
 }
+/// One thing a gate waits to be told, and the states it will accept.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SignalRequirement {
+    /// The signal's name, as its reporter calls it — `rollout`, `smoke`.
+    #[prost(string, tag="1")]
+    pub signal: ::prost::alloc::string::String,
+    /// Any one of these satisfies the requirement. Empty means HEALTHY, which
+    /// is the only reading of "wait for this signal" that is not a trap: an
+    /// empty list interpreted as "any status" would open the gate on
+    /// UNHEALTHY.
+    #[prost(enumeration="HealthStatus", repeated, tag="2")]
+    pub accept: ::prost::alloc::vec::Vec<i32>,
+}
+/// A stage that waits for evidence rather than for a duration.
+///
+/// This is what `WaitStageConfig` should have been. A wait stage sleeps for a
+/// fixed time and then declares the release fine, which is a guess; a gate waits
+/// to be told, by a provider or an agent, that the things it requires are in the
+/// states it requires — see forest/v1/signals.proto.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GateStageConfig {
+    /// All of these must be satisfied. A gate with none would open instantly
+    /// and is rejected at validation rather than silently doing nothing.
+    #[prost(message, repeated, tag="1")]
+    pub requires: ::prost::alloc::vec::Vec<SignalRequirement>,
+    /// How long to wait before `on_timeout` decides. Required: a gate that
+    /// waits forever blocks a pipeline with nothing reporting why, which is the
+    /// failure mode gates exist to remove rather than introduce.
+    #[prost(int64, tag="2")]
+    pub timeout_seconds: i64,
+    #[prost(enumeration="GateTimeoutBehaviour", tag="3")]
+    pub on_timeout: i32,
+}
 // ── A single pipeline stage ──────────────────────────────────────────
 
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PipelineStage {
     #[prost(string, tag="1")]
     pub id: ::prost::alloc::string::String,
     #[prost(string, repeated, tag="2")]
     pub depends_on: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(oneof="pipeline_stage::Config", tags="10, 11, 12")]
+    #[prost(oneof="pipeline_stage::Config", tags="10, 11, 12, 13")]
     pub config: ::core::option::Option<pipeline_stage::Config>,
 }
 /// Nested message and enum types in `PipelineStage`.
 pub mod pipeline_stage {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Config {
         #[prost(message, tag="10")]
         Deploy(super::DeployStageConfig),
@@ -3532,6 +3641,8 @@ pub mod pipeline_stage {
         Wait(super::WaitStageConfig),
         #[prost(message, tag="12")]
         Plan(super::PlanStageConfig),
+        #[prost(message, tag="13")]
+        Gate(super::GateStageConfig),
     }
 }
 // ── Pipeline resource ────────────────────────────────────────────────
@@ -3615,6 +3726,7 @@ pub enum StageType {
     Deploy = 1,
     Wait = 2,
     Plan = 3,
+    Gate = 4,
 }
 impl StageType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -3627,6 +3739,7 @@ impl StageType {
             Self::Deploy => "STAGE_TYPE_DEPLOY",
             Self::Wait => "STAGE_TYPE_WAIT",
             Self::Plan => "STAGE_TYPE_PLAN",
+            Self::Gate => "STAGE_TYPE_GATE",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -3636,6 +3749,40 @@ impl StageType {
             "STAGE_TYPE_DEPLOY" => Some(Self::Deploy),
             "STAGE_TYPE_WAIT" => Some(Self::Wait),
             "STAGE_TYPE_PLAN" => Some(Self::Plan),
+            "STAGE_TYPE_GATE" => Some(Self::Gate),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum GateTimeoutBehaviour {
+    /// Treated as FAIL. Defaulting an unset value to "proceed" would mean a
+    /// gate that silently stops gating.
+    Unspecified = 0,
+    Fail = 1,
+    /// Proceed anyway, recording that the gate timed out. For a signal that is
+    /// informative rather than load-bearing.
+    Proceed = 2,
+}
+impl GateTimeoutBehaviour {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "GATE_TIMEOUT_BEHAVIOUR_UNSPECIFIED",
+            Self::Fail => "GATE_TIMEOUT_BEHAVIOUR_FAIL",
+            Self::Proceed => "GATE_TIMEOUT_BEHAVIOUR_PROCEED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "GATE_TIMEOUT_BEHAVIOUR_UNSPECIFIED" => Some(Self::Unspecified),
+            "GATE_TIMEOUT_BEHAVIOUR_FAIL" => Some(Self::Fail),
+            "GATE_TIMEOUT_BEHAVIOUR_PROCEED" => Some(Self::Proceed),
             _ => None,
         }
     }
@@ -3652,6 +3799,14 @@ pub enum PipelineStageStatus {
     Failed = 4,
     Cancelled = 5,
     AwaitingApproval = 6,
+    /// A gate stage that is parked waiting to be told. Distinct from ACTIVE so
+    /// that "nothing is happening because nobody has reported" is visible
+    /// rather than looking like work in progress.
+    AwaitingSignal = 7,
+    /// A newer release for the same target overtook this stage's releases, or an
+    /// upstream stage was overtaken. Terminal, and deliberately neither FAILED
+    /// nor CANCELLED — see design/SKIP-TO-LATEST.md.
+    Superseded = 8,
 }
 impl PipelineStageStatus {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -3667,6 +3822,8 @@ impl PipelineStageStatus {
             Self::Failed => "PIPELINE_STAGE_STATUS_FAILED",
             Self::Cancelled => "PIPELINE_STAGE_STATUS_CANCELLED",
             Self::AwaitingApproval => "PIPELINE_STAGE_STATUS_AWAITING_APPROVAL",
+            Self::AwaitingSignal => "PIPELINE_STAGE_STATUS_AWAITING_SIGNAL",
+            Self::Superseded => "PIPELINE_STAGE_STATUS_SUPERSEDED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -3679,6 +3836,8 @@ impl PipelineStageStatus {
             "PIPELINE_STAGE_STATUS_FAILED" => Some(Self::Failed),
             "PIPELINE_STAGE_STATUS_CANCELLED" => Some(Self::Cancelled),
             "PIPELINE_STAGE_STATUS_AWAITING_APPROVAL" => Some(Self::AwaitingApproval),
+            "PIPELINE_STAGE_STATUS_AWAITING_SIGNAL" => Some(Self::AwaitingSignal),
+            "PIPELINE_STAGE_STATUS_SUPERSEDED" => Some(Self::Superseded),
             _ => None,
         }
     }
@@ -3704,7 +3863,7 @@ pub struct OrgPolicyRule {
     pub enabled: bool,
     #[prost(enumeration="PolicyType", tag="3")]
     pub policy_type: i32,
-    #[prost(oneof="org_policy_rule::Config", tags="10, 11, 12")]
+    #[prost(oneof="org_policy_rule::Config", tags="10, 11, 12, 13")]
     pub config: ::core::option::Option<org_policy_rule::Config>,
 }
 /// Nested message and enum types in `OrgPolicyRule`.
@@ -3717,6 +3876,8 @@ pub mod org_policy_rule {
         BranchRestriction(super::BranchRestrictionConfig),
         #[prost(message, tag="12")]
         ExternalApproval(super::ExternalApprovalConfig),
+        #[prost(message, tag="13")]
+        SupersedePending(super::SupersedePendingConfig),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -4905,6 +5066,62 @@ impl ReleaseOutcome {
             _ => None,
         }
     }
+}
+/// One named observation about a release on one destination.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Signal {
+    /// The reporter's own name for what it observed — `rollout`, `smoke`,
+    /// `migrations`. Scoped to the destination, so two destinations reporting
+    /// `rollout` do not collide.
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(enumeration="HealthStatus", tag="2")]
+    pub status: i32,
+    /// Human-readable, and the thing a person reads first when a gate did not
+    /// open. The ECS provider puts its poll line here:
+    /// "deployments=1 running=1/1".
+    #[prost(string, tag="3")]
+    pub detail: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub destination: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
+    pub environment: ::prost::alloc::string::String,
+    /// When the reporter observed this, RFC 3339 — not when the server stored
+    /// it. A gate compares this against the stage that preceded it, so a
+    /// HEALTHY observed before the deploy started cannot satisfy anything.
+    #[prost(string, tag="6")]
+    pub observed_at: ::prost::alloc::string::String,
+    /// Who reported it, for the case where a signal is wrong and someone has
+    /// to work out which reporter to go and look at. Free-form: an agent name,
+    /// a provider name.
+    #[prost(string, tag="7")]
+    pub reported_by: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReportSignalRequest {
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub release_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub project: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="10")]
+    pub signal: ::core::option::Option<Signal>,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReportSignalResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListSignalsRequest {
+    #[prost(string, tag="1")]
+    pub release_intent_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListSignalsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub signals: ::prost::alloc::vec::Vec<Signal>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Trigger {

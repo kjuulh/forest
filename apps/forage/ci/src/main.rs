@@ -190,7 +190,7 @@ async fn build_base(client: &dagger_sdk::Query) -> eyre::Result<dagger_sdk::Cont
     // Base rust image with build tools.
     let rust_base = client
         .container()
-        .from("rust:1.93-trixie")
+        .from("rust:1.98.1-trixie")
         .with_exec(vec!["apt", "update"])
         .with_exec(vec!["apt", "install", "-y", "clang", "wget"])
         // Install mold linker.

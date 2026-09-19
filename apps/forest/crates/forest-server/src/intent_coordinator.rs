@@ -10,8 +10,9 @@ use uuid::Uuid;
 use crate::State;
 use crate::services::release_event_store::{check_approval_policies, check_soak_time_policies};
 use crate::services::release_pipeline::{
-    ApprovalStatus, PipelineStages, StageConfig, StageState, StageStates, StageStatus,
-    find_ready_stages, has_failed_dependency, init_stage_states, is_pipeline_complete,
+    ApprovalStatus, GateTimeout, PipelineStages, SignalRequirement, StageConfig, StageState,
+    StageStates, StageStatus, find_ready_stages, has_failed_dependency, has_superseded_dependency,
+    init_stage_states, is_pipeline_complete,
 };
 
 /// The IntentCoordinator is the single saga orchestrator for pipeline release intents.
@@ -220,30 +221,33 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 let all_terminal = releases.iter().all(|r| {
                     matches!(
                         r.status.as_str(),
-                        "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT"
+                        "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT" | "SUPERSEDED"
                     )
                 });
                 if !all_terminal {
                     continue; // Still in progress
                 }
 
-                let all_succeeded = releases.iter().all(|r| r.status == "SUCCEEDED");
-
                 let mut updated = current.clone();
-                if all_succeeded {
-                    updated.status = StageStatus::Succeeded;
-                    updated.completed_at = Some(now_str.clone());
-                } else {
-                    updated.status = StageStatus::Failed;
-                    updated.completed_at = Some(now_str.clone());
-                    // Aggregate error messages from failed releases
-                    let errors: Vec<String> = releases
-                        .iter()
-                        .filter(|r| r.status != "SUCCEEDED")
-                        .filter_map(|r| r.error_message.clone())
-                        .collect();
-                    if !errors.is_empty() {
-                        updated.error_message = Some(errors.join("; "));
+                updated.completed_at = Some(now_str.clone());
+
+                match outcome_of(releases) {
+                    StageOutcome::Succeeded => updated.status = StageStatus::Succeeded,
+                    StageOutcome::Superseded => {
+                        updated.status = StageStatus::Superseded;
+                        updated.error_message = first_reason(releases);
+                    }
+                    StageOutcome::Failed => {
+                        updated.status = StageStatus::Failed;
+                        // Aggregate error messages from failed releases
+                        let errors: Vec<String> = releases
+                            .iter()
+                            .filter(|r| r.status != "SUCCEEDED" && r.status != "SUPERSEDED")
+                            .filter_map(|r| r.error_message.clone())
+                            .collect();
+                        if !errors.is_empty() {
+                            updated.error_message = Some(errors.join("; "));
+                        }
                     }
                 }
                 stage_states.insert(stage_id.clone(), updated);
@@ -270,6 +274,93 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                     }
                 }
             }
+            StageConfig::Gate {
+                requires,
+                on_timeout,
+                ..
+            } => {
+                let signals =
+                    crate::services::release_signals::list_for_intent(&state.db, intent_id)
+                        .await
+                        .unwrap_or_default();
+
+                let unmet = unmet_requirements(requires, &signals);
+
+                if unmet.is_empty() {
+                    let mut updated = current.clone();
+                    updated.status = StageStatus::Succeeded;
+                    updated.completed_at = Some(now_str.clone());
+                    updated.gate_waiting_on = None;
+                    stage_states.insert(stage_id.clone(), updated);
+                    changed = true;
+
+                    tracing::info!(
+                        %intent_id,
+                        stage_id,
+                        "coordinator: gate satisfied"
+                    );
+                    continue;
+                }
+
+                let deadline = current
+                    .gate_deadline
+                    .as_deref()
+                    .and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok())
+                    .map(|d| d.with_timezone(&chrono::Utc));
+
+                match deadline {
+                    Some(deadline) if deadline <= now => {
+                        let mut updated = current.clone();
+                        updated.completed_at = Some(now_str.clone());
+                        updated.gate_waiting_on = Some(unmet.clone());
+                        let waiting = unmet.join(", ");
+
+                        match on_timeout {
+                            GateTimeout::Proceed => {
+                                updated.status = StageStatus::Succeeded;
+                                updated.error_message = Some(format!(
+                                    "gate timed out waiting for {waiting}; proceeding because \
+                                     on_timeout is `proceed`"
+                                ));
+                                tracing::warn!(
+                                    %intent_id,
+                                    stage_id,
+                                    "coordinator: gate timed out, proceeding: {waiting}"
+                                );
+                            }
+                            GateTimeout::Fail => {
+                                updated.status = StageStatus::Failed;
+                                updated.error_message =
+                                    Some(format!("gate timed out waiting for {waiting}"));
+                                tracing::warn!(
+                                    %intent_id,
+                                    stage_id,
+                                    "coordinator: gate timed out: {waiting}"
+                                );
+                            }
+                        }
+
+                        stage_states.insert(stage_id.clone(), updated);
+                        changed = true;
+                    }
+                    _ => {
+                        // Still waiting. Record what for, so a parked pipeline
+                        // says what it is parked on rather than looking hung.
+                        if current.gate_waiting_on.as_deref() != Some(unmet.as_slice()) {
+                            let mut updated = current.clone();
+                            updated.gate_waiting_on = Some(unmet);
+                            stage_states.insert(stage_id.clone(), updated);
+                            changed = true;
+                        }
+                        if let Some(deadline) = deadline {
+                            earliest_timer = Some(match earliest_timer {
+                                Some(existing) => existing.min(deadline),
+                                None => deadline,
+                            });
+                        }
+                    }
+                }
+            }
             StageConfig::Plan { auto_approve, .. } => {
                 // Plan stages work like deploy stages but with an approval gate
                 let stage_releases = releases_by_stage.get(stage_id);
@@ -290,23 +381,32 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 let all_terminal = releases.iter().all(|r| {
                     matches!(
                         r.status.as_str(),
-                        "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT"
+                        "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT" | "SUPERSEDED"
                     )
                 });
                 if !all_terminal {
                     continue;
                 }
 
-                let all_succeeded = releases.iter().all(|r| r.status == "SUCCEEDED");
+                let outcome = outcome_of(releases);
                 let mut updated = current.clone();
 
-                if !all_succeeded {
+                if outcome == StageOutcome::Superseded {
+                    // A newer release overtook this plan before it ran. Not a
+                    // failure, and it must not sit waiting for an approval that
+                    // is now meaningless.
+                    updated.status = StageStatus::Superseded;
+                    updated.completed_at = Some(now_str.clone());
+                    updated.error_message = first_reason(releases);
+                    stage_states.insert(stage_id.clone(), updated);
+                    changed = true;
+                } else if outcome == StageOutcome::Failed {
                     // Plan execution itself failed
                     updated.status = StageStatus::Failed;
                     updated.completed_at = Some(now_str.clone());
                     let errors: Vec<String> = releases
                         .iter()
-                        .filter(|r| r.status != "SUCCEEDED")
+                        .filter(|r| r.status != "SUCCEEDED" && r.status != "SUPERSEDED")
                         .filter_map(|r| r.error_message.clone())
                         .collect();
                     if !errors.is_empty() {
@@ -361,12 +461,32 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
             let is_pending = stage_states
                 .get(stage_id)
                 .is_none_or(|s| s.status == StageStatus::Pending);
-            if is_pending && has_failed_dependency(stage_id, &stages, &stage_states) {
+            if !is_pending {
+                continue;
+            }
+            // Failure first: a stage downstream of both a failed and a
+            // superseded dependency is downstream of a failure.
+            if has_failed_dependency(stage_id, &stages, &stage_states) {
                 stage_states.insert(
                     stage_id.clone(),
                     StageState {
                         status: StageStatus::Cancelled,
                         error_message: Some("upstream stage failed".into()),
+                        completed_at: Some(now_str.clone()),
+                        ..StageState::pending()
+                    },
+                );
+                propagated = true;
+                changed = true;
+            } else if has_superseded_dependency(stage_id, &stages, &stage_states) {
+                // Inherits Superseded, not Cancelled: the rest of this run is
+                // moot because a newer release took its place, which is a
+                // different thing from somebody cancelling it.
+                stage_states.insert(
+                    stage_id.clone(),
+                    StageState {
+                        status: StageStatus::Superseded,
+                        error_message: Some("upstream stage superseded".into()),
                         completed_at: Some(now_str.clone()),
                         ..StageState::pending()
                     },
@@ -533,6 +653,39 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                     "coordinator: activated wait stage (until {wait_until})"
                 );
             }
+            StageConfig::Gate {
+                timeout_seconds, ..
+            } => {
+                let deadline = now + chrono::Duration::seconds(*timeout_seconds);
+
+                stage_states.insert(
+                    stage_id.clone(),
+                    StageState {
+                        status: StageStatus::Active,
+                        queued_at: Some(now_str.clone()),
+                        started_at: Some(now_str.clone()),
+                        gate_deadline: Some(deadline.to_rfc3339()),
+                        ..StageState::pending()
+                    },
+                );
+                changed = true;
+
+                // The deadline is a timer like a wait stage's, so the sweep
+                // wakes to decide `on_timeout` even if no signal ever arrives.
+                // Arriving signals wake it sooner, by publishing
+                // `forest.intent.evaluate` — see services/release_signals.rs.
+                earliest_timer = Some(match earliest_timer {
+                    Some(existing) => existing.min(deadline),
+                    None => deadline,
+                });
+
+                tracing::info!(
+                    %intent_id,
+                    stage_id,
+                    timeout_seconds,
+                    "coordinator: activated gate stage (deadline {deadline})"
+                );
+            }
             StageConfig::Plan { environment, .. } => {
                 // Plan stages work like deploy but create releases in plan mode
                 let soak_blocked = check_soak_time_policies(
@@ -656,6 +809,20 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
             .all(|s| s.status == StageStatus::Succeeded)
         {
             "SUCCEEDED"
+        } else if stage_states
+            .values()
+            .any(|s| matches!(s.status, StageStatus::Failed | StageStatus::Cancelled))
+        {
+            "FAILED"
+        } else if stage_states
+            .values()
+            .any(|s| s.status == StageStatus::Superseded)
+        {
+            // Every stage terminal, nothing failed, and at least one was
+            // overtaken: the run was collapsed into a newer one. Reporting this
+            // FAILED is what would make an opt-in optimisation look like an
+            // outage in every view over the release history.
+            "SUPERSEDED"
         } else {
             "FAILED"
         }
@@ -708,6 +875,7 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 StageStatus::Succeeded => "SUCCEEDED",
                 StageStatus::Failed => "FAILED",
                 StageStatus::Cancelled => "CANCELLED",
+                StageStatus::Superseded => "SUPERSEDED",
                 _ => continue,
             };
             let mut meta = BTreeMap::new();
@@ -811,6 +979,47 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// What a stage's finished child releases add up to.
+///
+/// Three-way rather than the succeeded/failed split this used to be. A child
+/// release that was superseded — overtaken by a newer pending release for the
+/// same destination — did not fail, and rendering a collapsed queue as a red
+/// pipeline would page whoever owns the project for something that worked
+/// exactly as configured. Failure still dominates: a run that half-deployed and
+/// then failed is a failure, whatever happened to the rest of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StageOutcome {
+    Succeeded,
+    Failed,
+    Superseded,
+}
+
+fn outcome_of(releases: &[ReleaseRow]) -> StageOutcome {
+    if releases.iter().all(|r| r.status == "SUCCEEDED") {
+        return StageOutcome::Succeeded;
+    }
+    let any_failed = releases
+        .iter()
+        .any(|r| matches!(r.status.as_str(), "FAILED" | "CANCELLED" | "TIMED_OUT"));
+    if any_failed {
+        return StageOutcome::Failed;
+    }
+    if releases.iter().any(|r| r.status == "SUPERSEDED") {
+        return StageOutcome::Superseded;
+    }
+    // Every child terminal, none succeeded, none failed, none superseded is
+    // unreachable — but a stage of unknown statuses is not a success.
+    StageOutcome::Failed
+}
+
+/// The reason the first superseded child carries, for the stage to quote.
+fn first_reason(releases: &[ReleaseRow]) -> Option<String> {
+    releases
+        .iter()
+        .find(|r| r.status == "SUPERSEDED")
+        .and_then(|r| r.error_message.clone())
+}
+
 /// A destination a stage is about to release to.
 struct StageDestination {
     id: Uuid,
@@ -858,6 +1067,56 @@ enum StageResolution {
 /// Declaring nothing for the stage's environment means no filtering, not an
 /// empty filter. Projects that name no destinations must keep releasing to
 /// whole environments or this fix breaks every one of them to help one.
+/// Which of a gate's requirements are not yet satisfied, rendered for a human.
+///
+/// A requirement is satisfied when *some* destination has reported that signal
+/// in one of the accepted states. Deliberately "some" and not "every
+/// destination in the preceding stage": forest does not model which
+/// destinations a gate is about, and demanding a quorum it cannot define would
+/// mean a gate that never opens for a stage that fans out. The narrower rule
+/// belongs with per-destination gates, if that turns out to be wanted.
+fn unmet_requirements(
+    requires: &[SignalRequirement],
+    signals: &[crate::services::release_signals::SignalRow],
+) -> Vec<String> {
+    requires
+        .iter()
+        .filter_map(|req| {
+            let accepted = req.accepted();
+            let satisfied = signals
+                .iter()
+                .any(|s| s.name == req.signal && accepted.contains(&s.status));
+            if satisfied {
+                return None;
+            }
+
+            // Name what was actually seen, if anything. "waiting for rollout
+            // to be HEALTHY (currently UNHEALTHY)" is a different problem from
+            // "waiting for rollout to be HEALTHY (nothing reported)", and the
+            // two want different responses.
+            let seen: Vec<&str> = signals
+                .iter()
+                .filter(|s| s.name == req.signal)
+                .map(|s| s.status.as_str())
+                .collect();
+            Some(if seen.is_empty() {
+                format!(
+                    "{} to be {} (nothing reported)",
+                    req.signal,
+                    accepted.join(" or ")
+                )
+            } else {
+                format!(
+                    "{} to be {} (currently {})",
+                    req.signal,
+                    accepted.join(" or "),
+                    seen.join(", ")
+                )
+            })
+        })
+        .collect()
+}
+
 async fn resolve_stage_destinations(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     project_id: &Uuid,
@@ -941,4 +1200,119 @@ async fn resolve_stage_destinations(
 struct ReleaseRow {
     status: String,
     error_message: Option<String>,
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+    use crate::services::release_signals::SignalRow;
+
+    fn signal(name: &str, status: &str) -> SignalRow {
+        SignalRow {
+            name: name.to_string(),
+            status: status.to_string(),
+            detail: String::new(),
+            destination_name: "platform-dev/eu-west-1/infrastructure-platform".to_string(),
+            environment: "platform-dev".to_string(),
+            reported_by: "forest-ecs-provider".to_string(),
+            observed_at: chrono::Utc::now(),
+        }
+    }
+
+    fn req(name: &str, accept: &[&str]) -> SignalRequirement {
+        SignalRequirement {
+            signal: name.to_string(),
+            accept: accept.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn a_reported_healthy_signal_satisfies_the_gate() {
+        let unmet = unmet_requirements(
+            &[req("rollout", &["HEALTHY"])],
+            &[signal("rollout", "HEALTHY")],
+        );
+        assert!(unmet.is_empty(), "got: {unmet:?}");
+    }
+
+    /// The point of the whole thing: a gate must not open on a bad state.
+    #[test]
+    fn an_unhealthy_signal_does_not_satisfy_a_gate_waiting_for_healthy() {
+        let unmet = unmet_requirements(
+            &[req("rollout", &["HEALTHY"])],
+            &[signal("rollout", "UNHEALTHY")],
+        );
+        assert_eq!(unmet.len(), 1);
+        assert!(unmet[0].contains("currently UNHEALTHY"), "got: {unmet:?}");
+    }
+
+    /// "Nothing reported" and "reported something bad" are different problems
+    /// wanting different responses, so they must read differently.
+    #[test]
+    fn nothing_reported_says_so_rather_than_naming_a_state() {
+        let unmet = unmet_requirements(&[req("rollout", &["HEALTHY"])], &[]);
+        assert_eq!(unmet.len(), 1);
+        assert!(unmet[0].contains("nothing reported"), "got: {unmet:?}");
+        assert!(unmet[0].contains("rollout"), "got: {unmet:?}");
+    }
+
+    /// A signal by another name is not this signal.
+    #[test]
+    fn a_different_signal_does_not_satisfy_the_requirement() {
+        let unmet = unmet_requirements(
+            &[req("rollout", &["HEALTHY"])],
+            &[signal("smoke", "HEALTHY")],
+        );
+        assert_eq!(unmet.len(), 1);
+        assert!(unmet[0].contains("nothing reported"), "got: {unmet:?}");
+    }
+
+    #[test]
+    fn any_of_the_accepted_states_satisfies_it() {
+        for status in ["HEALTHY", "DEGRADED"] {
+            let unmet = unmet_requirements(
+                &[req("rollout", &["HEALTHY", "DEGRADED"])],
+                &[signal("rollout", status)],
+            );
+            assert!(unmet.is_empty(), "{status} should satisfy: {unmet:?}");
+        }
+        let unmet = unmet_requirements(
+            &[req("rollout", &["HEALTHY", "DEGRADED"])],
+            &[signal("rollout", "UNHEALTHY")],
+        );
+        assert_eq!(unmet.len(), 1, "UNHEALTHY should not: {unmet:?}");
+    }
+
+    /// Every requirement must be met, not any.
+    #[test]
+    fn all_requirements_must_be_satisfied() {
+        let requires = [req("rollout", &["HEALTHY"]), req("smoke", &["HEALTHY"])];
+        let unmet = unmet_requirements(&requires, &[signal("rollout", "HEALTHY")]);
+        assert_eq!(unmet.len(), 1);
+        assert!(unmet[0].contains("smoke"), "got: {unmet:?}");
+
+        let unmet = unmet_requirements(
+            &requires,
+            &[signal("rollout", "HEALTHY"), signal("smoke", "HEALTHY")],
+        );
+        assert!(unmet.is_empty(), "got: {unmet:?}");
+    }
+
+    /// A stage that fans out reports one signal per destination. Any
+    /// destination reporting HEALTHY satisfies it — see the note on
+    /// `unmet_requirements` for why this is deliberately not a quorum.
+    #[test]
+    fn one_destination_reporting_is_enough() {
+        let mut from_other = signal("rollout", "HEALTHY");
+        from_other.destination_name = "finance/eu-west-1/infrastructure-finance".to_string();
+        let unmet = unmet_requirements(&[req("rollout", &["HEALTHY"])], &[from_other]);
+        assert!(unmet.is_empty(), "got: {unmet:?}");
+    }
+
+    #[test]
+    fn an_omitted_accept_list_waits_for_healthy() {
+        let unmet = unmet_requirements(&[req("rollout", &[])], &[signal("rollout", "DEGRADED")]);
+        assert_eq!(unmet.len(), 1);
+        assert!(unmet[0].contains("to be HEALTHY"), "got: {unmet:?}");
+    }
 }

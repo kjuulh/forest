@@ -259,6 +259,37 @@ async fn check_org_access(
     }
 }
 
+/// Resolve a release intent's owning organisation and check membership.
+///
+/// Returns NotFound if the intent doesn't exist, avoiding a probing oracle for
+/// unauthenticated callers.
+///
+/// Lives here rather than beside one caller because two services now gate on
+/// it — release health and release signals — and an authorization query with
+/// two copies is one refactor away from two different answers.
+pub async fn require_intent_access(
+    db: &sqlx::PgPool,
+    actor: &crate::actor::Actor,
+    release_intent_id: Uuid,
+) -> Result<(), tonic::Status> {
+    let org = sqlx::query_scalar!(
+        "SELECT p.organisation FROM release_intents ri
+         JOIN projects p ON p.id = ri.project_id
+         WHERE ri.id = $1",
+        release_intent_id,
+    )
+    .fetch_optional(db)
+    .await
+    .map_err(|e| {
+        tracing::error!("authz: resolve intent org failed: {e}");
+        tonic::Status::internal("authorization lookup failed")
+    })?
+    .ok_or_else(|| tonic::Status::not_found("release intent not found"))?;
+
+    require_org_access(db, actor, &org, OrgRole::Member).await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod typed_gate_tests {
     use super::{AuthenticatedActor, UnauthenticatedActor};

@@ -229,6 +229,11 @@ message PipelineStageState {
   repeated string release_ids = 12;      // deploy/plan stages: individual release IDs
   optional string approval_status = 13;  // plan stages: AWAITING_APPROVAL, APPROVED, REJECTED
   optional bool auto_approve = 14;       // plan stages
+  optional string gate_deadline = 15;    // gate stages: when on_timeout decides
+  // gate stages: the requirements not yet satisfied, rendered for a human —
+  // "rollout to be HEALTHY (currently UNHEALTHY)". A parked pipeline should
+  // say what it is parked on rather than look hung.
+  repeated string gate_waiting_on = 16;
 }
 
 // Status of a single release step (release_states row).
@@ -292,6 +297,11 @@ message PipelineRunStage {
   repeated string release_ids = 12;      // deploy stages: individual release IDs
   optional string approval_status = 13;  // plan stages: AWAITING_APPROVAL, APPROVED, REJECTED
   optional bool auto_approve = 14;       // plan stages
+  optional string gate_deadline = 15;    // gate stages: when on_timeout decides
+  // gate stages: the requirements not yet satisfied, rendered for a human —
+  // "rollout to be HEALTHY (currently UNHEALTHY)". A parked pipeline should
+  // say what it is parked on rather than look hung.
+  repeated string gate_waiting_on = 16;
 }
 
 enum PipelineRunStageType {
@@ -299,6 +309,7 @@ enum PipelineRunStageType {
   PIPELINE_RUN_STAGE_TYPE_DEPLOY = 1;
   PIPELINE_RUN_STAGE_TYPE_WAIT = 2;
   PIPELINE_RUN_STAGE_TYPE_PLAN = 3;
+  PIPELINE_RUN_STAGE_TYPE_GATE = 4;
 }
 
 enum PipelineRunStageStatus {
@@ -309,6 +320,15 @@ enum PipelineRunStageStatus {
   PIPELINE_RUN_STAGE_STATUS_FAILED = 4;
   PIPELINE_RUN_STAGE_STATUS_CANCELLED = 5;
   PIPELINE_RUN_STAGE_STATUS_AWAITING_APPROVAL = 6;
+  // Parked waiting to be told. Distinct from ACTIVE so that "nothing is
+  // happening because nobody has reported" is visible rather than looking like
+  // work in progress.
+  PIPELINE_RUN_STAGE_STATUS_AWAITING_SIGNAL = 7;
+  // A newer release for the same target overtook this stage's releases, or an
+  // upstream stage was overtaken. Terminal, and deliberately neither FAILED
+  // (nothing went wrong) nor CANCELLED (nobody cancelled it) — see
+  // design/SKIP-TO-LATEST.md.
+  PIPELINE_RUN_STAGE_STATUS_SUPERSEDED = 8;
 }
 
 // ── Plan stage approval ──────────────────────────────────────────────

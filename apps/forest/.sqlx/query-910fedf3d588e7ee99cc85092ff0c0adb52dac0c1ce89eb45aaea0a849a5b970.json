@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO release_events (\n                release_id, event_type, payload, actor_id, actor_type\n            ) VALUES ($1, 'release.failed', $2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "910fedf3d588e7ee99cc85092ff0c0adb52dac0c1ce89eb45aaea0a849a5b970"
+}

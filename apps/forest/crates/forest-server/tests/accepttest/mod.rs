@@ -16,3 +16,4 @@ mod release_destination_scoping;
 mod release_flow;
 mod release_intent_history;
 mod release_pipeline_destination_scoping;
+mod supersede_pending;

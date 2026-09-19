@@ -72,7 +72,13 @@ pub(crate) struct MockPlatformBehavior {
     pub create_org_rule_set_result: Option<Result<OrgRuleSet, PlatformError>>,
     pub update_org_rule_set_result: Option<Result<OrgRuleSet, PlatformError>>,
     pub delete_org_rule_set_result: Option<Result<(), PlatformError>>,
+    // Records `"<op>:<name>"` for every rule CRUD call the routes make. The
+    // routes address triggers, policies and pipelines by id and resolve that
+    // id to a name before calling the API, so a test needs to see the name
+    // that actually came out the far side.
+    pub rule_action_calls: Option<Arc<Mutex<Vec<String>>>>,
     pub list_triggers_result: Option<Result<Vec<Trigger>, PlatformError>>,
+    pub list_policies_result: Option<Result<Vec<Policy>, PlatformError>>,
     pub create_trigger_result: Option<Result<Trigger, PlatformError>>,
     pub update_trigger_result: Option<Result<Trigger, PlatformError>>,
     pub delete_trigger_result: Option<Result<(), PlatformError>>,
@@ -109,6 +115,9 @@ pub(crate) struct MockPlatformBehavior {
     // Takes precedence over `list_artifacts_result`; a project with no entry
     // returns no artifacts.
     pub list_artifacts_by_project: Option<std::collections::HashMap<String, Vec<Artifact>>>,
+    // DATA-863 — the artifact page renders the plan a reviewer is approving,
+    // so a test needs to be able to give it one.
+    pub get_plan_output_result: Option<Result<forage_core::platform::PlanOutput, PlatformError>>,
 }
 
 pub(crate) fn ok_tokens() -> AuthTokens {
@@ -875,6 +884,9 @@ impl ForestPlatform for MockPlatformClient {
         input: &UpdateTriggerInput,
     ) -> Result<Trigger, PlatformError> {
         let b = self.behavior.lock().unwrap();
+        if let Some(calls) = &b.rule_action_calls {
+            calls.lock().unwrap().push(format!("update_trigger:{name}"));
+        }
         b.update_trigger_result.clone().unwrap_or(Ok(Trigger {
             id: "trigger-1".into(),
             name: name.into(),
@@ -898,9 +910,12 @@ impl ForestPlatform for MockPlatformClient {
         _access_token: &str,
         _organisation: &str,
         _project: &str,
-        _name: &str,
+        name: &str,
     ) -> Result<(), PlatformError> {
         let b = self.behavior.lock().unwrap();
+        if let Some(calls) = &b.rule_action_calls {
+            calls.lock().unwrap().push(format!("delete_trigger:{name}"));
+        }
         b.delete_trigger_result.clone().unwrap_or(Ok(()))
     }
 
@@ -910,7 +925,8 @@ impl ForestPlatform for MockPlatformClient {
         _organisation: &str,
         _project: &str,
     ) -> Result<Vec<Policy>, PlatformError> {
-        Ok(vec![])
+        let b = self.behavior.lock().unwrap();
+        b.list_policies_result.clone().unwrap_or(Ok(vec![]))
     }
 
     async fn create_policy(
@@ -1126,10 +1142,13 @@ impl ForestPlatform for MockPlatformClient {
         _release_intent_id: &str,
         _stage_id: &str,
     ) -> Result<forage_core::platform::PlanOutput, PlatformError> {
-        Ok(forage_core::platform::PlanOutput {
-            plan_output: String::new(),
-            status: "RUNNING".into(),
-            outputs: vec![],
+        let b = self.behavior.lock().unwrap();
+        b.get_plan_output_result.clone().unwrap_or_else(|| {
+            Ok(forage_core::platform::PlanOutput {
+                plan_output: String::new(),
+                status: "RUNNING".into(),
+                outputs: vec![],
+            })
         })
     }
 

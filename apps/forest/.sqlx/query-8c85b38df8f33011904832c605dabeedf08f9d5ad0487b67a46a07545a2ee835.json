@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM organisation_allowed_domains\n             WHERE organisation_id = $1 AND domain = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8c85b38df8f33011904832c605dabeedf08f9d5ad0487b67a46a07545a2ee835"
+}

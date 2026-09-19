@@ -1,0 +1,179 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE oauth_apps\n            SET name = $3, description = $4, homepage_url = $5,\n                redirect_uris = $6, scopes = $7, grant_types = $8, updated_at = now()\n            WHERE organisation_id = $1 AND id = $2\n            RETURNING id, organisation_id, name, description, homepage_url, client_id,\n                      client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "organisation_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "organisation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "homepage_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "homepage_url"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "client_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "client_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "client_secret_hash",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "client_secret_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "redirect_uris",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "redirect_uris"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "scopes",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "scopes"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "grant_types",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "grant_types"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "created_by",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "created_by"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "TextArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "18bd56916a14dc47a394788d110f01acb93f52ea05a223cc4646c6fb5b478c2a"
+}

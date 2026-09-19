@@ -1,0 +1,148 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                rs.release_id,\n                rs.release_intent_id,\n                rs.stage_id,\n                d.name as destination_name,\n                d.environment,\n                rs.status,\n                rs.queued_at,\n                rs.assigned_at,\n                rs.started_at,\n                rs.completed_at,\n                rs.error_message\n            FROM release_states rs\n            JOIN destinations d ON d.id = rs.destination_id\n            WHERE rs.release_intent_id = ANY($1)\n            ORDER BY rs.queued_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "release_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "release_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "release_intent_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "release_intent_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "stage_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "stage_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "destination_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "environment",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "environment"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "queued_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "queued_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "assigned_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "assigned_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "started_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "started_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "completed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "completed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "error_message",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "error_message"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "ca8052943d361b2de0735172a00f399f87b8d2f3947d00d2f79b5e8761e873b3"
+}

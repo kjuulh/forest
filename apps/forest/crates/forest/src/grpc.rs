@@ -1745,6 +1745,7 @@ impl GrpcClient {
                         "SUCCEEDED" => "✓",
                         "ACTIVE" => "▶",
                         "FAILED" | "CANCELLED" => "✗",
+                        "SUPERSEDED" => "⇥",
                         "PENDING" => "◌",
                         _ => "•",
                     };

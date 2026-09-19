@@ -81,3 +81,4 @@ nav:
       - Configuration Files: reference/configuration-files.md
   - Architecture:
       - architecture/index.md
+      - Mire Migration Runbook: architecture/mire-migration.md

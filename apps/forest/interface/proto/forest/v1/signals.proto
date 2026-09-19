@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package forest.v1;
+
+import "forest/v1/health.proto";
+
+// ── Release signals ────────────────────────────────────────────────
+//
+// A signal is a named observation about a release on one destination,
+// pushed in by whoever is in a position to observe it. Signals exist so a
+// pipeline can wait on *evidence* that a release landed rather than on
+// `WaitStageConfig.duration_seconds`, which is a sleep and a hope.
+//
+// Deliberately push-based, and deliberately not restricted to the provider
+// that performed the deploy. That decoupling is the point:
+//
+//   * The ECS provider reports `rollout` because it already polls
+//     DescribeServices and knows when the primary deployment has landed.
+//   * A future health agent polling endpoints on pods or tasks reports the
+//     same signals from somewhere else entirely, satisfying the same gates
+//     with no new vocabulary.
+//   * Terraform cannot report its own: it applies and exits, and anything
+//     worth knowing about the result is observable only later and from
+//     elsewhere. If a gate only accepted signals from the deploying
+//     provider, terraform could never participate at all.
+//
+// So the extension path is "more reporters", not "more kinds of gate".
+//
+// `HealthStatus` is reused rather than a second status vocabulary minted,
+// so a health agent and a gate mean the same thing by HEALTHY.
+service SignalService {
+  // Report an observation. Called by a provider or an agent, repeatedly —
+  // the latest report for a given (release intent, destination, name) wins.
+  rpc ReportSignal(ReportSignalRequest) returns (ReportSignalResponse);
+
+  // Every signal reported for a release intent, for the CLI, forage, and
+  // for a gate deciding whether it is satisfied.
+  rpc ListSignals(ListSignalsRequest) returns (ListSignalsResponse);
+}
+
+// One named observation about a release on one destination.
+message Signal {
+  // The reporter's own name for what it observed — `rollout`, `smoke`,
+  // `migrations`. Scoped to the destination, so two destinations reporting
+  // `rollout` do not collide.
+  string name = 1;
+
+  HealthStatus status = 2;
+
+  // Human-readable, and the thing a person reads first when a gate did not
+  // open. The ECS provider puts its poll line here:
+  // "deployments=1 running=1/1".
+  string detail = 3;
+
+  string destination = 4;
+  string environment = 5;
+
+  // When the reporter observed this, RFC 3339 — not when the server stored
+  // it. A gate compares this against the stage that preceded it, so a
+  // HEALTHY observed before the deploy started cannot satisfy anything.
+  string observed_at = 6;
+
+  // Who reported it, for the case where a signal is wrong and someone has
+  // to work out which reporter to go and look at. Free-form: an agent name,
+  // a provider name.
+  string reported_by = 7;
+}
+
+message ReportSignalRequest {
+  string release_intent_id = 1;
+  string release_id = 2;
+  string organisation = 3;
+  string project = 4;
+  Signal signal = 10;
+}
+
+message ReportSignalResponse {}
+
+message ListSignalsRequest {
+  string release_intent_id = 1;
+}
+
+message ListSignalsResponse {
+  repeated Signal signals = 1;
+}

@@ -226,3 +226,58 @@ mod tests {
         assert!(failures.is_empty(), "templates failed to parse:\n{failures:#?}");
     }
 }
+
+
+#[cfg(test)]
+mod timeline_prefetch_tests {
+    //! The prefetch macro is a `<script>` built by string concatenation in a
+    //! template that renders with autoescaping off, so both halves are worth
+    //! pinning: that it renders at all, and that the URL it carries cannot
+    //! break out of its attribute.
+    use super::*;
+
+    fn engine() -> TemplateEngine {
+        TemplateEngine::from_path(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../templates"))
+            .expect("template engine")
+    }
+
+    fn releases_page(org: &str) -> String {
+        engine()
+            .render(
+                "pages/releases.html.jinja",
+                minijinja::context! {
+                    title => "t", description => "d",
+                    user => minijinja::context! { username => "u" },
+                    csrf_token => "c", current_org => org,
+                    orgs => Vec::<minijinja::Value>::new(),
+                    org_name => org,
+                    env_options => Vec::<minijinja::Value>::new(),
+                    active_tab => "releases",
+                },
+            )
+            .expect("render")
+    }
+
+    #[test]
+    fn the_page_starts_the_timeline_request() {
+        let html = releases_page("understory");
+        assert!(
+            html.contains("__forestTimeline"),
+            "the releases page no longer primes the timeline; \
+             <release-timeline> will wait for the bundle before it asks for data"
+        );
+    }
+
+    // Org names are slug-validated long before they reach here, so this is
+    // depth rather than a live hole — but the escaping is the only thing
+    // standing between an attribute and the rest of the document, and it is
+    // invisible when it works.
+    #[test]
+    fn the_url_cannot_break_out_of_its_attribute() {
+        let html = releases_page("evil\"><script>alert(1)</script>");
+        assert!(
+            !html.contains("<script>alert(1)</script>"),
+            "an org name escaped its attribute:\n{html}"
+        );
+    }
+}

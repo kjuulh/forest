@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO annotations (slug, artifact_id, metadata, source, context, project_id, ref)\n               VALUES ($1, $2, '{}', '{}', '{}', $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "36e21c9dc334a4233633dabcebdab70cf0af67541d7d169acc83fc8aa8250cdf"
+}
