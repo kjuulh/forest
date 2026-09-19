@@ -17,10 +17,20 @@ steps:
         from_secret: registry_token
     commands:
       - echo "$REGISTRY_TOKEN" | docker login git.kjuulh.io -u kjuulh --password-stdin
-      - >
-        docker buildx imagetools create
-        -t git.kjuulh.io/kjuulh/forest-ci:latest
-        -t git.kjuulh.io/kjuulh/forest-ci:rawpotion
-        -t git.kjuulh.io/kjuulh/forest-ci:rawpotion-${CI_COMMIT_SHA}
-        git.kjuulh.io/kjuulh/forest-ci:rawpotion-amd64-${CI_COMMIT_SHA}
-        git.kjuulh.io/kjuulh/forest-ci:rawpotion-arm64-${CI_COMMIT_SHA}
+      - |
+        set -eu
+        attempt=1
+        until docker buildx imagetools create \
+          -t git.kjuulh.io/kjuulh/forest-ci:latest \
+          -t git.kjuulh.io/kjuulh/forest-ci:rawpotion \
+          -t git.kjuulh.io/kjuulh/forest-ci:rawpotion-${CI_COMMIT_SHA} \
+          git.kjuulh.io/kjuulh/forest-ci:rawpotion-amd64-${CI_COMMIT_SHA} \
+          git.kjuulh.io/kjuulh/forest-ci:rawpotion-arm64-${CI_COMMIT_SHA}
+        do
+          if [ "$$attempt" -ge 5 ]; then
+            echo "manifest publish failed after $$attempt attempts"
+            exit 1
+          fi
+          attempt=$$((attempt + 1))
+          sleep 10
+        done
