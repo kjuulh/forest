@@ -1,5 +1,13 @@
 # Forage - The Platform for Forest
 
+> **Superseded historical proposal.** This document describes an unimplemented
+> PaaS direction and must not be used for product claims, pricing, or roadmap
+> decisions. Forest is now focused on a private Component Exchange. Use the
+> current [product direction](../../forest/docs/docs/product/index.md),
+> [pricing proposal](../../forest/docs/docs/product/pricing.md), and
+> [readiness gates](../../forest/docs/docs/product/readiness.md). The remainder
+> is retained only as design history.
+
 ## Elevator Pitch
 
 Forage is the managed platform for Forest. Push a `forest.cue` manifest, get production infrastructure. Think Heroku meets infrastructure-as-code, but built on the composable component model of Forest.

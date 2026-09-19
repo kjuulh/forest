@@ -1,66 +1,70 @@
 # Forest
 
-**Composable workflow and release management for teams.**
+**Publish a platform capability once. Use it as typed automation and as a developer tool.**
 
-Forest helps you design shareable development workflows, compose services from reusable components, and manage production releases with policies, triggers, and pipelines.
+Forest is a private component exchange for platform teams. Components combine a
+CUE contract with versioned, platform-specific executable artifacts. A project
+can lock and invoke a component through `forest run`; a developer can install
+the same component's tool facet through `forest global add`.
 
----
+> **Private preview**
+>
+> Forest is not ready for untrusted component execution. Native components
+> currently inherit the invoking process's host access. Use only components
+> published by organisations you trust, and read
+> [Security and sandboxing](product/security-and-sandboxing.md).
 
-## What is Forest?
+## The component exchange
 
-Forest is a platform that brings structure to how teams build, deploy, and operate software. Instead of gluing together ad-hoc scripts and CI/CD configs, Forest provides a component model where:
-
-- **Components** are self-contained, versioned plugins (Rust, Go, or Docker) that define commands, deployment hooks, and configuration schemas using [CUE](https://cuelang.org/).
-- **Projects** compose components together, providing environment-specific configuration.
-- **Releases** are first-class, event-sourced operations with full lifecycle management — from annotation through deployment to rollback.
-- **Policies** enforce guardrails like soak times, branch restrictions, and approval gates.
-- **Triggers** automate releases based on branch patterns, commit metadata, or source types.
-- **Pipelines** orchestrate multi-stage deployments as directed acyclic graphs (DAGs).
-
-## Key Features
-
-| Feature | Description |
-|---------|-------------|
-| **Component registry** | Publish and share reusable components across teams |
-| **CUE-based configuration** | Type-safe, composable configuration with schema validation |
-| **Event-sourced releases** | Full audit trail with status tracking and real-time streaming |
-| **Release pipelines** | Multi-stage DAG deployments (deploy, wait, plan) |
-| **Policy engine** | Soak time, branch restriction, and external approval policies |
-| **Automated triggers** | Pattern-based auto-release on commits, branches, and PRs |
-| **Multi-environment** | First-class support for dev, staging, prod (and custom environments) |
-| **Distributed runners** | Execute deployments on remote infrastructure |
-| **Lock files** | Reproducible dependency resolution with `forest.lock` |
-
-## How It Works
-
-```
-forest.cue (project config)
-    |
-    v
-+-- Components (versioned plugins) --+
-|   kubernetes-service                |
-|   terraform-service                 |
-|   docker-builder                    |
-+-------------------------------------+
-    |
-    v
-Environments (dev / staging / prod)
-    |
-    v
-Destinations (where to deploy)
-    |
-    v
-Releases (event-sourced lifecycle)
-    |
-    +-- Triggers (auto-fire on patterns)
-    +-- Policies (guard with rules)
-    +-- Pipelines (multi-stage DAGs)
+```text
+                          versioned component coordinate
+                    CUE contract + manifest + artifacts
+                                      |
+                 +--------------------+--------------------+
+                 |                                         |
+        project / CI dependency                     developer tool
+       forest.add + forest.lock                 forest global add
+                 |                                         |
+         forest run <command>                      verified lazy shim
 ```
 
-## Quick Links
+The initial supported product boundary includes:
 
-- [Quickstart](quickstart.md) — Get running in 5 minutes
-- [Getting Started](getting-started/index.md) — Step-by-step setup guide
-- [Concepts](concepts/index.md) — Understand the core model
-- [CLI Reference](reference/cli.md) — Full command reference
-- [Authoring Components](guides/authoring-components.md) — Build your own components
+- CUE-defined component inputs, outputs, commands, and tool metadata;
+- generated Rust and TypeScript SDK bindings;
+- private publication of versioned artifacts, with permanent coordinate
+  immutability required before external preview;
+- checksum verification and project lock files;
+- organisation-scoped discovery and catalogues;
+- typed command execution in repositories and CI;
+- lazy, verified developer-tool installation and shell integration.
+
+Release pipelines, deployment destinations, and the managed web application
+exist in this repository but remain preview surfaces until their isolation,
+tenancy, reliability, and support gates pass.
+
+## Start here
+
+1. [Install the private preview](getting-started/installation.md)
+2. [Configure authentication](getting-started/authentication.md)
+3. [Complete the Component Exchange quickstart](quickstart.md)
+4. [Understand components](concepts/components.md)
+5. [Author a component](guides/authoring-components.md)
+
+## Productization
+
+- [Product direction](product/index.md) defines the customer, product boundary,
+  non-goals, and validation milestones.
+- [Pricing](product/pricing.md) proposes a concrete managed-control-plane model;
+  billing is not active.
+- [Security and sandboxing](product/security-and-sandboxing.md) records the
+  current trusted-code boundary and required execution profiles.
+- [Readiness](product/readiness.md) gives the ordered gates for preview, paid
+  beta, and general availability.
+
+## Technical reference
+
+- [CLI reference](reference/cli.md)
+- [Configuration files](reference/configuration-files.md)
+- [Architecture](architecture/index.md)
+- [CI/CD integration](guides/ci-cd.md)

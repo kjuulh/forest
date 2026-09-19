@@ -13,22 +13,6 @@ async fn landing_page_returns_200() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-#[tokio::test]
-async fn landing_page_contains_expected_content() {
-    let response = test_app()
-        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let html = String::from_utf8(body.to_vec()).unwrap();
-    assert!(html.contains("Forest - your developer platform"));
-    assert!(html.contains("forest.cue"));
-    assert!(html.contains("Component Registry"));
-    assert!(html.contains("Managed Deployments"));
-    assert!(html.contains("Type-Safe Infrastructure"));
-}
 
 #[tokio::test]
 async fn pricing_page_returns_200() {
@@ -44,28 +28,6 @@ async fn pricing_page_returns_200() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-#[tokio::test]
-async fn pricing_page_contains_all_tiers() {
-    let response = test_app()
-        .oneshot(
-            Request::builder()
-                .uri("/pricing")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let html = String::from_utf8(body.to_vec()).unwrap();
-    assert!(html.contains("Free"));
-    assert!(html.contains("Developer"));
-    assert!(html.contains("Team"));
-    assert!(html.contains("Enterprise"));
-    assert!(html.contains("$10"));
-    assert!(html.contains("$25"));
-}
 
 #[tokio::test]
 async fn landing_page_redirects_to_dashboard_when_authenticated() {

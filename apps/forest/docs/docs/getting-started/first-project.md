@@ -41,18 +41,18 @@ forest project init
 
 ## Add Component Dependencies
 
-Components provide the deployment logic. Add one from the registry:
+Components provide the project command and deployment contracts. Add an exact
+version from the registry:
 
 ```bash
-# Add a component (latest version)
-forest add forest-contrib/kubernetes-service
-
-# Add a specific version
 forest add forest-contrib/kubernetes-service@0.2.0
 
-# Add a local path dependency (for development)
+# Local path dependency for component development
 forest add forest-contrib/kubernetes-service --path ../my-local-component
 ```
+
+Use exact registry versions during the private preview. Runtime command
+resolution does not yet consume a ranged dependency's resolved lock entry.
 
 This updates `forest.cue` and creates/updates `forest.lock`.
 
@@ -74,7 +74,7 @@ project: sdk.#ForestProject & {
 }
 
 dependencies: sdk.#ForestDependencies & {
-    "forest-contrib/kubernetes-service": version: "0.1"
+    "forest-contrib/kubernetes-service": version: "0.2.0"
 }
 
 "forest-contrib": "kubernetes-service": sdk.#ForestComponentUsage & {

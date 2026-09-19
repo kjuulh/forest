@@ -1,70 +1,68 @@
 {% extends "base.html.jinja" %}
 
 {% block content %}
-<section class="max-w-4xl mx-auto px-4 pt-24 pb-16 text-center">
-    <h1 class="text-5xl font-bold tracking-tight leading-tight">
-        Push a manifest.<br>Get production infrastructure.
+<section class="max-w-4xl mx-auto px-4 pt-24 pb-12 text-center">
+    <p class="text-xs font-semibold uppercase tracking-wider text-gray-500">Private component exchange</p>
+    <h1 class="mt-3 text-5xl font-bold tracking-tight leading-tight">
+        Publish once.<br>Run everywhere your team works.
     </h1>
-    <p class="mt-6 text-xl text-gray-600 max-w-2xl mx-auto">
-        Forest is your developer platform. Define your infrastructure in a
-        <code class="bg-gray-100 px-2 py-0.5 rounded text-base">forest.cue</code> file,
-        push it, and we handle the rest.
+    <p class="mt-6 text-xl text-gray-600 max-w-3xl mx-auto">
+        Forest packages typed automation and developer tools as one versioned component.
+        Lock it in repositories, invoke it in CI, or install its verified tool directly on your workstation.
+    </p>
+    <div class="mt-8 flex flex-wrap justify-center gap-3">
+        <a href="mailto:contact@kjuulh.io?subject=Forest%20private%20preview" class="px-5 py-2.5 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800">Join the waitlist</a>
+        <a href="/pricing" class="px-5 py-2.5 border border-gray-300 rounded-md text-sm font-medium hover:border-gray-400">See pricing strategy</a>
+    </div>
+</section>
+
+<section class="max-w-4xl mx-auto px-4 py-12">
+    {# `code-surface` keeps this block dark in both light and dark mode. #}
+    <div class="code-surface rounded-lg p-6 text-sm font-mono overflow-x-auto">
+        <pre><span class="text-gray-500"># One versioned capability in a repository</span>
+<span class="text-green-400">$</span> forest add acme/policy-check@1.4.0
+<span class="text-green-400">$</span> forest validate
+<span class="text-green-400">$</span> forest run check --policy production
+
+<span class="text-gray-500"># The same private catalogue on a workstation</span>
+<span class="text-green-400">$</span> forest global add acme/devctl@2.1.0
+<span class="text-green-400">$</span> devctl release status</pre>
+    </div>
+    <p class="mt-4 text-center text-sm text-gray-500">
+        CUE contracts make inputs inspectable. Lock files and checksums make resolution reproducible.
     </p>
 </section>
 
-<section class="max-w-4xl mx-auto px-4 py-16">
-    {# `code-surface` keeps this block dark in both light and dark mode —
-       see static/css/input.css. Without it the @media dark-mode palette
-       remap inverts bg-gray-950 to a near-white. #}
-    <div class="code-surface rounded-lg p-6 text-sm font-mono overflow-x-auto">
-        <pre><span class="text-gray-500">// forest.cue</span>
-<span class="text-blue-400">project</span>: {
-  <span class="text-green-400">name</span>:         <span class="text-amber-400">"my-api"</span>
-  <span class="text-green-400">organisation</span>: <span class="text-amber-400">"acme"</span>
-}
-
-<span class="text-blue-400">dependencies</span>: {
-  <span class="text-amber-400">"forage/service"</span>:  <span class="text-green-400">version</span>: <span class="text-amber-400">"1.0"</span>
-  <span class="text-amber-400">"forage/postgres"</span>: <span class="text-green-400">version</span>: <span class="text-amber-400">"1.0"</span>
-}
-
-<span class="text-blue-400">forage</span>: <span class="text-blue-400">service</span>: {
-  <span class="text-green-400">config</span>: {
-    <span class="text-green-400">name</span>:  <span class="text-amber-400">"my-api"</span>
-    <span class="text-green-400">image</span>: <span class="text-amber-400">"my-api:latest"</span>
-    <span class="text-green-400">ports</span>: [{ <span class="text-green-400">container</span>: <span class="text-purple-400">8080</span>, <span class="text-green-400">protocol</span>: <span class="text-amber-400">"http"</span> }]
-  }
-}</pre>
-    </div>
-    <div class="mt-4 text-center">
-        <code class="text-sm text-gray-500">$ forest release create --env prod</code>
+<section class="max-w-6xl mx-auto px-4 py-16">
+    <h2 class="text-3xl font-bold text-center mb-12">A distribution contract for platform capabilities</h2>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div class="p-6 border border-gray-200 rounded-lg">
+            <h3 class="font-bold text-lg mb-2">Typed components</h3>
+            <p class="text-gray-600 text-sm">
+                Define commands, inputs, outputs, and configuration in CUE. Generate SDK bindings and catch invalid configuration before execution.
+            </p>
+        </div>
+        <div class="p-6 border border-gray-200 rounded-lg">
+            <h3 class="font-bold text-lg mb-2">Private, versioned artifacts</h3>
+            <p class="text-gray-600 text-sm">
+                Publish per-platform artifacts to an organisation catalogue. Consumers resolve intentional versions into a checked-in lock file.
+            </p>
+        </div>
+        <div class="p-6 border border-gray-200 rounded-lg">
+            <h3 class="font-bold text-lg mb-2">Repository and workstation</h3>
+            <p class="text-gray-600 text-sm">
+                Use the same component through <code>forest run</code> in CI and through a lazily installed <code>forest global</code> tool on developer machines.
+            </p>
+        </div>
     </div>
 </section>
 
-<section class="max-w-6xl mx-auto px-4 py-16">
-    <h2 class="text-3xl font-bold text-center mb-12">Everything you need to ship</h2>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-        <div class="p-6 border border-gray-200 rounded-lg">
-            <h3 class="font-bold text-lg mb-2">Component Registry</h3>
-            <p class="text-gray-600 text-sm">
-                Publish and discover reusable forest components. Share deployment patterns,
-                service templates, and infrastructure modules across your organisation.
-            </p>
-        </div>
-        <div class="p-6 border border-gray-200 rounded-lg">
-            <h3 class="font-bold text-lg mb-2">Managed Deployments</h3>
-            <p class="text-gray-600 text-sm">
-                Zero-config container runtime. Push your manifest and get automatic scaling,
-                health checks, rollbacks, and multi-environment support.
-            </p>
-        </div>
-        <div class="p-6 border border-gray-200 rounded-lg">
-            <h3 class="font-bold text-lg mb-2">Type-Safe Infrastructure</h3>
-            <p class="text-gray-600 text-sm">
-                CUE gives you typed, validated infrastructure definitions. Catch configuration
-                errors before they reach production.
-            </p>
-        </div>
+<section class="max-w-4xl mx-auto px-4 py-12">
+    <div class="p-6 border border-amber-200 bg-amber-50 rounded-lg">
+        <h2 class="font-bold text-lg">Private preview: trusted components only</h2>
+        <p class="mt-2 text-sm text-gray-700">
+            Forest is currently suitable only for trusted internal evaluation on a private network. Native components run with the invoking user's privileges, global-tool warming may persist publisher-controlled shell code, and runner/artifact authorization is not ready for mutually untrusted tenants. Sandboxing, workload identity, permanent coordinates, provenance, and scanning are launch gates—not features we pretend already exist.
+        </p>
     </div>
 </section>
 {% endblock %}

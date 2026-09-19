@@ -1,6 +1,8 @@
 # Components
 
-Components are the building blocks of Forest. They are self-contained, versioned plugins that provide commands, deployment hooks, and configuration schemas.
+Components are the unit of publication and reuse in Forest. They are versioned
+executable capabilities with a CUE contract, platform artifacts, commands, and
+optional developer-tool metadata.
 
 ## What Is a Component?
 
@@ -11,6 +13,10 @@ A component is:
 - **Templates** (optional) for generating deployment manifests
 
 Components are published to the Forest registry and consumed by projects as dependencies.
+
+> **Trust boundary:** component binaries currently execute as native processes.
+> Checksums verify artifact identity but do not sandbox publisher code. Consume
+> only trusted components during the private preview.
 
 ## Component Structure
 
@@ -169,9 +175,20 @@ Forest renders these with the project's spec values and copies them to the worki
 
 ## Lifecycle
 
-1. **Author** — Write the component spec and implementation
-2. **Build** — `forest build` compiles for all configured platforms
-3. **Publish** — `forest publish` uploads binary + spec to the registry
-4. **Consume** — Projects add the component with `forest add org/name`
+1. **Author** — Define the component contract and implementation.
+2. **Generate** — Run `forest generate` after changing the CUE contract.
+3. **Build** — Run `forest run build`; a depended-on build component stages each
+   platform artifact under `.forest/component/output/<os>/<arch>/`.
+4. **Preflight** — Run `forest publish --dry-run` to check the staged host
+   artifact and descriptor, construct the manifest, and preview the target.
+   Server-side manifest rules run only during the real publish.
+5. **Publish** — Run `forest publish` to create a registry version. A live
+   coordinate cannot be overwritten, but administrators can currently
+   unpublish and reuse it; permanent coordinate immutability is a launch gate.
+6. **Consume** — Add it to a project with `forest add org/name@version`, or
+   install a declared tool facet with `forest global add org/name@version`.
 
-See the [Authoring Components](../guides/authoring-components.md) guide for a full walkthrough.
+The historical `forest build` command no longer exists.
+
+See the [Authoring Components](../guides/authoring-components.md) guide for a
+full walkthrough.

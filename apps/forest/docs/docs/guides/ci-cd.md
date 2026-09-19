@@ -1,39 +1,62 @@
-# CI/CD Integration
+# CI/CD integration
 
-Forest is designed to be driven from CI/CD pipelines. This guide covers common integration patterns.
+> **Status:** the generic Component Exchange does not yet ship a supported
+> provider-neutral CI package or scoped machine identities. The GitHub and
+> Understory examples later in this page are private integration history, not
+> the public product contract. Do not copy their hosts, repositories, or shared
+> organisation secrets into a new installation.
 
-## Authentication
+## Authentication during private development
 
-Generate a token for CI/CD:
-
-```bash
-# One-time setup. Writes the raw token to stdout and everything else to
-# stderr, so it pipes straight into a secret store without leaking:
-forest auth token create --name "ci-bot" | gh secret set FOREST_TOKEN --repo <org>/<repo>
-```
-
-:::note
-This is a *personal* access token — it carries the permissions of whoever
-created it. There is no machine/service-account token today; `forest
-organisation` has no `app` subcommand despite what earlier revisions of this
-guide claimed. Prefer a token created by an account that only holds the access
-CI actually needs.
-:::
-
-Set the token in your pipeline:
+The current CLI exposes personal access tokens:
 
 ```bash
-export FOREST_TOKEN="<your-app-token>"
-export FOREST_SERVER="https://forest.example.com:4040"
+forest auth token create \
+  --name "component-repo-ci" \
+  --expires-in 2592000
 ```
 
-`FOREST_TOKEN` is read directly by the gRPC auth interceptor and bypasses the
-interactive login entirely — no browser, no refresh, no local state file. It is
-the only credential a CI publish needs.
+The raw token is written once. Store it directly in the CI provider's secret
+store and expose it only to the publish job:
 
-Forest never prompts for credentials during a publish. An unattended run with
-no token fails immediately, before any upload, with a message naming what is
-missing rather than a transport error from somewhere inside the interceptor.
+```bash
+export FOREST_TOKEN="<dedicated token>"
+export FOREST_SERVER="https://api.forest.example.com"
+```
+
+Use a dedicated least-privileged preview account, one expiring token per
+repository, and revoke it when the workflow is retired. Do not share a
+maintainer's non-expiring personal token across repositories.
+
+Scoped workload identities are required before external design-partner CI.
+`FOREST_SERVICE_ACCOUNT_API_KEY` is a broad internal server credential and must
+not be distributed to customer workflows.
+
+## Provider-neutral publish sequence
+
+The CI provider is responsible for checking out the exact source revision,
+building every advertised platform artifact, and preserving credentials:
+
+```bash
+forest generate
+forest run build
+forest publish --dry-run
+forest publish
+```
+
+The project must declare an exact build-component dependency and its usage
+block so `forest run build` exists. The dry run checks the staged host binary
+and descriptor and constructs a preview; server-side manifest rules run during
+the real publish.
+
+Current CI is trusted-code-only. Component build and descriptor processes run
+with the job's permissions and can read its filesystem, environment, and
+network. See [Security and sandboxing](../product/security-and-sandboxing.md).
+
+## Historical private GitHub automation
+
+The remainder documents existing Understory workflows for maintainers of the
+private integration overlay. It is not a supported generic installation path.
 
 ## Publishing a component on a tagged release
 

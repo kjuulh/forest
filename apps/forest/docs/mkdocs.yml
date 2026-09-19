@@ -1,6 +1,8 @@
 site_name: Forest
-site_description: Composable workflow and release management for teams
+site_description: Private component exchange for platform teams
 site_url: https://forest.sh/docs
+repo_url: https://git.kjuulh.io/kjuulh/forest
+repo_name: kjuulh/forest
 
 theme:
   name: material
@@ -30,7 +32,7 @@ theme:
     - search.suggest
     - toc.follow
   icon:
-    repo: fontawesome/brands/github
+    repo: fontawesome/brands/git-alt
 
 markdown_extensions:
   - admonition
@@ -74,6 +76,11 @@ nav:
       - Flux v2 Destination: guides/flux-destination.md
       - CUE Configuration: guides/cue-configuration.md
       - CI/CD Integration: guides/ci-cd.md
+  - Productization:
+      - Product Direction: product/index.md
+      - Pricing: product/pricing.md
+      - Security and Sandboxing: product/security-and-sandboxing.md
+      - Readiness: product/readiness.md
   - Reference:
       - reference/index.md
       - CLI Reference: reference/cli.md

@@ -1253,7 +1253,6 @@ async fn usage_page_returns_200() {
         .await
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
-    assert!(html.contains("Early Access"));
     assert!(html.contains("testorg"));
 }
 

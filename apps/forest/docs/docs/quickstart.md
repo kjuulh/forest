@@ -1,120 +1,139 @@
-# Quickstart
+# Component Exchange quickstart
 
-Get a Forest project running in under 5 minutes.
+This walkthrough exercises Forest's core product loop:
+
+```text
+discover → add and lock → typed run → install tool facet
+```
+
+It requires access to a Forest server where your organisation has published a
+component with both a command and a tool facet. Replace the `acme/*` examples
+with coordinates supplied by your operator. A fresh local server is not seeded
+with these example components automatically.
 
 ## Prerequisites
 
-- [Rust toolchain](https://rustup.rs/) (for building from source)
-- Access to a Forest server (self-hosted or managed)
+- the `forest` CLI from the [installation guide](getting-started/installation.md);
+- CUE available on `PATH`;
+- a server URL and an invited or registered account;
+- a component coordinate and version from a trusted publisher.
 
-## Install Forest
+## 1. Select the server
 
-```bash
-cargo install --path crates/forest
-```
-
-## Authenticate
-
-```bash
-forest auth login
-```
-
-Follow the prompts to authenticate with your Forest server.
-
-## Create a Project
+Create a named context so credentials and endpoints do not leak between
+development, staging, and production:
 
 ```bash
-# Scaffold from a starter template
-forest init
+forest context create team \
+  --server https://api.forest.example.com \
+  --use
+forest context active
 ```
 
-This creates a `forest.cue` configuration file and sets up the project structure.
-
-## Add a Component
+## 2. Authenticate
 
 ```bash
-# Add a Kubernetes deployment component
-forest add forest-contrib/kubernetes-service
+forest auth login --web
+forest auth status
 ```
 
-This adds the component as a dependency in your `forest.cue` and updates `forest.lock`.
+Use `forest auth login --password` only when the server and workflow require the
+legacy password flow. CI should use a scoped, expiring machine identity when
+that capability ships; during the private preview it can use a dedicated,
+least-privileged personal token as documented in
+[CI/CD integration](guides/ci-cd.md).
 
-## Configure Your Service
+## 3. Discover a component
 
-Edit `forest.cue` to configure the component for your environments:
+```bash
+forest components list --org acme
+forest components show acme/devctl
+```
+
+Inspect the publisher, version, available platforms, component shape, methods,
+and checksums before installing. During the private preview, only run components
+from organisations you trust.
+
+## 4. Add and lock it in a project
+
+From a directory containing `forest.cue`:
+
+```bash
+forest add acme/devctl@2.1.0
+```
+
+`forest add` records the dependency. Declare its usage block in `forest.cue` so
+its commands enter the project command graph:
 
 ```cue
-package my_service
-
-import (
-    "forest.sh/forest/sdk@v0"
-    k8s "forest.sh/forest-contrib/kubernetes-service@v0:kubernetes_service"
-)
-
-project: sdk.#ForestProject & {
-    name:         "my-service"
-    organisation: "my-org"
-}
-
-dependencies: sdk.#ForestDependencies & {
-    "forest-contrib/kubernetes-service": version: "0.1"
-}
-
-"forest-contrib": "kubernetes-service": sdk.#ForestComponentUsage & {
-    env: {
-        dev: {
-            destinations: [
-                {destination: "k8s-dev", type: "forest/kubernetes@1"},
-            ]
-            config: replicas: 2
-        }
-        prod: {
-            destinations: [
-                {destination: "k8s-prod", type: "forest/kubernetes@1"},
-            ]
-            config: replicas: 5
-        }
-    }
-    config: k8s.#Spec & {
-        name:  "my-service"
-        image: "registry.example.com/my-service"
-        ports: [{name: "http", port: 8080, external: true}]
-        health_checks: liveness: http: {
-            path: "/health"
-            port: 8080
-        }
-    }
-}
+"acme": "devctl": {}
 ```
-
-## Validate
 
 ```bash
 forest validate
+forest run status
 ```
 
-Checks your configuration against component schemas and verifies contract coverage.
+Forest currently executes exact registry versions reliably; use an exact
+version rather than a range. Commit `forest.cue` and `forest.lock`. A clean
+checkout should resolve the same artifact hashes.
 
-## Prepare and Release
+The concrete commands and inputs come from the component's CUE contract. Use
+`forest components show acme/devctl` to inspect them; replace `status` above if
+the component exposes a different command.
+
+
+## 5. Install its developer tool
+
+If the component exposes a tool facet:
 
 ```bash
-# Generate deployment manifests
-forest release prepare
-
-# Create and execute a release in one step
-forest release create --environment dev
+forest global add acme/devctl@2.1.0
+forest global list
+forest global which devctl
 ```
 
-Forest will prepare manifests, create a release annotation, and deploy to the `dev` environment.
-
-## Watch the Release
-
-The `release create` command streams progress by default. You can also watch any release with:
+Enable shims and declared shell integration:
 
 ```bash
-forest release wait <release-intent-id>
+eval "$(forest shell zsh)"       # bash: forest shell bash
+devctl --version
 ```
 
----
+The shim fetches the platform artifact lazily, verifies its recorded checksum,
+and caches it. Shell setup may also execute trusted tools during background
+warming to capture output that later shells source. This verifies artifact
+identity; it does not sandbox the binary or its shell code. See
+[Security and sandboxing](product/security-and-sandboxing.md).
 
-**Next steps:** Read the [Getting Started guide](getting-started/index.md) for a deeper walkthrough, or explore [Concepts](concepts/index.md) to understand the full model.
+## 6. Verify reproducibility
+
+In a second clean checkout:
+
+```bash
+forest validate
+forest run status
+```
+
+Success means the checked-in exact version and recorded hashes resolve without
+manual component setup. If Forest rewrites the lock unexpectedly, downloads a
+different checksum, or needs an author's untracked files, the workflow is not
+reproducible.
+
+## Publish your own
+
+Once the consumer path works, follow
+[Authoring components](guides/authoring-components.md). The safe publication
+sequence is:
+
+```bash
+forest add forest-contrib/build-rust@0.1.2
+# Add `"forest-contrib": "build-rust": {}` to forest.cue.
+forest generate
+forest run build
+forest publish --dry-run
+forest publish
+```
+
+`forest build` is not a command. Builds are provided by a component and invoked
+through `forest run build`.

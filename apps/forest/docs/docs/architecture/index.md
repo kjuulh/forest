@@ -77,12 +77,22 @@ NATS-driven with 5s fallback sweep:
 
 ## Authorization
 
-Every gRPC endpoint enforces authorization:
+Most user-facing gRPC handlers extract an actor from request metadata and apply
+organisation or project checks. The current implementation is **not yet a
+complete multi-tenant authorization boundary**:
 
-1. Extract actor from request metadata (JWT / API key / app token)
-2. Check org-level access (`require_org_access` / `require_project_access`)
-3. Service accounts bypass org checks (cross-org infra access)
-4. App tokens are auto-scoped to their organisation
+- `RunnerService` is exempt from the normal authentication layer; registration
+  accepts caller-supplied runner identity and capabilities before the scheduler
+  can return scoped release credentials and destination metadata.
+- Artifact publication records the actor when an upload begins, but subsequent
+  upload, commit, abort, and retrieval operations rely on supplied identifiers
+  without consistently rebinding the request actor to the original owner.
+- The server-configured service-account credential has cross-organisation
+  behaviour and requires replacement or strict scoping.
+
+Treat the control plane as private trusted infrastructure until runner
+authentication, artifact ownership checks, and the complete negative
+cross-tenant matrix in the security plan are implemented and reviewed.
 
 ## Event Bus
 

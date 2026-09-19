@@ -106,9 +106,11 @@ Additional CUE type definitions imported by `forest.component.cue`. Useful for s
 
 Generated SDK code from `forest generate`. Contains typed structs matching the component spec, input/output types for commands, and method routing. Regenerated on each `forest generate` run.
 
-### `.forest/component/meta.json`
+### `.forest/component/output/`
 
-Build metadata cached after `forest build`. Contains binary hashes per platform and the cached component descriptor.
+Build components stage publishable binaries under
+`.forest/component/output/<os>/<arch>/<name>`. `forest publish` reads from this
+tree and does not fall back to Cargo's `target/` directory.
 
 ---
 
@@ -116,13 +118,16 @@ Build metadata cached after `forest build`. Contains binary hashes per platform 
 
 ### `.env`
 
-Local development environment variables:
+Local server development settings are loaded from `.env`. Start from the
+tracked, non-production example:
 
-```env
-DATABASE_URL=postgresql://devuser:devpassword@localhost:5432/dev
-NATS_URL=nats://localhost:4222
-FOREST_SERVICE_ACCOUNT_API_KEY=<optional>
+```bash
+cp .env.example .env
 ```
+
+It configures local PostgreSQL, NATS, MinIO, public callback hosts, and
+development-only signing secrets. Never reuse those example secrets outside
+localhost and never commit a populated `.env`.
 
 ### `docker-compose.yaml`
 

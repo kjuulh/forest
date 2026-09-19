@@ -224,11 +224,29 @@ Templates are rendered with the project's spec values during `forest release pre
 
 ## Build
 
+The generated scaffold does not expose a build command. Add the Rust build
+provider:
+
 ```bash
-forest build
+forest add forest-contrib/build-rust@0.1.2
 ```
 
-This compiles for all configured architectures and stores the binaries in the content-addressable cache at `~/.cache/forest/components/bin/`.
+Then add its usage block to `forest.cue`:
+
+```cue
+"forest-contrib": "build-rust": {}
+```
+
+Build through the ordinary component command graph:
+
+```bash
+forest run build
+```
+
+The build provider stages artifacts under
+`.forest/component/output/<os>/<arch>/<name>`. Declaring multiple architectures
+does not itself cross-compile them; the build command or CI matrix must produce
+every advertised artifact.
 
 ## Test Locally
 
@@ -243,7 +261,10 @@ Then run commands and releases against the local binary.
 
 ## Publish
 
+Validate the local payload before uploading:
+
 ```bash
+forest publish --dry-run
 forest publish
 ```
 
@@ -495,10 +516,11 @@ For dependency resolution to work at runtime, the parent project must list every
 
 ### Build and Test
 
-Build the component to generate `meta.json` (the component manifest):
+Run the depended-on build command to stage the TypeScript/Deno component and
+its descriptor:
 
 ```bash
-forest build
+forest run build
 ```
 
 For local testing, use a path-based dependency in your consuming project, just as with Rust components:
@@ -607,7 +629,7 @@ Forest supports sealing Kubernetes secrets using the `forest run seal` command. 
 
 4. **Projects must list transitive dependencies** — If component A calls component B via `callComponent`, every project that uses A must also declare B as a dependency. Forest does not auto-resolve transitive dependencies at the project level.
 
-5. **`forest build` does not regenerate codegen** — The `forest build` command compiles the component and produces `meta.json`, but it does not re-run code generation. When you change `forest.component.cue`, you must run `forest generate` separately before building.
+5. **Build does not regenerate codegen** — `forest run build` dispatches the configured build component; it does not re-run code generation. When you change `forest.component.cue`, run `forest generate` separately before building.
 
 ## First Deployment Workflow
 
@@ -619,7 +641,7 @@ When deploying a new service for the first time, follow this order:
 
    ```bash
    forest generate --output ./src/ --language typescript
-   forest build
+   forest run build
    ```
 
 3. **Seal any required secrets.** Encrypt sensitive values before the first release:

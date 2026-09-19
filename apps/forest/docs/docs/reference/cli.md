@@ -47,19 +47,31 @@ forest add forest-contrib/kubernetes-service@0.2.0
 forest add forest-contrib/kubernetes-service --path ../local-dev
 ```
 
----
+Use exact registry versions during the private preview. `forest update` can
+write a resolved lock entry for a range, but the current run path still queries
+the registry with the declaration rather than consuming that resolved lock
+entry. Runtime lock consumption is a productization blocker.
 
-## `forest build`
+`forest add` records the dependency; it does not add the CUE usage block that
+places the dependency's commands in the project graph. Declare it explicitly:
 
-Build the component binary for all configured platforms.
-
-```bash
-forest build
+```cue
+"forest-contrib": "kubernetes-service": {}
 ```
 
-Reads `forest.cue` and `spec.cue` to determine component name, version, and target architectures. Outputs binaries to `~/.cache/forest/components/bin/`.
-
 ---
+
+## Component builds
+
+`forest build` was removed. Build logic is provided by a component and invoked
+through the ordinary command surface:
+
+```bash
+forest run build
+```
+
+The build component stages artifacts under
+`.forest/component/output/<os>/<arch>/<name>` for `forest publish`.
 
 ## `forest generate`
 
@@ -71,20 +83,26 @@ forest generate --output <DIR> [--language <LANG>]
 
 | Option | Description |
 |--------|-------------|
-| `--output` | Output directory for generated code (required) |
-| `--language` | Target language: `rust`, `typescript`, `deno`, `ts` (auto-detected if omitted) |
+| `--output` | Output directory for generated code; defaults to `codegen.output` from `forest.cue` |
+| `--language` | Target language; defaults to the language declared in `forest.cue` |
 
 ---
 
 ## `forest publish`
 
-Publish the component to the Forest registry.
+Validate and publish a component to the selected Forest registry:
 
 ```bash
+forest publish --dry-run
 forest publish
 ```
 
-Uploads the compiled binary, CUE spec files, and component manifest. Requires `forest build` to be run first.
+The dry run evaluates CUE, verifies the staged host binary, executes its
+descriptor probe, constructs the manifest, and prints the destination without
+contacting the registry. Server-side manifest rules run during the real
+publish, which uploads the staged platform artifacts, CUE files, and manifest.
+A live version cannot be overwritten, but administrative unpublish currently
+allows coordinate reuse.
 
 ---
 
@@ -102,7 +120,7 @@ Checks that project config matches component schemas and verifies contract cover
 
 ## `forest update`
 
-Update dependencies to the latest versions matching the spec.
+Resolve dependency declarations and rewrite `forest.lock`.
 
 ```bash
 forest update [COMPONENT]
@@ -110,7 +128,10 @@ forest update [COMPONENT]
 
 | Argument | Description |
 |----------|-------------|
-| `COMPONENT` | Specific component to update (`org/name`). If omitted, updates all. |
+| `COMPONENT` | Specific component to resolve (`org/name`). If omitted, resolves all. |
+
+Until runtime execution consumes the resolved lock entry, keep registry
+declarations exact rather than relying on ranges.
 
 ---
 

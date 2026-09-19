@@ -24,8 +24,8 @@ async fn landing(
     let html = state
         .templates
         .render("pages/landing.html.jinja", context! {
-            title => "Forest - your developer platform",
-            description => "Push a forest.cue manifest, get production infrastructure.",
+            title => "Forest - private component exchange",
+            description => "Publish typed automation once, then use it in repositories, CI, and developer tools.",
             is_landing => true,
         })
         .map_err(|e| {
@@ -40,8 +40,8 @@ async fn pricing(State(state): State<AppState>) -> Result<Html<String>, axum::ht
     let html = state
         .templates
         .render("pages/pricing.html.jinja", context! {
-            title => "Pricing - Forage",
-            description => "Simple, transparent pricing. Pay only for what you use.",
+            title => "Pricing - Forest",
+            description => "Private preview terms and future pricing principles for Forest.",
         })
         .map_err(|e| {
             tracing::error!("template error: {e:#}");

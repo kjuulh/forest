@@ -1,44 +1,30 @@
 {% extends "base.html.jinja" %}
 {% from "components/settings_sidebar.html.jinja" import settings_layout %}
-{% from "components/ui.html.jinja" import empty_state %}
 
 {% block content %}
 {% call settings_layout(org_name, "usage") %}
-    <h2 class="text-lg font-bold mb-6">Usage &amp; Billing</h2>
+    <h2 class="text-lg font-bold mb-6">Preview access</h2>
 
     <div class="space-y-6">
-        {# Plan overview #}
         <div class="p-5 border border-gray-200 rounded-lg">
-            <div class="flex items-center justify-between">
-                <div>
-                    <h3 class="font-bold">Early Access</h3>
-                    <p class="text-sm text-gray-500 mt-0.5">Free during early access. No billing active.</p>
-                </div>
-                <a href="/pricing" class="text-sm text-gray-500 hover:text-gray-900">View plans &rarr;</a>
-            </div>
+            <h3 class="font-bold">Private Preview</h3>
+            <p class="text-sm text-gray-500 mt-1">Invite-only and free during preview. Billing is inactive, your organisation will not be charged, and there is no SLA.</p>
         </div>
 
-        {# Quick stats #}
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div class="p-4 border border-gray-200 rounded-lg">
+        <div class="p-5 border border-gray-200 rounded-lg">
+            <h3 class="font-bold">Workspace summary</h3>
+            <div class="mt-4">
                 <p class="text-2xl font-bold">{{ project_count }}</p>
                 <p class="text-xs text-gray-500 mt-1">Projects</p>
             </div>
-            <div class="p-4 border border-gray-200 rounded-lg">
-                <p class="text-2xl font-bold text-gray-300">&mdash;</p>
-                <p class="text-xs text-gray-500 mt-1">Compute hours</p>
-            </div>
-            <div class="p-4 border border-gray-200 rounded-lg">
-                <p class="text-2xl font-bold text-gray-300">&mdash;</p>
-                <p class="text-xs text-gray-500 mt-1">Storage</p>
-            </div>
-            <div class="p-4 border border-gray-200 rounded-lg">
-                <p class="text-2xl font-bold text-gray-300">&mdash;</p>
-                <p class="text-xs text-gray-500 mt-1">Bandwidth</p>
-            </div>
         </div>
 
-        <p class="text-xs text-gray-400">Usage metering will be available when billing launches. You will not be charged without notice.</p>
+        <div class="p-5 border border-gray-200 rounded-lg">
+            <h3 class="font-bold">Preview limits</h3>
+            <p class="text-sm text-gray-500 mt-1">Current storage, egress, member, and support limits are communicated during onboarding. Usage export, budget alerts, and advance notification must ship before any overage charging.</p>
+        </div>
+
+        <p class="text-xs text-gray-400">Future paid pricing has not been set. Customer-run component execution and CI minutes are not planned billing meters.</p>
     </div>
 {% endcall %}
 {% endblock %}

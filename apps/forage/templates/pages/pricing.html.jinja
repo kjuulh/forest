@@ -2,122 +2,55 @@
 
 {% block content %}
 <section class="max-w-4xl mx-auto px-4 pt-24 pb-8 text-center">
-    <h1 class="text-4xl font-bold tracking-tight">Simple, transparent pricing</h1>
-    <p class="mt-4 text-lg text-gray-600">Start free. Scale when you need to. No surprises.</p>
-    <p class="mt-2 text-sm text-gray-400">Forest is in early access. Pricing may change.</p>
+    <p class="text-xs font-semibold uppercase tracking-wider text-gray-500">Private preview</p>
+    <h1 class="mt-3 text-4xl font-bold tracking-tight">Free during preview. No surprise bill.</h1>
+    <p class="mt-4 text-lg text-gray-600">Forest pricing is still being validated with design partners. Billing is not active, there is no SLA, and preview users will not be charged without a separate agreement and advance notice.</p>
 </section>
 
-<section class="max-w-6xl mx-auto px-4 py-12">
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div class="p-6 border border-gray-200 rounded-lg">
-            <h3 class="font-bold text-lg">Free</h3>
-            <p class="mt-2 text-3xl font-bold">$0</p>
-            <p class="text-sm text-gray-500">forever</p>
-            <ul class="mt-6 space-y-3 text-sm">
-                <li>1 project</li>
-                <li>1 environment</li>
-                <li>256MB RAM, shared CPU</li>
-                <li>Community components</li>
-            </ul>
-            <a href="/signup" class="mt-8 block text-center py-2 border border-gray-300 rounded-md text-sm font-medium hover:border-gray-400">
-                Get started
+<section class="max-w-3xl mx-auto px-4 py-12">
+    <div class="p-8 border-2 border-gray-900 rounded-lg">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+                <h2 class="font-bold text-2xl">Private Preview</h2>
+                <p class="mt-1 text-sm text-gray-500">Invite-only · $0 · No SLA</p>
+            </div>
+            <a href="mailto:contact@kjuulh.io?subject=Forest%20private%20preview" class="inline-flex px-4 py-2 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800">
+                Join waitlist
             </a>
         </div>
+        <ul class="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            <li>Private component exchange</li>
+            <li>Typed project and CI dependencies</li>
+            <li>Developer-tool catalogues</li>
+            <li>Limits agreed during onboarding</li>
+            <li>Community support</li>
+            <li>Customer-run execution is unmetered</li>
+        </ul>
+    </div>
+</section>
 
-        <div class="p-6 border border-gray-200 rounded-lg">
-            <h3 class="font-bold text-lg">Developer</h3>
-            <p class="mt-2 text-3xl font-bold">$10<span class="text-base font-normal text-gray-500">/mo</span></p>
-            <p class="text-sm text-gray-500">per user</p>
-            <ul class="mt-6 space-y-3 text-sm">
-                <li>3 projects</li>
-                <li>3 environments each</li>
-                <li>512MB RAM, dedicated CPU</li>
-                <li>Custom domains</li>
-            </ul>
-            <a href="/signup" class="mt-8 block text-center py-2 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800">
-                Start trial
-            </a>
+<section class="max-w-4xl mx-auto px-4 py-12">
+    <h2 class="text-2xl font-bold text-center">How paid pricing is being designed</h2>
+    <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="p-5 border border-gray-200 rounded-lg">
+            <h3 class="font-bold">Managed exchange</h3>
+            <p class="mt-2 text-sm text-gray-600">Future pricing will cover the private registry, control plane, collaboration, policy, and support—not compute Forest does not provide.</p>
         </div>
-
-        <div class="p-6 border-2 border-gray-900 rounded-lg relative">
-            <span class="absolute -top-3 left-4 bg-gray-900 text-white text-xs px-2 py-0.5 rounded">Popular</span>
-            <h3 class="font-bold text-lg">Team</h3>
-            <p class="mt-2 text-3xl font-bold">$25<span class="text-base font-normal text-gray-500">/user/mo</span></p>
-            <p class="text-sm text-gray-500">billed monthly</p>
-            <ul class="mt-6 space-y-3 text-sm">
-                <li>Unlimited projects</li>
-                <li>Unlimited environments</li>
-                <li>Up to 4GB RAM, 2 vCPU</li>
-                <li>Private component registry</li>
-                <li>Team management, RBAC</li>
-            </ul>
-            <a href="/signup" class="mt-8 block text-center py-2 bg-gray-900 text-white rounded-md text-sm font-medium hover:bg-gray-800">
-                Start trial
-            </a>
+        <div class="p-5 border border-gray-200 rounded-lg">
+            <h3 class="font-bold">Active developers</h3>
+            <p class="mt-2 text-sm text-gray-600">The leading seat metric counts a human once per active UTC month. Machine identities will not consume human seats.</p>
         </div>
-
-        <div class="p-6 border border-gray-200 rounded-lg">
-            <h3 class="font-bold text-lg">Enterprise</h3>
-            <p class="mt-2 text-3xl font-bold">Custom</p>
-            <p class="text-sm text-gray-500">tailored to your needs</p>
-            <ul class="mt-6 space-y-3 text-sm">
-                <li>Dedicated infrastructure</li>
-                <li>SLA guarantees</li>
-                <li>SSO / SAML</li>
-                <li>Audit logs</li>
-                <li>Priority support</li>
-            </ul>
-            <a href="mailto:sales@forage.sh" class="mt-8 block text-center py-2 border border-gray-300 rounded-md text-sm font-medium hover:border-gray-400">
-                Contact sales
-            </a>
+        <div class="p-5 border border-gray-200 rounded-lg">
+            <h3 class="font-bold">Transparent usage</h3>
+            <p class="mt-2 text-sm text-gray-600">Storage and artifact egress may have allowances. Usage export, budget alerts, and advance notice must exist before overage charging.</p>
         </div>
     </div>
 </section>
 
 <section class="max-w-4xl mx-auto px-4 py-12">
-    <h2 class="text-2xl font-bold text-center mb-8">Usage-based add-ons</h2>
-    <div class="overflow-hidden border border-gray-200 rounded-lg">
-        <table class="w-full text-sm">
-            <thead class="bg-gray-50">
-                <tr>
-                    <th class="text-left px-6 py-3 font-medium">Resource</th>
-                    <th class="text-left px-6 py-3 font-medium">Price</th>
-                    <th class="text-left px-6 py-3 font-medium">Included free</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-200">
-                <tr>
-                    <td class="px-6 py-3">Compute (vCPU)</td>
-                    <td class="px-6 py-3">$0.05/hour</td>
-                    <td class="px-6 py-3">Varies by plan</td>
-                </tr>
-                <tr>
-                    <td class="px-6 py-3">Memory</td>
-                    <td class="px-6 py-3">$0.01/GB-hour</td>
-                    <td class="px-6 py-3">Varies by plan</td>
-                </tr>
-                <tr>
-                    <td class="px-6 py-3">Storage</td>
-                    <td class="px-6 py-3">$0.10/GB-month</td>
-                    <td class="px-6 py-3">1GB</td>
-                </tr>
-                <tr>
-                    <td class="px-6 py-3">Bandwidth</td>
-                    <td class="px-6 py-3">$0.05/GB</td>
-                    <td class="px-6 py-3">10GB</td>
-                </tr>
-                <tr class="text-gray-400">
-                    <td class="px-6 py-3">Managed Databases <span class="text-xs">(coming soon)</span></td>
-                    <td class="px-6 py-3">TBD</td>
-                    <td class="px-6 py-3">-</td>
-                </tr>
-                <tr class="text-gray-400">
-                    <td class="px-6 py-3">Managed Services <span class="text-xs">(coming soon)</span></td>
-                    <td class="px-6 py-3">TBD</td>
-                    <td class="px-6 py-3">-</td>
-                </tr>
-            </tbody>
-        </table>
+    <div class="p-6 border border-amber-200 bg-amber-50 rounded-lg">
+        <h2 class="font-bold text-lg">Trusted components only</h2>
+        <p class="mt-2 text-sm text-gray-700">Forest is currently suitable only for trusted internal evaluation on a private network. Native components run with the invoking user's privileges, and runner/artifact authorization is not ready for mutually untrusted tenants. Sandboxed managed execution, workload identity, permanent coordinates, provenance, and artifact scanning are productization gates—not paid add-ons or shipped preview guarantees.</p>
     </div>
 </section>
 {% endblock %}

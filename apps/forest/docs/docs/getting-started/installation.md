@@ -1,20 +1,23 @@
 # Installation
 
-## From Source (Cargo)
+## Private preview
 
-Forest is written in Rust. Install it with Cargo:
-
-```bash
-cargo install --path crates/forest
-```
-
-Or if you have the repository cloned and use [mise](https://mise.jdx.dev/):
+Forest does not yet have a supported anonymous binary distribution. Install it
+from the private repository:
 
 ```bash
-mise run install
+git clone git@git.kjuulh.io:kjuulh/forest.git
+cd forest
+cargo install --path apps/forest/crates/forest --locked
 ```
 
-This builds and installs the `forest` binary to your Cargo bin directory.
+For repository development, use the pinned toolchain:
+
+```bash
+cd apps/forest
+mise install
+cargo build --locked --workspace
+```
 
 ## Verify Installation
 
@@ -41,11 +44,18 @@ echo 'forest shell fish | source' >> ~/.config/fish/config.fish
 Optionally run `forest shell install` to put forest's global tools on your
 `PATH` so you can run them directly (reverse with `forest shell uninstall`).
 
+> **Security:** the emitted shell block can start
+> `forest global warm --background --quiet`. Warming executes a tool binary to
+> capture shell output, caches that output, and later shells source it. Forest
+> does not yet require an interactive trust decision for each new digest. Enable
+> this only for approved first-party tools. Set
+> `FOREST_NO_SHELL_INTEGRATION=1` to disable both sourcing and background warm.
+
 ### Tool shell integrations load themselves
 
-The single line above is all you need. A tool that ships shell integration —
-completions, a wrapper function, a `cd`-ing helper — declares it in its own
-component manifest, and `forest shell zsh` loads every installed tool's.
+For an approved trusted tool, a single line loads its declared shell
+integration—completions, wrapper functions, or directory-changing helpers—from
+the component manifest.
 
 ```cue
 // in the tool's own forest.cue
@@ -106,22 +116,22 @@ bash and fish work the same way via `forest shell bash` / `forest shell fish`.
 - **kubectl** — For Kubernetes destinations
 - **Terraform** — For Terraform destinations
 
-## Server Setup
+## Server setup
 
-Forest requires a running Forest server for release management, the component registry, and organisation features. For local development:
+Forest needs a server for authentication, the registry, organisation features,
+and releases. For local development:
 
 ```bash
-# Start PostgreSQL and NATS via Docker Compose
+cd apps/forest
+cp .env.example .env
 mise run local:up
-
-# Run database migrations
-mise run db:migrate
-
-# Start the server
 mise run dev
 ```
 
-The server starts on `http://localhost:4040` by default.
+The development Compose stack starts PostgreSQL, NATS, and MinIO.
+`forest-server` applies embedded migrations at startup and listens on
+`http://localhost:4040` by default. The `.env.example` values are intentionally
+local and insecure; never reuse them outside localhost.
 
 ## Configuration
 

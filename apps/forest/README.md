@@ -1,118 +1,206 @@
-# Forest
+# Forest CLI, control plane, and component SDK
 
-Forest is a set of tools to help you design the development workflows you need. It is specifically built to allow you to share workflows and streamline boring tasks.
+This workspace implements the executable core of
+[Forest](../../README.md): a private component exchange for platform teams.
 
-## Example
+The primary product workflow is:
 
-With `forest` you can quickly compose a shareable workflow to initiate a starter kit for a service, builds to produce production ready artifacts, spin up a development environment, release production services, and more.
-
-**Install `forest`**
-
-The forest repository is private, so installs go through `gh` so the
-GitHub CLI's auth is reused:
-
-```bash
-gh auth login      # one-time; needs read access to understory-io/forest
-gh release download --repo understory-io/forest --pattern install.sh
-bash install.sh    # installs the latest forest to /usr/local/bin
+```text
+author component → build platform artifacts → publish version
+       ↓                                          ↓
+typed `forest run` dependency           verified `forest global` tool
 ```
 
-To pin a version: `bash install.sh v0.2.0`. To install elsewhere:
-`PREFIX=$HOME/.local bash install.sh`.
+The workspace also contains release orchestration and deployment integrations.
+Those capabilities are operationally useful, but they are outside the first
+supported Component Exchange boundary until the isolation, tenancy, and support
+gates in the [productization plan](docs/docs/product/readiness.md) pass.
 
-*Or build from source* (requires repo access):
+> [!WARNING]
+> Components currently execute as native child processes with the permissions,
+> filesystem access, environment, and network access of the invoking CLI or
+> runner. Global-tool warming can also execute a tool to capture shell output
+> that later shells source. Treat every component and shell integration as
+> trusted code. Checksums detect corruption; they do not make an untrusted
+> binary safe.
 
-```bash
-gh repo clone understory-io/forest
-cd forest
-cargo install --path apps/forest/crates/forest --locked
-```
+## Workspace map
 
-**Create service**
+| Area | Responsibility |
+|---|---|
+| `crates/forest` | User-facing CLI |
+| `crates/forest-server` | Registry, authentication, organisations, releases, scheduling |
+| `crates/forest-runner` | Remote component and release execution |
+| `crates/forest-sdk` | Rust component protocol and authoring API |
+| `crates/forest-sdk-codegen` | CUE-to-language bindings |
+| `crates/forest-grpc-interface` | Protobuf and generated gRPC types |
+| `components/` | First-party components and build providers |
+| `examples/` | Runnable project and component examples |
+| `docs/` | MkDocs source |
+| `templates/` | Development Compose stack and container builds |
 
-```bash
-forest init
-> starter: github.com/forest/rust-service-starter
-> name: my-starter-service
-> http: y
-cd my-starter-service
-```
+## Prerequisites
 
-**Build production grade artifact**
-
-```bash
-forest run docker:build
-> tag: my-service-starter:local
-```
-
-**Development environment**
-
-```bash
-forest run dev:up
-> spins up: postgresql at tcp/5432
-```
-
-**Deploy artifact**
+- Rust `1.98.1` and components declared in `mise.toml`
+- CUE
+- Docker with Compose for local services
+- `mise` for repository tasks
 
 ```bash
-forest service release
-> branch: main
-> artifact: abc123 - $(date)
-> release: y
+mise install
+cargo build --locked --workspace
 ```
 
-**Rollback service**
+## Install the CLI from this checkout
 
 ```bash
-forest service rollback
-> artifact: abc123 - $(date)
-> release: y
+cargo install --path crates/forest --locked
+forest --version
 ```
 
-## Architecture
+No public package or anonymous binary channel is supported during the private
+preview.
 
-Forest allows you to use standard components, either upstream from forest, or build your own. Often we see that you use wrap standard forest components in your own ways to make `forest` truly yours.
+## Start a local control plane
 
-### Project
-
-Project is the place where actual work happens, it is in this context that `forest` components are executed.
-
-A `forest.toml` is the artifact that describes your dependencies, or any local workflows you may've got
-
-### Component
-
-Component can be thought of as a library or repository of logic, files or media. Components are what makes it possible to do `docker:build` as `no-rust-docker` is a component, that houses the build command, allowing the user to build the service in question into a production ready artifact
-
-Components can be added to a project with the following:
+The development stack provides PostgreSQL, NATS, and MinIO:
 
 ```bash
-forest add
-> forest: rust_service:docker
-# Rust is the language in question, service is the type of project we care about
-# Docker is the component under this namespace
+cp .env.example .env
+mise run local:up
+mise run dev
 ```
 
-Components are generally language, and/or organisation specific, and can pull certain interfaces from upstream to get access to top level commands. Such as docker:build, which is a reserved key project, all others has to go through a namespace.
+`forest-server` applies embedded SQLx migrations at startup and listens on
+`http://localhost:4040` by default. In another terminal:
 
-- myorg/rust_service:docker
-- rust_service:docker # blessed upstream implementation of the docker interface for a rust service implementation
-- go_service:docker # blessed upstream implementation of the docker interface for a golang service implementation
-- docker # blessed upstream interface cannot be used on its own
+```bash
+forest context create local --server http://localhost:4040 --use
+forest auth register
+forest auth status
+```
 
+Stop the dependency stack and remove its data with:
 
-## Roadmap
+```bash
+mise run local:down
+```
 
-- [ ] Init system
-  - [ ] Templating
-- [ ] Components
-  - [ ] Local
-  - [ ] Remote
+This setup is for development. It omits production TLS, external secret
+management, backups, multi-tenant isolation, artifact scanning, and sandboxed
+execution.
 
+## Author and publish a component
 
-## Domain model
+```bash
+forest components init policy-check \
+  --organisation acme \
+  --language rust
+cd policy-check
+forest add forest-contrib/build-rust@0.1.2
+```
 
-- Projects: scoped by org and name, contains everything related to a single project. Such as dependencies, code, links and more, documentation.
-- Components: a forest runnable project. It can contain requirements, other dependencies. It is basically either a tool, or a set of requirements and features that make upstream development easier.
-- Dependencies: A project or component can have a set of dependencies. These are components to include. Each component can require certain things their upstream parts, and add certain functionality.
-- Requirements: A component can require information from upstream services. These requirements are extra bits of information that can either be provided at runtime via. args, or via. the project variables. A component has to implement the requirements and re-require them from their upstream.
-- Artifact: A project can be published via. artifacts. An artifact can be used by interested parties and can optionally be annotated. These can either be static, or dynamic. If static it acts as releases, if dynamic these can be released, rolled back, re-released. A static artifact can be upgraded to a dynamic artifact, but the other way around isn't possible
+The scaffold does not expose a build command by itself. Add this usage block to
+`forest.cue`:
+
+```cue
+"forest-contrib": "build-rust": {}
+```
+
+Then:
+
+```bash
+forest generate
+forest run build
+forest publish --dry-run
+forest publish
+```
+
+`forest run build` dispatches the depended-on build component; the removed
+`forest build` command must not be used. Build outputs are staged under
+`.forest/component/output/<os>/<arch>/`. The publish dry run evaluates CUE,
+checks the host artifact and descriptor, constructs the manifest, and shows the
+target context. Server-side manifest rules run only during the real publish.
+
+Consume the published component from another project:
+
+```bash
+forest add acme/policy-check@0.1.0
+```
+
+Add its usage block to that project's `forest.cue`:
+
+```cue
+"acme": "policy-check": {}
+```
+
+```bash
+forest validate
+forest run status
+```
+
+If the component declares a tool facet:
+
+```bash
+forest global add acme/policy-check@0.1.0
+eval "$(forest shell zsh)"
+policy-check --help
+```
+
+## Verification
+
+Run workspace tests against the pinned lock file:
+
+```bash
+cargo test --locked --workspace
+```
+
+`forest-server` acceptance tests require live PostgreSQL, NATS, and MinIO
+services plus these settings:
+
+```bash
+export DATABASE_URL=postgres://devuser:devpassword@localhost:5432/dev
+export NATS_URL=nats://localhost:4222
+export S3_ENDPOINT=http://localhost:9000
+export S3_BUCKET=forest
+export S3_ACCESS_KEY=forestdev
+export S3_SECRET_KEY=forestdevpassword
+export S3_REGION=us-east-1
+```
+
+SQLx release builds use checked-in offline query metadata. Query changes must
+refresh `crates/forest-server/.sqlx` against a migrated development database:
+
+```bash
+mise run db:prepare
+```
+
+## Documentation
+
+- [Documentation home](docs/docs/index.md)
+- [Quickstart](docs/docs/quickstart.md)
+- [Component model](docs/docs/concepts/components.md)
+- [Authoring guide](docs/docs/guides/authoring-components.md)
+- [CLI reference](docs/docs/reference/cli.md)
+- [Architecture](docs/docs/architecture/index.md)
+- [Product direction](docs/docs/product/index.md)
+- [Pricing strategy](docs/docs/product/pricing.md)
+- [Security and sandboxing](docs/docs/product/security-and-sandboxing.md)
+- [Readiness gates](docs/docs/product/readiness.md)
+
+Build the documentation site with:
+
+```bash
+cd docs
+python -m pip install -r requirements.txt
+mkdocs build --strict
+```
+
+## Product and security status
+
+The repository is private and has no selected public licence. Historical Git
+objects include credential-like values and private deployment information, so
+this repository must not be made public in place. A public release requires a
+fresh allow-listed history, rotated credentials, provenance and signing,
+documented support ownership, and the sandboxing controls described in the
+readiness plan.
