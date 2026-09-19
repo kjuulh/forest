@@ -17,7 +17,7 @@
 # the server-side triggers, not here.
 #
 # Required woodpecker secrets:
-#   forest_token — token for FOREST_SERVER (forest.i.kjuulh.io)
+#   forest_token — token for FOREST_SERVER (api.forest.kjuulh.io)
 #
 # Trigger: only on push to kjuulh/gitea-fork. PRs build images (via
 # ci + manifest) but don't deploy.
@@ -36,7 +36,7 @@ labels:
 
 variables:
   - &forest_env
-    FOREST_SERVER: https://forest.i.kjuulh.io
+    FOREST_SERVER: https://api.forest.kjuulh.io
     CUE_REGISTRY: forest.sh=registry.forest.i.kjuulh.io,registry.cuelang.org
     RUST_LOG: forest=info,component=info
     FOREST_TOKEN:
