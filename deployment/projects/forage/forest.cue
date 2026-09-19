@@ -4,7 +4,7 @@ import "forest.sh/forest/sdk@v0"
 
 project: sdk.#ForestProject & {
 	name:         "forage"
-	organisation: "rawpotion"
+	organisation: "kjuulh"
 }
 
 _destinationTypes: {

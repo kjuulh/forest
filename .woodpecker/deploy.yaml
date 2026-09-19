@@ -88,7 +88,7 @@ steps:
       #
       # annotate requires org/project/title explicitly — unlike `release
       # create` it does not auto-detect them from forest.cue. The org is
-      # constant (rawpotion); the project name is the deployment/projects
+      # constant (kjuulh); the project name is the deployment/projects
       # subdir name. The CI runner doesn't `git clone` (no .git dir), so
       # commit info is passed explicitly from woodpecker's CI_* env vars.
       - |
@@ -106,7 +106,7 @@ steps:
             # Annotate once: publishes the prepared artifact and lets
             # server-side triggers pick it up (no --annotation-only).
             forest release annotate \
-              --organisation rawpotion \
+              --organisation kjuulh \
               --project-name "$$PROJECT" \
               --context-title "$$CI_COMMIT_MESSAGE" \
               --metadata "image_tag=$$TAG" \
