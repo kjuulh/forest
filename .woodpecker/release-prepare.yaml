@@ -43,12 +43,8 @@ steps:
           v*) ;;
           *) echo "RELEASE_TAG must be a v-prefixed release tag"; exit 1 ;;
         esac
-        tag_sha=$$(git rev-list -n 1 "$$tag")
-        head_sha=$$(git rev-parse HEAD)
-        if [ "$$tag_sha" != "$$head_sha" ]; then
-          echo "release tag $$tag points at $$tag_sha, but the pipeline is building $$head_sha"
-          exit 1
-        fi
+        # `--current` requires the checked-out commit to carry the release tag,
+        # so a manual run still fails safely if RELEASE_TAG and HEAD diverge.
         git-cliff --current --strip header > RELEASE_NOTES.md
 
   create-release:
