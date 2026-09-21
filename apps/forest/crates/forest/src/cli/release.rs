@@ -162,6 +162,8 @@ mod tests {
             release_ids: vec![],
             approval_status: approval.map(|a| a.to_string()),
             auto_approve: None,
+            gate_deadline: None,
+            gate_waiting_on: vec![],
         }
     }
 

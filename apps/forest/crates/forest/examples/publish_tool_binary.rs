@@ -12,6 +12,7 @@
 //! Project-level (spec 009) — pushed via UpdateProject:
 //!   PROJECT_GIT_URL, PROJECT_HOMEPAGE, PROJECT_DOCS_URL,
 //!   PROJECT_SUPPORT_URL, PROJECT_DOMAIN, PROJECT_OWNER
+//!   PROJECT_TAGS                 comma-separated labels
 
 use forest_grpc_interface::registry_service_client::RegistryServiceClient;
 use forest_grpc_interface::release_service_client::ReleaseServiceClient;
@@ -124,6 +125,12 @@ async fn main() -> anyhow::Result<()> {
         support_url: env_or_empty("PROJECT_SUPPORT_URL"),
         domain: env_or_empty("PROJECT_DOMAIN"),
         owner: env_or_empty("PROJECT_OWNER"),
+        tags: env_or_empty("PROJECT_TAGS")
+            .split(',')
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+            .collect(),
     };
     let project_description = description.clone();
 
