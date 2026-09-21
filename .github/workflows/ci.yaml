@@ -76,6 +76,105 @@ jobs:
           path: apps/forage/frontend/gallery/shots/*.png
           if-no-files-found: warn
 
+  # ---------------------------------------------------------------------------
+  # Forest's Rust tests.
+  #
+  # These ran nowhere. Nothing in this workflow built them, so the suite rotted
+  # until it no longer compiled: two `examples/` and one unit-test fixture
+  # missing struct fields a proto had grown, and four queries missing from
+  # `.sqlx/`. Nobody saw it, because the only thing gating a merge was "the
+  # image built" — and the image build sets `SQLX_OFFLINE=true` and never
+  # touches a test target.
+  #
+  # So both halves run here, and they run together on purpose. `cargo sqlx
+  # prepare --check` is what keeps the cache from drifting again: it is the
+  # difference between a query change failing in this job, in one line, and
+  # failing in the Docker build on main. The `-- --all-targets` is load-bearing
+  # — without it the prepare walks only the lib and bin and would pass while
+  # the test targets' entries were missing. See apps/forest/CLAUDE.md.
+  #
+  # Its own job, with no `needs`, so it runs beside the image build rather than
+  # in front of it; nothing waits on it today. On ubuntu-latest rather than the
+  # 32xlarge group because it is not on anyone's critical path — it finishes
+  # around when the image build does and costs a great deal less. It has no
+  # Rust cache yet, so most of its time is compiling ~650 dependency crates.
+  forest-tests:
+    name: forest tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/forest
+
+    env:
+      # The acceptance tests are not unit tests: `State::new_with_dns` opens a
+      # database, connects NATS and builds the S3 client before the fixture can
+      # serve a single RPC. These are the docker-compose stack below, addressed
+      # from the host — same values as templates/docker-compose.yaml and
+      # tests/e2e/docker-compose.yaml.
+      DATABASE_URL: postgresql://devuser:devpassword@localhost:5432/dev
+      NATS_URL: nats://localhost:4222
+      S3_ENDPOINT: http://localhost:9000
+      S3_BUCKET: forest
+      S3_ACCESS_KEY: forestdev
+      S3_SECRET_KEY: forestdevpassword
+      S3_REGION: us-east-1
+
+      # Compile against the committed `.sqlx/`, not the live database. Same as
+      # the Dockerfile, and the point: if the cache is wrong, this job says so
+      # instead of quietly compiling from a database CI happens to have.
+      # `cargo sqlx prepare --check` overrides this for its own subprocess.
+      SQLX_OFFLINE: true
+
+      # Debug info is 60% of forest's `target/` (9.7 GB -> 3.8 GB) and 19% of
+      # the build, and a hosted runner does not have room to spare. Set here
+      # rather than in Cargo.toml so this stays a workflow-only change; it
+      # becomes a redundant no-op once `[profile.dev]` lands. See BUILD-SPEED.md.
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # forest-server depends on canopy-util-rs over git, which is private.
+      - name: Setup ssh agent
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.HB_GITHUB_SSH_KEY }}
+      - name: Setup git for private auth
+        run: |
+          git config --global url."ssh://git@github.com".insteadOf https://github.com && \
+          mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      # Pins rustc to the version in mise.toml, as the image build does.
+      - uses: jdx/mise-action@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pinned to the sqlx the workspace pins. A newer CLI writes cache entries
+      # a `=0.9.0` build rejects, which would fail `--check` for a reason that
+      # has nothing to do with the change under test.
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --version 0.9.0 --locked --no-default-features --features postgres,rustls
+
+      # The stack developers run locally (`mise run local:up`), so there is one
+      # definition of it rather than a second copy in `services:` — which also
+      # could not express minio's `server /data` or its bucket-creating
+      # one-shot. `--wait` blocks on the healthchecks already written there.
+      - name: Start postgres, NATS and minio
+        run: docker compose -f ./templates/docker-compose.yaml up -d --wait
+
+      # The tests migrate on startup, but `prepare --check` compiles the
+      # queries against the schema before any of them run.
+      - name: Migrate
+        run: cargo sqlx migrate run --source ./crates/forest-server/migrations/
+
+      - name: Check the sqlx offline cache is current
+        working-directory: apps/forest/crates/forest-server
+        run: cargo sqlx prepare --check -- --all-targets
+
+      - name: Test
+        run: cargo test --workspace
+
   build-and-push:
     name: build and push ${{ matrix.app }}
     runs-on:
