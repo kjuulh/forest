@@ -1624,8 +1624,15 @@ mod tests {
         let bare_dir = tempfile::tempdir().unwrap();
         let bare_path = bare_dir.path().join("gitops.git");
 
+        // `-b main` explicitly: everything below pushes and clones `main`, but
+        // `git init --bare` alone names the branch from `init.defaultBranch`,
+        // which is `master` unless the developer has changed it. The bare
+        // repo's HEAD then points at a branch nothing ever creates, and the
+        // final verify clone — the only one that does not pass `--branch` —
+        // checks out nothing, failing on a missing manifest rather than on
+        // anything this test is about.
         let status = tokio::process::Command::new("git")
-            .args(["init", "--bare"])
+            .args(["init", "--bare", "-b", "main"])
             .arg(&bare_path)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
