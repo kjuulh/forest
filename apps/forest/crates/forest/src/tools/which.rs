@@ -32,7 +32,16 @@ pub fn binary_on_path(name: &str) -> bool {
     let Some(path_var) = std::env::var_os("PATH") else {
         return false;
     };
-    std::env::split_paths(&path_var).any(|dir| is_executable(&dir.join(name)))
+    binary_in(name, &path_var)
+}
+
+/// As [`binary_on_path`], against a search path given explicitly rather than
+/// read from the environment. Separate so the lookup can be tested without
+/// setting `PATH` for the whole process — `std::env::set_var` is unsound
+/// while any other thread reads the environment, and a test binary always has
+/// other threads.
+fn binary_in(name: &str, search_path: &std::ffi::OsStr) -> bool {
+    std::env::split_paths(search_path).any(|dir| is_executable(&dir.join(name)))
 }
 
 #[cfg(unix)]
@@ -89,21 +98,15 @@ mod tests {
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::set_permissions(&nonexe, std::fs::Permissions::from_mode(0o644)).unwrap();
 
-        let orig = std::env::var_os("PATH");
-        // SAFETY: not thread-safe with concurrent PATH readers; no other test
-        // in this module reads PATH at the same time.
-        unsafe {
-            std::env::set_var("PATH", &dir);
-        }
-        assert!(binary_on_path("fakebin"));
-        assert!(!binary_on_path("fakelib"));
-        assert!(!binary_on_path("does-not-exist-anywhere"));
-        unsafe {
-            match orig {
-                Some(v) => std::env::set_var("PATH", v),
-                None => std::env::remove_var("PATH"),
-            }
-        }
+        // Against this directory alone, not the process's PATH. Overwriting
+        // PATH here used to make `missing_tools_reports_only_absent` fail
+        // whenever the two happened to run at the same moment: it looks up
+        // `sh`, which is not in this directory.
+        let search_path = dir.as_os_str();
+        assert!(binary_in("fakebin", search_path));
+        assert!(!binary_in("fakelib", search_path));
+        assert!(!binary_in("does-not-exist-anywhere", search_path));
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
