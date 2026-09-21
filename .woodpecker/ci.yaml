@@ -10,9 +10,27 @@
 #
 # Required woodpecker runner: one linux/amd64 runner.
 
+# Only the app whose sources moved. Both legs used to build on every push:
+# a forest-only commit still ran a full forage image build, and on the single
+# amd64 homelab runner the two legs queue against each other, so the wasted
+# leg is not just idle capacity — it is the other leg waiting.
+#
+# `apps/<app>` is also the Docker build context below, so a file outside it
+# cannot change the image. `.woodpecker/ci.yaml` opens both legs, so a change
+# to this file is exercised on both.
+#
+# Woodpecker evaluates `path` against the push's changed files and runs the
+# pipeline when it cannot work them out (too many files, or an event with no
+# diff), which is the right way round: building too much costs a runner slot,
+# building too little ships the previous image under a `latest` tag that
+# deploy.yaml then rolls out.
 when:
   - event: push
     branch: kjuulh/gitea-fork
+    path:
+      include:
+        - "apps/${APP}/**"
+        - ".woodpecker/ci.yaml"
 
 matrix:
   APP:
