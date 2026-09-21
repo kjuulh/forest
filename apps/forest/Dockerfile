@@ -1,4 +1,4 @@
-FROM rust:1.98-trixie AS builder
+FROM rust:1.98-trixie AS chef
 
 WORKDIR /app
 
@@ -16,6 +16,29 @@ RUN git config --global url."ssh://git@github.com".insteadOf https://github.com 
     mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 
 ENV SQLX_OFFLINE=true
+
+RUN cargo install cargo-chef --locked --version 0.1.78
+
+# The recipe is a digest of every manifest in the workspace and nothing else, so
+# this stage re-runs on any commit but its *output* only changes when a
+# Cargo.toml or Cargo.lock does.
+FROM chef AS planner
+
+COPY . .
+
+RUN --mount=type=ssh cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+
+# Dependencies compile against the recipe alone. This layer is keyed on
+# recipe.json, so it survives every commit that does not touch a manifest --
+# which is most of them. `.sqlx/` is not needed here: cook builds the
+# dependency graph against a skeleton workspace, and no sqlx macro runs until
+# the real sources arrive below.
+COPY --from=planner /app/recipe.json recipe.json
+
+RUN --mount=type=ssh cargo chef cook --release \
+    --bin forest-server --bin forest-event-migration --recipe-path recipe.json
 
 COPY . .
 
