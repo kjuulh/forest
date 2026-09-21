@@ -95,3 +95,10 @@ tonic-prost = "=0.14.6"
 tonic-health = "=0.14.6"
 async-nats = "0.40"
 insta = "1"
+
+# Neither workspace had a [profile] section, so every debug build carried full
+# DWARF: measured at 16% of the wall clock and over half of `target/`.
+# `line-tables-only` keeps file and line in panics and backtraces — what anyone
+# reading a stack trace actually needs — and drops the rest.
+[profile.dev]
+debug = "line-tables-only"

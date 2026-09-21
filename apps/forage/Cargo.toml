@@ -45,3 +45,10 @@ async-nats = "0.40"
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+
+# Neither workspace had a [profile] section, so every debug build carried full
+# DWARF: measured at 16% of the wall clock and over half of `target/`.
+# `line-tables-only` keeps file and line in panics and backtraces — what anyone
+# reading a stack trace actually needs — and drops the rest.
+[profile.dev]
+debug = "line-tables-only"
