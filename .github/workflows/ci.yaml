@@ -160,8 +160,15 @@ jobs:
       # definition of it rather than a second copy in `services:` — which also
       # could not express minio's `server /data` or its bucket-creating
       # one-shot. `--wait` blocks on the healthchecks already written there.
+      #
+      # Named services, not the whole project: `--wait` exits 1 if any
+      # container in the project has stopped, and `minio-init` is meant to —
+      # it makes the bucket and leaves. So it runs after, as a `run`, which
+      # reports its exit status instead of being mistaken for a crash.
       - name: Start postgres, NATS and minio
-        run: docker compose -f ./templates/docker-compose.yaml up -d --wait
+        run: |
+          docker compose -f ./templates/docker-compose.yaml up -d --wait postgres nats minio
+          docker compose -f ./templates/docker-compose.yaml run --rm minio-init
 
       # The tests migrate on startup, but `prepare --check` compiles the
       # queries against the schema before any of them run.
