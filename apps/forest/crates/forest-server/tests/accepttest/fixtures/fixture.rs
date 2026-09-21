@@ -177,7 +177,52 @@ fn bring_up(config: forest_server::Config) -> Fixture {
 
 pub async fn fixture() -> anyhow::Result<Fixture> {
     let fixture = FIXTURE.get_or_init(|| bring_up(base_test_config()));
-    Ok(fixture.clone())
+    Ok(scoped_to_this_test(fixture))
+}
+
+/// A view of the fixture whose database handles belong to *this* test.
+///
+/// The gRPC server, the scheduler and the pool they share are built on
+/// `FIXTURE_RUNTIME` and outlive the whole suite. A test body that reaches the
+/// database directly — `fixture.db`, or `fixture.state` for a component the
+/// fixture does not run — does not: it runs on the runtime `#[tokio::test]`
+/// built for it, and that runtime is dropped the moment the test returns.
+///
+/// sqlx binds a connection's socket, and the task that returns the connection
+/// to the pool, to whichever runtime was current when it was opened. So a
+/// connection a test borrowed came back broken, and the next caller — usually
+/// the server, answering some *other* test's RPC — got `error communicating
+/// with database: A Tokio 1.x context was found, but it is being shutdown`.
+/// The slot went with it, and once enough had gone the pool ran dry: whoever
+/// asked next blocked for the 30-second acquire timeout and failed on
+/// `PoolTimedOut`. Which test that was depended on scheduling, which is why
+/// the name changed every run and no single test looked guilty.
+///
+/// Giving direct database work its own pool, created and dropped with the
+/// test, keeps the server's pool on the one runtime that owns it. The pool is
+/// lazy, so a test that never queries the database opens no connection.
+///
+/// `supersede_pending`'s module comment describes the same failure and the
+/// narrower fix it took at the time — running that module's scenarios on one
+/// runtime. That is still true of it; it no longer has to be.
+fn scoped_to_this_test(base: &Fixture) -> Fixture {
+    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+    let db = sqlx::postgres::PgPoolOptions::new()
+        .min_connections(0)
+        .max_connections(4)
+        .connect_lazy(&url)
+        .expect("build the per-test pool");
+
+    let mut state = base.state.clone();
+    state.db = db.clone();
+    state.event_store = mire::EventStore::new(db.clone());
+
+    Fixture {
+        channel: base.channel.clone(),
+        db,
+        dns: base.dns.clone(),
+        state,
+    }
 }
 
 /// Plaintext service-account key configured on `restricted_fixture()`.
@@ -200,7 +245,7 @@ pub async fn restricted_fixture() -> anyhow::Result<Fixture> {
             Some(sha2::Sha256::digest(RESTRICTED_FIXTURE_SERVICE_ACCOUNT_KEY.as_bytes()).to_vec());
         bring_up(config)
     });
-    Ok(fixture.clone())
+    Ok(scoped_to_this_test(fixture))
 }
 
 /// Test helper: flip `user_emails.verified` to true via direct DB

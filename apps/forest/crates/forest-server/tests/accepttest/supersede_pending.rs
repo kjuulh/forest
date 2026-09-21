@@ -30,6 +30,12 @@
 //! short straw, never on an assertion. One runtime for the module removes the
 //! failure class outright. Each scenario keeps its own name, and a failure says
 //! which one.
+//!
+//! The fixture now hands every test its own pool for direct database work, so
+//! that failure class is gone suite-wide and this module no longer needs the
+//! single runtime to be correct — see `fixtures::scoped_to_this_test`. Leaving
+//! it as one test all the same: the five are a sequence over one seeded queue,
+//! and that is how they read.
 
 use forest_server::intent_coordinator;
 use forest_server::services::policy::PolicyRegistryState;
