@@ -46,16 +46,6 @@ run = "cargo fmt"
 description = "Check formatting"
 run = "cargo fmt -- --check"
 
-# ─── CI Pipelines ──────────────────────────────────────────────────
-
-[tasks."ci:pr"]
-description = "Run PR pipeline (check, test, build)"
-run = "cargo run -p ci -- pr"
-
-[tasks."ci:main"]
-description = "Run main pipeline (check, test, build, publish)"
-run = "cargo run -p ci -- main"
-
 # ─── Docker ────────────────────────────────────────────────────────
 
 [tasks."docker:build"]

@@ -42,6 +42,7 @@ bytes.workspace = true
 prost.workspace = true
 prost-types.workspace = true
 tonic.workspace = true
+rustls.workspace = true
 tower.workspace = true
 http.workspace = true
 thiserror.workspace = true
@@ -50,7 +51,19 @@ uuid = { version = "1.7.0", features = ["v4", "v7"] }
 inquire = "0.9.0"
 indicatif = "0.17"
 console = "0.15"
-reqwest = "0.13.0"
+# `default-features = false` drops reqwest's `default-tls`, which is an alias
+# for `rustls` and hard-wires the aws-lc-rs provider. `rustls-no-provider`
+# gives the same rustls backend and leaves the provider to us; the rest of
+# this list is what `default` would have enabled anyway. reqwest 0.13 has no
+# ring feature, so this is the only way to get rustls without aws-lc-sys.
+# main() installs the ring provider — reqwest panics with "No provider set"
+# if it is missing.
+reqwest = { version = "0.13.0", default-features = false, features = [
+  "charset",
+  "http2",
+  "rustls-no-provider",
+  "system-proxy",
+] }
 webbrowser = "1.0"
 glob = "0.3.2"
 globset = "0.4.16"

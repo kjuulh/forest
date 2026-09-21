@@ -1,14 +1,16 @@
 //! Process-level rustls setup.
 //!
-//! Forest's dependency graph enables both rustls crypto providers on rustls
-//! 0.23: `async-nats` pulls `ring`, while `rust-s3`/`attohttpc` and `reqwest`
-//! pull `aws-lc-rs`. With more than one provider compiled in, rustls will not
-//! pick one on its own — it panics on the first handshake with
-//! "Could not automatically determine the process-level CryptoProvider".
+//! `ring` is now the only provider compiled into rustls 0.23 — see the comment
+//! on the `rustls` pin in the workspace manifest for how the graph is held to
+//! that. rustls can therefore pick it unaided, and this call is no longer the
+//! thing standing between a binary and a panicking handshake.
 //!
-//! Every entry point that opens a TLS connection (Aurora over `sslmode=require`
-//! or `verify-ca`, S3, OTLP) must therefore install a provider first. We pin the
-//! pure-Rust `ring` provider in preference to the `aws-lc-sys` C wrapper.
+//! It stays because it is what makes the choice explicit and cheap to keep: if
+//! a future dependency enables `aws-lc-rs`, rustls goes back to refusing to
+//! guess, and every entry point that opens TLS (Aurora over `sslmode=require`
+//! or `verify-ca`, S3, OTLP) would start panicking. With this call in place
+//! they keep working, on `ring`, and the regression shows up as `aws-lc-sys`
+//! appearing in the build rather than as an outage.
 
 /// Install `ring` as the process-level rustls crypto provider.
 ///

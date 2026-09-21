@@ -32,6 +32,13 @@ mod ui;
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
+    // reqwest is built with `rustls-no-provider` so `aws-lc-sys` stays out of
+    // the graph (see this crate's Cargo.toml). It then reads the process-level
+    // provider rather than bringing its own, and panics with "No provider set"
+    // if there is none — so install `ring` before anything can reach TLS.
+    // Idempotent: a losing race means an equivalent provider is already in.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     dotenvy::dotenv().ok();
 
     // tracing is initialised inside `cli::execute` once args are parsed, so it

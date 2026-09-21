@@ -233,14 +233,6 @@ run = "buf generate"
 alias = ["g", "gen"]
 depends = ["generate:proto"]
 
-[tasks."ci:pr"]
-run = "cargo run -p ci -- pr"
-description = "Run CI PR pipeline via Dagger"
-
-[tasks."ci:main"]
-run = "cargo run -p ci -- main"
-description = "Run CI main pipeline via Dagger"
-
 # Forest CLI releases are driven by GitHub Actions
 # (.github/workflows/release.yml + release-please.yml). No local
 # `release` task here — cut a release by merging the auto-generated

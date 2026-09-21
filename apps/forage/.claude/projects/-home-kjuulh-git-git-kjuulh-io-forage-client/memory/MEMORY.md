@@ -29,8 +29,7 @@
 - buf for proto generation (users.proto from forest)
 
 ## CI/CD
-- Dagger-based CI in ci/ crate: `ci pr` and `ci main`
-- `mise run ci:pr` / `mise run ci:main`
+- GitHub Actions (.github/workflows/ci.yaml) builds and pushes the image
 - Docker builds with distroless runtime
 
 ## Current State
