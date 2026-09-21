@@ -145,9 +145,12 @@ jobs:
           git config --global url."ssh://git@github.com".insteadOf https://github.com && \
           mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-      # Pins rustc to the version in mise.toml, as the image build does.
+      # Pins rustc to the version in mise.toml, as the image build does, and
+      # `cue`, which the CUE parser tests shell out to. Pointed at apps/forest
+      # rather than the repo root because that is where both are declared.
       - uses: jdx/mise-action@v4
         with:
+          working_directory: apps/forest
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       # Pinned to the sqlx the workspace pins. A newer CLI writes cache entries

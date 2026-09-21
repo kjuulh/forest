@@ -17,6 +17,12 @@ CUE_REGISTRY = "forest.sh=registry.api.forest.development.understory.sh,registry
 [tools]
 rust = { version = "1.98.1", components = "rust-src,rust-analyzer" }
 uv = "latest"
+# forest shells out to `cue`: the component and project parsers evaluate real
+# CUE, and so do their unit tests, which fail rather than skip when it is
+# absent. It was an undeclared prerequisite until CI went looking for it.
+# Pinned rather than "latest" because those tests assert on cue's own
+# diagnostics, which are not a stable interface across releases.
+cue = "0.16.1"
 
 [tasks.todos]
 run = "hyperlog --local-path ./todos"
