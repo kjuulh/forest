@@ -4,17 +4,13 @@ ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        clang mold git ssh ca-certificates \
+        git ssh ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git config --global url."ssh://git@github.com".insteadOf https://github.com && \
     mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 
 WORKDIR /mnt/src
-
-RUN mkdir -p /usr/local/cargo && \
-    printf '[target.x86_64-unknown-linux-gnu]\nlinker = "clang"\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' \
-    > /usr/local/cargo/config.toml
 
 ENV SQLX_OFFLINE=true
 

@@ -9,16 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     ca-certificates \
     curl \
-    clang mold \
     git ssh \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git config --global url."ssh://git@github.com".insteadOf https://github.com && \
     mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
-
-RUN mkdir -p /usr/local/cargo && \
-    printf '[target.x86_64-unknown-linux-gnu]\nlinker = "clang"\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' \
-    > /usr/local/cargo/config.toml
 
 ENV SQLX_OFFLINE=true
 
