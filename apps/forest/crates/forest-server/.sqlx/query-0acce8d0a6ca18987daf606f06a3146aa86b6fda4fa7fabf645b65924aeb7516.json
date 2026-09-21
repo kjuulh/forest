@@ -6,17 +6,35 @@
       {
         "ordinal": 0,
         "name": "organisation_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "organisations",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "organisation_name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "organisations",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "matched_domain",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "organisation_allowed_domains",
+            "name": "domain"
+          }
+        }
       }
     ],
     "parameters": {

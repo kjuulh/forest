@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO release_intents (id, artifact, annotation_id, project_id, status)\n           VALUES ($1, $2, $3, $4, 'ACTIVE')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c19655785b99c5379815c7d58660afd81e51d9e9c033b42ca32262fe5f854432"
+}

@@ -6,27 +6,57 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "type_organisation",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "type_organisation"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "type_name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "type_name"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "type_version",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "type_version"
+          }
+        }
       }
     ],
     "parameters": {
