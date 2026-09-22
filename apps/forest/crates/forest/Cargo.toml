@@ -85,11 +85,16 @@ minijinja = { version = "2.11.0", features = ["builtins"] }
 jiff = "0.2.15"
 tokio-stream = { version = "0.1.17", features = ["sync"] }
 
-opentelemetry = "0.32"
-opentelemetry_sdk = "0.32"
-opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic"] }
-opentelemetry-appender-tracing = "0.32"
-tracing-opentelemetry = "0.33"
+# Pinned to match `canopy-otel`, the org's shared telemetry crate, which
+# forest-server depends on. When the CLI ran ahead on 0.32 the workspace
+# compiled both majors of the whole opentelemetry stack — seven duplicate
+# crate names — because 0.x releases are semver-incompatible and cargo cannot
+# unify them. Bump this together with canopy-util-rs, not ahead of it.
+opentelemetry = "0.31"
+opentelemetry_sdk = "0.31"
+opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
+opentelemetry-appender-tracing = "0.31"
+tracing-opentelemetry = "0.32"
 tabled = "0.20"
 chrono = "0.4"
 itertools = "0.14.0"
