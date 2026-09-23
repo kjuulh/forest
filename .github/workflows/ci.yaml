@@ -1,7 +1,26 @@
 name: ci
 
+# `on: push` with no branch filter meant every push on every WIP branch built
+# both apps on a 32-core runner and pushed branch-tagged images to ghcr that
+# nothing ever reaps. Measured over the 99 most recent push runs (2026-09-07 to
+# 2026-09-21): only 24 were on main. 36 were release-please's bot branch, which
+# gets two pushes per merge to main — the action pushes the branch, then the
+# Cargo.lock sync step pushes again. 39 were human WIP branches.
+#
+# In billed core-minutes on `build-and-push` over those two weeks: 16,229
+# total, of which 3,390 (21%) was main. The other 79% built images that were
+# never deployed and wrote cache that nothing could read back (see the
+# `cache-to` note below).
+#
+# So: main pushes, and pull requests. What is given up is an image for every
+# intermediate commit on a branch. Nothing in this repository consumes one —
+# the deploy job below resolves `:latest`, which only ever moves on main, and
+# `service-release.yml` takes the tag it deploys as an explicit input from its
+# caller. Grepped for branch-tag consumers before changing this; there are none.
 on:
   push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
     inputs:
       deploy:
@@ -15,8 +34,116 @@ env:
 permissions:
   contents: read
   packages: write
+  # dorny/paths-filter reads the base of a pull request to work out which app
+  # moved. It diffs locally where it can, and falls back to the API.
+  pull-requests: read
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Which app's sources actually moved.
+  #
+  # Both matrix legs used to run on every push, so a forest-only commit still
+  # started a 32-core runner for forage: checkout, ssh-agent, mise, buildx,
+  # registry login, and then 32-46 s of Docker telling us the cache was
+  # complete. Measured at 32 cores that is real money for a job whose whole
+  # output is "nothing to do".
+  #
+  # The fix has to make the job *not exist*, not make it fast, so this runs
+  # first on a 1-core hosted runner and hands `build-and-push` its matrix. An
+  # app that did not change contributes no matrix entry, so no runner starts.
+  #
+  # The path lists mirror the Docker build context, which is `apps/<app>` — a
+  # file outside it cannot change the image, and `.github/workflows/ci.yaml`
+  # builds both so a change to this file is exercised on both legs.
+  #
+  # `workflow_dispatch` builds both unconditionally: it is dispatched to roll a
+  # ref onto the clusters, and there is no "before" commit to diff against.
+  # ---------------------------------------------------------------------------
+  changes:
+    name: what changed
+    runs-on: ubuntu-latest
+    outputs:
+      # A ready-made `strategy.matrix` object, or `{"include":[]}`.
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      any: ${{ steps.matrix.outputs.any }}
+      # One flag per app, for the jobs that are not the image build. Emitted
+      # by the same loop that builds the matrix, so a job gated on
+      # `outputs.<app>` and a matrix leg for `<app>` cannot disagree.
+      forest: ${{ steps.matrix.outputs.forest }}
+      forage: ${{ steps.matrix.outputs.forage }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # `continue-on-error` so this fails *open*, and the reasoning matters.
+      #
+      # A filter that cannot decide has two ways to be wrong. Build too much,
+      # and the bill is what it was before this job existed. Build too little,
+      # and no image is pushed, `:latest` still resolves to the previous
+      # digest, and the deploy below rolls the old code onto the cluster
+      # reporting success. The second is the one nobody notices.
+      #
+      # It can genuinely fail to decide: on a push it diffs against
+      # `github.event.before`, which a force-push to main can leave pointing
+      # at a commit that is no longer reachable. Rare, but the cost of being
+      # wrong there is a silent stale deploy, so it fails open.
+      - uses: dorny/paths-filter@v3
+        id: filter
+        # A dispatch has nothing to diff, and paths-filter would have to guess.
+        if: github.event_name != 'workflow_dispatch'
+        continue-on-error: true
+        with:
+          filters: |
+            forest:
+              - 'apps/forest/**'
+              - '.github/workflows/ci.yaml'
+            forage:
+              - 'apps/forage/**'
+              - '.github/workflows/ci.yaml'
+
+      - name: Build the matrix
+        id: matrix
+        env:
+          OWNER: ${{ github.repository_owner }}
+          FOREST: ${{ steps.filter.outputs.forest }}
+          FORAGE: ${{ steps.filter.outputs.forage }}
+          # 'success' only when the filter actually reached a verdict.
+          # 'skipped' on a dispatch, 'failure' when it could not diff — both
+          # mean "we do not know", and not knowing means building everything.
+          FILTER: ${{ steps.filter.outcome }}
+        run: |
+          set -euo pipefail
+
+          if [ "$FILTER" != "success" ]; then
+            echo "::notice::path filter reached no verdict (outcome=$FILTER) — building every app"
+          fi
+
+          include='[]'
+          for app in forest forage; do
+            case "$app" in
+              forest) changed="$FOREST" ;;
+              forage) changed="$FORAGE" ;;
+            esac
+            if [ "$changed" = "true" ] || [ "$FILTER" != "success" ]; then
+              echo "$app=true" >> "$GITHUB_OUTPUT"
+              include=$(jq -c --arg app "$app" --arg owner "$OWNER" '
+                . + [{
+                  app:     $app,
+                  context: ("apps/" + $app),
+                  image:   ("ghcr.io/" + $owner + "/" + $app)
+                }]' <<<"$include")
+            else
+              echo "$app=false" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+          matrix=$(jq -c -n --argjson include "$include" '{include: $include}')
+          any=$(jq -r 'length > 0' <<<"$include")
+
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "any=$any"       >> "$GITHUB_OUTPUT"
+
+          echo "building: $(jq -r 'if length == 0 then "nothing" else [.[].app] | join(", ") end' <<<"$include")"
+
   # ---------------------------------------------------------------------------
   # Frontend tests.
   #
@@ -32,6 +159,10 @@ jobs:
   # rendering was wrong about it.
   frontend-tests:
     name: frontend tests
+    # These assert what forage's UI says about a release; a forest-only commit
+    # cannot change that. Same filter as forage's build leg.
+    needs: changes
+    if: needs.changes.outputs.forage == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -100,7 +231,42 @@ jobs:
   # Rust cache yet, so most of its time is compiling ~650 dependency crates.
   forest-tests:
     name: forest tests
-    runs-on: ubuntu-latest
+    # Same gate as forest's image build. Measured over the 40 most recent
+    # commits on main: 18 touched only `apps/forest`, 14 only `apps/forage`,
+    # 5 neither, 3 both — so 19 of 40 (47%) of pushes were spending this job's
+    # ~11 minutes proving that forest, which nobody had touched, still works.
+    #
+    # It is the longest job in the pipeline by roughly 3x, so that is the
+    # single largest remaining slice of wall clock. Gating it does not weaken
+    # what #276 set out to fix: the suite rotted because *nothing* ran it, and
+    # it still runs on every commit that can actually break it, plus every
+    # change to this workflow.
+    needs: changes
+    if: needs.changes.outputs.forest == 'true'
+
+    # Eight cores instead of two. This job is ~90% compilation — measured on a
+    # cold run: `cargo test --workspace` 311 s, `cargo sqlx prepare --check`
+    # 142 s, `cargo install sqlx-cli` 129 s, against 36 s for everything else —
+    # and compilation is the one thing here that scales with cores.
+    #
+    # The group is the one DATA-395 provisioned. It is not hypothetical: run
+    # 28430137462 (2026-06-30) executed on `linux-8x-amd64-001-1000148746`.
+    # That run is also the argument for *not* using it for `build-and-push`,
+    # where it took 11.8 min against ~3.5 on the 32-core group. Here the
+    # comparison runs the other way, because the alternative is two cores.
+    #
+    # Worth knowing what this does and does not fix. The `Cache the Rust build`
+    # step below removes most of the compile once main has populated it, so on
+    # a warm run cores matter much less. What stays cold regardless is any
+    # commit that moves Cargo.lock — about 15% of them, per BUILD-SPEED.md §4
+    # — plus running the tests themselves, which also parallelises. If a warm
+    # run lands near four minutes on its own, this can go back to
+    # `ubuntu-latest` and nobody will miss it.
+    runs-on:
+      group: rust
+      labels:
+        - linux-8x-amd64-001
+
     defaults:
       run:
         working-directory: apps/forest
@@ -153,6 +319,30 @@ jobs:
           working_directory: apps/forest
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Most of this job is compiling ~650 dependency crates on two cores, as
+      # #276's own comment says. Measured on release.yml in this branch, where
+      # the same action turned 18.5 min of cross-platform build into 6.6 min:
+      # an exact hit, confirmed by the save step taking 0 s.
+      #
+      # `workspaces` is the part that is easy to get wrong. The Cargo workspace
+      # is `apps/forest`, not the repo root, so the action's default finds no
+      # Cargo.lock and caches nothing — silently, with a green step.
+      #
+      # `cache-all-crates` because `cargo install sqlx-cli` below is a
+      # dependency of the job rather than of the workspace; without it the
+      # action prunes the registry entries that install needs and it recompiles
+      # sqlx-cli every run.
+      #
+      # Saving only on main is the same reasoning as the Docker cache: a cache
+      # written on a branch is readable by that branch alone, and then evicts
+      # main's on the way out. Branches and PRs still restore main's.
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/forest
+          cache-all-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       # Pinned to the sqlx the workspace pins. A newer CLI writes cache entries
       # a `=0.9.0` build rejects, which would fail `--check` for a reason that
       # has nothing to do with the change under test.
@@ -182,24 +372,118 @@ jobs:
         working-directory: apps/forest/crates/forest-server
         run: cargo sqlx prepare --check -- --all-targets
 
+      # Not nextest, for now — see fix/acceptance-test-parallelism.
+      #
+      # Switching CI to `cargo nextest run` was committed here and is reverted
+      # deliberately. nextest gives each test its own process, which turned the
+      # acceptance suite's shared `OnceLock` fixture from one setup per binary
+      # into 132. That much was fixable, and is fixed on that branch: Argon2 at
+      # production cost ran 129 times, and the DB pool was sized 10-per-process
+      # against a postgres allowing 100 while nextest ran 32 processes.
+      #
+      # What is not fixed is flakiness. With both of those addressed, one run
+      # in four still had `test_full_release_flow` time out at 30 s, and the
+      # tests share a database they never clean up — 2095 user rows after a
+      # handful of runs, with single-process timings drifting from 0.94 s to
+      # 2.95 s as it fills.
+      #
+      # A test runner that is faster on average and red one run in four is a
+      # worse deal than a slower one that is green, so CI stays on `cargo
+      # test` until that is understood. `mise run test` is still nextest, so
+      # the local/CI divergence this was meant to close is still open; that is
+      # a known gap, not an oversight.
       - name: Test
         run: cargo test --workspace
 
   build-and-push:
     name: build and push ${{ matrix.app }}
+    needs: changes
+    # Guard the `fromJSON` below: an empty `include` is not a matrix GitHub
+    # will accept, and a commit that touches only the repo root (README,
+    # CLAUDE.md, deployment/, design/, scripts/) legitimately builds nothing.
+    #
+    # The `release-please--` guard is the same call release.yml makes, for the
+    # same reason. That PR bumps `$.package.version` and rewrites one `version`
+    # field on the workspace's own `forest` entry in Cargo.lock; building a
+    # Docker image from it establishes nothing a version bump could falsify.
+    # It is not cheap to keep: the PR re-synchronises on every merge to main,
+    # so without this it is one 32-core forest leg — roughly 112 core-minutes
+    # — per merge, for an image that is now not even pushed. When the release
+    # PR merges, main builds and deploys it on the normal path.
+    if: >-
+      needs.changes.outputs.any == 'true'
+      && !startsWith(github.head_ref, 'release-please--')
+      && (
+        github.event_name != 'pull_request'
+        || github.event.pull_request.head.repo.full_name == github.repository
+      )
+    # ── Right-sizing this runner: prepared, deliberately not flipped ───────
+    #
+    # 32 cores are mostly idle here. Measured with `cargo build --timings` on
+    # a cold release build of apps/forest (BUILD-SPEED.md §2): effective
+    # parallelism 5.5x across 32 threads, because the last 35 seconds of a
+    # 70-second build is `forest-server` compiling and linking as a single
+    # rustc process on a single core. The first 25 seconds — ~550 dependency
+    # crates — is the only genuinely parallel part, and it is exactly the part
+    # a cargo-chef dependency layer removes from the per-commit path.
+    #
+    # So this is sequenced, and the order matters. Once cargo-chef lands, what
+    # is left of a source-only build is roughly 10 s of first-party crates,
+    # `forest-server`'s 26.5 s solo compile and an 8.7 s link: about 90%
+    # single-threaded. Eight cores should cost almost nothing in wall clock
+    # and bill a quarter as much. Dropping to eight cores *before* cargo-chef
+    # lands instead stretches the one phase that does use all 32, and the job
+    # gets slower for no saving.
+    #
+    # The trigger is PR #277 (`build/docker-chef-and-dev-profile`), which adds
+    # the cargo-chef layer. It touches no workflow file, so this does not
+    # happen on its own either — it is a follow-up someone has to pick up,
+    # together with the `cache-to` restore further down.
+    #
+    # The shape of the flip is already known — DATA-395 (d5532e3) moved this
+    # exact job onto the 8-core runner and the branch was never merged:
+    #
+    #     runs-on:
+    #       group: rust
+    #       labels:
+    #         - linux-8x-amd64-001
+    #
+    # What a trial run has to show before anyone keeps it:
+    #
+    #   1. #277 is on main, and a source-only push to main is hitting the
+    #      `cook` layer. If the build log still shows ~500 crates compiling,
+    #      stop — the premise is not true yet.
+    #   2. A source-only push: the `Build and push` step should land within
+    #      about 15% of its 32-core time. Billed cost falls ~4x regardless, so
+    #      anything in that band is a win.
+    #   3. A push that touches a Cargo.toml or Cargo.lock — 15% of commits, so
+    #      force one. This is the cold `cargo chef cook`, the parallel case,
+    #      and it is where 8 cores genuinely hurt: budget for roughly 4x the
+    #      dependency-compile phase. Decide whether that tail is acceptable;
+    #      it is the real cost of this change.
+    #   4. Memory and disk. 32xlarge has headroom that ~500 concurrent rustc
+    #      processes were quietly using. An OOM here reads as a killed build,
+    #      not as a resource error.
     runs-on:
       group: 32xlarge
 
+    # Collapse superseded runs on a branch or a PR. release-please pushes its
+    # branch twice per merge to main, seconds apart, and both pushes used to
+    # build both apps to completion on 32 cores. A human pushing a fixup gets
+    # the same treatment.
+    #
+    # main is deliberately exempt, and the group is keyed on `run_id` there so
+    # it is unique per run: every commit on main is deployed, so a main build
+    # must neither be cancelled by the next push nor queued behind the last.
+    concurrency:
+      group: build-${{ matrix.app }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - app: forest
-            context: apps/forest
-            image: ghcr.io/${{ github.repository_owner }}/forest
-          - app: forage
-            context: apps/forage
-            image: ghcr.io/${{ github.repository_owner }}/forage
+      # One entry per app whose sources moved — see the `changes` job. The
+      # shape is exactly what was hard-coded here before.
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
 
     steps:
       - name: Checkout code
@@ -210,7 +494,9 @@ jobs:
         run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
       - name: Extract branch name
         id: branch
-        run: echo "BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | sed 's/[^a-zA-Z0-9]/-/g')" >> $GITHUB_ENV
+        # `GITHUB_HEAD_REF` on a pull request, where `GITHUB_REF` is
+        # `refs/pull/N/merge` and the `refs/heads/` strip below is a no-op.
+        run: echo "BRANCH_NAME=$(echo ${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} | sed 's/[^a-zA-Z0-9]/-/g')" >> $GITHUB_ENV
 
       - name: Setup ssh agent
         uses: webfactory/ssh-agent@v0.10.0
@@ -221,10 +507,17 @@ jobs:
           git config --global url."ssh://git@github.com".insteadOf https://github.com && \
           mkdir -p -m 0600 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-      - uses: jdx/mise-action@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
+      # No mise here. It installed the pinned Rust toolchain onto a runner
+      # that never compiles anything: the build below is Docker end to end and
+      # the Dockerfile brings its own `rust:1.98-trixie`. It arrived with the
+      # workflow in 068c186, whose own message says the mise + buildx +
+      # ssh-agent block was copied to match another repository's pattern —
+      # which is where the one step this job does not need came from.
+      #
+      # Measured at 8-12 s on every leg of the last six main runs. On 32
+      # cores that is not free, and it also wrote a ~40 MB cache entry per
+      # leg into the quota this branch is trying to protect. release.yml
+      # keeps its mise step, where cargo genuinely runs on the runner.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -257,7 +550,10 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.context }}/Dockerfile
-          push: true
+          # A pull request builds to prove the image builds; it does not
+          # publish. Nothing consumes a PR's image, and every one pushed was
+          # registry storage nothing reaps.
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.image_tags.outputs.tags }}
           # Provenance for the footer / `forest admin status`. The Dockerfile
           # applies these in its final stage only, so they cost nothing in
@@ -269,8 +565,159 @@ jobs:
             BUILD_TIME=${{ env.BUILD_TIME }}
           ssh: |
             default=${{ env.SSH_AUTH_SOCK }}
+          # Restore, but do not export. Measured, and it is not close.
+          #
+          # BuildKit exports cache after the image is already pushed, and the
+          # step does not finish until it is done — so `deploy`, which waits on
+          # this job, waits on the upload too. On the four most recent main runs
+          # the changed app spent this long past the manifest push:
+          #
+          #   prepare 27.3s + send 130.9s = 158s
+          #   prepare 41.7s + send  41.2s =  83s
+          #   prepare 42.3s + send  58.4s = 101s
+          #   prepare 41.5s + send 156.5s = 198s   <- 3m10s of pure upload
+          #
+          # Mean about 2m15s, and roughly half the job. The unchanged app
+          # exported in 2.5s, because it had nothing new to send.
+          #
+          # What that bought: look at the Dockerfile. Everything above
+          # `COPY . .` is the base image, one apt install, a git config and a
+          # printf. The `cargo build` is below it, so any source change
+          # invalidates it and the big exported layer is only ever reusable by
+          # a build whose app source is byte-identical. That was the *other*
+          # app's leg — the 32-46s job — and path filtering just stopped that
+          # leg running at all. So the export now pays ~2m15s to preserve an
+          # apt layer that installs `clang mold`, which BUILD-SPEED.md §4
+          # measures as buying 0.02 seconds and recommends deleting.
+          #
+          # This cannot be moved off the critical path instead: BuildKit
+          # exports from the machine that built, and `needs:` is job-level, so
+          # there is no way to let the deploy start while the upload finishes.
+          # Do it, or do not.
+          #
+          # ── Turn it back on when cargo-chef lands: PR #277 ────────────────
+          #
+          # #277 (`build/docker-chef-and-dev-profile`) is the trigger, and it
+          # touches no workflow file — so this will not come back on its own.
+          # It is a deliberate follow-up, not something that PR will carry.
+          #
+          # What makes it worth restoring is the layer order that PR
+          # introduces. In its `apps/forage/Dockerfile`:
+          #
+          #     RUN cargo chef cook --release ...   # ~500 deps, keyed on
+          #                                         # recipe.json = manifests
+          #     COPY . .                            # source
+          #     RUN cargo build --release ...       # first-party only
+          #
+          # The cook layer sits ABOVE the source copy and depends only on the
+          # manifests, so it survives a source change — which is exactly what
+          # today's cache cannot do. And the export gets cheap at the same
+          # time: BuildKit skips blobs the cache already holds, and the recipe
+          # is byte-identical on the 85% of commits that touch no manifest.
+          #
+          # So: restore this line, unchanged, in the PR that follows #277:
+          #
+          #   cache-to: ${{ github.ref == 'refs/heads/main' && format('type=gha,scope={0},mode=max', matrix.app) || '' }}
+          #
+          # The main-only condition is the other half and still applies: see
+          # the cache accounting in this branch's description. Writing from
+          # branches put 8.85 GB on refs that could never read it back.
+          #
+          # Restoring stays on regardless. It costs about a second when there
+          # is nothing to find, and it still helps the case where an app's
+          # source genuinely has not moved.
+          #
+          # This is not a `mode=max` problem, which is what it looks like from
+          # the outside. Measured on 2026-09-22: 11.89 GB of active cache
+          # across 156 entries, against a 10 GB default per-repo limit. Of
+          # that, main's two scopes hold 3.04 GB — comfortably clear on their
+          # own, `mode=max` and all. The other 8.85 GB (74%) sat on refs that
+          # could never read it back: 5.79 GB on release-please's bot branch,
+          # 2.01 GB on a long-lived evaluation branch, the rest on feature
+          # branches and a PR merge ref.
+          #
+          # A run restores from its own ref and from the default branch, so a
+          # cache written on a branch is readable by that branch alone and
+          # then evicted on somebody else's behalf. Writing only on main means
+          # branches and PRs still get a warm cache — main's — and the quota
+          # stops being a race between refs that cannot help each other.
+          #
+          # An eviction looks exactly like a cold build, with no error in the
+          # log — and it is not hypothetical. Listing the cache twice, 40
+          # minutes apart on 2026-09-22 with no build of this workflow having
+          # exported anything in between, 15 entries had gone: 0.95 GB off
+          # release-please's branch, 2 stale feature-branch entries, and
+          # **0.47 GB off main** (6 of its 64 entries, 3.04 -> 2.57 GB).
+          # main's own Docker layers are being thrown away to make room for
+          # branch caches that nothing will ever restore.
           cache-from: type=gha,scope=${{ matrix.app }}
-          cache-to: type=gha,scope=${{ matrix.app }},mode=max
+          cache-to: ""
+
+  # ---------------------------------------------------------------------------
+  # One check that always reports, so branch protection survives the filter.
+  #
+  # `main`'s ruleset requires two status checks by name: `build and push forage`
+  # and `build and push forest`. Those names are generated by the matrix, so
+  # before this job the path filter was on a collision course with them — a
+  # forest-only PR produces no `build and push forage` context at all, and a
+  # required check that never reports is not "passed", it is "expected". The PR
+  # blocks forever, on every PR that touches one app, which is most of them.
+  #
+  # So the required context becomes this job, which cannot fail to report: it
+  # runs on `always()` and depends on both jobs, whatever they did. It is the
+  # matrix shape that varies; this name does not.
+  #
+  # ── What it does NOT cover, which the name flatters ────────────────────
+  #
+  # `build ok` means the images built. It does not mean CI passed. It needs
+  # `changes` and `build-and-push`, and deliberately nothing else, because
+  # that is precisely the scope the two contexts it replaces had: neither
+  # `frontend-tests` nor `forest-tests` is a required check today, and both
+  # can go red without branch protection objecting. Swapping the contexts is
+  # meant to survive the path filter, not to quietly tighten what blocks a
+  # merge — that is a policy call and belongs to whoever owns the ruleset.
+  #
+  # If you do want a merge gated on the tests as well, it is one line:
+  #
+  #     needs: [changes, build-and-push, frontend-tests, forest-tests]
+  #
+  # plus the same `success|skipped` treatment for each in the script below,
+  # since both are path-filtered and `skipped` has to stay a pass.
+  #
+  # Update the ruleset to require `build ok` in place of the two `build and
+  # push …` contexts. Until that is done the old contexts still apply, so
+  # merge this PR first — it builds both apps, because it edits this file —
+  # and flip the ruleset immediately after.
+  # ---------------------------------------------------------------------------
+  build-ok:
+    name: build ok
+    needs: [changes, build-and-push]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert that every build which ran, passed
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          BUILDS: ${{ needs['build-and-push'].result }}
+        run: |
+          set -euo pipefail
+          echo "changes=$CHANGES  build-and-push=$BUILDS"
+
+          # If the filter itself did not finish, nothing downstream means
+          # anything — an empty matrix would look exactly like "nothing to do".
+          if [ "$CHANGES" != "success" ]; then
+            echo "::error::the changed-paths job did not succeed ($CHANGES)"
+            exit 1
+          fi
+
+          # `skipped` is a pass on purpose, and it is the whole point of this
+          # job: the app did not change, or the commit touched neither app, or
+          # this is a fork PR that cannot reach the deploy key. None of those
+          # is a build failure, and none of them should hold a PR shut.
+          case "$BUILDS" in
+            success|skipped) echo "builds ok" ;;
+            *) echo "::error::build-and-push reported '$BUILDS'"; exit 1 ;;
+          esac
 
   # ---------------------------------------------------------------------------
   # Roll the freshly-pushed images onto the platform ECS cluster.
@@ -296,7 +743,7 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy:
     name: deploy ${{ matrix.environment.name }}/${{ matrix.service }}
-    needs: build-and-push
+    needs: [changes, build-and-push]
     # Fork PRs get no secrets; the repository guard makes that a clean skip
     # rather than a red X on someone's fork.
     #
@@ -331,8 +778,30 @@ jobs:
     #   merge, and let the deploy be the boring part.
     #
     # The manual dispatch stays, for deploying a ref that is not main.
+    #
+    # ── Why this tolerates a skipped build ─────────────────────────────────
+    #
+    # `build-and-push` now skips the app whose sources did not move, and skips
+    # entirely when a commit touches neither app. A default `needs:` would
+    # propagate that skip here and quietly stop deploying, so the condition is
+    # explicit: run unless the build failed or was cancelled.
+    #
+    # `!cancelled()` alone is not enough for the cancelled half. It answers for
+    # *this* job, so a run where someone cancels the build job by hand leaves
+    # deploy eligible with no image behind it — and `:latest` still resolves,
+    # to the previous digest. Same silent stale deploy, different door.
+    #
+    # Deploying a service whose image did not change is not a no-op — it
+    # resolves `:latest`, which is still the digest already running, registers
+    # a revision pinned to it and rolls the service onto the same image. That
+    # is the behaviour this repository has always had on a push to main, and
+    # narrowing it is ECS work (health-check grace, minimum-healthy-percent),
+    # not build work. Left alone deliberately; see the note in the PR.
     if: >-
-      github.repository == 'understory-io/forest'
+      !cancelled()
+      && needs.changes.result == 'success'
+      && !contains(fromJSON('["failure", "cancelled"]'), needs['build-and-push'].result)
+      && github.repository == 'understory-io/forest'
       && (
         (github.event_name == 'push' && github.ref == 'refs/heads/main')
         || (github.event_name == 'workflow_dispatch' && inputs.deploy)

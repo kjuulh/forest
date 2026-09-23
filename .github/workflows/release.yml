@@ -44,6 +44,19 @@ on:
 permissions:
   contents: write
 
+# A publish must never be cancelled — it uploads the artefacts users install
+# from, and a half-uploaded release is worse than a late one. A PR dry run is
+# the opposite: it exists to tell you about the commit you just pushed, so an
+# older one is only burning runner minutes.
+#
+# This matters because of how release-please works. It pushes its branch once
+# from the action and once more from the Cargo.lock sync step seconds later, so
+# every merge to main queued two full three-target dry runs. Grouping by PR
+# number collapses them.
+concurrency:
+  group: release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
   BINARY_NAME: forest
@@ -57,6 +70,26 @@ env:
 jobs:
   build:
     name: build ${{ matrix.target }}
+    # Skip the dry run on release-please's own PR.
+    #
+    # The dry run is here to catch "a new private git dep showed up in the
+    # workspace lockfile" before a tag goes out. release-please's PR is the one
+    # PR that structurally cannot do that: it bumps `$.package.version` on
+    # `apps/forest/crates/forest/Cargo.toml`, and release-please.yml's sync step
+    # rewrites exactly one `version` field on the workspace's own `forest` entry
+    # in `Cargo.lock`. Every external dependency stays as locked.
+    #
+    # It was not a rounding error. 60 of the last 100 runs of this workflow were
+    # this one PR, at three targets and ~18 min of runner time each, one of them
+    # macOS at 10x — because the PR re-synchronises on every merge to main and
+    # lives for days.
+    #
+    # The real lockfile check still happens: on every human PR that touches
+    # `apps/forest/**`, and again on `release: published` before the artefacts
+    # are built.
+    if: >-
+      github.event_name != 'pull_request'
+      || !startsWith(github.head_ref, 'release-please--')
     strategy:
       fail-fast: false
       matrix:
@@ -114,6 +147,29 @@ jobs:
       - uses: jdx/mise-action@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Nothing cached the Rust build here, so every one of these legs
+      # compiled the CLI's whole dependency graph from nothing: measured
+      # over the 40 most recent runs, 6.9 min on x86_64 linux, 5.7 on
+      # arm64 linux, 5.3 on macOS — and macOS runner minutes bill at 10x.
+      #
+      # `workspaces` is required: the Cargo workspace is `apps/forest`,
+      # not the repo root, so the default (repo root) would find no
+      # Cargo.lock and cache nothing. `key` separates the three legs, all
+      # of which build a different target triple into the same `target/`.
+      #
+      # Caches are scoped per ref, and a run can read its own ref plus
+      # the default branch. This workflow never runs on a push to main,
+      # so there is no main-scoped cache for a tag build to restore —
+      # what this buys is the *repeated* runs on one PR, which is where
+      # the minutes actually are: 95 of the last 100 runs were the
+      # `pull_request` dry run, 60 of them on release-please's single
+      # long-lived PR, all sharing one cache scope.
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ env.CARGO_DIR }}
+          key: ${{ matrix.target }}
 
       # All three matrix targets are *native* to their runner, so no
       # `rustup target add` is needed. If the matrix grows to include
