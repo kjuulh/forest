@@ -108,6 +108,8 @@ pub async fn execute() -> anyhow::Result<()> {
             .ok()
             .filter(|v| !v.is_empty())
             .map(|v| v.trim_end_matches('/').to_string()),
+
+        password_hashing: crate::state::PasswordHashing::Production,
     };
 
     validate_config(&config)?;

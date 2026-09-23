@@ -95,6 +95,42 @@ pub struct Config {
     /// `failed_precondition` — i.e. the operator must opt in before
     /// the web-login flow becomes usable.
     pub web_app_url: Option<String>,
+
+    /// How much work `NativeCredentials` spends hashing a password.
+    ///
+    /// A `Config` field rather than an environment variable on purpose:
+    /// nothing a deployment can set should be able to weaken this.
+    pub password_hashing: PasswordHashing,
+}
+
+/// Argon2 cost, as a choice rather than numbers, so the call sites read as
+/// what they are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PasswordHashing {
+    /// OWASP-recommended Argon2id parameters. ~100-200 ms per hash, which is
+    /// the entire point of a password hash.
+    #[default]
+    Production,
+
+    /// Minimum cost. **Never valid outside a test.**
+    ///
+    /// The acceptance suite registers a user in 129 places; at production cost
+    /// that hashing measured as two thirds of its runtime — 132 tests in
+    /// 2.61 s with it, 0.86 s without. None of them asserts anything about how
+    /// expensive a hash is.
+    InsecureFastForTests,
+}
+
+impl PasswordHashing {
+    pub(crate) fn params(self) -> argon2::Params {
+        match self {
+            Self::Production => argon2::Params::DEFAULT,
+            // m=8 KiB, t=1, p=1 — argon2's floor.
+            Self::InsecureFastForTests => {
+                argon2::Params::new(8, 1, 1, None).expect("argon2 floor is valid")
+            }
+        }
+    }
 }
 
 /// Pure validator for inter-field invariants on `Config`.
@@ -111,12 +147,33 @@ pub fn validate_config(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Open the pool with a bounded connection count.
+///
+/// `PgPool::connect` uses sqlx's default of 10, which is right for one server
+/// and wrong for a test suite: nextest runs a process per test — 32 on a
+/// 32-core machine — and 32 x 10 is 320 connections against a postgres whose
+/// `max_connections` is 100. That does not bite today only because
+/// production-cost hashing keeps those processes busy instead of connecting;
+/// make hashing cheap and it fails at once with "pool timed out while waiting
+/// for an open connection".
+///
+/// Default stays 10, so production is unchanged unless the variable is set.
+async fn connect_pool() -> anyhow::Result<sqlx::PgPool> {
+    let url = std::env::var("DATABASE_URL").context("failed to find DATABASE_URL in env")?;
+    let max = std::env::var("DATABASE_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(10);
+
+    Ok(sqlx::postgres::PgPoolOptions::new()
+        .max_connections(max)
+        .connect(&url)
+        .await?)
+}
+
 impl State {
     pub async fn new(config: Config) -> anyhow::Result<Self> {
-        let pool = sqlx::PgPool::connect(
-            &std::env::var("DATABASE_URL").context("failed to find DATABASE_URL in env")?,
-        )
-        .await?;
+        let pool = connect_pool().await?;
 
         // Aurora PostgreSQL supports SQLx's advisory migration lock. Keep it
         // enabled so rolling deployments cannot execute schema changes from
@@ -162,10 +219,7 @@ impl State {
         config: Config,
         dns_resolver: std::sync::Arc<dyn crate::dns::DnsResolver>,
     ) -> anyhow::Result<Self> {
-        let pool = sqlx::PgPool::connect(
-            &std::env::var("DATABASE_URL").context("failed to find DATABASE_URL in env")?,
-        )
-        .await?;
+        let pool = connect_pool().await?;
 
         sqlx::migrate!("./migrations/").run(&pool).await?;
 
@@ -211,6 +265,7 @@ mod tests {
             registration_email_domain_regex: None,
             require_email_verification: false,
             web_app_url: None,
+            password_hashing: PasswordHashing::InsecureFastForTests,
         }
     }
 
