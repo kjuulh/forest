@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT ON (p.id)\n            p.project AS \"project!\",\n            a.deployment_items\n        FROM projects p\n        JOIN annotations a ON a.project_id = p.id\n        WHERE p.organisation = $1\n          AND EXISTS (\n            SELECT 1\n            FROM release_states rs\n            JOIN destinations d ON d.id = rs.destination_id\n            WHERE rs.project_id = p.id\n              AND d.organisation = $1\n              AND d.environment = $2\n          )\n        ORDER BY p.id, a.created DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "project!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "projects",
+            "name": "project"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "deployment_items",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "annotations",
+            "name": "deployment_items"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "08bfa1eb889a71c65b8aa7d0d75bf189ab166a639fed539705f3cbe2433c1fac"
+}

@@ -1922,8 +1922,9 @@ impl GrpcClient {
         metadata: HashMap<String, String>,
         sensitive_keys: Vec<String>,
         destination_type: DestinationType,
-    ) -> anyhow::Result<()> {
-        self.destination_client()
+    ) -> anyhow::Result<Vec<String>> {
+        let response = self
+            .destination_client()
             .await?
             .create_destination(CreateDestinationRequest {
                 organisation: organisation.to_string(),
@@ -1937,7 +1938,10 @@ impl GrpcClient {
             .map_err(grpc_err)
             .context("create destination (grpc)")?;
 
-        Ok(())
+        // Projects the new destination was added to without asking. Empty from
+        // a server that predates the field, which is indistinguishable from
+        // "none" — the warning is advisory either way.
+        Ok(response.into_inner().widened_projects)
     }
 
     pub async fn update_destination(

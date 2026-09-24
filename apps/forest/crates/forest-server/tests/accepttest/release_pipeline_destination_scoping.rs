@@ -352,6 +352,34 @@ async fn a_declaration_for_another_environment_does_not_narrow_this_one() -> any
     Ok(())
 }
 
+/// forest#288. A project that declares nothing for this environment still fans
+/// out across it — but only onto the kinds of destination its artifact renders.
+/// A terraform destination added beside the flux one it has always released to
+/// must not be scheduled: there is no terraform in the artifact to run there.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_undeclared_environment_does_not_widen_onto_a_kind_the_artifact_never_renders()
+-> anyhow::Result<()> {
+    let env = format!("accept-env-{}", uuid::Uuid::now_v7());
+
+    let outcome = run_typed_stage(
+        deploy_stage("only", &env),
+        &env,
+        (FLUX, TERRAFORM),
+        Some(("some-other-env", &[("^target-.*$", FLUX)])),
+        false,
+    )
+    .await?;
+
+    assert!(
+        only(&outcome.scheduled, "target-"),
+        "only the flux destination is of a kind this artifact renders. \
+         scheduled: {:?}",
+        outcome.scheduled,
+    );
+
+    Ok(())
+}
+
 /// The migration's read-side default. Distinct from the `[]` case above: that
 /// one is "prepared and declared nothing", this one is "annotated before the
 /// column existed", and they are different code paths.

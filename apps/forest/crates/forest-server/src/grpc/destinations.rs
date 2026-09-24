@@ -90,7 +90,27 @@ impl DestinationService for DestinationServer {
             })
             .await;
 
-        Ok(Response::new(CreateDestinationResponse {}))
+        // After the create, so a failure here cannot cost the destination. And
+        // advisory: a query error is logged and reported as "none known"
+        // rather than failing a create that has already happened.
+        let widened_projects = match crate::services::destination_selector::projects_widened_by(
+            &self.state.db,
+            &req.organisation,
+            &req.environment,
+            &dest_type.qualified(),
+        )
+        .await
+        {
+            Ok(projects) => projects,
+            Err(e) => {
+                tracing::warn!("could not work out which projects this destination widens: {e:#}");
+                Vec::new()
+            }
+        };
+
+        Ok(Response::new(CreateDestinationResponse {
+            widened_projects,
+        }))
     }
 
     async fn update_destination(
