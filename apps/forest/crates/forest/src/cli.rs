@@ -420,3 +420,33 @@ impl Component for CommandHandler {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod global_flag_tests {
+    use super::*;
+
+    /// `--context` was global and `--forest-server` was not, so
+    /// `forest publish --forest-server <url>` failed with "unexpected argument"
+    /// and only the before-the-subcommand spelling worked (#298).
+    #[test]
+    fn forest_server_is_accepted_after_the_subcommand() {
+        let cmd = Command::try_parse_from([
+            "forest",
+            "publish",
+            "--dry-run",
+            "--forest-server",
+            "https://api.example",
+        ])
+        .unwrap();
+        assert_eq!(
+            cmd.config.forest_server.as_deref(),
+            Some("https://api.example")
+        );
+    }
+
+    #[test]
+    fn context_is_accepted_after_the_subcommand() {
+        let cmd = Command::try_parse_from(["forest", "publish", "--context", "work"]).unwrap();
+        assert_eq!(cmd.config.context.as_deref(), Some("work"));
+    }
+}

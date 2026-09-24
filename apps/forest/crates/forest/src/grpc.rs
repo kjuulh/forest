@@ -3014,10 +3014,14 @@ impl GrpcClientState for State {
             {
                 s
             } else {
-                match crate::contexts::ContextStore::from_env()
-                    .and_then(|s| s.resolve(self.config.context.as_deref()))
-                {
-                    Ok(entry) => entry.server,
+                match crate::contexts::ContextStore::from_env().and_then(|store| {
+                    crate::contexts::resolve_server_target(
+                        None,
+                        self.config.context.as_deref(),
+                        &store,
+                    )
+                }) {
+                    Ok(target) => target.server,
                     Err(e) => {
                         tracing::warn!("resolving context server url: {e:#}");
                         String::new()
