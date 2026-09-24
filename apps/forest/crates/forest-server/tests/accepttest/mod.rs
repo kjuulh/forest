@@ -3,6 +3,7 @@ mod authz_flow;
 mod auto_join_flow;
 mod component_flow;
 mod destination_sensitive_metadata;
+mod destination_widening;
 mod device_login;
 mod email_verification;
 mod fixtures;

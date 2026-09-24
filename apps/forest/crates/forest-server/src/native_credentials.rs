@@ -1,7 +1,7 @@
 use std::sync::{Arc, LazyLock};
 
 use argon2::{
-    Argon2, Params, PasswordHash, PasswordVerifier,
+    Argon2, PasswordHash, PasswordVerifier,
     password_hash::{SaltString, rand_core::OsRng},
 };
 
@@ -12,6 +12,7 @@ use crate::{
 
 pub struct NativeCredentials {
     secret_key: Vec<u8>,
+    hashing: crate::state::PasswordHashing,
 }
 
 trait PasswordRequirement {
@@ -68,7 +69,7 @@ impl NativeCredentials {
             &self.secret_key,
             argon2::Algorithm::Argon2id,
             argon2::Version::V0x13,
-            Params::DEFAULT,
+            self.hashing.params(),
         )
         .map_err(|e| anyhow::anyhow!("failed to build password hashing facility: {e:#}"))?;
 
@@ -85,7 +86,7 @@ impl NativeCredentials {
             &self.secret_key,
             argon2::Algorithm::Argon2id,
             argon2::Version::V0x13,
-            Params::DEFAULT,
+            self.hashing.params(),
         )
         .map_err(|e| anyhow::anyhow!("failed to build password hashing facility: {e:#}"))?;
 
@@ -121,6 +122,7 @@ impl NativeCredentialsState for State {
     fn native_credentials(&self) -> NativeCredentials {
         NativeCredentials {
             secret_key: self.config.password_secret_key.clone().into_bytes(),
+            hashing: self.config.password_hashing,
         }
     }
 }

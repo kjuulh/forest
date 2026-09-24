@@ -6,27 +6,57 @@
       {
         "ordinal": 0,
         "name": "organisation_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "organisation_members",
+            "name": "organisation_id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "user_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "organisation_members",
+            "name": "user_id"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "role",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "organisation_members",
+            "name": "role"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "created_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "organisation_members",
+            "name": "created_at"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "updated_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "organisation_members",
+            "name": "updated_at"
+          }
+        }
       }
     ],
     "parameters": {

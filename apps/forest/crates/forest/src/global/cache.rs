@@ -59,12 +59,19 @@ impl BinaryCache {
         let limit = std::time::Duration::from_millis(500);
         loop {
             self.migrate_legacy_entry(sha, bin_name).await?;
+            // Sample the marker *before* looking, not after. A mover that
+            // lands in between has, by definition, published its entry after
+            // this read and before the lookup — so `racing` is still true and
+            // the next pass finds it. Read the other way round, that mover is
+            // invisible to both: the lookup is too early and the marker check
+            // too late, and a warm entry is reported as a miss.
+            let racing = self.migration_in_flight(sha).await;
             if let Some(p) = self.lookup(sha, bin_name).await? {
                 return Ok(Some(p));
             }
             // Not a race — or a mover that died holding the file, in which
             // case the cold path re-fetches. Either way, stop waiting.
-            if waited >= limit || !self.migration_in_flight(sha).await {
+            if waited >= limit || !racing {
                 return Ok(None);
             }
             tokio::time::sleep(step).await;

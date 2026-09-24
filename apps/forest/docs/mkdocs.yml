@@ -76,6 +76,7 @@ nav:
       - Flux v2 Destination: guides/flux-destination.md
       - CUE Configuration: guides/cue-configuration.md
       - CI/CD Integration: guides/ci-cd.md
+      - Adopting Existing Infrastructure: guides/terraform-adoption.md
   - Productization:
       - Product Direction: product/index.md
       - Pricing: product/pricing.md

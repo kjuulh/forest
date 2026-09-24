@@ -221,8 +221,16 @@ pub struct CreateDestinationRequest {
     #[prost(string, repeated, tag="6")]
     pub sensitive_keys: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateDestinationResponse {
+    /// Projects this destination was just added to without asking for it: they
+    /// release into its environment, declare no destinations for it, and render
+    /// something of its type (or cannot say what they render). A project that
+    /// declares nothing for an environment is released to every destination in
+    /// it of a kind it renders, so these projects' next release there will also
+    /// target the new one. `organisation/project`, sorted. forest#288.
+    #[prost(string, repeated, tag="1")]
+    pub widened_projects: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UpdateDestinationRequest {

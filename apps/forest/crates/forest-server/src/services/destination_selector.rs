@@ -197,6 +197,73 @@ pub async fn recorded_declaration(
     }
 }
 
+/// Projects in `organisation` that a new destination of `destination_type` in
+/// `environment` widens (see [`widened_by_new_destination`]), as
+/// `organisation/project`, sorted.
+///
+/// "Releases into the environment" is read from history: a project with at
+/// least one release to a destination there. Its declaration is the one on its
+/// most recent annotation, which is what its next release is most likely to
+/// carry. That makes this a warning, not a guarantee — a project whose next
+/// artifact declares differently is judged by that artifact when it releases.
+pub async fn projects_widened_by(
+    db: &sqlx::PgPool,
+    organisation: &str,
+    environment: &str,
+    destination_type: &str,
+) -> anyhow::Result<Vec<String>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT DISTINCT ON (p.id)
+            p.project AS "project!",
+            a.deployment_items
+        FROM projects p
+        JOIN annotations a ON a.project_id = p.id
+        WHERE p.organisation = $1
+          AND EXISTS (
+            SELECT 1
+            FROM release_states rs
+            JOIN destinations d ON d.id = rs.destination_id
+            WHERE rs.project_id = p.id
+              AND d.organisation = $1
+              AND d.environment = $2
+          )
+        ORDER BY p.id, a.created DESC
+        "#,
+        organisation,
+        environment,
+    )
+    .fetch_all(db)
+    .await
+    .context("read the projects releasing into this environment")?;
+
+    let mut widened = Vec::new();
+    for row in rows {
+        let items: Option<Vec<DeploymentItem>> = match row.deployment_items {
+            Some(value) if !value.is_null() => match serde_json::from_value(value) {
+                Ok(items) => Some(items),
+                Err(e) => {
+                    // Unreadable is not "declares nothing"; say nothing rather
+                    // than guess, and leave a trace.
+                    tracing::warn!(
+                        project = row.project,
+                        "unreadable recorded declaration: {e}"
+                    );
+                    continue;
+                }
+            },
+            _ => None,
+        };
+
+        if widened_by_new_destination(items.as_deref(), environment, destination_type) {
+            widened.push(format!("{organisation}/{}", row.project));
+        }
+    }
+
+    widened.sort();
+    Ok(widened)
+}
+
 /// Does a project's declared destination *type* cover a destination of type
 /// `actual`?
 ///
@@ -250,9 +317,14 @@ pub fn selects(item: &DeploymentItem, destination_name: &str, destination_type: 
 /// `describe` yields a candidate's `(name, type)`. Both are consulted — see
 /// [`selects`].
 ///
-/// - Nothing declared for `environment` → every candidate, unchanged. This is the
-///   compatibility hinge: a project that declares no destinations must keep
-///   releasing to all of them.
+/// - Nothing declared for `environment` → every candidate **of a type the
+///   artifact renders at all** (see [`rendered_types`]). This is the
+///   compatibility hinge: a project that declares no destinations keeps
+///   releasing to the whole environment — but only to the kinds of place it
+///   has something for. Without the type half, adding a destination of a new
+///   kind to an environment silently widened every undeclared project onto it,
+///   and their next release failed there (forest#288). An artifact that renders
+///   no typed item at all still fans out to everything, as it always has.
 /// - Declared, and something matches → the matching subset.
 /// - Declared, and nothing matches → `Err` with a message naming the environment,
 ///   what it holds, and the selectors that matched none of it. Never an empty
@@ -280,7 +352,7 @@ pub fn narrow_to_declared<T>(
         .filter(|item| item.env == environment)
         .collect();
     if declared.is_empty() {
-        return Ok(candidates);
+        return narrow_undeclared(candidates, items, environment, describe);
     }
 
     for item in &declared {
@@ -361,6 +433,120 @@ pub fn narrow_to_declared<T>(
     }
 
     Ok(selected)
+}
+
+/// Every destination type an artifact renders an item for, in any environment —
+/// or `None` when that is not known.
+///
+/// Not known means: no item records at all (an artifact prepared before they
+/// existed, or a project with no component), or any item recorded without a
+/// type (prepared before items carried one). Neither says anything about kind,
+/// so neither may narrow — reading absence as "renders nothing" would stop
+/// projects releasing that never said anything wrong.
+pub fn rendered_types(items: &[DeploymentItem]) -> Option<std::collections::BTreeSet<&str>> {
+    if items.is_empty()
+        || items
+            .iter()
+            .any(|item| item.destination_type.trim().is_empty())
+    {
+        return None;
+    }
+
+    Some(
+        items
+            .iter()
+            .map(|item| item.destination_type.trim())
+            .collect(),
+    )
+}
+
+/// The undeclared half of [`narrow_to_declared`]: the whole environment, minus
+/// the kinds of destination this artifact has nothing for.
+///
+/// The type rule is the one `work_dirs` and [`selects`] already apply — a
+/// terraform destination is handed only what a terraform item rendered — so a
+/// candidate of a type the artifact never renders could only ever fail there.
+/// Skipping it is the same "not scheduled, not failed" as a declared type
+/// mismatch.
+///
+/// If that leaves nothing, it is an error rather than an empty success, for the
+/// same reason as the declared path: silently deploying nothing is the failure
+/// this module exists to prevent.
+fn narrow_undeclared<T>(
+    candidates: Vec<T>,
+    items: &[DeploymentItem],
+    environment: &str,
+    describe: impl Fn(&T) -> (&str, &str),
+) -> Result<Vec<T>, String> {
+    let Some(rendered) = rendered_types(items) else {
+        return Ok(candidates);
+    };
+
+    let available: Vec<String> = candidates
+        .iter()
+        .map(|candidate| describe_one(&describe, candidate))
+        .collect();
+
+    let selected: Vec<T> = candidates
+        .into_iter()
+        .filter(|candidate| {
+            let (name, destination_type) = describe(candidate);
+            let keep = rendered
+                .iter()
+                .any(|rendered| type_matches(rendered, destination_type));
+            if !keep {
+                tracing::info!(
+                    environment,
+                    destination = name,
+                    destination_type,
+                    "not scheduled: this project declares nothing for the environment and renders nothing of this destination's type"
+                );
+            }
+            keep
+        })
+        .collect();
+
+    if selected.is_empty() && !available.is_empty() {
+        return Err(format!(
+            "this project declares no destinations for environment '{environment}', and none of what it holds ({}) is of a type the artifact renders ({})",
+            available.join(", "),
+            rendered.into_iter().collect::<Vec<_>>().join(", "),
+        ));
+    }
+
+    Ok(selected)
+}
+
+/// Would a new destination of `destination_type` in `environment` be scheduled
+/// for this project's next release there **without the project having asked
+/// for it** — that is, through the undeclared fan-out of [`narrow_to_declared`]?
+///
+/// `items` is the project's latest recorded declaration: `None` for an
+/// artifact annotated before declarations were recorded, which fans out to
+/// everything and so always gains the destination.
+///
+/// A project that *declares* destinations for the environment is not widened
+/// by this: whether one of its selectors happens to match the new name is its
+/// own explicit choice, and it is answered by the selector, not by fan-out.
+pub fn widened_by_new_destination(
+    items: Option<&[DeploymentItem]>,
+    environment: &str,
+    destination_type: &str,
+) -> bool {
+    let Some(items) = items else {
+        return true;
+    };
+
+    if items.iter().any(|item| item.env == environment) {
+        return false;
+    }
+
+    match rendered_types(items) {
+        None => true,
+        Some(rendered) => rendered
+            .iter()
+            .any(|rendered| type_matches(rendered, destination_type)),
+    }
 }
 
 /// `name (type)`, or just the name when the caller has no type to offer.
@@ -486,7 +672,7 @@ mod tests {
 
     use super::{
         DeploymentItem, config_for_destination, matches, narrow_to_declared, parse_declaration,
-        selectors_for_env, type_matches,
+        selectors_for_env, type_matches, widened_by_new_destination,
     };
 
     /// What `release prepare` writes, at the path it writes it to — selector and
@@ -1026,18 +1212,158 @@ mod tests {
     /// type filter, and asserted here because the filter now runs over items
     /// rather than over selectors.
     #[test]
-    fn nothing_declared_for_the_environment_still_fans_out() {
-        let items = vec![declared("some-other-env", "^dev/.*$", "forest/terraform@1")];
+    fn nothing_declared_for_the_environment_still_fans_out_across_its_own_kinds() {
+        let items = vec![
+            declared("some-other-env", "^dev/.*$", "forest/terraform@1"),
+            declared("some-other-env", "^x$", "forest/generic@1"),
+        ];
 
+        let candidates = vec![
+            dest("a", "forest/generic@1"),
+            dest("b", "forest/terraform@1"),
+            dest("c", "forest/generic@1"),
+        ];
+
+        let selected =
+            narrow_to_declared(candidates, &items, "platform-dev", describe).expect("fans out");
+
+        assert_eq!(selected.len(), 3, "every destination of a rendered type");
+    }
+
+    /// forest#288, as it would have happened: an ECS-only project that declares
+    /// nothing for `dev`, and a terraform destination added to `dev`. The new
+    /// destination must not be scheduled — its artifact has no terraform to run.
+    #[test]
+    fn a_new_kind_of_destination_does_not_widen_an_undeclared_project() {
+        let items = vec![declared("prod", "^prod/.*$", "forest/generic@1")];
+
+        let candidates = vec![
+            dest("dev/eu-west-1/development", "forest/generic@1"),
+            dest("dev/eu-west-1/core", "forest/terraform@1"),
+        ];
+
+        let selected =
+            narrow_to_declared(candidates, &items, "dev", describe).expect("the ECS one remains");
+
+        assert_eq!(
+            selected,
+            vec![dest("dev/eu-west-1/development", "forest/generic@1")]
+        );
+    }
+
+    /// When the type filter leaves nothing, say so: an empty success would be a
+    /// release that silently deployed nowhere.
+    #[test]
+    fn an_undeclared_environment_holding_only_other_kinds_fails_loudly() {
+        let items = vec![declared("prod", "^prod/.*$", "forest/generic@1")];
+        let candidates = vec![dest("dev/eu-west-1/core", "forest/terraform@1")];
+
+        let error = narrow_to_declared(candidates, &items, "dev", describe)
+            .expect_err("nothing of a rendered type");
+
+        assert!(
+            error.contains("declares no destinations for environment 'dev'"),
+            "{error}"
+        );
+        assert!(
+            error.contains("dev/eu-west-1/core (forest/terraform@1)"),
+            "{error}"
+        );
+        assert!(error.contains("forest/generic@1"), "{error}");
+    }
+
+    /// The compatibility hinge, kept: with no item records at all there is no
+    /// statement about kind, so nothing is filtered.
+    #[test]
+    fn an_artifact_with_no_items_still_fans_out_to_everything() {
         let candidates = vec![
             dest("a", "forest/generic@1"),
             dest("b", "forest/terraform@1"),
         ];
 
-        let selected =
-            narrow_to_declared(candidates, &items, "platform-dev", describe).expect("no filter");
+        let selected = narrow_to_declared(candidates, &[], "dev", describe).expect("no filter");
 
         assert_eq!(selected.len(), 2);
+    }
+
+    /// An item recorded before items carried a type says nothing about kind
+    /// either, so it must not narrow.
+    #[test]
+    fn an_untyped_item_anywhere_disables_the_type_filter() {
+        let items = vec![
+            declared("prod", "^prod/.*$", "forest/generic@1"),
+            declared("prod", "^prod-tf$", ""),
+        ];
+        let candidates = vec![
+            dest("a", "forest/generic@1"),
+            dest("b", "forest/terraform@1"),
+        ];
+
+        let selected = narrow_to_declared(candidates, &items, "dev", describe).expect("no filter");
+
+        assert_eq!(selected.len(), 2);
+    }
+
+    /// `destination create`'s warning asks the same question the scheduler
+    /// answers: an ECS-only project that declares nothing for `dev` is widened
+    /// by a new ECS destination there, and not by a terraform one.
+    #[test]
+    fn a_new_destination_widens_only_undeclared_projects_that_render_its_kind() {
+        let ecs_only = vec![declared("prod", "^prod/.*$", "forest/generic@1")];
+
+        assert!(widened_by_new_destination(
+            Some(&ecs_only),
+            "dev",
+            "forest/generic@1"
+        ));
+        assert!(!widened_by_new_destination(
+            Some(&ecs_only),
+            "dev",
+            "forest/terraform@1"
+        ));
+    }
+
+    #[test]
+    fn a_project_declaring_the_environment_is_never_widened() {
+        // Even though `.*` would match the new name: that is the project's
+        // selector choosing it, not fan-out.
+        let declaring = vec![declared("dev", ".*", "forest/terraform@1")];
+
+        assert!(!widened_by_new_destination(
+            Some(&declaring),
+            "dev",
+            "forest/terraform@1"
+        ));
+    }
+
+    #[test]
+    fn a_project_that_cannot_say_what_it_renders_is_widened() {
+        assert!(widened_by_new_destination(
+            None,
+            "dev",
+            "forest/terraform@1"
+        ));
+        assert!(widened_by_new_destination(
+            Some(&[]),
+            "dev",
+            "forest/terraform@1"
+        ));
+        assert!(widened_by_new_destination(
+            Some(&[declared("prod", "^p$", "")]),
+            "dev",
+            "forest/terraform@1",
+        ));
+    }
+
+    /// And a candidate whose own type is unknown is kept, as on the declared path.
+    #[test]
+    fn an_undeclared_candidate_with_no_known_type_is_kept() {
+        let items = vec![declared("prod", "^prod/.*$", "forest/generic@1")];
+        let candidates = vec![dest("a", "")];
+
+        let selected = narrow_to_declared(candidates, &items, "dev", describe).expect("kept");
+
+        assert_eq!(selected.len(), 1);
     }
 
     /// `selects` is the single rule; `config_for_destination` uses it too, so a

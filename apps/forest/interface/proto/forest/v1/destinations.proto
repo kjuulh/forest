@@ -13,7 +13,15 @@ message CreateDestinationRequest {
   // TF_VAR_* credentials) be marked without changing the type schema.
   repeated string sensitive_keys = 6;
 }
-message CreateDestinationResponse {}
+message CreateDestinationResponse {
+  // Projects this destination was just added to without asking for it: they
+  // release into its environment, declare no destinations for it, and render
+  // something of its type (or cannot say what they render). A project that
+  // declares nothing for an environment is released to every destination in
+  // it of a kind it renders, so these projects' next release there will also
+  // target the new one. `organisation/project`, sorted. forest#288.
+  repeated string widened_projects = 1;
+}
 
 message UpdateDestinationRequest {
   string name = 1;

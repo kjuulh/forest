@@ -12,6 +12,7 @@
 //!   PROJECT_DESCRIPTION    (optional)
 //!   PROJECT_GIT_URL, PROJECT_HOMEPAGE, PROJECT_DOCS_URL,
 //!   PROJECT_SUPPORT_URL, PROJECT_DOMAIN, PROJECT_OWNER  (all optional)
+//!   PROJECT_TAGS           comma-separated labels (optional)
 
 use forest_grpc_interface::release_service_client::ReleaseServiceClient;
 use forest_grpc_interface::{CreateProjectRequest, ProjectMetadata, UpdateProjectRequest};
@@ -33,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
         support_url: env_or_empty("PROJECT_SUPPORT_URL"),
         domain: env_or_empty("PROJECT_DOMAIN"),
         owner: env_or_empty("PROJECT_OWNER"),
-        tags: vec![],
+        tags: split_tags(&env_or_empty("PROJECT_TAGS")),
     };
     let description = env_or_empty("PROJECT_DESCRIPTION");
 
@@ -76,8 +77,20 @@ async fn main() -> anyhow::Result<()> {
             println!("  support_url: {:?}", m.support_url);
             println!("  domain:      {:?}", m.domain);
             println!("  owner:       {:?}", m.owner);
+            println!("  tags:        {:?}", m.tags);
         }
     }
 
     Ok(())
+}
+
+/// `tags` is a repeated field, so it arrives from the environment as one
+/// comma-separated string. Empty in, empty out — the server treats a missing
+/// tag list as "clear", same as the other blessed fields.
+fn split_tags(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+        .collect()
 }

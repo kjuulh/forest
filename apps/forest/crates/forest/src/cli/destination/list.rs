@@ -1,7 +1,15 @@
+use std::collections::BTreeMap;
+
 use anyhow::Context;
 use forest_models::Destination;
+use serde::Serialize;
+use tabled::Tabled;
 
-use crate::{grpc::GrpcClientState, state::State};
+use crate::{
+    cli::output::{self, OutputFormat},
+    grpc::GrpcClientState,
+    state::State,
+};
 
 /// Stand-in printed instead of a credential. Same width regardless of the
 /// value's real length, so the output leaks nothing about it.
@@ -21,6 +29,21 @@ impl ListCommand {
             .await
             .context("get destinations")?;
 
+        let format = &state.config.format;
+
+        // Everything but the default goes through the shared renderer, so
+        // `--format json` is JSON (it used to print the pretty layout whatever
+        // was asked for) and `--format name | xargs` works as it does elsewhere.
+        if !matches!(format, OutputFormat::Pretty) {
+            let rows: Vec<DestinationRow> = destinations.iter().map(DestinationRow::from).collect();
+            if rows.is_empty() && matches!(format, OutputFormat::Json) {
+                println!("[]");
+            } else {
+                print!("{}", output::render(format, &rows));
+            }
+            return Ok(());
+        }
+
         if destinations.is_empty() {
             println!("No destinations added yet");
 
@@ -33,6 +56,9 @@ impl ListCommand {
 
         for destination in &destinations {
             println!("{} @ {}", destination.environment, destination.name);
+            // The type is what decides which projects a destination receives
+            // (forest#288), so it belongs in the listing.
+            println!("type: {}", destination.destination_type.qualified());
 
             let rows = metadata_rows(destination);
             if rows.is_empty() {
@@ -62,6 +88,56 @@ impl ListCommand {
 
         Ok(())
     }
+}
+
+/// One destination as a row, for every format but the default.
+///
+/// Sensitive values are never here: withheld keys appear with the same
+/// placeholder the pretty listing prints, and are named in `sensitive_keys`.
+#[derive(Debug, Serialize, Tabled)]
+struct DestinationRow {
+    #[tabled(rename = "Name")]
+    name: String,
+    #[tabled(rename = "Environment")]
+    environment: String,
+    #[tabled(rename = "Type")]
+    #[serde(rename = "type")]
+    destination_type: String,
+    #[tabled(rename = "Metadata", display = "display_metadata")]
+    metadata: BTreeMap<String, String>,
+    #[tabled(skip)]
+    sensitive_keys: Vec<String>,
+}
+
+impl From<&Destination> for DestinationRow {
+    fn from(destination: &Destination) -> Self {
+        let metadata = metadata_rows(destination)
+            .into_iter()
+            .map(|row| match row {
+                MetadataRow::Visible { key, value } => (key, value),
+                MetadataRow::Hidden { key } => (key, REDACTED.to_string()),
+            })
+            .collect();
+
+        let mut sensitive_keys = destination.sensitive_keys.clone();
+        sensitive_keys.sort();
+
+        Self {
+            name: destination.name.clone(),
+            environment: destination.environment.clone(),
+            destination_type: destination.destination_type.qualified(),
+            metadata,
+            sensitive_keys,
+        }
+    }
+}
+
+fn display_metadata(metadata: &BTreeMap<String, String>) -> String {
+    metadata
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -213,6 +289,39 @@ mod tests {
         let keys: Vec<&str> = rows.iter().map(row_key).collect();
 
         assert_eq!(keys, vec!["alpha", "bravo", "mike", "yankee", "zulu"]);
+    }
+
+    /// forest#288's smaller half: `--format json` must be JSON, carry the
+    /// type, and still never carry a credential.
+    #[test]
+    fn json_is_json_with_the_type_and_no_secret_values() {
+        let dest = destination(&[("region", "eu-west-1")], &["git_token"]);
+        let rows = vec![DestinationRow::from(&dest)];
+
+        let json = output::render(&OutputFormat::Json, &rows);
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+
+        assert_eq!(parsed[0]["name"], "flux-dev");
+        assert_eq!(parsed[0]["environment"], "dev");
+        assert_eq!(parsed[0]["type"], "forest/flux@1");
+        assert_eq!(parsed[0]["metadata"]["region"], "eu-west-1");
+        assert_eq!(parsed[0]["metadata"]["git_token"], REDACTED);
+        assert_eq!(parsed[0]["sensitive_keys"][0], "git_token");
+    }
+
+    #[test]
+    fn name_format_is_just_the_names() {
+        let rows = vec![DestinationRow::from(&destination(&[], &[]))];
+        assert_eq!(output::render(&OutputFormat::Name, &rows), "flux-dev\n");
+    }
+
+    #[test]
+    fn text_format_carries_the_type_column() {
+        let rows = vec![DestinationRow::from(&destination(&[("a", "1")], &[]))];
+        assert_eq!(
+            output::render(&OutputFormat::Text, &rows),
+            "flux-dev\tdev\tforest/flux@1\ta=1\n"
+        );
     }
 
     #[test]

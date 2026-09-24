@@ -5,7 +5,6 @@ members = [
     "crates/forage-core",
     "crates/forage-db",
     "crates/forage-grpc",
-    "ci",
 ]
 
 [workspace.dependencies]

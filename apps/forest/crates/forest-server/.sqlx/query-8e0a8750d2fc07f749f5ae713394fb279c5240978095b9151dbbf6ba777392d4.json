@@ -6,7 +6,13 @@
       {
         "ordinal": 0,
         "name": "verification_source",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_emails",
+            "name": "verification_source"
+          }
+        }
       }
     ],
     "parameters": {

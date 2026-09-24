@@ -6,72 +6,101 @@
       {
         "ordinal": 0,
         "name": "destination_id",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "destination_name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "environment",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "environment"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "release_id!",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": "Expression"
       },
       {
         "ordinal": 4,
         "name": "release_intent_id!",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": "Expression"
       },
       {
         "ordinal": 5,
         "name": "artifact_id!",
-        "type_info": "Uuid"
+        "type_info": "Uuid",
+        "origin": "Expression"
       },
       {
         "ordinal": 6,
         "name": "status!",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": "Expression"
       },
       {
         "ordinal": 7,
         "name": "error_message",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": "Expression"
       },
       {
         "ordinal": 8,
         "name": "queued_at!",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": "Expression"
       },
       {
         "ordinal": 9,
         "name": "assigned_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": "Expression"
       },
       {
         "ordinal": 10,
         "name": "started_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": "Expression"
       },
       {
         "ordinal": 11,
         "name": "completed_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": "Expression"
       },
       {
         "ordinal": 12,
         "name": "queue_position",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": "Expression"
       },
       {
         "ordinal": 13,
         "name": "stage_id",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": "Expression"
       }
     ],
     "parameters": {
