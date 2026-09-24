@@ -74,6 +74,7 @@ nav:
       - Flux v2 Destination: guides/flux-destination.md
       - CUE Configuration: guides/cue-configuration.md
       - CI/CD Integration: guides/ci-cd.md
+      - Adopting Existing Infrastructure: guides/terraform-adoption.md
   - Reference:
       - reference/index.md
       - CLI Reference: reference/cli.md

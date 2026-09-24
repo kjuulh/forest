@@ -30,6 +30,20 @@ FROM debian:13-slim AS production
 
 ENV TERRAFORM_EXE=tofu
 
+# The OpenTofu every forest/terraform@1 plan and apply runs with. Pinned, not
+# "whatever apt has today" (forest#283): state written by a newer tofu can be
+# unreadable by an older one, so an unpinned install made a routine image
+# rebuild a silent state-format upgrade — and rolling the image back after it
+# could strand every terraform destination. Components also lean on
+# version-gated features (`import` blocks, `removed` blocks, `for_each` on
+# import), which want a known floor.
+#
+# To bump: pick a release from https://github.com/opentofu/opentofu/releases,
+# check its upgrade notes for state-format changes, change the number here, and
+# say in the PR that it is a tofu bump. Rolling back past a bump is only safe if
+# no apply has run on the newer version since.
+ARG TOFU_VERSION=1.12.6
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl apt-transport-https gnupg git \
     && rm -rf /var/lib/apt/lists/* \
@@ -43,7 +57,8 @@ deb-src [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-rep
   tee /etc/apt/sources.list.d/opentofu.list > /dev/null \
     && chmod a+r /etc/apt/sources.list.d/opentofu.list \
     && apt-get update \
-    && apt-get install -y tofu
+    && apt-get install -y "tofu=${TOFU_VERSION}" \
+    && tofu version | grep -q "v${TOFU_VERSION}"
 
 WORKDIR /app
 
