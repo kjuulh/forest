@@ -46,6 +46,19 @@ Common types:
 | `forest/kubernetes@1` | Kubernetes deployment via manifests |
 | `forest/terraform@1` | Terraform apply/plan |
 
+## Terraform state
+
+A `forest/terraform@1` destination keeps state in forest-server, behind an
+HTTP backend on `FOREST_TERRAFORM_V1_HOST` (internal-only in production). Every
+request to it must carry a credential signed for that one state; runs get one
+automatically.
+
+| Server variable | |
+|---|---|
+| `FOREST_TERRAFORM_STATE_SIGNING_KEY` | Base64, at least 32 bytes. Signs state credentials. Its own secret, so rotating `ACCESS_TOKEN_SECRET_KEY` does not revoke state credentials and rotating this does not sign anybody out. **Optional:** unset, forest derives the key from `ACCESS_TOKEN_SECRET_KEY` and logs a warning at startup. Rotating it revokes every outstanding state credential, including a running apply's, so rotate when nothing is applying. |
+
+Generate one with `openssl rand -base64 32`.
+
 ## Mapping in Configuration
 
 In `forest.cue`, destinations are mapped per environment:

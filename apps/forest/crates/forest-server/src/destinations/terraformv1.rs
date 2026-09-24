@@ -1,9 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    net::SocketAddr,
-    process::Stdio,
-    sync::{Arc, OnceLock},
-};
+use std::{net::SocketAddr, process::Stdio, sync::Arc};
 
 use anyhow::Context;
 use axum::{
@@ -21,7 +16,6 @@ use sqlx::PgPool;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpListener,
-    sync::Mutex,
 };
 use tokio_util::sync::CancellationToken;
 use tower_http::trace::TraceLayer;
@@ -32,6 +26,7 @@ use crate::{
     destinations::{
         DestinationEdge, DestinationIndex, DriftReport,
         logger::DestinationLogger,
+        terraform_credentials::{self, CredentialKey, Rejection, Scope, Verified},
         terraform_plans::{SavedPlan, TerraformPlanStore},
     },
     services::{artifact_staging_registry::ArtifactStagingRegistry, release_registry::ReleaseItem},
@@ -74,12 +69,11 @@ pub struct TerraformStateStore {
     // `terraform_state_locks` and are released on unlock or by admin
     // DELETE if a runner crashes mid-apply.
     //
-    // The per-state-id basic-auth secret stays in memory — it's
-    // regenerated on demand, only matters within a single forest-server
-    // process lifetime, and any in-flight tofu session is killed when
-    // forest restarts anyway.
+    // Every request to the state server must carry a credential signed for
+    // that exact state id (see `terraform_credentials`). Stateless, so it
+    // holds across restarts and replicas.
     db: PgPool,
-    users: Arc<Mutex<BTreeMap<String, String>>>,
+    key: CredentialKey,
 
     pub external_url: String,
 }
@@ -142,16 +136,72 @@ impl TerraformStateStore {
         format!("{environment}.{project_id}")
     }
 
-    /// Look up (or generate) the secret for a state id and return both back.
-    pub async fn urls(&self, state_id: String) -> (String, String) {
-        let mut user = self.users.lock().await;
+    /// The read-write credential a release run carries as `TF_HTTP_PASSWORD`.
+    ///
+    /// Scoped to this state id, named after the destination so the state
+    /// server's request log says which destination touched which state, and
+    /// sized to a run (`RUNNER_TTL`).
+    pub fn runner_credential(&self, state_id: &str, destination: &Destination) -> String {
+        self.key.issue(
+            state_id,
+            Scope::ReadWrite,
+            &format!("runner:{}/{}", destination.organisation, destination.name),
+            terraform_credentials::RUNNER_TTL,
+        )
+    }
 
-        let secret = user.entry(state_id.clone()).or_insert_with(|| {
-            let id = uuid::Uuid::new_v4();
-            id.to_string()
-        });
+    /// A credential for an operator. Callers are responsible for having
+    /// authorised `principal` against the state's project first.
+    pub fn operator_credential(
+        &self,
+        state_id: &str,
+        scope: Scope,
+        principal: &str,
+        ttl: std::time::Duration,
+    ) -> String {
+        self.key.issue(
+            state_id,
+            scope,
+            principal,
+            ttl.min(terraform_credentials::MAX_OPERATOR_TTL),
+        )
+    }
 
-        (state_id, secret.clone())
+    /// The backend URLs for a state id, in the shape terraform's HTTP backend
+    /// wants them: (address, lock, unlock).
+    pub fn addresses(&self, state_id: &str) -> (String, String, String) {
+        let base = format!("{}/{state_id}", self.external_url.trim_end_matches('/'));
+        (
+            base.clone(),
+            format!("{base}/lock"),
+            format!("{base}/unlock"),
+        )
+    }
+
+    fn verify(&self, state_id: &str, headers: &http::HeaderMap) -> Result<Verified, Rejection> {
+        let password =
+            terraform_credentials::basic_auth_password(headers.get(http::header::AUTHORIZATION))
+                .ok_or(Rejection::Malformed)?;
+        self.key.verify(state_id, &password)
+    }
+
+    /// The holder of a state's lock, if any. Public so an operator path can
+    /// report what it is about to break.
+    pub async fn lock_holder(&self, state_id: &str) -> anyhow::Result<Option<String>> {
+        self.get_lock(state_id).await
+    }
+
+    /// Break a state's lock regardless of holder — `terraform force-unlock`
+    /// for someone who has no terraform. Returns the lock id removed.
+    pub async fn force_unlock(&self, state_id: &str) -> anyhow::Result<Option<String>> {
+        let removed = sqlx::query_scalar!(
+            r#"DELETE FROM terraform_state_locks WHERE state_id = $1 RETURNING lock_id"#,
+            state_id,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("force-unlock terraform state")?;
+        Ok(removed)
     }
 
     async fn get_lock(&self, project_id: &str) -> anyhow::Result<Option<String>> {
@@ -259,16 +309,21 @@ pub trait TerraformStateStoreState {
 }
 
 impl TerraformStateStoreState for State {
+    // Built per call. It used to be a process-wide `OnceLock`, because the
+    // in-memory password map had to be shared; with stateless credentials
+    // there is nothing to share, and the singleton pinned whichever pool the
+    // first caller happened to hold — which in the test harness is a pool that
+    // dies with its test.
     fn terraform_state_store(&self) -> TerraformStateStore {
-        static ONCE: OnceLock<TerraformStateStore> = OnceLock::new();
-
-        ONCE.get_or_init(|| TerraformStateStore {
+        TerraformStateStore {
             db: self.db.clone(),
-            users: Arc::default(),
+            key: CredentialKey::from_secrets(
+                self.config.terraform_state_signing_key.as_deref(),
+                &self.config.access_token_secret_key,
+            ),
 
             external_url: self.config.terraform_external_host.clone(),
-        })
-        .clone()
+        }
     }
 }
 
@@ -279,20 +334,7 @@ pub struct TerraformV1Server {
 
 impl TerraformV1Server {
     pub async fn serve(&self, cancel: CancellationToken) -> anyhow::Result<()> {
-        let router = axum::Router::new()
-            .route("/{project_id}", get(Self::get_state).post(Self::post_state))
-            .route("/{project_id}/lock", post(Self::lock_state))
-            .route("/{project_id}/unlock", post(Self::unlock_state))
-            .layer(TraceLayer::new_for_http().on_request(
-                |req: &axum::http::Request<_>, _span: &Span| {
-                    let uri = req.uri();
-                    let method = req.method();
-                    let path = uri.path_and_query();
-
-                    tracing::info!(?method, ?path, "terraform v1 request");
-                },
-            ))
-            .with_state(self.state.clone());
+        let router = Self::router(self.state.clone());
 
         let listener = TcpListener::bind(self.host).await?;
 
@@ -308,31 +350,101 @@ impl TerraformV1Server {
         Ok(())
     }
 
+    /// The state backend's routes, separate from `serve` so tests can drive
+    /// them in-process.
+    pub fn router(state: State) -> axum::Router {
+        axum::Router::new()
+            .route("/{state_id}", get(Self::get_state).post(Self::post_state))
+            .route("/{state_id}/lock", post(Self::lock_state))
+            .route("/{state_id}/unlock", post(Self::unlock_state))
+            .layer(TraceLayer::new_for_http().on_request(
+                |req: &axum::http::Request<_>, _span: &Span| {
+                    let uri = req.uri();
+                    let method = req.method();
+                    let path = uri.path_and_query();
+
+                    tracing::info!(?method, ?path, "terraform v1 request");
+                },
+            ))
+            .with_state(state)
+    }
+
+    /// Every route goes through here first. `write` routes (state POST, lock,
+    /// unlock) need a read-write credential; GET takes either.
+    ///
+    /// Each authorised request is logged with the credential's principal —
+    /// that line is the record of who read or wrote which state.
+    fn authorise(
+        state: &State,
+        state_id: &str,
+        headers: &http::HeaderMap,
+        operation: &'static str,
+        write: bool,
+    ) -> Result<Verified, ApiError> {
+        let verified = match state.terraform_state_store().verify(state_id, headers) {
+            Ok(v) => v,
+            Err(rejection) => {
+                tracing::warn!(
+                    state_id,
+                    operation,
+                    ?rejection,
+                    "terraform state request refused: no valid credential for this state"
+                );
+                return Err(ApiError::Unauthorized);
+            }
+        };
+
+        if write && verified.scope != Scope::ReadWrite {
+            tracing::warn!(
+                state_id,
+                operation,
+                principal = %verified.principal,
+                "terraform state request refused: read-only credential"
+            );
+            return Err(ApiError::Forbidden);
+        }
+
+        tracing::info!(
+            state_id,
+            operation,
+            principal = %verified.principal,
+            "terraform state request"
+        );
+        Ok(verified)
+    }
+
     async fn get_state(
         AState(state): AState<State>,
-        Path(project_id): Path<String>,
+        Path(state_id): Path<String>,
+        headers: http::HeaderMap,
     ) -> Result<impl IntoResponse, ApiError> {
-        let Ok(state) = state.terraform_state_store().get(&project_id).await else {
-            tracing::info!(project_id, "failed to request state");
+        Self::authorise(&state, &state_id, &headers, "get", false)?;
+
+        let Ok(content) = state.terraform_state_store().get(&state_id).await else {
+            tracing::info!(state_id, "failed to request state");
             return Err(ApiError::BadRequest);
         };
 
-        let Some(state) = state else {
-            tracing::info!(project_id, "no terraform state found");
+        let Some(content) = content else {
+            tracing::info!(state_id, "no terraform state found");
             return Err(ApiError::NotFound);
         };
 
-        Ok(state)
+        Ok(content)
     }
+
     async fn post_state(
         AState(state): AState<State>,
-        Path(project_id): Path<String>,
+        Path(state_id): Path<String>,
         Query(req): Query<LockRequest>,
+        headers: http::HeaderMap,
         body: String,
     ) -> Result<impl IntoResponse, ApiError> {
+        Self::authorise(&state, &state_id, &headers, "write", true)?;
+
         if let Err(e) = state
             .terraform_state_store()
-            .add(&project_id, &req.lock_id, &body)
+            .add(&state_id, &req.lock_id, &body)
             .await
         {
             tracing::error!("failed to save state: {e:#}");
@@ -341,37 +453,53 @@ impl TerraformV1Server {
 
         Ok(())
     }
+
     async fn lock_state(
         AState(state): AState<State>,
-        Path(project_id): Path<String>,
-        Json(req): Json<LockRequest>,
-    ) -> Result<impl IntoResponse, ApiError> {
-        tracing::info!(lock_id = req.lock_id, project_id, "locking state");
+        Path(state_id): Path<String>,
+        headers: http::HeaderMap,
+        body: axum::body::Bytes,
+    ) -> Result<axum::response::Response, ApiError> {
+        Self::authorise(&state, &state_id, &headers, "lock", true)?;
+        let req = LockRequest::parse(&body)?;
+        tracing::info!(lock_id = req.lock_id, state_id, "locking state");
 
-        let Ok(lock) = state
-            .terraform_state_store()
-            .attempt_lock(project_id, &req.lock_id)
-            .await
-        else {
+        let store = state.terraform_state_store();
+        let Ok(lock) = store.attempt_lock(state_id.clone(), &req.lock_id).await else {
             tracing::warn!("failed to lock state");
             return Err(ApiError::InternalServerError);
         };
 
         match lock {
-            LockState::Held => Ok(()),
-            LockState::Wait => Err(ApiError::Custom(StatusCode::CONFLICT)),
+            LockState::Held => Ok(StatusCode::OK.into_response()),
+            LockState::Wait => {
+                // Terraform's HTTP backend reads a 409 body as the current
+                // holder's LockInfo, and prints its ID — which is what
+                // `terraform force-unlock <ID>` needs. Returning a bare
+                // string left an operator with no ID to unlock.
+                let holder = store.lock_holder(&state_id).await.ok().flatten();
+                Ok((
+                    StatusCode::CONFLICT,
+                    Json(serde_json::json!({ "ID": holder.unwrap_or_default() })),
+                )
+                    .into_response())
+            }
         }
     }
+
     async fn unlock_state(
         AState(state): AState<State>,
-        Path(project_id): Path<String>,
-        Json(req): Json<LockRequest>,
+        Path(state_id): Path<String>,
+        headers: http::HeaderMap,
+        body: axum::body::Bytes,
     ) -> Result<impl IntoResponse, ApiError> {
-        tracing::info!(lock_id = req.lock_id, project_id, "unlocking state");
+        Self::authorise(&state, &state_id, &headers, "unlock", true)?;
+        let req = LockRequest::parse(&body)?;
+        tracing::info!(lock_id = req.lock_id, state_id, "unlocking state");
 
         let Ok(lock) = state
             .terraform_state_store()
-            .attempt_unlock(project_id, &req.lock_id)
+            .attempt_unlock(state_id, &req.lock_id)
             .await
         else {
             tracing::warn!("failed to unlock state");
@@ -391,13 +519,26 @@ pub struct LockRequest {
     lock_id: String,
 }
 
+impl LockRequest {
+    /// Parsed by hand, after authorisation, rather than with axum's `Json`
+    /// extractor: an extractor runs before the handler, so a request with no
+    /// credential would otherwise be answered 415/422 — telling an anonymous
+    /// caller about the body shape before telling it no.
+    fn parse(body: &[u8]) -> Result<Self, ApiError> {
+        serde_json::from_slice(body).map_err(|_| ApiError::BadRequest)
+    }
+}
+
 struct StatePath {}
 
 pub enum ApiError {
     BadRequest,
     NotFound,
     InternalServerError,
-    Custom(StatusCode),
+    /// No credential, or one not signed for this state, or expired.
+    Unauthorized,
+    /// A valid read-only credential on a route that writes.
+    Forbidden,
 }
 
 impl IntoResponse for ApiError {
@@ -408,7 +549,18 @@ impl IntoResponse for ApiError {
             ApiError::InternalServerError => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal server error")
             }
-            ApiError::Custom(status) => (status, "custom error"),
+            ApiError::Unauthorized => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    [(
+                        http::header::WWW_AUTHENTICATE,
+                        "Basic realm=\"forest-terraform-v1\"",
+                    )],
+                    "a credential for this state is required",
+                )
+                    .into_response();
+            }
+            ApiError::Forbidden => (StatusCode::FORBIDDEN, "this credential is read-only"),
         }
         .into_response()
     }
@@ -600,12 +752,11 @@ impl TerraformV1Destination {
         let state_id = self
             .tf_state
             .state_id(destination, &release.project_id.to_string());
-        let (id, password) = self.tf_state.urls(state_id).await;
-
-        let base = format!("{}/{id}", self.tf_state.external_url.trim_end_matches("/"));
+        let password = self.tf_state.runner_credential(&state_id, destination);
+        let (base, lock, unlock) = self.tf_state.addresses(&state_id);
         vec![
-            ("TF_HTTP_LOCK_ADDRESS", format!("{base}/lock")),
-            ("TF_HTTP_UNLOCK_ADDRESS", format!("{base}/unlock")),
+            ("TF_HTTP_LOCK_ADDRESS", lock),
+            ("TF_HTTP_UNLOCK_ADDRESS", unlock),
             ("TF_HTTP_ADDRESS", base),
             ("TF_HTTP_PASSWORD", password),
         ]

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM terraform_state_locks WHERE state_id = $1 RETURNING lock_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lock_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_locks",
+            "name": "lock_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2bb90cbb41de394b5b1c6a9d7bc36ac9429312bcb58767014d77bd3f60ca4c5b"
+}

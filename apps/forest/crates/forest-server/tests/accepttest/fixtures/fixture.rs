@@ -90,6 +90,9 @@ fn base_test_config() -> forest_server::Config {
         password_secret_key: "test-password-secret-key-32chars".into(),
         access_token_secret_key: b"test-access-token-secret-key-32b".to_vec(),
         refresh_token_secret_key: b"test-refresh-token-secret-key32b".to_vec(),
+        // Unset on purpose: exercises the fallback every existing deployment
+        // takes until the variable is configured.
+        terraform_state_signing_key: None,
         service_account_token_hash: None,
         registration_email_domain_regex: None,
         require_email_verification: false,
