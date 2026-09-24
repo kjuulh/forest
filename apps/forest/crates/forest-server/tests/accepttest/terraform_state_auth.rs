@@ -55,12 +55,10 @@ async fn call(
 }
 
 fn operator(state: &forest_server::State, id: &str, scope: Scope) -> String {
-    state.terraform_state_store().operator_credential(
-        id,
-        scope,
-        "user:test",
-        std::time::Duration::from_secs(300),
-    )
+    state
+        .terraform_state_store()
+        .operator_credential(id, scope, "user:test", std::time::Duration::from_secs(300))
+        .0
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -250,4 +248,119 @@ async fn the_runner_credential_is_accepted_for_its_own_state() {
         .force_unlock(&id)
         .await
         .unwrap();
+}
+
+/// Real OpenTofu against the real backend, through the credential: init, apply,
+/// state list, a lock conflict that names its holder, force-unlock, and a
+/// read-only credential that can plan but not apply.
+///
+/// Ignored by default because CI has no `tofu`; run with
+/// `cargo test -p forest-server --test tests tofu_ -- --ignored`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs tofu on PATH"]
+async fn tofu_drives_the_backend_with_a_forest_credential() {
+    let f = fixture().await.unwrap();
+    let id = state_id();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let router = TerraformV1Server::router(f.state.clone());
+    let server = tokio::spawn(async move { axum::serve(listener, router).await });
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("main.tf"),
+        "terraform {\n  backend \"http\" {}\n}\n\nresource \"terraform_data\" \"probe\" {\n  input = \"forest\"\n}\n",
+    )
+    .unwrap();
+
+    let base = format!("http://{addr}/{id}");
+    let tofu = |password: &str, args: &[&str]| {
+        std::process::Command::new("tofu")
+            .args(args)
+            .arg("-no-color")
+            .current_dir(dir.path())
+            .env("TF_HTTP_ADDRESS", &base)
+            .env("TF_HTTP_LOCK_ADDRESS", format!("{base}/lock"))
+            .env("TF_HTTP_UNLOCK_ADDRESS", format!("{base}/unlock"))
+            .env("TF_HTTP_LOCK_METHOD", "POST")
+            .env("TF_HTTP_UNLOCK_METHOD", "POST")
+            .env("TF_HTTP_USERNAME", "forest-terraform-v1")
+            .env("TF_HTTP_PASSWORD", password)
+            .env("TF_IN_AUTOMATION", "1")
+            .output()
+            .expect("run tofu")
+    };
+    let ok = |out: &std::process::Output, what: &str| {
+        assert!(
+            out.status.success(),
+            "{what} failed:\n{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let text = |out: &std::process::Output| {
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
+    };
+
+    let rw = operator(&f.state, &id, Scope::ReadWrite);
+    let ro = operator(&f.state, &id, Scope::ReadOnly);
+
+    ok(&tofu(&rw, &["init", "-input=false"]), "init");
+    ok(
+        &tofu(&rw, &["apply", "-auto-approve", "-input=false"]),
+        "apply",
+    );
+    let listed = tofu(&rw, &["state", "list"]);
+    ok(&listed, "state list");
+    assert!(
+        text(&listed).contains("terraform_data.probe"),
+        "{}",
+        text(&listed)
+    );
+
+    // A wrong credential cannot even read.
+    let other = operator(&f.state, &state_id(), Scope::ReadWrite);
+    assert!(!tofu(&other, &["state", "list"]).status.success());
+
+    // Read-only: a plan without locking works, an apply does not.
+    ok(
+        &tofu(&ro, &["plan", "-lock=false", "-input=false"]),
+        "read-only plan",
+    );
+    assert!(
+        !tofu(&ro, &["apply", "-auto-approve", "-input=false"])
+            .status
+            .success(),
+        "a read-only credential must not apply"
+    );
+
+    // A crashed run's lock: tofu is told the holder's ID...
+    sqlx::query(
+        "INSERT INTO terraform_state_locks (state_id, lock_id) VALUES ($1, 'crashed-apply')",
+    )
+    .bind(&id)
+    .execute(&f.db)
+    .await
+    .unwrap();
+    let blocked = tofu(&rw, &["plan", "-input=false", "-lock-timeout=0s"]);
+    assert!(!blocked.status.success());
+    assert!(
+        text(&blocked).contains("crashed-apply"),
+        "{}",
+        text(&blocked)
+    );
+
+    // ...and `force-unlock <ID>` with a read-write credential clears it.
+    ok(
+        &tofu(&rw, &["force-unlock", "-force", "crashed-apply"]),
+        "force-unlock",
+    );
+    ok(&tofu(&rw, &["plan", "-input=false"]), "plan after unlock");
+
+    server.abort();
 }

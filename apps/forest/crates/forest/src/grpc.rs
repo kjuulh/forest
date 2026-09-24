@@ -12,8 +12,9 @@ use forest_grpc_interface::{
     organisation_service_client::OrganisationServiceClient,
     policy_service_client::PolicyServiceClient, registry_service_client::RegistryServiceClient,
     release_pipeline_service_client::ReleasePipelineServiceClient,
-    release_service_client::ReleaseServiceClient, trigger_service_client::TriggerServiceClient,
-    users_service_client::UsersServiceClient, *,
+    release_service_client::ReleaseServiceClient,
+    terraform_state_service_client::TerraformStateServiceClient,
+    trigger_service_client::TriggerServiceClient, users_service_client::UsersServiceClient, *,
 };
 use forest_models::{Destination, DestinationType, OrganisationName, ProjectName};
 use futures::{SinkExt, Stream, TryStreamExt};
@@ -98,6 +99,19 @@ fn grpc_err(status: tonic::Status) -> anyhow::Error {
     anyhow::anyhow!("gRPC {code:?}: {hint}")
 }
 
+/// `grpc_err` for `forest state`: a refusal there is almost always "you are a
+/// member but not an admin", so say that, and which organisation.
+fn state_err(status: tonic::Status, organisation: &str) -> anyhow::Error {
+    if status.code() == tonic::Code::PermissionDenied {
+        return anyhow::anyhow!(
+            "`forest state` requires the Admin role in organisation '{organisation}' \
+             (terraform state holds secrets, so reads are admin-only too): {}",
+            status.message()
+        );
+    }
+    grpc_err(status)
+}
+
 #[derive(Clone)]
 pub struct GrpcClient {
     host: String,
@@ -118,6 +132,7 @@ pub struct GrpcClient {
     policy_client: OnceCell<PolicyServiceClient<AuthMiddleware<Channel>>>,
     release_pipeline_client: OnceCell<ReleasePipelineServiceClient<AuthMiddleware<Channel>>>,
     event_client: OnceCell<EventServiceClient<AuthMiddleware<Channel>>>,
+    terraform_state_client: OnceCell<TerraformStateServiceClient<AuthMiddleware<Channel>>>,
 }
 
 impl GrpcClient {
@@ -861,6 +876,96 @@ impl GrpcClient {
             .await?;
 
         Ok(client.clone())
+    }
+
+    async fn terraform_state_client(
+        &self,
+    ) -> anyhow::Result<TerraformStateServiceClient<AuthMiddleware<Channel>>> {
+        let client = self
+            .terraform_state_client
+            .get_or_try_init(move || async move {
+                let channel = self.auth_channel(self.channel().await?);
+                Ok::<_, anyhow::Error>(TerraformStateServiceClient::new(channel))
+            })
+            .await?;
+
+        Ok(client.clone())
+    }
+
+    // ── terraform@1 state (understory-io/forest#282) ───────────────────
+
+    pub async fn issue_terraform_state_credential(
+        &self,
+        state: TerraformStateRef,
+        write: bool,
+        ttl_seconds: u64,
+    ) -> anyhow::Result<IssueTerraformStateCredentialResponse> {
+        let org = state.organisation.clone();
+        Ok(self
+            .terraform_state_client()
+            .await?
+            .issue_terraform_state_credential(IssueTerraformStateCredentialRequest {
+                state: Some(state),
+                write,
+                ttl_seconds,
+            })
+            .await
+            .map_err(|s| state_err(s, &org))
+            .context("issue terraform state credential (grpc)")?
+            .into_inner())
+    }
+
+    pub async fn get_terraform_state(
+        &self,
+        state: TerraformStateRef,
+        version: i64,
+    ) -> anyhow::Result<GetTerraformStateResponse> {
+        let org = state.organisation.clone();
+        Ok(self
+            .terraform_state_client()
+            .await?
+            .get_terraform_state(GetTerraformStateRequest {
+                state: Some(state),
+                version,
+            })
+            .await
+            .map_err(|s| state_err(s, &org))
+            .context("get terraform state (grpc)")?
+            .into_inner())
+    }
+
+    pub async fn list_terraform_state_versions(
+        &self,
+        state: TerraformStateRef,
+        limit: u32,
+    ) -> anyhow::Result<ListTerraformStateVersionsResponse> {
+        let org = state.organisation.clone();
+        Ok(self
+            .terraform_state_client()
+            .await?
+            .list_terraform_state_versions(ListTerraformStateVersionsRequest {
+                state: Some(state),
+                limit,
+            })
+            .await
+            .map_err(|s| state_err(s, &org))
+            .context("list terraform state versions (grpc)")?
+            .into_inner())
+    }
+
+    pub async fn force_unlock_terraform_state(
+        &self,
+        state: TerraformStateRef,
+    ) -> anyhow::Result<ForceUnlockTerraformStateResponse> {
+        let org = state.organisation.clone();
+        Ok(self
+            .terraform_state_client()
+            .await?
+            .force_unlock_terraform_state(ForceUnlockTerraformStateRequest { state: Some(state) })
+            .await
+            .map_err(|s| state_err(s, &org))
+            .context("force-unlock terraform state (grpc)")?
+            .into_inner())
     }
 
     async fn environment_client(
@@ -3052,6 +3157,7 @@ impl GrpcClientState for State {
                 policy_client: OnceCell::const_new(),
                 release_pipeline_client: OnceCell::const_new(),
                 event_client: OnceCell::const_new(),
+                terraform_state_client: OnceCell::const_new(),
             }
         })
         .clone()

@@ -10,6 +10,7 @@ use forest_grpc_interface::organisation_service_client::OrganisationServiceClien
 use forest_grpc_interface::registry_service_client::RegistryServiceClient;
 use forest_grpc_interface::release_pipeline_service_client::ReleasePipelineServiceClient;
 use forest_grpc_interface::release_service_client::ReleaseServiceClient;
+use forest_grpc_interface::terraform_state_service_client::TerraformStateServiceClient;
 use forest_grpc_interface::users_service_client::UsersServiceClient;
 use tonic::transport::Channel;
 
@@ -64,6 +65,10 @@ impl Fixture {
 
     pub fn notifications(&self) -> NotificationServiceClient<Channel> {
         NotificationServiceClient::new(self.channel.clone())
+    }
+
+    pub fn terraform_state(&self) -> TerraformStateServiceClient<Channel> {
+        TerraformStateServiceClient::new(self.channel.clone())
     }
 
     pub fn registry(&self) -> RegistryServiceClient<Channel> {

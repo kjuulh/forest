@@ -119,8 +119,22 @@ impl CredentialKey {
     }
 
     pub fn issue(&self, state_id: &str, scope: Scope, principal: &str, ttl: Duration) -> String {
+        self.issue_with_expiry(state_id, scope, principal, ttl).0
+    }
+
+    /// As [`issue`](Self::issue), also returning the expiry (unix seconds).
+    pub fn issue_with_expiry(
+        &self,
+        state_id: &str,
+        scope: Scope,
+        principal: &str,
+        ttl: Duration,
+    ) -> (String, u64) {
         let expires_at = now_unix().saturating_add(ttl.as_secs());
-        self.issue_expiring_at(state_id, scope, principal, expires_at)
+        (
+            self.issue_expiring_at(state_id, scope, principal, expires_at),
+            expires_at,
+        )
     }
 
     fn issue_expiring_at(

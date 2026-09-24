@@ -43,6 +43,7 @@ mod run;
 mod run_output;
 mod self_cmd;
 mod shell;
+mod state;
 mod template;
 mod tmp;
 mod tool;
@@ -102,6 +103,8 @@ enum Commands {
     /// Manage deployment destinations
     #[command(visible_aliases = ["destinations", "dest"], aliases = ["d"])]
     Destination(DestinationCommand),
+    /// Reach a project's terraform state outside a release (org Admin): credentials, pull, list, unlock
+    State(state::StateCommand),
     /// Manage environments (dev, staging, prod)
     #[command(visible_aliases = ["environments", "env"], aliases = ["e"])]
     Environment(EnvironmentCommand),
@@ -277,6 +280,7 @@ fn is_server_mutation(command: &Commands) -> bool {
         Commands::Auth(cmd) => cmd.is_mutation(),
         Commands::Project(cmd) => cmd.is_mutation(),
         Commands::Destination(cmd) => cmd.is_mutation(),
+        Commands::State(cmd) => cmd.is_mutation(),
         Commands::Environment(cmd) => cmd.is_mutation(),
         Commands::Organisation(cmd) => cmd.is_mutation(),
         Commands::Notifications(cmd) => cmd.is_mutation(),
@@ -376,6 +380,7 @@ impl CommandHandler {
             Commands::Release(cmd) => cmd.execute(state).await,
             Commands::Project(cmd) => cmd.execute(state).await,
             Commands::Destination(cmd) => cmd.execute(state).await,
+            Commands::State(cmd) => cmd.execute(state).await,
             Commands::Environment(cmd) => cmd.execute(state).await,
             Commands::Organisation(cmd) => cmd.execute(state).await,
             Commands::Notifications(cmd) => cmd.execute(state).await,

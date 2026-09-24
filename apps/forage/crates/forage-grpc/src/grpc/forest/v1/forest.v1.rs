@@ -5199,6 +5199,110 @@ pub struct ListSignalsResponse {
     #[prost(message, repeated, tag="1")]
     pub signals: ::prost::alloc::vec::Vec<Signal>,
 }
+/// Which state. `destination` may be left empty when it is unambiguous: the
+/// project's state predates per-destination ids, or the environment has exactly
+/// one terraform destination.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TerraformStateRef {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub project: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub environment: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub destination: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IssueTerraformStateCredentialRequest {
+    #[prost(message, optional, tag="1")]
+    pub state: ::core::option::Option<TerraformStateRef>,
+    /// Read-write: lock, write and unlock as well as read. Default read-only.
+    #[prost(bool, tag="2")]
+    pub write: bool,
+    /// Lifetime; 0 means one hour. Capped by the server (twelve hours).
+    #[prost(uint64, tag="3")]
+    pub ttl_seconds: u64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IssueTerraformStateCredentialResponse {
+    #[prost(string, tag="1")]
+    pub state_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub address: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub lock_address: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub unlock_address: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
+    pub username: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
+    pub password: ::prost::alloc::string::String,
+    #[prost(int64, tag="7")]
+    pub expires_at_unix: i64,
+    #[prost(bool, tag="8")]
+    pub write: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetTerraformStateRequest {
+    #[prost(message, optional, tag="1")]
+    pub state: ::core::option::Option<TerraformStateRef>,
+    /// 0 means the latest.
+    #[prost(int64, tag="2")]
+    pub version: i64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetTerraformStateResponse {
+    #[prost(string, tag="1")]
+    pub state_id: ::prost::alloc::string::String,
+    #[prost(int64, tag="2")]
+    pub version: i64,
+    #[prost(string, tag="3")]
+    pub created_at: ::prost::alloc::string::String,
+    /// The state as terraform wrote it. Contains secrets in plaintext.
+    #[prost(string, tag="4")]
+    pub content: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListTerraformStateVersionsRequest {
+    #[prost(message, optional, tag="1")]
+    pub state: ::core::option::Option<TerraformStateRef>,
+    /// 0 means 20.
+    #[prost(uint32, tag="2")]
+    pub limit: u32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TerraformStateVersion {
+    #[prost(int64, tag="1")]
+    pub version: i64,
+    #[prost(string, tag="2")]
+    pub created_at: ::prost::alloc::string::String,
+    #[prost(uint64, tag="3")]
+    pub size_bytes: u64,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListTerraformStateVersionsResponse {
+    #[prost(string, tag="1")]
+    pub state_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
+    pub versions: ::prost::alloc::vec::Vec<TerraformStateVersion>,
+    /// The current lock holder, empty when unlocked.
+    #[prost(string, tag="3")]
+    pub lock_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ForceUnlockTerraformStateRequest {
+    #[prost(message, optional, tag="1")]
+    pub state: ::core::option::Option<TerraformStateRef>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ForceUnlockTerraformStateResponse {
+    #[prost(string, tag="1")]
+    pub state_id: ::prost::alloc::string::String,
+    /// The lock id removed; empty when the state was not locked.
+    #[prost(string, tag="2")]
+    pub removed_lock_id: ::prost::alloc::string::String,
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Trigger {
     #[prost(string, tag="1")]

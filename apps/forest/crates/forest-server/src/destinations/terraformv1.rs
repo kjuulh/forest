@@ -230,6 +230,163 @@ impl TerraformStateStore {
         ))
     }
 
+    /// The state id an **operator** means by (organisation, environment,
+    /// project, destination?), for the access in understory-io/forest#282.
+    ///
+    /// The same rule as [`resolve_state_id`](Self::resolve_state_id) — the
+    /// legacy id is its first destination's, every other destination has its
+    /// own — but it never writes: looking at a state must not be what decides
+    /// which destination owns the legacy id.
+    ///
+    /// `destination` may be left out when there is one answer: the environment
+    /// has one terraform destination, or the only state is a legacy one nobody
+    /// has claimed yet.
+    pub async fn lookup_state_id(
+        &self,
+        organisation: &str,
+        environment: &str,
+        project_id: &str,
+        destination: Option<&str>,
+    ) -> Result<String, StateLookupError> {
+        let legacy = Self::legacy_state_id(environment, project_id);
+        let internal = |e: sqlx::Error| StateLookupError::Internal(e.into());
+
+        let owner = sqlx::query_scalar!(
+            r#"SELECT destination FROM terraform_state_bindings WHERE state_id = $1"#,
+            legacy,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .map_err(internal)?;
+
+        let candidates = sqlx::query_scalar!(
+            r#"
+                SELECT name FROM destinations
+                WHERE organisation = $1 AND environment = $2
+                  AND type_organisation = 'forest' AND type_name = 'terraform'
+                ORDER BY name
+            "#,
+            organisation,
+            environment,
+        )
+        .fetch_all(&self.db)
+        .await
+        .map_err(internal)?;
+
+        let destination = match destination {
+            Some(asked) if candidates.iter().any(|c| c == asked) => asked.to_string(),
+            Some(asked) => {
+                return Err(StateLookupError::NotFound(format!(
+                    "no forest/terraform@1 destination '{asked}' in environment '{environment}' (have: {})",
+                    list_or_none(&candidates)
+                )));
+            }
+            None => match candidates.as_slice() {
+                [only] => only.clone(),
+                [] if self
+                    .exists(&legacy)
+                    .await
+                    .map_err(StateLookupError::Internal)? =>
+                {
+                    return Ok(legacy);
+                }
+                [] => {
+                    return Err(StateLookupError::NotFound(format!(
+                        "environment '{environment}' has no forest/terraform@1 destination"
+                    )));
+                }
+                _ if owner.is_none()
+                    && self
+                        .exists(&legacy)
+                        .await
+                        .map_err(StateLookupError::Internal)? =>
+                {
+                    // A pre-#285 state no run has claimed since: there is only
+                    // one state, so there is only one answer.
+                    return Ok(legacy);
+                }
+                many => {
+                    return Err(StateLookupError::Invalid(format!(
+                        "environment '{environment}' has several terraform destinations; name one with --destination ({})",
+                        many.join(", ")
+                    )));
+                }
+            },
+        };
+
+        Ok(match owner {
+            // Unclaimed: the legacy id is what this destination's first run
+            // takes, unless another destination's run gets there first.
+            None => legacy,
+            Some(owner) if owner == destination => legacy,
+            Some(_) => Self::destination_state_id(environment, project_id, &destination),
+        })
+    }
+
+    async fn exists(&self, state_id: &str) -> anyhow::Result<bool> {
+        let exists = sqlx::query_scalar!(
+            r#"
+                SELECT EXISTS (SELECT 1 FROM terraform_states WHERE state_id = $1)
+                    OR EXISTS (SELECT 1 FROM terraform_state_locks WHERE state_id = $1)
+                    AS "exists!"
+            "#,
+            state_id,
+        )
+        .fetch_one(&self.db)
+        .await
+        .context("check for terraform state")?;
+        Ok(exists)
+    }
+
+    /// One stored version of a state (0 = latest): (version, created_at, content).
+    pub async fn version(
+        &self,
+        state_id: &str,
+        version: i64,
+    ) -> anyhow::Result<Option<(i64, chrono::DateTime<chrono::Utc>, String)>> {
+        let row = sqlx::query!(
+            r#"
+                SELECT id, created_at, content
+                FROM terraform_states
+                WHERE state_id = $1 AND ($2::BIGINT = 0 OR id = $2)
+                ORDER BY id DESC
+                LIMIT 1
+            "#,
+            state_id,
+            version,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("read terraform state version")?;
+        Ok(row.map(|r| (r.id, r.created_at, r.content)))
+    }
+
+    /// Stored versions, newest first: (version, created_at, size in bytes).
+    pub async fn versions(
+        &self,
+        state_id: &str,
+        limit: i64,
+    ) -> anyhow::Result<Vec<(i64, chrono::DateTime<chrono::Utc>, i64)>> {
+        let rows = sqlx::query!(
+            r#"
+                SELECT id, created_at, octet_length(content)::BIGINT AS "size!"
+                FROM terraform_states
+                WHERE state_id = $1
+                ORDER BY id DESC
+                LIMIT $2
+            "#,
+            state_id,
+            limit,
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("list terraform state versions")?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (r.id, r.created_at, r.size))
+            .collect())
+    }
+
     /// The only id there was before #285. Still what existing states use.
     pub fn legacy_state_id(environment: &str, project_id: &str) -> String {
         format!("{environment}.{project_id}")
@@ -270,16 +427,17 @@ impl TerraformStateStore {
         )
     }
 
-    /// A credential for an operator. Callers are responsible for having
-    /// authorised `principal` against the state's project first.
+    /// A credential for an operator, and when it expires (unix seconds).
+    /// Callers are responsible for having authorised `principal` against the
+    /// state's project first. The lifetime is capped at `MAX_OPERATOR_TTL`.
     pub fn operator_credential(
         &self,
         state_id: &str,
         scope: Scope,
         principal: &str,
         ttl: std::time::Duration,
-    ) -> String {
-        self.key.issue(
+    ) -> (String, u64) {
+        self.key.issue_with_expiry(
             state_id,
             scope,
             principal,
@@ -412,6 +570,23 @@ impl TerraformStateStore {
         } else {
             Ok(UnlockState::Available)
         }
+    }
+}
+
+/// Why an operator's state reference did not resolve.
+#[derive(Debug)]
+pub enum StateLookupError {
+    NotFound(String),
+    /// Ambiguous, or naming a destination the state does not belong to.
+    Invalid(String),
+    Internal(anyhow::Error),
+}
+
+fn list_or_none(names: &[String]) -> String {
+    if names.is_empty() {
+        "none".into()
+    } else {
+        names.join(", ")
     }
 }
 
