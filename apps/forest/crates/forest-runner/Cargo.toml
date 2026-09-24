@@ -30,6 +30,7 @@ uuid = { version = "1.7.0", features = ["v4", "v7"] }
 tokio-stream = "0.1"
 serde_yaml = "0.9"
 regex = "1"
+rand.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 notmad = "0.11.0"
 tokio-util = "0.7.15"

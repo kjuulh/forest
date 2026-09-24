@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     process::Stdio,
+    time::{Duration, Instant},
 };
 
 use anyhow::Context;
@@ -188,6 +189,45 @@ pub enum Mode {
     Apply,
 }
 
+/// What became of the reconcile request forest sends Flux after a push.
+///
+/// Returned from [`FluxV1Handler::run`] rather than only logged, so the caller
+/// can record it where a person looks at a release (forest-server stores it
+/// as the `reconcile` release signal). A failed reconcile never fails the
+/// release: the commit is already in the gitops repo, and Flux applies it on
+/// its next poll. But "SUCCEEDED" must not be read as "running" when nothing
+/// told Flux to sync (understory-io/forest#298).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReconcileOutcome {
+    /// Nothing asked Flux to sync: no `reconcile_url` is configured, nothing
+    /// was pushed, this was a prepare, or the destination is in local mode.
+    NotRequested,
+    /// The receiver accepted the request.
+    Triggered { attempts: u32 },
+    /// Every attempt failed or the receiver refused the request. `reason`
+    /// never contains the receiver's token.
+    Failed { attempts: u32, reason: String },
+}
+
+impl ReconcileOutcome {
+    /// Combine the outcomes of several matched destination directories: the
+    /// worst one is what a person needs to see.
+    fn worst(self, other: ReconcileOutcome) -> ReconcileOutcome {
+        fn rank(o: &ReconcileOutcome) -> u8 {
+            match o {
+                ReconcileOutcome::NotRequested => 0,
+                ReconcileOutcome::Triggered { .. } => 1,
+                ReconcileOutcome::Failed { .. } => 2,
+            }
+        }
+        if rank(&other) > rank(&self) {
+            other
+        } else {
+            self
+        }
+    }
+}
+
 // ====== HANDLER ======
 
 /// Flux v1 GitOps destination handler.
@@ -224,11 +264,14 @@ impl FluxV1Handler {
     /// Fetches deployment files from the backend, resolves the project name,
     /// and either writes files directly (local mode) or clones a git repo,
     /// writes files, commits, and pushes (git mode).
+    ///
+    /// Returns what became of the post-push reconcile request. A failed
+    /// reconcile is an `Ok`: the release itself has landed in git.
     pub async fn run(
         backend: &dyn DestinationBackend,
         config: &DestinationConfig,
         mode: Mode,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<ReconcileOutcome> {
         let flux_meta = FluxMetadata::from_metadata(&config.metadata)
             .context("invalid flux destination metadata")?;
 
@@ -260,6 +303,7 @@ impl FluxV1Handler {
             .context("read dir found no destinations for env")?;
 
         let mut matched = false;
+        let mut reconcile = ReconcileOutcome::NotRequested;
         while let Some(entry) = env_dir_entries.next_entry().await? {
             if !entry.file_type().await?.is_dir() {
                 continue;
@@ -336,7 +380,7 @@ impl FluxV1Handler {
                 )
                 .await?;
             } else {
-                run_git(
+                let outcome = run_git(
                     backend,
                     &flux_meta,
                     &manifest_files,
@@ -348,6 +392,7 @@ impl FluxV1Handler {
                     &mode,
                 )
                 .await?;
+                reconcile = reconcile.worst(outcome);
             }
         }
 
@@ -355,7 +400,7 @@ impl FluxV1Handler {
             anyhow::bail!("failed to find a destination match for submitted release");
         }
 
-        Ok(())
+        Ok(reconcile)
     }
 
     /// Generate a Flux Kustomization CR YAML.
@@ -753,7 +798,7 @@ async fn run_git(
     project: &str,
     identity: Option<&crate::backend::ReleaseIdentity>,
     mode: &Mode,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<ReconcileOutcome> {
     let clone_dir = backend.create_temp_dir().await?;
     let git_env = meta.git_env();
     let effective_url = meta.effective_git_url()?;
@@ -824,7 +869,9 @@ async fn run_git(
                 backend.log_stdout("[flux@1] release pushed successfully");
 
                 if let Some(url) = &meta.reconcile_url {
-                    trigger_reconciliation(backend, url).await;
+                    return Ok(
+                        trigger_reconciliation(backend, url, &ReconcileRetry::default()).await,
+                    );
                 }
             } else {
                 backend.log_stdout("[flux@1] no changes to push, gitops repo is up to date");
@@ -832,7 +879,7 @@ async fn run_git(
         }
     }
 
-    Ok(())
+    Ok(ReconcileOutcome::NotRequested)
 }
 
 async fn apply_gitops_mutation(
@@ -1014,30 +1061,235 @@ fn is_concurrent_push_rejection(stderr: &[u8]) -> bool {
 
 // ====== RECONCILIATION ======
 
-async fn trigger_reconciliation(backend: &dyn DestinationBackend, url: &str) {
-    backend.log_stdout(&format!("[flux@1] triggering reconciliation via {url}"));
-    match reqwest::Client::new()
-        .post(url)
-        .header("Content-Type", "application/json")
-        .body("{}")
-        .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() => {
-            backend.log_stdout("[flux@1] reconciliation triggered successfully");
-        }
-        Ok(resp) => {
-            backend.log_stdout(&format!(
-                "[flux@1] reconciliation webhook returned {}",
-                resp.status()
-            ));
-        }
-        Err(e) => {
-            backend.log_stdout(&format!(
-                "[flux@1] reconciliation webhook failed: {e} (non-fatal)"
-            ));
+/// How hard to try the reconcile webhook before leaving the release to Flux's
+/// own poll.
+///
+/// A time budget, not an attempt count: what matters is how long the release
+/// step waits. Past about half a minute a retry buys little over Flux's own
+/// poll (1m for the GitRepository in the setups we run), so the default gives
+/// up at 30 s.
+#[derive(Debug, Clone)]
+struct ReconcileRetry {
+    /// Total time from the first attempt after which no new attempt starts.
+    budget: Duration,
+    /// Deadline for one request, connect included.
+    attempt_timeout: Duration,
+    /// Backoff before the second attempt; doubles per attempt, full jitter.
+    base_delay: Duration,
+    /// Cap on a single backoff.
+    max_delay: Duration,
+}
+
+impl Default for ReconcileRetry {
+    fn default() -> Self {
+        Self {
+            budget: Duration::from_secs(30),
+            attempt_timeout: Duration::from_secs(10),
+            base_delay: Duration::from_secs(1),
+            max_delay: Duration::from_secs(8),
         }
     }
+}
+
+impl ReconcileRetry {
+    /// Full-jitter exponential backoff before attempt `attempt + 1`.
+    fn backoff(&self, attempt: u32) -> Duration {
+        use rand::RngExt;
+        let exp = self
+            .base_delay
+            .saturating_mul(1u32 << attempt.saturating_sub(1).min(16));
+        let cap = exp.min(self.max_delay).as_millis() as u64;
+        Duration::from_millis(rand::rng().random_range(0..=cap))
+    }
+}
+
+/// One attempt's verdict.
+enum AttemptResult {
+    Accepted,
+    /// Worth another attempt: a transport error, a 5xx, or a 429 (whose
+    /// `Retry-After`, when given, is honoured instead of the backoff).
+    Transient {
+        reason: String,
+        retry_after: Option<Duration>,
+    },
+    /// Another attempt would get the same answer: any other 4xx, most likely a
+    /// hook path that matches no Receiver.
+    Permanent {
+        reason: String,
+    },
+}
+
+/// POSTs to the Flux Receiver, retrying transient failures within `retry`'s
+/// budget. Never fails the release, and never logs the receiver's token.
+///
+/// The request is safe to repeat: a Receiver only asks Flux to reconcile its
+/// resources, and asking twice costs one extra sync from git.
+async fn trigger_reconciliation(
+    backend: &dyn DestinationBackend,
+    url: &str,
+    retry: &ReconcileRetry,
+) -> ReconcileOutcome {
+    let shown = redact_reconcile_url(url);
+    backend.log_stdout(&format!("[flux@1] triggering reconciliation via {shown}"));
+
+    let client = match reqwest::Client::builder()
+        .timeout(retry.attempt_timeout)
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            let reason = describe_request_error(&e, url);
+            backend.log_stderr(&format!(
+                "[flux@1] reconciliation webhook failed: {reason} (non-fatal: the release \
+                 is pushed, and Flux applies it on its next poll)"
+            ));
+            return ReconcileOutcome::Failed {
+                attempts: 0,
+                reason,
+            };
+        }
+    };
+
+    let started = Instant::now();
+    let mut attempts = 0u32;
+    loop {
+        attempts += 1;
+        let result = match client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .send()
+            .await
+        {
+            Ok(resp) => classify_response(&resp),
+            Err(e) => AttemptResult::Transient {
+                reason: describe_request_error(&e, url),
+                retry_after: None,
+            },
+        };
+
+        let reason = match result {
+            AttemptResult::Accepted => {
+                backend.log_stdout(&format!(
+                    "[flux@1] reconciliation triggered successfully (attempt {attempts})"
+                ));
+                return ReconcileOutcome::Triggered { attempts };
+            }
+            AttemptResult::Permanent { reason } => reason,
+            AttemptResult::Transient {
+                reason,
+                retry_after,
+            } => {
+                let delay = retry_after.unwrap_or_else(|| retry.backoff(attempts));
+                if started.elapsed() + delay < retry.budget {
+                    backend.log_stdout(&format!(
+                        "[flux@1] reconciliation attempt {attempts} failed: {reason}; \
+                         retrying in {:.1}s",
+                        delay.as_secs_f64()
+                    ));
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+                reason
+            }
+        };
+
+        backend.log_stderr(&format!(
+            "[flux@1] reconciliation webhook failed after {attempts} attempt(s): {reason} \
+             (non-fatal: the release is pushed, and Flux applies it on its next poll)"
+        ));
+        return ReconcileOutcome::Failed { attempts, reason };
+    }
+}
+
+fn classify_response(resp: &reqwest::Response) -> AttemptResult {
+    let status = resp.status();
+    if status.is_success() {
+        return AttemptResult::Accepted;
+    }
+    let reason = format!("receiver returned {status}");
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        let retry_after = resp
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map(Duration::from_secs);
+        return AttemptResult::Transient {
+            reason,
+            retry_after,
+        };
+    }
+    if status.is_server_error() {
+        return AttemptResult::Transient {
+            reason,
+            retry_after: None,
+        };
+    }
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return AttemptResult::Permanent {
+            reason: format!(
+                "{reason}: the hook path matches no Receiver, so check reconcile_url \
+                 against the Receiver's status.webhookPath"
+            ),
+        };
+    }
+    AttemptResult::Permanent { reason }
+}
+
+/// `reconcile_url` with everything that can carry the Receiver's token
+/// removed: the path (`/hook/<sha256>` *is* the token), userinfo, query and
+/// fragment. Scheme, host and port stay, because that is what someone
+/// debugging a failed webhook needs to see.
+fn redact_reconcile_url(url: &str) -> String {
+    match reqwest::Url::parse(url) {
+        Ok(parsed) => {
+            let host = parsed.host_str().unwrap_or("<no host>");
+            let port = parsed.port().map(|p| format!(":{p}")).unwrap_or_default();
+            format!("{}://{host}{port}/<redacted>", parsed.scheme())
+        }
+        Err(_) => "<unparseable reconcile_url>".to_string(),
+    }
+}
+
+/// A request error as a person can act on it, without the URL.
+///
+/// reqwest's `Display` is "error sending request for url (<full url>)", which
+/// is both the leak and the least useful part; the cause (DNS, refused, TLS)
+/// is further down the source chain. As a last line of defence, anything that
+/// still contains the URL's path is scrubbed.
+fn describe_request_error(err: &reqwest::Error, url: &str) -> String {
+    let mut reason = if err.is_timeout() {
+        "request timed out".to_string()
+    } else if err.is_connect() {
+        "could not connect".to_string()
+    } else {
+        "request failed".to_string()
+    };
+    let mut source = std::error::Error::source(err);
+    while let Some(cause) = source {
+        let text = cause.to_string();
+        if !reason.ends_with(&text) {
+            reason.push_str(": ");
+            reason.push_str(&text);
+        }
+        source = cause.source();
+    }
+    scrub_reconcile_path(&reason, url)
+}
+
+fn scrub_reconcile_path(text: &str, url: &str) -> String {
+    let mut out = text.replace(url, &redact_reconcile_url(url));
+    if let Ok(parsed) = reqwest::Url::parse(url) {
+        let path = parsed.path();
+        if path.len() > 1 {
+            out = out.replace(path, "/<redacted>");
+        }
+        if let Some(query) = parsed.query() {
+            out = out.replace(query, "<redacted>");
+        }
+    }
+    out
 }
 
 // ====== COMMAND EXECUTION ======
@@ -1261,11 +1513,16 @@ impl RunnerDestination for FluxV1RunnerDestination {
     }
 
     async fn prepare(&self, ctx: &RunnerContext) -> anyhow::Result<()> {
-        FluxV1Handler::run(ctx.backend.as_ref(), &ctx.destination, Mode::Prepare).await
+        FluxV1Handler::run(ctx.backend.as_ref(), &ctx.destination, Mode::Prepare).await?;
+        Ok(())
     }
 
+    // The runner binary has no channel for release signals yet, so a failed
+    // reconcile is reported only through the log lines trigger_reconciliation
+    // writes. forest-server's in-process flux destination records it.
     async fn release(&self, ctx: &RunnerContext) -> anyhow::Result<()> {
-        FluxV1Handler::run(ctx.backend.as_ref(), &ctx.destination, Mode::Apply).await
+        FluxV1Handler::run(ctx.backend.as_ref(), &ctx.destination, Mode::Apply).await?;
+        Ok(())
     }
 }
 
@@ -2404,5 +2661,363 @@ mod credential_scrubbing_tests {
         );
 
         assert!(!scrub_url_credentials(&url).contains("ghp_supersecret"));
+    }
+}
+
+#[cfg(test)]
+mod reconcile_tests {
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicU32, Ordering},
+    };
+
+    use tokio::io::AsyncReadExt;
+    use tokio::net::TcpListener;
+
+    use super::*;
+
+    /// A Receiver path is `/hook/<sha256 of token+name+namespace>`; this stands
+    /// in for one.
+    const TOKEN_PATH: &str =
+        "/hook/5ec2e7c0ffee5ec2e7c0ffee5ec2e7c0ffee5ec2e7c0ffee5ec2e7c0ffee5ec2";
+
+    #[derive(Default)]
+    struct CapturingBackend {
+        lines: Mutex<Vec<String>>,
+        temp: Mutex<Vec<tempfile::TempDir>>,
+    }
+
+    impl CapturingBackend {
+        fn lines(&self) -> Vec<String> {
+            self.lines.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl DestinationBackend for CapturingBackend {
+        async fn get_deployment_files(&self) -> anyhow::Result<Vec<(PathBuf, String)>> {
+            unreachable!()
+        }
+        async fn get_spec_files(&self) -> anyhow::Result<Vec<(PathBuf, String)>> {
+            unreachable!()
+        }
+        async fn get_release_annotation(&self) -> anyhow::Result<ReleaseAnnotation> {
+            unreachable!()
+        }
+        async fn get_project_info(&self) -> anyhow::Result<crate::backend::ProjectInfo> {
+            unreachable!()
+        }
+        fn log_stdout(&self, line: &str) {
+            self.lines.lock().unwrap().push(line.to_string());
+        }
+        fn log_stderr(&self, line: &str) {
+            self.lines.lock().unwrap().push(line.to_string());
+        }
+        async fn create_temp_dir(&self) -> anyhow::Result<PathBuf> {
+            let dir = tempfile::tempdir()?;
+            let path = dir.path().to_path_buf();
+            self.temp.lock().unwrap().push(dir);
+            Ok(path)
+        }
+    }
+
+    fn fast_retry(budget_ms: u64) -> ReconcileRetry {
+        ReconcileRetry {
+            budget: Duration::from_millis(budget_ms),
+            attempt_timeout: Duration::from_secs(2),
+            base_delay: Duration::from_millis(10),
+            max_delay: Duration::from_millis(40),
+        }
+    }
+
+    /// Serves one canned response per connection, in order, repeating the
+    /// last. Returns the base URL and a counter of requests served.
+    async fn receiver(responses: Vec<&'static str>) -> (String, Arc<AtomicU32>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let served = Arc::new(AtomicU32::new(0));
+        let counter = served.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                let n = counter.fetch_add(1, Ordering::SeqCst) as usize;
+                let response = responses[n.min(responses.len() - 1)];
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock.write_all(response.as_bytes()).await;
+                let _ = sock.shutdown().await;
+            }
+        });
+        (format!("http://{addr}"), served)
+    }
+
+    const OK: &str = "HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+    const UNAVAILABLE: &str =
+        "HTTP/1.1 503 Service Unavailable\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+    const NOT_FOUND: &str =
+        "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+    const TOO_MANY_LONG: &str = "HTTP/1.1 429 Too Many Requests\r\nretry-after: 3600\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+
+    fn assert_no_token(lines: &[String], outcome: &ReconcileOutcome) {
+        for line in lines {
+            assert!(!line.contains(TOKEN_PATH), "token leaked into log: {line}");
+            assert!(
+                !line.contains("5ec2e7c0ffee"),
+                "token leaked into log: {line}"
+            );
+        }
+        if let ReconcileOutcome::Failed { reason, .. } = outcome {
+            assert!(!reason.contains("5ec2e7c0ffee"), "token leaked: {reason}");
+        }
+    }
+
+    #[test]
+    fn redaction_keeps_the_host_and_drops_everything_that_can_carry_the_token() {
+        let shown = redact_reconcile_url(&format!(
+            "https://user:pw@forest-receiver.prod.example:8443{TOKEN_PATH}?t=secret#frag"
+        ));
+        assert_eq!(
+            shown,
+            "https://forest-receiver.prod.example:8443/<redacted>"
+        );
+        assert_eq!(
+            redact_reconcile_url("not a url"),
+            "<unparseable reconcile_url>"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_accepting_receiver_is_triggered_once_and_the_token_is_never_logged() {
+        let (base, served) = receiver(vec![OK]).await;
+        let backend = CapturingBackend::default();
+        let outcome =
+            trigger_reconciliation(&backend, &format!("{base}{TOKEN_PATH}"), &fast_retry(2000))
+                .await;
+        assert_eq!(outcome, ReconcileOutcome::Triggered { attempts: 1 });
+        assert_eq!(served.load(Ordering::SeqCst), 1);
+        let lines = backend.lines();
+        assert!(lines[0].ends_with("/<redacted>"), "{lines:?}");
+        assert_no_token(&lines, &outcome);
+    }
+
+    #[tokio::test]
+    async fn a_5xx_is_retried_until_the_receiver_accepts() {
+        let (base, served) = receiver(vec![UNAVAILABLE, UNAVAILABLE, OK]).await;
+        let backend = CapturingBackend::default();
+        let outcome =
+            trigger_reconciliation(&backend, &format!("{base}{TOKEN_PATH}"), &fast_retry(5000))
+                .await;
+        assert_eq!(outcome, ReconcileOutcome::Triggered { attempts: 3 });
+        assert_eq!(served.load(Ordering::SeqCst), 3);
+        assert_no_token(&backend.lines(), &outcome);
+    }
+
+    /// A 404 means the hook path matches no Receiver. Asking again gets the
+    /// same answer, so it is not retried.
+    #[tokio::test]
+    async fn a_404_is_not_retried_and_points_at_the_hook_path() {
+        let (base, served) = receiver(vec![NOT_FOUND, OK]).await;
+        let backend = CapturingBackend::default();
+        let outcome =
+            trigger_reconciliation(&backend, &format!("{base}{TOKEN_PATH}"), &fast_retry(5000))
+                .await;
+        let ReconcileOutcome::Failed { attempts, reason } = &outcome else {
+            panic!("expected failure, got {outcome:?}");
+        };
+        assert_eq!(*attempts, 1);
+        assert_eq!(served.load(Ordering::SeqCst), 1);
+        assert!(reason.contains("404"), "{reason}");
+        assert!(reason.contains("reconcile_url"), "{reason}");
+        assert_no_token(&backend.lines(), &outcome);
+    }
+
+    /// #298's case: nothing answers. The attempts stop at the budget, the
+    /// release is not failed, and neither the log nor the reason carries the
+    /// token (reqwest's own error text prints the full URL).
+    #[tokio::test]
+    async fn an_unreachable_receiver_is_retried_within_the_budget_then_reported() {
+        // Bind and drop, so the port is closed and connecting is refused.
+        let addr = TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let backend = CapturingBackend::default();
+        let started = Instant::now();
+        let outcome = trigger_reconciliation(
+            &backend,
+            &format!("http://{addr}{TOKEN_PATH}"),
+            &fast_retry(300),
+        )
+        .await;
+        let ReconcileOutcome::Failed { attempts, reason } = &outcome else {
+            panic!("expected failure, got {outcome:?}");
+        };
+        assert!(*attempts > 1, "expected retries, got {attempts}");
+        assert!(reason.contains("could not connect"), "{reason}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        let lines = backend.lines();
+        assert!(
+            lines.last().unwrap().contains("non-fatal"),
+            "the final line should say the release still stands: {lines:?}"
+        );
+        assert_no_token(&lines, &outcome);
+    }
+
+    /// A Retry-After beyond the budget is honoured by not waiting for it:
+    /// the release step gives up and leaves the change to Flux's poll.
+    #[tokio::test]
+    async fn a_429_whose_retry_after_exceeds_the_budget_is_not_waited_for() {
+        let (base, served) = receiver(vec![TOO_MANY_LONG, OK]).await;
+        let backend = CapturingBackend::default();
+        let started = Instant::now();
+        let outcome =
+            trigger_reconciliation(&backend, &format!("{base}{TOKEN_PATH}"), &fast_retry(1000))
+                .await;
+        assert!(matches!(
+            outcome,
+            ReconcileOutcome::Failed { attempts: 1, .. }
+        ));
+        assert_eq!(served.load(Ordering::SeqCst), 1);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    async fn git(cwd: &Path, args: &[&str]) {
+        let status = tokio::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    /// The whole git path, not just the webhook: a push reports what the
+    /// Receiver said, and a release that changes nothing pushes nothing and
+    /// asks Flux for nothing.
+    #[tokio::test]
+    async fn a_pushed_release_reports_the_reconcile_and_an_unchanged_one_asks_for_none() {
+        let bare_dir = tempfile::tempdir().unwrap();
+        let bare = bare_dir.path().join("gitops.git");
+        git(
+            bare_dir.path(),
+            &["init", "--bare", "-b", "main", bare.to_str().unwrap()],
+        )
+        .await;
+        let seed = tempfile::tempdir().unwrap();
+        git(
+            seed.path(),
+            &["clone", &format!("file://{}", bare.display()), "repo"],
+        )
+        .await;
+        let seed_repo = seed.path().join("repo");
+        tokio::fs::write(seed_repo.join("README.md"), "gitops\n")
+            .await
+            .unwrap();
+        git(&seed_repo, &["add", "-A"]).await;
+        git(
+            &seed_repo,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-m",
+                "init",
+            ],
+        )
+        .await;
+        git(&seed_repo, &["push", "origin", "HEAD:main"]).await;
+
+        let (base, served) = receiver(vec![OK]).await;
+        let meta = FluxMetadata::from_metadata(
+            &[
+                ("cluster_name", "c1"),
+                ("namespace", "ns"),
+                ("git_url", &format!("file://{}", bare.display())),
+                ("reconcile_url", &format!("{base}{TOKEN_PATH}")),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        )
+        .unwrap();
+        let manifests = vec![(
+            "10-namespace.yaml".to_string(),
+            "apiVersion: v1\nkind: Namespace\n".to_string(),
+        )];
+        let forest_metadata = ForestMetadataFiles {
+            config_yaml: None,
+            release_yaml: "slug: s\n".into(),
+            spec_yaml: "{}\n".into(),
+        };
+
+        let backend = CapturingBackend::default();
+        let first = run_git(
+            &backend,
+            &meta,
+            &manifests,
+            &forest_metadata,
+            "dev",
+            "flux-dev",
+            "acme-app",
+            None,
+            &Mode::Apply,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first, ReconcileOutcome::Triggered { attempts: 1 });
+        assert_eq!(served.load(Ordering::SeqCst), 1);
+
+        let second = run_git(
+            &backend,
+            &meta,
+            &manifests,
+            &forest_metadata,
+            "dev",
+            "flux-dev",
+            "acme-app",
+            None,
+            &Mode::Apply,
+        )
+        .await
+        .unwrap();
+        assert_eq!(second, ReconcileOutcome::NotRequested);
+        assert_eq!(
+            served.load(Ordering::SeqCst),
+            1,
+            "nothing pushed, nothing asked"
+        );
+        assert_no_token(&backend.lines(), &first);
+    }
+
+    #[test]
+    fn backoff_never_exceeds_its_cap() {
+        let retry = fast_retry(1000);
+        for attempt in 1..40 {
+            assert!(retry.backoff(attempt) <= retry.max_delay);
+        }
+    }
+
+    #[test]
+    fn the_worst_outcome_of_several_directories_wins() {
+        let failed = ReconcileOutcome::Failed {
+            attempts: 1,
+            reason: "x".into(),
+        };
+        assert_eq!(
+            ReconcileOutcome::Triggered { attempts: 1 }.worst(failed.clone()),
+            failed
+        );
+        assert_eq!(failed.clone().worst(ReconcileOutcome::NotRequested), failed);
+        assert_eq!(
+            ReconcileOutcome::NotRequested.worst(ReconcileOutcome::Triggered { attempts: 2 }),
+            ReconcileOutcome::Triggered { attempts: 2 }
+        );
     }
 }

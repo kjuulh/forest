@@ -2043,6 +2043,25 @@ impl GrpcClient {
         Ok(resp.into_inner())
     }
 
+    /// Every release signal reported for a release intent: named observations
+    /// about a release on one destination, such as flux@1's `reconcile`.
+    pub async fn list_signals(
+        &self,
+        release_intent_id: Uuid,
+    ) -> anyhow::Result<Vec<forest_grpc_interface::Signal>> {
+        let channel = self.auth_channel(self.channel().await?);
+        let mut client =
+            forest_grpc_interface::signal_service_client::SignalServiceClient::new(channel);
+        let resp = client
+            .list_signals(forest_grpc_interface::ListSignalsRequest {
+                release_intent_id: release_intent_id.to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("list signals (grpc)")?;
+        Ok(resp.into_inner().signals)
+    }
+
     /// Approve a plan stage that is parked in `AWAITING_APPROVAL`.
     ///
     /// The server-side half of plan-before-apply has existed since the plan

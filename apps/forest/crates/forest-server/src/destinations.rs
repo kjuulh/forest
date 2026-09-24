@@ -53,6 +53,7 @@ impl DestinationService {
                 temp: state.temp_directories(),
                 artifact_files: state.artifact_staging_registry(),
                 db: state.db.clone(),
+                nats: state.nats.clone(),
             },
             release_logs_registry,
         )
