@@ -30,7 +30,7 @@ use tracing::Span;
 use crate::{
     State,
     destinations::{
-        DestinationEdge, DestinationIndex,
+        DestinationEdge, DestinationIndex, DriftReport,
         logger::DestinationLogger,
         terraform_plans::{SavedPlan, TerraformPlanStore},
     },
@@ -665,17 +665,34 @@ impl TerraformV1Destination {
         release: &ReleaseItem,
         destination: &Destination,
     ) -> anyhow::Result<String> {
+        let destroy = self.plans.is_destroy_plan(release.id).await?;
         let env = self.backend_env(release, destination).await;
         let staged = self.stage(release, destination).await?;
-        let (outputs, saved) =
-            plan_roots(logger, destination, &env, &staged.root, &staged.dirs).await?;
+        let (outputs, saved) = plan_roots(
+            logger,
+            destination,
+            &env,
+            &staged.root,
+            &staged.dirs,
+            destroy,
+        )
+        .await?;
 
         self.plans
             .save(release.release_intent_id, release.destination_id, &saved)
             .await
             .context("save plans")?;
 
-        Ok(join_plan_outputs(outputs))
+        let output = join_plan_outputs(outputs);
+        if destroy {
+            // Said before the plan so it cannot be missed by someone skimming
+            // for "Plan:" at the bottom.
+            return Ok(format!(
+                "⚠ DESTROY PLAN — approving this removes everything shown below, and the deploy \
+                 stage applies it as-is.\n\n{output}"
+            ));
+        }
+        Ok(output)
     }
 
     /// Apply what the plan stage saved, root for root. Refuses a root with no
@@ -750,8 +767,12 @@ async fn plan_roots(
     env: &[(&str, String)],
     root: &std::path::Path,
     dirs: &[std::path::PathBuf],
+    destroy: bool,
 ) -> anyhow::Result<(Vec<(String, String)>, Vec<SavedPlan>)> {
-    let plan_args = ["plan", "-input=false", "-out", PLAN_FILE];
+    let mut plan_args = vec!["plan", "-input=false", "-out", PLAN_FILE];
+    if destroy {
+        plan_args.push("-destroy");
+    }
 
     let mut outputs = Vec::new();
     let mut saved = Vec::new();
@@ -858,6 +879,22 @@ async fn run_command_capture(
     tf_envs: &[(&str, String)],
     args: &[&str],
 ) -> anyhow::Result<String> {
+    let (code, output) = run_command_status(logger, destination, path, tf_envs, args).await?;
+    if code != 0 {
+        anyhow::bail!("terraform failed: {code}");
+    }
+    Ok(output)
+}
+
+/// Run terraform, capture stdout, and hand back the exit code rather than
+/// failing on a nonzero one — for `-detailed-exitcode`, where 2 is an answer.
+async fn run_command_status(
+    logger: &DestinationLogger,
+    destination: &Destination,
+    path: &std::path::Path,
+    tf_envs: &[(&str, String)],
+    args: &[&str],
+) -> anyhow::Result<(i32, String)> {
     tracing::debug!(path =% path.display(), "running terraform {} (capture)", args.join(" "));
 
     let mut cmd = command(destination, path, tf_envs).await;
@@ -906,12 +943,54 @@ async fn run_command_capture(
     if let Some(task) = stdout_task {
         let _ = task.await;
     }
-    if !exit.success() {
-        anyhow::bail!("terraform failed: {}", exit.code().unwrap_or(-1));
-    }
 
     let output = captured.lock().await.clone();
-    Ok(output)
+    Ok((exit.code().unwrap_or(-1), output))
+}
+
+/// The drift check, per root: refresh-only, so it asks "did the world move
+/// away from state?" rather than "does config differ from state?"; unlocked,
+/// because it writes nothing and must not queue behind — or block — a release.
+async fn drift_roots(
+    logger: &DestinationLogger,
+    destination: &Destination,
+    env: &[(&str, String)],
+    root: &std::path::Path,
+    dirs: &[std::path::PathBuf],
+) -> anyhow::Result<Vec<DriftReport>> {
+    let args = [
+        "plan",
+        "-refresh-only",
+        "-detailed-exitcode",
+        "-lock=false",
+        "-input=false",
+    ];
+
+    let mut reports = Vec::new();
+    for dir in dirs {
+        run_command(logger, destination, dir, env, &["init", "-input=false"])
+            .await
+            .context("terraform init")?;
+
+        let (code, output) = run_command_status(logger, destination, dir, env, &args)
+            .await
+            .context("terraform plan -refresh-only")?;
+
+        let drifted = match code {
+            0 => false,
+            2 => true,
+            other => anyhow::bail!(
+                "terraform plan -refresh-only failed ({other}) for {}:\n{output}",
+                root_key(root, dir)
+            ),
+        };
+        reports.push(DriftReport {
+            work_dir: root_key(root, dir),
+            drifted,
+            output,
+        });
+    }
+    Ok(reports)
 }
 
 async fn run_command(
@@ -1158,6 +1237,18 @@ impl DestinationEdge for TerraformV1Destination {
 
     fn supports_plan(&self) -> bool {
         true
+    }
+
+    async fn drift(
+        &self,
+        logger: &DestinationLogger,
+        deployed: &ReleaseItem,
+        destination: &Destination,
+    ) -> anyhow::Result<Option<Vec<DriftReport>>> {
+        let env = self.backend_env(deployed, destination).await;
+        let staged = self.stage(deployed, destination).await?;
+        let reports = drift_roots(logger, destination, &env, &staged.root, &staged.dirs).await?;
+        Ok(Some(reports))
     }
 }
 
@@ -1693,7 +1784,7 @@ output "o" {{
 
         // Plan stage: the reviewer approves input = "approved".
         let (plan_root, plan_dirs) = lay_out(state.path(), "approved");
-        let (outputs, saved) = plan_roots(&logger, &dest, &[], plan_root.path(), &plan_dirs)
+        let (outputs, saved) = plan_roots(&logger, &dest, &[], plan_root.path(), &plan_dirs, false)
             .await
             .expect("plan");
         assert!(outputs[0].1.contains("will be created"), "{}", outputs[0].1);
@@ -1719,7 +1810,7 @@ output "o" {{
         let state = tempfile::tempdir().unwrap();
 
         let (plan_root, plan_dirs) = lay_out(state.path(), "approved");
-        let (_, saved) = plan_roots(&logger, &dest, &[], plan_root.path(), &plan_dirs)
+        let (_, saved) = plan_roots(&logger, &dest, &[], plan_root.path(), &plan_dirs, false)
             .await
             .expect("plan");
 
@@ -1756,6 +1847,134 @@ output "o" {{
             Some("someone-else"),
             "nothing was applied over the other change"
         );
+    }
+
+    #[tokio::test]
+    async fn a_destroy_plan_removes_what_it_showed_and_nothing_re_plans_it() {
+        let _exe = TERRAFORM_EXE_LOCK.lock().await;
+        require_terraform();
+        let logger = test_logger().await;
+        let dest = destination_with(&[]);
+        let state = tempfile::tempdir().unwrap();
+
+        // Something exists.
+        let (live_root, live_dirs) = lay_out(state.path(), "live");
+        let (_, saved) = plan_roots(&logger, &dest, &[], live_root.path(), &live_dirs, false)
+            .await
+            .unwrap();
+        apply_roots(&logger, &dest, &[], live_root.path(), &live_dirs, &saved)
+            .await
+            .unwrap();
+        assert_eq!(state_output(state.path()).as_deref(), Some("live"));
+
+        // Destroy plan stage.
+        let (plan_root, plan_dirs) = lay_out(state.path(), "live");
+        let (outputs, saved) = plan_roots(&logger, &dest, &[], plan_root.path(), &plan_dirs, true)
+            .await
+            .unwrap();
+        assert!(
+            outputs[0].1.contains("will be destroyed"),
+            "{}",
+            outputs[0].1
+        );
+
+        // Deploy stage applies that saved destroy plan.
+        let (apply_root, apply_dirs) = lay_out(state.path(), "live");
+        apply_roots(&logger, &dest, &[], apply_root.path(), &apply_dirs, &saved)
+            .await
+            .unwrap();
+
+        let state: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(state.path().join("terraform.tfstate")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            state["resources"].as_array().map(|r| r.len()),
+            Some(0),
+            "everything the plan showed is gone: {state}"
+        );
+    }
+
+    #[tokio::test]
+    async fn drift_is_reported_when_the_world_moves_and_not_before() {
+        let _exe = TERRAFORM_EXE_LOCK.lock().await;
+        require_terraform();
+        let logger = test_logger().await;
+        let dest = destination_with(&[]);
+        let state = tempfile::tempdir().unwrap();
+        let managed = tempfile::tempdir().unwrap();
+        let file = managed.path().join("managed.txt");
+
+        // Unlike terraform_data, a local_file exists outside terraform and so
+        // can drift: the hashicorp/local provider is the one download here.
+        let lay_out_file = || {
+            let root = tempfile::tempdir().unwrap();
+            let dir = root.path().join("dev/^dev/x$/forest/terraform@1");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("main.tf"),
+                format!(
+                    r#"
+terraform {{
+  backend "local" {{
+    path = "{}/terraform.tfstate"
+  }}
+}}
+
+resource "local_file" "x" {{
+  filename = "{}"
+  content  = "managed by forest"
+}}
+"#,
+                    state.path().display(),
+                    file.display()
+                ),
+            )
+            .unwrap();
+            (root, vec![dir])
+        };
+
+        let (root, dirs) = lay_out_file();
+        let (_, saved) = plan_roots(&logger, &dest, &[], root.path(), &dirs, false)
+            .await
+            .unwrap();
+        apply_roots(&logger, &dest, &[], root.path(), &dirs, &saved)
+            .await
+            .unwrap();
+        assert!(file.exists());
+
+        let (root, dirs) = lay_out_file();
+        let reports = drift_roots(&logger, &dest, &[], root.path(), &dirs)
+            .await
+            .unwrap();
+        assert!(
+            !reports[0].drifted,
+            "just applied, nothing moved: {}",
+            reports[0].output
+        );
+
+        // Someone deletes it by hand.
+        std::fs::remove_file(&file).unwrap();
+
+        let (root, dirs) = lay_out_file();
+        let reports = drift_roots(&logger, &dest, &[], root.path(), &dirs)
+            .await
+            .unwrap();
+        assert!(reports[0].drifted, "{}", reports[0].output);
+        assert!(
+            reports[0].output.contains("local_file.x"),
+            "{}",
+            reports[0].output
+        );
+
+        // A drift check changes nothing: the state still has the resource,
+        // and the file is still gone.
+        let state_json: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(state.path().join("terraform.tfstate")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(state_json["resources"].as_array().map(|r| r.len()), Some(1));
+        assert!(!file.exists());
     }
 
     #[tokio::test]

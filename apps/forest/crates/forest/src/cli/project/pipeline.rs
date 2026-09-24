@@ -63,6 +63,9 @@ enum JsonStageConfig {
         environment: String,
         #[serde(default)]
         auto_approve: bool,
+        /// `terraform plan -destroy`; the server refuses it with auto_approve.
+        #[serde(default)]
+        destroy: bool,
     },
     /// Wait for evidence rather than a duration — see forest#252.
     ///
@@ -150,9 +153,11 @@ pub fn parse_stages_from_json(json: &str) -> anyhow::Result<Vec<PipelineStage>> 
                 JsonStageConfig::Plan {
                     environment,
                     auto_approve,
+                    destroy,
                 } => pipeline_stage::Config::Plan(PlanStageConfig {
                     environment,
                     auto_approve,
+                    destroy,
                 }),
                 JsonStageConfig::Gate {
                     requires,

@@ -95,3 +95,19 @@ forest destination delete --organisation my-org --name k8s-dev
 forest destination list --organisation my-org
 forest destination types
 ```
+
+## Drift (`forest/terraform@1`)
+
+Terraform state records what forest last applied. It doesn't tell you whether someone has changed a resource in a console since. To check:
+
+```bash
+forest release drift --environment dev              # every destination this project deployed to
+forest release drift -e prod -d prod/eu-west-1/core # one destination
+```
+
+For each destination the server takes the artifact of that destination's last successful deploy and runs `terraform plan -refresh-only -detailed-exitcode -lock=false` against it. It changes nothing: no state write, no lock, so it can't block or be blocked by a release.
+
+The exit status is `0` when in sync, `2` when something drifted (the refresh-only plan is printed), and `1` when the check couldn't run. So a scheduled CI job can alert on `2` without parsing anything.
+
+The check runs synchronously in the request. Scheduling it and showing the result in forage are follow-ups.
+

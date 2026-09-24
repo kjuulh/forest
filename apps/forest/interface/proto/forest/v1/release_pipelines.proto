@@ -28,6 +28,11 @@ message WaitStageConfig {
 message PlanStageConfig {
     string environment = 1;
     bool auto_approve = 2;
+    // Plan the removal of everything this project manages at the stage's
+    // destinations (`terraform plan -destroy`) instead of the rendered config.
+    // The deploy stage that follows applies that saved plan verbatim. A
+    // destroy plan stage can never auto-approve: the pipeline is refused.
+    bool destroy = 3;
 }
 
 // One thing a gate waits to be told, and the states it will accept.

@@ -127,6 +127,33 @@ impl TerraformPlanStore {
         Ok(())
     }
 
+    /// Whether this plan release belongs to a destroy plan stage (forest#286).
+    ///
+    /// Read from the intent's own pipeline definition rather than carried on
+    /// the release, so the only way to get a destroy plan is a stage that says
+    /// `destroy: true` — which `validate_pipeline` refuses to combine with
+    /// auto-approval. A release with no stage (a direct release) is never one.
+    pub async fn is_destroy_plan(&self, release_id: Uuid) -> anyhow::Result<bool> {
+        let row = sqlx::query!(
+            r#"
+                SELECT rs.stage_id, ri.stages
+                FROM release_states rs
+                JOIN release_intents ri ON ri.id = rs.release_intent_id
+                WHERE rs.release_id = $1
+            "#,
+            release_id,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("look up the release's stage")?;
+
+        let Some(row) = row else { return Ok(false) };
+        let (Some(stage_id), Some(stages)) = (row.stage_id, row.stages) else {
+            return Ok(false);
+        };
+        stage_is_destroy(&stages, &stage_id)
+    }
+
     /// Whether this intent ran a plan stage against this destination. Used to
     /// tell "no plan was ever made" (a direct release: plan and apply in one
     /// go, as before) from "a plan was made and approved but is gone" — which
@@ -151,6 +178,18 @@ impl TerraformPlanStore {
         .context("look up plan stage")?;
         Ok(ran)
     }
+}
+
+/// Whether `stage_id` in a stored pipeline definition is a destroy plan.
+fn stage_is_destroy(stages: &serde_json::Value, stage_id: &str) -> anyhow::Result<bool> {
+    use crate::services::release_pipeline::{PipelineStages, StageConfig};
+
+    let stages: PipelineStages =
+        serde_json::from_value(stages.clone()).context("parse the intent's pipeline stages")?;
+    Ok(matches!(
+        stages.get(stage_id).map(|s| &s.config),
+        Some(StageConfig::Plan { destroy: true, .. })
+    ))
 }
 
 #[cfg(test)]
@@ -228,6 +267,25 @@ mod tests {
         store.discard(intent, dest).await.unwrap();
 
         assert!(store.load(intent, dest).await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn only_a_plan_stage_marked_destroy_is_a_destroy_plan() {
+        let stages = serde_json::json!({
+            "plan-dev":    {"type": "plan", "depends_on": [], "environment": "dev"},
+            "destroy-dev": {"type": "plan", "depends_on": [], "environment": "dev", "destroy": true},
+            "deploy-dev":  {"type": "deploy", "depends_on": ["destroy-dev"], "environment": "dev"},
+        });
+        assert!(stage_is_destroy(&stages, "destroy-dev").unwrap());
+        assert!(!stage_is_destroy(&stages, "plan-dev").unwrap());
+        assert!(!stage_is_destroy(&stages, "deploy-dev").unwrap());
+        assert!(!stage_is_destroy(&stages, "no-such-stage").unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_release_that_does_not_exist_is_not_a_destroy() {
+        let store = store().await;
+        assert!(!store.is_destroy_plan(Uuid::now_v7()).await.unwrap());
     }
 
     #[tokio::test]

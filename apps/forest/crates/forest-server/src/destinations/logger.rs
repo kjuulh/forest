@@ -122,6 +122,15 @@ impl DestinationLogger {
         Self { input }
     }
 
+    /// A logger for work that is not a release — a drift check — and so has
+    /// no release log to write to. Lines are drained and dropped; the caller
+    /// captures what it needs from the command itself.
+    pub fn detached() -> Self {
+        let (input, mut output) = tokio::sync::mpsc::unbounded_channel::<(LogChannel, String)>();
+        tokio::spawn(async move { while output.recv().await.is_some() {} });
+        Self { input }
+    }
+
     pub fn log_stdout(&self, line: &str) {
         self.log(LogChannel::Stdout, line);
     }

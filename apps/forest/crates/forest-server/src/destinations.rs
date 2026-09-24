@@ -157,6 +157,17 @@ impl DestinationService {
         self.inner.supports_plan()
     }
 
+    pub(crate) async fn drift(
+        &self,
+        logger: &DestinationLogger,
+        deployed: &ReleaseItem,
+        destination: &Destination,
+    ) -> anyhow::Result<Option<Vec<DriftReport>>> {
+        tracing::debug!(id =% deployed.id, destination =% self.name(), "checking drift");
+
+        self.inner.drift(logger, deployed, destination).await
+    }
+
     fn create_logger(&self, staged_release: &ReleaseItem) -> DestinationLogger {
         DestinationLogger::new(staged_release.clone(), self.release_logs_registry.clone())
     }
@@ -217,6 +228,27 @@ pub trait DestinationEdge {
     fn supports_plan(&self) -> bool {
         false
     }
+
+    /// Compare what `deployed` rendered with what is actually running, and
+    /// change neither (forest#286). `deployed` is the destination's last
+    /// successful release. `None` means this type has no drift check.
+    #[allow(unused_variables)]
+    async fn drift(
+        &self,
+        logger: &DestinationLogger,
+        deployed: &ReleaseItem,
+        destination: &Destination,
+    ) -> anyhow::Result<Option<Vec<DriftReport>>> {
+        Ok(None)
+    }
+}
+
+/// One root's drift, as a destination reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriftReport {
+    pub work_dir: String,
+    pub drifted: bool,
+    pub output: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

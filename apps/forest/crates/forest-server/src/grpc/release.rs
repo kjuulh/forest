@@ -1817,6 +1817,34 @@ impl ReleaseService for ReleaseServer {
         Ok(Response::new(RejectPlanStageResponse {}))
     }
 
+    async fn check_drift(
+        &self,
+        request: tonic::Request<CheckDriftRequest>,
+    ) -> Result<Response<CheckDriftResponse>, tonic::Status> {
+        let actor = authorize::extract_actor(&request)?;
+        let req = request.into_inner();
+        let project = req
+            .project
+            .clone()
+            .ok_or_else(|| tonic::Status::invalid_argument("project is required"))?;
+
+        // Admin, like `forest state`: a drift check refreshes against the
+        // destination's credentials and returns the plan text, and reading
+        // state is admin-only for now (forest#282).
+        authorize::require_project_access(
+            &self.state.db,
+            &actor,
+            &project,
+            authorize::OrgRole::Admin,
+        )
+        .await?;
+
+        let resp = super::release_drift::check_drift(&self.state, req)
+            .await
+            .map_err(|e| tonic::Status::failed_precondition(format!("{e:#}")))?;
+        Ok(Response::new(resp))
+    }
+
     async fn get_plan_output(
         &self,
         request: tonic::Request<GetPlanOutputRequest>,
@@ -2016,6 +2044,7 @@ fn stage_def_to_type_fields(
         StageConfig::Plan {
             environment,
             auto_approve,
+            ..
         } => (
             forest_grpc_interface::PipelineRunStageType::Plan as i32,
             Some(environment.clone()),

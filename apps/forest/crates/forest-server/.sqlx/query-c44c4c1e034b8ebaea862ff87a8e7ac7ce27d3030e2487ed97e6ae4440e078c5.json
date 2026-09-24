@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT DISTINCT ON (rs.destination_id)\n                rs.release_id, rs.release_intent_id, rs.destination_id, rs.artifact_id,\n                d.name AS destination_name\n            FROM release_states rs\n            JOIN destinations d ON d.id = rs.destination_id\n            WHERE rs.project_id = $1\n              AND rs.mode = 'deploy'\n              AND rs.status = 'SUCCEEDED'\n              AND d.environment = $2\n              AND ($3 = '' OR d.name = $3)\n            ORDER BY rs.destination_id, rs.completed_at DESC NULLS LAST, rs.queued_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "release_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "release_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "release_intent_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "release_intent_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "destination_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "destination_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "artifact_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "artifact_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "destination_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c44c4c1e034b8ebaea862ff87a8e7ac7ce27d3030e2487ed97e6ae4440e078c5"
+}

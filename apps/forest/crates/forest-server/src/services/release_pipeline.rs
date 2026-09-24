@@ -40,6 +40,12 @@ pub enum StageConfig {
         /// When true, auto-approve after plan succeeds (no manual gate).
         #[serde(default)]
         auto_approve: bool,
+        /// Plan removing everything the project manages at these destinations
+        /// (`terraform plan -destroy`). The deploy stage after it applies that
+        /// saved plan. Never combined with `auto_approve` — see
+        /// `validate_pipeline`.
+        #[serde(default)]
+        destroy: bool,
     },
     /// Wait for evidence rather than for a duration.
     ///
@@ -119,6 +125,19 @@ impl StageDefinition {
             config: StageConfig::Plan {
                 environment: environment.into(),
                 auto_approve,
+                destroy: false,
+            },
+        }
+    }
+
+    /// A plan stage that plans a teardown. Always gated on approval.
+    pub fn destroy_plan(environment: impl Into<String>, depends_on: Vec<String>) -> Self {
+        Self {
+            depends_on,
+            config: StageConfig::Plan {
+                environment: environment.into(),
+                auto_approve: false,
+                destroy: true,
             },
         }
     }
@@ -303,6 +322,22 @@ pub fn validate_pipeline(stages: &PipelineStages) -> anyhow::Result<()> {
     }
 
     let ids: HashSet<&str> = stages.keys().map(|s| s.as_str()).collect();
+
+    // A destroy that approves itself is `terraform destroy` on a timer. The
+    // plan stage's approval is the only thing between a pipeline run and the
+    // removal of everything the project manages, so it cannot be waived.
+    for (id, def) in stages {
+        if let StageConfig::Plan {
+            destroy: true,
+            auto_approve: true,
+            ..
+        } = &def.config
+        {
+            anyhow::bail!(
+                "stage '{id}' is a destroy plan with auto_approve — a destroy must be approved by a person"
+            );
+        }
+    }
 
     // Gate configuration is checked here rather than left to the coordinator,
     // because every way of getting it wrong produces a gate that looks fine
@@ -811,6 +846,7 @@ mod tests {
             StageConfig::Plan {
                 environment,
                 auto_approve,
+                ..
             } => {
                 assert_eq!(environment, "prod");
                 assert!(!auto_approve);
@@ -835,12 +871,55 @@ mod tests {
             StageConfig::Plan {
                 environment,
                 auto_approve,
+                ..
             } => {
                 assert_eq!(environment, "prod");
                 assert!(auto_approve);
             }
             _ => panic!("expected plan stage"),
         }
+    }
+
+    #[test]
+    fn a_destroy_plan_that_approves_itself_is_refused() {
+        let mut stages = PipelineStages::new();
+        stages.insert(
+            "destroy-dev".into(),
+            StageDefinition {
+                depends_on: vec![],
+                config: StageConfig::Plan {
+                    environment: "dev".into(),
+                    auto_approve: true,
+                    destroy: true,
+                },
+            },
+        );
+        let err = validate_pipeline(&stages).expect_err("auto-approved destroy");
+        assert!(err.to_string().contains("approved by a person"), "{err}");
+    }
+
+    #[test]
+    fn a_gated_destroy_plan_followed_by_a_deploy_is_valid() {
+        let mut stages = PipelineStages::new();
+        stages.insert(
+            "destroy-dev".into(),
+            StageDefinition::destroy_plan("dev", vec![]),
+        );
+        stages.insert(
+            "apply-dev".into(),
+            StageDefinition::deploy("dev", vec!["destroy-dev".into()]),
+        );
+        validate_pipeline(&stages).expect("valid");
+    }
+
+    #[test]
+    fn destroy_defaults_false_so_existing_pipelines_are_unchanged() {
+        let json = r#"{"plan-prod": {"type": "plan", "depends_on": [], "environment": "prod"}}"#;
+        let stages: PipelineStages = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            stages["plan-prod"].config,
+            StageConfig::Plan { destroy: false, .. }
+        ));
     }
 
     #[test]

@@ -1197,6 +1197,7 @@ fn convert_pipeline_stage(s: forage_grpc::PipelineStage) -> PipelineStage {
         Some(forage_grpc::pipeline_stage::Config::Plan(p)) => PipelineStageConfig::Plan {
             environment: p.environment,
             auto_approve: p.auto_approve,
+            destroy: p.destroy,
         },
         Some(forage_grpc::pipeline_stage::Config::Gate(g)) => PipelineStageConfig::Gate {
             requires: g
@@ -1302,9 +1303,11 @@ fn convert_stages_to_grpc(stages: &[PipelineStage]) -> Vec<forage_grpc::Pipeline
                 PipelineStageConfig::Plan {
                     environment,
                     auto_approve,
+                    destroy,
                 } => forage_grpc::pipeline_stage::Config::Plan(forage_grpc::PlanStageConfig {
                     environment: environment.clone(),
                     auto_approve: *auto_approve,
+                    destroy: *destroy,
                 }),
                 PipelineStageConfig::Gate {
                     requires,

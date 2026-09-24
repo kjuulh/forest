@@ -7353,6 +7353,7 @@ pub mod release_service_client {
                 .insert(GrpcMethod::new("forest.v1.ReleaseService", "Release"));
             self.inner.unary(req, path, codec).await
         }
+        ///
         pub async fn report_release_failed(
             &mut self,
             request: impl tonic::IntoRequest<super::ReportReleaseFailedRequest>,
@@ -7379,6 +7380,7 @@ pub mod release_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        ///
         pub async fn wait_release(
             &mut self,
             request: impl tonic::IntoRequest<super::WaitReleaseRequest>,
@@ -7403,6 +7405,7 @@ pub mod release_service_client {
                 .insert(GrpcMethod::new("forest.v1.ReleaseService", "WaitRelease"));
             self.inner.server_streaming(req, path, codec).await
         }
+        ///
         pub async fn get_artifact_by_slug(
             &mut self,
             request: impl tonic::IntoRequest<super::GetArtifactBySlugRequest>,
@@ -7429,6 +7432,7 @@ pub mod release_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        ///
         pub async fn get_artifacts_by_project(
             &mut self,
             request: impl tonic::IntoRequest<super::GetArtifactsByProjectRequest>,
@@ -7455,6 +7459,7 @@ pub mod release_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        ///
         pub async fn get_releases_by_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::GetReleasesByActorRequest>,
@@ -7481,6 +7486,7 @@ pub mod release_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        ///
         pub async fn get_organisations(
             &mut self,
             request: impl tonic::IntoRequest<super::GetOrganisationsRequest>,
@@ -7505,6 +7511,7 @@ pub mod release_service_client {
                 .insert(GrpcMethod::new("forest.v1.ReleaseService", "GetOrganisations"));
             self.inner.unary(req, path, codec).await
         }
+        ///
         pub async fn get_projects(
             &mut self,
             request: impl tonic::IntoRequest<super::GetProjectsRequest>,
@@ -7529,6 +7536,7 @@ pub mod release_service_client {
                 .insert(GrpcMethod::new("forest.v1.ReleaseService", "GetProjects"));
             self.inner.unary(req, path, codec).await
         }
+        ///
         pub async fn create_project(
             &mut self,
             request: impl tonic::IntoRequest<super::CreateProjectRequest>,
@@ -7553,6 +7561,7 @@ pub mod release_service_client {
                 .insert(GrpcMethod::new("forest.v1.ReleaseService", "CreateProject"));
             self.inner.unary(req, path, codec).await
         }
+        ///
         pub async fn get_project(
             &mut self,
             request: impl tonic::IntoRequest<super::GetProjectRequest>,
@@ -7577,6 +7586,7 @@ pub mod release_service_client {
                 .insert(GrpcMethod::new("forest.v1.ReleaseService", "GetProject"));
             self.inner.unary(req, path, codec).await
         }
+        ///
         pub async fn update_project(
             &mut self,
             request: impl tonic::IntoRequest<super::UpdateProjectRequest>,
@@ -7601,6 +7611,7 @@ pub mod release_service_client {
                 .insert(GrpcMethod::new("forest.v1.ReleaseService", "UpdateProject"));
             self.inner.unary(req, path, codec).await
         }
+        ///
         pub async fn get_destination_states(
             &mut self,
             request: impl tonic::IntoRequest<super::GetDestinationStatesRequest>,
@@ -7725,6 +7736,30 @@ pub mod release_service_client {
                 .insert(GrpcMethod::new("forest.v1.ReleaseService", "GetPlanOutput"));
             self.inner.unary(req, path, codec).await
         }
+        pub async fn check_drift(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CheckDriftRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CheckDriftResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/forest.v1.ReleaseService/CheckDrift",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("forest.v1.ReleaseService", "CheckDrift"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -7753,6 +7788,7 @@ pub mod release_service_server {
             &self,
             request: tonic::Request<super::ReleaseRequest>,
         ) -> std::result::Result<tonic::Response<super::ReleaseResponse>, tonic::Status>;
+        ///
         async fn report_release_failed(
             &self,
             request: tonic::Request<super::ReportReleaseFailedRequest>,
@@ -7766,6 +7802,7 @@ pub mod release_service_server {
             >
             + std::marker::Send
             + 'static;
+        ///
         async fn wait_release(
             &self,
             request: tonic::Request<super::WaitReleaseRequest>,
@@ -7773,6 +7810,7 @@ pub mod release_service_server {
             tonic::Response<Self::WaitReleaseStream>,
             tonic::Status,
         >;
+        ///
         async fn get_artifact_by_slug(
             &self,
             request: tonic::Request<super::GetArtifactBySlugRequest>,
@@ -7780,6 +7818,7 @@ pub mod release_service_server {
             tonic::Response<super::GetArtifactBySlugResponse>,
             tonic::Status,
         >;
+        ///
         async fn get_artifacts_by_project(
             &self,
             request: tonic::Request<super::GetArtifactsByProjectRequest>,
@@ -7787,6 +7826,7 @@ pub mod release_service_server {
             tonic::Response<super::GetArtifactsByProjectResponse>,
             tonic::Status,
         >;
+        ///
         async fn get_releases_by_actor(
             &self,
             request: tonic::Request<super::GetReleasesByActorRequest>,
@@ -7794,6 +7834,7 @@ pub mod release_service_server {
             tonic::Response<super::GetReleasesByActorResponse>,
             tonic::Status,
         >;
+        ///
         async fn get_organisations(
             &self,
             request: tonic::Request<super::GetOrganisationsRequest>,
@@ -7801,6 +7842,7 @@ pub mod release_service_server {
             tonic::Response<super::GetOrganisationsResponse>,
             tonic::Status,
         >;
+        ///
         async fn get_projects(
             &self,
             request: tonic::Request<super::GetProjectsRequest>,
@@ -7808,6 +7850,7 @@ pub mod release_service_server {
             tonic::Response<super::GetProjectsResponse>,
             tonic::Status,
         >;
+        ///
         async fn create_project(
             &self,
             request: tonic::Request<super::CreateProjectRequest>,
@@ -7815,6 +7858,7 @@ pub mod release_service_server {
             tonic::Response<super::CreateProjectResponse>,
             tonic::Status,
         >;
+        ///
         async fn get_project(
             &self,
             request: tonic::Request<super::GetProjectRequest>,
@@ -7822,6 +7866,7 @@ pub mod release_service_server {
             tonic::Response<super::GetProjectResponse>,
             tonic::Status,
         >;
+        ///
         async fn update_project(
             &self,
             request: tonic::Request<super::UpdateProjectRequest>,
@@ -7829,6 +7874,7 @@ pub mod release_service_server {
             tonic::Response<super::UpdateProjectResponse>,
             tonic::Status,
         >;
+        ///
         async fn get_destination_states(
             &self,
             request: tonic::Request<super::GetDestinationStatesRequest>,
@@ -7862,6 +7908,13 @@ pub mod release_service_server {
             request: tonic::Request<super::GetPlanOutputRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetPlanOutputResponse>,
+            tonic::Status,
+        >;
+        async fn check_drift(
+            &self,
+            request: tonic::Request<super::CheckDriftRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CheckDriftResponse>,
             tonic::Status,
         >;
     }
@@ -8719,6 +8772,51 @@ pub mod release_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetPlanOutputSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/forest.v1.ReleaseService/CheckDrift" => {
+                    #[allow(non_camel_case_types)]
+                    struct CheckDriftSvc<T: ReleaseService>(pub Arc<T>);
+                    impl<
+                        T: ReleaseService,
+                    > tonic::server::UnaryService<super::CheckDriftRequest>
+                    for CheckDriftSvc<T> {
+                        type Response = super::CheckDriftResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CheckDriftRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ReleaseService>::check_drift(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = CheckDriftSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

@@ -46,6 +46,7 @@ mod organisations;
 mod policies;
 mod registry;
 mod release;
+mod release_drift;
 mod release_health;
 pub(crate) mod release_pipelines;
 mod release_signals;

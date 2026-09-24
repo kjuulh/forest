@@ -2026,6 +2026,33 @@ impl GrpcClient {
         Ok(resp.into_inner())
     }
 
+    /// Ask the server to compare what this project last deployed with what is
+    /// running, per destination (forest#286). Synchronous: it runs a
+    /// refresh-only plan per destination before answering.
+    pub async fn check_drift(
+        &self,
+        organisation: &str,
+        project: &str,
+        environment: &str,
+        destination: Option<&str>,
+    ) -> anyhow::Result<forest_grpc_interface::CheckDriftResponse> {
+        let mut client = self.release_client().await?;
+        let resp = client
+            .check_drift(forest_grpc_interface::CheckDriftRequest {
+                project: Some(forest_grpc_interface::Project {
+                    organisation: organisation.to_string(),
+                    project: project.to_string(),
+                    ..Default::default()
+                }),
+                environment: environment.to_string(),
+                destination: destination.unwrap_or_default().to_string(),
+            })
+            .await
+            .map_err(grpc_err)
+            .context("check drift (grpc)")?;
+        Ok(resp.into_inner())
+    }
+
     pub async fn get_plan_output(
         &self,
         release_intent_id: Uuid,

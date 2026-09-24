@@ -61,6 +61,7 @@ fn plan_stage(id: &str, environment: &str) -> PipelineStage {
         config: Some(pipeline_stage::Config::Plan(PlanStageConfig {
             environment: environment.into(),
             auto_approve: true,
+            destroy: false,
         })),
     }
 }
