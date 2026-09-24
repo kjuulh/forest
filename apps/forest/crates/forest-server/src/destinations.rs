@@ -27,6 +27,7 @@ pub mod genericv1;
 pub mod in_process_backend;
 pub mod kubernetesv1;
 pub mod noopv1;
+pub mod terraform_plans;
 pub mod terraformv1;
 
 pub mod logger;
@@ -89,6 +90,7 @@ impl DestinationService {
                 temp: state.temp_directories(),
                 artifact_files: state.artifact_staging_registry(),
                 tf_state: state.terraform_state_store(),
+                plans: terraform_plans::TerraformPlanStore::new(state.db.clone()),
             },
             release_logs_registry,
         )

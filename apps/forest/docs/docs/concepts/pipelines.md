@@ -48,6 +48,8 @@ Runs a dry-run / preview (e.g., `terraform plan`) before deploying:
 
 When `auto_approve` is `false`, the stage enters an **AwaitingApproval** sub-state after the plan completes, requiring manual approval before proceeding.
 
+For `forest/terraform@1` destinations, what you approve is what gets applied. The plan stage saves the binary plan (`terraform plan -out`) together with the provider lock file. The deploy stage of the same release then applies **that file**, and doesn't plan again. If the state changed between approval and apply (someone else applied), terraform refuses the plan as stale and the deploy fails. Re-run the release and review the new plan. A deploy stage whose plan stage ran but has no saved plan also fails rather than re-planning. Saved plans are deleted once their apply has been attempted, and pruned after 7 days if never applied.
+
 ## DAG Structure
 
 Stages declare dependencies via `depends_on`, forming a DAG:

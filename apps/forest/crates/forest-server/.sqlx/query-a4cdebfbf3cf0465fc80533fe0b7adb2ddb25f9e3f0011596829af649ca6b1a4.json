@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM terraform_plans WHERE release_intent_id = $1 AND destination_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a4cdebfbf3cf0465fc80533fe0b7adb2ddb25f9e3f0011596829af649ca6b1a4"
+}

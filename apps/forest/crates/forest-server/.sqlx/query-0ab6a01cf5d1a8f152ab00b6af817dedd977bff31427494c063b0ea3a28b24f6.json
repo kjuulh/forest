@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT work_dir, plan, lock_file\n                FROM terraform_plans\n                WHERE release_intent_id = $1 AND destination_id = $2\n                ORDER BY work_dir\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "work_dir",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_plans",
+            "name": "work_dir"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "plan",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "terraform_plans",
+            "name": "plan"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "lock_file",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_plans",
+            "name": "lock_file"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "0ab6a01cf5d1a8f152ab00b6af817dedd977bff31427494c063b0ea3a28b24f6"
+}

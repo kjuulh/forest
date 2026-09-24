@@ -392,6 +392,16 @@ jobs:
       # test` until that is understood. `mise run test` is still nextest, so
       # the local/CI divergence this was meant to close is still open; that is
       # a known gap, not an oversight.
+      # The terraform@1 destination's tests drive a real tofu against a local
+      # backend (saved plans, stale-plan refusal — forest#284). Same version
+      # the production image pins in apps/forest/Dockerfile; bump both
+      # together. The tests fail rather than skip without it.
+      - name: Install OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.12.6
+          tofu_wrapper: false
+
       - name: Test
         run: cargo test --workspace
 
