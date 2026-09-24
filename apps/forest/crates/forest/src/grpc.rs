@@ -39,6 +39,7 @@ use crate::{
 };
 
 mod interceptor;
+pub mod release_watch;
 
 /// Starting per-stream HTTP/2 window (DATA-505). Adaptive sizing grows it from
 /// here based on the measured bandwidth-delay product; 4 MiB is enough to keep
@@ -1687,102 +1688,86 @@ impl GrpcClient {
         })
     }
 
-    pub async fn wait_release(&self, release_intent_id: Uuid) -> anyhow::Result<WaitReleaseResult> {
-        use futures::StreamExt;
-
-        let mut client = self.release_client().await?;
-
-        let response = client
-            .wait_release(forest_grpc_interface::WaitReleaseRequest {
-                release_intent_id: release_intent_id.to_string(),
-            })
-            .await
-            .map_err(grpc_err)
-            .context("wait_release (grpc)")?;
-
-        let mut stream = response.into_inner();
-        // Track status per destination
-        let mut final_statuses: HashMap<String, forest_models::ReleaseStatus> = HashMap::new();
-
-        while let Some(event) = stream.next().await {
-            let event = event.map_err(grpc_err).context("stream error")?;
-
-            match event.event {
-                Some(forest_grpc_interface::wait_release_event::Event::StatusUpdate(status)) => {
-                    let release_status: forest_models::ReleaseStatus = status
-                        .status
-                        .parse()
-                        .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-                    tracing::debug!(
-                        destination =% status.destination,
-                        status =% release_status,
-                        "received status update"
-                    );
-
-                    final_statuses.insert(status.destination, release_status);
-                }
-                Some(forest_grpc_interface::wait_release_event::Event::LogLine(log)) => {
-                    // Print log lines to appropriate output stream
-                    match forest_grpc_interface::LogChannel::try_from(log.channel) {
-                        Ok(forest_grpc_interface::LogChannel::Stderr) => {
-                            eprintln!("{}: {}", log.destination, log.line);
-                        }
-                        _ => {
-                            println!("{}: {}", log.destination, log.line);
+    /// Follow a release just started, printing its stages and logs, until it
+    /// is terminal or parks on a plan approval. A parked release waits for a
+    /// human, so following it further would hang the command that asked for
+    /// the approval.
+    pub async fn wait_release(&self, release_intent_id: Uuid) -> anyhow::Result<WatchOutcome> {
+        let outcome = self
+            .watch_release(
+                release_intent_id,
+                release_watch::WatchMode::UntilParked,
+                release_watch::ReleaseProgress::default(),
+                |event, _| match &event.event {
+                    Some(forest_grpc_interface::wait_release_event::Event::StatusUpdate(
+                        status,
+                    )) => {
+                        tracing::debug!(
+                            destination =% status.destination,
+                            status =% status.status,
+                            "received status update"
+                        );
+                    }
+                    Some(forest_grpc_interface::wait_release_event::Event::LogLine(log)) => {
+                        // Print log lines to appropriate output stream
+                        match forest_grpc_interface::LogChannel::try_from(log.channel) {
+                            Ok(forest_grpc_interface::LogChannel::Stderr) => {
+                                eprintln!("{}: {}", log.destination, log.line);
+                            }
+                            _ => {
+                                println!("{}: {}", log.destination, log.line);
+                            }
                         }
                     }
-                }
-                Some(forest_grpc_interface::wait_release_event::Event::StageUpdate(stage)) => {
-                    tracing::debug!(
-                        stage_id =% stage.stage_id,
-                        stage_type =% stage.stage_type,
-                        status =% stage.status,
-                        "received stage update"
-                    );
+                    Some(forest_grpc_interface::wait_release_event::Event::StageUpdate(stage)) => {
+                        tracing::debug!(
+                            stage_id =% stage.stage_id,
+                            stage_type =% stage.stage_type,
+                            status =% stage.status,
+                            "received stage update"
+                        );
 
-                    let icon = match stage.status.as_str() {
-                        "SUCCEEDED" => "✓",
-                        "ACTIVE" => "▶",
-                        "FAILED" | "CANCELLED" => "✗",
-                        "SUPERSEDED" => "⇥",
-                        "PENDING" => "◌",
-                        _ => "•",
-                    };
+                        let awaiting =
+                            stage.approval_status.as_deref() == Some("AWAITING_APPROVAL");
+                        let icon = match stage.status.as_str() {
+                            _ if awaiting => "⏸",
+                            "SUCCEEDED" => "✓",
+                            "ACTIVE" => "▶",
+                            "FAILED" | "CANCELLED" => "✗",
+                            "SUPERSEDED" => "⇥",
+                            "PENDING" => "◌",
+                            _ => "•",
+                        };
 
-                    eprintln!(
-                        "  {icon} stage {}: {}({}) [{}]",
-                        stage.stage_id,
-                        stage.stage_type,
-                        stage.started_at.as_deref().unwrap_or(""),
-                        stage.status,
-                    );
+                        eprintln!(
+                            "  {icon} stage {}: {}({}) [{}{}]",
+                            stage.stage_id,
+                            stage.stage_type,
+                            stage.started_at.as_deref().unwrap_or(""),
+                            stage.status,
+                            if awaiting { ", AWAITING_APPROVAL" } else { "" },
+                        );
 
-                    if let Some(wait_until) = &stage.wait_until {
-                        eprintln!("    wait until: {wait_until}");
+                        if let Some(wait_until) = &stage.wait_until {
+                            eprintln!("    wait until: {wait_until}");
+                        }
+                        if let Some(err) = &stage.error_message {
+                            eprintln!("    error: {err}");
+                        }
                     }
-                    if let Some(err) = &stage.error_message {
-                        eprintln!("    error: {err}");
-                    }
-                }
-                None => {}
-            }
-        }
+                    Some(forest_grpc_interface::wait_release_event::Event::ReplayComplete(_))
+                    | None => {}
+                },
+            )
+            .await?;
 
-        // Return aggregated results
-        let destinations: Vec<WaitReleaseDestinationResult> = final_statuses
-            .into_iter()
-            .map(|(dest, status)| WaitReleaseDestinationResult {
-                destination: dest,
-                status,
-            })
-            .collect();
-
-        if destinations.is_empty() {
+        if outcome.end == release_watch::WatchEnd::Terminal
+            && outcome.result.destinations.is_empty()
+        {
             anyhow::bail!("stream ended without any status updates");
         }
 
-        Ok(WaitReleaseResult { destinations })
+        Ok(outcome)
     }
 
     pub async fn get_organisations(&self) -> anyhow::Result<Vec<OrganisationName>> {
@@ -2109,13 +2094,18 @@ impl GrpcClient {
     /// through `on_event` instead of printing directly. Used by
     /// `forest release show` so it can render history into structured
     /// per-destination sections (and respect `--format json`).
-    pub async fn wait_release_with<F>(
+    /// Read a release's `WaitRelease` stream, handing every event to
+    /// `on_event`, until `mode` says to stop (see [`release_watch`]) or the
+    /// server closes it because the release is terminal.
+    pub async fn watch_release<F>(
         &self,
         release_intent_id: Uuid,
+        mode: release_watch::WatchMode,
+        mut progress: release_watch::ReleaseProgress,
         mut on_event: F,
-    ) -> anyhow::Result<WaitReleaseResult>
+    ) -> anyhow::Result<WatchOutcome>
     where
-        F: FnMut(&forest_grpc_interface::WaitReleaseEvent),
+        F: FnMut(&forest_grpc_interface::WaitReleaseEvent, &release_watch::ReleaseProgress),
     {
         use futures::StreamExt;
 
@@ -2132,7 +2122,20 @@ impl GrpcClient {
         let mut stream = response.into_inner();
         let mut final_statuses: HashMap<String, forest_models::ReleaseStatus> = HashMap::new();
 
-        while let Some(event) = stream.next().await {
+        let end = loop {
+            let next = match release_watch::stop_on_quiet(mode, &progress) {
+                Some(quiet_end) => {
+                    match tokio::time::timeout(release_watch::QUIET_GAP, stream.next()).await {
+                        Ok(next) => next,
+                        Err(_elapsed) => break quiet_end,
+                    }
+                }
+                None => stream.next().await,
+            };
+
+            let Some(event) = next else {
+                break release_watch::WatchEnd::Terminal;
+            };
             let event = event.map_err(grpc_err).context("stream error")?;
 
             if let Some(forest_grpc_interface::wait_release_event::Event::StatusUpdate(status)) =
@@ -2145,8 +2148,13 @@ impl GrpcClient {
                 final_statuses.insert(status.destination.clone(), release_status);
             }
 
-            on_event(&event);
-        }
+            progress.observe(&event);
+            on_event(&event, &progress);
+
+            if let Some(end) = release_watch::stop_after_event(mode, &progress) {
+                break end;
+            }
+        };
 
         let destinations: Vec<WaitReleaseDestinationResult> = final_statuses
             .into_iter()
@@ -2156,7 +2164,11 @@ impl GrpcClient {
             })
             .collect();
 
-        Ok(WaitReleaseResult { destinations })
+        Ok(WatchOutcome {
+            result: WaitReleaseResult { destinations },
+            end,
+            progress,
+        })
     }
 
     pub async fn get_release_intent_states(
@@ -2960,6 +2972,13 @@ pub struct ReleaseIntentInfo {
 
 pub struct WaitReleaseResult {
     pub destinations: Vec<WaitReleaseDestinationResult>,
+}
+
+/// What a watch of a release stream saw, and why it stopped.
+pub struct WatchOutcome {
+    pub result: WaitReleaseResult,
+    pub end: release_watch::WatchEnd,
+    pub progress: release_watch::ReleaseProgress,
 }
 
 impl WaitReleaseResult {

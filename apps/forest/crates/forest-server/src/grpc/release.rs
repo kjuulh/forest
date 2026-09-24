@@ -932,6 +932,10 @@ impl ReleaseService for ReleaseServer {
 
             let mut fallback_interval = tokio::time::interval(std::time::Duration::from_secs(2));
             fallback_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            // The first pass replays everything persisted so far; say when it
+            // is over, so `forest release show` can stop there instead of
+            // following a parked release that never finishes.
+            let mut replay_announced = false;
 
             loop {
                 // Wait for either a NATS notification or the fallback timer
@@ -991,6 +995,10 @@ impl ReleaseService for ReleaseServer {
                                             approval_status: state
                                                 .approval_status
                                                 .map(|a| a.as_str().to_string()),
+                                            depends_on: stages
+                                                .get(stage_id)
+                                                .map(|def| def.depends_on.clone())
+                                                .unwrap_or_default(),
                                         },
                                     )),
                                 };
@@ -1003,15 +1011,113 @@ impl ReleaseService for ReleaseServer {
                     }
                 }
 
-                // Fetch current state and stream updates
-                match release_registry
-                    .get_release_status_by_intent(&release_intent_id)
-                    .await
-                {
-                    Ok(status_infos) => {
-                        if status_infos.is_empty() {
-                            // For pipeline releases with no deploy steps yet (e.g. wait stage),
-                            // check if pipeline is fully complete via stage_states
+                // Fetch current state and stream updates. The block yields
+                // whether the release is done rather than breaking out, so the
+                // first pass can still end with the replay marker below.
+                let done = 'pass: {
+                    match release_registry
+                        .get_release_status_by_intent(&release_intent_id)
+                        .await
+                    {
+                        Ok(status_infos) => {
+                            if status_infos.is_empty() {
+                                // For pipeline releases with no deploy steps yet (e.g. wait stage),
+                                // check if pipeline is fully complete via stage_states
+                                break 'pass !last_stage_statuses.is_empty()
+                                    && last_stage_statuses.values().all(|s| {
+                                        matches!(
+                                            s.as_str(),
+                                            "SUCCEEDED" | "FAILED" | "CANCELLED" | "SUPERSEDED"
+                                        )
+                                    });
+                            }
+
+                            let mut all_finalized = true;
+                            for status_info in &status_infos {
+                                let status_changed = last_statuses
+                                    .get(&status_info.destination_id)
+                                    .map(|prev| *prev != status_info.status)
+                                    .unwrap_or(true);
+
+                                if status_changed {
+                                    last_statuses
+                                        .insert(status_info.destination_id, status_info.status);
+
+                                    let event = WaitReleaseEvent {
+                                        event: Some(wait_release_event::Event::StatusUpdate(
+                                            ReleaseStatusUpdate {
+                                                destination: status_info.destination.clone(),
+                                                status: status_info.status.to_string(),
+                                            },
+                                        )),
+                                    };
+
+                                    if tx.send(Ok(event)).await.is_err() {
+                                        return;
+                                    }
+                                }
+
+                                let log_cursor =
+                                    *log_cursors.get(&status_info.destination_id).unwrap_or(&-1);
+
+                                match logs_registry
+                                    .get_logs_after_sequence(
+                                        release_intent_id,
+                                        status_info.destination_id,
+                                        log_cursor,
+                                    )
+                                    .await
+                                {
+                                    Ok(log_blocks) => {
+                                        for block in log_blocks {
+                                            if block.sequence > log_cursor {
+                                                log_cursors.insert(
+                                                    status_info.destination_id,
+                                                    block.sequence,
+                                                );
+                                            }
+
+                                            for log_line in block.log_lines {
+                                                let event = WaitReleaseEvent {
+                                                    event: Some(wait_release_event::Event::LogLine(
+                                                        ReleaseLogLine {
+                                                            destination: status_info.destination.clone(),
+                                                            line: log_line.line,
+                                                            timestamp: log_line.timestamp.to_string(),
+                                                            channel: match log_line.channel {
+                                                                LogChannel::Stdout => {
+                                                                    forest_grpc_interface::LogChannel::Stdout
+                                                                        .into()
+                                                                }
+                                                                LogChannel::Stderr => {
+                                                                    forest_grpc_interface::LogChannel::Stderr
+                                                                        .into()
+                                                                }
+                                                            },
+                                                        },
+                                                    )),
+                                                };
+
+                                                if tx.send(Ok(event)).await.is_err() {
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            destination = %status_info.destination,
+                                            "error polling logs: {e:#}"
+                                        );
+                                    }
+                                }
+
+                                if !status_info.status.is_finalized() {
+                                    all_finalized = false;
+                                }
+                            }
+
+                            // For pipeline releases, also check stage_states for completion
                             if !last_stage_statuses.is_empty() {
                                 let all_stages_terminal = last_stage_statuses.values().all(|s| {
                                     matches!(
@@ -1019,127 +1125,36 @@ impl ReleaseService for ReleaseServer {
                                         "SUCCEEDED" | "FAILED" | "CANCELLED" | "SUPERSEDED"
                                     )
                                 });
-                                if all_stages_terminal {
-                                    break;
-                                }
+                                // Pipeline not done yet even if current releases are finalized
+                                break 'pass all_finalized && all_stages_terminal;
                             }
-                            continue;
+
+                            all_finalized
                         }
-
-                        let mut all_finalized = true;
-
-                        for status_info in &status_infos {
-                            let status_changed = last_statuses
-                                .get(&status_info.destination_id)
-                                .map(|prev| *prev != status_info.status)
-                                .unwrap_or(true);
-
-                            if status_changed {
-                                last_statuses
-                                    .insert(status_info.destination_id, status_info.status);
-
-                                let event = WaitReleaseEvent {
-                                    event: Some(wait_release_event::Event::StatusUpdate(
-                                        ReleaseStatusUpdate {
-                                            destination: status_info.destination.clone(),
-                                            status: status_info.status.to_string(),
-                                        },
-                                    )),
-                                };
-
-                                if tx.send(Ok(event)).await.is_err() {
-                                    return;
-                                }
-                            }
-
-                            let log_cursor =
-                                *log_cursors.get(&status_info.destination_id).unwrap_or(&-1);
-
-                            match logs_registry
-                                .get_logs_after_sequence(
-                                    release_intent_id,
-                                    status_info.destination_id,
-                                    log_cursor,
-                                )
-                                .await
-                            {
-                                Ok(log_blocks) => {
-                                    for block in log_blocks {
-                                        if block.sequence > log_cursor {
-                                            log_cursors
-                                                .insert(status_info.destination_id, block.sequence);
-                                        }
-
-                                        for log_line in block.log_lines {
-                                            let event = WaitReleaseEvent {
-                                                event: Some(wait_release_event::Event::LogLine(
-                                                    ReleaseLogLine {
-                                                        destination: status_info.destination.clone(),
-                                                        line: log_line.line,
-                                                        timestamp: log_line.timestamp.to_string(),
-                                                        channel: match log_line.channel {
-                                                            LogChannel::Stdout => {
-                                                                forest_grpc_interface::LogChannel::Stdout
-                                                                    .into()
-                                                            }
-                                                            LogChannel::Stderr => {
-                                                                forest_grpc_interface::LogChannel::Stderr
-                                                                    .into()
-                                                            }
-                                                        },
-                                                    },
-                                                )),
-                                            };
-
-                                            if tx.send(Ok(event)).await.is_err() {
-                                                return;
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        destination = %status_info.destination,
-                                        "error polling logs: {e:#}"
-                                    );
-                                }
-                            }
-
-                            if !status_info.status.is_finalized() {
-                                all_finalized = false;
-                            }
-                        }
-
-                        // For pipeline releases, also check stage_states for completion
-                        if !last_stage_statuses.is_empty() {
-                            let all_stages_terminal = last_stage_statuses.values().all(|s| {
-                                matches!(
-                                    s.as_str(),
-                                    "SUCCEEDED" | "FAILED" | "CANCELLED" | "SUPERSEDED"
-                                )
-                            });
-                            if all_finalized && all_stages_terminal {
-                                break;
-                            }
-                            // Pipeline not done yet even if current releases are finalized
-                            if !all_stages_terminal {
-                                continue;
-                            }
-                        }
-
-                        if all_finalized {
-                            break;
+                        Err(e) => {
+                            tracing::warn!("error polling release status: {e:#}");
+                            let _ = tx
+                                .send(Err(tonic::Status::internal(format!(
+                                    "error polling status: {e}"
+                                ))))
+                                .await;
+                            return;
                         }
                     }
-                    Err(e) => {
-                        tracing::warn!("error polling release status: {e:#}");
-                        let _ = tx
-                            .send(Err(tonic::Status::internal(format!(
-                                "error polling status: {e}"
-                            ))))
-                            .await;
-                        break;
+                };
+
+                if !replay_announced {
+                    replay_announced = true;
+                    let event = WaitReleaseEvent {
+                        event: Some(wait_release_event::Event::ReplayComplete(ReplayComplete {})),
+                    };
+                    if tx.send(Ok(event)).await.is_err() {
+                        return;
                     }
+                }
+
+                if done {
+                    break;
                 }
             }
         });

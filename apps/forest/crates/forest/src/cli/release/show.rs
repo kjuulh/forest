@@ -7,7 +7,10 @@ use uuid::Uuid;
 
 use crate::{
     cli::output::OutputFormat,
-    grpc::{GetProjectsQuery, GrpcClientState},
+    grpc::{
+        GetProjectsQuery, GrpcClientState,
+        release_watch::{ReleaseProgress, WatchEnd, WatchMode},
+    },
     models::{project::Project, release_annotation::ReleaseAnnotation},
     state::State,
 };
@@ -16,9 +19,10 @@ use crate::{
 /// logs) for a single release. Mirrors what the web UI shows; uses the
 /// same persisted log stream that `release create` follows live.
 ///
-/// For completed releases the underlying `WaitRelease` stream
-/// terminates immediately after replay, so a `show` of a finished
-/// release is effectively a snapshot dump.
+/// By default a snapshot: it prints what has been persisted and exits, also
+/// for a release still in flight or parked awaiting approval. For a parked
+/// plan stage it ends with the command that approves it, so read the plan and
+/// then run that line. `--follow` streams until the release is terminal.
 #[derive(clap::Parser)]
 pub struct ShowCommand {
     /// Release slug or release-intent UUID. Omit for an interactive picker.
@@ -40,9 +44,9 @@ pub struct ShowCommand {
     #[arg(long)]
     logs_only: bool,
 
-    /// For an in-flight release, attach to the live stream after dumping
-    /// captured history. (For completed releases, the stream terminates
-    /// after replay either way.)
+    /// Keep streaming until the release is terminal instead of exiting once
+    /// the persisted history is printed. On a release parked awaiting approval
+    /// this waits until someone approves or rejects it.
     #[arg(long)]
     follow: bool,
 }
@@ -124,56 +128,116 @@ impl ShowCommand {
             print!("{}", output.render_header());
         }
 
-        // Collect logs by destination via WaitRelease (same stream
-        // `release create` follows live; for completed releases it
-        // terminates after replay).
+        // Collect logs by destination via WaitRelease, the stream `release
+        // create` follows live. By default only what is persisted: the stream
+        // stays open until the release is terminal, and a plan parked on its
+        // approval never gets there until someone has read this very output.
+        let mode = if self.follow {
+            WatchMode::Follow
+        } else {
+            WatchMode::Snapshot
+        };
+        let depends_on = intent_state
+            .stages
+            .iter()
+            .map(|s| (s.stage_id.clone(), s.depends_on.clone()))
+            .collect();
         let mut log_buffers: BTreeMap<String, Vec<DestLog>> = BTreeMap::new();
+        let mut announced_parked = false;
 
-        let stream_result = grpc
-            .wait_release_with(intent_id, |event| {
-                use forest_grpc_interface::wait_release_event::Event;
-                if let Some(Event::LogLine(line)) = &event.event {
-                    let stderr = matches!(
-                        forest_grpc_interface::LogChannel::try_from(line.channel),
-                        Ok(forest_grpc_interface::LogChannel::Stderr)
-                    );
-                    log_buffers
-                        .entry(line.destination.clone())
-                        .or_default()
-                        .push(DestLog {
-                            line: line.line.clone(),
-                            timestamp: line.timestamp.clone(),
-                            stderr,
-                        });
-                }
-            })
-            .await;
-
-        let stream_result = stream_result
+        let watch = grpc
+            .watch_release(
+                intent_id,
+                mode,
+                ReleaseProgress::with_dependencies(depends_on),
+                |event, progress| {
+                    use forest_grpc_interface::wait_release_event::Event;
+                    if let Some(Event::LogLine(line)) = &event.event {
+                        let stderr = matches!(
+                            forest_grpc_interface::LogChannel::try_from(line.channel),
+                            Ok(forest_grpc_interface::LogChannel::Stderr)
+                        );
+                        log_buffers
+                            .entry(line.destination.clone())
+                            .or_default()
+                            .push(DestLog {
+                                line: line.line.clone(),
+                                timestamp: line.timestamp.clone(),
+                                stderr,
+                            });
+                    }
+                    if mode == WatchMode::Follow && !announced_parked && progress.is_parked() {
+                        announced_parked = true;
+                        eprintln!(
+                            "awaiting approval: {}; --follow waits until it is approved or rejected",
+                            progress.awaiting_approval().join(", ")
+                        );
+                    }
+                },
+            )
+            .await
             .map_err(|e| {
                 tracing::warn!("wait_release stream error: {e:#}");
                 e
             })
             .ok();
 
+        // Without the stream, the intent state fetched above still says which
+        // stages are parked. Not narrowed by --stage: a parked plan is why the
+        // stages after it are pending, so `--stage deploy-prod` needs it too.
+        let awaiting: Vec<String> = match &watch {
+            Some(w) => w.progress.awaiting_approval(),
+            None => intent_state
+                .stages
+                .iter()
+                .filter(|s| s.approval_status.as_deref() == Some("AWAITING_APPROVAL"))
+                .map(|s| s.stage_id.clone())
+                .collect(),
+        };
+        let in_progress = watch.as_ref().is_some_and(|w| {
+            w.end == WatchEnd::Snapshot && !w.progress.is_terminal() && awaiting.is_empty()
+        });
+
+        // With --stage, keep the logs of that stage's destinations only.
+        if stages_filter.is_some() {
+            log_buffers
+                .retain(|dest, _| output.destinations.iter().any(|d| d.destination == *dest));
+        }
+
         output.attach_logs(&log_buffers);
+        output.awaiting_approval = awaiting.clone();
+        output.in_progress = in_progress;
+
+        let hints: Vec<String> = awaiting
+            .iter()
+            .map(|stage| super::approval_hint(stage, &output.slug))
+            .collect();
 
         if json_mode {
             let json = serde_json::to_string_pretty(&output).context("serialize show output")?;
             println!("{json}");
         } else if self.logs_only {
             render_logs_only(&output.plan_outputs, &log_buffers);
+            // stderr, so `--logs-only > release.log` stays the logs alone.
+            for hint in &hints {
+                eprintln!("{hint}");
+            }
         } else {
             print!("{}", output.render_body(&log_buffers));
+            for hint in &hints {
+                println!("{hint}");
+            }
         }
 
-        // `--follow` is currently a no-op because `wait_release_with`
-        // already waits for terminal state. Reserved for forward
-        // compatibility when a snapshot-only mode is added.
-        let _ = self.follow;
+        if in_progress && !json_mode {
+            eprintln!(
+                "release is still in progress; follow it with: forest release show {} --follow",
+                output.slug
+            );
+        }
 
-        let any_failed = match &stream_result {
-            Some(r) => r.any_failed(),
+        let any_failed = match &watch {
+            Some(w) => w.result.any_failed(),
             None => intent_state
                 .steps
                 .iter()
@@ -414,6 +478,10 @@ struct ShowOutput {
     destinations: Vec<DestView>,
     plan_outputs: Vec<PlanView>,
     logs: Vec<DestLogView>,
+    /// Stages parked on a plan approval; `forest release approve` clears them.
+    awaiting_approval: Vec<String>,
+    /// The snapshot ended before the release did.
+    in_progress: bool,
 }
 
 #[derive(Serialize)]
@@ -440,6 +508,7 @@ struct StageView {
     started_at: Option<String>,
     completed_at: Option<String>,
     error_message: Option<String>,
+    approval_status: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -514,6 +583,7 @@ impl ShowOutput {
                 started_at: s.started_at.clone(),
                 completed_at: s.completed_at.clone(),
                 error_message: s.error_message.clone(),
+                approval_status: s.approval_status.clone(),
             })
             .collect();
 
@@ -585,6 +655,8 @@ impl ShowOutput {
             destinations,
             plan_outputs: plan_views,
             logs: Vec::new(),
+            awaiting_approval: Vec::new(),
+            in_progress: false,
         }
     }
 
@@ -666,16 +738,7 @@ impl ShowOutput {
         if !self.stages.is_empty() {
             let _ = writeln!(out, "stages:");
             for s in &self.stages {
-                let icon = stage_icon(&s.status);
-                let _ = writeln!(
-                    out,
-                    "  {icon} {sid}: {st}({started}) [{status}]",
-                    icon = icon,
-                    sid = s.stage_id,
-                    st = s.stage_type,
-                    started = s.started_at.as_deref().unwrap_or(""),
-                    status = s.status,
-                );
+                render_stage(&mut out, s);
                 if let Some(err) = &s.error_message {
                     let _ = writeln!(out, "    error: {err}");
                 }
@@ -752,6 +815,26 @@ fn render_logs_only(plan_outputs: &[PlanView], log_buffers: &BTreeMap<String, Ve
             }
         }
     }
+}
+
+fn render_stage(out: &mut String, s: &StageView) {
+    use std::fmt::Write;
+    // A parked plan stage stays ACTIVE; without this it reads as running.
+    let awaiting = s.approval_status.as_deref() == Some("AWAITING_APPROVAL");
+    let _ = writeln!(
+        out,
+        "  {icon} {sid}: {st}({started}) [{status}{approval}]",
+        icon = if awaiting {
+            "⏸"
+        } else {
+            stage_icon(&s.status)
+        },
+        sid = s.stage_id,
+        st = s.stage_type,
+        started = s.started_at.as_deref().unwrap_or(""),
+        status = s.status,
+        approval = if awaiting { ", AWAITING_APPROVAL" } else { "" },
+    );
 }
 
 fn render_destination(out: &mut String, d: &DestView) {
@@ -932,6 +1015,38 @@ mod tests {
         let mut out = String::new();
         render_destination(&mut out, &succeeded_destination(Vec::new()));
         assert_eq!(out, "  ✓ [prod] flux-prod [SUCCEEDED]\n");
+    }
+
+    fn plan_stage(approval_status: Option<&str>) -> StageView {
+        StageView {
+            stage_id: "plan-prod".into(),
+            stage_type: "plan".into(),
+            status: "ACTIVE".into(),
+            started_at: Some("2026-09-24T21:12:30Z".into()),
+            completed_at: None,
+            error_message: None,
+            approval_status: approval_status.map(Into::into),
+        }
+    }
+
+    /// A parked plan stage is ACTIVE on the wire. Shown as bare ACTIVE it
+    /// reads as a plan still running, which is how a person ends up waiting
+    /// on a release that is waiting on them.
+    #[test]
+    fn a_parked_plan_stage_says_it_is_awaiting_approval() {
+        let mut out = String::new();
+        render_stage(&mut out, &plan_stage(Some("AWAITING_APPROVAL")));
+        assert_eq!(
+            out,
+            "  ⏸ plan-prod: plan(2026-09-24T21:12:30Z) [ACTIVE, AWAITING_APPROVAL]\n"
+        );
+    }
+
+    #[test]
+    fn a_running_plan_stage_renders_as_before() {
+        let mut out = String::new();
+        render_stage(&mut out, &plan_stage(None));
+        assert_eq!(out, "  ▶ plan-prod: plan(2026-09-24T21:12:30Z) [ACTIVE]\n");
     }
 
     #[test]

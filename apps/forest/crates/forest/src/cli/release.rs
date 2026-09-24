@@ -129,6 +129,15 @@ pub(crate) fn pick_awaiting_stage(
     }
 }
 
+/// The line that tells a person how to release a parked stage. `target` is
+/// what `approve` should be pointed at: the slug where known, since an intent
+/// UUID also needs `--organisation`.
+pub(crate) fn approval_hint(stage_id: &str, target: &str) -> String {
+    format!(
+        "stage {stage_id} is awaiting approval: forest release approve {target} --stage {stage_id}"
+    )
+}
+
 fn stage_list(intent_state: &forest_grpc_interface::ReleaseIntentState) -> String {
     if intent_state.stages.is_empty() {
         return "none — this is not a pipeline release".to_string();
@@ -176,6 +185,17 @@ mod tests {
             stages,
             steps: vec![],
         }
+    }
+
+    /// The last line `show` prints for a parked plan, and what `release
+    /// release` prints when it stops at one: runnable as it stands.
+    #[test]
+    fn the_approval_hint_names_the_command_that_clears_the_stage() {
+        assert_eq!(
+            approval_hint("plan-prod", "unhappily-trim-brill"),
+            "stage plan-prod is awaiting approval: \
+             forest release approve unhappily-trim-brill --stage plan-prod"
+        );
     }
 
     #[test]
