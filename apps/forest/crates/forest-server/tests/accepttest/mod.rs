@@ -19,3 +19,4 @@ mod release_intent_history;
 mod release_pipeline_destination_scoping;
 mod supersede_pending;
 mod terraform_state_auth;
+mod terraform_state_per_destination;

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT destination, bound_at FROM terraform_state_bindings WHERE state_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "destination",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_bindings",
+            "name": "destination"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "bound_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_bindings",
+            "name": "bound_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "439f3ef5960482cc8112db872a7218a3313071be61a4d2940f23ba030c886f72"
+}

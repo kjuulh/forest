@@ -124,16 +124,136 @@ impl TerraformStateStore {
         Ok(())
     }
 
-    pub fn state_id(&self, destination: &Destination, project_id: &str) -> String {
-        format!("{}.{}", destination.environment, project_id)
+    /// The state id a project's terraform keeps in this destination
+    /// (understory-io/forest#285).
+    ///
+    /// Ids used to be `<environment>.<project>` — no destination — so two
+    /// terraform destinations in one environment shared one state, and each
+    /// apply planned to destroy what the other had created.
+    ///
+    /// The rule, chosen to stay readable by an older server:
+    ///
+    /// - **The legacy id belongs to the first destination that uses it**, and
+    ///   to that destination for ever (`terraform_state_bindings`). So every
+    ///   project that exists today, and every new project with one terraform
+    ///   destination per environment — which is all of them in practice —
+    ///   keeps `<environment>.<project>`, exactly what a server from before
+    ///   this change would look up. Rolling back loses nothing.
+    /// - **Any other destination gets its own id**,
+    ///   `<environment>.<project>.<destination slug>-<hash>`. Only a project
+    ///   that really has a second terraform destination in an environment
+    ///   ever has one — the case that was broken before — and only that
+    ///   second destination's state is invisible to an older server.
+    /// - Nothing is counted, so adding or removing a destination never moves
+    ///   anyone's state.
+    ///
+    /// The one refusal: a destination that already **completed** a release of
+    /// this project before the legacy id was claimed. It was sharing the legacy
+    /// state under the old scheme, so a fresh state of its own would plan to
+    /// re-create resources that exist; that needs a person. "Completed", not
+    /// "started", so two new destinations racing their first run cannot
+    /// refuse each other.
+    pub async fn resolve_state_id(
+        &self,
+        destination: &Destination,
+        project_id: &str,
+    ) -> anyhow::Result<String> {
+        let legacy = Self::legacy_state_id(&destination.environment, project_id);
+
+        sqlx::query!(
+            r#"
+                INSERT INTO terraform_state_bindings (state_id, organisation, destination)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (state_id) DO NOTHING
+            "#,
+            legacy,
+            destination.organisation,
+            destination.name,
+        )
+        .execute(&self.db)
+        .await
+        .context("claim legacy terraform state id")?;
+
+        let binding = sqlx::query!(
+            r#"SELECT destination, bound_at FROM terraform_state_bindings WHERE state_id = $1"#,
+            legacy,
+        )
+        .fetch_one(&self.db)
+        .await
+        .context("read legacy terraform state binding")?;
+
+        if binding.destination == destination.name {
+            return Ok(legacy);
+        }
+
+        let project_uuid: uuid::Uuid = project_id
+            .parse()
+            .context("terraform state: project id is not a uuid")?;
+        let shared_before = sqlx::query_scalar!(
+            r#"
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM release_states rs
+                    JOIN destinations d ON d.id = rs.destination_id
+                    WHERE rs.project_id = $1
+                      AND d.organisation = $2
+                      AND d.name = $3
+                      AND rs.completed_at IS NOT NULL
+                      AND rs.completed_at < $4
+                ) AS "shared!"
+            "#,
+            project_uuid,
+            destination.organisation,
+            destination.name,
+            binding.bound_at,
+        )
+        .fetch_one(&self.db)
+        .await
+        .context("check for releases under the shared state id")?;
+
+        if shared_before {
+            anyhow::bail!(
+                "destination '{}' released this project into environment '{}' while its terraform \
+                 state was shared under '{legacy}', which now belongs to destination '{}'. A fresh \
+                 state here would plan to re-create what already exists (understory-io/forest#285). \
+                 Move this destination's resources into their own state by hand first.",
+                destination.name,
+                destination.environment,
+                binding.destination,
+            );
+        }
+
+        Ok(Self::destination_state_id(
+            &destination.environment,
+            project_id,
+            &destination.name,
+        ))
     }
 
-    /// Like [`state_id`](Self::state_id) but for callers that don't have a
-    /// `Destination` handy (e.g. the scheduler when computing credentials
-    /// for a remote runner). The shape MUST match `state_id` exactly so
-    /// in-process and remote runs converge on the same state record.
-    pub fn state_id_for(environment: &str, project_id: &str) -> String {
+    /// The only id there was before #285. Still what existing states use.
+    pub fn legacy_state_id(environment: &str, project_id: &str) -> String {
         format!("{environment}.{project_id}")
+    }
+
+    /// A destination's own state id. The name is slugged for readability and
+    /// hashed for uniqueness: destination names contain `/`, which cannot
+    /// appear in the one path segment the backend routes on, and two names can
+    /// slug alike (`dev/eu-west-1/core`, `dev-eu-west-1-core`).
+    pub fn destination_state_id(environment: &str, project_id: &str, destination: &str) -> String {
+        use sha2::Digest as _;
+
+        let mut slug = String::with_capacity(destination.len());
+        for c in destination.chars() {
+            if c.is_ascii_alphanumeric() {
+                slug.push(c.to_ascii_lowercase());
+            } else if !slug.ends_with('-') {
+                slug.push('-');
+            }
+        }
+        let slug: String = slug.trim_matches('-').chars().take(40).collect();
+        let hash = hex::encode(sha2::Sha256::digest(destination.as_bytes()));
+
+        format!("{environment}.{project_id}.{slug}-{}", &hash[..12])
     }
 
     /// The read-write credential a release run carries as `TF_HTTP_PASSWORD`.
@@ -669,6 +789,31 @@ async fn work_dirs(
 /// One level under `{env}/`, each entry treated as a regex over the destination
 /// name, the destination's own type joined on. Correct only while no selector
 /// contains a `/`; see `work_dirs`.
+/// A destination gets exactly one terraform root per release.
+///
+/// Every root a destination runs shares that destination's one state id, so a
+/// second root — two component usages whose selectors both match, say — would
+/// see the first root's resources as absent from its config and plan to
+/// destroy them. That is #285 inside a single destination; refuse it rather
+/// than apply it.
+fn ensure_one_root(dirs: &[std::path::PathBuf], destination: &Destination) -> anyhow::Result<()> {
+    match dirs {
+        [] => anyhow::bail!("failed to find a destination match for submitted release"),
+        [_] => Ok(()),
+        many => anyhow::bail!(
+            "{} terraform roots selected destination '{}' ({}); they would share one state and \
+             destroy each other's resources (understory-io/forest#285). Make one component usage \
+             select this destination.",
+            many.len(),
+            destination.name,
+            many.iter()
+                .map(|d| d.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+    }
+}
+
 async fn legacy_work_dirs(
     temp_dir: &std::path::Path,
     destination: &Destination,
@@ -748,18 +893,19 @@ impl TerraformV1Destination {
         &self,
         release: &ReleaseItem,
         destination: &Destination,
-    ) -> Vec<(&'static str, String)> {
+    ) -> anyhow::Result<Vec<(&'static str, String)>> {
         let state_id = self
             .tf_state
-            .state_id(destination, &release.project_id.to_string());
+            .resolve_state_id(destination, &release.project_id.to_string())
+            .await?;
         let password = self.tf_state.runner_credential(&state_id, destination);
         let (base, lock, unlock) = self.tf_state.addresses(&state_id);
-        vec![
+        Ok(vec![
             ("TF_HTTP_LOCK_ADDRESS", lock),
             ("TF_HTTP_UNLOCK_ADDRESS", unlock),
             ("TF_HTTP_ADDRESS", base),
             ("TF_HTTP_PASSWORD", password),
-        ]
+        ])
     }
 
     /// Write the release's files into a fresh temp dir and find this
@@ -797,9 +943,7 @@ impl TerraformV1Destination {
         }
 
         let dirs = work_dirs(&root, destination, &files).await?;
-        if dirs.is_empty() {
-            anyhow::bail!("failed to find a destination match for submitted release");
-        }
+        ensure_one_root(&dirs, destination)?;
 
         Ok(Staged {
             _temp: temp,
@@ -817,7 +961,7 @@ impl TerraformV1Destination {
         destination: &Destination,
     ) -> anyhow::Result<String> {
         let destroy = self.plans.is_destroy_plan(release.id).await?;
-        let env = self.backend_env(release, destination).await;
+        let env = self.backend_env(release, destination).await?;
         let staged = self.stage(release, destination).await?;
         let (outputs, saved) = plan_roots(
             logger,
@@ -855,7 +999,7 @@ impl TerraformV1Destination {
         destination: &Destination,
         saved: Vec<SavedPlan>,
     ) -> anyhow::Result<()> {
-        let env = self.backend_env(release, destination).await;
+        let env = self.backend_env(release, destination).await?;
         let staged = self.stage(release, destination).await?;
         apply_roots(
             logger,
@@ -877,7 +1021,7 @@ impl TerraformV1Destination {
         destination: &Destination,
         mode: Mode,
     ) -> anyhow::Result<()> {
-        let env = self.backend_env(release, destination).await;
+        let env = self.backend_env(release, destination).await?;
         let staged = self.stage(release, destination).await?;
 
         for dir in &staged.dirs {
@@ -1396,7 +1540,7 @@ impl DestinationEdge for TerraformV1Destination {
         deployed: &ReleaseItem,
         destination: &Destination,
     ) -> anyhow::Result<Option<Vec<DriftReport>>> {
-        let env = self.backend_env(deployed, destination).await;
+        let env = self.backend_env(deployed, destination).await?;
         let staged = self.stage(deployed, destination).await?;
         let reports = drift_roots(logger, destination, &env, &staged.root, &staged.dirs).await?;
         Ok(Some(reports))
@@ -1742,6 +1886,41 @@ mod tests {
             })
             .to_string(),
         )
+    }
+
+    #[test]
+    fn a_destination_state_id_is_one_url_segment_and_unique_per_name() {
+        let a = TerraformStateStore::destination_state_id("dev", "p1", "dev/eu-west-1/core");
+        let b = TerraformStateStore::destination_state_id("dev", "p1", "dev-eu-west-1-core");
+
+        // The backend routes on one path segment, and a destination name
+        // carries slashes.
+        assert!(!a.contains('/'), "{a}");
+        assert!(a.starts_with("dev.p1.dev-eu-west-1-core-"), "{a}");
+        // Same slug, different names: the hash keeps them apart.
+        assert_ne!(a, b);
+        // Deterministic: every run for a destination finds the same state.
+        assert_eq!(
+            a,
+            TerraformStateStore::destination_state_id("dev", "p1", "dev/eu-west-1/core")
+        );
+        // And never the legacy id, which is how existing states stay put.
+        assert_ne!(a, TerraformStateStore::legacy_state_id("dev", "p1"));
+    }
+
+    #[test]
+    fn one_destination_takes_exactly_one_terraform_root() {
+        let dest = destination("dev/eu-west-1/core", "dev", "terraform");
+        let root = std::path::PathBuf::from("/w/dev/a/forest/terraform@1");
+        let other = std::path::PathBuf::from("/w/dev/b/forest/terraform@1");
+
+        assert!(ensure_one_root(std::slice::from_ref(&root), &dest).is_ok());
+        assert!(ensure_one_root(&[], &dest).is_err());
+
+        let err = ensure_one_root(&[root, other], &dest)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("share one state"), "{err}");
     }
 
     /// `fungus`'s selector, and the reason its release said `terraform init: No

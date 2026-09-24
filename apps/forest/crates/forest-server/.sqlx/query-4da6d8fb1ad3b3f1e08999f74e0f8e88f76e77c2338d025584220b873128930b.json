@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO terraform_state_bindings (state_id, organisation, destination)\n                VALUES ($1, $2, $3)\n                ON CONFLICT (state_id) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4da6d8fb1ad3b3f1e08999f74e0f8e88f76e77c2338d025584220b873128930b"
+}
