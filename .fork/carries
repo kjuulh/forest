@@ -1,0 +1,141 @@
+# Upstream-owned files the fork changes anyway, and why.
+#
+# fork-check.sh fails on any difference from upstream that is not in
+# .fork/overlay, .fork/removed or here, so this file is the whole inventory of
+# what the fork changes in shared code. It reports an entry as stale once the
+# file matches upstream again (typically: the upstream PR merged and the sync
+# brought it in); fork-sync.sh drops stale entries in the merge commit.
+#
+# Every group says when it goes away. "Never" is allowed, with a reason.
+# One glob per line; `*` also matches `/`.
+#
+# A heading starting `## [take-upstream #N ...]` marks a group whose upstream
+# PR differs from the fork's copy (review changes, or a deliberate redesign).
+# Once upstream contains the squash commit of every listed PR, fork-sync.sh
+# resolves a conflict in those files to upstream's side: the resolution a
+# person would make when the PR lands. Until then, and for any group without
+# the marker, a conflicting carry stops the sync.
+
+## [take-upstream #300] upstream PR understory-io/forest#300: flux@1 reconcile webhook (#298)
+apps/forest/crates/forest-runner/Cargo.toml
+apps/forest/crates/forest-server/src/destinations.rs
+apps/forest/crates/forest-server/src/destinations/fluxv1.rs
+apps/forest/docs/docs/guides/flux-destination.md
+
+## upstream PR understory-io/forest#301: publish names its real server
+apps/forest/crates/forest/src/cli.rs
+apps/forest/crates/forest/src/cli/components/publish.rs
+apps/forest/crates/forest/src/contexts.rs
+apps/forest/crates/forest/src/state.rs
+
+## upstream PR understory-io/forest#302: show a plan parked awaiting approval
+apps/forest/crates/forest-grpc-interface/src/grpc/forest/v1/forest.v1.rs
+apps/forest/crates/forest-server/src/grpc/release.rs
+apps/forest/crates/forest-server/tests/accepttest/mod.rs
+apps/forest/crates/forest-server/tests/accepttest/release_wait_parked.rs
+apps/forest/crates/forest/src/cli/release.rs
+apps/forest/crates/forest/src/cli/release/commit.rs
+apps/forest/crates/forest/src/cli/release/show.rs
+apps/forest/crates/forest/src/grpc.rs
+apps/forest/crates/forest/src/grpc/release_watch.rs
+apps/forest/interface/proto/forest/v1/releases.proto
+
+## [take-upstream #306 #300] upstream PRs understory-io/forest#306 (retry concurrent GitOps
+## pushes) and #300, which both change run_git; upstream's final text wins
+apps/forest/crates/forest-runner/src/destinations/fluxv1.rs
+
+## [take-upstream #307] upstream PR understory-io/forest#307: OAuth component publish tokens.
+## #307 deliberately differs from the fork's version: it adds a deny-by-default
+## scope allowlist the fork lacks, so upstream's text must win
+apps/forest/crates/forest-server/src/actor.rs
+apps/forest/crates/forest-server/src/grpc/auth_layer.rs
+apps/forest/crates/forest-server/src/grpc/authorize.rs
+apps/forest/crates/forest-server/src/grpc/event_subscriptions.rs
+apps/forest/crates/forest-server/src/grpc/registry.rs
+apps/forest/crates/forest-server/src/services/oauth_apps.rs
+apps/forage/crates/forage-server/src/routes/developers.rs
+apps/forage/crates/forage-server/src/routes/oauth.rs
+apps/forage/templates/pages/developer_app.html.jinja
+apps/forage/templates/pages/developer_app_new.html.jinja
+
+## upstream PR understory-io/forest#305: forage maintenance mode
+apps/forage/.env.example
+apps/forage/Cargo.toml
+apps/forage/crates/forage-server/Cargo.toml
+apps/forage/crates/forage-server/src/cli.rs
+apps/forage/crates/forage-server/src/compute_grpc.rs
+apps/forage/crates/forage-server/src/serve_grpc.rs
+apps/forage/crates/forage-server/src/serve_http.rs
+apps/forage/crates/forage-server/src/tests/maintenance_grpc_tests.rs
+apps/forage/crates/forage-server/src/tests/maintenance_tests.rs
+apps/forage/crates/forage-server/src/tests/mod.rs
+apps/forage/templates/pages/maintenance.html.jinja
+
+## upstream PR understory-io/forest#303: organisation creation errors
+apps/forage/crates/forage-server/src/routes/platform.rs
+apps/forage/crates/forage-server/src/tests/platform_tests.rs
+
+## upstream PR understory-io/forest#304: normalize build timestamps
+apps/forage/crates/forage-server/src/build_info.rs
+
+## upstream candidate, no PR yet: forage shows external health agents' observations
+apps/forage/crates/forage-core/src/platform/mod.rs
+apps/forage/crates/forage-server/src/forest_client.rs
+apps/forage/crates/forage-server/src/test_support.rs
+apps/forage/templates/pages/artifact_detail.html.jinja
+apps/forest/crates/forest-server/src/grpc/release_health.rs
+
+## upstream candidate, no PR yet: `forest release create --skip-commit`
+apps/forest/crates/forest/src/cli/release/create.rs
+
+## upstream candidate, no PR yet: components with a deno.json import map
+apps/forest/crates/forest/src/services/component_deno.rs
+
+## never: canopy-otel is a private Understory git dependency the fork's CI
+## cannot fetch (Cargo resolves git dependencies even when feature-gated)
+apps/forage/crates/forage-server/src/main.rs
+apps/forest/Cargo.lock
+apps/forage/Cargo.lock
+
+## never: the fork's own distribution (Rawpotion release channel, Woodpecker
+## builds with sccache, tag-driven releases, fork-only contributor docs)
+.gitignore
+CONTRIBUTING.md
+SECURITY.md
+scripts/install.sh
+apps/forest/crates/forest/src/cli/self_cmd.rs
+apps/forest/Dockerfile
+apps/forage/Dockerfile
+apps/forest/mise.toml
+apps/forest/.env.example
+apps/forest/CLAUDE.md
+apps/forest/docs/docs/getting-started/installation.md
+
+## never (until branding is configuration): Rawpotion product copy and docs
+README.md
+CLAUDE.md
+apps/forest/README.md
+design/PRICING.md
+apps/forage/specs/PITCH.md
+apps/forage/crates/forage-server/src/routes/pages.rs
+apps/forage/crates/forage-server/src/tests/pages_tests.rs
+apps/forage/templates/pages/landing.html.jinja
+apps/forage/templates/pages/pricing.html.jinja
+apps/forage/templates/pages/usage.html.jinja
+apps/forage/static/css/style.css
+apps/forest/docs/mkdocs.yml
+apps/forest/docs/docs/index.md
+apps/forest/docs/docs/quickstart.md
+apps/forest/docs/docs/product/*
+apps/forest/docs/docs/architecture/index.md
+apps/forest/docs/docs/concepts/components.md
+apps/forest/docs/docs/concepts/destinations.md
+apps/forest/docs/docs/concepts/index.md
+apps/forest/docs/docs/getting-started/authentication.md
+apps/forest/docs/docs/getting-started/first-project.md
+apps/forest/docs/docs/getting-started/first-release.md
+apps/forest/docs/docs/getting-started/index.md
+apps/forest/docs/docs/guides/authoring-components.md
+apps/forest/docs/docs/guides/ci-cd.md
+apps/forest/docs/docs/reference/cli.md
+apps/forest/docs/docs/reference/configuration-files.md

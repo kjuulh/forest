@@ -1,0 +1,10 @@
+# Upstream paths the fork deletes. fork-sync.sh deletes them again after
+# every merge, so upstream editing them is never a conflict.
+# Upstream's CI, release and release-please workflows; the fork builds and
+# releases with Woodpecker (.woodpecker/). Only these three: the fork keeps
+# upstream's other .github files as they are.
+.github/workflows/ci.yaml
+.github/workflows/release.yml
+.github/workflows/release-please.yml
+release-please-config.json
+.release-please-manifest.json

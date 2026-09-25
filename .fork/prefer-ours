@@ -1,0 +1,11 @@
+# Files where a conflicting hunk resolves to the fork's side, hunk by hunk
+# (`git merge-file --ours`); upstream's non-conflicting changes still land.
+# Keep this list to lines the fork must own; tests on the sync branch catch a
+# resolution that dropped something upstream needed.
+#
+# The CLI version: fork releases are tag-driven (v0.3.15) while upstream's
+# release-please bumps the same line on its own schedule.
+apps/forest/crates/forest/Cargo.toml
+# canopy-otel is a private Understory git dependency the fork's CI cannot
+# fetch, so the fork removes it (see the comment left in its place).
+apps/forest/crates/forest-server/Cargo.toml

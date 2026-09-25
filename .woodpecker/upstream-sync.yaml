@@ -1,0 +1,148 @@
+# Daily: merge Understory's main (github.com/understory-io/forest) into the
+# fork with scripts/fork-sync.sh, test the result the way upstream's CI does,
+# and push it as a branch `sync/upstream-<date>` for a person to merge into
+# kjuulh/gitea-fork. Also fast-forwards the `understory/main` mirror branch.
+#
+# It never pushes kjuulh/gitea-fork: that branch builds and ships images
+# (ci.yaml, deploy.yaml), so merging a sync stays a deliberate step.
+# See .fork/README.md for the model and for what to do when it goes red.
+#
+# Outcomes:
+#   green, "already contains upstream"  nothing new upstream; nothing pushed
+#   green, branch pushed                merge it: git.kjuulh.io/kjuulh/forest/compare/kjuulh/gitea-fork...sync/upstream-<date>
+#   red in merge                        a carry conflicts or the fork drifted;
+#                                       the log names the files
+#   red in test                         upstream plus the fork does not pass;
+#                                       nothing pushed
+#
+# Required Woodpecker secrets, events `cron` only:
+#   upstream_deploy_key — private half of a read-only deploy key on
+#                         github.com/understory-io/forest
+#   gitea_sync_key      — private half of a deploy key with write access on
+#                         git.kjuulh.io/kjuulh/forest; it pushes sync/* and
+#                         understory/main only
+#
+# Cron: `woodpecker-cli repo cron add --repository kjuulh/forest
+#        --name upstream-sync --branch kjuulh/gitea-fork --schedule "<cron>"`.
+
+when:
+  - event: cron
+    cron: upstream-sync
+
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    settings:
+      # The whole history, with trees: fork-check.sh diffs against the
+      # upstream commit in .fork/upstream-base, and later steps have no
+      # credentials to fetch what a shallow or partial clone left out. The
+      # plugin reads `depth: 0` as unset (it cloned --depth=1
+      # --filter=tree:0), hence a depth no history reaches.
+      depth: 1000000
+      partial: false
+
+labels:
+  platform: linux/amd64
+
+variables:
+  # Pinned host keys. GitHub's is the one it publishes at api.github.com/meta;
+  # Gitea's is git.kjuulh.io's own (OpenSSH, port 22).
+  - &known_hosts >-
+    github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+  - &gitea_known_hosts >-
+    git.kjuulh.io ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJdO0Tw0e/Fa78g1Xszc4oKaOPbTwl7RTAaGQb0TrV8
+
+steps:
+  merge:
+    image: rust:1.98.1-bookworm
+    environment:
+      UPSTREAM_KEY:
+        from_secret: upstream_deploy_key
+      KNOWN_HOSTS: *known_hosts
+    commands:
+      - git config --global --add safe.directory '*'
+      - git config --global user.name "forest upstream sync"
+      - git config --global user.email "ci@git.kjuulh.io"
+      - install -d -m 700 ~/.ssh
+      - printf '%s\n' "$${UPSTREAM_KEY}" > ~/.ssh/upstream && chmod 600 ~/.ssh/upstream
+      - printf '%s\n' "$${KNOWN_HOSTS}" > ~/.ssh/known_hosts
+      - export GIT_SSH_COMMAND="ssh -i $$HOME/.ssh/upstream -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+      - git fetch --no-tags git@github.com:understory-io/forest.git +main:refs/remotes/upstream/main
+      - rm -f ~/.ssh/upstream
+      - branch="sync/upstream-$(date -u +%Y-%m-%d)"
+      - echo "$${branch}" > .sync-branch
+      - |
+        rc=0
+        scripts/fork-sync.sh --upstream upstream/main --base HEAD --branch "$${branch}" || rc=$$?
+        case "$${rc}" in
+          0) ;;
+          3) touch .sync-up-to-date ;;
+          *) exit "$${rc}" ;;
+        esac
+
+  test:
+    image: rust:1.98.1-bookworm
+    depends_on: [merge]
+    environment:
+      SQLX_OFFLINE: "true"
+      DATABASE_URL: postgres://devuser:devpassword@postgres:5432/dev
+      NATS_URL: nats://nats:4222
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: forest
+      S3_ACCESS_KEY: forestdev
+      S3_SECRET_KEY: forestdevpassword
+      S3_REGION: us-east-1
+    commands:
+      - if [ -f .sync-up-to-date ]; then echo "nothing new upstream"; exit 0; fi
+      # What upstream's CI installs for the same suites: cue for the CUE
+      # parser tests, OpenTofu for terraform@1's (both fail rather than skip
+      # without them). Versions as apps/forest/mise.toml and
+      # apps/forest/Dockerfile pin them.
+      - curl -fsSL https://github.com/cue-lang/cue/releases/download/v0.16.1/cue_v0.16.1_linux_amd64.tar.gz | tar xz -C /usr/local/bin cue
+      - curl -fsSL https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_amd64.tar.gz | tar xz -C /usr/local/bin tofu
+      # The bucket the acceptance suite writes to (templates/docker-compose.yaml's minio-init).
+      - curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc && chmod +x /usr/local/bin/mc
+      - mc alias set local http://minio:9000 forestdev forestdevpassword >/dev/null && mc mb --ignore-existing local/forest
+      - cd apps/forest && cargo test --locked --workspace
+      - cd ../forage && cargo test --locked --workspace
+
+  push:
+    image: rust:1.98.1-bookworm
+    depends_on: [test]
+    environment:
+      GITEA_KEY:
+        from_secret: gitea_sync_key
+      KNOWN_HOSTS: *gitea_known_hosts
+    commands:
+      - if [ -f .sync-up-to-date ]; then echo "nothing new upstream"; exit 0; fi
+      - git config --global --add safe.directory '*'
+      - install -d -m 700 ~/.ssh
+      - printf '%s\n' "$${GITEA_KEY}" > ~/.ssh/gitea && chmod 600 ~/.ssh/gitea
+      - printf '%s\n' "$${KNOWN_HOSTS}" > ~/.ssh/known_hosts
+      - export GIT_SSH_COMMAND="ssh -i $$HOME/.ssh/gitea -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+      - branch=$(cat .sync-branch)
+      # A rerun on the same day replaces that day's branch, never another.
+      - git push --force git@git.kjuulh.io:kjuulh/forest.git "HEAD:refs/heads/$${branch}"
+      # Fast-forward only: the mirror must equal upstream, and a rejection
+      # here means someone committed to it.
+      - git push git@git.kjuulh.io:kjuulh/forest.git upstream/main:refs/heads/understory/main
+      - echo "merge it - https://git.kjuulh.io/kjuulh/forest/compare/kjuulh/gitea-fork...$${branch}"
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: dev
+      POSTGRES_USER: devuser
+      POSTGRES_PASSWORD: devpassword
+  nats:
+    image: nats:2-alpine
+    commands:
+      - nats-server --http_port 8222 --jetstream
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    commands:
+      - minio server /data
+    environment:
+      MINIO_ROOT_USER: forestdev
+      MINIO_ROOT_PASSWORD: forestdevpassword

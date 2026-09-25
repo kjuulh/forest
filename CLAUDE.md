@@ -372,3 +372,9 @@ behind it — read the `components/` one.
 
 `cue` and `gh` must be on `PATH`. Deploying forest and forage is CI's job on push
 to `main`; see `README.md`.
+
+**This checkout is the kjuulh fork** (`kjuulh/gitea-fork`) of
+`understory-io/forest`. Product changes go upstream first, as a PR there; a
+daily job merges upstream into the fork. Every file the fork changes in shared
+code is declared in `.fork/`, and `scripts/fork-check.sh` fails on anything
+undeclared. Read `.fork/README.md` before changing forest or forage here.

@@ -1,0 +1,14 @@
+# Paths the fork owns outright. Upstream (github.com/understory-io/forest)
+# never has them, so changing them can never conflict with a sync.
+# One glob per line; `*` also matches `/`. See .fork/README.md.
+.fork/*
+.woodpecker/*
+deployment/*
+apps/forest-ci/*
+scripts/fork-check.sh
+scripts/fork-sync.sh
+scripts/fork-sync.test.sh
+cliff.toml
+# The JSR package @rawpotion/forest-sdk is published from the fork only.
+apps/forest/sdk/typescript/deno.json
+apps/forest/sdk/typescript/README.md

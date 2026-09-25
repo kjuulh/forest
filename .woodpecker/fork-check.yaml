@@ -1,0 +1,41 @@
+# Fail any push or pull request that changes upstream-owned code without
+# declaring it in .fork/, and run the sync tooling's own tests.
+#
+# Why: the fork is upstream (github.com/understory-io/forest) plus an overlay.
+# Product changes made here first are what turned every upstream sync into a
+# hand-resolved merge, and the same fix then landed twice. See .fork/README.md.
+#
+# No secrets and no network: it needs only full history, to reach the upstream
+# commit recorded in .fork/upstream-base.
+#
+# Deliberately not a dependency of ci.yaml or deploy.yaml: a red check says the
+# fork drifted, it does not hold back a build.
+
+when:
+  - event: push
+  - event: pull_request
+
+clone:
+  git:
+    image: woodpeckerci/plugin-git
+    settings:
+      # The whole history, with trees: fork-check.sh diffs against the
+      # upstream commit in .fork/upstream-base, and later steps have no
+      # credentials to fetch what a shallow or partial clone left out. The
+      # plugin reads `depth: 0` as unset (it cloned --depth=1
+      # --filter=tree:0), hence a depth no history reaches.
+      depth: 1000000
+      partial: false
+
+labels:
+  platform: linux/amd64
+
+steps:
+  fork-check:
+    image: alpine:3.22
+    commands:
+      - apk add --no-cache bash git >/dev/null
+      # The workspace is owned by the clone step's user.
+      - git config --global --add safe.directory '*'
+      - scripts/fork-check.sh
+      - scripts/fork-sync.test.sh
