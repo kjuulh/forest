@@ -10,7 +10,7 @@ license = "MIT"
 # value and the TypeScript SDK version to match the `vX.Y.Z` tag. The rest of
 # the workspace continues to use `version.workspace = true`; those crates are
 # not distributed independently.
-version = "0.3.14"
+version = "0.3.15"
 
 [dependencies]
 forest-grpc-interface.workspace = true

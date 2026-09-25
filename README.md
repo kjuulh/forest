@@ -182,8 +182,8 @@ Pin both the installer and binary to a specific release when reproducibility
 matters:
 
 ```bash
-curl -fsSL https://src.rawpotion.io/rawpotion/forest/releases/download/v0.3.14/install.sh \
-  | bash -s -- v0.3.14
+curl -fsSL https://src.rawpotion.io/rawpotion/forest/releases/download/v0.3.15/install.sh \
+  | bash -s -- v0.3.15
 ```
 
 The hosted Forest service remains a private preview and requires an account.
