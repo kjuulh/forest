@@ -151,8 +151,8 @@ async fn next_event(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_parked_release_replays_its_stages_then_says_the_replay_is_complete()
--> anyhow::Result<()> {
+async fn a_parked_release_replays_its_stages_then_says_the_replay_is_complete() -> anyhow::Result<()>
+{
     let (given, token, intent_id) = a_release_parked_on_plan_approval().await?;
 
     let mut stream = given
