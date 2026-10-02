@@ -110,6 +110,16 @@ on:
         type: string
         required: false
         default: v0.17.1
+      deno-version:
+        description: >-
+          Deno for components whose prepare hooks are `type: "deno"` (e.g.
+          understory/slice-registry), which `forest release prepare` spawns.
+          Installed on every run: a project should not have to know which
+          runtime its dependencies' hooks happen to use. Same exact-version
+          rule as forest-version.
+        type: string
+        required: false
+        default: v2.9.7
       working-directory:
         description: Directory holding the project's forest.cue.
         type: string
@@ -183,6 +193,14 @@ jobs:
       - uses: cue-lang/setup-cue@v1.0.1
         with:
           version: ${{ inputs.cue-version }}
+
+      # Without it, a project depending on a component with deno hooks fails
+      # here with `deno deployment prepare hook failed ... failed to spawn deno`
+      # — canopy-github-ingest's releases did, on every main push from
+      # 2026-09-01 on.
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: ${{ inputs.deno-version }}
 
       # Fail here, loudly, rather than three steps later inside a gRPC
       # transport error. A missing token is a setup problem with a one-line fix
