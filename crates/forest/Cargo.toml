@@ -13,11 +13,11 @@ dotenvy.workspace = true
 serde.workspace = true
 uuid.workspace = true
 
-rusty-s3 = "0.7"
+rusty-s3 = "0.10"
 url = "2.5"
 kdl = "6.3"
 walkdir = "2.5"
-minijinja = "2.7"
+minijinja = "3.0"
 glob = "0.3"
 serde_json = "1"
 colored_json = "5"
