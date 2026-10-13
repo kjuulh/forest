@@ -10,17 +10,34 @@ use crate::{
     user_state::UserStateLoaderState,
 };
 
-/// Print a single line naming the active forest context + server URL the
-/// publish is about to hit. TASKS/031 item #10 — prevents accidental
-/// pushes to the wrong (e.g. prod) registry by making the destination
-/// visible *before* the first RPC.
+/// Print a single line naming the forest context + server URL the publish is
+/// about to hit. TASKS/031 item #10 — prevents accidental pushes to the wrong
+/// (e.g. prod) registry by making the destination visible *before* the first
+/// RPC.
 ///
-/// Best-effort: a failure to resolve the active context (no contexts
-/// configured, corrupted state file) silently degrades to a minimal
+/// `selected` is the `--context` / FOREST_CONTEXT override, resolved the same
+/// way the gRPC client resolves it, so the line names where the upload
+/// actually goes rather than the registry's active marker (DATA-656).
+///
+/// Best-effort: a failure to resolve the context (no contexts configured,
+/// corrupted state file, unknown name) silently degrades to a minimal
 /// "publishing as <owner>/<component>" line so we never block the publish
 /// just for the courtesy print.
-fn print_publish_context(owner: &str, component: &str) {
-    match ContextStore::from_env().and_then(|s| s.active()) {
+fn print_publish_context(selected: Option<&str>, owner: &str, component: &str) {
+    let line = match ContextStore::from_env() {
+        Ok(store) => publish_context_line(&store, selected, owner, component),
+        Err(_) => format!("Publishing {owner}/{component}"),
+    };
+    crate::ui::status(line);
+}
+
+fn publish_context_line(
+    store: &ContextStore,
+    selected: Option<&str>,
+    owner: &str,
+    component: &str,
+) -> String {
+    match store.resolve(selected) {
         Ok(ctx) => {
             // Server URL is detail for the logs, not the human line.
             tracing::debug!(
@@ -28,9 +45,9 @@ fn print_publish_context(owner: &str, component: &str) {
                 ctx.name,
                 ctx.server
             );
-            crate::ui::status(format!("Publishing {owner}/{component} to {}", ctx.name));
+            format!("Publishing {owner}/{component} to {}", ctx.name)
         }
-        Err(_) => crate::ui::status(format!("Publishing {owner}/{component}")),
+        Err(_) => format!("Publishing {owner}/{component}"),
     }
 }
 
@@ -668,6 +685,31 @@ mod abort_on_drop_tests {
     }
 
     #[test]
+    fn publish_line_names_the_selected_context_not_the_active_one() {
+        use super::{ContextStore, publish_context_line};
+
+        let td = tempfile::TempDir::new().unwrap();
+        let store = ContextStore::with_root(td.path().to_path_buf());
+        // `default` stays active; `prod` is only selected via --context.
+        store
+            .create("prod", "https://forest.example.invalid", false)
+            .unwrap();
+
+        assert_eq!(
+            publish_context_line(&store, Some("prod"), "understory", "fungus"),
+            "Publishing understory/fungus to prod"
+        );
+        assert_eq!(
+            publish_context_line(&store, None, "understory", "fungus"),
+            "Publishing understory/fungus to default"
+        );
+        assert_eq!(
+            publish_context_line(&store, Some("missing"), "understory", "fungus"),
+            "Publishing understory/fungus"
+        );
+    }
+
+    #[test]
     fn production_guard_compiles_with_disarm_signature() {
         // Compile-time check on AbortOnDrop's API surface. We can't construct
         // one without a real GrpcClient; the runtime assertion (aborted upload
@@ -1016,7 +1058,7 @@ impl PublishCommand {
         // summary using the same renderer as the post-success path so the
         // user sees exactly the line a real publish would emit.
         if self.dry_run {
-            print_publish_context(organisation, name);
+            print_publish_context(state.config.context.as_deref(), organisation, name);
             let has_tool = descriptor
                 .as_ref()
                 .and_then(describe_response_tool_facet)
@@ -1065,7 +1107,7 @@ impl PublishCommand {
         }
 
         // 4. Begin upload
-        print_publish_context(organisation, name);
+        print_publish_context(state.config.context.as_deref(), organisation, name);
         let client = state.grpc_client();
         tracing::info!("beginning upload");
         let upload_context = client
@@ -1588,7 +1630,7 @@ async fn publish_external(
         platforms.len()
     );
 
-    print_publish_context(organisation, name);
+    print_publish_context(state.config.context.as_deref(), organisation, name);
 
     // Dry-run stops here, exactly as the built and prebuilt paths do. Everything
     // above is local — cue eval, tool-facet extraction, manifest synthesis — and
@@ -1773,7 +1815,7 @@ async fn publish_prebuilt(
         return Ok(());
     }
 
-    print_publish_context(organisation, name);
+    print_publish_context(state.config.context.as_deref(), organisation, name);
     let client = state.grpc_client();
     let upload_context = client
         .begin_component_upload(organisation, name, version)
