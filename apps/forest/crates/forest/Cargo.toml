@@ -80,7 +80,7 @@ unicode-normalization = "0.1"
 tokio-util = "0.7.15"
 stringcase = "0.4.0"
 ron = { version = "0.12.0", features = ["indexmap"] }
-minijinja = { version = "2.11.0", features = ["builtins"] }
+minijinja = { version = "2.11.0", features = ["builtins", "json"] }
 jiff = "0.2.15"
 tokio-stream = { version = "0.1.17", features = ["sync"] }
 

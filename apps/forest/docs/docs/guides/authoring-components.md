@@ -571,6 +571,7 @@ Forest extends Jinja2 with these custom filters:
 | `to_kebab` | kebab-case | `{{ name \| to_kebab }}` |
 | `as_bool` | Convert to boolean string | `{{ flag \| as_bool }}` |
 | `dictsort` | Sort a dictionary by key | `{{ dict \| dictsort }}` |
+| `tojson` | Encode a value as JSON (including string escaping) | `{{ config.image \| tojson }}` |
 
 ### The `is configured` Test
 

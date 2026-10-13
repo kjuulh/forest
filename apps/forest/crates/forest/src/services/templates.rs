@@ -214,3 +214,15 @@ fn render_template(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::render_template;
+
+    #[test]
+    fn release_template_renders_json_filter() {
+        let output = render_template("value: {{ sample | tojson }}", &None, &[("sample", "a\"b")])
+            .expect("render template with tojson");
+        assert_eq!(output, "value: \"a\\\"b\"");
+    }
+}
