@@ -152,6 +152,8 @@ struct AppForm {
     scope_profile: Option<String>,
     #[serde(default)]
     scope_email: Option<String>,
+    #[serde(default)]
+    scope_components_publish: Option<String>,
     /// An app may hold both grants — acting for a user and acting as
     /// itself, the way a GitHub App does.
     #[serde(default)]
@@ -196,6 +198,9 @@ impl AppForm {
         }
         if self.scope_email.is_some() {
             scopes.push("email".to_string());
+        }
+        if self.scope_components_publish.is_some() {
+            scopes.push("components:publish".to_string());
         }
         scopes
     }
@@ -490,6 +495,7 @@ mod tests {
             scope_openid: None,
             scope_profile: None,
             scope_email: None,
+            scope_components_publish: None,
             grant_authorization_code: auth_code.then(|| "on".to_string()),
             grant_client_credentials: client_creds.then(|| "on".to_string()),
         }
@@ -526,5 +532,12 @@ mod tests {
     #[test]
     fn no_boxes_defers_the_default_to_forest() {
         assert!(form(false, false).grant_type_list().is_empty());
+    }
+
+    #[test]
+    fn the_component_publish_box_requests_that_scope() {
+        let mut form = form(false, true);
+        form.scope_components_publish = Some("on".to_string());
+        assert_eq!(form.scope_list(), vec!["components:publish".to_string()]);
     }
 }

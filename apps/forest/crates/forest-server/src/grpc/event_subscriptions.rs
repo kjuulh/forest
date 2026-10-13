@@ -51,6 +51,7 @@ impl EventSubscriptionService for EventSubscriptionsServer {
             Actor::App {
                 app_id,
                 organisation_id: _,
+                scopes: _,
             } => (Some(*app_id), None),
             Actor::User { user_id } => (None, Some(*user_id)),
             Actor::ServiceAccount { service_account_id } => {

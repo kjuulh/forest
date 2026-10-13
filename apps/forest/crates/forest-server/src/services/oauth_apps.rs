@@ -11,12 +11,26 @@ use crate::{
 /// - `openid`:  OIDC marker — issues an `id_token` on the code exchange
 /// - `profile`: sub (user_id), username, profile_picture_url
 /// - `email`:   primary + all verified emails
-pub const ALLOWED_SCOPES: &[&str] = &["openid", "profile", "email", "directory:read"];
+/// - `directory:read`: resolve organisation members (machine clients)
+/// - `components:publish`: publish component versions (machine clients)
+pub const ALLOWED_SCOPES: &[&str] = &[
+    "openid",
+    "profile",
+    "email",
+    SCOPE_DIRECTORY_READ,
+    SCOPE_COMPONENTS_PUBLISH,
+];
 
 /// Scope for reading the organisation directory — resolving a person from
 /// an external identity to their linked accounts. Only ever granted to
 /// machine clients; there is nothing here a browser login needs.
 pub const SCOPE_DIRECTORY_READ: &str = "directory:read";
+
+/// Scope for publishing component versions to the organisation's registry,
+/// for a CI job holding an OAuth app's client credentials instead of a
+/// person's token. What it lets a token call is listed, method by method,
+/// in `grpc::auth_layer::scoped_token_permits`.
+pub const SCOPE_COMPONENTS_PUBLISH: &str = "components:publish";
 
 /// Validation failures for OAuth-app management. The gRPC layer maps these
 /// to `invalid_argument` with the message surfaced to the caller.

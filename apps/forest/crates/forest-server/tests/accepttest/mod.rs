@@ -10,6 +10,7 @@ mod fixtures;
 mod global_tools_flow;
 mod notification_recipient;
 mod oauth_apps;
+mod oauth_client_token_scope;
 mod oauth_flow;
 mod oauth_unlink;
 mod registration_domain;

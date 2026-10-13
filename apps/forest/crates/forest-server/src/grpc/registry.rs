@@ -8,7 +8,10 @@ use uuid::Uuid;
 use crate::{
     actor::Actor,
     grpc::authorize::{self, OrgRole},
-    services::component_aggregate::{ComponentServiceState, ComponentVersion, FileStream},
+    services::{
+        component_aggregate::{ComponentServiceState, ComponentVersion, FileStream},
+        oauth_apps::SCOPE_COMPONENTS_PUBLISH,
+    },
     state::State,
 };
 
@@ -166,6 +169,7 @@ impl RegistryService for RegistryServer {
             OrgRole::Member,
         )
         .await?;
+        require_component_publish_scope(&actor)?;
 
         let upload_id = self
             .state
@@ -222,6 +226,7 @@ impl RegistryService for RegistryServer {
             OrgRole::Member,
         )
         .await?;
+        require_component_publish_scope(&actor)?;
 
         let reason = if request.reason.is_empty() {
             None
@@ -846,6 +851,28 @@ async fn authorize_upload(
     .ok_or_else(|| tonic::Status::not_found("upload not found or already committed"))?;
 
     authorize::require_org_access(&state.db, actor, &org, OrgRole::Member).await?;
+    require_component_publish_scope(actor)?;
+    Ok(())
+}
+
+/// An OAuth client-credentials token changes the registry only with the
+/// `components:publish` grant. Users, service accounts and legacy app tokens
+/// keep the org-member rule above.
+///
+/// The auth layer already refuses a scoped token on any method its scopes do
+/// not cover; this repeats the rule where the write happens, so a later
+/// change to that method list cannot quietly open publishing.
+fn require_component_publish_scope(actor: &Actor) -> Result<(), tonic::Status> {
+    if let Actor::App {
+        scopes: Some(scopes),
+        ..
+    } = actor
+        && !scopes.iter().any(|scope| scope == SCOPE_COMPONENTS_PUBLISH)
+    {
+        return Err(tonic::Status::permission_denied(format!(
+            "token lacks the {SCOPE_COMPONENTS_PUBLISH} scope"
+        )));
+    }
     Ok(())
 }
 
@@ -872,6 +899,48 @@ impl From<ComponentVersion> for Component {
             id: value.id,
             version: value.version,
         }
+    }
+}
+
+#[cfg(test)]
+mod component_publish_scope_tests {
+    use super::{Actor, SCOPE_COMPONENTS_PUBLISH, require_component_publish_scope};
+    use uuid::Uuid;
+
+    fn app(scopes: Option<Vec<&str>>) -> Actor {
+        Actor::App {
+            app_id: Uuid::now_v7(),
+            organisation_id: Uuid::now_v7(),
+            scopes: scopes.map(|s| s.into_iter().map(str::to_owned).collect()),
+        }
+    }
+
+    #[test]
+    fn a_client_token_without_the_publish_grant_cannot_change_the_registry() {
+        let err = require_component_publish_scope(&app(Some(vec!["directory:read"]))).unwrap_err();
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    }
+
+    #[test]
+    fn a_client_token_with_no_scopes_at_all_cannot_change_the_registry() {
+        assert!(require_component_publish_scope(&app(Some(vec![]))).is_err());
+    }
+
+    #[test]
+    fn a_client_token_with_the_publish_grant_can() {
+        assert!(
+            require_component_publish_scope(&app(Some(vec![
+                "directory:read",
+                SCOPE_COMPONENTS_PUBLISH
+            ])))
+            .is_ok()
+        );
+    }
+
+    /// Legacy app tokens predate scopes and keep what they could always do.
+    #[test]
+    fn a_legacy_app_token_keeps_its_access() {
+        assert!(require_component_publish_scope(&app(None)).is_ok());
     }
 }
 
