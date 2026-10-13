@@ -540,6 +540,20 @@ pub struct UpdatePipelineParams {
     pub stages: Option<PipelineStages>,
 }
 
+/// Persist the exact approval candidate once, only for a plan execution.
+/// A retry or a deploy cannot replace what the reviewer already saw.
+pub async fn seal_plan_output(db: &PgPool, release_id: Uuid, output: &str) -> anyhow::Result<bool> {
+    let saved = sqlx::query(
+        "UPDATE release_states SET plan_output = $2 \
+         WHERE release_id = $1 AND mode = 'plan' AND plan_output IS NULL",
+    )
+    .bind(release_id)
+    .bind(output)
+    .execute(db)
+    .await?;
+    Ok(saved.rows_affected() == 1)
+}
+
 #[derive(Clone)]
 pub struct ReleasePipelineRegistry {
     db: PgPool,

@@ -512,20 +512,22 @@ impl RunnerService for RunnerServer {
             None
         };
 
-        // Store plan output if provided (plan mode releases)
-        #[allow(clippy::collapsible_if)]
-        if let Some(ref plan_output) = req.plan_output
+        // Accept one plan output for a plan execution; never overwrite an
+        // already persisted approval candidate or attach one to a deploy.
+        if let Some(plan_output) = &req.plan_output
             && !plan_output.is_empty()
         {
-            if let Err(e) = sqlx::query!(
-                "UPDATE release_states SET plan_output = $2 WHERE release_id = $1",
+            let saved = crate::services::release_pipeline::seal_plan_output(
+                &self.state.db,
                 scope.release_id,
                 plan_output,
             )
-            .execute(&self.state.db)
             .await
-            {
-                tracing::warn!(%scope.release_id, "failed to store plan output: {e:#}");
+            .map_err(|e| tonic::Status::internal(format!("store plan output: {e}")))?;
+            if !saved {
+                return Err(tonic::Status::failed_precondition(
+                    "plan output already sealed or release is not a plan",
+                ));
             }
         }
 

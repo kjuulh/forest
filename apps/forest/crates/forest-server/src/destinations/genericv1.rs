@@ -21,7 +21,10 @@
 //! implementation that lives somewhere forest cannot reach wants the runner
 //! (dial-in) model instead.
 
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use anyhow::Context;
 use forest_grpc_interface::provider::{
@@ -35,6 +38,7 @@ use crate::{
     destinations::{DestinationEdge, DestinationIndex, logger::DestinationLogger},
     services::{
         artifact_staging_registry::ArtifactStagingRegistry,
+        release_pipeline::{ApprovalStatus, PipelineStages, StageConfig, StageStates, StageStatus},
         release_registry::{Reference, ReleaseItem},
         release_token_registry::{ReleaseTokenRegistry, ReleaseTokenScope},
     },
@@ -339,10 +343,10 @@ impl GenericV1Destination {
     /// project is small: which service, which container. Those come from the
     /// project's own `forest.cue`, rendered by `release prepare` into
     /// `forest/config.json` next to whatever manifests the destination needs.
-    ///
-    /// Returned flattened to strings so it can be merged straight over the
-    /// destination's metadata. Absent config is normal, not an error: most
-    /// destination types carry everything they need on the destination itself.
+    /// Returned flattened to strings so project-specific keys can be added to
+    /// the provider request. Destination-owned metadata always takes precedence.
+    /// Absent config is normal: most destination types carry everything they
+    /// need on the destination itself.
     ///
     /// Read from the declaration `annotate` recorded, which is the same record
     /// the scheduler filtered this release's destinations with — so the config a
@@ -440,6 +444,103 @@ impl GenericV1Destination {
         HashMap::new()
     }
 
+    /// Return only the exact output of an approved ancestor plan for this
+    /// execution's intent, destination and artifact. No ancestor means a
+    /// direct, ungated deploy; an ancestor without a valid seal must fail.
+    async fn approved_plan_output(
+        db: &sqlx::PgPool,
+        release: &ReleaseItem,
+        destination: &Destination,
+    ) -> anyhow::Result<String> {
+        let (definitions, states, deploy_stage): (
+            Option<serde_json::Value>,
+            Option<serde_json::Value>,
+            Option<String>,
+        ) = sqlx::query_as(
+            "SELECT ri.stages, ri.stage_states, rs.stage_id \
+             FROM release_states rs JOIN release_intents ri ON ri.id = rs.release_intent_id \
+             WHERE rs.release_id = $1 AND rs.release_intent_id = $2 \
+               AND rs.destination_id = $3 AND rs.artifact_id = $4",
+        )
+        .bind(release.id)
+        .bind(release.release_intent_id)
+        .bind(release.destination_id)
+        .bind(release.artifact)
+        .fetch_one(db)
+        .await
+        .context("find generic provider deploy stage")?;
+
+        let Some(deploy_stage) = deploy_stage else {
+            anyhow::ensure!(definitions.is_none(), "pipeline deploy has no stage");
+            return Ok(String::new());
+        };
+        let definitions: PipelineStages =
+            serde_json::from_value(definitions.context("pipeline has no stages")?)?;
+        let states: StageStates =
+            serde_json::from_value(states.context("pipeline has no stage states")?)?;
+        let deploy = definitions
+            .get(&deploy_stage)
+            .context("deploy stage is missing")?;
+        anyhow::ensure!(
+            matches!(deploy.config, StageConfig::Deploy { .. }),
+            "release is not in a deploy stage"
+        );
+
+        let mut stack: Vec<&str> = deploy.depends_on.iter().map(String::as_str).collect();
+        let mut visited = HashSet::new();
+        let mut plan_stage = None;
+        while let Some(stage_id) = stack.pop() {
+            if !visited.insert(stage_id) {
+                continue;
+            }
+            let stage = definitions
+                .get(stage_id)
+                .context("pipeline dependency is missing")?;
+            if let StageConfig::Plan { environment, .. } = &stage.config
+                && environment == &destination.environment
+            {
+                anyhow::ensure!(
+                    plan_stage.replace(stage_id).is_none(),
+                    "multiple ancestor plans target this destination"
+                );
+            }
+            stack.extend(stage.depends_on.iter().map(String::as_str));
+        }
+        let Some(plan_stage) = plan_stage else {
+            return Ok(String::new());
+        };
+        let state = states
+            .get(plan_stage)
+            .context("plan stage state is missing")?;
+        anyhow::ensure!(
+            state.status == StageStatus::Succeeded
+                && state.approval_status == Some(ApprovalStatus::Approved),
+            "generic provider deploy requires an approved plan"
+        );
+        let (plan_id, output): (uuid::Uuid, String) = sqlx::query_as(
+            "SELECT release_id, plan_output FROM release_states \
+             WHERE release_intent_id = $1 AND destination_id = $2 AND artifact_id = $3 \
+               AND stage_id = $4 AND mode = 'plan' AND status = 'SUCCEEDED' \
+               AND plan_output IS NOT NULL",
+        )
+        .bind(release.release_intent_id)
+        .bind(release.destination_id)
+        .bind(release.artifact)
+        .bind(plan_stage)
+        .fetch_one(db)
+        .await
+        .context("approved plan has no successful output for this destination and artifact")?;
+        anyhow::ensure!(
+            state
+                .release_ids
+                .as_ref()
+                .is_some_and(|ids| ids.contains(&plan_id.to_string())),
+            "approved plan does not belong to this stage"
+        );
+        anyhow::ensure!(!output.is_empty(), "approved plan output is empty");
+        Ok(output)
+    }
+
     /// Run `Execute`, streaming log lines into the release log.
     ///
     /// Returns the plan text for `RELEASE_MODE_PLAN`.
@@ -452,6 +553,14 @@ impl GenericV1Destination {
         mode: ReleaseMode,
     ) -> anyhow::Result<Option<String>> {
         let mut client = self.connect(meta).await?;
+
+        let metadata = provider_metadata(meta, self.release_config(release, destination).await);
+        let approved_plan_output = if mode == ReleaseMode::Deploy {
+            Self::approved_plan_output(&self.db, release, destination).await?
+        } else {
+            String::new()
+        };
+        let provider_release = provider_release(&self.db, release).await?;
 
         // A provider that needs the release's artifacts calls back with this.
         // Most act on infrastructure that already exists and never use it.
@@ -472,9 +581,6 @@ impl GenericV1Destination {
             .await
             .context("failed to mint a release token for the provider")?;
 
-        let metadata = provider_metadata(meta, self.release_config(release, destination).await);
-        let provider_release = provider_release(&self.db, release).await?;
-
         let request = ExecuteRequest {
             mode: mode as i32,
             destination: Some(ProviderDestination {
@@ -484,7 +590,7 @@ impl GenericV1Destination {
                 metadata,
             }),
             release: Some(provider_release),
-            approved_plan_output: String::new(),
+            approved_plan_output,
             release_token,
             forest_addr: self.external_host.clone(),
         };
@@ -511,6 +617,10 @@ impl GenericV1Destination {
                     }
                 }
                 Some(Event::Signal(sig)) => {
+                    if mode == ReleaseMode::Plan {
+                        // A dry-run is not evidence that a rollout is healthy.
+                        continue;
+                    }
                     // A provider says what it saw; forest knows which release
                     // it is about. Recorded here rather than by the provider
                     // calling back, so the provider protocol stays free of any
@@ -598,10 +708,16 @@ impl GenericV1Destination {
             );
         }
 
-        Ok(match mode {
-            ReleaseMode::Plan if !outcome.plan_output.is_empty() => Some(outcome.plan_output),
-            _ => None,
-        })
+        if mode == ReleaseMode::Plan {
+            anyhow::ensure!(
+                !outcome.plan_output.is_empty(),
+                "provider at {} returned no plan output to approve",
+                meta.provider_url
+            );
+            Ok(Some(outcome.plan_output))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -923,6 +1039,7 @@ mod tests {
                 .sensitive
         );
     }
+
     #[test]
     fn provider_declared_credentials_are_withheld_from_destination_listing() {
         let described = DescribeResponse {
@@ -1012,5 +1129,200 @@ mod tests {
             ..release
         };
         assert!(provider_release(&pool, &unannotated).await.is_err());
+    }
+    #[sqlx::test]
+    async fn deploy_uses_only_its_approved_immutable_plan(pool: sqlx::PgPool) {
+        use crate::services::release_pipeline::{StageDefinition, StageState};
+
+        let intent_id = uuid::Uuid::new_v4();
+        let artifact_id = uuid::Uuid::new_v4();
+        let destination_id = uuid::Uuid::new_v4();
+        let plan_id = uuid::Uuid::new_v4();
+        let deploy_id = uuid::Uuid::new_v4();
+        let project_id = uuid::Uuid::new_v4();
+        let mut states = StageStates::new();
+        let mut planned = StageState::pending();
+        planned.status = StageStatus::Succeeded;
+        planned.approval_status = Some(ApprovalStatus::Approved);
+        planned.release_ids = Some(vec![plan_id.to_string()]);
+        states.insert("plan-prod".into(), planned);
+        let definitions = PipelineStages::from([
+            (
+                "plan-prod".into(),
+                StageDefinition::plan("prod", false, vec![]),
+            ),
+            (
+                "wait".into(),
+                StageDefinition::wait(0, vec!["plan-prod".into()]),
+            ),
+            (
+                "deploy-prod".into(),
+                StageDefinition::deploy("prod", vec!["wait".into()]),
+            ),
+        ]);
+        sqlx::query(
+            "INSERT INTO release_intents (id, artifact, annotation_id, project_id, stages, stage_states) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(intent_id)
+        .bind(artifact_id)
+        .bind(uuid::Uuid::new_v4())
+        .bind(project_id)
+        .bind(serde_json::to_value(&definitions).unwrap())
+        .bind(serde_json::to_value(&states).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let plan = r#"{"schema_version":1,"artifact_id":"pinned"}"#;
+        sqlx::query(
+            "INSERT INTO release_states (release_id, release_intent_id, project_id, \
+             destination_id, artifact_id, stage_id, mode, status) \
+             VALUES ($1, $2, $3, $4, $5, 'plan-prod', 'plan', 'SUCCEEDED')",
+        )
+        .bind(plan_id)
+        .bind(intent_id)
+        .bind(project_id)
+        .bind(destination_id)
+        .bind(artifact_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            crate::services::release_pipeline::seal_plan_output(&pool, plan_id, plan)
+                .await
+                .unwrap()
+        );
+        sqlx::query(
+            "INSERT INTO release_states (release_id, release_intent_id, project_id, \
+             destination_id, artifact_id, stage_id, status) \
+             VALUES ($1, $2, $3, $4, $5, 'deploy-prod', 'RUNNING')",
+        )
+        .bind(deploy_id)
+        .bind(intent_id)
+        .bind(project_id)
+        .bind(destination_id)
+        .bind(artifact_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut release = ReleaseItem {
+            id: deploy_id,
+            release_intent_id: intent_id,
+            artifact: artifact_id,
+            project_id,
+            destination_id,
+            status: "RUNNING".into(),
+            project: "sample".into(),
+        };
+        let destination = Destination::new(
+            "sample",
+            "prod",
+            "prod",
+            HashMap::new(),
+            forest_models::DestinationType {
+                organisation: "forest".into(),
+                name: "generic".into(),
+                version: 1,
+                description: String::new(),
+                fields: vec![],
+            },
+        );
+        assert_eq!(
+            GenericV1Destination::approved_plan_output(&pool, &release, &destination)
+                .await
+                .unwrap(),
+            plan,
+        );
+        assert!(
+            !crate::services::release_pipeline::seal_plan_output(&pool, plan_id, "replacement")
+                .await
+                .unwrap(),
+            "approved output is immutable"
+        );
+        assert_eq!(
+            GenericV1Destination::approved_plan_output(&pool, &release, &destination)
+                .await
+                .unwrap(),
+            plan,
+        );
+
+        states.get_mut("plan-prod").unwrap().approval_status =
+            Some(ApprovalStatus::AwaitingApproval);
+        sqlx::query("UPDATE release_intents SET stage_states = $2 WHERE id = $1")
+            .bind(intent_id)
+            .bind(serde_json::to_value(&states).unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            GenericV1Destination::approved_plan_output(&pool, &release, &destination)
+                .await
+                .is_err(),
+            "unapproved plans cannot open deploy"
+        );
+        states.get_mut("plan-prod").unwrap().approval_status = Some(ApprovalStatus::Approved);
+        sqlx::query("UPDATE release_intents SET stage_states = $2 WHERE id = $1")
+            .bind(intent_id)
+            .bind(serde_json::to_value(&states).unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        release.destination_id = uuid::Uuid::new_v4();
+        sqlx::query("UPDATE release_states SET destination_id = $2 WHERE release_id = $1")
+            .bind(deploy_id)
+            .bind(release.destination_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            GenericV1Destination::approved_plan_output(&pool, &release, &destination)
+                .await
+                .is_err(),
+            "another destination cannot borrow this plan"
+        );
+        release.destination_id = destination_id;
+        sqlx::query("UPDATE release_states SET destination_id = $2 WHERE release_id = $1")
+            .bind(deploy_id)
+            .bind(destination_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        release.artifact = uuid::Uuid::new_v4();
+        sqlx::query("UPDATE release_states SET artifact_id = $2 WHERE release_id = $1")
+            .bind(deploy_id)
+            .bind(release.artifact)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            GenericV1Destination::approved_plan_output(&pool, &release, &destination)
+                .await
+                .is_err(),
+            "another artifact cannot borrow this plan"
+        );
+        release.artifact = artifact_id;
+        sqlx::query("UPDATE release_states SET artifact_id = $2 WHERE release_id = $1")
+            .bind(deploy_id)
+            .bind(artifact_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE release_states SET stage_id = NULL WHERE release_id = $1")
+            .bind(deploy_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE release_intents SET stages = NULL WHERE id = $1")
+            .bind(intent_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            GenericV1Destination::approved_plan_output(&pool, &release, &destination)
+                .await
+                .unwrap(),
+            "",
+            "ungated direct deploy has no approved plan"
+        );
     }
 }

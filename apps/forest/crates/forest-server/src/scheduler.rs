@@ -445,13 +445,16 @@ impl SchedulerInner {
                 }
                 let plan_output = dest_svc.plan(&logger, &release_item, &dest).await?;
                 if let Some(output) = plan_output {
-                    sqlx::query!(
-                        "UPDATE release_states SET plan_output = $2 WHERE release_id = $1",
+                    let saved = crate::services::release_pipeline::seal_plan_output(
+                        &self.release_event_store.db,
                         release_id,
-                        output,
+                        &output,
                     )
-                    .execute(&self.release_event_store.db)
                     .await?;
+                    anyhow::ensure!(
+                        saved,
+                        "plan output was already sealed or release is not a plan"
+                    );
                 }
             } else {
                 // Normal deploy mode

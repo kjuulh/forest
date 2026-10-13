@@ -335,7 +335,7 @@ async fn reveal_returns_one_requested_value() {
 /// An ordinary project member can list a destination but cannot extract its
 /// provider credential. Revealing a key is reserved for org operators.
 #[tokio::test(flavor = "multi_thread")]
-async fn member_cannot_reveal_destination_credential() {
+async fn member_cannot_reveal_credential_or_approve_plan() {
     let fixture = fixture().await.expect("fixture");
     let owner_token = register_user(&fixture).await;
     let org = create_org(&fixture, &owner_token).await;
@@ -391,7 +391,7 @@ async fn member_cannot_reveal_destination_credential() {
         .reveal_destination_metadata(authed_request(
             &member_token,
             RevealDestinationMetadataRequest {
-                organisation: org,
+                organisation: org.clone(),
                 name: dest,
                 key: "cloudflare_token".into(),
             },
@@ -400,6 +400,65 @@ async fn member_cannot_reveal_destination_credential() {
         .expect_err("member must not reveal destination credentials");
     assert_eq!(error.code(), tonic::Code::PermissionDenied);
     assert!(!error.message().contains("private-value"));
+
+    let project_id: uuid::Uuid =
+        sqlx::query_scalar("INSERT INTO projects (organisation, project) VALUES ($1, $2) RETURNING id")
+            .bind(&org)
+            .bind(format!("project-{}", uuid::Uuid::now_v7()))
+            .fetch_one(&fixture.db)
+            .await
+            .unwrap();
+    let intent_id: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO release_intents (artifact, annotation_id, project_id, stages, stage_states) \
+         VALUES ($1, $2, $3, $4, $5) RETURNING id",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(uuid::Uuid::new_v4())
+    .bind(project_id)
+    .bind(serde_json::json!({
+        "plan-prod": {"type": "plan", "environment": "prod", "depends_on": []}
+    }))
+    .bind(serde_json::json!({
+        "plan-prod": {"status": "ACTIVE", "approval_status": "AWAITING_APPROVAL"}
+    }))
+    .fetch_one(&fixture.db)
+    .await
+    .unwrap();
+    let approval = ApprovePlanStageRequest {
+        release_intent_id: intent_id.to_string(),
+        stage_id: "plan-prod".into(),
+    };
+    let error = fixture
+        .releases()
+        .approve_plan_stage(authed_request(&member_token, approval.clone()))
+        .await
+        .expect_err("member must not approve production plan");
+    assert_eq!(error.code(), tonic::Code::PermissionDenied);
+    let error = fixture
+        .releases()
+        .reject_plan_stage(authed_request(
+            &member_token,
+            RejectPlanStageRequest {
+                release_intent_id: intent_id.to_string(),
+                stage_id: "plan-prod".into(),
+                reason: None,
+            },
+        ))
+        .await
+        .expect_err("member must not reject production plan");
+    assert_eq!(error.code(), tonic::Code::PermissionDenied);
+    fixture
+        .releases()
+        .approve_plan_stage(authed_request(&owner_token, approval))
+        .await
+        .expect("org admin can approve plan");
+    let state: serde_json::Value =
+        sqlx::query_scalar("SELECT stage_states FROM release_intents WHERE id = $1")
+            .bind(intent_id)
+            .fetch_one(&fixture.db)
+            .await
+            .unwrap();
+    assert_eq!(state["plan-prod"]["approval_status"], "APPROVED");
 }
 
 /// A member of another org cannot reveal a credential.

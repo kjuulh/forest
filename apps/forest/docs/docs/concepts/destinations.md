@@ -79,16 +79,19 @@ does not already define; it cannot replace destination values or send
 `provider_url`/`provider_token` as provider metadata. Keep credentials in
 destination-sensitive metadata, never in project artifacts.
 
-The provider receives the annotated artifact slug, source commit/reference,
-release intent ID and artifact ID alongside the execution ID. PLAN and DEPLOY
-can therefore correlate the same immutable artifact across executions.
-
-Fields marked `sensitive` by `Describe` are withheld from destination listing
+Fields marked `sensitive` by `Describe` are withheld from destination listing,
 even if the creator did not name them in `sensitive_keys`; provider failure
-withholds all metadata rather than exposing a credential. Only an
-organisation admin or infrastructure service account may reveal a withheld
-credential or approve/reject a plan. Ordinary members and org-scoped app
-tokens cannot perform those operator actions.
+withholds all metadata rather than exposing a credential. Only an organisation
+admin or infrastructure service account may reveal a withheld credential or
+approve/reject a plan. Ordinary members and org-scoped app tokens cannot
+perform those operator actions.
+
+The provider receives the annotated artifact slug, source reference, release
+intent ID and artifact ID alongside the execution ID. PLAN must return
+nonempty, redacted `plan_output`. Forest persists that output once and passes
+its exact bytes as `ExecuteRequest.approved_plan_output` only to a DEPLOY
+descending from an approved plan for the same intent, destination and artifact.
+A gated DEPLOY without that seal fails; an ungated deploy sends an empty field.
 
 Provider authentication, mTLS, identity, release-token audience binding,
 revocation, callback authorization, and cross-tenant tests remain launch gates.
