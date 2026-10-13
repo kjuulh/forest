@@ -5,7 +5,10 @@ use crate::cli::output::OutputFormat;
 #[derive(clap::Parser, Clone)]
 pub struct Config {
     /// Forest server URL — overrides the active context's server.
-    #[arg(long, env = "FOREST_SERVER")]
+    ///
+    /// Global like `--context`, so it is accepted after the subcommand too
+    /// (`forest publish --forest-server …`), not only before it.
+    #[arg(long, env = "FOREST_SERVER", global = true)]
     pub forest_server: Option<String>,
 
     /// Use a named context for this invocation, overriding the active one.

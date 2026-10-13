@@ -171,6 +171,41 @@ pub fn validate_name(name: &str) -> Result<()> {
     }
 }
 
+/// The forest server a command talks to, and what to call it when telling a
+/// person so.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerTarget {
+    /// The context name, or the URL itself when `--forest-server` chose it.
+    pub label: String,
+    pub server: String,
+}
+
+/// Which server a command talks to: `--forest-server` / `FOREST_SERVER` if set
+/// and non-empty, otherwise the context named by `--context` /
+/// `FOREST_CONTEXT`, otherwise the active context.
+///
+/// The one place this precedence lives. The gRPC client connects with it and
+/// `forest publish` names its target with it; when the two resolved
+/// separately, publish announced the stored active context while uploading to
+/// the one `--context` named (understory-io/forest#298).
+pub fn resolve_server_target(
+    forest_server: Option<&str>,
+    context: Option<&str>,
+    store: &ContextStore,
+) -> Result<ServerTarget> {
+    if let Some(server) = forest_server.filter(|s| !s.is_empty()) {
+        return Ok(ServerTarget {
+            label: server.to_string(),
+            server: server.to_string(),
+        });
+    }
+    let entry = store.resolve(context)?;
+    Ok(ServerTarget {
+        label: entry.name,
+        server: entry.server,
+    })
+}
+
 /// Filesystem-backed context registry.
 #[derive(Debug, Clone)]
 pub struct ContextStore {
@@ -502,6 +537,57 @@ mod tests {
 
     fn store(td: &TempDir) -> ContextStore {
         ContextStore::with_root(td.path().to_path_buf())
+    }
+
+    fn two_contexts(td: &TempDir) -> ContextStore {
+        let s = store(td);
+        s.create("home", "https://api.home.example", true).unwrap();
+        s.create("work", "https://api.work.example", false).unwrap();
+        s
+    }
+
+    #[test]
+    fn server_target_is_the_active_context_by_default() {
+        let td = TempDir::new().unwrap();
+        let target = resolve_server_target(None, None, &two_contexts(&td)).unwrap();
+        assert_eq!(target.label, "home");
+        assert_eq!(target.server, "https://api.home.example");
+    }
+
+    /// #298: `--context work` must name, and reach, work, whatever is active.
+    #[test]
+    fn a_named_context_wins_over_the_active_one() {
+        let td = TempDir::new().unwrap();
+        let target = resolve_server_target(None, Some("work"), &two_contexts(&td)).unwrap();
+        assert_eq!(target.label, "work");
+        assert_eq!(target.server, "https://api.work.example");
+    }
+
+    #[test]
+    fn an_explicit_server_wins_over_any_context() {
+        let td = TempDir::new().unwrap();
+        let target = resolve_server_target(
+            Some("https://api.other.example"),
+            Some("work"),
+            &two_contexts(&td),
+        )
+        .unwrap();
+        assert_eq!(target.server, "https://api.other.example");
+        assert_eq!(target.label, "https://api.other.example");
+    }
+
+    /// FOREST_SERVER= (set but empty) is how CI sometimes spells "unset".
+    #[test]
+    fn an_empty_server_falls_through_to_the_context() {
+        let td = TempDir::new().unwrap();
+        let target = resolve_server_target(Some(""), Some("work"), &two_contexts(&td)).unwrap();
+        assert_eq!(target.label, "work");
+    }
+
+    #[test]
+    fn an_unknown_context_is_an_error_not_the_active_one() {
+        let td = TempDir::new().unwrap();
+        assert!(resolve_server_target(None, Some("nope"), &two_contexts(&td)).is_err());
     }
 
     #[test]

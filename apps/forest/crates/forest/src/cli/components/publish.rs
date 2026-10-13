@@ -15,39 +15,45 @@ use crate::{
 /// (e.g. prod) registry by making the destination visible *before* the first
 /// RPC.
 ///
-/// `selected` is the `--context` / FOREST_CONTEXT override, resolved the same
-/// way the gRPC client resolves it, so the line names where the upload
-/// actually goes rather than the registry's active marker (DATA-656).
+/// Resolved exactly as the gRPC client resolves it (`--forest-server`, then
+/// `--context`, then the active context), so the line names where the upload
+/// actually goes. It used to read the stored active context only, and named
+/// the wrong instance whenever `--context` or `--forest-server` was given.
 ///
-/// Best-effort: a failure to resolve the context (no contexts configured,
-/// corrupted state file, unknown name) silently degrades to a minimal
-/// "publishing as <owner>/<component>" line so we never block the publish
-/// just for the courtesy print.
-fn print_publish_context(selected: Option<&str>, owner: &str, component: &str) {
-    let line = match ContextStore::from_env() {
-        Ok(store) => publish_context_line(&store, selected, owner, component),
-        Err(_) => format!("Publishing {owner}/{component}"),
-    };
-    crate::ui::status(line);
-}
-
-fn publish_context_line(
-    store: &ContextStore,
-    selected: Option<&str>,
-    owner: &str,
-    component: &str,
-) -> String {
-    match store.resolve(selected) {
-        Ok(ctx) => {
-            // Server URL is detail for the logs, not the human line.
+/// Best-effort: a failure to resolve (no contexts configured, corrupted state
+/// file) silently degrades to a minimal "publishing <owner>/<component>" line
+/// so we never block the publish just for the courtesy print.
+fn print_publish_context(state: &State, owner: &str, component: &str) {
+    let target = ContextStore::from_env().and_then(|store| {
+        crate::contexts::resolve_server_target(
+            state.config.forest_server.as_deref(),
+            state.config.context.as_deref(),
+            &store,
+        )
+    });
+    match target {
+        Ok(target) => {
             tracing::debug!(
                 "publishing as {owner}/{component} to {} ({})",
-                ctx.name,
-                ctx.server
+                target.label,
+                target.server
             );
-            format!("Publishing {owner}/{component} to {}", ctx.name)
+            crate::ui::status(publish_line(owner, component, &target));
         }
-        Err(_) => format!("Publishing {owner}/{component}"),
+        Err(_) => crate::ui::status(format!("Publishing {owner}/{component}")),
+    }
+}
+
+/// The server URL is on the human line too: two contexts can share a
+/// misleading name, and the URL is what says which registry this is.
+fn publish_line(owner: &str, component: &str, target: &crate::contexts::ServerTarget) -> String {
+    if target.label == target.server {
+        format!("Publishing {owner}/{component} to {}", target.server)
+    } else {
+        format!(
+            "Publishing {owner}/{component} to {} ({})",
+            target.label, target.server
+        )
     }
 }
 
@@ -686,7 +692,8 @@ mod abort_on_drop_tests {
 
     #[test]
     fn publish_line_names_the_selected_context_not_the_active_one() {
-        use super::{ContextStore, publish_context_line};
+        use super::{ContextStore, publish_line};
+        use crate::contexts::resolve_server_target;
 
         let td = tempfile::TempDir::new().unwrap();
         let store = ContextStore::with_root(td.path().to_path_buf());
@@ -695,18 +702,15 @@ mod abort_on_drop_tests {
             .create("prod", "https://forest.example.invalid", false)
             .unwrap();
 
+        let prod = resolve_server_target(None, Some("prod"), &store).unwrap();
         assert_eq!(
-            publish_context_line(&store, Some("prod"), "understory", "fungus"),
-            "Publishing understory/fungus to prod"
+            publish_line("understory", "fungus", &prod),
+            "Publishing understory/fungus to prod (https://forest.example.invalid)"
         );
-        assert_eq!(
-            publish_context_line(&store, None, "understory", "fungus"),
-            "Publishing understory/fungus to default"
-        );
-        assert_eq!(
-            publish_context_line(&store, Some("missing"), "understory", "fungus"),
-            "Publishing understory/fungus"
-        );
+        let active = resolve_server_target(None, None, &store).unwrap();
+        assert_eq!(active.label, "default");
+        // An unknown name is an error, so the caller prints the bare line.
+        assert!(resolve_server_target(None, Some("missing"), &store).is_err());
     }
 
     #[test]
@@ -1058,7 +1062,7 @@ impl PublishCommand {
         // summary using the same renderer as the post-success path so the
         // user sees exactly the line a real publish would emit.
         if self.dry_run {
-            print_publish_context(state.config.context.as_deref(), organisation, name);
+            print_publish_context(state, organisation, name);
             let has_tool = descriptor
                 .as_ref()
                 .and_then(describe_response_tool_facet)
@@ -1107,7 +1111,7 @@ impl PublishCommand {
         }
 
         // 4. Begin upload
-        print_publish_context(state.config.context.as_deref(), organisation, name);
+        print_publish_context(state, organisation, name);
         let client = state.grpc_client();
         tracing::info!("beginning upload");
         let upload_context = client
@@ -1630,7 +1634,7 @@ async fn publish_external(
         platforms.len()
     );
 
-    print_publish_context(state.config.context.as_deref(), organisation, name);
+    print_publish_context(state, organisation, name);
 
     // Dry-run stops here, exactly as the built and prebuilt paths do. Everything
     // above is local — cue eval, tool-facet extraction, manifest synthesis — and
@@ -1815,7 +1819,7 @@ async fn publish_prebuilt(
         return Ok(());
     }
 
-    print_publish_context(state.config.context.as_deref(), organisation, name);
+    print_publish_context(state, organisation, name);
     let client = state.grpc_client();
     let upload_context = client
         .begin_component_upload(organisation, name, version)
@@ -2154,6 +2158,36 @@ async fn eval_tool_facet(dir: &std::path::Path) -> anyhow::Result<serde_json::Va
 ///
 /// Structs are built by literal rather than parsed, so no test here depends on
 /// the ambient environment being clean.
+#[cfg(test)]
+mod publish_line_tests {
+    use super::*;
+    use crate::contexts::ServerTarget;
+
+    #[test]
+    fn a_context_is_named_with_its_server() {
+        let target = ServerTarget {
+            label: "work".into(),
+            server: "https://api.work.example".into(),
+        };
+        assert_eq!(
+            publish_line("acme", "tool", &target),
+            "Publishing acme/tool to work (https://api.work.example)"
+        );
+    }
+
+    #[test]
+    fn an_explicit_server_is_named_once() {
+        let target = ServerTarget {
+            label: "https://api.other.example".into(),
+            server: "https://api.other.example".into(),
+        };
+        assert_eq!(
+            publish_line("acme", "tool", &target),
+            "Publishing acme/tool to https://api.other.example"
+        );
+    }
+}
+
 #[cfg(test)]
 mod version_override_tests {
     use super::*;
