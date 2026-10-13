@@ -5,7 +5,6 @@ use std::{
 
 use sha2::Digest;
 use tower::{Layer, Service};
-use uuid::Uuid;
 
 use crate::{
     actor::Actor,
@@ -88,7 +87,6 @@ async fn resolve_legacy_app_token(
         app_id: row.app_id,
         organisation_id: row.organisation_id,
         scopes: None,
-
     }))
 }
 
@@ -345,7 +343,7 @@ where
             }
 
             // 4. Try a legacy app token (DB)
-            match resolve_app_token(&state.db, &token).await {
+            match resolve_legacy_app_token(&state.db, &token).await {
                 Ok(Some(actor)) => {
                     req.extensions_mut().insert(actor);
                     return inner.call(req).await;
