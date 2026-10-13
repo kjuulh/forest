@@ -400,45 +400,31 @@ impl GenericV1Destination {
             }
         };
 
+        let destination_type = destination.destination_type.qualified();
         for (path, content) in files {
             if !path.ends_with("forest/config.json") {
                 continue;
             }
 
-            let Ok(item) = serde_json::from_str::<serde_json::Value>(&content) else {
+            let Ok(item) = serde_json::from_str::<
+                crate::services::destination_selector::DeploymentItem,
+            >(&content) else {
                 continue;
             };
 
-            // `destination` in the rendered item is the pattern the project
-            // wrote, not the resolved name, so match it the same way the
-            // release did rather than comparing strings. Shared with the
-            // scheduler via `destination_selector` — the two disagreeing is
-            // what let a release be scheduled somewhere its config was then
-            // (correctly) withheld.
-            //
-            // Type as well as name, for the same reason the scheduler consults
-            // it: a project with an ECS item and a terraform item in one
-            // environment has two records whose selectors can both match, and
-            // the first by name is not necessarily the right one.
-            let selected = item
-                .get("destination")
-                .and_then(|d| d.as_str())
-                .map(|pattern| {
-                    crate::services::destination_selector::matches(pattern, &destination.name)
-                })
-                .unwrap_or(false)
-                && crate::services::destination_selector::type_matches(
-                    item.get("destination_type")
-                        .and_then(|t| t.as_str())
-                        .unwrap_or_default(),
-                    &destination.destination_type.qualified(),
-                );
-
-            if !selected {
+            // Legacy file scans use the same type-and-name opt-in as the
+            // scheduler; an untyped item cannot supply generic provider config.
+            if item.env != destination.environment
+                || !crate::services::destination_selector::selects(
+                    &item,
+                    &destination.name,
+                    &destination_type,
+                )
+            {
                 continue;
             }
 
-            let Some(config) = item.get("config") else {
+            let Some(config) = item.config.as_ref() else {
                 continue;
             };
 

@@ -181,7 +181,11 @@ values such as service or image identity.
 
 ## Releasing
 
-Target all destinations in an environment:
+Environment releases retain undeclared fan-out for non-generic destination types. External `forest/generic@1` destinations are opt-in: an artifact must contain a destination item for that environment, explicitly typed `forest/generic@1`, whose destination selector matches the name. Legacy or untyped items do not opt in. Naming a generic destination with `--destination` does not bypass this rule; naming a non-generic destination still overrides the project's selector. Creating a generic destination therefore reports no projects widened by implicit fan-out.
+
+If the environment holds only generic destinations and the project has not opted in, the release fails rather than succeeding without deploying anywhere. The type and selector must be present in the rendered deployment item; adding a destination to Forest alone cannot enroll another project.
+
+Target all eligible destinations in an environment:
 
 ```bash
 forest release create --environment dev
