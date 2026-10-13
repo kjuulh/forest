@@ -60,8 +60,16 @@ message WaitReleaseEvent {
     ReleaseStatusUpdate status_update = 1;
     ReleaseLogLine log_line = 2;
     PipelineStageUpdate stage_update = 3;
+    ReplayComplete replay_complete = 4;
   }
 }
+
+// Sent once, after the stream's first pass has replayed every stage state,
+// destination status and persisted log line. A client that wants a snapshot
+// rather than a live follow stops here: a release parked on a plan approval
+// never reaches a terminal state, so the stream would otherwise never end.
+// Servers without it send nothing; clients fall back to a quiet period.
+message ReplayComplete {}
 
 // Streamed in WaitRelease for pipeline releases: reports stage status changes.
 message PipelineStageUpdate {
@@ -74,6 +82,9 @@ message PipelineStageUpdate {
   optional string wait_until = 7;
   optional string error_message = 8;
   optional string approval_status = 9;
+  // Stage ids this stage waits on. Lets a follower tell a PENDING stage that
+  // is blocked behind a parked approval from one about to start.
+  repeated string depends_on = 10;
 }
 
 message ReleaseStatusUpdate {

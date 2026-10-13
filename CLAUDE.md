@@ -316,10 +316,17 @@ Observing and steering:
 
 ```bash
 forest release show                  # interactive picker
-forest release show <slug> --follow  # attach to a live release
+forest release show <slug>           # what has happened so far, then exit
+forest release show <slug> --follow  # stream until the release is terminal
 forest release show <slug> --logs-only > release.log
 forest project releases              # current state per destination
 ```
+
+`release show` is a snapshot: it prints what the server has persisted and
+exits, in flight or not. A plan stage parked awaiting approval is printed in
+full, plan output included, and the last line is the command that approves it.
+`release create` and `release release` stop following at such a stage and say
+the same, instead of waiting for an approval only a person can give.
 
 A plan stage parked awaiting approval is cleared with `forest release approve
 [<slug>]` or killed with `forest release reject`. `forest release fail` reports

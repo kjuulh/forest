@@ -2514,7 +2514,7 @@ pub struct WaitReleaseRequest {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WaitReleaseEvent {
-    #[prost(oneof="wait_release_event::Event", tags="1, 2, 3")]
+    #[prost(oneof="wait_release_event::Event", tags="1, 2, 3, 4")]
     pub event: ::core::option::Option<wait_release_event::Event>,
 }
 /// Nested message and enum types in `WaitReleaseEvent`.
@@ -2527,7 +2527,17 @@ pub mod wait_release_event {
         LogLine(super::ReleaseLogLine),
         #[prost(message, tag="3")]
         StageUpdate(super::PipelineStageUpdate),
+        #[prost(message, tag="4")]
+        ReplayComplete(super::ReplayComplete),
     }
+}
+/// Sent once, after the stream's first pass has replayed every stage state,
+/// destination status and persisted log line. A client that wants a snapshot
+/// rather than a live follow stops here: a release parked on a plan approval
+/// never reaches a terminal state, so the stream would otherwise never end.
+/// Servers without it send nothing; clients fall back to a quiet period.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReplayComplete {
 }
 /// Streamed in WaitRelease for pipeline releases: reports stage status changes.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2552,6 +2562,10 @@ pub struct PipelineStageUpdate {
     pub error_message: ::core::option::Option<::prost::alloc::string::String>,
     #[prost(string, optional, tag="9")]
     pub approval_status: ::core::option::Option<::prost::alloc::string::String>,
+    /// Stage ids this stage waits on. Lets a follower tell a PENDING stage that
+    /// is blocked behind a parked approval from one about to start.
+    #[prost(string, repeated, tag="10")]
+    pub depends_on: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReleaseStatusUpdate {

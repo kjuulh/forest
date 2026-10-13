@@ -3,7 +3,7 @@ use std::fmt::Display;
 use anyhow::Context;
 
 use crate::{
-    grpc::{GetProjectsQuery, GrpcClientState},
+    grpc::{GetProjectsQuery, GrpcClientState, release_watch::WatchEnd},
     models::{artifacts::ArtifactID, release_annotation::ReleaseAnnotation},
     state::State,
 };
@@ -198,12 +198,31 @@ impl CommitCommand {
         if !self.no_wait {
             eprintln!("Waiting for release to complete (streaming logs)...\n");
 
-            let result = grpc
+            let outcome = grpc
                 .wait_release(release_result.release_intent_id)
                 .await
                 .context("wait_release")?;
 
             eprintln!(); // Empty line after logs
+
+            // A plan stage parked on its approval will not move until someone
+            // reads the plan and says yes; waiting here for that would hang the
+            // very person who has to do it.
+            if outcome.end == WatchEnd::Parked {
+                let intent_id = release_result.release_intent_id;
+                let target = match (&self.slug, &self.organisation) {
+                    (Some(slug), _) => slug.clone(),
+                    (None, Some(org)) => format!("{intent_id} --organisation {org}"),
+                    (None, None) => intent_id.to_string(),
+                };
+                eprintln!("read the plan with:\n  forest release show {target}\n");
+                for stage in outcome.progress.awaiting_approval() {
+                    eprintln!("{}", super::approval_hint(&stage, &target));
+                }
+                return Ok(());
+            }
+
+            let result = outcome.result;
 
             // Report results for each destination
             let mut any_failed = false;
