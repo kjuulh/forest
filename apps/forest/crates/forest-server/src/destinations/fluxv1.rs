@@ -2,12 +2,15 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use forest_models::Destination;
-use forest_runner::destinations::fluxv1::{FluxV1Handler, Mode};
+use forest_runner::destinations::fluxv1::{FluxV1Handler, Mode, ReconcileOutcome};
 use sqlx::PgPool;
 
 use crate::{
     destinations::{DestinationEdge, DestinationIndex, logger::DestinationLogger},
-    services::{artifact_staging_registry::ArtifactStagingRegistry, release_registry::ReleaseItem},
+    services::{
+        artifact_staging_registry::ArtifactStagingRegistry, release_registry::ReleaseItem,
+        release_signals,
+    },
     temp_dir::TempDirectories,
 };
 
@@ -19,6 +22,34 @@ pub struct FluxV1Destination {
     pub temp: TempDirectories,
     pub artifact_files: ArtifactStagingRegistry,
     pub db: PgPool,
+    pub nats: async_nats::Client,
+}
+
+/// The release signal a reconcile outcome is recorded as.
+pub const RECONCILE_SIGNAL: &str = "reconcile";
+
+/// How a reconcile outcome reads as a release signal: `(status, detail)`, or
+/// `None` when nothing was asked of Flux and there is nothing to say.
+///
+/// A failed reconcile is DEGRADED rather than UNHEALTHY: the release is in
+/// git and Flux applies it on its next poll, so nothing is broken, but it is
+/// not running yet either, and a gate waiting on `reconcile` HEALTHY must not
+/// open on it.
+fn reconcile_signal(outcome: &ReconcileOutcome) -> Option<(&'static str, String)> {
+    match outcome {
+        ReconcileOutcome::NotRequested => None,
+        ReconcileOutcome::Triggered { attempts } => Some((
+            "HEALTHY",
+            format!("Flux receiver accepted the reconcile request (attempt {attempts})"),
+        )),
+        ReconcileOutcome::Failed { attempts, reason } => Some((
+            "DEGRADED",
+            format!(
+                "reconcile webhook failed after {attempts} attempt(s): {reason}. The release \
+                 is pushed; Flux applies it on its next poll"
+            ),
+        )),
+    }
 }
 
 impl FluxV1Destination {
@@ -219,7 +250,8 @@ impl DestinationEdge for FluxV1Destination {
         let config = InProcessBackend::config_from_destination(destination);
         FluxV1Handler::run(&backend, &config, Mode::Prepare)
             .await
-            .context("flux prepare failed")
+            .context("flux prepare failed")?;
+        Ok(())
     }
 
     async fn release(
@@ -230,8 +262,86 @@ impl DestinationEdge for FluxV1Destination {
     ) -> anyhow::Result<()> {
         let backend = self.create_backend(logger, release, destination);
         let config = InProcessBackend::config_from_destination(destination);
-        FluxV1Handler::run(&backend, &config, Mode::Apply)
+        let outcome = FluxV1Handler::run(&backend, &config, Mode::Apply)
             .await
-            .context("flux release failed")
+            .context("flux release failed")?;
+
+        // Recorded here rather than inside the handler, so forest-runner's
+        // flux code keeps no dependency on forest-server's storage — the same
+        // split as genericv1's provider signals.
+        if let Some((status, detail)) = reconcile_signal(&outcome) {
+            let row = release_signals::SignalRow {
+                name: RECONCILE_SIGNAL.to_string(),
+                status: status.to_string(),
+                detail,
+                destination_name: destination.name.clone(),
+                environment: destination.environment.clone(),
+                reported_by: "forest/flux@1".to_string(),
+                observed_at: chrono::Utc::now(),
+            };
+            if let Err(e) = release_signals::report(
+                &self.db,
+                &self.nats,
+                release.release_intent_id,
+                release.id,
+                &destination.organisation,
+                &release.project,
+                &row,
+            )
+            .await
+            {
+                // The deploy is what matters; losing the release over a
+                // signal that failed to store would be the wrong trade.
+                logger.log_stderr(&format!(
+                    "[flux@1] failed to record the {RECONCILE_SIGNAL} signal: {e:#}"
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nothing_is_recorded_when_flux_was_not_asked() {
+        assert_eq!(reconcile_signal(&ReconcileOutcome::NotRequested), None);
+    }
+
+    #[test]
+    fn an_accepted_reconcile_is_healthy() {
+        let (status, _) = reconcile_signal(&ReconcileOutcome::Triggered { attempts: 2 }).unwrap();
+        assert_eq!(status, "HEALTHY");
+    }
+
+    /// Not UNHEALTHY: the release is in git and lands on Flux's next poll.
+    /// Not HEALTHY either, or "SUCCEEDED" goes back to hiding it.
+    #[test]
+    fn a_failed_reconcile_is_degraded_and_says_why() {
+        let (status, detail) = reconcile_signal(&ReconcileOutcome::Failed {
+            attempts: 4,
+            reason: "could not connect: tcp connect error".into(),
+        })
+        .unwrap();
+        assert_eq!(status, "DEGRADED");
+        assert!(detail.contains("4 attempt(s)"), "{detail}");
+        assert!(detail.contains("could not connect"), "{detail}");
+    }
+
+    #[test]
+    fn every_reported_status_is_one_the_signal_store_accepts() {
+        for outcome in [
+            ReconcileOutcome::Triggered { attempts: 1 },
+            ReconcileOutcome::Failed {
+                attempts: 1,
+                reason: String::new(),
+            },
+        ] {
+            let (status, _) = reconcile_signal(&outcome).unwrap();
+            assert!(release_signals::is_valid_status(status), "{status}");
+        }
     }
 }

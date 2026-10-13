@@ -194,6 +194,17 @@ The Flux destination handler will:
 4. Trigger Flux reconciliation via the webhook (if `reconcile_url` is configured)
 5. Stream release status back to the CLI
 
+The webhook call retries transport errors and 5xx responses with jittered
+exponential backoff for up to 30 seconds, and honours a 429's `Retry-After`
+when it fits in that budget. Any other 4xx is not retried: a 404 means the
+hook path matches no Receiver. A failed webhook never fails the release, since
+the commit is already in the GitOps repository and Flux applies it on its next
+poll. It is recorded as the release signal `reconcile` on the destination:
+`HEALTHY` when the Receiver accepted the request, `DEGRADED` with the reason
+when it did not. `forest release show` prints it under the destination, and a
+release with no `reconcile_url` records no signal. Log lines show the
+Receiver's host only; the hook path, which is the token, is never logged.
+
 ## Repository Layout
 
 Forest organizes the GitOps repository automatically:
@@ -228,7 +239,22 @@ clusters/
 
 ### Release succeeds but manifests don't apply
 
-Check if `reconcile_url` is configured:
+Look at the destination's `reconcile` signal:
+
+```bash
+forest release show <slug>
+#   ✓ [prod] flux-prod [SUCCEEDED]
+#     ⚠ reconcile [DEGRADED] reconcile webhook failed after 5 attempt(s): could not connect: ...
+```
+
+`DEGRADED` means forest pushed the release but could not reach the Receiver,
+so Flux applies it on its next poll. The reason says whether the host did not
+resolve, refused the connection, failed the TLS handshake, or answered with an
+error status. The Receiver's URL must be reachable from wherever forest-server
+runs, which is not necessarily where your laptop can reach.
+
+No `reconcile` line at all means no reconciliation was requested. Check if
+`reconcile_url` is configured:
 
 ```bash
 forest destination list --organisation my-org

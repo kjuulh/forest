@@ -93,6 +93,18 @@ impl ShowCommand {
             }
         }
 
+        // Signals say what a destination's status cannot: flux@1 reports
+        // `reconcile` DEGRADED when the push landed but nothing told Flux to
+        // sync, which a bare SUCCEEDED would hide. A server without the
+        // signal service just shows none.
+        let signals = match grpc.list_signals(intent_id).await {
+            Ok(signals) => signals,
+            Err(e) => {
+                tracing::warn!("could not fetch release signals: {e:#}");
+                Vec::new()
+            }
+        };
+
         let mut output = ShowOutput::new(
             &annotation,
             &project,
@@ -101,6 +113,7 @@ impl ShowCommand {
             &plan_outputs,
             stages_filter,
         );
+        output.attach_signals(&signals);
 
         let format = state.config.format;
         let json_mode = matches!(format, OutputFormat::Json);
@@ -436,6 +449,16 @@ struct DestView {
     status: String,
     error_message: Option<String>,
     stage_id: Option<String>,
+    signals: Vec<SignalView>,
+}
+
+#[derive(Serialize, Clone)]
+struct SignalView {
+    name: String,
+    status: String,
+    detail: String,
+    observed_at: String,
+    reported_by: String,
 }
 
 #[derive(Serialize)]
@@ -508,6 +531,7 @@ impl ShowOutput {
                 status: s.status.clone(),
                 error_message: s.error_message.clone(),
                 stage_id: s.stage_id.clone(),
+                signals: Vec::new(),
             })
             .collect();
 
@@ -561,6 +585,22 @@ impl ShowOutput {
             destinations,
             plan_outputs: plan_views,
             logs: Vec::new(),
+        }
+    }
+
+    fn attach_signals(&mut self, signals: &[forest_grpc_interface::Signal]) {
+        for d in &mut self.destinations {
+            d.signals = signals
+                .iter()
+                .filter(|s| s.destination == d.destination && s.environment == d.environment)
+                .map(|s| SignalView {
+                    name: s.name.clone(),
+                    status: signal_status_name(s.status).to_string(),
+                    detail: s.detail.clone(),
+                    observed_at: s.observed_at.clone(),
+                    reported_by: s.reported_by.clone(),
+                })
+                .collect();
         }
     }
 
@@ -646,18 +686,7 @@ impl ShowOutput {
         if !self.destinations.is_empty() {
             let _ = writeln!(out, "destinations:");
             for d in &self.destinations {
-                let icon = stage_icon(&d.status);
-                let _ = writeln!(
-                    out,
-                    "  {icon} [{env}] {dest} [{status}]",
-                    icon = icon,
-                    env = d.environment,
-                    dest = d.destination,
-                    status = d.status,
-                );
-                if let Some(err) = &d.error_message {
-                    let _ = writeln!(out, "    error: {err}");
-                }
+                render_destination(&mut out, d);
             }
             out.push('\n');
         }
@@ -722,6 +751,57 @@ fn render_logs_only(plan_outputs: &[PlanView], log_buffers: &BTreeMap<String, Ve
                 println!("{}", line.line);
             }
         }
+    }
+}
+
+fn render_destination(out: &mut String, d: &DestView) {
+    use std::fmt::Write;
+    let _ = writeln!(
+        out,
+        "  {icon} [{env}] {dest} [{status}]",
+        icon = stage_icon(&d.status),
+        env = d.environment,
+        dest = d.destination,
+        status = d.status,
+    );
+    if let Some(err) = &d.error_message {
+        let _ = writeln!(out, "    error: {err}");
+    }
+    for s in &d.signals {
+        let _ = writeln!(
+            out,
+            "    {icon} {name} [{status}] {detail}",
+            icon = signal_icon(&s.status),
+            name = s.name,
+            status = s.status,
+            detail = s.detail,
+        );
+    }
+}
+
+/// The `HealthStatus` wire value as the name the server stores and a person
+/// reads.
+fn signal_status_name(status: i32) -> &'static str {
+    use forest_grpc_interface::HealthStatus;
+    match HealthStatus::try_from(status) {
+        Ok(HealthStatus::Healthy) => "HEALTHY",
+        Ok(HealthStatus::Progressing) => "PROGRESSING",
+        Ok(HealthStatus::Degraded) => "DEGRADED",
+        Ok(HealthStatus::Unhealthy) => "UNHEALTHY",
+        Ok(HealthStatus::Missing) => "MISSING",
+        Ok(HealthStatus::Unspecified) | Err(_) => "UNSPECIFIED",
+    }
+}
+
+fn signal_icon(status: &str) -> &'static str {
+    match status {
+        "HEALTHY" => "✓",
+        "PROGRESSING" => "▶",
+        // A warning, not a cross: the destination succeeded, and this says
+        // what that success does not yet mean.
+        "DEGRADED" => "⚠",
+        "UNHEALTHY" | "MISSING" => "✗",
+        _ => "•",
     }
 }
 
@@ -806,4 +886,57 @@ async fn prompt_project_select_opt(
     } else {
         Some(picked)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn succeeded_destination(signals: Vec<SignalView>) -> DestView {
+        DestView {
+            destination: "flux-prod".into(),
+            environment: "prod".into(),
+            status: "SUCCEEDED".into(),
+            error_message: None,
+            stage_id: None,
+            signals,
+        }
+    }
+
+    /// The case #298 is about: the destination SUCCEEDED, but Flux was never
+    /// told to sync. The warning has to be on the destination's own lines,
+    /// not only somewhere in the log dump.
+    #[test]
+    fn a_degraded_reconcile_shows_under_a_succeeded_destination() {
+        let mut out = String::new();
+        render_destination(
+            &mut out,
+            &succeeded_destination(vec![SignalView {
+                name: "reconcile".into(),
+                status: "DEGRADED".into(),
+                detail: "reconcile webhook failed after 4 attempt(s)".into(),
+                observed_at: String::new(),
+                reported_by: "forest/flux@1".into(),
+            }]),
+        );
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "  ✓ [prod] flux-prod [SUCCEEDED]");
+        assert_eq!(
+            lines[1],
+            "    ⚠ reconcile [DEGRADED] reconcile webhook failed after 4 attempt(s)"
+        );
+    }
+
+    #[test]
+    fn a_destination_without_signals_renders_as_before() {
+        let mut out = String::new();
+        render_destination(&mut out, &succeeded_destination(Vec::new()));
+        assert_eq!(out, "  ✓ [prod] flux-prod [SUCCEEDED]\n");
+    }
+
+    #[test]
+    fn unknown_wire_statuses_read_as_unspecified_rather_than_healthy() {
+        assert_eq!(signal_status_name(0), "UNSPECIFIED");
+        assert_eq!(signal_status_name(999), "UNSPECIFIED");
+    }
 }
