@@ -35,7 +35,7 @@ pub struct BuildInfo {
 
 /// Environment variable carrying the git commit, set on the image.
 const COMMIT_VAR: &str = "FOREST_GIT_SHA";
-/// Environment variable carrying the RFC 3339 build timestamp.
+/// Environment variable carrying an RFC 3339 timestamp or Unix epoch.
 const BUILD_TIME_VAR: &str = "FOREST_BUILD_TIME";
 
 impl BuildInfo {
@@ -44,7 +44,7 @@ impl BuildInfo {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
             commit: read(COMMIT_VAR),
-            build_time: read(BUILD_TIME_VAR),
+            build_time: normalize_build_time(&read(BUILD_TIME_VAR)),
         }
     }
 }
@@ -66,6 +66,24 @@ fn read(key: &str) -> String {
         }
         Err(_) => String::new(),
     }
+}
+
+/// Hold `build_time` to the RFC 3339 contract that status responses and HTML
+/// `<time datetime>` attributes expose.
+///
+/// Some CI systems only offer the build time as Unix seconds (Woodpecker's
+/// `CI_PIPELINE_CREATED`, or a `SOURCE_DATE_EPOCH`-style stamp), and passing
+/// that through gave the footer a `datetime` browsers cannot parse. An integer
+/// is converted; anything else, RFC 3339 included, is left exactly as it was
+/// stamped.
+fn normalize_build_time(value: &str) -> String {
+    let Ok(timestamp) = value.parse::<i64>() else {
+        return value.to_string();
+    };
+
+    chrono::DateTime::from_timestamp(timestamp, 0)
+        .map(|timestamp| timestamp.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .unwrap_or_else(|| value.to_string())
 }
 
 #[cfg(test)]
@@ -96,6 +114,31 @@ mod tests {
         unsafe { std::env::set_var("FOREST_BUILD_INFO_TEST2", "  437c7b1\n") };
         assert_eq!(read("FOREST_BUILD_INFO_TEST2"), "437c7b1");
         unsafe { std::env::remove_var("FOREST_BUILD_INFO_TEST2") };
+    }
+
+    #[test]
+    fn unix_build_timestamp_is_normalized_to_rfc3339() {
+        assert_eq!(normalize_build_time("1700000000"), "2023-11-14T22:13:20Z");
+    }
+
+    #[test]
+    fn an_rfc3339_build_timestamp_is_kept_as_stamped() {
+        assert_eq!(
+            normalize_build_time("2026-09-20T01:00:35+02:00"),
+            "2026-09-20T01:00:35+02:00"
+        );
+    }
+
+    /// Not a timestamp forage can convert, so it is not rewritten into one: an
+    /// absent stamp stays absent, and anything else stays visibly what it was.
+    #[test]
+    fn empty_and_unconvertible_stamps_are_left_alone() {
+        assert_eq!(normalize_build_time(""), "");
+        assert_eq!(normalize_build_time("yesterday"), "yesterday");
+        assert_eq!(
+            normalize_build_time(&i64::MAX.to_string()),
+            i64::MAX.to_string()
+        );
     }
 
     #[test]
