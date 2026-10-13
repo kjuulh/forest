@@ -32,6 +32,8 @@ RUN mkdir -p /usr/local/cargo && \
     > /usr/local/cargo/config.toml
 ENV SQLX_OFFLINE=true
 
+RUN cargo install cargo-chef --locked --version 0.1.78
+
 # The recipe is a digest of every manifest in the workspace and nothing else, so
 # this stage re-runs on any commit but its *output* only changes when a
 # Cargo.toml or Cargo.lock does.
