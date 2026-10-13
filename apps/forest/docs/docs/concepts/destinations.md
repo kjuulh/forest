@@ -73,6 +73,12 @@ forest destination create \
   --metadata provider_token="$PROVIDER_TOKEN"
 ```
 
+For generic providers, destination metadata owns settings such as accounts,
+clusters, and credentials. Project configuration adds only keys the destination
+does not already define; it cannot replace destination values or send
+`provider_url`/`provider_token` as provider metadata. Keep credentials in
+destination-sensitive metadata, never in project artifacts.
+
 Provider authentication, mTLS, identity, release-token audience binding,
 revocation, callback authorization, and cross-tenant tests remain launch gates.
 Do not expose an arbitrary provider URL allowlist to untrusted organisation

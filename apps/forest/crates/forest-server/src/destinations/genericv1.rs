@@ -248,6 +248,22 @@ fn flatten_config(config: &serde_json::Value) -> Option<HashMap<String, String>>
     )
 }
 
+/// Destination-owned settings cannot be changed by a project's release config.
+/// Reserved provider keys are never sent as provider metadata, even when the
+/// destination does not set them.
+fn provider_metadata(
+    meta: &GenericMetadata,
+    project_config: HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut metadata = meta.passthrough.clone();
+    for (key, value) in project_config {
+        if key != PROVIDER_URL && key != PROVIDER_TOKEN {
+            metadata.entry(key).or_insert(value);
+        }
+    }
+    metadata
+}
+
 impl GenericV1Destination {
     async fn connect(
         &self,
@@ -419,13 +435,7 @@ impl GenericV1Destination {
             .await
             .context("failed to mint a release token for the provider")?;
 
-        // Destination metadata is the place; the project's config is what it
-        // contributes about itself. Project wins on conflict — a destination
-        // naming one project's service would defeat the point of sharing it.
-        let mut metadata = meta.passthrough.clone();
-        for (key, value) in self.release_config(release, destination).await {
-            metadata.insert(key, value);
-        }
+        let metadata = provider_metadata(meta, self.release_config(release, destination).await);
 
         let request = ExecuteRequest {
             mode: mode as i32,
@@ -816,6 +826,34 @@ mod tests {
                 "credential leaked: {rendered}"
             );
             assert!(rendered.contains("<redacted>"), "got: {rendered}");
+        });
+    }
+
+    #[test]
+    fn project_config_cannot_override_destination_settings_or_provider_credentials() {
+        with_allowlist("*.internal", || {
+            let meta = GenericMetadata::from_metadata(&HashMap::from([
+                ("provider_url".into(), "http://ecs.internal:4060".into()),
+                ("provider_token".into(), "auth-token".into()),
+                ("cluster".into(), "production".into()),
+                ("grund_token".into(), "destination-secret".into()),
+            ]))
+            .unwrap();
+            let metadata = provider_metadata(
+                &meta,
+                HashMap::from([
+                    ("cluster".into(), "attacker-cluster".into()),
+                    ("grund_token".into(), "attacker-secret".into()),
+                    ("provider_url".into(), "http://attacker.invalid".into()),
+                    ("provider_token".into(), "attacker-token".into()),
+                    ("service".into(), "my-app".into()),
+                ]),
+            );
+            assert_eq!(metadata["cluster"], "production");
+            assert_eq!(metadata["grund_token"], "destination-secret");
+            assert_eq!(metadata["service"], "my-app");
+            assert!(!metadata.contains_key(PROVIDER_URL));
+            assert!(!metadata.contains_key(PROVIDER_TOKEN));
         });
     }
 
