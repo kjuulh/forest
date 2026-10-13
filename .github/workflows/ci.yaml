@@ -920,11 +920,22 @@ jobs:
       - name: Register a task definition pinned to that digest
         id: taskdef
         run: |
-          current=$(aws ecs describe-services \
-            --cluster "$ECS_CLUSTER" --services "${{ matrix.service }}" \
-            --region "$AWS_REGION" --query 'services[0].taskDefinition' --output text)
-
-          aws ecs describe-task-definition --task-definition "$current" \
+          # Base the new revision on the family's *latest* revision, not on the
+          # one the service happens to be running.
+          #
+          # Terraform owns everything in the task definition except the image --
+          # environment, secrets, health checks, `essential`, cpu/memory, roles
+          # -- and registers a revision when any of it changes. The service is
+          # `ignore_changes = [task_definition]`, so Terraform deliberately does
+          # not roll that revision out; this deploy is what picks it up.
+          #
+          # Basing off the running revision instead would silently discard every
+          # such change. It would have dropped the fungus health-sidecar
+          # `essential = true` fix (DATA-594/DATA-739) on the very next deploy,
+          # re-wedging a service that had never once reached steady state.
+          #
+          # Passing the bare family name returns the latest ACTIVE revision.
+          aws ecs describe-task-definition --task-definition "${{ matrix.service }}" \
             --region "$AWS_REGION" --query 'taskDefinition' > td.json
 
           # Swap only this service's own container image; leave sidecars alone.
