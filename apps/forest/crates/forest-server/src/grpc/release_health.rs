@@ -1,7 +1,7 @@
 use forest_grpc_interface::{
-    release_health_service_server::ReleaseHealthService, DestinationHealth, GetReleaseHealthRequest,
-    GetReleaseHealthResponse, HealthObservation, HealthStatus, ReleaseHealthEvent,
-    ReportHealthRequest, ReportHealthResponse, ResourceHealth, WatchReleaseHealthRequest,
+    DestinationHealth, GetReleaseHealthRequest, GetReleaseHealthResponse, HealthObservation,
+    HealthStatus, ReleaseHealthEvent, ReportHealthRequest, ReportHealthResponse, ResourceHealth,
+    WatchReleaseHealthRequest, release_health_service_server::ReleaseHealthService,
 };
 use futures::StreamExt;
 use uuid::Uuid;
@@ -32,11 +32,31 @@ fn observation_from_json(obs: &serde_json::Value) -> Option<HealthObservation> {
         .map(|arr| {
             arr.iter()
                 .map(|r| ResourceHealth {
-                    kind: r.get("kind").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                    name: r.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                    namespace: r.get("namespace").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                    status: status_string_to_proto(r.get("status").and_then(|v| v.as_str()).unwrap_or("UNSPECIFIED")),
-                    message: r.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    kind: r
+                        .get("kind")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    name: r
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    namespace: r
+                        .get("namespace")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    status: status_string_to_proto(
+                        r.get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("UNSPECIFIED"),
+                    ),
+                    message: r
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     properties: r
                         .get("properties")
                         .and_then(|p| p.as_object())
@@ -53,9 +73,21 @@ fn observation_from_json(obs: &serde_json::Value) -> Option<HealthObservation> {
 
     Some(HealthObservation {
         resources,
-        observed_at: obs.get("observed_at").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        status: status_string_to_proto(obs.get("status").and_then(|v| v.as_str()).unwrap_or("UNSPECIFIED")),
-        message: obs.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        observed_at: obs
+            .get("observed_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        status: status_string_to_proto(
+            obs.get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("UNSPECIFIED"),
+        ),
+        message: obs
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
     })
 }
 

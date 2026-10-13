@@ -425,8 +425,7 @@ impl FluxV1Handler {
             annotations.push(format!("    forest.sh/environment: \"{}\"", id.environment));
         }
 
-        let labels_block = if identity.is_some() {
-            let id = identity.unwrap();
+        let labels_block = if let Some(id) = identity {
             format!(
                 "  labels:\n    forest.sh/managed: \"true\"\n    forest.sh/organisation: \"{}\"\n    forest.sh/project: \"{}\"",
                 id.organisation, id.project,

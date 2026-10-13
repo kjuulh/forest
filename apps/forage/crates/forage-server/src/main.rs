@@ -1,6 +1,5 @@
 mod auth;
 mod build_info;
-mod cli;
 mod checks;
 mod cli;
 mod compute_grpc;

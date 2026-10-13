@@ -817,7 +817,6 @@ fn render_logs_only(plan_outputs: &[PlanView], log_buffers: &BTreeMap<String, Ve
     }
 }
 
-
 fn render_destination(out: &mut String, d: &DestView) {
     use std::fmt::Write;
     let _ = writeln!(
@@ -1009,7 +1008,6 @@ mod tests {
             "    ⚠ reconcile [DEGRADED] reconcile webhook failed after 4 attempt(s)"
         );
     }
-
 
     fn plan_stage(approval_status: Option<&str>) -> StageView {
         StageView {

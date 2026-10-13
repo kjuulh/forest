@@ -37,7 +37,11 @@ fn release_host() -> String {
 }
 
 fn api_latest_url() -> String {
-    format!("https://{}/api/v1/repos/{}/releases/latest", release_host(), REPO)
+    format!(
+        "https://{}/api/v1/repos/{}/releases/latest",
+        release_host(),
+        REPO
+    )
 }
 
 fn release_download_url(tag: &str, asset: &str) -> String {
@@ -53,7 +57,12 @@ fn release_download_url(tag: &str, asset: &str) -> String {
 fn release_page_url(version: &Version) -> String {
     // Gitea release pages live under /<repo>/releases/tag/<tag>. We
     // store versions without the leading "v"; tags carry it.
-    format!("https://{}/{}/releases/tag/v{}", release_host(), REPO, version)
+    format!(
+        "https://{}/{}/releases/tag/v{}",
+        release_host(),
+        REPO,
+        version
+    )
 }
 
 /// How long a successful version check is considered fresh before we
@@ -228,9 +237,16 @@ async fn download_release_asset(tag: &str, asset: &str, dest: &Path) -> anyhow::
         .with_context(|| format!("GET {url}"))?
         .error_for_status()
         .with_context(|| {
-            format!("GET {url} — check that the tag exists at https://{}/{}/releases", release_host(), REPO)
+            format!(
+                "GET {url} — check that the tag exists at https://{}/{}/releases",
+                release_host(),
+                REPO
+            )
         })?;
-    let bytes = resp.bytes().await.with_context(|| format!("read body of GET {url}"))?;
+    let bytes = resp
+        .bytes()
+        .await
+        .with_context(|| format!("read body of GET {url}"))?;
     tokio::fs::write(dest, &bytes)
         .await
         .with_context(|| format!("write {}", dest.display()))?;
