@@ -92,6 +92,8 @@ COPY --from=builder /mnt/src/static /static
 # it here means the image still self-describes (`docker inspect` shows both
 # values, and the server reads them at startup) while the expensive builder
 # layers stay cacheable.
+# Woodpecker rebuilds this image only when apps/forage/** or ci.yaml changes;
+# a Forest-only fork sync does not refresh the published Forage image.
 ARG GIT_SHA=""
 ARG BUILD_TIME=""
 ENV FOREST_GIT_SHA=$GIT_SHA
