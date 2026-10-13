@@ -76,8 +76,10 @@ forest destination create \
 For generic providers, destination metadata owns settings such as accounts,
 clusters, and credentials. Project configuration adds only keys the destination
 does not already define; it cannot replace destination values or send
-`provider_url`/`provider_token` as provider metadata. Keep credentials in
-destination-sensitive metadata, never in project artifacts.
+`provider_url`/`provider_token` as provider metadata. Fields the provider declares
+sensitive at destination creation cannot come from project configuration even
+when unset on the destination. Keep credentials in destination-sensitive metadata,
+never in project artifacts.
 
 Fields marked `sensitive` by `Describe` are withheld from destination listing,
 even if the creator did not name them in `sensitive_keys`; provider failure

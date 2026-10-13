@@ -253,15 +253,19 @@ fn flatten_config(config: &serde_json::Value) -> Option<HashMap<String, String>>
 }
 
 /// Destination-owned settings cannot be changed by a project's release config.
-/// Reserved provider keys are never sent as provider metadata, even when the
-/// destination does not set them.
+/// Reserved provider keys and credentials declared sensitive at destination
+/// creation are never accepted from the project, even if unset on the destination.
 fn provider_metadata(
     meta: &GenericMetadata,
     project_config: HashMap<String, String>,
+    sensitive_keys: &[String],
 ) -> HashMap<String, String> {
     let mut metadata = meta.passthrough.clone();
     for (key, value) in project_config {
-        if key != PROVIDER_URL && key != PROVIDER_TOKEN {
+        if key != PROVIDER_URL
+            && key != PROVIDER_TOKEN
+            && !sensitive_keys.iter().any(|sensitive| sensitive == &key)
+        {
             metadata.entry(key).or_insert(value);
         }
     }
@@ -554,7 +558,11 @@ impl GenericV1Destination {
     ) -> anyhow::Result<Option<String>> {
         let mut client = self.connect(meta).await?;
 
-        let metadata = provider_metadata(meta, self.release_config(release, destination).await);
+        let metadata = provider_metadata(
+            meta,
+            self.release_config(release, destination).await,
+            &destination.sensitive_keys,
+        );
         let approved_plan_output = if mode == ReleaseMode::Deploy {
             Self::approved_plan_output(&self.db, release, destination).await?
         } else {
@@ -1005,6 +1013,7 @@ mod tests {
                     ("provider_token".into(), "attacker-token".into()),
                     ("service".into(), "my-app".into()),
                 ]),
+                &["grund_token".into()],
             );
             assert_eq!(metadata["cluster"], "production");
             assert_eq!(metadata["grund_token"], "destination-secret");
@@ -1013,6 +1022,23 @@ mod tests {
             assert!(!metadata.contains_key(PROVIDER_TOKEN));
             let debug = format!("{meta:?}");
             assert!(!debug.contains("destination-secret"), "{debug}");
+        });
+    }
+
+    #[test]
+    fn project_config_cannot_supply_an_unset_provider_credential() {
+        with_allowlist("*.internal", || {
+            let meta = GenericMetadata::from_metadata(&HashMap::from([(
+                "provider_url".into(),
+                "http://ecs.internal:4060".into(),
+            )]))
+            .unwrap();
+            let metadata = provider_metadata(
+                &meta,
+                HashMap::from([("grund_token".into(), "attacker-secret".into())]),
+                &["grund_token".into()],
+            );
+            assert!(!metadata.contains_key("grund_token"));
         });
     }
 
