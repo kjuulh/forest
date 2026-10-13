@@ -461,8 +461,25 @@ impl ReleaseRegistry {
         }
 
         if by_name {
-            // An explicit --destination overrides the declaration; say so rather
-            // than quietly doing something else.
+            // Naming a destination is an override for built-in types, not
+            // consent to run an external provider on an undeclared project.
+            for rec in &recs {
+                if rec.destination_type == destination_selector::GENERIC_DESTINATION_TYPE
+                    && !destination_selector::declares_generic_destination(
+                        declared,
+                        &rec.environment,
+                        &rec.name,
+                    )
+                {
+                    anyhow::bail!(
+                        "generic destination {} in environment {} requires an explicitly typed forest/generic@1 destination item matching its name",
+                        rec.name,
+                        rec.environment,
+                    );
+                }
+            }
+
+            // Non-generic --destination retains its declaration override.
             for rec in &recs {
                 let declared_here: Vec<&str> =
                     destination_selector::selectors_for_env(declared, &rec.environment);

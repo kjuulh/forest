@@ -24,6 +24,9 @@
 
 use anyhow::Context;
 
+/// External generic providers are opt-in even for legacy, untyped artifacts.
+pub(crate) const GENERIC_DESTINATION_TYPE: &str = "forest/generic@1";
+
 /// Does `pattern`, as declared by a project, select the destination named
 /// `destination_name`?
 ///
@@ -206,12 +209,17 @@ pub async fn recorded_declaration(
 /// most recent annotation, which is what its next release is most likely to
 /// carry. That makes this a warning, not a guarantee — a project whose next
 /// artifact declares differently is judged by that artifact when it releases.
+/// Generic destinations are opt-in, so they never widen undeclared projects.
 pub async fn projects_widened_by(
     db: &sqlx::PgPool,
     organisation: &str,
     environment: &str,
     destination_type: &str,
 ) -> anyhow::Result<Vec<String>> {
+    if destination_type == GENERIC_DESTINATION_TYPE {
+        return Ok(Vec::new());
+    }
+
     let rows = sqlx::query!(
         r#"
         SELECT DISTINCT ON (p.id)
@@ -271,12 +279,10 @@ pub async fn projects_widened_by(
 /// the one `destination create --type` takes and the one `release prepare`
 /// renders into each item record, so they compare directly.
 ///
-/// **Blank on either side means "do not filter on type."** That is the
-/// compatibility hinge, and it has two real sources: an artifact annotated
-/// before item records carried a type at all (`destination_type` is
-/// `#[serde(default)]`), and a caller that has no type to offer. Neither is a
-/// statement about kind, and reading absence as "matches nothing" would fail
-/// stages for projects that never said anything wrong.
+/// **Blank on either side means "do not filter on type" for non-generic
+/// destinations.** Legacy artifacts omitted the type, and narrowing those
+/// would break their existing releases. Generic destinations are different:
+/// an external provider must be named by an explicitly typed item.
 pub fn type_matches(declared: &str, actual: &str) -> bool {
     let declared = declared.trim();
     let actual = actual.trim();
@@ -301,9 +307,29 @@ pub fn type_matches(declared: &str, actual: &str) -> bool {
 /// artifact carries no terraform to run. The destination it *did* declare was
 /// released to as well, so the failure read as "half the release is broken"
 /// rather than as "forest scheduled something nobody asked for".
+///
+/// A generic destination also requires an item explicitly typed
+/// `forest/generic@1`; legacy untyped items do not authorise it.
 pub fn selects(item: &DeploymentItem, destination_name: &str, destination_type: &str) -> bool {
     matches(&item.destination, destination_name)
-        && type_matches(&item.destination_type, destination_type)
+        && (if destination_type == GENERIC_DESTINATION_TYPE {
+            item.destination_type.trim() == GENERIC_DESTINATION_TYPE
+        } else {
+            type_matches(&item.destination_type, destination_type)
+        })
+}
+
+/// A generic destination may run only for a project that declared its name,
+/// environment and exact type. An explicit CLI destination flag cannot opt in
+/// on behalf of an artifact with no matching item.
+pub fn declares_generic_destination(
+    items: &[DeploymentItem],
+    environment: &str,
+    destination_name: &str,
+) -> bool {
+    items.iter().any(|item| {
+        item.env == environment && selects(item, destination_name, GENERIC_DESTINATION_TYPE)
+    })
 }
 
 /// Narrow a set of candidate destinations to the ones a project declared for
@@ -317,14 +343,11 @@ pub fn selects(item: &DeploymentItem, destination_name: &str, destination_type: 
 /// `describe` yields a candidate's `(name, type)`. Both are consulted — see
 /// [`selects`].
 ///
-/// - Nothing declared for `environment` → every candidate **of a type the
-///   artifact renders at all** (see [`rendered_types`]). This is the
-///   compatibility hinge: a project that declares no destinations keeps
-///   releasing to the whole environment — but only to the kinds of place it
-///   has something for. Without the type half, adding a destination of a new
-///   kind to an environment silently widened every undeclared project onto it,
-///   and their next release failed there (forest#288). An artifact that renders
-///   no typed item at all still fans out to everything, as it always has.
+/// - Nothing declared for `environment` → every non-generic candidate **of a
+///   type the artifact renders at all** (see [`rendered_types`]). Legacy
+///   artifacts without a known type still fan out to non-generic destinations.
+///   External `forest/generic@1` destinations never join this fan-out: they
+///   require an explicitly typed, name-matching item for this environment.
 /// - Declared, and something matches → the matching subset.
 /// - Declared, and nothing matches → `Err` with a message naming the environment,
 ///   what it holds, and the selectors that matched none of it. Never an empty
@@ -461,45 +484,43 @@ pub fn rendered_types(items: &[DeploymentItem]) -> Option<std::collections::BTre
 }
 
 /// The undeclared half of [`narrow_to_declared`]: the whole environment, minus
-/// the kinds of destination this artifact has nothing for.
+/// generic destinations and kinds this artifact has nothing for. An external
+/// generic provider is never selected by fan-out, even when legacy artifacts
+/// do not record any types.
 ///
-/// The type rule is the one `work_dirs` and [`selects`] already apply — a
-/// terraform destination is handed only what a terraform item rendered — so a
-/// candidate of a type the artifact never renders could only ever fail there.
-/// Skipping it is the same "not scheduled, not failed" as a declared type
-/// mismatch.
-///
-/// If that leaves nothing, it is an error rather than an empty success, for the
-/// same reason as the declared path: silently deploying nothing is the failure
-/// this module exists to prevent.
+/// If that leaves nothing, it is an error rather than an empty success: an
+/// explicit generic item is required to release to a generic-only environment.
 fn narrow_undeclared<T>(
     candidates: Vec<T>,
     items: &[DeploymentItem],
     environment: &str,
     describe: impl Fn(&T) -> (&str, &str),
 ) -> Result<Vec<T>, String> {
-    let Some(rendered) = rendered_types(items) else {
-        return Ok(candidates);
-    };
-
+    let rendered = rendered_types(items);
     let available: Vec<String> = candidates
         .iter()
         .map(|candidate| describe_one(&describe, candidate))
         .collect();
+    let mut has_generic = false;
 
     let selected: Vec<T> = candidates
         .into_iter()
         .filter(|candidate| {
             let (name, destination_type) = describe(candidate);
-            let keep = rendered
-                .iter()
-                .any(|rendered| type_matches(rendered, destination_type));
+            let generic = destination_type == GENERIC_DESTINATION_TYPE;
+            has_generic |= generic;
+            let keep = !generic
+                && rendered.as_ref().is_none_or(|types| {
+                    types
+                        .iter()
+                        .any(|rendered| type_matches(rendered, destination_type))
+                });
             if !keep {
                 tracing::info!(
                     environment,
                     destination = name,
                     destination_type,
-                    "not scheduled: this project declares nothing for the environment and renders nothing of this destination's type"
+                    "not scheduled: this project has not declared this generic destination or rendered its non-generic type"
                 );
             }
             keep
@@ -507,10 +528,18 @@ fn narrow_undeclared<T>(
         .collect();
 
     if selected.is_empty() && !available.is_empty() {
+        let kinds = rendered.map_or_else(
+            || "unknown".to_string(),
+            |types| types.into_iter().collect::<Vec<_>>().join(", "),
+        );
+        let generic_requirement = if has_generic {
+            "; forest/generic@1 requires an explicitly typed destination item"
+        } else {
+            ""
+        };
         return Err(format!(
-            "this project declares no destinations for environment '{environment}', and none of what it holds ({}) is of a type the artifact renders ({})",
+            "this project declares no destinations for environment '{environment}', and none of what it holds ({}) is selectable by the artifact's rendered types ({kinds}){generic_requirement}",
             available.join(", "),
-            rendered.into_iter().collect::<Vec<_>>().join(", "),
         ));
     }
 
@@ -521,18 +550,18 @@ fn narrow_undeclared<T>(
 /// for this project's next release there **without the project having asked
 /// for it** — that is, through the undeclared fan-out of [`narrow_to_declared`]?
 ///
-/// `items` is the project's latest recorded declaration: `None` for an
-/// artifact annotated before declarations were recorded, which fans out to
-/// everything and so always gains the destination.
-///
-/// A project that *declares* destinations for the environment is not widened
-/// by this: whether one of its selectors happens to match the new name is its
-/// own explicit choice, and it is answered by the selector, not by fan-out.
+/// Generic destinations are never selected by undeclared fan-out. For other
+/// types, `None` means a legacy annotation without a recorded declaration and
+/// therefore retains the existing fan-out and warning behavior.
 pub fn widened_by_new_destination(
     items: Option<&[DeploymentItem]>,
     environment: &str,
     destination_type: &str,
 ) -> bool {
+    if destination_type == GENERIC_DESTINATION_TYPE {
+        return false;
+    }
+
     let Some(items) = items else {
         return true;
     };
@@ -671,8 +700,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        DeploymentItem, config_for_destination, matches, narrow_to_declared, parse_declaration,
-        selectors_for_env, type_matches, widened_by_new_destination,
+        DeploymentItem, config_for_destination, declares_generic_destination, matches,
+        narrow_to_declared, parse_declaration, projects_widened_by, selectors_for_env,
+        type_matches, widened_by_new_destination,
     };
 
     /// What `release prepare` writes, at the path it writes it to — selector and
@@ -1207,17 +1237,69 @@ mod tests {
         ));
     }
 
-    /// Declaring nothing at all for an environment still fans out — the hinge
-    /// every project that names no destinations depends on. Unchanged by the
-    /// type filter, and asserted here because the filter now runs over items
-    /// rather than over selectors.
     #[test]
-    fn nothing_declared_for_the_environment_still_fans_out_across_its_own_kinds() {
+    fn generic_requires_a_typed_item_matching_name_and_environment_even_when_named() {
+        let generic = dest("grund-forest-pilot-dev", "forest/generic@1");
+        let absent = Vec::new();
+        let legacy = vec![declared("dev", "^grund-forest-pilot-dev$", "")];
+        let wrong_type = vec![declared(
+            "dev",
+            "^grund-forest-pilot-dev$",
+            "forest/terraform@1",
+        )];
+        let wrong_name = vec![declared("dev", "^other$", "forest/generic@1")];
+        let wrong_environment = vec![declared(
+            "prod",
+            "^grund-forest-pilot-dev$",
+            "forest/generic@1",
+        )];
+        for items in [
+            &absent,
+            &legacy,
+            &wrong_type,
+            &wrong_name,
+            &wrong_environment,
+        ] {
+            assert!(!declares_generic_destination(
+                items,
+                "dev",
+                "grund-forest-pilot-dev"
+            ));
+            assert!(
+                narrow_to_declared(vec![generic.clone()], items, "dev", describe).is_err(),
+                "a generic-only dev release cannot silently select nothing"
+            );
+        }
+
+        let opted_in = vec![declared(
+            "dev",
+            "^grund-forest-pilot-dev$",
+            "forest/generic@1",
+        )];
+        assert!(declares_generic_destination(
+            &opted_in,
+            "dev",
+            "grund-forest-pilot-dev"
+        ));
+        assert!(!declares_generic_destination(&opted_in, "dev", "other"));
+        let selected = narrow_to_declared(
+            vec![generic.clone(), dest("other", "forest/generic@1")],
+            &opted_in,
+            "dev",
+            describe,
+        )
+        .expect("the explicitly typed, name-matching generic destination");
+        assert_eq!(selected, vec![generic]);
+    }
+
+    /// Non-generic undeclared fan-out survives, but generic never inherits an
+    /// opt-in from a different environment, even if the artifact renders it.
+    #[test]
+    fn undeclared_environment_fans_out_only_to_rendered_non_generic_types() {
         let items = vec![
             declared("some-other-env", "^dev/.*$", "forest/terraform@1"),
             declared("some-other-env", "^x$", "forest/generic@1"),
         ];
-
         let candidates = vec![
             dest("a", "forest/generic@1"),
             dest("b", "forest/terraform@1"),
@@ -1225,30 +1307,25 @@ mod tests {
         ];
 
         let selected =
-            narrow_to_declared(candidates, &items, "platform-dev", describe).expect("fans out");
+            narrow_to_declared(candidates, &items, "platform-dev", describe).expect("terraform");
 
-        assert_eq!(selected.len(), 3, "every destination of a rendered type");
+        assert_eq!(selected, vec![dest("b", "forest/terraform@1")]);
     }
 
-    /// forest#288, as it would have happened: an ECS-only project that declares
-    /// nothing for `dev`, and a terraform destination added to `dev`. The new
-    /// destination must not be scheduled — its artifact has no terraform to run.
+    /// A generic-only release without a dev declaration fails visibly rather
+    /// than silently becoming an empty release or reaching the external provider.
     #[test]
-    fn a_new_kind_of_destination_does_not_widen_an_undeclared_project() {
+    fn generic_only_undeclared_environment_fails_with_opt_in_guidance() {
         let items = vec![declared("prod", "^prod/.*$", "forest/generic@1")];
+        let candidates = vec![dest("grund-forest-pilot-dev", "forest/generic@1")];
+        let error = narrow_to_declared(candidates, &items, "dev", describe)
+            .expect_err("generic requires explicit dev consent");
 
-        let candidates = vec![
-            dest("dev/eu-west-1/development", "forest/generic@1"),
-            dest("dev/eu-west-1/core", "forest/terraform@1"),
-        ];
-
-        let selected =
-            narrow_to_declared(candidates, &items, "dev", describe).expect("the ECS one remains");
-
-        assert_eq!(
-            selected,
-            vec![dest("dev/eu-west-1/development", "forest/generic@1")]
+        assert!(
+            error.contains("explicitly typed destination item"),
+            "{error}"
         );
+        assert!(error.contains("grund-forest-pilot-dev"), "{error}");
     }
 
     /// When the type filter leaves nothing, say so: an empty success would be a
@@ -1272,24 +1349,24 @@ mod tests {
         assert!(error.contains("forest/generic@1"), "{error}");
     }
 
-    /// The compatibility hinge, kept: with no item records at all there is no
-    /// statement about kind, so nothing is filtered.
+    /// Legacy artifacts with no recorded items retain their non-generic
+    /// fan-out, but cannot accidentally call an external generic provider.
     #[test]
-    fn an_artifact_with_no_items_still_fans_out_to_everything() {
+    fn an_artifact_with_no_items_excludes_generic_from_fan_out() {
         let candidates = vec![
             dest("a", "forest/generic@1"),
             dest("b", "forest/terraform@1"),
         ];
 
-        let selected = narrow_to_declared(candidates, &[], "dev", describe).expect("no filter");
+        let selected = narrow_to_declared(candidates, &[], "dev", describe).expect("terraform");
 
-        assert_eq!(selected.len(), 2);
+        assert_eq!(selected, vec![dest("b", "forest/terraform@1")]);
     }
 
-    /// An item recorded before items carried a type says nothing about kind
-    /// either, so it must not narrow.
+    /// An old untyped item removes the non-generic type filter, not the
+    /// explicit-consent requirement for generic destinations.
     #[test]
-    fn an_untyped_item_anywhere_disables_the_type_filter() {
+    fn an_untyped_item_elsewhere_preserves_non_generic_fan_out_only() {
         let items = vec![
             declared("prod", "^prod/.*$", "forest/generic@1"),
             declared("prod", "^prod-tf$", ""),
@@ -1299,28 +1376,47 @@ mod tests {
             dest("b", "forest/terraform@1"),
         ];
 
-        let selected = narrow_to_declared(candidates, &items, "dev", describe).expect("no filter");
+        let selected = narrow_to_declared(candidates, &items, "dev", describe).expect("terraform");
 
-        assert_eq!(selected.len(), 2);
+        assert_eq!(selected, vec![dest("b", "forest/terraform@1")]);
     }
 
-    /// `destination create`'s warning asks the same question the scheduler
-    /// answers: an ECS-only project that declares nothing for `dev` is widened
-    /// by a new ECS destination there, and not by a terraform one.
+    /// Destination-create warnings mirror scheduling: undeclared generic
+    /// destinations widen nobody; unchanged non-generic kinds still can.
     #[test]
-    fn a_new_destination_widens_only_undeclared_projects_that_render_its_kind() {
-        let ecs_only = vec![declared("prod", "^prod/.*$", "forest/generic@1")];
-
-        assert!(widened_by_new_destination(
-            Some(&ecs_only),
+    fn a_new_generic_destination_never_widens_an_undeclared_project() {
+        let generic_in_prod = vec![declared("prod", "^prod/.*$", "forest/generic@1")];
+        assert!(!widened_by_new_destination(
+            Some(&generic_in_prod),
             "dev",
             "forest/generic@1"
         ));
-        assert!(!widened_by_new_destination(
-            Some(&ecs_only),
+        let terraform_in_prod = vec![declared("prod", "^prod/.*$", "forest/terraform@1")];
+        assert!(widened_by_new_destination(
+            Some(&terraform_in_prod),
             "dev",
             "forest/terraform@1"
         ));
+        assert!(!widened_by_new_destination(
+            Some(&generic_in_prod),
+            "dev",
+            "forest/terraform@1"
+        ));
+    }
+
+    #[tokio::test]
+    async fn creating_a_generic_destination_reports_no_widened_projects() {
+        // Its creation warning is empty even if the database has legacy
+        // projects, because no undeclared artifact can select this type.
+        let db = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/unused")
+            .expect("valid connection string");
+        assert!(
+            projects_widened_by(&db, "kjuulh", "dev", "forest/generic@1")
+                .await
+                .expect("generic never queries project history")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1352,6 +1448,17 @@ mod tests {
             Some(&[declared("prod", "^p$", "")]),
             "dev",
             "forest/terraform@1",
+        ));
+        assert!(!widened_by_new_destination(None, "dev", "forest/generic@1"));
+        assert!(!widened_by_new_destination(
+            Some(&[]),
+            "dev",
+            "forest/generic@1"
+        ));
+        assert!(!widened_by_new_destination(
+            Some(&[declared("prod", "^p$", "")]),
+            "dev",
+            "forest/generic@1"
         ));
     }
 
