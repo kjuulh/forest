@@ -18,6 +18,7 @@ use tonic::{Request, Response, Status};
 /// the `ComputeScheduler`, and converts results back to proto.
 pub struct ForageServiceImpl {
     pub scheduler: Arc<dyn ComputeScheduler>,
+    pub maintenance_mode: bool,
 }
 
 type WatchStream =
@@ -29,6 +30,10 @@ impl ForageService for ForageServiceImpl {
         &self,
         request: Request<ApplyResourcesRequest>,
     ) -> Result<Response<ApplyResourcesResponse>, Status> {
+        if self.maintenance_mode {
+            return Ok(Response::new(ApplyResourcesResponse::default()));
+        }
+
         let req = request.into_inner();
 
         if req.namespace.is_empty() {
@@ -103,6 +108,12 @@ impl ForageService for ForageServiceImpl {
         &self,
         request: Request<WatchRolloutRequest>,
     ) -> Result<Response<Self::WatchRolloutStream>, Status> {
+        if self.maintenance_mode {
+            return Ok(Response::new(
+                Box::pin(tokio_stream::empty()) as Self::WatchRolloutStream
+            ));
+        }
+
         let rollout_id = request.into_inner().rollout_id;
 
         let mut rx = self
@@ -129,6 +140,10 @@ impl ForageService for ForageServiceImpl {
         &self,
         request: Request<DeleteResourcesRequest>,
     ) -> Result<Response<DeleteResourcesResponse>, Status> {
+        if self.maintenance_mode {
+            return Ok(Response::new(DeleteResourcesResponse::default()));
+        }
+
         let req = request.into_inner();
 
         self.scheduler

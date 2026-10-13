@@ -12,6 +12,8 @@ mod error_block_tests;
 mod footer_tests;
 mod integration_tests;
 mod magic_link_tests;
+mod maintenance_grpc_tests;
+mod maintenance_tests;
 mod nats_tests;
 mod oauth_e2e_tests;
 mod oauth_flow_tests;

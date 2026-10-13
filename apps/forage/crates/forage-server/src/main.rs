@@ -1,6 +1,7 @@
 mod auth;
 mod build_info;
 mod checks;
+mod cli;
 mod compute_grpc;
 mod email_consumer;
 mod forest_client;
@@ -41,8 +42,9 @@ use forage_db::PgSessionStore;
 
 use axum::Router;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
+use clap::Parser;
 use minijinja::context;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
@@ -50,6 +52,36 @@ use tower_http::trace::TraceLayer;
 use crate::forest_client::GrpcForestClient;
 use crate::state::AppState;
 use crate::templates::TemplateEngine;
+
+async fn maintenance_page(State(templates): State<TemplateEngine>) -> Response {
+    let body = match templates.render("pages/maintenance.html.jinja", context! {}) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!("failed to render maintenance page: {err}");
+            "<!DOCTYPE html><title>Maintenance</title><h1>Application under maintenance</h1>"
+                .to_string()
+        }
+    };
+
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::RETRY_AFTER, "300"),
+        ],
+        Html(body),
+    )
+        .into_response()
+}
+
+pub fn build_maintenance_router(templates: TemplateEngine) -> Router {
+    Router::new()
+        .fallback(maintenance_page)
+        .layer(tower_http::compression::CompressionLayer::new())
+        .layer(TraceLayer::new_for_http())
+        .with_state(templates)
+        .merge(nostatus::axum_routes(nostatus::global()))
+}
 
 async fn fallback_404(State(state): State<AppState>) -> Response {
     let html = state.templates.render(
@@ -101,6 +133,12 @@ async fn main() -> anyhow::Result<()> {
     // Falls back to pretty fmt-only when unset, matching the previous
     // default. The guard flushes on drop, so hold it until end of main.
     let _otel = canopy_otel::init();
+
+    let config = cli::Command::parse();
+
+    if config.maintenance_mode {
+        tracing::warn!("maintenance mode enabled; application routes return safe defaults");
+    }
 
     let forest_endpoint =
         std::env::var("FOREST_SERVER_URL").unwrap_or_else(|_| "http://localhost:4040".into());
@@ -388,10 +426,16 @@ async fn main() -> anyhow::Result<()> {
     mad.add(serve_grpc::ServeGrpc {
         addr: grpc_addr,
         scheduler: compute_scheduler,
+        maintenance_mode: config.maintenance_mode,
     });
 
     // HTTP server component
-    mad.add(serve_http::ServeHttp { addr, state });
+    let mode = if config.maintenance_mode {
+        serve_http::ServeMode::Maintenance(Box::new(state.templates.clone()))
+    } else {
+        serve_http::ServeMode::Application(Box::new(state))
+    };
+    mad.add(serve_http::ServeHttp { addr, mode });
 
     mad.cancellation(Some(Duration::from_secs(10)))
         .run()

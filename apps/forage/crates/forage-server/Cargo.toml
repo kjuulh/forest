@@ -10,6 +10,7 @@ forage-grpc = { path = "../forage-grpc", features = ["client", "server"] }
 anyhow.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
+clap.workspace = true
 axum.workspace = true
 axum-extra.workspace = true
 minijinja.workspace = true
