@@ -332,6 +332,76 @@ async fn reveal_returns_one_requested_value() {
     );
 }
 
+/// An ordinary project member can list a destination but cannot extract its
+/// provider credential. Revealing a key is reserved for org operators.
+#[tokio::test(flavor = "multi_thread")]
+async fn member_cannot_reveal_destination_credential() {
+    let fixture = fixture().await.expect("fixture");
+    let owner_token = register_user(&fixture).await;
+    let org = create_org(&fixture, &owner_token).await;
+    let env = create_env(&fixture, &owner_token, &org).await;
+    let dest = format!("tf-{}", uuid::Uuid::now_v7());
+    fixture
+        .destinations()
+        .create_destination(authed_request(
+            &owner_token,
+            CreateDestinationRequest {
+                organisation: org.clone(),
+                name: dest.clone(),
+                environment: env,
+                metadata: [("cloudflare_token".into(), "private-value".into())].into(),
+                r#type: Some(terraform_type()),
+                sensitive_keys: vec!["cloudflare_token".into()],
+            },
+        ))
+        .await
+        .expect("create destination");
+    let member = fixture
+        .users()
+        .register(RegisterRequest {
+            username: format!("member-{}", uuid::Uuid::now_v7()),
+            email: format!("{}@test.com", uuid::Uuid::now_v7()),
+            password: "TestPassword123!".into(),
+        })
+        .await
+        .expect("register member")
+        .into_inner();
+    let member_token = member.tokens.unwrap().access_token;
+    let org_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM organisations WHERE name = $1")
+        .bind(&org)
+        .fetch_one(&fixture.db)
+        .await
+        .unwrap();
+    fixture
+        .organisations()
+        .add_member(authed_request(
+            &owner_token,
+            AddMemberRequest {
+                organisation_id: org_id.to_string(),
+                user_id: member.user.unwrap().user_id,
+                role: "member".into(),
+            },
+        ))
+        .await
+        .expect("add member");
+    let listed = fetch_destination(&fixture, &member_token, &org, &dest).await;
+    assert!(!listed.metadata.contains_key("cloudflare_token"));
+    let error = fixture
+        .destinations()
+        .reveal_destination_metadata(authed_request(
+            &member_token,
+            RevealDestinationMetadataRequest {
+                organisation: org,
+                name: dest,
+                key: "cloudflare_token".into(),
+            },
+        ))
+        .await
+        .expect_err("member must not reveal destination credentials");
+    assert_eq!(error.code(), tonic::Code::PermissionDenied);
+    assert!(!error.message().contains("private-value"));
+}
+
 /// A member of another org cannot reveal a credential.
 #[tokio::test(flavor = "multi_thread")]
 async fn reveal_is_denied_across_organisations() {

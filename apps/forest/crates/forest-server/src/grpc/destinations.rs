@@ -61,6 +61,16 @@ impl DestinationService for DestinationServer {
             .await
             .context("invalid destination metadata")
             .to_internal_error()?;
+        let mut sensitive_keys = req.sensitive_keys;
+        sensitive_keys.extend(
+            dest_svc
+                .metadata_sensitive_keys(&req.metadata)
+                .await
+                .context("read destination sensitive metadata schema")
+                .to_internal_error()?,
+        );
+        sensitive_keys.sort_unstable();
+        sensitive_keys.dedup();
 
         self.state
             .destination_aggregate_service()
@@ -69,7 +79,7 @@ impl DestinationService for DestinationServer {
                 &req.name,
                 &req.environment,
                 req.metadata,
-                req.sensitive_keys,
+                sensitive_keys,
                 &dest_type.organisation,
                 &dest_type.name,
                 dest_type.version as u32,
@@ -130,6 +140,48 @@ impl DestinationService for DestinationServer {
         )
         .await?;
 
+        let record = self
+            .state
+            .destination_aggregate_service()
+            .get_by_name(&req.organisation, &req.name)
+            .await
+            .context("get destination")
+            .to_internal_error()?
+            .ok_or_else(|| tonic::Status::not_found("destination not found"))?;
+        let dest_services = self.state.destination_services();
+        let dest_svc = dest_services
+            .get_destination(
+                &record.type_organisation,
+                &record.type_name,
+                record.type_version as usize,
+            )
+            .context("failed to find destination implementation")
+            .to_internal_error()?;
+        let mut updated_metadata = if req.merge_metadata {
+            record.metadata.clone()
+        } else {
+            Default::default()
+        };
+        updated_metadata.extend(req.metadata.clone());
+        dest_svc
+            .validate_metadata(&updated_metadata)
+            .await
+            .context("invalid destination metadata")
+            .to_internal_error()?;
+        let mut sensitive_keys = if req.set_sensitive_keys {
+            req.sensitive_keys
+        } else {
+            record.sensitive_keys.clone()
+        };
+        sensitive_keys.extend(
+            dest_svc
+                .metadata_sensitive_keys(&updated_metadata)
+                .await
+                .context("read destination sensitive metadata schema")
+                .to_internal_error()?,
+        );
+        sensitive_keys.sort_unstable();
+        sensitive_keys.dedup();
         // Merging an empty overlay changes nothing, so skip the write rather
         // than record an event that says the metadata stayed the same. This is
         // the shape a caller sends when it only means to touch sensitive_keys.
@@ -147,12 +199,11 @@ impl DestinationService for DestinationServer {
                 .to_internal_error()?;
         }
 
-        // Guarded by an explicit flag so older clients, which cannot send the
-        // field, don't silently clear an existing set.
-        if req.set_sensitive_keys {
+        // Provider-declared credentials cannot be unmarked by a caller.
+        if sensitive_keys != record.sensitive_keys {
             self.state
                 .destination_aggregate_service()
-                .update_sensitive_keys(&req.organisation, &req.name, req.sensitive_keys)
+                .update_sensitive_keys(&req.organisation, &req.name, sensitive_keys)
                 .await
                 .context("update destination sensitive keys")
                 .to_internal_error()?;
@@ -239,13 +290,8 @@ impl DestinationService for DestinationServer {
         if req.key.is_empty() {
             return Err(tonic::Status::invalid_argument("key is required"));
         }
-        let _authz = authorize::require_org_access(
-            &self.state.db,
-            &actor,
-            &req.organisation,
-            authorize::OrgRole::Member,
-        )
-        .await?;
+        let _authz =
+            authorize::require_operator_access(&self.state.db, &actor, &req.organisation).await?;
 
         let record = self
             .state
@@ -319,6 +365,21 @@ impl DestinationService for DestinationServer {
             let t = &dest.destination_type;
             if let Some(svc) = dest_services.get_destination(&t.organisation, &t.name, t.version) {
                 dest.destination_type.fields = svc.metadata_schema();
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    svc.metadata_sensitive_keys(&dest.metadata),
+                )
+                .await
+                {
+                    Ok(Ok(keys)) => dest.sensitive_keys.extend(keys),
+                    _ => {
+                        // An unreachable provider must not turn its credentials
+                        // into ordinary visible metadata.
+                        dest.sensitive_keys.extend(dest.metadata.keys().cloned());
+                    }
+                }
+            } else {
+                dest.sensitive_keys.extend(dest.metadata.keys().cloned());
             }
         }
 

@@ -193,6 +193,22 @@ pub async fn require_org_access_by_id(
     check_org_access(db, actor, organisation_id, required_role).await
 }
 
+/// Secrets and approval gates are operator actions. An org-scoped app token
+/// passes ordinary org checks without a user role; it must not inherit admin
+/// authority to reveal provider credentials or approve production plans.
+pub async fn require_operator_access(
+    db: &PgPool,
+    actor: &Actor,
+    organisation_name: &str,
+) -> Result<AuthzContext, tonic::Status> {
+    if matches!(actor, Actor::App { .. }) {
+        return Err(tonic::Status::permission_denied(
+            "app tokens cannot reveal credentials or approve plans",
+        ));
+    }
+    require_org_access(db, actor, organisation_name, OrgRole::Admin).await
+}
+
 /// Convenience for handlers with `project: Project { organisation, project }`.
 pub async fn require_project_access(
     db: &PgPool,
@@ -389,5 +405,21 @@ mod typed_gate_tests {
             Actor::User { user_id } => assert_eq!(user_id, id),
             _ => panic!("expected User variant"),
         }
+    }
+    #[tokio::test]
+    async fn app_token_cannot_inherit_operator_privileges() {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://localhost/unused")
+            .unwrap();
+        let actor = Actor::App {
+            app_id: Uuid::now_v7(),
+            organisation_id: Uuid::now_v7(),
+            scopes: None,
+        };
+        let error = super::require_operator_access(&pool, &actor, "org")
+            .await
+            .err()
+            .expect("app token must not get operator access");
+        assert_eq!(error.code(), tonic::Code::PermissionDenied);
     }
 }

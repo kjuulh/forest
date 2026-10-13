@@ -140,7 +140,7 @@ impl std::fmt::Debug for GenericMetadata {
                 "provider_token",
                 &self.provider_token.as_ref().map(|_| "<redacted>"),
             )
-            .field("passthrough", &self.passthrough)
+            .field("passthrough_keys", &self.passthrough.keys())
             .finish()
     }
 }
@@ -287,6 +287,18 @@ async fn provider_release(
         release_intent_id: release.release_intent_id.to_string(),
         artifact_id: release.artifact.to_string(),
     })
+}
+
+fn sensitive_keys_from_describe(described: DescribeResponse) -> Vec<String> {
+    let mut keys = vec![PROVIDER_TOKEN.to_string()];
+    keys.extend(
+        described
+            .fields
+            .into_iter()
+            .filter(|field| field.sensitive)
+            .map(|field| field.name),
+    );
+    keys
 }
 
 impl GenericV1Destination {
@@ -611,6 +623,15 @@ impl DestinationEdge for GenericV1Destination {
         metadata_schema()
     }
 
+    async fn metadata_sensitive_keys(
+        &self,
+        metadata: &HashMap<String, String>,
+    ) -> anyhow::Result<Vec<String>> {
+        let meta = GenericMetadata::from_metadata(metadata)?;
+        let described = self.describe(&meta).await?;
+        Ok(sensitive_keys_from_describe(described))
+    }
+
     /// Ask the provider what it accepts, then hold the destination to it.
     ///
     /// The schema lives with the implementation, so this is the single source of
@@ -874,6 +895,8 @@ mod tests {
             assert_eq!(metadata["service"], "my-app");
             assert!(!metadata.contains_key(PROVIDER_URL));
             assert!(!metadata.contains_key(PROVIDER_TOKEN));
+            let debug = format!("{meta:?}");
+            assert!(!debug.contains("destination-secret"), "{debug}");
         });
     }
 
@@ -900,6 +923,53 @@ mod tests {
                 .sensitive
         );
     }
+    #[test]
+    fn provider_declared_credentials_are_withheld_from_destination_listing() {
+        let described = DescribeResponse {
+            fields: vec![
+                forest_grpc_interface::provider::MetadataField {
+                    name: "grund_token".into(),
+                    sensitive: true,
+                    ..Default::default()
+                },
+                forest_grpc_interface::provider::MetadataField {
+                    name: "cluster".into(),
+                    sensitive: false,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let keys = sensitive_keys_from_describe(described);
+        let destination = Destination::new(
+            "sample",
+            "prod",
+            "prod",
+            HashMap::from([
+                ("provider_token".into(), "provider-secret".into()),
+                ("grund_token".into(), "grund-secret".into()),
+                ("cluster".into(), "eu-west".into()),
+            ]),
+            forest_models::DestinationType {
+                organisation: "forest".into(),
+                name: "generic".into(),
+                version: 1,
+                description: String::new(),
+                fields: metadata_schema(),
+            },
+        )
+        .with_sensitive_keys(keys);
+        let wire: forest_grpc_interface::Destination = destination.into();
+        assert_eq!(
+            wire.metadata.get("cluster").map(String::as_str),
+            Some("eu-west")
+        );
+        assert!(!wire.metadata.contains_key("grund_token"));
+        assert!(!wire.metadata.contains_key("provider_token"));
+        assert!(wire.sensitive_keys.contains(&"grund_token".to_string()));
+        assert!(!format!("{wire:?}").contains("grund-secret"));
+    }
+
     #[sqlx::test]
     async fn annotated_source_and_stable_ids_reach_provider(pool: sqlx::PgPool) {
         let artifact_id = uuid::Uuid::new_v4();

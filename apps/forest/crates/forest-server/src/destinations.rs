@@ -111,6 +111,13 @@ impl DestinationService {
         self.inner.metadata_schema()
     }
 
+    pub async fn metadata_sensitive_keys(
+        &self,
+        metadata: &HashMap<String, String>,
+    ) -> anyhow::Result<Vec<String>> {
+        self.inner.metadata_sensitive_keys(metadata).await
+    }
+
     pub async fn validate_metadata(
         &self,
         metadata: &HashMap<String, String>,
@@ -189,6 +196,20 @@ pub trait DestinationEdge {
     /// clients can render a dynamic creation form.
     fn metadata_schema(&self) -> Vec<forest_models::MetadataFieldSchema> {
         vec![]
+    }
+
+    /// Provider-declared sensitive fields must remain withheld even when a
+    /// caller omits `sensitive_keys` at creation or on a later update.
+    async fn metadata_sensitive_keys(
+        &self,
+        _metadata: &HashMap<String, String>,
+    ) -> anyhow::Result<Vec<String>> {
+        Ok(self
+            .metadata_schema()
+            .into_iter()
+            .filter(|field| field.sensitive)
+            .map(|field| field.name)
+            .collect())
     }
 
     /// Validate that the given metadata contains all required fields for this

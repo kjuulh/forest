@@ -83,6 +83,13 @@ The provider receives the annotated artifact slug, source commit/reference,
 release intent ID and artifact ID alongside the execution ID. PLAN and DEPLOY
 can therefore correlate the same immutable artifact across executions.
 
+Fields marked `sensitive` by `Describe` are withheld from destination listing
+even if the creator did not name them in `sensitive_keys`; provider failure
+withholds all metadata rather than exposing a credential. Only an
+organisation admin or infrastructure service account may reveal a withheld
+credential or approve/reject a plan. Ordinary members and org-scoped app
+tokens cannot perform those operator actions.
+
 Provider authentication, mTLS, identity, release-token audience binding,
 revocation, callback authorization, and cross-tenant tests remain launch gates.
 Do not expose an arbitrary provider URL allowlist to untrusted organisation

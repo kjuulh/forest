@@ -1608,13 +1608,7 @@ impl ReleaseService for ReleaseServer {
         .to_internal_error()?
         .ok_or_else(|| tonic::Status::not_found("release intent not found"))?;
 
-        authorize::require_org_access(
-            &self.state.db,
-            &actor,
-            &intent_org,
-            authorize::OrgRole::Member,
-        )
-        .await?;
+        authorize::require_operator_access(&self.state.db, &actor, &intent_org).await?;
 
         let mut tx = self
             .state
@@ -1734,13 +1728,7 @@ impl ReleaseService for ReleaseServer {
         .to_internal_error()?
         .ok_or_else(|| tonic::Status::not_found("release intent not found"))?;
 
-        authorize::require_org_access(
-            &self.state.db,
-            &actor,
-            &intent_org,
-            authorize::OrgRole::Member,
-        )
-        .await?;
+        authorize::require_operator_access(&self.state.db, &actor, &intent_org).await?;
 
         let mut tx = self
             .state
