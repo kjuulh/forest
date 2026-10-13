@@ -35,7 +35,7 @@ use crate::{
     destinations::{DestinationEdge, DestinationIndex, logger::DestinationLogger},
     services::{
         artifact_staging_registry::ArtifactStagingRegistry,
-        release_registry::ReleaseItem,
+        release_registry::{Reference, ReleaseItem},
         release_token_registry::{ReleaseTokenRegistry, ReleaseTokenScope},
     },
 };
@@ -264,6 +264,31 @@ fn provider_metadata(
     metadata
 }
 
+/// The execution ID changes per PLAN/DEPLOY; artifact and intent do not.
+async fn provider_release(
+    db: &sqlx::PgPool,
+    release: &ReleaseItem,
+) -> anyhow::Result<ProviderRelease> {
+    let (slug, reference): (String, serde_json::Value) =
+        sqlx::query_as("SELECT slug, ref FROM annotations WHERE artifact_id = $1")
+            .bind(release.artifact)
+            .fetch_one(db)
+            .await
+            .context("generic provider release requires an annotated artifact")?;
+    let reference: Reference =
+        serde_json::from_value(reference).context("invalid artifact source reference")?;
+    Ok(ProviderRelease {
+        release_id: release.id.to_string(),
+        project: release.project.clone(),
+        slug,
+        reference_commit_sha: reference.commit_sha,
+        reference_commit_branch: reference.commit_branch.unwrap_or_default(),
+        reference_version: reference.version.unwrap_or_default(),
+        release_intent_id: release.release_intent_id.to_string(),
+        artifact_id: release.artifact.to_string(),
+    })
+}
+
 impl GenericV1Destination {
     async fn connect(
         &self,
@@ -436,6 +461,7 @@ impl GenericV1Destination {
             .context("failed to mint a release token for the provider")?;
 
         let metadata = provider_metadata(meta, self.release_config(release, destination).await);
+        let provider_release = provider_release(&self.db, release).await?;
 
         let request = ExecuteRequest {
             mode: mode as i32,
@@ -445,14 +471,8 @@ impl GenericV1Destination {
                 organisation: destination.organisation.clone(),
                 metadata,
             }),
-            release: Some(ProviderRelease {
-                release_id: release.id.to_string(),
-                project: release.project.clone(),
-                slug: String::new(),
-                reference_commit_sha: String::new(),
-                reference_commit_branch: String::new(),
-                reference_version: String::new(),
-            }),
+            release: Some(provider_release),
+            approved_plan_output: String::new(),
             release_token,
             forest_addr: self.external_host.clone(),
         };
@@ -879,5 +899,48 @@ mod tests {
                 .unwrap()
                 .sensitive
         );
+    }
+    #[sqlx::test]
+    async fn annotated_source_and_stable_ids_reach_provider(pool: sqlx::PgPool) {
+        let artifact_id = uuid::Uuid::new_v4();
+        let intent_id = uuid::Uuid::new_v4();
+        let release = ReleaseItem {
+            id: uuid::Uuid::new_v4(),
+            release_intent_id: intent_id,
+            artifact: artifact_id,
+            project_id: uuid::Uuid::new_v4(),
+            destination_id: uuid::Uuid::new_v4(),
+            status: "RUNNING".into(),
+            project: "grund".into(),
+        };
+        sqlx::query(
+            "INSERT INTO annotations (slug, artifact_id, metadata, source, context, project_id, ref) \
+             VALUES ($1, $2, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, $3, $4)",
+        )
+        .bind("release-abc")
+        .bind(artifact_id)
+        .bind(release.project_id)
+        .bind(serde_json::json!({
+            "commit_sha": "deadbeef",
+            "commit_branch": "main",
+            "version": "v2.1"
+        }))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let provider = provider_release(&pool, &release).await.unwrap();
+        assert_eq!(provider.slug, "release-abc");
+        assert_eq!(provider.reference_commit_sha, "deadbeef");
+        assert_eq!(provider.reference_commit_branch, "main");
+        assert_eq!(provider.reference_version, "v2.1");
+        assert_eq!(provider.release_intent_id, intent_id.to_string());
+        assert_eq!(provider.artifact_id, artifact_id.to_string());
+        assert_eq!(provider.release_id, release.id.to_string());
+
+        let unannotated = ReleaseItem {
+            artifact: uuid::Uuid::new_v4(),
+            ..release
+        };
+        assert!(provider_release(&pool, &unannotated).await.is_err());
     }
 }

@@ -79,6 +79,10 @@ does not already define; it cannot replace destination values or send
 `provider_url`/`provider_token` as provider metadata. Keep credentials in
 destination-sensitive metadata, never in project artifacts.
 
+The provider receives the annotated artifact slug, source commit/reference,
+release intent ID and artifact ID alongside the execution ID. PLAN and DEPLOY
+can therefore correlate the same immutable artifact across executions.
+
 Provider authentication, mTLS, identity, release-token audience binding,
 revocation, callback authorization, and cross-tenant tests remain launch gates.
 Do not expose an arbitrary provider URL allowlist to untrusted organisation

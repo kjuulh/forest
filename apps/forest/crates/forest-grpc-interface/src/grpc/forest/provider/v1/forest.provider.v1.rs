@@ -61,6 +61,11 @@ pub struct ExecuteRequest {
     pub release_token: ::prost::alloc::string::String,
     #[prost(string, tag="5")]
     pub forest_addr: ::prost::alloc::string::String,
+    /// Exact, persisted output of the approved PLAN stage for this release's
+    /// intent, destination and artifact. Empty for PLAN and ungated DEPLOY.
+    /// A provider must reject a mismatched or stale seal rather than re-plan.
+    #[prost(string, tag="6")]
+    pub approved_plan_output: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Destination {
@@ -91,6 +96,12 @@ pub struct Release {
     pub reference_commit_branch: ::prost::alloc::string::String,
     #[prost(string, tag="6")]
     pub reference_version: ::prost::alloc::string::String,
+    /// Stable identities shared by PLAN and DEPLOY executions. release_id is
+    /// unique per execution and must not be used as an artifact/intent identity.
+    #[prost(string, tag="7")]
+    pub release_intent_id: ::prost::alloc::string::String,
+    #[prost(string, tag="8")]
+    pub artifact_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ExecuteEvent {

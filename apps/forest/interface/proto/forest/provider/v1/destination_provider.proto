@@ -96,6 +96,11 @@ message ExecuteRequest {
   // with it.
   string release_token = 4;
   string forest_addr = 5;
+
+  // Exact, persisted output of the approved PLAN stage for this release's
+  // intent, destination and artifact. Empty for PLAN and ungated DEPLOY.
+  // A provider must reject a mismatched or stale seal rather than re-plan.
+  string approved_plan_output = 6;
 }
 
 message Destination {
@@ -118,6 +123,11 @@ message Release {
   string reference_commit_sha = 4;
   string reference_commit_branch = 5;
   string reference_version = 6;
+
+  // Stable identities shared by PLAN and DEPLOY executions. release_id is
+  // unique per execution and must not be used as an artifact/intent identity.
+  string release_intent_id = 7;
+  string artifact_id = 8;
 }
 
 message ExecuteEvent {
