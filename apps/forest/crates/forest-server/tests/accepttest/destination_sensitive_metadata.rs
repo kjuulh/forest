@@ -333,7 +333,7 @@ async fn reveal_returns_one_requested_value() {
 }
 
 /// An ordinary project member can list a destination but cannot extract its
-/// provider credential. Revealing a key is reserved for org operators.
+/// credential or approve/reject a plan. Both are operator-only actions.
 #[tokio::test(flavor = "multi_thread")]
 async fn member_cannot_reveal_credential_or_approve_plan() {
     let fixture = fixture().await.expect("fixture");
