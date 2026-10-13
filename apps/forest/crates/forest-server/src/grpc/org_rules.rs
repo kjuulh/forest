@@ -199,6 +199,7 @@ fn stages_from_proto(proto_stages: Vec<PipelineStage>) -> anyhow::Result<Pipelin
             Some(pipeline_stage::Config::Plan(c)) => StageConfig::Plan {
                 environment: c.environment,
                 auto_approve: c.auto_approve,
+                destroy: c.destroy,
             },
             Some(pipeline_stage::Config::Gate(c)) => StageConfig::Gate {
                 requires: crate::grpc::release_pipelines::requirements_from_proto(c.requires),
@@ -241,9 +242,11 @@ fn stages_to_proto(stages: PipelineStages) -> Vec<PipelineStage> {
                 StageConfig::Plan {
                     environment,
                     auto_approve,
+                    destroy,
                 } => Some(pipeline_stage::Config::Plan(PlanStageConfig {
                     environment,
                     auto_approve,
+                    destroy,
                 })),
                 StageConfig::Gate {
                     requires,

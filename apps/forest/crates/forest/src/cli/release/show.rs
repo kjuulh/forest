@@ -817,25 +817,6 @@ fn render_logs_only(plan_outputs: &[PlanView], log_buffers: &BTreeMap<String, Ve
     }
 }
 
-fn render_stage(out: &mut String, s: &StageView) {
-    use std::fmt::Write;
-    // A parked plan stage stays ACTIVE; without this it reads as running.
-    let awaiting = s.approval_status.as_deref() == Some("AWAITING_APPROVAL");
-    let _ = writeln!(
-        out,
-        "  {icon} {sid}: {st}({started}) [{status}{approval}]",
-        icon = if awaiting {
-            "⏸"
-        } else {
-            stage_icon(&s.status)
-        },
-        sid = s.stage_id,
-        st = s.stage_type,
-        started = s.started_at.as_deref().unwrap_or(""),
-        status = s.status,
-        approval = if awaiting { ", AWAITING_APPROVAL" } else { "" },
-    );
-}
 
 fn render_destination(out: &mut String, d: &DestView) {
     use std::fmt::Write;
@@ -888,6 +869,25 @@ fn signal_icon(status: &str) -> &'static str {
     }
 }
 
+fn render_stage(out: &mut String, s: &StageView) {
+    use std::fmt::Write;
+    // A parked plan stage stays ACTIVE; without this it reads as running.
+    let awaiting = s.approval_status.as_deref() == Some("AWAITING_APPROVAL");
+    let _ = writeln!(
+        out,
+        "  {icon} {sid}: {st}({started}) [{status}{approval}]",
+        icon = if awaiting {
+            "⏸"
+        } else {
+            stage_icon(&s.status)
+        },
+        sid = s.stage_id,
+        st = s.stage_type,
+        started = s.started_at.as_deref().unwrap_or(""),
+        status = s.status,
+        approval = if awaiting { ", AWAITING_APPROVAL" } else { "" },
+    );
+}
 fn stage_icon(status: &str) -> &'static str {
     match status {
         "SUCCEEDED" => "✓",
@@ -1010,12 +1010,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_destination_without_signals_renders_as_before() {
-        let mut out = String::new();
-        render_destination(&mut out, &succeeded_destination(Vec::new()));
-        assert_eq!(out, "  ✓ [prod] flux-prod [SUCCEEDED]\n");
-    }
 
     fn plan_stage(approval_status: Option<&str>) -> StageView {
         StageView {
@@ -1043,15 +1037,22 @@ mod tests {
     }
 
     #[test]
-    fn a_running_plan_stage_renders_as_before() {
+    fn a_destination_without_signals_renders_as_before() {
         let mut out = String::new();
-        render_stage(&mut out, &plan_stage(None));
-        assert_eq!(out, "  ▶ plan-prod: plan(2026-09-24T21:12:30Z) [ACTIVE]\n");
+        render_destination(&mut out, &succeeded_destination(Vec::new()));
+        assert_eq!(out, "  ✓ [prod] flux-prod [SUCCEEDED]\n");
     }
 
     #[test]
     fn unknown_wire_statuses_read_as_unspecified_rather_than_healthy() {
         assert_eq!(signal_status_name(0), "UNSPECIFIED");
         assert_eq!(signal_status_name(999), "UNSPECIFIED");
+    }
+
+    #[test]
+    fn a_running_plan_stage_renders_as_before() {
+        let mut out = String::new();
+        render_stage(&mut out, &plan_stage(None));
+        assert_eq!(out, "  ▶ plan-prod: plan(2026-09-24T21:12:30Z) [ACTIVE]\n");
     }
 }

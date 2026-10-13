@@ -80,6 +80,7 @@ async fn a_release_parked_on_plan_approval() -> anyhow::Result<(
                         config: Some(pipeline_stage::Config::Plan(PlanStageConfig {
                             environment: "prod".into(),
                             auto_approve: false,
+                            destroy: false,
                         })),
                     },
                     PipelineStage {

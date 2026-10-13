@@ -10,6 +10,7 @@ use forest_grpc_interface::organisation_service_client::OrganisationServiceClien
 use forest_grpc_interface::registry_service_client::RegistryServiceClient;
 use forest_grpc_interface::release_pipeline_service_client::ReleasePipelineServiceClient;
 use forest_grpc_interface::release_service_client::ReleaseServiceClient;
+use forest_grpc_interface::terraform_state_service_client::TerraformStateServiceClient;
 use forest_grpc_interface::users_service_client::UsersServiceClient;
 use tonic::transport::Channel;
 
@@ -66,6 +67,10 @@ impl Fixture {
         NotificationServiceClient::new(self.channel.clone())
     }
 
+    pub fn terraform_state(&self) -> TerraformStateServiceClient<Channel> {
+        TerraformStateServiceClient::new(self.channel.clone())
+    }
+
     pub fn registry(&self) -> RegistryServiceClient<Channel> {
         RegistryServiceClient::new(self.channel.clone())
     }
@@ -90,6 +95,9 @@ fn base_test_config() -> forest_server::Config {
         password_secret_key: "test-password-secret-key-32chars".into(),
         access_token_secret_key: b"test-access-token-secret-key-32b".to_vec(),
         refresh_token_secret_key: b"test-refresh-token-secret-key32b".to_vec(),
+        // Unset on purpose: exercises the fallback every existing deployment
+        // takes until the variable is configured.
+        terraform_state_signing_key: None,
         service_account_token_hash: None,
         registration_email_domain_regex: None,
         require_email_verification: false,

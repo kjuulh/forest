@@ -335,6 +335,27 @@ that a deploy an annotation announced never actually happened.
 Guardrails and automation live under `forest project`: `trigger` (release
 triggers), `policy` (deployment guardrails), and `pipeline` (release pipelines).
 
+### Terraform state
+
+A `forest/terraform@1` destination keeps its state in forest. `forest state`
+reaches it outside a release (project and organisation from `forest.cue`):
+
+```bash
+forest state list -e dev                 # resource addresses in the latest state
+forest state versions -e dev             # one version per apply, and the lock holder
+forest state pull -e dev [--version N]   # the document — contains secrets
+forest state unlock -e dev               # break a lock left by a dead apply
+eval "$(forest state env -e dev [--write] [--ttl 30m])"   # TF_HTTP_* for plain terraform/tofu
+```
+
+`env` mints a short-lived credential for that one state (read-only unless
+`--write`), so `terraform state list`, `plan`, `import`, `state rm` and
+`force-unlock` work unchanged — but its address is forest's internal one and
+only resolves inside forest's network. Pass `-d <destination>` when an
+environment has more than one terraform destination. Every call is recorded
+with your identity, and every one — reads too, since a state carries secrets —
+requires the **Admin** role in the organisation.
+
 **Releases deploy real infrastructure.** `create`, `release`, `approve`, and
 `publish` all take effect immediately against the active context — don't run them
 speculatively, and confirm with the user first.

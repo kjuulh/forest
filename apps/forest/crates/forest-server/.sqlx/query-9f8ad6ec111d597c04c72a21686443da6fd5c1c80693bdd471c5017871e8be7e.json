@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT EXISTS (SELECT 1 FROM terraform_states WHERE state_id = $1)\n                    OR EXISTS (SELECT 1 FROM terraform_state_locks WHERE state_id = $1)\n                    AS \"exists!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9f8ad6ec111d597c04c72a21686443da6fd5c1c80693bdd471c5017871e8be7e"
+}

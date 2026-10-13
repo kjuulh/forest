@@ -691,6 +691,29 @@ mod abort_on_drop_tests {
     }
 
     #[test]
+    fn publish_line_names_the_selected_context_not_the_active_one() {
+        use super::{ContextStore, publish_line};
+        use crate::contexts::resolve_server_target;
+
+        let td = tempfile::TempDir::new().unwrap();
+        let store = ContextStore::with_root(td.path().to_path_buf());
+        // `default` stays active; `prod` is only selected via --context.
+        store
+            .create("prod", "https://forest.example.invalid", false)
+            .unwrap();
+
+        let prod = resolve_server_target(None, Some("prod"), &store).unwrap();
+        assert_eq!(
+            publish_line("understory", "fungus", &prod),
+            "Publishing understory/fungus to prod (https://forest.example.invalid)"
+        );
+        let active = resolve_server_target(None, None, &store).unwrap();
+        assert_eq!(active.label, "default");
+        // An unknown name is an error, so the caller prints the bare line.
+        assert!(resolve_server_target(None, Some("missing"), &store).is_err());
+    }
+
+    #[test]
     fn production_guard_compiles_with_disarm_signature() {
         // Compile-time check on AbortOnDrop's API surface. We can't construct
         // one without a real GrpcClient; the runtime assertion (aborted upload

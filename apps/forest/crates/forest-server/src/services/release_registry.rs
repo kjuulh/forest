@@ -799,8 +799,6 @@ impl ReleaseRegistry {
         organisation: &str,
         project: &str,
     ) -> anyhow::Result<Vec<ReleaseAnnotation>> {
-        // Get annotations without destinations — destination state is fetched
-        // separately via get_destination_states and matched client-side by artifact_id.
         let recs = sqlx::query!(
             r#"
                 SELECT
@@ -829,40 +827,65 @@ impl ReleaseRegistry {
         .await
         .context("get annotations (db)")?;
 
-        let mut annotations: Vec<ReleaseAnnotation> = Vec::new();
+        // Every annotation's destinations in one round trip.
+        //
+        // This used to be a query per annotation inside the loop below. A
+        // project with a few hundred releases therefore issued a few hundred
+        // sequential queries, and `list_artifacts` — which calls this — became
+        // the slowest upstream call forage makes by a wide margin: p50 269ms
+        // against ≤21ms for everything else, and over a second at the tail,
+        // where the cost is round trips rather than work the database does.
+        let artifact_ids: Vec<Uuid> = recs.iter().map(|r| r.artifact_id).collect();
 
-        for rec in recs {
-            // Fetch destinations that have release_states for this artifact
-            let dest_rows = sqlx::query!(
-                r#"SELECT DISTINCT
-                    d.name as "name!",
-                    d.environment as "environment!",
-                    d.type_organisation as "type_organisation!",
-                    d.type_name as "type_name!",
-                    d.type_version as "type_version!",
-                    rs.status as "status!"
-                FROM release_states rs
-                JOIN destinations d ON rs.destination_id = d.id
-                WHERE rs.artifact_id = $1
-                  AND rs.mode = 'deploy'
-                ORDER BY d.name"#,
-                rec.artifact_id,
-            )
-            .fetch_all(&self.db)
-            .await
-            .context("get destinations for annotation")?;
+        let dest_rows = sqlx::query!(
+            r#"SELECT DISTINCT
+                rs.artifact_id as "artifact_id!",
+                d.name as "name!",
+                d.environment as "environment!",
+                d.type_organisation as "type_organisation!",
+                d.type_name as "type_name!",
+                d.type_version as "type_version!",
+                rs.status as "status!"
+            FROM release_states rs
+            JOIN destinations d ON rs.destination_id = d.id
+            WHERE rs.artifact_id = ANY($1)
+              AND rs.mode = 'deploy'
+            ORDER BY rs.artifact_id, d.name"#,
+            &artifact_ids,
+        )
+        .fetch_all(&self.db)
+        .await
+        .context("get destinations for annotations")?;
 
-            let destinations = dest_rows
-                .into_iter()
-                .map(|d| ReleaseDestination {
+        // `ORDER BY rs.artifact_id, d.name` is what preserves the per-annotation
+        // ordering the loop used to get from its own `ORDER BY d.name`.
+        let mut destinations_by_artifact: HashMap<Uuid, Vec<ReleaseDestination>> = HashMap::new();
+        for d in dest_rows {
+            destinations_by_artifact
+                .entry(d.artifact_id)
+                .or_default()
+                .push(ReleaseDestination {
                     name: d.name,
                     environment: d.environment,
                     type_organisation: d.type_organisation,
                     type_name: d.type_name,
                     type_version: d.type_version,
                     status: d.status,
-                })
-                .collect();
+                });
+        }
+
+        let mut annotations: Vec<ReleaseAnnotation> = Vec::new();
+
+        for rec in recs {
+            // Cloned rather than taken: nothing stops two annotations from
+            // naming the same artifact — `annotations` is unique on `slug`, not
+            // on `artifact_id` — and moving the vec out would hand the first
+            // annotation the destinations and leave every later one looking
+            // like it never deployed.
+            let destinations = destinations_by_artifact
+                .get(&rec.artifact_id)
+                .cloned()
+                .unwrap_or_default();
 
             let annotation = ReleaseAnnotation {
                 id: rec.id,
@@ -1445,6 +1468,7 @@ pub struct ReleaseAnnotation {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Clone)]
 pub struct ReleaseDestination {
     pub name: String,
     pub environment: String,

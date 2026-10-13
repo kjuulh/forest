@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT name FROM destinations\n                WHERE organisation = $1 AND environment = $2\n                  AND type_organisation = 'forest' AND type_name = 'terraform'\n                ORDER BY name\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "destinations",
+            "name": "name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bfb459f69f6d020d8852c8db2ead831e63b2e6f323ee7fe4679b799cb48d840f"
+}

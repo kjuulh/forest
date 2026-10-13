@@ -275,9 +275,10 @@ impl SchedulerInner {
                 && dest.destination_type.name == "terraform"
             {
                 let project_id = release_state.project_id.to_string();
-                let state_id = TerraformStateStore::state_id_for(&dest.environment, &project_id);
-                let (id, password) = self.tf_state.urls(state_id).await;
-                let url = format!("{}/{id}", self.tf_state.external_url.trim_end_matches('/'));
+                let state_id = self.tf_state.resolve_state_id(&dest, &project_id).await?;
+                let password = self.tf_state.runner_credential(&state_id, &dest);
+                let (url, _, _) = self.tf_state.addresses(&state_id);
+                let id = state_id;
                 Some(ReleaseArtifactStore {
                     id,
                     url,

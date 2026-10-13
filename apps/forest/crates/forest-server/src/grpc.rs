@@ -14,6 +14,7 @@ use forest_grpc_interface::{
     release_pipeline_service_server::ReleasePipelineServiceServer,
     release_service_server::ReleaseServiceServer, runner_service_server::RunnerServiceServer,
     signal_service_server::SignalServiceServer, status_service_server::StatusServiceServer,
+    terraform_state_service_server::TerraformStateServiceServer,
     trigger_service_server::TriggerServiceServer, users_service_server::UsersServiceServer,
 };
 use notmad::MadError;
@@ -46,11 +47,13 @@ mod organisations;
 mod policies;
 mod registry;
 mod release;
+mod release_drift;
 mod release_health;
 pub(crate) mod release_pipelines;
 mod release_signals;
 pub mod runner;
 mod status;
+mod terraform_state;
 mod triggers;
 mod users;
 
@@ -161,6 +164,11 @@ impl GrpcServer {
             .add_service(SignalServiceServer::new(release_signals::SignalServer {
                 state: self.state.clone(),
             }))
+            .add_service(TerraformStateServiceServer::new(
+                terraform_state::TerraformStateServer {
+                    state: self.state.clone(),
+                },
+            ))
             .serve_with_shutdown(
                 self.host,
                 async move { cancellation_token.cancelled().await },

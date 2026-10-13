@@ -346,7 +346,7 @@ async fn create_org_duplicate_shows_actionable_error() {
                 .uri("/orgs")
                 .header("cookie", &cookie)
                 .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from("name=rawpotion&_csrf=test-csrf"))
+                .body(Body::from("name=acme&_csrf=test-csrf"))
                 .unwrap(),
         )
         .await
@@ -357,7 +357,7 @@ async fn create_org_duplicate_shows_actionable_error() {
         .unwrap();
     let html = String::from_utf8(body.to_vec()).unwrap();
     assert!(html.contains("An organisation named"));
-    assert!(html.contains("rawpotion"));
+    assert!(html.contains("acme"));
     assert!(html.contains("ask an owner to invite you"));
     assert!(!html.contains("Could not create organisation"));
 }

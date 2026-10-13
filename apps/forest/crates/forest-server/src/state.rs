@@ -71,6 +71,12 @@ pub struct Config {
     pub access_token_secret_key: Vec<u8>,
     pub refresh_token_secret_key: Vec<u8>,
 
+    /// Signs terraform@1 state credentials (`FOREST_TERRAFORM_STATE_SIGNING_KEY`,
+    /// base64). Its own secret so that rotating the access-token secret does not
+    /// revoke every state credential, and vice versa. `None` falls back to a key
+    /// derived from `access_token_secret_key`, with a warning at startup.
+    pub terraform_state_signing_key: Option<Vec<u8>>,
+
     /// Optional pre-hashed service account API key (SHA-256).
     /// Set via `FOREST_SERVICE_ACCOUNT_API_KEY` env var.
     /// Grants `Actor::ServiceAccount` with full cross-org access.
@@ -260,6 +266,7 @@ mod tests {
             terraform_external_host: "http://localhost:0".into(),
             password_secret_key: "test-password-secret-key-32chars".into(),
             access_token_secret_key: b"test-access-token-secret-key-32b".to_vec(),
+            terraform_state_signing_key: None,
             refresh_token_secret_key: b"test-refresh-token-secret-key32b".to_vec(),
             service_account_token_hash: None,
             registration_email_domain_regex: None,

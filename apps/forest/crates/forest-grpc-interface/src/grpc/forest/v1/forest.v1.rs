@@ -2981,6 +2981,37 @@ pub struct PlanDestinationOutput {
     #[prost(string, tag="4")]
     pub status: ::prost::alloc::string::String,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CheckDriftRequest {
+    #[prost(message, optional, tag="1")]
+    pub project: ::core::option::Option<Project>,
+    #[prost(string, tag="2")]
+    pub environment: ::prost::alloc::string::String,
+    /// Optional: one destination by name. Empty means every destination in the
+    /// environment this project has deployed to.
+    #[prost(string, tag="3")]
+    pub destination: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CheckDriftResponse {
+    #[prost(message, repeated, tag="1")]
+    pub destinations: ::prost::alloc::vec::Vec<DestinationDrift>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DestinationDrift {
+    #[prost(string, tag="1")]
+    pub destination_name: ::prost::alloc::string::String,
+    #[prost(enumeration="DriftStatus", tag="2")]
+    pub status: i32,
+    /// The refresh-only plan text, every root labelled.
+    #[prost(string, tag="3")]
+    pub output: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub error: ::prost::alloc::string::String,
+    /// The artifact whose rendered config was compared.
+    #[prost(string, tag="5")]
+    pub artifact_id: ::prost::alloc::string::String,
+}
 /// Report that the deploy an annotation announced did not happen.
 ///
 /// For a project whose rollout Forest does not perform — CI builds an image and
@@ -3262,6 +3293,45 @@ impl PipelineRunStageStatus {
             "PIPELINE_RUN_STAGE_STATUS_AWAITING_APPROVAL" => Some(Self::AwaitingApproval),
             "PIPELINE_RUN_STAGE_STATUS_AWAITING_SIGNAL" => Some(Self::AwaitingSignal),
             "PIPELINE_RUN_STAGE_STATUS_SUPERSEDED" => Some(Self::Superseded),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum DriftStatus {
+    Unspecified = 0,
+    /// The live infrastructure matches state.
+    InSync = 1,
+    /// Something changed outside forest; `output` says what.
+    Drifted = 2,
+    /// This destination type has no drift check.
+    Unsupported = 3,
+    /// The check itself failed; see `error`.
+    Error = 4,
+}
+impl DriftStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "DRIFT_STATUS_UNSPECIFIED",
+            Self::InSync => "DRIFT_STATUS_IN_SYNC",
+            Self::Drifted => "DRIFT_STATUS_DRIFTED",
+            Self::Unsupported => "DRIFT_STATUS_UNSUPPORTED",
+            Self::Error => "DRIFT_STATUS_ERROR",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "DRIFT_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "DRIFT_STATUS_IN_SYNC" => Some(Self::InSync),
+            "DRIFT_STATUS_DRIFTED" => Some(Self::Drifted),
+            "DRIFT_STATUS_UNSUPPORTED" => Some(Self::Unsupported),
+            "DRIFT_STATUS_ERROR" => Some(Self::Error),
             _ => None,
         }
     }
@@ -3608,6 +3678,12 @@ pub struct PlanStageConfig {
     pub environment: ::prost::alloc::string::String,
     #[prost(bool, tag="2")]
     pub auto_approve: bool,
+    /// Plan the removal of everything this project manages at the stage's
+    /// destinations (`terraform plan -destroy`) instead of the rendered config.
+    /// The deploy stage that follows applies that saved plan verbatim. A
+    /// destroy plan stage can never auto-approve: the pipeline is refused.
+    #[prost(bool, tag="3")]
+    pub destroy: bool,
 }
 /// One thing a gate waits to be told, and the states it will accept.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -5144,6 +5220,110 @@ pub struct ListSignalsRequest {
 pub struct ListSignalsResponse {
     #[prost(message, repeated, tag="1")]
     pub signals: ::prost::alloc::vec::Vec<Signal>,
+}
+/// Which state. `destination` may be left empty when it is unambiguous: the
+/// project's state predates per-destination ids, or the environment has exactly
+/// one terraform destination.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TerraformStateRef {
+    #[prost(string, tag="1")]
+    pub organisation: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub project: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub environment: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub destination: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IssueTerraformStateCredentialRequest {
+    #[prost(message, optional, tag="1")]
+    pub state: ::core::option::Option<TerraformStateRef>,
+    /// Read-write: lock, write and unlock as well as read. Default read-only.
+    #[prost(bool, tag="2")]
+    pub write: bool,
+    /// Lifetime; 0 means one hour. Capped by the server (twelve hours).
+    #[prost(uint64, tag="3")]
+    pub ttl_seconds: u64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IssueTerraformStateCredentialResponse {
+    #[prost(string, tag="1")]
+    pub state_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub address: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub lock_address: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub unlock_address: ::prost::alloc::string::String,
+    #[prost(string, tag="5")]
+    pub username: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
+    pub password: ::prost::alloc::string::String,
+    #[prost(int64, tag="7")]
+    pub expires_at_unix: i64,
+    #[prost(bool, tag="8")]
+    pub write: bool,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetTerraformStateRequest {
+    #[prost(message, optional, tag="1")]
+    pub state: ::core::option::Option<TerraformStateRef>,
+    /// 0 means the latest.
+    #[prost(int64, tag="2")]
+    pub version: i64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetTerraformStateResponse {
+    #[prost(string, tag="1")]
+    pub state_id: ::prost::alloc::string::String,
+    #[prost(int64, tag="2")]
+    pub version: i64,
+    #[prost(string, tag="3")]
+    pub created_at: ::prost::alloc::string::String,
+    /// The state as terraform wrote it. Contains secrets in plaintext.
+    #[prost(string, tag="4")]
+    pub content: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListTerraformStateVersionsRequest {
+    #[prost(message, optional, tag="1")]
+    pub state: ::core::option::Option<TerraformStateRef>,
+    /// 0 means 20.
+    #[prost(uint32, tag="2")]
+    pub limit: u32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TerraformStateVersion {
+    #[prost(int64, tag="1")]
+    pub version: i64,
+    #[prost(string, tag="2")]
+    pub created_at: ::prost::alloc::string::String,
+    #[prost(uint64, tag="3")]
+    pub size_bytes: u64,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListTerraformStateVersionsResponse {
+    #[prost(string, tag="1")]
+    pub state_id: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="2")]
+    pub versions: ::prost::alloc::vec::Vec<TerraformStateVersion>,
+    /// The current lock holder, empty when unlocked.
+    #[prost(string, tag="3")]
+    pub lock_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ForceUnlockTerraformStateRequest {
+    #[prost(message, optional, tag="1")]
+    pub state: ::core::option::Option<TerraformStateRef>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ForceUnlockTerraformStateResponse {
+    #[prost(string, tag="1")]
+    pub state_id: ::prost::alloc::string::String,
+    /// The lock id removed; empty when the state was not locked.
+    #[prost(string, tag="2")]
+    pub removed_lock_id: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Trigger {

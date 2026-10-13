@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT rs.stage_id, ri.stages\n                FROM release_states rs\n                JOIN release_intents ri ON ri.id = rs.release_intent_id\n                WHERE rs.release_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "stage_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "release_states",
+            "name": "stage_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "stages",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "release_intents",
+            "name": "stages"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "9ef8774447c5371e40b042497ee3f469a8bff6520f4d667afb036d9e9ddaebf8"
+}

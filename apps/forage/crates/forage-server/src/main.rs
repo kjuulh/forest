@@ -2,6 +2,7 @@ mod auth;
 mod build_info;
 mod cli;
 mod checks;
+mod cli;
 mod compute_grpc;
 mod email_consumer;
 mod forest_client;
@@ -145,6 +146,12 @@ async fn main() -> anyhow::Result<()> {
     // Upstream initialized OTLP traces/logs/metrics here via canopy-otel
     // when `OTEL_SERVICE_NAME` was set. Dropped on the rawpotion fork —
     // see Cargo.toml comment for restoration steps.
+
+    let config = cli::Command::parse();
+
+    if config.maintenance_mode {
+        tracing::warn!("maintenance mode enabled; application routes return safe defaults");
+    }
 
     let config = cli::Command::parse();
 
@@ -449,9 +456,9 @@ async fn main() -> anyhow::Result<()> {
 
     // HTTP server component
     let mode = if config.maintenance_mode {
-        serve_http::ServeMode::Maintenance(state.templates.clone())
+        serve_http::ServeMode::Maintenance(Box::new(state.templates.clone()))
     } else {
-        serve_http::ServeMode::Application(state)
+        serve_http::ServeMode::Application(Box::new(state))
     };
     mad.add(serve_http::ServeHttp { addr, mode });
 

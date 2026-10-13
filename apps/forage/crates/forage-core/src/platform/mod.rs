@@ -673,6 +673,10 @@ pub enum PipelineStageConfig {
     Plan {
         environment: String,
         auto_approve: bool,
+        /// A teardown plan (forest#286). Carried through unchanged so editing
+        /// a pipeline here cannot turn a destroy stage into an ordinary plan.
+        #[serde(default)]
+        destroy: bool,
     },
     /// Waits for reported signals rather than a duration. See forest#252.
     ///

@@ -536,8 +536,9 @@ mod tests {
     fn no_boxes_defers_the_default_to_forest() {
         assert!(form(false, false).grant_type_list().is_empty());
     }
+
     #[test]
-    fn component_publish_scope_is_requestable() {
+    fn the_component_publish_box_requests_that_scope() {
         let mut form = form(false, true);
         form.scope_components_publish = Some("on".to_string());
         assert_eq!(form.scope_list(), vec!["components:publish".to_string()]);

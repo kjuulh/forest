@@ -394,6 +394,46 @@ service ReleaseService {
   rpc ApprovePlanStage(ApprovePlanStageRequest) returns (ApprovePlanStageResponse);
   rpc RejectPlanStage(RejectPlanStageRequest) returns (RejectPlanStageResponse);
   rpc GetPlanOutput(GetPlanOutputRequest) returns (GetPlanOutputResponse);
+
+  // Compare what a project last deployed with what is actually running, and
+  // change neither (forest#286). For `forest/terraform@1` this is
+  // `plan -refresh-only -detailed-exitcode -lock=false` against the artifact of
+  // the destination's last successful deploy. Runs synchronously.
+  rpc CheckDrift(CheckDriftRequest) returns (CheckDriftResponse);
+}
+
+message CheckDriftRequest {
+  Project project = 1;
+  string environment = 2;
+  // Optional: one destination by name. Empty means every destination in the
+  // environment this project has deployed to.
+  string destination = 3;
+}
+
+message CheckDriftResponse {
+  repeated DestinationDrift destinations = 1;
+}
+
+enum DriftStatus {
+  DRIFT_STATUS_UNSPECIFIED = 0;
+  // The live infrastructure matches state.
+  DRIFT_STATUS_IN_SYNC = 1;
+  // Something changed outside forest; `output` says what.
+  DRIFT_STATUS_DRIFTED = 2;
+  // This destination type has no drift check.
+  DRIFT_STATUS_UNSUPPORTED = 3;
+  // The check itself failed; see `error`.
+  DRIFT_STATUS_ERROR = 4;
+}
+
+message DestinationDrift {
+  string destination_name = 1;
+  DriftStatus status = 2;
+  // The refresh-only plan text, every root labelled.
+  string output = 3;
+  string error = 4;
+  // The artifact whose rendered config was compared.
+  string artifact_id = 5;
 }
 
 // Report that the deploy an annotation announced did not happen.

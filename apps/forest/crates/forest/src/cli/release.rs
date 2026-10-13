@@ -1,8 +1,8 @@
 use crate::{
     cli::release::{
         annotate::AnnotateCommand, approve::ApproveCommand, commit::CommitCommand,
-        create::CreateCommand, fail::FailCommand, prepare::PrepareCommand, reject::RejectCommand,
-        show::ShowCommand,
+        create::CreateCommand, drift::DriftCommand, fail::FailCommand, prepare::PrepareCommand,
+        reject::RejectCommand, show::ShowCommand,
     },
     state::State,
 };
@@ -12,6 +12,7 @@ pub(crate) mod approve;
 pub(crate) mod commit;
 mod create;
 pub(crate) mod detect;
+mod drift;
 mod fail;
 pub(crate) mod prepare;
 pub(crate) mod reject;
@@ -46,6 +47,8 @@ pub enum Commands {
     Approve(ApproveCommand),
     /// Reject a plan stage, cancelling it and everything downstream.
     Reject(RejectCommand),
+    /// Check whether what was last deployed is still what is running. Exits 2 on drift.
+    Drift(DriftCommand),
 }
 
 impl ReleaseCommand {
@@ -64,6 +67,7 @@ impl ReleaseCommand {
             Some(Commands::Fail(cmd)) => cmd.execute(state).await?,
             Some(Commands::Approve(cmd)) => cmd.execute(state).await?,
             Some(Commands::Reject(cmd)) => cmd.execute(state).await?,
+            Some(Commands::Drift(cmd)) => cmd.execute(state).await?,
             None => {
                 let cmd = self.release.as_ref().cloned().unwrap_or_default();
                 cmd.execute(state).await?

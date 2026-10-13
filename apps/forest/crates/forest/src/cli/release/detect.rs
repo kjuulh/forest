@@ -348,7 +348,7 @@ async fn candidates(state: &State) -> Vec<Candidate> {
 /// A caller that named both on the command line does not need one and should
 /// not be made to have one — only a caller that left a blank finds out, and
 /// then the error names the blank rather than the file.
-pub(super) async fn project(state: &State) -> (Option<String>, Option<String>) {
+pub(crate) async fn project(state: &State) -> (Option<String>, Option<String>) {
     match state.project_parser().get_project().await {
         Ok(project) => (project.organisation.clone(), Some(project.name.clone())),
         Err(e) => {

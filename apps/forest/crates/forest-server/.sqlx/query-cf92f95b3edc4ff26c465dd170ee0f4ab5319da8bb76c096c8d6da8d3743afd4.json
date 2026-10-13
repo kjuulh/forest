@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    INSERT INTO terraform_plans\n                        (release_intent_id, destination_id, work_dir, plan, lock_file)\n                    VALUES ($1, $2, $3, $4, $5)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Bytea",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cf92f95b3edc4ff26c465dd170ee0f4ab5319da8bb76c096c8d6da8d3743afd4"
+}

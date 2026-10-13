@@ -10,6 +10,11 @@ pub enum Actor {
     App {
         app_id: Uuid,
         organisation_id: Uuid,
+        /// `None` for a legacy app token, which acts org-wide as an app
+        /// always has. `Some` for an OAuth client-credentials token, which
+        /// may act only within the scopes it was granted: the auth layer
+        /// refuses any method those scopes do not cover
+        /// (`grpc::auth_layer::scoped_token_permits`).
         scopes: Option<Vec<String>>,
     },
     ServiceAccount {

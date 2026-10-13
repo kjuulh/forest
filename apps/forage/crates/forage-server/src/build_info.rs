@@ -68,8 +68,14 @@ fn read(key: &str) -> String {
     }
 }
 
-/// Convert Woodpecker's Unix timestamp to the RFC 3339 contract exposed by
-/// status responses and HTML `<time datetime>` attributes.
+/// Hold `build_time` to the RFC 3339 contract that status responses and HTML
+/// `<time datetime>` attributes expose.
+///
+/// Some CI systems only offer the build time as Unix seconds (Woodpecker's
+/// `CI_PIPELINE_CREATED`, or a `SOURCE_DATE_EPOCH`-style stamp), and passing
+/// that through gave the footer a `datetime` browsers cannot parse. An integer
+/// is converted; anything else, RFC 3339 included, is left exactly as it was
+/// stamped.
 fn normalize_build_time(value: &str) -> String {
     let Ok(timestamp) = value.parse::<i64>() else {
         return value.to_string();
@@ -113,6 +119,26 @@ mod tests {
     #[test]
     fn unix_build_timestamp_is_normalized_to_rfc3339() {
         assert_eq!(normalize_build_time("1700000000"), "2023-11-14T22:13:20Z");
+    }
+
+    #[test]
+    fn an_rfc3339_build_timestamp_is_kept_as_stamped() {
+        assert_eq!(
+            normalize_build_time("2026-09-20T01:00:35+02:00"),
+            "2026-09-20T01:00:35+02:00"
+        );
+    }
+
+    /// Not a timestamp forage can convert, so it is not rewritten into one: an
+    /// absent stamp stays absent, and anything else stays visibly what it was.
+    #[test]
+    fn empty_and_unconvertible_stamps_are_left_alone() {
+        assert_eq!(normalize_build_time(""), "");
+        assert_eq!(normalize_build_time("yesterday"), "yesterday");
+        assert_eq!(
+            normalize_build_time(&i64::MAX.to_string()),
+            i64::MAX.to_string()
+        );
     }
 
     #[test]

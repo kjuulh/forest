@@ -505,7 +505,7 @@ async fn discovery(State(state): State<AppState>) -> Response {
         "userinfo_endpoint": format!("{base}/oauth/userinfo"),
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
-        "scopes_supported": ["openid", "profile", "email", "directory:read", "components:publish"],
+        "scopes_supported": ["openid", "profile", "email", "components:publish"],
         "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
         "id_token_signing_alg_values_supported": ["HS256"],
         "code_challenge_methods_supported": ["S256", "plain"],
@@ -627,7 +627,7 @@ fn scope_description(scope: &str) -> &'static str {
         "openid" => "Confirm your identity",
         "profile" => "Your username, account ID and avatar",
         "email" => "Your verified email addresses",
-        "directory:read" => "Look up organisation members by verified identity",
+
         "components:publish" => "Publish Forest components from CI",
         _ => "",
     }

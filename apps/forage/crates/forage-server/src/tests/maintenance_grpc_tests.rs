@@ -22,14 +22,18 @@ impl ComputeScheduler for RejectingScheduler {
         _resources: Vec<ComputeResourceSpec>,
         _labels: HashMap<String, String>,
     ) -> Result<String, ComputeError> {
-        Err(ComputeError::Internal("scheduler must not be called".into()))
+        Err(ComputeError::Internal(
+            "scheduler must not be called".into(),
+        ))
     }
 
     async fn watch_rollout(
         &self,
         _rollout_id: &str,
     ) -> Result<tokio::sync::mpsc::Receiver<RolloutEvent>, ComputeError> {
-        Err(ComputeError::Internal("scheduler must not be called".into()))
+        Err(ComputeError::Internal(
+            "scheduler must not be called".into(),
+        ))
     }
 
     async fn delete_resources(
@@ -37,22 +41,27 @@ impl ComputeScheduler for RejectingScheduler {
         _namespace: &str,
         _labels: HashMap<String, String>,
     ) -> Result<(), ComputeError> {
-        Err(ComputeError::Internal("scheduler must not be called".into()))
+        Err(ComputeError::Internal(
+            "scheduler must not be called".into(),
+        ))
     }
 
     async fn list_rollouts(&self, _namespace: &str) -> Result<Vec<Rollout>, ComputeError> {
-        Err(ComputeError::Internal("scheduler must not be called".into()))
+        Err(ComputeError::Internal(
+            "scheduler must not be called".into(),
+        ))
     }
 
     async fn get_rollout(&self, _rollout_id: &str) -> Result<Rollout, ComputeError> {
-        Err(ComputeError::Internal("scheduler must not be called".into()))
+        Err(ComputeError::Internal(
+            "scheduler must not be called".into(),
+        ))
     }
 
-    async fn list_instances(
-        &self,
-        _namespace: &str,
-    ) -> Result<Vec<ComputeInstance>, ComputeError> {
-        Err(ComputeError::Internal("scheduler must not be called".into()))
+    async fn list_instances(&self, _namespace: &str) -> Result<Vec<ComputeInstance>, ComputeError> {
+        Err(ComputeError::Internal(
+            "scheduler must not be called".into(),
+        ))
     }
 }
 
@@ -81,4 +90,20 @@ async fn maintenance_grpc_returns_defaults_without_scheduling_work() {
         .delete_resources(Request::new(DeleteResourcesRequest::default()))
         .await
         .unwrap();
+}
+
+/// With maintenance mode off, requests reach the scheduler as before: the
+/// rejecting scheduler's error comes back instead of a default response.
+#[tokio::test]
+async fn grpc_outside_maintenance_still_reaches_the_scheduler() {
+    let service = ForageServiceImpl {
+        scheduler: Arc::new(RejectingScheduler),
+        maintenance_mode: false,
+    };
+
+    let status = service
+        .delete_resources(Request::new(DeleteResourcesRequest::default()))
+        .await
+        .expect_err("expected the scheduler's error, got a default response");
+    assert_eq!(status.message(), "scheduler must not be called");
 }

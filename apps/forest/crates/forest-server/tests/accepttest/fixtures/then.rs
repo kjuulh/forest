@@ -18,6 +18,10 @@ pub trait ThenReleaseFlow {
     async fn the_intent_is_finalized_failed(self) -> anyhow::Result<Then<ReleaseFlowData>>;
     async fn artifact_is_retrievable_by_slug(self) -> anyhow::Result<Then<ReleaseFlowData>>;
     async fn artifact_is_listed_in_project(self) -> anyhow::Result<Then<ReleaseFlowData>>;
+    async fn each_artifact_lists_only_its_own_destination(
+        self,
+        expected: &[(String, String)],
+    ) -> anyhow::Result<Then<ReleaseFlowData>>;
 }
 
 impl ThenReleaseFlow for Then<ReleaseFlowData> {
@@ -142,6 +146,60 @@ impl ThenReleaseFlow for Then<ReleaseFlowData> {
             "artifact should have destinations after release"
         );
         assert_eq!(art.destinations[0].name, dest_name);
+
+        Ok(self)
+    }
+
+    /// Every artifact in the listing carries its own destinations and nobody
+    /// else's.
+    ///
+    /// `artifact_is_listed_in_project` releases a single artifact, so it cannot
+    /// see the mistake that matters here. The listing used to run one
+    /// destinations query per annotation, which made cross-contamination
+    /// impossible by construction; it now runs one query for every artifact at
+    /// once and groups the rows in memory, and a grouping bug — the wrong key,
+    /// a `get` where the loop wanted the next artifact's rows — shows up only
+    /// once two artifacts in the same project went to different places.
+    async fn each_artifact_lists_only_its_own_destination(
+        self,
+        expected: &[(String, String)],
+    ) -> anyhow::Result<Self> {
+        let mut release_client = self.fixture().releases();
+        let (token, org) = {
+            let data = self.data();
+            (data.auth_token.clone(), data.organisation.clone())
+        };
+
+        let resp = release_client
+            .get_artifacts_by_project(authed_request(
+                &token,
+                GetArtifactsByProjectRequest {
+                    project: Some(Project {
+                        organisation: org,
+                        project: "test-project".into(),
+                        readme: String::new(),
+                        description: String::new(),
+                        metadata: Some(Default::default()),
+                    }),
+                },
+            ))
+            .await?;
+
+        let artifacts = resp.into_inner().artifact;
+
+        for (slug, dest_name) in expected {
+            let art = artifacts
+                .iter()
+                .find(|a| &a.slug == slug)
+                .unwrap_or_else(|| panic!("artifact {slug} missing from the project listing"));
+
+            let names: Vec<&str> = art.destinations.iter().map(|d| d.name.as_str()).collect();
+            assert_eq!(
+                names,
+                vec![dest_name.as_str()],
+                "artifact {slug} should list only {dest_name}"
+            );
+        }
 
         Ok(self)
     }

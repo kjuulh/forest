@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT destination FROM terraform_state_bindings WHERE state_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "destination",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "terraform_state_bindings",
+            "name": "destination"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b08676943854a11571392dbdc2e20e5a3c445e71e8eaa4de8a8bb497cc794ebf"
+}

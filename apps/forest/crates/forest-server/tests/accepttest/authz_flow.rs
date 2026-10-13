@@ -569,3 +569,156 @@ async fn user_cannot_get_release_intent_states_for_other_org() {
     );
     assert_eq!(result.unwrap_err().code(), tonic::Code::PermissionDenied);
 }
+
+// ── CheckDrift (forest#286) ──────────────────────────────────────────
+
+/// A drift check runs a plan with the destination's credentials and returns
+/// its text, so it is at least as sensitive as a plan: org admins only.
+#[tokio::test(flavor = "multi_thread")]
+async fn user_cannot_check_drift_for_other_orgs_project() {
+    let fixture = fixture().await.unwrap();
+
+    let token_a = register_user(&fixture).await;
+    let org_a = create_org(&fixture, &token_a).await;
+    fixture
+        .releases()
+        .create_project(authed_request(
+            &token_a,
+            CreateProjectRequest {
+                organisation: org_a.clone(),
+                project: "drift-a".into(),
+            },
+        ))
+        .await
+        .expect("create project");
+
+    let token_b = register_user(&fixture).await;
+    let status = fixture
+        .releases()
+        .check_drift(authed_request(
+            &token_b,
+            CheckDriftRequest {
+                project: Some(Project {
+                    organisation: org_a.clone(),
+                    project: "drift-a".into(),
+                    ..Default::default()
+                }),
+                environment: "dev".into(),
+                destination: String::new(),
+            },
+        ))
+        .await
+        .expect_err("user B must not check drift on org A's project");
+
+    assert_eq!(status.code(), tonic::Code::PermissionDenied, "{status:?}");
+}
+
+/// Admin only, like `forest state` (forest#282): a member of the right org is
+/// still refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_who_is_not_an_admin_cannot_check_drift() {
+    let fixture = fixture().await.unwrap();
+
+    let token_a = register_user(&fixture).await;
+    let org_a = create_org(&fixture, &token_a).await;
+    fixture
+        .releases()
+        .create_project(authed_request(
+            &token_a,
+            CreateProjectRequest {
+                organisation: org_a.clone(),
+                project: "drift-members".into(),
+            },
+        ))
+        .await
+        .expect("create project");
+
+    let member = fixture
+        .users()
+        .register(RegisterRequest {
+            username: format!("member-{}", uuid::Uuid::now_v7()),
+            email: format!("{}@test.com", uuid::Uuid::now_v7()),
+            password: "TestPassword123!".into(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    let member_token = member.tokens.unwrap().access_token;
+    let org_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM organisations WHERE name = $1")
+        .bind(&org_a)
+        .fetch_one(&fixture.db)
+        .await
+        .unwrap();
+    fixture
+        .organisations()
+        .add_member(authed_request(
+            &token_a,
+            AddMemberRequest {
+                organisation_id: org_id.to_string(),
+                user_id: member.user.unwrap().user_id,
+                role: "member".into(),
+            },
+        ))
+        .await
+        .expect("add member");
+
+    let status = fixture
+        .releases()
+        .check_drift(authed_request(
+            &member_token,
+            CheckDriftRequest {
+                project: Some(Project {
+                    organisation: org_a.clone(),
+                    project: "drift-members".into(),
+                    ..Default::default()
+                }),
+                environment: "dev".into(),
+                destination: String::new(),
+            },
+        ))
+        .await
+        .expect_err("a non-admin member must not check drift");
+
+    assert_eq!(status.code(), tonic::Code::PermissionDenied, "{status:?}");
+}
+
+/// An admin gets an answer, not a panic, for a project that has never
+/// deployed: there is nothing to compare against, and it says so.
+#[tokio::test(flavor = "multi_thread")]
+async fn check_drift_without_a_deploy_says_there_is_nothing_to_compare() {
+    let fixture = fixture().await.unwrap();
+
+    let token_a = register_user(&fixture).await;
+    let org_a = create_org(&fixture, &token_a).await;
+    fixture
+        .releases()
+        .create_project(authed_request(
+            &token_a,
+            CreateProjectRequest {
+                organisation: org_a.clone(),
+                project: "drift-never-deployed".into(),
+            },
+        ))
+        .await
+        .expect("create project");
+
+    let status = fixture
+        .releases()
+        .check_drift(authed_request(
+            &token_a,
+            CheckDriftRequest {
+                project: Some(Project {
+                    organisation: org_a.clone(),
+                    project: "drift-never-deployed".into(),
+                    ..Default::default()
+                }),
+                environment: "dev".into(),
+                destination: String::new(),
+            },
+        ))
+        .await
+        .expect_err("no deploy, nothing to compare");
+
+    assert_eq!(status.code(), tonic::Code::FailedPrecondition, "{status:?}");
+    assert!(status.message().contains("no successful deploy"), "{status:?}");
+}

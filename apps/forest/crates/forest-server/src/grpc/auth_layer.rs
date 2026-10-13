@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::{
     actor::Actor,
+    services::oauth_apps::{OAuthAppServiceState, SCOPE_COMPONENTS_PUBLISH},
     state::State,
     tokens::{AccessToken, TokenServiceState},
 };
@@ -87,40 +88,43 @@ async fn resolve_legacy_app_token(
         app_id: row.app_id,
         organisation_id: row.organisation_id,
         scopes: None,
+
     }))
 }
 
-async fn resolve_oauth_client_token(
-    db: &sqlx::PgPool,
-    raw_token: &str,
-) -> anyhow::Result<Option<Actor>> {
-    let token_hash = sha2::Sha256::digest(raw_token.as_bytes()).to_vec();
+/// The gRPC methods an OAuth client-credentials token may call, by scope.
+///
+/// Deny by default. Such a token authenticates as its app, and an app passes
+/// every org-member check in its own organisation, so without this list a
+/// token granted only `directory:read` could create releases or edit
+/// destinations. A scope not listed here grants no gRPC method at all.
+///
+/// `components:publish` covers what `forest publish` calls: the registry
+/// (reading the org's components, and the upload, manifest, commit, abort
+/// and unpublish writes, which also check the scope themselves), plus
+/// `CreateProject`/`UpdateProject`, because publishing ensures the
+/// component's project exists and records its metadata.
+const SCOPED_METHODS: &[(&str, &[&str])] = &[(
+    SCOPE_COMPONENTS_PUBLISH,
+    &[
+        "/forest.v1.RegistryService/",
+        "/forest.v1.ReleaseService/CreateProject",
+        "/forest.v1.ReleaseService/UpdateProject",
+    ],
+)];
 
-    let row = sqlx::query_as::<_, (Uuid, Uuid, Vec<String>)>(
-        r#"
-        UPDATE oauth_client_tokens t
-        SET last_used_at = now()
-        FROM oauth_apps a
-        WHERE t.token_hash = $1
-          AND t.app_id = a.id
-          AND t.revoked_at IS NULL
-          AND t.expires_at > now()
-        RETURNING t.app_id, a.organisation_id, t.scopes
-        "#,
-    )
-    .bind(&token_hash)
-    .fetch_optional(db)
-    .await?;
-
-    let Some(row) = row else {
-        return Ok(None);
-    };
-
-    Ok(Some(Actor::App {
-        app_id: row.0,
-        organisation_id: row.1,
-        scopes: Some(row.2),
-    }))
+/// Whether a token holding `scopes` may call the gRPC method at `path`.
+pub(crate) fn scoped_token_permits(path: &str, scopes: &[String]) -> bool {
+    SCOPED_METHODS.iter().any(|(scope, methods)| {
+        scopes.iter().any(|s| s == scope)
+            && methods.iter().any(|m| {
+                if m.ends_with('/') {
+                    path.starts_with(m)
+                } else {
+                    path == *m
+                }
+            })
+    })
 }
 
 /// Compare the incoming token against the pre-hashed service account key
@@ -235,10 +239,18 @@ fn auth_mode(path: &str) -> AuthMode {
 }
 
 fn grpc_unauthenticated<B: Default>(message: &str) -> http::Response<B> {
+    grpc_status_response(16, message)
+}
+
+fn grpc_permission_denied<B: Default>(message: &str) -> http::Response<B> {
+    grpc_status_response(7, message)
+}
+
+fn grpc_status_response<B: Default>(code: u16, message: &str) -> http::Response<B> {
     let mut response = http::Response::new(B::default());
     response
         .headers_mut()
-        .insert("grpc-status", http::HeaderValue::from(16));
+        .insert("grpc-status", http::HeaderValue::from(code));
     response.headers_mut().insert(
         "content-type",
         http::HeaderValue::from_static("application/grpc"),
@@ -332,36 +344,114 @@ where
                 }
             }
 
-            // 4. Try legacy app token (DB)
-            match resolve_legacy_app_token(&state.db, &token).await {
+            // 4. Try a legacy app token (DB)
+            match resolve_app_token(&state.db, &token).await {
                 Ok(Some(actor)) => {
                     req.extensions_mut().insert(actor);
                     return inner.call(req).await;
                 }
-                Ok(None) => {} // not a legacy app token, try OAuth client token
+                Ok(None) => {} // not an app token, try next
                 Err(e) => {
-                    tracing::warn!(path = %path, error = %e, "legacy app token lookup failed");
+                    tracing::warn!(path = %path, error = %e, "app token lookup failed");
                 }
             }
 
-            // 5. Fall back to OAuth client-credentials token lookup (DB)
-            match resolve_oauth_client_token(&state.db, &token).await {
-                Ok(Some(actor)) => {
-                    req.extensions_mut().insert(actor);
+            // 5. Fall back to an OAuth client-credentials token (DB), limited
+            //    to the methods its scopes cover.
+            match state
+                .oauth_app_service()
+                .introspect_client_token(&token)
+                .await
+            {
+                Ok(Some(principal)) => {
+                    if !scoped_token_permits(&path, &principal.scopes) {
+                        tracing::warn!(path = %path, app_id = %principal.app_id, "client token's scopes do not cover this method");
+                        return Ok(grpc_permission_denied(
+                            "token's scopes do not cover this method",
+                        ));
+                    }
+                    req.extensions_mut().insert(Actor::App {
+                        app_id: principal.app_id,
+                        organisation_id: principal.organisation_id,
+                        scopes: Some(principal.scopes),
+                    });
                     inner.call(req).await
                 }
                 Ok(None) => {
                     if mode == AuthMode::Optional {
                         return inner.call(req).await;
                     }
-                    tracing::warn!(path = %path, "token verification failed: no matching user, app, oauth client, or service account token");
+                    tracing::warn!(path = %path, "token verification failed: no matching user, app, client, or service account token");
                     Ok(grpc_unauthenticated("token verification failed"))
                 }
                 Err(e) => {
-                    tracing::warn!(path = %path, error = %e, "OAuth client token lookup failed");
+                    tracing::warn!(path = %path, error = %e, "client token lookup failed");
                     Ok(grpc_unauthenticated("token verification failed"))
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod scoped_token_tests {
+    use super::scoped_token_permits;
+
+    fn scopes(s: &[&str]) -> Vec<String> {
+        s.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn the_publish_grant_reaches_the_registry_and_project_upsert() {
+        let s = scopes(&["components:publish"]);
+        for path in [
+            "/forest.v1.RegistryService/BeginUpload",
+            "/forest.v1.RegistryService/UploadBinary",
+            "/forest.v1.RegistryService/PublishManifest",
+            "/forest.v1.RegistryService/CommitUpload",
+            "/forest.v1.RegistryService/AbortUpload",
+            "/forest.v1.ReleaseService/CreateProject",
+            "/forest.v1.ReleaseService/UpdateProject",
+        ] {
+            assert!(scoped_token_permits(path, &s), "{path} should be allowed");
+        }
+    }
+
+    /// The point of the list: an app passes org-member checks, so anything
+    /// not listed must be refused here.
+    #[test]
+    fn the_publish_grant_reaches_nothing_else() {
+        let s = scopes(&["components:publish"]);
+        for path in [
+            "/forest.v1.ReleaseService/CreateReleaseIntent",
+            "/forest.v1.ReleaseService/CreateProjectTrigger",
+            "/forest.v1.DestinationService/CreateDestination",
+            "/forest.v1.OrganisationService/AddMember",
+            "/forest.v1.OAuthAppsService/CreateOAuthApp",
+            "/forest.v1.RegistryServiceX/BeginUpload",
+        ] {
+            assert!(!scoped_token_permits(path, &s), "{path} should be refused");
+        }
+    }
+
+    #[test]
+    fn a_scope_without_methods_grants_no_method() {
+        let s = scopes(&["directory:read", "openid", "profile", "email"]);
+        assert!(!scoped_token_permits(
+            "/forest.v1.RegistryService/BeginUpload",
+            &s
+        ));
+        assert!(!scoped_token_permits(
+            "/forest.v1.ReleaseService/CreateProject",
+            &s
+        ));
+    }
+
+    #[test]
+    fn no_scopes_grant_no_method() {
+        assert!(!scoped_token_permits(
+            "/forest.v1.RegistryService/BeginUpload",
+            &[]
+        ));
     }
 }

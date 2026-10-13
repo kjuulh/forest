@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT EXISTS (\n                    SELECT 1 FROM release_states\n                    WHERE release_intent_id = $1 AND destination_id = $2 AND mode = 'plan'\n                ) AS \"ran!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ran!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "13d944697507c8dcb4b58b7e34d51040d36dd914c83b50685708fea6528b6574"
+}

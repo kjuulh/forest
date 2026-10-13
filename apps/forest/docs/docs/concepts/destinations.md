@@ -120,6 +120,21 @@ exchange. Never commit cloud credentials to `forest.cue`.
 
 ## Mapping destinations in a project
 
+## Terraform state
+
+A `forest/terraform@1` destination keeps state in forest-server, behind an
+HTTP backend on `FOREST_TERRAFORM_V1_HOST` (internal-only in production). Every
+request to it must carry a credential signed for that one state; runs get one
+automatically.
+
+| Server variable | |
+|---|---|
+| `FOREST_TERRAFORM_STATE_SIGNING_KEY` | Base64, at least 32 bytes. Signs state credentials. Its own secret, so rotating `ACCESS_TOKEN_SECRET_KEY` does not revoke state credentials and rotating this does not sign anybody out. **Optional:** unset, forest derives the key from `ACCESS_TOKEN_SECRET_KEY` and logs a warning at startup. Rotating it revokes every outstanding state credential, including a running apply's, so rotate when nothing is applying. |
+
+Generate one with `openssl rand -base64 32`.
+
+## Mapping in Configuration
+
 `forest.cue` declares which destinations an environment targets:
 
 ```cue
@@ -185,3 +200,19 @@ forest destination delete --organisation acme --name k8s-dev
 forest destination list --organisation acme
 forest destination types
 ```
+
+## Drift (`forest/terraform@1`)
+
+Terraform state records what forest last applied. It doesn't tell you whether someone has changed a resource in a console since. To check:
+
+```bash
+forest release drift --environment dev              # every destination this project deployed to
+forest release drift -e prod -d prod/eu-west-1/core # one destination
+```
+
+For each destination the server takes the artifact of that destination's last successful deploy and runs `terraform plan -refresh-only -detailed-exitcode -lock=false` against it. It changes nothing: no state write, no lock, so it can't block or be blocked by a release.
+
+The exit status is `0` when in sync, `2` when something drifted (the refresh-only plan is printed), and `1` when the check couldn't run. So a scheduled CI job can alert on `2` without parsing anything.
+
+The check runs synchronously in the request. Scheduling it and showing the result in forage are follow-ups.
+

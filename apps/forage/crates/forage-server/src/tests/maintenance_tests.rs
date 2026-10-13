@@ -3,6 +3,7 @@ use axum::http::{Method, Request, StatusCode, header};
 use tower::ServiceExt;
 
 use crate::build_maintenance_router;
+use crate::serve_http::ServeMode;
 use crate::test_support::test_state;
 
 #[tokio::test]
@@ -59,4 +60,34 @@ async fn maintenance_mode_keeps_liveness_probe_available() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+/// The flag off must leave the application exactly as it was: the mode the
+/// listener is built from serves the real router, not the maintenance page.
+#[tokio::test]
+async fn application_mode_serves_the_application_not_the_maintenance_page() {
+    let (state, _) = test_state();
+    let response = ServeMode::Application(Box::new(state))
+        .router()
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_ne!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(response.headers().get(header::RETRY_AFTER).is_none());
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(!html.contains("Maintenance in progress"));
+}
+
+#[tokio::test]
+async fn maintenance_mode_is_what_the_listener_serves_when_enabled() {
+    let (state, _) = test_state();
+    let response = ServeMode::Maintenance(Box::new(state.templates))
+        .router()
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }

@@ -34,6 +34,17 @@ struct Command {
 
     #[arg(long, env = "REFRESH_TOKEN_SECRET_KEY")]
     refresh_token_secret_key: String,
+
+    /// Base64 secret (at least 32 bytes) that signs terraform@1 state
+    /// credentials. Optional: unset falls back to a key derived from
+    /// ACCESS_TOKEN_SECRET_KEY, with a warning. Rotating it revokes every
+    /// outstanding state credential, including those of runs in flight.
+    #[arg(
+        long,
+        env = "FOREST_TERRAFORM_STATE_SIGNING_KEY",
+        hide_env_values = true
+    )]
+    terraform_state_signing_key: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -92,6 +103,29 @@ pub async fn execute() -> anyhow::Result<()> {
         access_token_secret_key: BASE64_STANDARD
             .decode(cli.access_token_secret_key)
             .context("access token secret was not base64")?,
+
+        terraform_state_signing_key: match cli.terraform_state_signing_key.as_deref() {
+            Some(key) if !key.is_empty() => {
+                let key = BASE64_STANDARD
+                    .decode(key)
+                    .context("FOREST_TERRAFORM_STATE_SIGNING_KEY was not base64")?;
+                // Fail closed on a short key rather than sign with it.
+                anyhow::ensure!(
+                    key.len() >= 32,
+                    "FOREST_TERRAFORM_STATE_SIGNING_KEY must decode to at least 32 bytes, got {}",
+                    key.len()
+                );
+                Some(key)
+            }
+            _ => {
+                tracing::warn!(
+                    "FOREST_TERRAFORM_STATE_SIGNING_KEY is not set; terraform state credentials \
+                     are signed with a key derived from ACCESS_TOKEN_SECRET_KEY, so rotating that \
+                     secret also revokes them. Set a dedicated key."
+                );
+                None
+            }
+        },
 
         service_account_token_hash: std::env::var("FOREST_SERVICE_ACCOUNT_API_KEY")
             .ok()

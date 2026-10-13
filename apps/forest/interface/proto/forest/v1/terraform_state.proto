@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package forest.v1;
+
+// Operator access to the state the forest/terraform@1 destination keeps
+// (understory-io/forest#282).
+//
+// Before this, a project's terraform state could be reached only by a release
+// run: no way to read it, plan against it, `state rm` a mistake, or break a
+// lock left by a crashed apply. Every call here is authorised against the
+// project's organisation and recorded (an event plus a log line naming the
+// actor and the state).
+service TerraformStateService {
+  // A short-lived HTTP-backend credential for one state, as the TF_HTTP_*
+  // variables terraform/OpenTofu read. With it every terraform command works
+  // unchanged — `state list`, `plan`, `import`, `state rm`, `force-unlock` —
+  // from anywhere the backend address is reachable.
+  rpc IssueTerraformStateCredential(IssueTerraformStateCredentialRequest) returns (IssueTerraformStateCredentialResponse);
+
+  // The state document itself, latest or a given version. Over gRPC, so it
+  // works where the backend address does not resolve.
+  rpc GetTerraformState(GetTerraformStateRequest) returns (GetTerraformStateResponse);
+
+  // Every stored version of a state, newest first. Each apply appends one.
+  rpc ListTerraformStateVersions(ListTerraformStateVersionsRequest) returns (ListTerraformStateVersionsResponse);
+
+  // Break a state's lock whoever holds it — for a runner that died mid-apply.
+  rpc ForceUnlockTerraformState(ForceUnlockTerraformStateRequest) returns (ForceUnlockTerraformStateResponse);
+}
+
+// Which state. `destination` may be left empty when it is unambiguous: the
+// project's state predates per-destination ids, or the environment has exactly
+// one terraform destination.
+message TerraformStateRef {
+  string organisation = 1;
+  string project = 2;
+  string environment = 3;
+  string destination = 4;
+}
+
+message IssueTerraformStateCredentialRequest {
+  TerraformStateRef state = 1;
+  // Read-write: lock, write and unlock as well as read. Default read-only.
+  bool write = 2;
+  // Lifetime; 0 means one hour. Capped by the server (twelve hours).
+  uint64 ttl_seconds = 3;
+}
+
+message IssueTerraformStateCredentialResponse {
+  string state_id = 1;
+  string address = 2;
+  string lock_address = 3;
+  string unlock_address = 4;
+  string username = 5;
+  string password = 6;
+  int64 expires_at_unix = 7;
+  bool write = 8;
+}
+
+message GetTerraformStateRequest {
+  TerraformStateRef state = 1;
+  // 0 means the latest.
+  int64 version = 2;
+}
+
+message GetTerraformStateResponse {
+  string state_id = 1;
+  int64 version = 2;
+  string created_at = 3;
+  // The state as terraform wrote it. Contains secrets in plaintext.
+  string content = 4;
+}
+
+message ListTerraformStateVersionsRequest {
+  TerraformStateRef state = 1;
+  // 0 means 20.
+  uint32 limit = 2;
+}
+
+message TerraformStateVersion {
+  int64 version = 1;
+  string created_at = 2;
+  uint64 size_bytes = 3;
+}
+
+message ListTerraformStateVersionsResponse {
+  string state_id = 1;
+  repeated TerraformStateVersion versions = 2;
+  // The current lock holder, empty when unlocked.
+  string lock_id = 3;
+}
+
+message ForceUnlockTerraformStateRequest {
+  TerraformStateRef state = 1;
+}
+
+message ForceUnlockTerraformStateResponse {
+  string state_id = 1;
+  // The lock id removed; empty when the state was not locked.
+  string removed_lock_id = 2;
+}

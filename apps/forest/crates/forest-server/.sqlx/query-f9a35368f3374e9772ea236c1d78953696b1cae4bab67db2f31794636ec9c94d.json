@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT EXISTS (\n                    SELECT 1\n                    FROM release_states rs\n                    JOIN destinations d ON d.id = rs.destination_id\n                    WHERE rs.project_id = $1\n                      AND d.organisation = $2\n                      AND d.name = $3\n                      AND rs.completed_at IS NOT NULL\n                      AND rs.completed_at < $4\n                ) AS \"shared!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "shared!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f9a35368f3374e9772ea236c1d78953696b1cae4bab67db2f31794636ec9c94d"
+}

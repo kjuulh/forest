@@ -1,4 +1,4 @@
-FROM rust:1.98-trixie AS builder
+FROM rust:1.98-trixie AS chef
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     ca-certificates \
     curl \
-    clang mold \
+    clang mold git ssh \
     && rm -rf /var/lib/apt/lists/*
 
 # sccache amortizes rustc compile across CI runs. When
@@ -39,11 +39,30 @@ RUN case "$TARGETARCH" in \
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_MEMCACHED_ENDPOINT=$SCCACHE_MEMCACHED_ENDPOINT
 
-RUN mkdir -p /usr/local/cargo && \
-    printf '[target.x86_64-unknown-linux-gnu]\nlinker = "clang"\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' \
-    > /usr/local/cargo/config.toml
-
 ENV SQLX_OFFLINE=true
+
+RUN cargo install cargo-chef --locked --version 0.1.78
+
+# The recipe is a digest of every manifest in the workspace and nothing else, so
+# this stage re-runs on any commit but its *output* only changes when a
+# Cargo.toml or Cargo.lock does.
+FROM chef AS planner
+
+COPY . .
+
+RUN --mount=type=ssh cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+
+# Dependencies compile against the recipe alone. This layer is keyed on
+# recipe.json, so it survives every commit that does not touch a manifest --
+# which is most of them. `.sqlx/` is not needed here: cook builds the
+# dependency graph against a skeleton workspace, and no sqlx macro runs until
+# the real sources arrive below.
+COPY --from=planner /app/recipe.json recipe.json
+
+RUN --mount=type=ssh cargo chef cook --release \
+    --bin forest-server --bin forest-event-migration --recipe-path recipe.json
 
 COPY . .
 
