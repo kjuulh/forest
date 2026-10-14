@@ -442,6 +442,22 @@ mod scoped_token_tests {
         ));
     }
 
+    /// The data gateway's scopes, and the introspection scope, are for other
+    /// services: a token holding only them must reach no Forest method,
+    /// IntrospectClientToken included (Forage answers that, not the caller).
+    #[test]
+    fn the_resource_server_scopes_grant_no_forest_method() {
+        let s = scopes(&["tokens:introspect", "datagateway:apply", "datagateway:read"]);
+        for path in [
+            "/forest.v1.OAuthAppService/IntrospectClientToken",
+            "/forest.v1.RegistryService/BeginUpload",
+            "/forest.v1.ReleaseService/CreateProject",
+            "/forest.v1.ReleaseService/CreateRelease",
+        ] {
+            assert!(!scoped_token_permits(path, &s), "{path} should be refused");
+        }
+    }
+
     #[test]
     fn no_scopes_grant_no_method() {
         assert!(!scoped_token_permits(

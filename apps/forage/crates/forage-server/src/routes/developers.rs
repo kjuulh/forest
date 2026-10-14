@@ -154,6 +154,12 @@ struct AppForm {
     scope_email: Option<String>,
     #[serde(default)]
     scope_components_publish: Option<String>,
+    #[serde(default)]
+    scope_tokens_introspect: Option<String>,
+    #[serde(default)]
+    scope_datagateway_apply: Option<String>,
+    #[serde(default)]
+    scope_datagateway_read: Option<String>,
     /// An app may hold both grants — acting for a user and acting as
     /// itself, the way a GitHub App does.
     #[serde(default)]
@@ -201,6 +207,15 @@ impl AppForm {
         }
         if self.scope_components_publish.is_some() {
             scopes.push("components:publish".to_string());
+        }
+        if self.scope_tokens_introspect.is_some() {
+            scopes.push("tokens:introspect".to_string());
+        }
+        if self.scope_datagateway_apply.is_some() {
+            scopes.push("datagateway:apply".to_string());
+        }
+        if self.scope_datagateway_read.is_some() {
+            scopes.push("datagateway:read".to_string());
         }
         scopes
     }
@@ -496,6 +511,9 @@ mod tests {
             scope_profile: None,
             scope_email: None,
             scope_components_publish: None,
+            scope_tokens_introspect: None,
+            scope_datagateway_apply: None,
+            scope_datagateway_read: None,
             grant_authorization_code: auth_code.then(|| "on".to_string()),
             grant_client_credentials: client_creds.then(|| "on".to_string()),
         }

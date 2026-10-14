@@ -7,6 +7,7 @@ mod destination_sensitive_tests;
 mod developer_tests;
 mod device_tests;
 mod directory_tests;
+mod introspect_tests;
 mod email_verification_tests;
 mod error_block_tests;
 mod footer_tests;

@@ -13,13 +13,34 @@ use crate::{
 /// - `email`:   primary + all verified emails
 /// - `directory:read`: resolve organisation members (machine clients)
 /// - `components:publish`: publish component versions (machine clients)
+/// - `tokens:introspect`: ask Forage's `/oauth/introspect` about other tokens
+///   (resource servers, e.g. the data gateway)
+/// - `datagateway:apply` / `datagateway:read`: for the data gateway's project
+///   metrics, which the gateway checks after introspection
+///
+/// The last three grant no Forest gRPC method: `scoped_token_permits` is
+/// deny-by-default, and they have no entry there. A token minted for the data
+/// gateway can do nothing in Forest itself.
 pub const ALLOWED_SCOPES: &[&str] = &[
     "openid",
     "profile",
     "email",
     SCOPE_DIRECTORY_READ,
     SCOPE_COMPONENTS_PUBLISH,
+    SCOPE_TOKENS_INTROSPECT,
+    SCOPE_DATAGATEWAY_APPLY,
+    SCOPE_DATAGATEWAY_READ,
 ];
+
+/// Scope for a resource server to introspect other client tokens through
+/// Forage's `POST /oauth/introspect` (RFC 7662). Forage checks it; Forest maps
+/// it to no gRPC method.
+pub const SCOPE_TOKENS_INTROSPECT: &str = "tokens:introspect";
+
+/// Scopes the data gateway reads from an introspected token: define project
+/// metrics (`apply`) and query them (`read`). Meaningful only to the gateway.
+pub const SCOPE_DATAGATEWAY_APPLY: &str = "datagateway:apply";
+pub const SCOPE_DATAGATEWAY_READ: &str = "datagateway:read";
 
 /// Scope for reading the organisation directory — resolving a person from
 /// an external identity to their linked accounts. Only ever granted to

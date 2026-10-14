@@ -1583,14 +1583,18 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         access_token: &str,
     ) -> Result<Option<ClientPrincipal>, OAuthFlowError> {
         // Any non-empty token is a directory-capable client; the real
-        // gate is Forest's.
-        if access_token.is_empty() {
-            return Ok(None);
-        }
+        // gate is Forest's. A few names stand for other principals, so the
+        // introspection route can be told apart from the directory one.
+        let scopes = match access_token {
+            "" | "forest_cat_revoked" => return Ok(None),
+            "forest_cat_introspector" => vec!["tokens:introspect".into()],
+            "forest_cat_gateway_ci" => vec!["datagateway:apply".into(), "datagateway:read".into()],
+            _ => vec!["directory:read".into()],
+        };
         Ok(Some(ClientPrincipal {
             app_id: "app-1".into(),
             organisation_id: "org-1".into(),
-            scopes: vec!["directory:read".into()],
+            scopes,
         }))
     }
 

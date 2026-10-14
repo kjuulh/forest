@@ -73,6 +73,18 @@
                 <input type="checkbox" name="scope_components_publish" class="mt-0.5" {% if "components:publish" in app.scopes %}checked{% endif %}>
                 <span class="text-sm"><span class="font-mono">components:publish</span> &mdash; publish Forest components from CI</span>
             </label>
+            <label class="flex items-start gap-2 mt-2">
+                <input type="checkbox" name="scope_tokens_introspect" class="mt-0.5" {% if "tokens:introspect" in app.scopes %}checked{% endif %}>
+                <span class="text-sm"><span class="font-mono">tokens:introspect</span> &mdash; check other apps&rsquo; tokens (a service that accepts them)</span>
+            </label>
+            <label class="flex items-start gap-2 mt-2">
+                <input type="checkbox" name="scope_datagateway_apply" class="mt-0.5" {% if "datagateway:apply" in app.scopes %}checked{% endif %}>
+                <span class="text-sm"><span class="font-mono">datagateway:apply</span> &mdash; define data gateway project metrics</span>
+            </label>
+            <label class="flex items-start gap-2 mt-2">
+                <input type="checkbox" name="scope_datagateway_read" class="mt-0.5" {% if "datagateway:read" in app.scopes %}checked{% endif %}>
+                <span class="text-sm"><span class="font-mono">datagateway:read</span> &mdash; query data gateway project metrics</span>
+            </label>
         </fieldset>
 
         <fieldset>

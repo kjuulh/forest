@@ -484,7 +484,15 @@ async fn discovery(State(state): State<AppState>) -> Response {
         "userinfo_endpoint": format!("{base}/oauth/userinfo"),
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
-        "scopes_supported": ["openid", "profile", "email", "components:publish"],
+        "scopes_supported": [
+            "openid",
+            "profile",
+            "email",
+            "components:publish",
+            "tokens:introspect",
+            "datagateway:apply",
+            "datagateway:read"
+        ],
         "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
         "id_token_signing_alg_values_supported": ["HS256"],
         "code_challenge_methods_supported": ["S256", "plain"],
@@ -606,6 +614,9 @@ fn scope_description(scope: &str) -> &'static str {
         "profile" => "Your username, account ID and avatar",
         "email" => "Your verified email addresses",
         "components:publish" => "Publish Forest components from CI",
+        "tokens:introspect" => "Check other apps' tokens (for a service that accepts them)",
+        "datagateway:apply" => "Define data gateway project metrics",
+        "datagateway:read" => "Query data gateway project metrics",
         _ => "",
     }
 }
