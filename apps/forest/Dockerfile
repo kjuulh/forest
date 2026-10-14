@@ -62,9 +62,12 @@ FROM chef AS builder
 # which is most of them. `.sqlx/` is not needed here: cook builds the
 # dependency graph against a skeleton workspace, and no sqlx macro runs until
 # the real sources arrive below.
+# sccache can hang during dependency cook even when memcached accepts TCP
+# connections. Compile this layer locally; the final app build still uses its
+# cache reachability probe below.
 COPY --from=planner /app/recipe.json recipe.json
 
-RUN --mount=type=ssh cargo chef cook --release \
+RUN --mount=type=ssh RUSTC_WRAPPER= SCCACHE_MEMCACHED_ENDPOINT= cargo chef cook --release \
     --bin forest-server --bin forest-event-migration --recipe-path recipe.json
 
 COPY . .
