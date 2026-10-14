@@ -41,7 +41,10 @@ ENV SCCACHE_MEMCACHED_ENDPOINT=$SCCACHE_MEMCACHED_ENDPOINT
 
 ENV SQLX_OFFLINE=true
 
-RUN cargo install cargo-chef --locked --version 0.1.78
+# The installer runs before the builder's cache reachability probe. A TCP-open
+# memcached endpoint can still hang sccache requests for ten minutes; compile
+# this small build tool locally so a cache outage cannot stall every image.
+RUN RUSTC_WRAPPER= SCCACHE_MEMCACHED_ENDPOINT= cargo install cargo-chef --locked --version 0.1.78
 
 # The recipe is a digest of every manifest in the workspace and nothing else, so
 # this stage re-runs on any commit but its *output* only changes when a
