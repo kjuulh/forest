@@ -1587,6 +1587,9 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         // introspection route can be told apart from the directory one.
         let scopes = match access_token {
             "" | "forest_cat_revoked" => return Ok(None),
+            // Client-credentials tokens carry the `forest_cat_` prefix; anything
+            // else (a user's session or PAT) is not an app's token.
+            t if !t.starts_with("forest_cat_") => return Ok(None),
             "forest_cat_introspector" => vec!["tokens:introspect".into()],
             "forest_cat_gateway_ci" => vec!["datagateway:apply".into(), "datagateway:read".into()],
             _ => vec!["directory:read".into()],
