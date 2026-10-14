@@ -776,3 +776,214 @@ async fn token_invalid_code_is_invalid_grant() {
     let json: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
     assert_eq!(json["error"], "invalid_grant");
 }
+
+// ─── Public clients (RFC 8252 native apps) ───────────────────────────
+
+const PUBLIC_CID: &str = "forest_oa_datactl";
+/// Registered without a port; the CLI asks for whichever port it got.
+const LOOPBACK: &str = "http://127.0.0.1/callback";
+const LOOPBACK_ON_PORT: &str = "http://127.0.0.1:53817/callback";
+const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+
+fn s256(verifier: &str) -> String {
+    use base64::Engine;
+    use sha2::Digest;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(sha2::Sha256::digest(verifier.as_bytes()))
+}
+
+fn seeded_public() -> Arc<MockOAuthAppsClient> {
+    let oauth = Arc::new(MockOAuthAppsClient::new());
+    oauth.seed_public_app(
+        PUBLIC_CID,
+        vec![LOOPBACK.into()],
+        vec!["datagateway:apply".into(), "datagateway:read".into()],
+    );
+    oauth.seed_app(CID, vec![REDIRECT.into()], vec!["profile".into()]);
+    oauth
+}
+
+fn public_authorize_uri(challenge: &str, method: &str) -> String {
+    format!(
+        "/oauth/authorize?client_id={PUBLIC_CID}&redirect_uri={}&response_type=code&scope=datagateway%3Aapply&state=xyz&code_challenge={challenge}&code_challenge_method={method}",
+        urlencoding::encode(LOOPBACK_ON_PORT)
+    )
+}
+
+fn token_request(body: String) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/oauth/token")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(body))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_public_client_without_s256_pkce_is_sent_back_with_invalid_request() {
+    let (state, sessions) = test_state_with_oauth_apps(seeded_public());
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    for (challenge, method) in [("", ""), (VERIFIER, "plain"), (VERIFIER, "")] {
+        let resp = app
+            .clone()
+            .oneshot(get(&public_authorize_uri(challenge, method), &cookie))
+            .await
+            .unwrap();
+        // The redirect is registered (loopback, any port), so the error goes
+        // back to the client rather than onto an error page.
+        assert!(resp.status().is_redirection(), "{method}");
+        let loc = location(&resp);
+        assert!(loc.starts_with(LOOPBACK_ON_PORT), "{loc}");
+        assert_eq!(
+            query_param(&loc, "error").as_deref(),
+            Some("invalid_request")
+        );
+        let description = query_param(&loc, "error_description").expect("described");
+        assert!(urlencoding::decode(&description).unwrap().contains("S256"));
+        assert_eq!(query_param(&loc, "state").as_deref(), Some("xyz"));
+    }
+}
+
+#[tokio::test]
+async fn a_public_client_with_s256_on_a_loopback_port_gets_the_consent_screen() {
+    let (state, sessions) = test_state_with_oauth_apps(seeded_public());
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let resp = app
+        .oneshot(get(&public_authorize_uri(&s256(VERIFIER), "S256"), &cookie))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(body_text(resp).await.contains("Authorize Seeded App"));
+}
+
+#[tokio::test]
+async fn a_loopback_redirect_on_another_path_is_still_refused() {
+    let (state, sessions) = test_state_with_oauth_apps(seeded_public());
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+
+    let uri = format!(
+        "/oauth/authorize?client_id={PUBLIC_CID}&redirect_uri={}&response_type=code&code_challenge={}&code_challenge_method=S256",
+        urlencoding::encode("http://127.0.0.1:53817/elsewhere"),
+        s256(VERIFIER)
+    );
+    let resp = app.oneshot(get(&uri, &cookie)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert!(resp.headers().get("location").is_none());
+}
+
+/// Consent for the public client, and the code it yields.
+async fn public_code(app: &axum::Router, cookie: &str) -> String {
+    let binding = crate::routes::oauth::consent_binding(
+        "test-csrf",
+        PUBLIC_CID,
+        LOOPBACK_ON_PORT,
+        "datagateway:apply",
+    );
+    let body = format!(
+        "_csrf=test-csrf&action=approve&client_id={PUBLIC_CID}&redirect_uri={}&scope=datagateway%3Aapply&state=xyz&code_challenge={}&code_challenge_method=S256&consent_binding={binding}",
+        urlencoding::encode(LOOPBACK_ON_PORT),
+        s256(VERIFIER)
+    );
+    let resp = app
+        .clone()
+        .oneshot(post("/oauth/authorize", cookie, body))
+        .await
+        .unwrap();
+    assert!(resp.status().is_redirection());
+    let loc = location(&resp);
+    assert!(loc.starts_with(LOOPBACK_ON_PORT), "{loc}");
+    query_param(&loc, "code").expect("code")
+}
+
+#[tokio::test]
+async fn a_public_client_exchanges_with_only_its_client_id_and_the_verifier() {
+    let (state, sessions) = test_state_with_oauth_apps(seeded_public());
+    let cookie = create_test_session(&sessions).await;
+    let app = build_router(state);
+    let redirect = urlencoding::encode(LOOPBACK_ON_PORT);
+
+    // The wrong verifier is refused.
+    let code = public_code(&app, &cookie).await;
+    let resp = app
+        .clone()
+        .oneshot(token_request(format!(
+            "grant_type=authorization_code&client_id={PUBLIC_CID}&code={code}&redirect_uri={redirect}&code_verifier=wrong"
+        )))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let json: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+    assert_eq!(json["error"], "invalid_grant");
+
+    // No Basic auth, no client_secret: just client_id and the verifier.
+    let code = public_code(&app, &cookie).await;
+    let resp = app
+        .clone()
+        .oneshot(token_request(format!(
+            "grant_type=authorization_code&client_id={PUBLIC_CID}&code={code}&redirect_uri={redirect}&code_verifier={VERIFIER}"
+        )))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+    assert!(
+        json["access_token"]
+            .as_str()
+            .unwrap()
+            .starts_with("forest_oat_")
+    );
+    assert_eq!(json["refresh_token"], "forest_ort_mocktoken");
+
+    // And refreshes the same way.
+    let resp = app
+        .oneshot(token_request(format!(
+            "grant_type=refresh_token&client_id={PUBLIC_CID}&refresh_token=forest_ort_mocktoken"
+        )))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_confidential_client_without_its_secret_is_invalid_client() {
+    let (state, _sessions) = test_state_with_oauth_apps(seeded_public());
+    let app = build_router(state);
+
+    let resp = app
+        .oneshot(token_request(format!(
+            "grant_type=refresh_token&client_id={CID}&refresh_token=forest_ort_mocktoken"
+        )))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let json: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+    assert_eq!(json["error"], "invalid_client");
+}
+
+#[tokio::test]
+async fn discovery_advertises_public_clients_and_s256() {
+    let (state, _sessions) = test_state_with_oauth_apps(seeded());
+    let app = build_router(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/.well-known/openid-configuration")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let doc: serde_json::Value = serde_json::from_str(&body_text(resp).await).unwrap();
+    let auth_methods = doc["token_endpoint_auth_methods_supported"]
+        .as_array()
+        .unwrap();
+    assert!(auth_methods.iter().any(|m| m == "none"));
+    let pkce = doc["code_challenge_methods_supported"].as_array().unwrap();
+    assert!(pkce.iter().any(|m| m == "S256"));
+}

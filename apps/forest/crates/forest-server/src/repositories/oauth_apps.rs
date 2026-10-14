@@ -29,6 +29,10 @@ pub struct OAuthAppRow {
     /// machine-to-machine support default to `authorization_code` only,
     /// so nothing gains a capability by being old.
     pub grant_types: Vec<String>,
+    /// A public client (RFC 8252 native app): its `client_secret_hash` is of
+    /// a value nobody holds, so the secret check is skipped and PKCE S256
+    /// is required instead.
+    pub public: bool,
     pub created_by: Uuid,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -39,6 +43,16 @@ pub struct OAuthAppRow {
 pub struct ResolvedClientTokenRow {
     pub app_id: Uuid,
     pub organisation_id: Uuid,
+    pub scopes: Vec<String>,
+}
+
+/// A live access token an app holds on a user's behalf, with the app's
+/// organisation, for introspection by a resource server.
+pub struct ResolvedUserTokenRow {
+    pub app_id: Uuid,
+    pub organisation_id: Uuid,
+    pub user_id: Uuid,
+    pub username: String,
     pub scopes: Vec<String>,
 }
 
@@ -130,6 +144,7 @@ impl OAuthAppRepository {
         redirect_uris: &[String],
         scopes: &[String],
         grant_types: &[String],
+        public: bool,
         created_by: Uuid,
     ) -> Result<OAuthAppRow, DbError> {
         let row = sqlx::query_as!(
@@ -137,10 +152,10 @@ impl OAuthAppRepository {
             r#"
             INSERT INTO oauth_apps
                 (id, organisation_id, name, description, homepage_url, client_id,
-                 client_secret_hash, redirect_uris, scopes, grant_types, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                 client_secret_hash, redirect_uris, scopes, grant_types, public, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING id, organisation_id, name, description, homepage_url, client_id,
-                      client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at
+                      client_secret_hash, redirect_uris, scopes, grant_types, public, created_by, created_at, updated_at
             "#,
             id,
             organisation_id,
@@ -152,6 +167,7 @@ impl OAuthAppRepository {
             redirect_uris,
             scopes,
             grant_types,
+            public,
             created_by,
         )
         .fetch_one(db)
@@ -169,7 +185,7 @@ impl OAuthAppRepository {
             OAuthAppRow,
             r#"
             SELECT id, organisation_id, name, description, homepage_url, client_id,
-                   client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at
+                   client_secret_hash, redirect_uris, scopes, grant_types, public, created_by, created_at, updated_at
             FROM oauth_apps
             WHERE organisation_id = $1
             ORDER BY created_at DESC
@@ -193,7 +209,7 @@ impl OAuthAppRepository {
             OAuthAppRow,
             r#"
             SELECT id, organisation_id, name, description, homepage_url, client_id,
-                   client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at
+                   client_secret_hash, redirect_uris, scopes, grant_types, public, created_by, created_at, updated_at
             FROM oauth_apps
             WHERE organisation_id = $1 AND id = $2
             "#,
@@ -216,7 +232,7 @@ impl OAuthAppRepository {
             OAuthAppRow,
             r#"
             SELECT id, organisation_id, name, description, homepage_url, client_id,
-                   client_secret_hash, redirect_uris, scopes, grant_types,
+                   client_secret_hash, redirect_uris, scopes, grant_types, public,
                    created_by, created_at, updated_at
             FROM oauth_apps
             WHERE client_id = $1
@@ -327,7 +343,7 @@ impl OAuthAppRepository {
                 redirect_uris = $6, scopes = $7, grant_types = $8, updated_at = now()
             WHERE organisation_id = $1 AND id = $2
             RETURNING id, organisation_id, name, description, homepage_url, client_id,
-                      client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at
+                      client_secret_hash, redirect_uris, scopes, grant_types, public, created_by, created_at, updated_at
             "#,
             organisation_id,
             app_id,
@@ -358,7 +374,7 @@ impl OAuthAppRepository {
             SET client_secret_hash = $3, updated_at = now()
             WHERE organisation_id = $1 AND id = $2
             RETURNING id, organisation_id, name, description, homepage_url, client_id,
-                      client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at
+                      client_secret_hash, redirect_uris, scopes, grant_types, public, created_by, created_at, updated_at
             "#,
             organisation_id,
             app_id,
@@ -481,6 +497,34 @@ impl OAuthAppRepository {
             SET last_used_at = now()
             WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
             RETURNING app_id, user_id, scopes
+            "#,
+            token_hash,
+        )
+        .fetch_optional(db)
+        .await?;
+        Ok(row)
+    }
+
+    /// Resolve a live user-delegated access token to its app, the app's
+    /// organisation, the user and the granted scopes, touching
+    /// `last_used_at`. `None` when unknown, expired or revoked.
+    pub async fn resolve_user_token(
+        &self,
+        db: impl PgExecutor<'_>,
+        token_hash: &[u8],
+    ) -> anyhow::Result<Option<ResolvedUserTokenRow>> {
+        let row = sqlx::query_as!(
+            ResolvedUserTokenRow,
+            r#"
+            UPDATE oauth_access_tokens t
+            SET last_used_at = now()
+            FROM oauth_apps a, users u
+            WHERE t.token_hash = $1
+              AND t.app_id = a.id
+              AND t.user_id = u.id
+              AND t.revoked_at IS NULL
+              AND t.expires_at > now()
+            RETURNING t.app_id, a.organisation_id, t.user_id, u.username, t.scopes
             "#,
             token_hash,
         )

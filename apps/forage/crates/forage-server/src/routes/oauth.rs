@@ -7,6 +7,13 @@
 //! - `GET  /oauth/authorize` — consent screen (session-gated)
 //! - `POST /oauth/authorize` — consent decision (CSRF-protected)
 //! - `POST /oauth/token`     — code → token exchange (machine-to-machine)
+//!
+//! Public clients (RFC 8252 native apps, e.g. a CLI) are supported: they hold
+//! no client_secret, so they authenticate at the token endpoint with just
+//! `client_id` in the body (`token_endpoint_auth_method: none`), must send a
+//! PKCE S256 challenge, and may redirect to a loopback URI on any port.
+//! Forest enforces all of it; Forage refuses a missing challenge up front so
+//! the person is not asked to consent to a request that cannot succeed.
 #![allow(clippy::result_large_err)]
 
 use axum::extract::{Form, Query, State};
@@ -141,6 +148,21 @@ async fn authorize_page(
     // From here, redirect_uri is trusted: protocol errors go back to it.
     if q.response_type != "code" {
         return Ok(redirect_error(&q.redirect_uri, "unsupported_response_type", q.state.as_deref()));
+    }
+    // A public client has no secret: the PKCE verifier is all that ties the
+    // code to it, so it must send an S256 challenge (RFC 8252 §8.1). Forest
+    // refuses the code otherwise; saying so before login or consent spares
+    // the person a screen that cannot lead anywhere.
+    if app.public
+        && (non_empty(q.code_challenge.as_deref()).is_none()
+            || q.code_challenge_method.as_deref() != Some("S256"))
+    {
+        return Ok(redirect_error_described(
+            &q.redirect_uri,
+            "invalid_request",
+            PUBLIC_CLIENT_PKCE_REQUIRED,
+            q.state.as_deref(),
+        ));
     }
     let scopes = match resolve_scopes(&app, &q.scope) {
         Ok(s) => s,
@@ -355,10 +377,19 @@ async fn issue_code_redirect(
             }
             Redirect::to(&append_query(redirect_uri, &params)).into_response()
         }
+        Err(OAuthFlowError::InvalidRequest(msg)) => {
+            // Forest prefixes a reason it wants shown (e.g. a public client
+            // without PKCE S256) with the error code.
+            match msg.strip_prefix("invalid_request: ") {
+                Some(description) => {
+                    redirect_error_described(redirect_uri, "invalid_request", description, state)
+                }
+                None => redirect_error(redirect_uri, "invalid_request", state),
+            }
+        }
         Err(e) => {
             let oauth_err = match e {
                 OAuthFlowError::InvalidScope => "invalid_scope",
-                OAuthFlowError::InvalidRequest(_) => "invalid_request",
                 _ => "server_error",
             };
             redirect_error(redirect_uri, oauth_err, state)
@@ -400,7 +431,10 @@ async fn token(
     };
 
     // Client credentials may arrive via HTTP Basic (RFC 6749 §2.3.1) or in the
-    // body (`client_secret_post`). Basic takes precedence when present.
+    // body (`client_secret_post`). Basic takes precedence when present. A
+    // public client sends only `client_id` in the body and no secret at all
+    // (`none`); the empty secret goes to Forest, which knows the app is public
+    // and skips the check — a confidential app still fails without its own.
     let (client_id, client_secret) = match parse_basic_auth(&headers) {
         Some((id, secret)) => (id, secret),
         None => (form.client_id.clone(), form.client_secret.clone()),
@@ -493,7 +527,7 @@ async fn discovery(State(state): State<AppState>) -> Response {
             "datagateway:apply",
             "datagateway:read"
         ],
-        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "none"],
         "id_token_signing_alg_values_supported": ["HS256"],
         "code_challenge_methods_supported": ["S256", "plain"],
         "prompt_values_supported": ["none", "consent"],
@@ -584,10 +618,66 @@ async fn require_client(
     })
 }
 
-/// Exact-match check against the registered redirect URIs.
+/// Check a redirect URI against the registered ones: exact match, except a
+/// registered loopback URI matches any port (see [`redirect_uri_matches`]).
 fn redirect_uri_allowed(app: &OAuthClientInfo, redirect_uri: &str) -> bool {
-    app.redirect_uris.iter().any(|u| u == redirect_uri)
+    app.redirect_uris
+        .iter()
+        .any(|u| redirect_uri_matches(u, redirect_uri))
 }
+
+/// Whether a requested redirect URI is allowed by a registered one. The same
+/// rule as Forest's `redirect_uri_matches`, which re-checks it when the code
+/// is minted.
+///
+/// Exact match, with one exception from RFC 8252 §7.3: a native app listens
+/// on a loopback port the OS picks at run time, so a registered
+/// `http://127.0.0.1/<path>` or `http://localhost/<path>` (with or without a
+/// port) matches a request for the same host and path on any port. The host,
+/// path and query must still match exactly; nothing that is not http on a
+/// loopback host gets this leniency.
+pub(crate) fn redirect_uri_matches(registered: &str, requested: &str) -> bool {
+    if registered == requested {
+        return true;
+    }
+    match (loopback_parts(registered), loopback_parts(requested)) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// `(host, path-and-query)` of an `http://` loopback URI, with the port
+/// dropped and an empty path read as `/`. `None` for anything else.
+fn loopback_parts(uri: &str) -> Option<(&str, String)> {
+    let rest = uri.strip_prefix("http://")?;
+    if rest.contains('#') {
+        return None;
+    }
+    let split = rest.find(['/', '?']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(split);
+    let (host, port) = match authority.split_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (authority, None),
+    };
+    if host != "127.0.0.1" && host != "localhost" {
+        return None;
+    }
+    if let Some(port) = port
+        && (port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return None;
+    }
+    let tail = if tail.starts_with('/') {
+        tail.to_string()
+    } else {
+        format!("/{tail}")
+    };
+    Some((host, tail))
+}
+
+/// `error_description` for a public client that sent no PKCE S256 challenge.
+const PUBLIC_CLIENT_PKCE_REQUIRED: &str =
+    "a public client must use PKCE with code_challenge_method S256";
 
 /// Resolve requested scopes against the app's allowlist. Empty request →
 /// all app scopes (RFC 6749 §3.3 default). Any unknown scope → `Err`.
@@ -708,6 +798,21 @@ fn redirect_error(redirect_uri: &str, error: &str, state: Option<&str>) -> Respo
     Redirect::to(&append_query(redirect_uri, &params)).into_response()
 }
 
+/// [`redirect_error`] with an RFC 6749 §4.1.2.1 `error_description`, for
+/// when the code alone would leave a client's developer guessing.
+fn redirect_error_described(
+    redirect_uri: &str,
+    error: &str,
+    description: &str,
+    state: Option<&str>,
+) -> Response {
+    let mut params = vec![("error", error), ("error_description", description)];
+    if let Some(s) = state {
+        params.push(("state", s));
+    }
+    Redirect::to(&append_query(redirect_uri, &params)).into_response()
+}
+
 fn token_error(status: StatusCode, error: &str) -> Response {
     (status, Json(json!({ "error": error }))).into_response()
 }
@@ -732,7 +837,69 @@ fn invalid_redirect_page(state: &AppState) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_basic_auth;
+    use super::{parse_basic_auth, redirect_uri_matches};
+
+    #[test]
+    fn a_registered_loopback_redirect_matches_any_port() {
+        for registered in [
+            "http://127.0.0.1/callback",
+            "http://127.0.0.1:8080/callback",
+        ] {
+            assert!(redirect_uri_matches(
+                registered,
+                "http://127.0.0.1:53817/callback"
+            ));
+            assert!(redirect_uri_matches(
+                registered,
+                "http://127.0.0.1/callback"
+            ));
+        }
+        assert!(redirect_uri_matches(
+            "http://localhost/cb?x=1",
+            "http://localhost:4000/cb?x=1"
+        ));
+    }
+
+    #[test]
+    fn a_loopback_redirect_still_needs_the_same_host_path_and_query() {
+        let registered = "http://127.0.0.1/callback";
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1:53817/other"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://localhost:53817/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1:53817/callback?a=b"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1.evil.example/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1@evil.example/callback"
+        ));
+    }
+
+    #[test]
+    fn only_http_on_a_loopback_host_ignores_the_port() {
+        assert!(!redirect_uri_matches(
+            "https://127.0.0.1/callback",
+            "https://127.0.0.1:53817/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            "https://app.example:8443/callback",
+            "https://app.example:9443/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            "http://app.example/callback",
+            "http://app.example:8080/callback"
+        ));
+    }
     use axum::http::{HeaderMap, HeaderValue};
     use base64::Engine;
 

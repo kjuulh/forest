@@ -61,6 +61,8 @@ struct AppRow {
     name: String,
     #[tabled(rename = "Client ID")]
     client_id: String,
+    #[tabled(rename = "Public")]
+    public: bool,
     #[tabled(rename = "Scopes")]
     scopes: String,
     #[tabled(rename = "Redirect URIs")]
@@ -73,6 +75,7 @@ impl From<OAuthApp> for AppRow {
             app_id: a.app_id,
             name: a.name,
             client_id: a.client_id,
+            public: a.public,
             scopes: a.scopes.join(" "),
             redirect_uris: a.redirect_uris.join(", "),
         }
@@ -107,7 +110,8 @@ pub struct CreateCommand {
     /// Allowed redirect URI (repeatable; at least one required)
     #[arg(long = "redirect-uri", required = true)]
     redirect_uri: Vec<String>,
-    /// Requested scope (repeatable). Defaults to: openid profile
+    /// Requested scope (repeatable). Defaults to: openid profile (profile
+    /// alone with --public)
     #[arg(long)]
     scope: Vec<String>,
     /// OAuth grant this app may use (repeatable): `authorization_code`
@@ -123,6 +127,16 @@ pub struct CreateCommand {
     /// machine-capable by asking for it.
     #[arg(long = "grant-type")]
     grant_type: Vec<String>,
+    /// Register a public client: a CLI or other native app that cannot
+    /// keep a secret (RFC 8252).
+    ///
+    /// No client secret is issued. The app may only use
+    /// `authorization_code`, every authorization must carry a PKCE S256
+    /// challenge, and it may not request `openid`. A loopback redirect URI
+    /// (`http://127.0.0.1/<path>`) matches any port, so the app can listen
+    /// on whatever port is free.
+    #[arg(long)]
+    public: bool,
 }
 
 #[derive(Tabled, Serialize)]
@@ -135,11 +149,22 @@ struct CreatedRow {
     client_secret: String,
 }
 
+#[derive(Tabled, Serialize)]
+struct CreatedPublicRow {
+    #[tabled(rename = "App ID")]
+    app_id: String,
+    #[tabled(rename = "Client ID")]
+    client_id: String,
+}
+
 impl CreateCommand {
     async fn execute(&self, state: &State, format: &OutputFormat) -> anyhow::Result<()> {
         require_login(state).await?;
         let org_id = super::member::resolve_org_id(state, &self.org).await?;
-        let scopes = if self.scope.is_empty() {
+        let scopes = if self.scope.is_empty() && self.public {
+            // A public client may not hold `openid`.
+            vec!["profile".to_string()]
+        } else if self.scope.is_empty() {
             vec!["openid".to_string(), "profile".to_string()]
         } else {
             self.scope.clone()
@@ -155,10 +180,21 @@ impl CreateCommand {
                 self.redirect_uri.clone(),
                 scopes,
                 self.grant_type.clone(),
+                self.public,
             )
             .await
             .context("failed to create oauth app")?;
         let app = resp.app.context("no app in response")?;
+
+        if app.public {
+            let rows = vec![CreatedPublicRow {
+                app_id: app.app_id,
+                client_id: app.client_id,
+            }];
+            print!("{}", output::render(format, &rows));
+            eprintln!("Public client: no client secret. Authorize with PKCE (S256).");
+            return Ok(());
+        }
 
         let rows = vec![CreatedRow {
             app_id: app.app_id,

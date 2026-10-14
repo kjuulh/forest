@@ -110,3 +110,16 @@ async fn a_malformed_query_says_what_is_wrong() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_token_an_app_holds_for_a_user_is_not_a_directory_credential() {
+    // Its app was registered with `directory:read`, but the token is the
+    // user's authority, not the machine client's.
+    let (status, json) = get(
+        "/api/directory/resolve?email=kasper@understory.io",
+        Some("Bearer forest_oat_holds_machine_scopes"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(json["error"], "invalid_token");
+}

@@ -4,6 +4,7 @@ use uuid::Uuid;
 use crate::{
     State,
     repositories::oauth_apps::{OAuthAppRepository, OAuthAppRepositoryState, OAuthAppRow},
+    services::organisations::{OrganisationService, OrganisationServiceState},
 };
 
 /// The fixed scope catalog an OAuth app may request (MVP).
@@ -94,6 +95,22 @@ pub enum OAuthAppError {
     /// Unsupported code_challenge_method.
     #[error("unsupported code_challenge_method")]
     InvalidCodeChallengeMethod,
+
+    // ── Public clients (RFC 8252 native apps) ──
+    /// A public client may only use the authorization-code grant: it has no
+    /// secret to authenticate a client-credentials request with.
+    #[error("a public client may only use the authorization_code grant")]
+    PublicClientGrant,
+    /// A public client may not hold `openid`: its id_token would be signed
+    /// with a client_secret it does not have.
+    #[error("a public client may not request the openid scope")]
+    PublicClientOpenid,
+    /// A public client has no client_secret, so there is nothing to rotate.
+    #[error("a public client has no client secret to rotate")]
+    PublicClientNoSecret,
+    /// A public client sent no PKCE challenge, or a `plain` one.
+    #[error("a public client must use PKCE with code_challenge_method S256")]
+    PkceRequired,
 }
 
 /// Public view of an OAuth app — never carries the client_secret.
@@ -109,6 +126,9 @@ pub struct OAuthApp {
     pub scopes: Vec<String>,
     /// Which OAuth grants this app may use.
     pub grant_types: Vec<String>,
+    /// A public client (RFC 8252 native app): no usable secret, PKCE S256
+    /// required, `authorization_code` only, no `openid`.
+    pub public: bool,
     pub created_by: Uuid,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -126,6 +146,7 @@ impl From<OAuthAppRow> for OAuthApp {
             redirect_uris: row.redirect_uris,
             scopes: row.scopes,
             grant_types: row.grant_types,
+            public: row.public,
             created_by: row.created_by,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -135,6 +156,7 @@ impl From<OAuthAppRow> for OAuthApp {
 
 /// An app paired with its freshly-minted raw client_secret. Returned only
 /// from create / rotate; the secret is shown to the org once and never again.
+/// Empty for a public app, which has none.
 #[derive(Debug, Clone)]
 pub struct CreatedOAuthApp {
     pub app: OAuthApp,
@@ -168,12 +190,32 @@ pub struct IssuedClientToken {
     pub scopes: Vec<String>,
 }
 
-/// Who a machine token belongs to, as seen by a resource server.
+/// Who a token belongs to, as seen by a resource server: the app, its
+/// organisation and the granted scopes, plus the user when the app holds the
+/// token on someone's behalf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientPrincipal {
     pub app_id: Uuid,
     pub organisation_id: Uuid,
     pub scopes: Vec<String>,
+    /// `None` for a client-credentials token, which has no user.
+    pub user: Option<DelegatingUser>,
+}
+
+/// The person a user-delegated access token (`forest_oat_`) acts for, and
+/// the organisations they belong to, so a resource server can authorise
+/// them without holding their forest session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DelegatingUser {
+    pub user_id: Uuid,
+    pub username: String,
+    pub organisations: Vec<UserOrganisation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserOrganisation {
+    pub organisation_id: Uuid,
+    pub name: String,
 }
 
 /// Opaque tokens minted on a successful code exchange.
@@ -221,9 +263,11 @@ pub struct OAuthAppInput {
 
 pub struct OAuthAppService {
     repo: OAuthAppRepository,
+    organisations: OrganisationService,
 }
 
 impl OAuthAppService {
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_app(
         &self,
         organisation_id: Uuid,
@@ -234,14 +278,22 @@ impl OAuthAppService {
         redirect_uris: &[String],
         scopes: &[String],
         grant_types: &[String],
+        public: bool,
     ) -> anyhow::Result<CreatedOAuthApp> {
         let input = validate_input(name, description, homepage_url, redirect_uris, scopes)?;
         let grant_types = validate_grant_types(grant_types)?;
+        if public {
+            validate_public_client(&input.scopes, &grant_types)?;
+        }
 
         let app_id = Uuid::now_v7();
         let client_id = generate_client_id();
         let client_secret = generate_client_secret();
         let secret_hash = hash_secret(&client_secret);
+        // A public client gets no secret. The column still holds a hash, of
+        // a value dropped right here, so no presented secret can ever match
+        // it; the secret checks are skipped for public apps instead.
+        let client_secret = if public { String::new() } else { client_secret };
 
         let row = self
             .repo
@@ -257,6 +309,7 @@ impl OAuthAppService {
                 &input.redirect_uris,
                 &input.scopes,
                 &grant_types,
+                public,
                 created_by,
             )
             .await?;
@@ -301,6 +354,19 @@ impl OAuthAppService {
         let input = validate_input(name, description, homepage_url, redirect_uris, scopes)?;
         let grant_types = validate_grant_types(grant_types)?;
 
+        // `public` is fixed at creation, so an update has to keep a public
+        // app within what a public app may hold.
+        let Some(existing) = self
+            .repo
+            .get_oauth_app(self.repo.pool(), organisation_id, app_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        if existing.public {
+            validate_public_client(&input.scopes, &grant_types)?;
+        }
+
         let row = self
             .repo
             .update_oauth_app(
@@ -323,6 +389,17 @@ impl OAuthAppService {
         organisation_id: Uuid,
         app_id: Uuid,
     ) -> anyhow::Result<Option<CreatedOAuthApp>> {
+        let Some(existing) = self
+            .repo
+            .get_oauth_app(self.repo.pool(), organisation_id, app_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        if existing.public {
+            return Err(OAuthAppError::PublicClientNoSecret.into());
+        }
+
         let client_secret = generate_client_secret();
         let secret_hash = hash_secret(&client_secret);
 
@@ -354,7 +431,9 @@ impl OAuthAppService {
     }
 
     /// Mint a single-use authorization code, after the user has consented.
-    /// Re-validates client, redirect_uri (exact match), and scope subset.
+    /// Re-validates client, redirect_uri (exact match, or any port on a
+    /// registered loopback URI), and scope subset. A public client must
+    /// send a PKCE S256 challenge.
     #[allow(clippy::too_many_arguments)]
     pub async fn create_authorization_code(
         &self,
@@ -376,7 +455,11 @@ impl OAuthAppService {
         // app should never reach a consent screen at all.
         Self::require_grant(&app, GRANT_AUTHORIZATION_CODE)?;
 
-        if !app.redirect_uris.iter().any(|u| u == redirect_uri) {
+        if !app
+            .redirect_uris
+            .iter()
+            .any(|u| redirect_uri_matches(u, redirect_uri))
+        {
             return Err(OAuthAppError::RedirectUriNotAllowed.into());
         }
         if scopes.is_empty() {
@@ -390,6 +473,12 @@ impl OAuthAppService {
 
         let challenge = non_empty(code_challenge);
         let method = normalize_pkce_method(challenge, non_empty(code_challenge_method))?;
+        // With no secret, the PKCE verifier is the only thing tying the code
+        // to the client that asked for it, and `plain` would hand it over
+        // in the authorization request itself (RFC 8252 §8.1).
+        if app.public && method.as_deref() != Some("S256") {
+            return Err(OAuthAppError::PkceRequired.into());
+        }
 
         let (code, code_hash) = generate_opaque_token("forest_ac_");
         let expires_at = chrono::Utc::now() + chrono::Duration::seconds(AUTH_CODE_TTL_SECONDS);
@@ -434,7 +523,9 @@ impl OAuthAppService {
 
     /// Exchange an authorization code for access + refresh tokens. Verifies
     /// client credentials, single-use consumption, redirect_uri binding, and
-    /// PKCE (when a challenge was stored).
+    /// PKCE (when a challenge was stored). A public client presents no
+    /// secret; its code always carries an S256 challenge, so the verifier
+    /// stands in for it.
     pub async fn exchange_code(
         &self,
         client_id: &str,
@@ -450,9 +541,7 @@ impl OAuthAppService {
             .await?
             .ok_or(OAuthAppError::UnknownClient)?;
 
-        if !constant_time_eq(&hash_secret(client_secret), &row.client_secret_hash) {
-            return Err(OAuthAppError::InvalidClientSecret.into());
-        }
+        Self::authenticate_client(&row, client_secret)?;
 
         // Re-checked here rather than trusted from issue time: a code
         // outlives the check that minted it, and the grant may have been
@@ -498,8 +587,8 @@ impl OAuthAppService {
 
         let id_token = self
             .maybe_id_token(
+                &row,
                 issuer,
-                client_id,
                 client_secret,
                 consumed.user_id,
                 &consumed.scopes,
@@ -517,20 +606,22 @@ impl OAuthAppService {
     }
 
     /// Build an OIDC `id_token` when the `openid` scope was granted, loading
-    /// the profile/email claims the granted scopes permit. `None` otherwise.
-    #[allow(clippy::too_many_arguments)]
+    /// the profile/email claims the granted scopes permit. `None` otherwise,
+    /// and always `None` for a public app: there is no secret to sign with
+    /// (and it cannot hold `openid` in the first place).
     async fn maybe_id_token(
         &self,
+        app: &OAuthAppRow,
         issuer: &str,
-        client_id: &str,
         client_secret: &str,
         user_id: Uuid,
         scopes: &[String],
         nonce: Option<&str>,
     ) -> anyhow::Result<Option<String>> {
-        if !scopes.iter().any(|s| s == "openid") {
+        if app.public || !scopes.iter().any(|s| s == "openid") {
             return Ok(None);
         }
+        let client_id = app.client_id.as_str();
         let username = if scopes.iter().any(|s| s == "profile") {
             self.repo
                 .get_user_basic(self.repo.pool(), user_id)
@@ -562,6 +653,21 @@ impl OAuthAppService {
             exp,
         )?;
         Ok(Some(token))
+    }
+
+    /// Check the client_secret, except for a public app, which has none.
+    ///
+    /// A confidential app's check is exactly as it always was: a missing
+    /// or wrong secret is `InvalidClientSecret`. Whatever a public client
+    /// sends is ignored, since nothing it could send would be a secret.
+    fn authenticate_client(app: &OAuthAppRow, client_secret: &str) -> Result<(), OAuthAppError> {
+        if app.public {
+            return Ok(());
+        }
+        if !constant_time_eq(&hash_secret(client_secret), &app.client_secret_hash) {
+            return Err(OAuthAppError::InvalidClientSecret);
+        }
+        Ok(())
     }
 
     /// Refuse an app a grant it was never registered for.
@@ -634,8 +740,12 @@ impl OAuthAppService {
         })
     }
 
-    /// Resolve a machine token to the app behind it. Resource servers
-    /// call this to authorise a request.
+    /// Resolve a machine token (`forest_cat_`) to the app behind it.
+    ///
+    /// Client tokens only, deliberately: the gRPC auth layer authenticates
+    /// callers with this, and a token an app holds on a user's behalf must
+    /// never pass as the app itself. Resource servers use
+    /// [`Self::introspect_token`], which also answers those.
     pub async fn introspect_client_token(
         &self,
         access_token: &str,
@@ -652,6 +762,55 @@ impl OAuthAppService {
             app_id: row.app_id,
             organisation_id: row.organisation_id,
             scopes: row.scopes,
+            user: None,
+        }))
+    }
+
+    /// Resolve a token for a resource server (`IntrospectClientToken`).
+    ///
+    /// A machine token resolves to its app alone. An access token an app
+    /// holds on a user's behalf (`forest_oat_`) also carries that user and
+    /// the organisations they belong to — this is how a CLI signed in with
+    /// Forest reaches a resource server as the person, scoped to what they
+    /// consented to, without forwarding their session. Anything else
+    /// (unknown, expired, revoked, another kind of token) is `None`.
+    pub async fn introspect_token(
+        &self,
+        access_token: &str,
+    ) -> anyhow::Result<Option<ClientPrincipal>> {
+        if let Some(principal) = self.introspect_client_token(access_token).await? {
+            return Ok(Some(principal));
+        }
+
+        if !access_token.starts_with(USER_ACCESS_TOKEN_PREFIX) {
+            return Ok(None);
+        }
+        let Some(row) = self
+            .repo
+            .resolve_user_token(self.repo.pool(), &hash_secret(access_token))
+            .await?
+        else {
+            return Ok(None);
+        };
+        let organisations = self
+            .organisations
+            .list_my_organisations(row.user_id, None)
+            .await?
+            .into_iter()
+            .map(|o| UserOrganisation {
+                organisation_id: o.organisation_id,
+                name: o.name,
+            })
+            .collect();
+        Ok(Some(ClientPrincipal {
+            app_id: row.app_id,
+            organisation_id: row.organisation_id,
+            scopes: row.scopes,
+            user: Some(DelegatingUser {
+                user_id: row.user_id,
+                username: row.username,
+                organisations,
+            }),
         }))
     }
 
@@ -670,9 +829,7 @@ impl OAuthAppService {
             .get_oauth_app_by_client_id(self.repo.pool(), client_id)
             .await?
             .ok_or(OAuthAppError::UnknownClient)?;
-        if !constant_time_eq(&hash_secret(client_secret), &app.client_secret_hash) {
-            return Err(OAuthAppError::InvalidClientSecret.into());
-        }
+        Self::authenticate_client(&app, client_secret)?;
         // A refresh token can only have come from the code flow, so
         // withdrawing that grant should stop the whole family working —
         // not just stop new logins while old sessions roll on forever.
@@ -728,8 +885,8 @@ impl OAuthAppService {
         // is not carried into id_tokens minted on refresh.
         let id_token = self
             .maybe_id_token(
+                &app,
                 issuer,
-                client_id,
                 client_secret,
                 consumed.user_id,
                 &consumed.scopes,
@@ -883,9 +1040,21 @@ pub fn validate_input(
     })
 }
 
-/// A redirect URI must be an absolute http(s) URL with no fragment. https is
-/// required, except for loopback (localhost / 127.0.0.1) which may use http
-/// for local development.
+/// What a public client may be registered with: the authorization-code grant
+/// alone, and no `openid`.
+pub fn validate_public_client(
+    scopes: &[String],
+    grant_types: &[String],
+) -> Result<(), OAuthAppError> {
+    if grant_types.iter().any(|g| g != GRANT_AUTHORIZATION_CODE) {
+        return Err(OAuthAppError::PublicClientGrant);
+    }
+    if scopes.iter().any(|s| s == "openid") {
+        return Err(OAuthAppError::PublicClientOpenid);
+    }
+    Ok(())
+}
+
 /// Normalise and check an app's requested grant types.
 ///
 /// An empty list means `authorization_code`, matching both the column
@@ -908,6 +1077,9 @@ pub fn validate_grant_types(requested: &[String]) -> Result<Vec<String>, OAuthAp
     Ok(out)
 }
 
+/// A redirect URI must be an absolute http(s) URL with no fragment. https is
+/// required, except for loopback (localhost / 127.0.0.1) which may use http
+/// for local development.
 pub fn validate_redirect_uri(uri: &str) -> Result<(), OAuthAppError> {
     let invalid = |u: &str| OAuthAppError::InvalidRedirectUri(u.to_string());
 
@@ -935,6 +1107,56 @@ pub fn validate_redirect_uri(uri: &str) -> Result<(), OAuthAppError> {
         _ => Err(invalid(uri)),
     }
 }
+
+/// Whether a requested redirect URI is allowed by a registered one.
+///
+/// Exact match, with one exception from RFC 8252 §7.3: a native app listens
+/// on a loopback port the OS picks at run time, so a registered
+/// `http://127.0.0.1/<path>` or `http://localhost/<path>` (with or without
+/// a port) matches a request for the same host and path on any port. The
+/// host, path and query must still match exactly; nothing that is not http
+/// on a loopback host gets this leniency.
+pub fn redirect_uri_matches(registered: &str, requested: &str) -> bool {
+    if registered == requested {
+        return true;
+    }
+    match (loopback_parts(registered), loopback_parts(requested)) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// `(host, path-and-query)` of an `http://` loopback URI, with the port
+/// dropped and an empty path read as `/`. `None` for anything else.
+fn loopback_parts(uri: &str) -> Option<(&str, String)> {
+    let rest = uri.strip_prefix("http://")?;
+    if rest.contains('#') {
+        return None;
+    }
+    let split = rest.find(['/', '?']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(split);
+    let (host, port) = match authority.split_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (authority, None),
+    };
+    if host != "127.0.0.1" && host != "localhost" {
+        return None;
+    }
+    if let Some(port) = port
+        && (port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return None;
+    }
+    let tail = if tail.starts_with('/') {
+        tail.to_string()
+    } else {
+        format!("/{tail}")
+    };
+    Some((host, tail))
+}
+
+/// Prefix of an access token an app holds on a user's behalf.
+pub const USER_ACCESS_TOKEN_PREFIX: &str = "forest_oat_";
 
 /// Public client identifier. Random and unguessable but not secret.
 pub fn generate_client_id() -> String {
@@ -1088,6 +1310,7 @@ impl OAuthAppServiceState for State {
     fn oauth_app_service(&self) -> OAuthAppService {
         OAuthAppService {
             repo: self.oauth_app_repository(),
+            organisations: self.organisation_service(),
         }
     }
 }
@@ -1379,6 +1602,7 @@ mod tests {
             redirect_uris: vec![],
             scopes: vec![],
             grant_types: grants.iter().map(|g| g.to_string()).collect(),
+            public: false,
             created_by: Uuid::nil(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -1434,6 +1658,148 @@ mod tests {
         // widens the blast radius of a leak.
         assert!(CLIENT_TOKEN_TTL_SECONDS < ACCESS_TOKEN_TTL_SECONDS);
         assert!(CLIENT_TOKEN_TTL_SECONDS > 0);
+    }
+
+    // ── Loopback redirects (RFC 8252 §7.3) ───────────────────────────
+
+    #[test]
+    fn a_registered_loopback_redirect_matches_any_port() {
+        for registered in [
+            "http://127.0.0.1/callback",
+            "http://127.0.0.1:8080/callback",
+        ] {
+            assert!(redirect_uri_matches(
+                registered,
+                "http://127.0.0.1:53817/callback"
+            ));
+            assert!(redirect_uri_matches(
+                registered,
+                "http://127.0.0.1:1/callback"
+            ));
+            assert!(redirect_uri_matches(
+                registered,
+                "http://127.0.0.1/callback"
+            ));
+        }
+        assert!(redirect_uri_matches(
+            "http://localhost/callback",
+            "http://localhost:49152/callback"
+        ));
+        assert!(redirect_uri_matches(
+            "http://localhost:3000/cb?x=1",
+            "http://localhost:4000/cb?x=1"
+        ));
+        // An empty path is the root path.
+        assert!(redirect_uri_matches(
+            "http://127.0.0.1",
+            "http://127.0.0.1:9000/"
+        ));
+    }
+
+    #[test]
+    fn a_loopback_redirect_still_needs_the_same_host_path_and_query() {
+        let registered = "http://127.0.0.1/callback";
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1:53817/other"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1:53817/callback/x"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://localhost:53817/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.2:53817/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1:53817/callback?a=b"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1.evil.example/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1@evil.example/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            registered,
+            "http://127.0.0.1:x/callback"
+        ));
+    }
+
+    #[test]
+    fn only_http_on_a_loopback_host_ignores_the_port() {
+        // https on loopback is not the native-app case.
+        assert!(!redirect_uri_matches(
+            "https://127.0.0.1/callback",
+            "https://127.0.0.1:53817/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            "http://127.0.0.1/callback",
+            "https://127.0.0.1:53817/callback"
+        ));
+        // A real host keeps exact matching, port and all.
+        assert!(!redirect_uri_matches(
+            "https://app.example:8443/callback",
+            "https://app.example:9443/callback"
+        ));
+        assert!(!redirect_uri_matches(
+            "http://app.example/callback",
+            "http://app.example:8080/callback"
+        ));
+        assert!(redirect_uri_matches(
+            "https://app.example/callback",
+            "https://app.example/callback"
+        ));
+    }
+
+    // ── Public clients ───────────────────────────────────────────────
+
+    #[test]
+    fn a_public_client_may_only_use_the_code_grant_without_openid() {
+        let code = vec![GRANT_AUTHORIZATION_CODE.to_string()];
+        let both = vec![
+            GRANT_AUTHORIZATION_CODE.to_string(),
+            GRANT_CLIENT_CREDENTIALS.to_string(),
+        ];
+        let gateway = vec!["datagateway:apply".to_string(), "profile".to_string()];
+        let oidc = vec!["openid".to_string(), "profile".to_string()];
+
+        assert!(validate_public_client(&gateway, &code).is_ok());
+        assert_eq!(
+            validate_public_client(&gateway, &both).unwrap_err(),
+            OAuthAppError::PublicClientGrant
+        );
+        assert_eq!(
+            validate_public_client(&oidc, &code).unwrap_err(),
+            OAuthAppError::PublicClientOpenid
+        );
+    }
+
+    #[test]
+    fn a_public_client_skips_the_secret_check_and_a_confidential_one_does_not() {
+        let secret = generate_client_secret();
+        let mut app = app_with(&[GRANT_AUTHORIZATION_CODE]);
+        app.client_secret_hash = hash_secret(&secret);
+
+        assert!(OAuthAppService::authenticate_client(&app, &secret).is_ok());
+        assert_eq!(
+            OAuthAppService::authenticate_client(&app, "").unwrap_err(),
+            OAuthAppError::InvalidClientSecret
+        );
+        assert_eq!(
+            OAuthAppService::authenticate_client(&app, "forest_oas_wrong").unwrap_err(),
+            OAuthAppError::InvalidClientSecret
+        );
+
+        app.public = true;
+        assert!(OAuthAppService::authenticate_client(&app, "").is_ok());
     }
 
     #[test]

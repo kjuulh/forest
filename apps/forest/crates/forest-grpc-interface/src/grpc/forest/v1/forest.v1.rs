@@ -2104,6 +2104,10 @@ pub struct LookupOAuthClientResponse {
     pub redirect_uris: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(string, repeated, tag="7")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// A public client (RFC 8252 native app, e.g. a CLI) holds no secret, so it
+    /// must bind every authorization to a PKCE S256 challenge.
+    #[prost(bool, tag="8")]
+    pub public: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateOAuthAuthorizationCodeRequest {
@@ -2117,10 +2121,10 @@ pub struct CreateOAuthAuthorizationCodeRequest {
     /// consented scopes (subset of app scopes)
     #[prost(string, repeated, tag="4")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// PKCE (optional)
+    /// PKCE (optional; required, S256, for a public client)
     #[prost(string, tag="5")]
     pub code_challenge: ::prost::alloc::string::String,
-    /// "S256" | "plain" (optional)
+    /// "S256" | "plain" (optional; must be "S256" for a public client)
     #[prost(string, tag="6")]
     pub code_challenge_method: ::prost::alloc::string::String,
     /// OIDC nonce (optional) — echoed into the id_token
@@ -2139,6 +2143,7 @@ pub struct CreateOAuthAuthorizationCodeResponse {
 pub struct ExchangeOAuthCodeRequest {
     #[prost(string, tag="1")]
     pub client_id: ::prost::alloc::string::String,
+    /// empty for a public client
     #[prost(string, tag="2")]
     pub client_secret: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
@@ -2183,7 +2188,14 @@ pub struct IntrospectClientTokenRequest {
 }
 /// Empty `app_id` means the token is not live — unknown, expired or
 /// revoked, deliberately indistinguishable to the caller.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+///
+/// Two kinds of token are live: an app's client-credentials token
+/// (`forest_cat_`), and an access token an app holds on a user's behalf
+/// (`forest_oat_`, from the authorization-code flow). For the latter
+/// `user_id` is set, along with the user's username and the organisations
+/// they belong to; `organisation_id` is still the app's. For a client
+/// token the user fields are empty.
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct IntrospectClientTokenResponse {
     #[prost(bool, tag="1")]
     pub active: bool,
@@ -2193,6 +2205,20 @@ pub struct IntrospectClientTokenResponse {
     pub organisation_id: ::prost::alloc::string::String,
     #[prost(string, repeated, tag="4")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(string, tag="5")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="6")]
+    pub username: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag="7")]
+    pub organisations: ::prost::alloc::vec::Vec<IntrospectedOrganisation>,
+}
+/// An organisation the user behind an introspected token is a member of.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IntrospectedOrganisation {
+    #[prost(string, tag="1")]
+    pub organisation_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetOAuthUserinfoRequest {
@@ -2233,6 +2259,7 @@ pub struct GetOAuthUserinfoResponse {
 pub struct RefreshOAuthTokenRequest {
     #[prost(string, tag="1")]
     pub client_id: ::prost::alloc::string::String,
+    /// empty for a public client
     #[prost(string, tag="2")]
     pub client_secret: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
@@ -2329,6 +2356,11 @@ pub struct OAuthApp {
     pub created_at: ::core::option::Option<::prost_types::Timestamp>,
     #[prost(message, optional, tag="11")]
     pub updated_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// A public client (RFC 8252 native app, e.g. a CLI): it has no usable
+    /// client_secret, may only use `authorization_code` with PKCE S256, and
+    /// may not hold `openid`. Fixed at creation.
+    #[prost(bool, tag="13")]
+    pub public: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateOAuthAppRequest {
@@ -2348,12 +2380,17 @@ pub struct CreateOAuthAppRequest {
     /// machine-capable by asking.
     #[prost(string, repeated, tag="7")]
     pub grant_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Register a public client (a CLI or other native app that cannot keep a
+    /// secret). No client_secret is returned, and the app may only use
+    /// `authorization_code` with PKCE S256 and may not hold `openid`.
+    #[prost(bool, tag="8")]
+    pub public: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateOAuthAppResponse {
     #[prost(message, optional, tag="1")]
     pub app: ::core::option::Option<OAuthApp>,
-    /// The raw client_secret, only returned on creation.
+    /// The raw client_secret, only returned on creation. Empty for a public app.
     #[prost(string, tag="2")]
     pub client_secret: ::prost::alloc::string::String,
 }

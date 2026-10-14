@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO oauth_apps\n                (id, organisation_id, name, description, homepage_url, client_id,\n                 client_secret_hash, redirect_uris, scopes, grant_types, created_by)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n            RETURNING id, organisation_id, name, description, homepage_url, client_id,\n                      client_secret_hash, redirect_uris, scopes, grant_types, created_by, created_at, updated_at\n            ",
+  "query": "\n            SELECT id, organisation_id, name, description, homepage_url, client_id,\n                   client_secret_hash, redirect_uris, scopes, grant_types, public, created_by, created_at, updated_at\n            FROM oauth_apps\n            WHERE organisation_id = $1\n            ORDER BY created_at DESC\n            ",
   "describe": {
     "columns": [
       {
@@ -115,6 +115,17 @@
       },
       {
         "ordinal": 10,
+        "name": "public",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "public"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
         "name": "created_by",
         "type_info": "Uuid",
         "origin": {
@@ -125,7 +136,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -136,7 +147,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -149,16 +160,6 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Uuid",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Bytea",
-        "TextArray",
-        "TextArray",
-        "TextArray",
         "Uuid"
       ]
     },
@@ -175,8 +176,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "3074d690a1b37a07a52850cdd796b1d5cf7afd675011e8896b7a98a8b64ac15b"
+  "hash": "6e50500e2b64b1635469575f7b2c91f4ceb10bc9c48067ebeb87808eb5ffc6b0"
 }

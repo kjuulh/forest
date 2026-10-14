@@ -69,6 +69,9 @@ message LookupOAuthClientResponse {
   string homepage_url = 5;
   repeated string redirect_uris = 6;
   repeated string scopes = 7;
+  // A public client (RFC 8252 native app, e.g. a CLI) holds no secret, so it
+  // must bind every authorization to a PKCE S256 challenge.
+  bool public = 8;
 }
 
 message CreateOAuthAuthorizationCodeRequest {
@@ -76,8 +79,8 @@ message CreateOAuthAuthorizationCodeRequest {
   string user_id = 2; // the consenting user (resolved by Forage's session)
   string redirect_uri = 3;
   repeated string scopes = 4; // consented scopes (subset of app scopes)
-  string code_challenge = 5; // PKCE (optional)
-  string code_challenge_method = 6; // "S256" | "plain" (optional)
+  string code_challenge = 5; // PKCE (optional; required, S256, for a public client)
+  string code_challenge_method = 6; // "S256" | "plain" (optional; must be "S256" for a public client)
   string nonce = 7; // OIDC nonce (optional) — echoed into the id_token
 }
 
@@ -88,7 +91,7 @@ message CreateOAuthAuthorizationCodeResponse {
 
 message ExchangeOAuthCodeRequest {
   string client_id = 1;
-  string client_secret = 2;
+  string client_secret = 2; // empty for a public client
   string code = 3;
   string redirect_uri = 4;
   string code_verifier = 5; // PKCE (optional)
@@ -118,11 +121,27 @@ message IntrospectClientTokenRequest {
 
 // Empty `app_id` means the token is not live — unknown, expired or
 // revoked, deliberately indistinguishable to the caller.
+//
+// Two kinds of token are live: an app's client-credentials token
+// (`forest_cat_`), and an access token an app holds on a user's behalf
+// (`forest_oat_`, from the authorization-code flow). For the latter
+// `user_id` is set, along with the user's username and the organisations
+// they belong to; `organisation_id` is still the app's. For a client
+// token the user fields are empty.
 message IntrospectClientTokenResponse {
   bool active = 1;
   string app_id = 2;
   string organisation_id = 3;
   repeated string scopes = 4;
+  string user_id = 5;
+  string username = 6;
+  repeated IntrospectedOrganisation organisations = 7;
+}
+
+// An organisation the user behind an introspected token is a member of.
+message IntrospectedOrganisation {
+  string organisation_id = 1;
+  string name = 2;
 }
 
 message GetOAuthUserinfoRequest {
@@ -147,7 +166,7 @@ message GetOAuthUserinfoResponse {
 
 message RefreshOAuthTokenRequest {
   string client_id = 1;
-  string client_secret = 2;
+  string client_secret = 2; // empty for a public client
   string refresh_token = 3;
 }
 
@@ -208,6 +227,10 @@ message OAuthApp {
   string created_by = 9; // UUID of the creating user
   google.protobuf.Timestamp created_at = 10;
   google.protobuf.Timestamp updated_at = 11;
+  // A public client (RFC 8252 native app, e.g. a CLI): it has no usable
+  // client_secret, may only use `authorization_code` with PKCE S256, and
+  // may not hold `openid`. Fixed at creation.
+  bool public = 13;
 }
 
 message CreateOAuthAppRequest {
@@ -220,11 +243,15 @@ message CreateOAuthAppRequest {
   // Empty defaults to ["authorization_code"], so an app only becomes
   // machine-capable by asking.
   repeated string grant_types = 7;
+  // Register a public client (a CLI or other native app that cannot keep a
+  // secret). No client_secret is returned, and the app may only use
+  // `authorization_code` with PKCE S256 and may not hold `openid`.
+  bool public = 8;
 }
 
 message CreateOAuthAppResponse {
   OAuthApp app = 1;
-  // The raw client_secret, only returned on creation.
+  // The raw client_secret, only returned on creation. Empty for a public app.
   string client_secret = 2;
 }
 

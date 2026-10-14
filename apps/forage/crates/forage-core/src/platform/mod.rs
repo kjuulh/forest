@@ -1162,6 +1162,10 @@ pub struct OAuthApp {
     /// Which OAuth grants this app may use. An app can hold both —
     /// acting for a user and acting as itself.
     pub grant_types: Vec<String>,
+    /// A public client (RFC 8252 native app, e.g. a CLI): no client_secret,
+    /// PKCE S256 required, `authorization_code` only.
+    #[serde(default)]
+    pub public: bool,
     pub created_by: String,
     pub created_at: String,
     pub updated_at: String,
@@ -1185,6 +1189,9 @@ pub struct OAuthClientInfo {
     pub homepage_url: String,
     pub redirect_uris: Vec<String>,
     pub scopes: Vec<String>,
+    /// A public client must send a PKCE S256 challenge; the authorize page
+    /// refuses the request up front rather than after consent.
+    pub public: bool,
 }
 
 /// Tokens returned from a successful code exchange at /oauth/token.
@@ -1199,12 +1206,34 @@ pub struct OAuthIssuedTokens {
     pub id_token: Option<String>,
 }
 
-/// What a machine token turned out to belong to.
+/// What a token turned out to belong to: the app, its organisation and the
+/// granted scopes, plus the user when the app holds it on someone's behalf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientPrincipal {
     pub app_id: String,
     pub organisation_id: String,
     pub scopes: Vec<String>,
+    /// `Some` for an access token an app holds on a user's behalf (the
+    /// authorization-code flow, e.g. a CLI signed in with Forest); `None`
+    /// for the app's own client-credentials token. Only the latter is a
+    /// machine credential: a caller authenticating as an app must have
+    /// `None` here.
+    pub user: Option<DelegatingUser>,
+}
+
+/// The person behind a user-delegated access token, with the organisations
+/// they belong to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DelegatingUser {
+    pub user_id: String,
+    pub username: String,
+    pub organisations: Vec<DelegatingUserOrganisation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DelegatingUserOrganisation {
+    pub organisation_id: String,
+    pub name: String,
 }
 
 /// How to find a person in the directory.
@@ -1347,9 +1376,11 @@ pub trait ForestOAuthApps: Send + Sync {
         scopes: &[String],
     ) -> Result<OAuthClientToken, OAuthFlowError>;
 
-    /// Resolve a machine token to the app behind it, for authorising a
-    /// request. `None` when the token is unknown, expired or revoked —
-    /// deliberately indistinguishable to the caller.
+    /// Resolve a token to the app behind it, for authorising a request: an
+    /// app's client-credentials token, or an access token it holds on a
+    /// user's behalf (then with [`ClientPrincipal::user`] set). `None` when
+    /// the token is unknown, expired or revoked — deliberately
+    /// indistinguishable to the caller.
     async fn introspect_client_token(
         &self,
         access_token: &str,

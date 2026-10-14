@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, organisation_id, name, description, homepage_url, client_id,\n                   client_secret_hash, redirect_uris, scopes, grant_types,\n                   created_by, created_at, updated_at\n            FROM oauth_apps\n            WHERE client_id = $1\n            ",
+  "query": "\n            SELECT id, organisation_id, name, description, homepage_url, client_id,\n                   client_secret_hash, redirect_uris, scopes, grant_types, public, created_by, created_at, updated_at\n            FROM oauth_apps\n            WHERE organisation_id = $1 AND id = $2\n            ",
   "describe": {
     "columns": [
       {
@@ -115,6 +115,17 @@
       },
       {
         "ordinal": 10,
+        "name": "public",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "oauth_apps",
+            "name": "public"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
         "name": "created_by",
         "type_info": "Uuid",
         "origin": {
@@ -125,7 +136,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -136,7 +147,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -149,7 +160,8 @@
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid",
+        "Uuid"
       ]
     },
     "nullable": [
@@ -165,8 +177,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "59b78a946ca8e20ab32313188c9f14f4681e684260ed6171ed3ea52d2117df20"
+  "hash": "f3ef4e18eec6532dc47fe030a1afcd4d34ffbec08e11a08d90a42a44c2cd8bc3"
 }

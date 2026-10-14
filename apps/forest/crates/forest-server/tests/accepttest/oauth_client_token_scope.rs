@@ -74,6 +74,7 @@ async fn machine_app(fixture: &Fixture, token: &str, org_id: &str) -> (String, S
                 redirect_uris: vec!["https://app.example/callback".into()],
                 scopes: vec!["components:publish".into(), "directory:read".into()],
                 grant_types: vec!["client_credentials".into()],
+                public: false,
             },
         ))
         .await

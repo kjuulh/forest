@@ -95,8 +95,10 @@ async fn resolve(
     // Authenticate before parsing the query: an unauthenticated caller
     // shouldn't learn anything from our validation messages.
     let principal = match client.introspect_client_token(token).await {
-        Ok(Some(p)) => p,
-        Ok(None) => return error(StatusCode::UNAUTHORIZED, "invalid_token"),
+        // A machine client's own token only: an access token an app holds on
+        // a user's behalf is no directory credential.
+        Ok(Some(p)) if p.user.is_none() => p,
+        Ok(_) => return error(StatusCode::UNAUTHORIZED, "invalid_token"),
         Err(e) => {
             tracing::warn!(?e, "directory: token introspection failed");
             return error(StatusCode::INTERNAL_SERVER_ERROR, "server_error");

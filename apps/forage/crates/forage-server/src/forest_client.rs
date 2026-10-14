@@ -6,14 +6,14 @@ use forage_core::platform::{
     AllowedDomain, ApprovalDecisionEntry, ApprovalState, Artifact, ArtifactContext,
     ArtifactDestination, ArtifactRef, ArtifactSource, ClientPrincipal, CreateOrgRuleSetInput,
     CreatePolicyInput, CreateReleasePipelineInput, CreateTriggerInput, CreatedOAuthApp,
-    Destination, DestinationType, DestinationTypeInfo, DirectoryLookup, DirectoryUser, Environment,
-    ForestOAuthApps, ForestPlatform, JoinOffer, MetadataFieldDef, NotificationPreference, OAuthApp,
-    OAuthClientInfo, OAuthClientToken, OAuthFlowError, OAuthGrant, OAuthIssuedTokens,
-    OAuthUserinfo, OrgMember, OrgPolicyRule, OrgReleasePipelineRule, OrgRuleSet, OrgTriggerRule,
-    Organisation, PipelineStage, PipelineStageConfig, PlanOutput, PlatformError, Policy,
-    PolicyConfig, PolicyEvaluation, ProjectSelector, ReleasePipeline, Trigger,
-    UpdateOrgRuleSetInput, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
-    VerifyDomainOutcome,
+    DelegatingUser, DelegatingUserOrganisation, Destination, DestinationType, DestinationTypeInfo,
+    DirectoryLookup, DirectoryUser, Environment, ForestOAuthApps, ForestPlatform, JoinOffer,
+    MetadataFieldDef, NotificationPreference, OAuthApp, OAuthClientInfo, OAuthClientToken,
+    OAuthFlowError, OAuthGrant, OAuthIssuedTokens, OAuthUserinfo, OrgMember, OrgPolicyRule,
+    OrgReleasePipelineRule, OrgRuleSet, OrgTriggerRule, Organisation, PipelineStage,
+    PipelineStageConfig, PlanOutput, PlatformError, Policy, PolicyConfig, PolicyEvaluation,
+    ProjectSelector, ReleasePipeline, Trigger, UpdateOrgRuleSetInput, UpdatePolicyInput,
+    UpdateReleasePipelineInput, UpdateTriggerInput, VerifyDomainOutcome,
 };
 use forage_core::registry::{
     ComponentDetail, ComponentSearchResult, ComponentSummary, ComponentVersionInfo, ForestRegistry,
@@ -3748,6 +3748,7 @@ fn convert_oauth_app(app: forage_grpc::OAuthApp) -> OAuthApp {
         redirect_uris: app.redirect_uris,
         scopes: app.scopes,
         grant_types: app.grant_types,
+        public: app.public,
         created_by: app.created_by,
         created_at: app
             .created_at
@@ -3784,6 +3785,10 @@ impl ForestOAuthApps for GrpcForestClient {
                 homepage_url: homepage_url.into(),
                 redirect_uris: redirect_uris.to_vec(),
                 scopes: scopes.to_vec(),
+                // Forage's app form registers confidential apps; a public
+                // client is registered with `forest organisation oauth-app
+                // create --public`.
+                public: false,
             },
         )?;
 
@@ -3974,6 +3979,7 @@ impl ForestOAuthApps for GrpcForestClient {
                     homepage_url: r.homepage_url,
                     redirect_uris: r.redirect_uris,
                     scopes: r.scopes,
+                    public: r.public,
                 }))
             }
             Err(status) if status.code() == tonic::Code::NotFound => Ok(None),
@@ -4073,10 +4079,25 @@ impl ForestOAuthApps for GrpcForestClient {
         if !resp.active {
             return Ok(None);
         }
+        // Forest sets `user_id` only for a token an app holds on a user's
+        // behalf.
+        let user = (!resp.user_id.is_empty()).then(|| DelegatingUser {
+            user_id: resp.user_id,
+            username: resp.username,
+            organisations: resp
+                .organisations
+                .into_iter()
+                .map(|o| DelegatingUserOrganisation {
+                    organisation_id: o.organisation_id,
+                    name: o.name,
+                })
+                .collect(),
+        });
         Ok(Some(ClientPrincipal {
             app_id: resp.app_id,
             organisation_id: resp.organisation_id,
             scopes: resp.scopes,
+            user,
         }))
     }
 

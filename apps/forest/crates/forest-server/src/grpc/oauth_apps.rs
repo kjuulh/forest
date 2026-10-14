@@ -61,6 +61,7 @@ impl OAuthAppsService for OAuthAppsServer {
                 &req.redirect_uris,
                 &req.scopes,
                 &req.grant_types,
+                req.public,
             )
             .await
             .map_err(error::to_status)?;
@@ -220,6 +221,7 @@ impl OAuthAppsService for OAuthAppsServer {
             homepage_url: app.homepage_url,
             redirect_uris: app.redirect_uris,
             scopes: app.scopes,
+            public: app.public,
         }))
     }
 
@@ -279,7 +281,9 @@ impl OAuthAppsService for OAuthAppsServer {
         }))
     }
 
-    /// Resolve a machine token for a resource server.
+    /// Resolve a token for a resource server: a machine token, or an access
+    /// token an app holds on a user's behalf (then with the user and their
+    /// organisations).
     ///
     /// An unknown, expired or revoked token all return `active: false`
     /// with empty fields — the caller learns only that it can't be used,
@@ -295,17 +299,35 @@ impl OAuthAppsService for OAuthAppsServer {
 
         let found = self
             .service()
-            .introspect_client_token(&req.access_token)
+            .introspect_token(&req.access_token)
             .await
             .map_err(oauth_flow_status)?;
 
         Ok(tonic::Response::new(match found {
-            Some(p) => IntrospectClientTokenResponse {
-                active: true,
-                app_id: p.app_id.to_string(),
-                organisation_id: p.organisation_id.to_string(),
-                scopes: p.scopes,
-            },
+            Some(p) => {
+                let mut resp = IntrospectClientTokenResponse {
+                    active: true,
+                    app_id: p.app_id.to_string(),
+                    organisation_id: p.organisation_id.to_string(),
+                    scopes: p.scopes,
+                    ..Default::default()
+                };
+                // Only a user-delegated token has a user; a client token
+                // leaves these empty.
+                if let Some(user) = p.user {
+                    resp.user_id = user.user_id.to_string();
+                    resp.username = user.username;
+                    resp.organisations = user
+                        .organisations
+                        .into_iter()
+                        .map(|o| IntrospectedOrganisation {
+                            organisation_id: o.organisation_id.to_string(),
+                            name: o.name,
+                        })
+                        .collect();
+                }
+                resp
+            }
             None => IntrospectClientTokenResponse {
                 active: false,
                 ..Default::default()
@@ -491,11 +513,17 @@ fn oauth_flow_status(err: anyhow::Error) -> tonic::Status {
                 tonic::Status::invalid_argument("unsupported_grant_type")
             }
             OAuthAppError::ScopeNotGranted(_) => tonic::Status::invalid_argument("invalid_scope"),
+            // Prefixed with the RFC 6749 code so Forage still maps it to
+            // `invalid_request`, and can show the rest to the person.
+            OAuthAppError::PkceRequired => {
+                tonic::Status::invalid_argument(format!("invalid_request: {e}"))
+            }
             OAuthAppError::InvalidName
             | OAuthAppError::NoRedirectUris
-            | OAuthAppError::InvalidRedirectUri(_) => {
-                tonic::Status::invalid_argument(e.to_string())
-            }
+            | OAuthAppError::InvalidRedirectUri(_)
+            | OAuthAppError::PublicClientGrant
+            | OAuthAppError::PublicClientOpenid
+            | OAuthAppError::PublicClientNoSecret => tonic::Status::invalid_argument(e.to_string()),
         };
     }
     error::to_status(err)
@@ -530,6 +558,7 @@ fn to_proto(app: OAuthApp) -> forest_grpc_interface::OAuthApp {
         redirect_uris: app.redirect_uris,
         grant_types: app.grant_types,
         scopes: app.scopes,
+        public: app.public,
         created_by: app.created_by.to_string(),
         created_at: Some(datetime_to_timestamp(app.created_at)),
         updated_at: Some(datetime_to_timestamp(app.updated_at)),

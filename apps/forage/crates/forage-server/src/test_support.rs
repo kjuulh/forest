@@ -6,12 +6,13 @@ use forage_core::auth::{self, LoginResult, MfaSetup, *};
 use forage_core::integrations::InMemoryIntegrationStore;
 use forage_core::platform::{
     Artifact, ArtifactContext, ClientPrincipal, CreateOrgRuleSetInput, CreatePolicyInput,
-    CreateReleasePipelineInput, CreateTriggerInput, CreatedOAuthApp, Destination,
-    DestinationTypeInfo, DirectoryLookup, DirectoryUser, Environment, ForestOAuthApps,
-    ForestPlatform, NotificationPreference, OAuthApp, OAuthClientInfo, OAuthClientToken,
-    OAuthFlowError, OAuthGrant, OAuthIssuedTokens, OAuthUserinfo, OrgMember, OrgRuleSet,
-    Organisation, PlatformError, Policy, ReleasePipeline, Trigger, UpdateOrgRuleSetInput,
-    UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
+    CreateReleasePipelineInput, CreateTriggerInput, CreatedOAuthApp, DelegatingUser,
+    DelegatingUserOrganisation, Destination, DestinationTypeInfo, DirectoryLookup, DirectoryUser,
+    Environment, ForestOAuthApps, ForestPlatform, NotificationPreference, OAuthApp,
+    OAuthClientInfo, OAuthClientToken, OAuthFlowError, OAuthGrant, OAuthIssuedTokens,
+    OAuthUserinfo, OrgMember, OrgRuleSet, Organisation, PlatformError, Policy, ReleasePipeline,
+    Trigger, UpdateOrgRuleSetInput, UpdatePolicyInput, UpdateReleasePipelineInput,
+    UpdateTriggerInput,
 };
 use forage_core::registry::{
     ComponentDetail, ComponentSearchResult, ComponentVersionInfo, ForestRegistry, ToolSummary,
@@ -1273,16 +1274,52 @@ pub(crate) fn test_state_with_integrations(
 
 // ─── Mock OAuth-apps client ──────────────────────────────────────────
 
+/// What Forest answers for a `forest_oat_` access token (after the prefix):
+/// `datactl_kjuulh` is `datactl`, a public client, acting for `kjuulh` with
+/// the data gateway's scopes; `holds_machine_scopes` is a user-delegated
+/// token whose app was registered with machine scopes (`tokens:introspect`,
+/// `directory:read`), which must still never pass as the app itself.
+/// Anything else is dead.
+pub(crate) fn mock_user_delegated_principal(token: &str) -> Option<ClientPrincipal> {
+    let scopes: Vec<String> = match token {
+        "datactl_kjuulh" => vec!["datagateway:apply".into(), "datagateway:read".into()],
+        "holds_machine_scopes" => vec!["tokens:introspect".into(), "directory:read".into()],
+        _ => return None,
+    };
+    Some(ClientPrincipal {
+        app_id: "app-datactl".into(),
+        organisation_id: "org-1".into(),
+        scopes,
+        user: Some(DelegatingUser {
+            user_id: "user-1".into(),
+            username: "kjuulh".into(),
+            organisations: vec![
+                DelegatingUserOrganisation {
+                    organisation_id: "org-1".into(),
+                    name: "testorg".into(),
+                },
+                DelegatingUserOrganisation {
+                    organisation_id: "org-2".into(),
+                    name: "understory".into(),
+                },
+            ],
+        }),
+    })
+}
+
 /// In-memory implementation of [`ForestOAuthApps`] that behaves like the real
 /// forest-server store (create → list → get → update → rotate → delete) so
 /// route tests can exercise the full lifecycle. Optionally forced into an
 /// error to test the failure paths.
+type MockCodes = std::collections::HashMap<String, (String, Vec<String>, String, Option<String>)>;
+
 pub(crate) struct MockOAuthAppsClient {
     apps: Mutex<Vec<OAuthApp>>,
     counter: Mutex<u32>,
     forced_error: Option<PlatformError>,
-    /// Issued authorization codes → (user_id, scopes, redirect_uri).
-    codes: Mutex<std::collections::HashMap<String, (String, Vec<String>, String)>>,
+    /// Issued authorization codes → (user_id, scopes, redirect_uri, PKCE S256
+    /// challenge).
+    codes: Mutex<MockCodes>,
     /// Remembered consent: client_id → consented scopes.
     consents: Mutex<std::collections::HashMap<String, Vec<String>>>,
 }
@@ -1308,6 +1345,23 @@ impl MockOAuthAppsClient {
         }
     }
 
+    /// Mirror Forest's secret check loosely: a known confidential app must
+    /// present some secret, a public one need not. (Unknown clients pass, as
+    /// they always have here, so tests can use ad-hoc client ids.)
+    fn authenticate_client(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+    ) -> Result<(), OAuthFlowError> {
+        let apps = self.apps.lock().unwrap();
+        match apps.iter().find(|a| a.client_id == client_id) {
+            Some(app) if !app.public && client_secret.is_empty() => {
+                Err(OAuthFlowError::InvalidClient)
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Seed a prior consent (for remembered-consent auto-approve tests).
     pub(crate) fn seed_consent(&self, client_id: &str, scopes: Vec<String>) {
         self.consents
@@ -1324,6 +1378,21 @@ impl MockOAuthAppsClient {
         redirect_uris: Vec<String>,
         scopes: Vec<String>,
     ) {
+        self.seed(client_id, redirect_uris, scopes, false);
+    }
+
+    /// Seed a public client (a native app such as `datactl`): no secret,
+    /// PKCE S256 required.
+    pub(crate) fn seed_public_app(
+        &self,
+        client_id: &str,
+        redirect_uris: Vec<String>,
+        scopes: Vec<String>,
+    ) {
+        self.seed(client_id, redirect_uris, scopes, true);
+    }
+
+    fn seed(&self, client_id: &str, redirect_uris: Vec<String>, scopes: Vec<String>, public: bool) {
         let mut counter = self.counter.lock().unwrap();
         *counter += 1;
         let id = format!("app-{}", *counter);
@@ -1337,6 +1406,7 @@ impl MockOAuthAppsClient {
             redirect_uris,
             scopes,
             grant_types: vec!["authorization_code".into()],
+            public,
             created_by: "user-1".into(),
             created_at: "0".into(),
             updated_at: "0".into(),
@@ -1378,6 +1448,7 @@ impl ForestOAuthApps for MockOAuthAppsClient {
             } else {
                 grant_types.to_vec()
             },
+            public: false,
             created_by: "user-1".into(),
             created_at: "0".into(),
             updated_at: "0".into(),
@@ -1519,6 +1590,7 @@ impl ForestOAuthApps for MockOAuthAppsClient {
                 homepage_url: a.homepage_url.clone(),
                 redirect_uris: a.redirect_uris.clone(),
                 scopes: a.scopes.clone(),
+                public: a.public,
             }))
     }
 
@@ -1528,8 +1600,8 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         user_id: &str,
         redirect_uri: &str,
         scopes: &[String],
-        _code_challenge: Option<&str>,
-        _code_challenge_method: Option<&str>,
+        code_challenge: Option<&str>,
+        code_challenge_method: Option<&str>,
         _nonce: Option<&str>,
     ) -> Result<String, OAuthFlowError> {
         let apps = self.apps.lock().unwrap();
@@ -1537,9 +1609,24 @@ impl ForestOAuthApps for MockOAuthAppsClient {
             .iter()
             .find(|a| a.client_id == client_id)
             .ok_or(OAuthFlowError::InvalidClient)?;
-        if !app.redirect_uris.iter().any(|u| u == redirect_uri) {
+        if !app
+            .redirect_uris
+            .iter()
+            .any(|u| crate::routes::oauth::redirect_uri_matches(u, redirect_uri))
+        {
             return Err(OAuthFlowError::InvalidRequest("redirect_uri".into()));
         }
+        // Mirror Forest: a public client must bind the code to PKCE S256.
+        let challenge = match (code_challenge, code_challenge_method) {
+            (Some(c), Some("S256")) => Some(c.to_string()),
+            _ if app.public => {
+                return Err(OAuthFlowError::InvalidRequest(
+                    "invalid_request: a public client must use PKCE with code_challenge_method S256"
+                        .into(),
+                ));
+            }
+            _ => None,
+        };
         for s in scopes {
             if !app.scopes.contains(s) {
                 return Err(OAuthFlowError::InvalidScope);
@@ -1551,7 +1638,12 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         let code = format!("code-{}", *counter);
         self.codes.lock().unwrap().insert(
             code.clone(),
-            (user_id.into(), scopes.to_vec(), redirect_uri.into()),
+            (
+                user_id.into(),
+                scopes.to_vec(),
+                redirect_uri.into(),
+                challenge,
+            ),
         );
         // Mirror forest: approving records (unions) consent.
         let mut consents = self.consents.lock().unwrap();
@@ -1582,13 +1674,16 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         &self,
         access_token: &str,
     ) -> Result<Option<ClientPrincipal>, OAuthFlowError> {
-        // Any non-empty token is a directory-capable client; the real
+        // Any non-empty client token is a directory-capable client; the real
         // gate is Forest's. A few names stand for other principals, so the
         // introspection route can be told apart from the directory one.
+        if let Some(user_token) = access_token.strip_prefix("forest_oat_") {
+            return Ok(mock_user_delegated_principal(user_token));
+        }
         let scopes = match access_token {
             "" | "forest_cat_revoked" => return Ok(None),
             // Client-credentials tokens carry the `forest_cat_` prefix; anything
-            // else (a user's session or PAT) is not an app's token.
+            // else (a user's forest session or PAT) is no OAuth token at all.
             t if !t.starts_with("forest_cat_") => return Ok(None),
             "forest_cat_introspector" => vec!["tokens:introspect".into()],
             "forest_cat_gateway_ci" => vec!["datagateway:apply".into(), "datagateway:read".into()],
@@ -1598,6 +1693,7 @@ impl ForestOAuthApps for MockOAuthAppsClient {
             app_id: "app-1".into(),
             organisation_id: "org-1".into(),
             scopes,
+            user: None,
         }))
     }
 
@@ -1618,17 +1714,30 @@ impl ForestOAuthApps for MockOAuthAppsClient {
 
     async fn exchange_oauth_code(
         &self,
-        _client_id: &str,
-        _client_secret: &str,
+        client_id: &str,
+        client_secret: &str,
         code: &str,
         redirect_uri: &str,
-        _code_verifier: Option<&str>,
+        code_verifier: Option<&str>,
     ) -> Result<OAuthIssuedTokens, OAuthFlowError> {
+        self.authenticate_client(client_id, client_secret)?;
         // Single-use: remove on exchange.
         let entry = self.codes.lock().unwrap().remove(code);
-        let (_user, scopes, stored_redirect) = entry.ok_or(OAuthFlowError::InvalidGrant)?;
+        let (_user, scopes, stored_redirect, challenge) =
+            entry.ok_or(OAuthFlowError::InvalidGrant)?;
         if stored_redirect != redirect_uri {
             return Err(OAuthFlowError::InvalidGrant);
+        }
+        if let Some(challenge) = challenge {
+            use base64::Engine;
+            use sha2::Digest;
+            let computed = code_verifier.map(|v| {
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(sha2::Sha256::digest(v.as_bytes()))
+            });
+            if computed.as_deref() != Some(challenge.as_str()) {
+                return Err(OAuthFlowError::InvalidGrant);
+            }
         }
         let id_token = scopes
             .iter()
@@ -1646,10 +1755,11 @@ impl ForestOAuthApps for MockOAuthAppsClient {
 
     async fn refresh_oauth_token(
         &self,
-        _client_id: &str,
-        _client_secret: &str,
+        client_id: &str,
+        client_secret: &str,
         refresh_token: &str,
     ) -> Result<OAuthIssuedTokens, OAuthFlowError> {
+        self.authenticate_client(client_id, client_secret)?;
         if refresh_token != "forest_ort_mocktoken" {
             return Err(OAuthFlowError::InvalidGrant);
         }

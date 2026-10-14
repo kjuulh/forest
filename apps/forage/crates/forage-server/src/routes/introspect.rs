@@ -15,18 +15,21 @@
 //! is `{"active": false}` and nothing else, so this is no oracle for which
 //! tokens exist.
 //!
-//! Two kinds of token are live:
+//! Two kinds of token are live, both minted by Forest's OAuth server:
 //!
 //! - an app's client-credentials token: `client_id`, `organisation_id` and
-//!   `scope`, as before;
-//! - a person's (a `forest auth login` session or a personal access token):
+//!   `scope`;
+//! - an access token an app holds on a person's behalf, from "Sign in with
+//!   Forest" (e.g. `datactl`, a public client, after the person consented
+//!   to `datagateway:apply`): the same three fields, plus
 //!   `token_kind: "user"`, `sub` (the user id), `username` and
 //!   `organisations` (`[{id, name}]`, those they belong to). This is how a
-//!   person runs a tool against a resource server as themselves, e.g.
-//!   `datactl apply` for a data-gateway project that lists them as an owner,
-//!   with no shared key. Forest checks the token by answering as that user
-//!   (`TokenInfo`, `GetUser`, `ListMyOrganisations`), so nothing here holds
-//!   or mints user credentials.
+//!   person runs a tool against a resource server as themselves, limited to
+//!   the scopes they consented to.
+//!
+//! A person's own Forest session or personal access token is NOT accepted:
+//! those carry everything the person may do in Forest, and a resource server
+//! has no business holding one. Such a token is `{"active": false}`.
 
 use axum::extract::{Form, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -66,8 +69,10 @@ async fn introspect(
 
     // Authenticate the caller before looking at what it asks about.
     let caller = match client.introspect_client_token(caller_token).await {
-        Ok(Some(p)) => p,
-        Ok(None) => return error(StatusCode::UNAUTHORIZED, "invalid_token"),
+        // Only an app's own token: one it holds for a user is the user's
+        // authority, not the resource server's.
+        Ok(Some(p)) if p.user.is_none() => p,
+        Ok(_) => return error(StatusCode::UNAUTHORIZED, "invalid_token"),
         Err(e) => {
             tracing::warn!(?e, "introspect: caller token lookup failed");
             return error(StatusCode::INTERNAL_SERVER_ERROR, "server_error");
@@ -87,56 +92,33 @@ async fn introspect(
     }
 
     match client.introspect_client_token(token).await {
-        Ok(Some(p)) => Json(json!({
-            "active": true,
-            "token_type": "bearer",
-            "client_id": p.app_id,
-            "organisation_id": p.organisation_id,
-            "scope": p.scopes.join(" "),
-        }))
-        .into_response(),
-        Ok(None) => introspect_user(&state, token, &caller.app_id).await,
+        Ok(Some(p)) => {
+            let mut body = json!({
+                "active": true,
+                "token_type": "bearer",
+                "client_id": p.app_id,
+                "organisation_id": p.organisation_id,
+                "scope": p.scopes.join(" "),
+            });
+            if let Some(user) = p.user {
+                let organisations: Vec<_> = user
+                    .organisations
+                    .into_iter()
+                    .map(|o| json!({"id": o.organisation_id, "name": o.name}))
+                    .collect();
+                body["token_kind"] = json!("user");
+                body["sub"] = json!(user.user_id);
+                body["username"] = json!(user.username);
+                body["organisations"] = json!(organisations);
+            }
+            Json(body).into_response()
+        }
+        Ok(None) => Json(json!({"active": false})).into_response(),
         Err(e) => {
             tracing::warn!(?e, app_id = %caller.app_id, "introspect: token lookup failed");
             error(StatusCode::INTERNAL_SERVER_ERROR, "server_error")
         }
     }
-}
-
-/// Not an app's token: try it as a person's. Forest verifies it by serving
-/// that user's own `TokenInfo`/`GetUser`, and their organisations.
-async fn introspect_user(state: &AppState, token: &str, caller: &str) -> Response {
-    use forage_core::auth::AuthError;
-
-    let user = match state.forest_client.get_user(token).await {
-        Ok(user) => user,
-        Err(AuthError::NotAuthenticated | AuthError::InvalidCredentials) => {
-            return Json(json!({"active": false})).into_response();
-        }
-        Err(e) => {
-            tracing::warn!(?e, app_id = %caller, "introspect: user token lookup failed");
-            return error(StatusCode::INTERNAL_SERVER_ERROR, "server_error");
-        }
-    };
-    let organisations = match state.platform_client.list_my_organisations(token).await {
-        Ok(orgs) => orgs
-            .into_iter()
-            .map(|o| json!({"id": o.organisation_id, "name": o.name}))
-            .collect::<Vec<_>>(),
-        Err(e) => {
-            tracing::warn!(?e, app_id = %caller, "introspect: user organisations lookup failed");
-            return error(StatusCode::INTERNAL_SERVER_ERROR, "server_error");
-        }
-    };
-    Json(json!({
-        "active": true,
-        "token_type": "bearer",
-        "token_kind": "user",
-        "sub": user.user_id,
-        "username": user.username,
-        "organisations": organisations,
-    }))
-    .into_response()
 }
 
 fn bearer(headers: &HeaderMap) -> Option<&str> {
