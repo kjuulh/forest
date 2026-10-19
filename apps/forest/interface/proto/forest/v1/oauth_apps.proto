@@ -43,6 +43,24 @@ service OAuthAppsService {
   // Return the scopes a user has previously consented to for a client, so the
   // consent screen can be skipped when the request is already covered.
   rpc GetOAuthConsent(GetOAuthConsentRequest) returns (GetOAuthConsentResponse);
+
+  // ── Device authorization grant (RFC 8628) for an app ──
+  // A CLI on a machine without a usable browser (an SSH session) signs a
+  // person in to an app: it shows a code, the person approves it in Forage's
+  // /device page on any device, and the CLI polls for the app's tokens. The
+  // grant is bound to the requesting app and the scopes it asked for; it
+  // yields the same tokens as the authorization-code flow, never a Forest
+  // session. The app must be registered for the
+  // `urn:ietf:params:oauth:grant-type:device_code` grant.
+  rpc InitiateOAuthDeviceAuthorization(InitiateOAuthDeviceAuthorizationRequest) returns (InitiateOAuthDeviceAuthorizationResponse);
+  // The pending app grant behind a user_code, for the approval page. Not
+  // found for an unknown, finished or expired code, or a Forest CLI login.
+  rpc LookupOAuthDeviceAuthorization(LookupOAuthDeviceAuthorizationRequest) returns (LookupOAuthDeviceAuthorizationResponse);
+  rpc ApproveOAuthDeviceAuthorization(ApproveOAuthDeviceAuthorizationRequest) returns (ApproveOAuthDeviceAuthorizationResponse);
+  rpc DenyOAuthDeviceAuthorization(DenyOAuthDeviceAuthorizationRequest) returns (DenyOAuthDeviceAuthorizationResponse);
+  // The token request of RFC 8628 §3.4: tokens once approved, otherwise the
+  // state the client should act on.
+  rpc ExchangeOAuthDeviceCode(ExchangeOAuthDeviceCodeRequest) returns (ExchangeOAuthDeviceCodeResponse);
 }
 
 // Opaque bearer tokens issued to an OAuth app on a user's behalf.
@@ -209,6 +227,72 @@ message GetOAuthConsentResponse {
   repeated string scopes = 1;
 }
 
+message InitiateOAuthDeviceAuthorizationRequest {
+  string client_id = 1;
+  string client_secret = 2; // empty for a public client
+  repeated string scopes = 3; // non-empty subset of the app's scopes
+}
+
+message InitiateOAuthDeviceAuthorizationResponse {
+  // Secret: only the client holds it, and sends it back to redeem the grant.
+  string device_code = 1;
+  // Shown to the person, e.g. "BCDF-GHJK".
+  string user_code = 2;
+  string verification_uri = 3;
+  string verification_uri_complete = 4;
+  int64 expires_in_seconds = 5;
+  int32 interval_seconds = 6;
+}
+
+message LookupOAuthDeviceAuthorizationRequest {
+  string user_code = 1;
+}
+
+message LookupOAuthDeviceAuthorizationResponse {
+  string client_id = 1;
+  string name = 2; // the app's name
+  string homepage_url = 3;
+  repeated string scopes = 4; // what approving grants the app
+}
+
+message ApproveOAuthDeviceAuthorizationRequest {
+  string user_code = 1;
+  string user_id = 2; // the approving user (resolved by Forage's session)
+  string approving_ip = 3;
+  string approving_user_agent = 4;
+}
+
+message ApproveOAuthDeviceAuthorizationResponse {}
+
+message DenyOAuthDeviceAuthorizationRequest {
+  string user_code = 1;
+  string user_id = 2;
+}
+
+message DenyOAuthDeviceAuthorizationResponse {}
+
+message ExchangeOAuthDeviceCodeRequest {
+  string client_id = 1;
+  string client_secret = 2; // empty for a public client
+  string device_code = 3;
+}
+
+// RFC 8628 §3.5. A device_code that is unknown, already redeemed, or bound
+// to another client is EXPIRED_TOKEN, indistinguishable from a lapsed one.
+enum OAuthDeviceTokenStatus {
+  O_AUTH_DEVICE_TOKEN_STATUS_UNSPECIFIED = 0;
+  O_AUTH_DEVICE_TOKEN_STATUS_ISSUED = 1;
+  O_AUTH_DEVICE_TOKEN_STATUS_AUTHORIZATION_PENDING = 2;
+  O_AUTH_DEVICE_TOKEN_STATUS_SLOW_DOWN = 3;
+  O_AUTH_DEVICE_TOKEN_STATUS_ACCESS_DENIED = 4;
+  O_AUTH_DEVICE_TOKEN_STATUS_EXPIRED_TOKEN = 5;
+}
+
+message ExchangeOAuthDeviceCodeResponse {
+  OAuthDeviceTokenStatus status = 1;
+  OAuthTokens tokens = 2; // only when ISSUED
+}
+
 // Public-safe representation of an OAuth application. Never carries the
 // client_secret (that is only present in Create/Rotate responses).
 message OAuthApp {
@@ -220,16 +304,17 @@ message OAuthApp {
   string client_id = 6; // public client identifier
   repeated string redirect_uris = 7;
   repeated string scopes = 8; // scopes this app is permitted to request
-  // OAuth grants this app may use: "authorization_code" and/or
-  // "client_credentials". Apps predating machine-to-machine support
+  // OAuth grants this app may use: "authorization_code",
+  // "client_credentials" and/or "urn:ietf:params:oauth:grant-type:device_code".
+  // Apps predating machine-to-machine support
   // carry "authorization_code" alone.
   repeated string grant_types = 12;
   string created_by = 9; // UUID of the creating user
   google.protobuf.Timestamp created_at = 10;
   google.protobuf.Timestamp updated_at = 11;
   // A public client (RFC 8252 native app, e.g. a CLI): it has no usable
-  // client_secret, may only use `authorization_code` with PKCE S256, and
-  // may not hold `openid`. Fixed at creation.
+  // client_secret, may only use `authorization_code` (with PKCE S256) and
+  // the device grant, and may not hold `openid`. Fixed at creation.
   bool public = 13;
 }
 

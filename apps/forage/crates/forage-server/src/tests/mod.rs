@@ -16,6 +16,7 @@ mod magic_link_tests;
 mod maintenance_grpc_tests;
 mod maintenance_tests;
 mod nats_tests;
+mod oauth_device_tests;
 mod oauth_e2e_tests;
 mod oauth_flow_tests;
 mod oauth_tests;

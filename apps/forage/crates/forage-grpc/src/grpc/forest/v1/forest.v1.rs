@@ -2312,6 +2312,95 @@ pub struct GetOAuthConsentResponse {
     #[prost(string, repeated, tag="1")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InitiateOAuthDeviceAuthorizationRequest {
+    #[prost(string, tag="1")]
+    pub client_id: ::prost::alloc::string::String,
+    /// empty for a public client
+    #[prost(string, tag="2")]
+    pub client_secret: ::prost::alloc::string::String,
+    /// non-empty subset of the app's scopes
+    #[prost(string, repeated, tag="3")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InitiateOAuthDeviceAuthorizationResponse {
+    /// Secret: only the client holds it, and sends it back to redeem the grant.
+    #[prost(string, tag="1")]
+    pub device_code: ::prost::alloc::string::String,
+    /// Shown to the person, e.g. "BCDF-GHJK".
+    #[prost(string, tag="2")]
+    pub user_code: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub verification_uri: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub verification_uri_complete: ::prost::alloc::string::String,
+    #[prost(int64, tag="5")]
+    pub expires_in_seconds: i64,
+    #[prost(int32, tag="6")]
+    pub interval_seconds: i32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LookupOAuthDeviceAuthorizationRequest {
+    #[prost(string, tag="1")]
+    pub user_code: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LookupOAuthDeviceAuthorizationResponse {
+    #[prost(string, tag="1")]
+    pub client_id: ::prost::alloc::string::String,
+    /// the app's name
+    #[prost(string, tag="2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub homepage_url: ::prost::alloc::string::String,
+    /// what approving grants the app
+    #[prost(string, repeated, tag="4")]
+    pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApproveOAuthDeviceAuthorizationRequest {
+    #[prost(string, tag="1")]
+    pub user_code: ::prost::alloc::string::String,
+    /// the approving user (resolved by Forage's session)
+    #[prost(string, tag="2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub approving_ip: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub approving_user_agent: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApproveOAuthDeviceAuthorizationResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DenyOAuthDeviceAuthorizationRequest {
+    #[prost(string, tag="1")]
+    pub user_code: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DenyOAuthDeviceAuthorizationResponse {
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExchangeOAuthDeviceCodeRequest {
+    #[prost(string, tag="1")]
+    pub client_id: ::prost::alloc::string::String,
+    /// empty for a public client
+    #[prost(string, tag="2")]
+    pub client_secret: ::prost::alloc::string::String,
+    #[prost(string, tag="3")]
+    pub device_code: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExchangeOAuthDeviceCodeResponse {
+    #[prost(enumeration="OAuthDeviceTokenStatus", tag="1")]
+    pub status: i32,
+    /// only when ISSUED
+    #[prost(message, optional, tag="2")]
+    pub tokens: ::core::option::Option<OAuthTokens>,
+}
 /// Public-safe representation of an OAuth application. Never carries the
 /// client_secret (that is only present in Create/Rotate responses).
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2336,8 +2425,9 @@ pub struct OAuthApp {
     /// scopes this app is permitted to request
     #[prost(string, repeated, tag="8")]
     pub scopes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// OAuth grants this app may use: "authorization_code" and/or
-    /// "client_credentials". Apps predating machine-to-machine support
+    /// OAuth grants this app may use: "authorization_code",
+    /// "client_credentials" and/or "urn:ietf:params:oauth:grant-type:device_code".
+    /// Apps predating machine-to-machine support
     /// carry "authorization_code" alone.
     #[prost(string, repeated, tag="12")]
     pub grant_types: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
@@ -2349,8 +2439,8 @@ pub struct OAuthApp {
     #[prost(message, optional, tag="11")]
     pub updated_at: ::core::option::Option<::prost_types::Timestamp>,
     /// A public client (RFC 8252 native app, e.g. a CLI): it has no usable
-    /// client_secret, may only use `authorization_code` with PKCE S256, and
-    /// may not hold `openid`. Fixed at creation.
+    /// client_secret, may only use `authorization_code` (with PKCE S256) and
+    /// the device grant, and may not hold `openid`. Fixed at creation.
     #[prost(bool, tag="13")]
     pub public: bool,
 }
@@ -2459,6 +2549,46 @@ pub struct DeleteOAuthAppRequest {
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteOAuthAppResponse {
+}
+/// RFC 8628 §3.5. A device_code that is unknown, already redeemed, or bound
+/// to another client is EXPIRED_TOKEN, indistinguishable from a lapsed one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum OAuthDeviceTokenStatus {
+    Unspecified = 0,
+    Issued = 1,
+    AuthorizationPending = 2,
+    SlowDown = 3,
+    AccessDenied = 4,
+    ExpiredToken = 5,
+}
+impl OAuthDeviceTokenStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "O_AUTH_DEVICE_TOKEN_STATUS_UNSPECIFIED",
+            Self::Issued => "O_AUTH_DEVICE_TOKEN_STATUS_ISSUED",
+            Self::AuthorizationPending => "O_AUTH_DEVICE_TOKEN_STATUS_AUTHORIZATION_PENDING",
+            Self::SlowDown => "O_AUTH_DEVICE_TOKEN_STATUS_SLOW_DOWN",
+            Self::AccessDenied => "O_AUTH_DEVICE_TOKEN_STATUS_ACCESS_DENIED",
+            Self::ExpiredToken => "O_AUTH_DEVICE_TOKEN_STATUS_EXPIRED_TOKEN",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "O_AUTH_DEVICE_TOKEN_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "O_AUTH_DEVICE_TOKEN_STATUS_ISSUED" => Some(Self::Issued),
+            "O_AUTH_DEVICE_TOKEN_STATUS_AUTHORIZATION_PENDING" => Some(Self::AuthorizationPending),
+            "O_AUTH_DEVICE_TOKEN_STATUS_SLOW_DOWN" => Some(Self::SlowDown),
+            "O_AUTH_DEVICE_TOKEN_STATUS_ACCESS_DENIED" => Some(Self::AccessDenied),
+            "O_AUTH_DEVICE_TOKEN_STATUS_EXPIRED_TOKEN" => Some(Self::ExpiredToken),
+            _ => None,
+        }
+    }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnnotateReleaseRequest {

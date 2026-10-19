@@ -116,7 +116,9 @@ pub struct CreateCommand {
     scope: Vec<String>,
     /// OAuth grant this app may use (repeatable): `authorization_code`
     /// for "Sign in with Forest", `client_credentials` for a service
-    /// calling as itself.
+    /// calling as itself, `urn:ietf:params:oauth:grant-type:device_code`
+    /// for a CLI that signs a person in with a code they approve on any
+    /// device (RFC 8628; works over SSH).
     ///
     /// Pass both to get both, the way a GitHub App acts for a user and
     /// as itself:
@@ -131,8 +133,8 @@ pub struct CreateCommand {
     /// keep a secret (RFC 8252).
     ///
     /// No client secret is issued. The app may only use
-    /// `authorization_code`, every authorization must carry a PKCE S256
-    /// challenge, and it may not request `openid`. A loopback redirect URI
+    /// `authorization_code` (every authorization must carry a PKCE S256
+    /// challenge) and the device grant, and it may not request `openid`. A loopback redirect URI
     /// (`http://127.0.0.1/<path>`) matches any port, so the app can listen
     /// on whatever port is free.
     #[arg(long)]

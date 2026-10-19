@@ -9,10 +9,10 @@ use forage_core::platform::{
     CreateReleasePipelineInput, CreateTriggerInput, CreatedOAuthApp, DelegatingUser,
     DelegatingUserOrganisation, Destination, DestinationTypeInfo, DirectoryLookup, DirectoryUser,
     Environment, ForestOAuthApps, ForestPlatform, NotificationPreference, OAuthApp,
-    OAuthClientInfo, OAuthClientToken, OAuthFlowError, OAuthGrant, OAuthIssuedTokens,
-    OAuthUserinfo, OrgMember, OrgRuleSet, Organisation, PlatformError, Policy, ReleasePipeline,
-    Trigger, UpdateOrgRuleSetInput, UpdatePolicyInput, UpdateReleasePipelineInput,
-    UpdateTriggerInput,
+    OAuthClientInfo, OAuthClientToken, OAuthDeviceAuthorization, OAuthDeviceToken, OAuthFlowError,
+    OAuthGrant, OAuthIssuedTokens, OAuthUserinfo, OrgMember, OrgRuleSet, Organisation,
+    PendingOAuthDeviceAuthorization, PlatformError, Policy, ReleasePipeline, Trigger,
+    UpdateOrgRuleSetInput, UpdatePolicyInput, UpdateReleasePipelineInput, UpdateTriggerInput,
 };
 use forage_core::registry::{
     ComponentDetail, ComponentSearchResult, ComponentVersionInfo, ForestRegistry, ToolSummary,
@@ -1307,6 +1307,8 @@ pub(crate) fn mock_user_delegated_principal(token: &str) -> Option<ClientPrincip
     })
 }
 
+const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
+
 /// In-memory implementation of [`ForestOAuthApps`] that behaves like the real
 /// forest-server store (create → list → get → update → rotate → delete) so
 /// route tests can exercise the full lifecycle. Optionally forced into an
@@ -1322,6 +1324,25 @@ pub(crate) struct MockOAuthAppsClient {
     codes: Mutex<MockCodes>,
     /// Remembered consent: client_id → consented scopes.
     consents: Mutex<std::collections::HashMap<String, Vec<String>>>,
+    /// Device grants, in the order started.
+    device_grants: Mutex<Vec<MockDeviceGrant>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct MockDeviceGrant {
+    pub device_code: String,
+    pub user_code: String,
+    pub client_id: String,
+    pub scopes: Vec<String>,
+    pub state: MockDeviceState,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum MockDeviceState {
+    Pending,
+    Approved { user_id: String, ip: String },
+    Denied,
+    Consumed,
 }
 
 impl MockOAuthAppsClient {
@@ -1332,6 +1353,7 @@ impl MockOAuthAppsClient {
             forced_error: None,
             codes: Mutex::new(std::collections::HashMap::new()),
             consents: Mutex::new(std::collections::HashMap::new()),
+            device_grants: Mutex::new(Vec::new()),
         }
     }
 
@@ -1342,6 +1364,21 @@ impl MockOAuthAppsClient {
             forced_error: Some(err),
             codes: Mutex::new(std::collections::HashMap::new()),
             consents: Mutex::new(std::collections::HashMap::new()),
+            device_grants: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The device grants started so far.
+    pub(crate) fn device_grants(&self) -> Vec<MockDeviceGrant> {
+        self.device_grants.lock().unwrap().clone()
+    }
+
+    /// Register a seeded app for the device grant too.
+    pub(crate) fn allow_device_grant(&self, client_id: &str) {
+        for app in self.apps.lock().unwrap().iter_mut() {
+            if app.client_id == client_id {
+                app.grant_types.push(DEVICE_GRANT.into());
+            }
         }
     }
 
@@ -1818,6 +1855,151 @@ impl ForestOAuthApps for MockOAuthAppsClient {
             .get(client_id)
             .cloned()
             .unwrap_or_default())
+    }
+
+    async fn initiate_oauth_device_authorization(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        scopes: &[String],
+    ) -> Result<OAuthDeviceAuthorization, OAuthFlowError> {
+        let app = self
+            .apps
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|a| a.client_id == client_id)
+            .cloned()
+            .ok_or(OAuthFlowError::InvalidClient)?;
+        self.authenticate_client(client_id, client_secret)?;
+        if !app.grant_types.iter().any(|g| g == DEVICE_GRANT) {
+            return Err(OAuthFlowError::InvalidRequest(
+                "unsupported_grant_type".into(),
+            ));
+        }
+        if scopes.is_empty() || scopes.iter().any(|s| !app.scopes.contains(s)) {
+            return Err(OAuthFlowError::InvalidScope);
+        }
+        let mut grants = self.device_grants.lock().unwrap();
+        let n = grants.len() + 1;
+        let grant = MockDeviceGrant {
+            device_code: format!("mock-device-code-{n}"),
+            user_code: format!("BCDF-GH{n:02}"),
+            client_id: client_id.into(),
+            scopes: scopes.to_vec(),
+            state: MockDeviceState::Pending,
+        };
+        let user_code = grant.user_code.clone();
+        let device_code = grant.device_code.clone();
+        grants.push(grant);
+        Ok(OAuthDeviceAuthorization {
+            device_code,
+            verification_uri: "http://forage.test/device".into(),
+            verification_uri_complete: format!(
+                "http://forage.test/device?user_code={}",
+                user_code.replace('-', "")
+            ),
+            user_code,
+            expires_in_seconds: 900,
+            interval_seconds: 5,
+        })
+    }
+
+    async fn lookup_oauth_device_authorization(
+        &self,
+        user_code: &str,
+    ) -> Result<Option<PendingOAuthDeviceAuthorization>, PlatformError> {
+        let wanted = user_code.replace('-', "").to_ascii_uppercase();
+        let grants = self.device_grants.lock().unwrap();
+        let Some(grant) = grants.iter().find(|g| {
+            g.user_code.replace('-', "") == wanted && g.state == MockDeviceState::Pending
+        }) else {
+            return Ok(None);
+        };
+        let apps = self.apps.lock().unwrap();
+        let app = apps.iter().find(|a| a.client_id == grant.client_id);
+        Ok(app.map(|a| PendingOAuthDeviceAuthorization {
+            client_id: a.client_id.clone(),
+            name: a.name.clone(),
+            homepage_url: a.homepage_url.clone(),
+            scopes: grant.scopes.clone(),
+        }))
+    }
+
+    async fn approve_oauth_device_authorization(
+        &self,
+        user_code: &str,
+        user_id: &str,
+        approving_ip: &str,
+        _approving_user_agent: &str,
+    ) -> Result<(), PlatformError> {
+        let wanted = user_code.replace('-', "").to_ascii_uppercase();
+        let mut grants = self.device_grants.lock().unwrap();
+        let grant = grants
+            .iter_mut()
+            .find(|g| g.user_code.replace('-', "") == wanted && g.state == MockDeviceState::Pending)
+            .ok_or_else(|| PlatformError::Other("invalid_grant".into()))?;
+        grant.state = MockDeviceState::Approved {
+            user_id: user_id.into(),
+            ip: approving_ip.into(),
+        };
+        Ok(())
+    }
+
+    async fn deny_oauth_device_authorization(
+        &self,
+        user_code: &str,
+        _user_id: &str,
+    ) -> Result<(), PlatformError> {
+        let wanted = user_code.replace('-', "").to_ascii_uppercase();
+        let mut grants = self.device_grants.lock().unwrap();
+        let grant = grants
+            .iter_mut()
+            .find(|g| g.user_code.replace('-', "") == wanted && g.state == MockDeviceState::Pending)
+            .ok_or_else(|| PlatformError::Other("invalid_grant".into()))?;
+        grant.state = MockDeviceState::Denied;
+        Ok(())
+    }
+
+    async fn exchange_oauth_device_code(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        device_code: &str,
+    ) -> Result<OAuthDeviceToken, OAuthFlowError> {
+        if !self
+            .apps
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|a| a.client_id == client_id)
+        {
+            return Err(OAuthFlowError::InvalidClient);
+        }
+        self.authenticate_client(client_id, client_secret)?;
+        let mut grants = self.device_grants.lock().unwrap();
+        let Some(grant) = grants
+            .iter_mut()
+            .find(|g| g.device_code == device_code && g.client_id == client_id)
+        else {
+            return Ok(OAuthDeviceToken::ExpiredToken);
+        };
+        Ok(match grant.state.clone() {
+            MockDeviceState::Pending => OAuthDeviceToken::AuthorizationPending,
+            MockDeviceState::Denied => OAuthDeviceToken::AccessDenied,
+            MockDeviceState::Consumed => OAuthDeviceToken::ExpiredToken,
+            MockDeviceState::Approved { .. } => {
+                grant.state = MockDeviceState::Consumed;
+                OAuthDeviceToken::Issued(OAuthIssuedTokens {
+                    access_token: "forest_oat_mockdevice".into(),
+                    refresh_token: "forest_ort_mockdevice".into(),
+                    token_type: "bearer".into(),
+                    expires_in_seconds: 28800,
+                    scopes: grant.scopes.clone(),
+                    id_token: None,
+                })
+            }
+        })
     }
 
     async fn oauth_userinfo(&self, access_token: &str) -> Result<OAuthUserinfo, OAuthFlowError> {

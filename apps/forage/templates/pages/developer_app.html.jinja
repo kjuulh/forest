@@ -102,6 +102,10 @@
                 <input type="checkbox" name="grant_client_credentials" class="mt-0.5" {% if "client_credentials" in app.grant_types %}checked{% endif %}>
                 <span class="text-sm"><span class="font-mono">client_credentials</span> &mdash; a service calling as itself, with no user involved</span>
             </label>
+            <label class="flex items-start gap-2 mt-2">
+                <input type="checkbox" name="grant_device_code" class="mt-0.5" {% if "urn:ietf:params:oauth:grant-type:device_code" in app.grant_types %}checked{% endif %}>
+                <span class="text-sm"><span class="font-mono">device_code</span> &mdash; a CLI signs a user in with a code they approve on another device (RFC 8628)</span>
+            </label>
         </fieldset>
 
         <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-800">Save changes</button>

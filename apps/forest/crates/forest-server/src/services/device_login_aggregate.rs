@@ -9,6 +9,14 @@
 //! the same `device_code` will see `Consumed` and report `Expired` to
 //! the caller — externally indistinguishable from a natural TTL expiry,
 //! so a replay attacker cannot learn that the code was already redeemed.
+//!
+//! A grant is either a Forest CLI login (`app_id` is `None`, redeemed through
+//! `UsersService/PollDeviceLogin` for a Forest session) or an OAuth app's
+//! (`app_id` is the app, redeemed through `OAuthAppsService` for that app's
+//! scoped tokens). Every operation names which kind it expects, and a grant
+//! of the other kind looks like no grant at all: a Forest CLI poll must never
+//! turn an app's approval into a full Forest session, and an app must never
+//! redeem a Forest CLI login or another app's grant.
 
 use crate::event_store::EventStoreExt;
 use anyhow::Context;
@@ -59,11 +67,21 @@ pub enum DeviceLoginPollOutcome {
     /// issue tokens for `user_id` and return them to the CLI.
     Approved {
         user_id: Uuid,
+        /// What the grant was initiated for. For an app's grant, exactly the
+        /// scopes its tokens may carry.
+        scopes: Vec<String>,
     },
     Denied,
     Expired,
     /// The CLI polled faster than `interval_seconds`. RFC 8628 § 3.5.
     SlowDown,
+}
+
+/// A grant still waiting for the person, as the approval page sees it.
+#[derive(Debug, Clone)]
+pub struct PendingDeviceGrant {
+    pub app_id: Option<Uuid>,
+    pub scopes: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -87,6 +105,7 @@ impl DeviceLoginAggregateService {
         client_name: &str,
         client_version: &str,
         scopes: Vec<String>,
+        app_id: Option<Uuid>,
     ) -> anyhow::Result<InitiatedDeviceGrant> {
         // Bound caller-controlled inputs before they hit the DB. Each
         // limit is generous for legitimate clients (the canonical
@@ -152,6 +171,7 @@ impl DeviceLoginAggregateService {
                     scopes: scopes.clone(),
                     expires_at,
                     interval_seconds: DEFAULT_INTERVAL_SECONDS,
+                    app_id,
                 },
             ) {
                 Ok(id) => id,
@@ -176,8 +196,8 @@ impl DeviceLoginAggregateService {
                             "INSERT INTO device_login_grants
                                 (id, device_code_hash, user_code, client_name,
                                  client_version, scopes, status, expires_at,
-                                 interval_seconds)
-                             VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)",
+                                 interval_seconds, app_id)
+                             VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)",
                         )
                         .bind(grant_id)
                         .bind(&device_code_hash_for_insert)
@@ -187,6 +207,7 @@ impl DeviceLoginAggregateService {
                         .bind(&scopes_json)
                         .bind(expires_at)
                         .bind(DEFAULT_INTERVAL_SECONDS)
+                        .bind(app_id)
                         .execute(&mut **tx)
                         .await
                         .context("insert device_login_grants projection")?;
@@ -224,7 +245,16 @@ impl DeviceLoginAggregateService {
 
     /// Poll a device grant. If approved within TTL, atomically marks it
     /// consumed and returns the `user_id` so the handler can issue tokens.
-    pub async fn poll(&self, device_code: &str) -> anyhow::Result<DeviceLoginPollOutcome> {
+    ///
+    /// `app` is the kind of grant the caller may redeem: `None` for a Forest
+    /// CLI login, `Some(app)` for that app's grant. Any other grant is
+    /// reported `Expired` and left untouched, so a mismatched poll can neither
+    /// redeem nor burn it.
+    pub async fn poll(
+        &self,
+        device_code: &str,
+        app: Option<Uuid>,
+    ) -> anyhow::Result<DeviceLoginPollOutcome> {
         // Bound the input length so an attacker can't ship megabytes
         // hoping to slow the hasher. The legitimate device_code is 43
         // ASCII chars; we accept up to 128 to leave headroom for future
@@ -244,6 +274,10 @@ impl DeviceLoginAggregateService {
             .event_store
             .load_or_default::<DeviceGrantAggregate>(&device_code_hash)
             .await?;
+
+        if root.state.app_id != app {
+            return Ok(DeviceLoginPollOutcome::Expired);
+        }
 
         let external = root.state.poll_status(now);
 
@@ -294,7 +328,11 @@ impl DeviceLoginAggregateService {
                     .state
                     .approved_user_id
                     .context("approved grant missing user_id")?;
+                let scopes = root.state.scopes.clone();
 
+                // Two concurrent polls both load the approved grant, but the
+                // event store's expected-version check lets only one of them
+                // save `Consumed`; the other fails here and mints nothing.
                 DeviceGrantAggregate::consume(&mut root, now)?;
 
                 let device_code_hash_for_update = device_code_hash.clone();
@@ -318,17 +356,47 @@ impl DeviceLoginAggregateService {
                     })
                     .await?;
 
-                Ok(DeviceLoginPollOutcome::Approved { user_id })
+                Ok(DeviceLoginPollOutcome::Approved { user_id, scopes })
             }
         }
     }
 
+    /// The pending, unexpired grant behind a user_code, of either kind.
+    /// `None` for anything else, so the approval page can tell an app's
+    /// grant from a Forest CLI login before it says what approving does.
+    pub async fn pending(&self, user_code: &str) -> anyhow::Result<Option<PendingDeviceGrant>> {
+        if user_code.len() > MAX_USER_CODE_INPUT_LEN {
+            return Ok(None);
+        }
+        let normalized = device_login::normalize_user_code(user_code);
+        let row = sqlx::query!(
+            r#"SELECT app_id, scopes
+               FROM device_login_grants
+               WHERE user_code = $1 AND status = 'pending' AND expires_at > now()"#,
+            normalized,
+        )
+        .fetch_optional(&self.db)
+        .await
+        .context("lookup pending device_login_grants by user_code")?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        Ok(Some(PendingDeviceGrant {
+            app_id: row.app_id,
+            scopes: serde_json::from_value(row.scopes).context("device grant scopes")?,
+        }))
+    }
+
+    /// Approve the grant behind a user_code, which must be of the kind `app`
+    /// names (see [`Self::poll`]); a grant of the other kind is "no device
+    /// grant matching that code".
     pub async fn approve(
         &self,
         user_code: &str,
         user_id: Uuid,
         approving_ip: &str,
         approving_user_agent: &str,
+        app: Option<Uuid>,
     ) -> anyhow::Result<()> {
         if user_code.len() > MAX_USER_CODE_INPUT_LEN {
             anyhow::bail!("user_code too long");
@@ -338,14 +406,15 @@ impl DeviceLoginAggregateService {
 
         // Resolve user_code → device_code_hash via the projection.
         let row = sqlx::query!(
-            r#"SELECT device_code_hash, status, expires_at
+            r#"SELECT device_code_hash, status, expires_at, app_id
                FROM device_login_grants
                WHERE user_code = $1"#,
             normalized,
         )
         .fetch_optional(&self.db)
         .await
-        .context("lookup device_login_grants by user_code")?;
+        .context("lookup device_login_grants by user_code")?
+        .filter(|r| r.app_id == app);
 
         let row = match row {
             Some(r) => r,
@@ -375,6 +444,9 @@ impl DeviceLoginAggregateService {
             .event_store
             .load_or_default::<DeviceGrantAggregate>(&device_code_hash)
             .await?;
+        if root.state.app_id != app {
+            anyhow::bail!("no device grant matching that code");
+        }
 
         // Truncate IP/UA before persistence — they're caller-supplied
         // (forage forwards them on the user's behalf) so we treat them
@@ -434,7 +506,13 @@ impl DeviceLoginAggregateService {
         Ok(())
     }
 
-    pub async fn deny(&self, user_code: &str, user_id: Uuid) -> anyhow::Result<()> {
+    /// Deny the grant behind a user_code; `app` as for [`Self::approve`].
+    pub async fn deny(
+        &self,
+        user_code: &str,
+        user_id: Uuid,
+        app: Option<Uuid>,
+    ) -> anyhow::Result<()> {
         if user_code.len() > MAX_USER_CODE_INPUT_LEN {
             anyhow::bail!("user_code too long");
         }
@@ -442,14 +520,15 @@ impl DeviceLoginAggregateService {
         let now = Utc::now();
 
         let row = sqlx::query!(
-            r#"SELECT device_code_hash, status, expires_at
+            r#"SELECT device_code_hash, status, expires_at, app_id
                FROM device_login_grants
                WHERE user_code = $1"#,
             normalized,
         )
         .fetch_optional(&self.db)
         .await
-        .context("lookup device_login_grants by user_code")?;
+        .context("lookup device_login_grants by user_code")?
+        .filter(|r| r.app_id == app);
 
         let row = match row {
             Some(r) => r,
@@ -476,6 +555,9 @@ impl DeviceLoginAggregateService {
             .event_store
             .load_or_default::<DeviceGrantAggregate>(&device_code_hash)
             .await?;
+        if root.state.app_id != app {
+            anyhow::bail!("no device grant matching that code");
+        }
 
         DeviceGrantAggregate::deny(&mut root, user_id, now)?;
 

@@ -9,11 +9,12 @@ use forage_core::platform::{
     DelegatingUser, DelegatingUserOrganisation, Destination, DestinationType, DestinationTypeInfo,
     DirectoryLookup, DirectoryUser, Environment, ForestOAuthApps, ForestPlatform, JoinOffer,
     MetadataFieldDef, NotificationPreference, OAuthApp, OAuthClientInfo, OAuthClientToken,
-    OAuthFlowError, OAuthGrant, OAuthIssuedTokens, OAuthUserinfo, OrgMember, OrgPolicyRule,
-    OrgReleasePipelineRule, OrgRuleSet, OrgTriggerRule, Organisation, PipelineStage,
-    PipelineStageConfig, PlanOutput, PlatformError, Policy, PolicyConfig, PolicyEvaluation,
-    ProjectSelector, ReleasePipeline, Trigger, UpdateOrgRuleSetInput, UpdatePolicyInput,
-    UpdateReleasePipelineInput, UpdateTriggerInput, VerifyDomainOutcome,
+    OAuthDeviceAuthorization, OAuthDeviceToken, OAuthFlowError, OAuthGrant, OAuthIssuedTokens,
+    OAuthUserinfo, OrgMember, OrgPolicyRule, OrgReleasePipelineRule, OrgRuleSet, OrgTriggerRule,
+    Organisation, PendingOAuthDeviceAuthorization, PipelineStage, PipelineStageConfig, PlanOutput,
+    PlatformError, Policy, PolicyConfig, PolicyEvaluation, ProjectSelector, ReleasePipeline,
+    Trigger, UpdateOrgRuleSetInput, UpdatePolicyInput, UpdateReleasePipelineInput,
+    UpdateTriggerInput, VerifyDomainOutcome,
 };
 use forage_core::registry::{
     ComponentDetail, ComponentSearchResult, ComponentSummary, ComponentVersionInfo, ForestRegistry,
@@ -1383,12 +1384,10 @@ fn convert_policy(p: forage_grpc::Policy) -> Policy {
             target_environment: c.target_environment,
             required_approvals: c.required_approvals,
         },
-        Some(forage_grpc::policy::Config::SupersedePending(c)) => {
-            PolicyConfig::SupersedePending {
-                target_environment: c.target_environment,
-                same_branch_only: c.same_branch_only,
-            }
-        }
+        Some(forage_grpc::policy::Config::SupersedePending(c)) => PolicyConfig::SupersedePending {
+            target_environment: c.target_environment,
+            same_branch_only: c.same_branch_only,
+        },
         // A config forage cannot read — a policy type newer than this build.
         // Rendering it as an empty soak-time policy, which is what this used to
         // do, invents a policy that does not exist and shows a target
@@ -4348,6 +4347,182 @@ impl ForestOAuthApps for GrpcForestClient {
             .into_inner();
         Ok(resp.scopes)
     }
+
+    async fn initiate_oauth_device_authorization(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        scopes: &[String],
+    ) -> Result<OAuthDeviceAuthorization, OAuthFlowError> {
+        let service_key = self.service_account_key.as_deref().ok_or_else(|| {
+            OAuthFlowError::ServerError("service account key not configured".into())
+        })?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::InitiateOAuthDeviceAuthorizationRequest {
+                client_id: client_id.into(),
+                client_secret: client_secret.into(),
+                scopes: scopes.to_vec(),
+            },
+        )
+        .map_err(OAuthFlowError::ServerError)?;
+
+        let resp = self
+            .oauth_apps_client()
+            .initiate_o_auth_device_authorization(req)
+            .await
+            .map_err(map_oauth_flow_status)?
+            .into_inner();
+        Ok(OAuthDeviceAuthorization {
+            device_code: resp.device_code,
+            user_code: resp.user_code,
+            verification_uri: resp.verification_uri,
+            verification_uri_complete: resp.verification_uri_complete,
+            expires_in_seconds: resp.expires_in_seconds,
+            interval_seconds: resp.interval_seconds,
+        })
+    }
+
+    async fn lookup_oauth_device_authorization(
+        &self,
+        user_code: &str,
+    ) -> Result<Option<PendingOAuthDeviceAuthorization>, PlatformError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| PlatformError::Other("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::LookupOAuthDeviceAuthorizationRequest {
+                user_code: user_code.into(),
+            },
+        )
+        .map_err(PlatformError::Other)?;
+
+        match self
+            .oauth_apps_client()
+            .lookup_o_auth_device_authorization(req)
+            .await
+        {
+            Ok(resp) => {
+                let resp = resp.into_inner();
+                Ok(Some(PendingOAuthDeviceAuthorization {
+                    client_id: resp.client_id,
+                    name: resp.name,
+                    homepage_url: resp.homepage_url,
+                    scopes: resp.scopes,
+                }))
+            }
+            Err(status) if status.code() == tonic::Code::NotFound => Ok(None),
+            Err(status) => Err(map_platform_status(status)),
+        }
+    }
+
+    async fn approve_oauth_device_authorization(
+        &self,
+        user_code: &str,
+        user_id: &str,
+        approving_ip: &str,
+        approving_user_agent: &str,
+    ) -> Result<(), PlatformError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| PlatformError::Other("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::ApproveOAuthDeviceAuthorizationRequest {
+                user_code: user_code.into(),
+                user_id: user_id.into(),
+                approving_ip: approving_ip.into(),
+                approving_user_agent: approving_user_agent.into(),
+            },
+        )
+        .map_err(PlatformError::Other)?;
+
+        self.oauth_apps_client()
+            .approve_o_auth_device_authorization(req)
+            .await
+            .map_err(map_platform_status)?;
+        Ok(())
+    }
+
+    async fn deny_oauth_device_authorization(
+        &self,
+        user_code: &str,
+        user_id: &str,
+    ) -> Result<(), PlatformError> {
+        let service_key = self
+            .service_account_key
+            .as_deref()
+            .ok_or_else(|| PlatformError::Other("service account key not configured".into()))?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::DenyOAuthDeviceAuthorizationRequest {
+                user_code: user_code.into(),
+                user_id: user_id.into(),
+            },
+        )
+        .map_err(PlatformError::Other)?;
+
+        self.oauth_apps_client()
+            .deny_o_auth_device_authorization(req)
+            .await
+            .map_err(map_platform_status)?;
+        Ok(())
+    }
+
+    async fn exchange_oauth_device_code(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        device_code: &str,
+    ) -> Result<OAuthDeviceToken, OAuthFlowError> {
+        let service_key = self.service_account_key.as_deref().ok_or_else(|| {
+            OAuthFlowError::ServerError("service account key not configured".into())
+        })?;
+        let req = bearer_request(
+            service_key,
+            forage_grpc::ExchangeOAuthDeviceCodeRequest {
+                client_id: client_id.into(),
+                client_secret: client_secret.into(),
+                device_code: device_code.into(),
+            },
+        )
+        .map_err(OAuthFlowError::ServerError)?;
+
+        let resp = self
+            .oauth_apps_client()
+            .exchange_o_auth_device_code(req)
+            .await
+            .map_err(map_oauth_flow_status)?
+            .into_inner();
+        use forage_grpc::OAuthDeviceTokenStatus as S;
+        Ok(match S::try_from(resp.status).unwrap_or(S::Unspecified) {
+            S::Issued => {
+                let tokens = resp
+                    .tokens
+                    .ok_or_else(|| OAuthFlowError::ServerError("no tokens in response".into()))?;
+                OAuthDeviceToken::Issued(OAuthIssuedTokens {
+                    access_token: tokens.access_token,
+                    refresh_token: tokens.refresh_token,
+                    token_type: tokens.token_type,
+                    expires_in_seconds: tokens.expires_in_seconds,
+                    scopes: tokens.scopes,
+                    id_token: opt(tokens.id_token),
+                })
+            }
+            S::AuthorizationPending => OAuthDeviceToken::AuthorizationPending,
+            S::SlowDown => OAuthDeviceToken::SlowDown,
+            S::AccessDenied => OAuthDeviceToken::AccessDenied,
+            S::ExpiredToken => OAuthDeviceToken::ExpiredToken,
+            S::Unspecified => {
+                return Err(OAuthFlowError::ServerError(
+                    "unknown device token status".into(),
+                ));
+            }
+        })
+    }
 }
 
 /// Treat an empty proto string field as absent.
@@ -4427,7 +4602,10 @@ mod tests {
 
         // And back out again, as the create form sends it.
         let (policy_type, config) = policy_config_to_grpc(&converted.config);
-        assert_eq!(policy_type, forage_grpc::PolicyType::SupersedePending as i32);
+        assert_eq!(
+            policy_type,
+            forage_grpc::PolicyType::SupersedePending as i32
+        );
         match config {
             Some(forage_grpc::create_policy_request::Config::SupersedePending(c)) => {
                 assert_eq!(c.target_environment, "prod");

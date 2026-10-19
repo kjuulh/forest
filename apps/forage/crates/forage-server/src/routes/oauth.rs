@@ -7,6 +7,14 @@
 //! - `GET  /oauth/authorize` — consent screen (session-gated)
 //! - `POST /oauth/authorize` — consent decision (CSRF-protected)
 //! - `POST /oauth/token`     — code → token exchange (machine-to-machine)
+//! - `POST /oauth/device_authorization` — start a device grant (RFC 8628)
+//!
+//! The device grant is for a CLI on a machine with no usable browser (an SSH
+//! session): it gets a short code, the person approves it at `/device` on
+//! any device, and the CLI polls `/oauth/token` with
+//! `grant_type=urn:ietf:params:oauth:grant-type:device_code`. Forest binds the
+//! grant to the app and the scopes requested, and the tokens are the app's,
+//! exactly as the code flow mints them.
 //!
 //! Public clients (RFC 8252 native apps, e.g. a CLI) are supported: they hold
 //! no client_secret, so they authenticate at the token endpoint with just
@@ -16,12 +24,12 @@
 //! the person is not asked to consent to a request that cannot succeed.
 #![allow(clippy::result_large_err)]
 
+use axum::Router;
 use axum::extract::{Form, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Json, Redirect, Response};
 use axum::routing::{get, post};
-use axum::Router;
-use forage_core::platform::{OAuthClientInfo, OAuthFlowError};
+use forage_core::platform::{OAuthClientInfo, OAuthDeviceToken, OAuthFlowError};
 use minijinja::context;
 use serde::Deserialize;
 use serde_json::json;
@@ -32,8 +40,12 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/oauth/authorize", get(authorize_page).post(authorize_decision))
+        .route(
+            "/oauth/authorize",
+            get(authorize_page).post(authorize_decision),
+        )
         .route("/oauth/token", post(token))
+        .route("/oauth/device_authorization", post(device_authorization))
         .route("/oauth/userinfo", get(userinfo).post(userinfo))
         .route("/.well-known/openid-configuration", get(discovery))
         .route("/settings/authorized-apps", get(authorized_apps_page))
@@ -147,7 +159,11 @@ async fn authorize_page(
 
     // From here, redirect_uri is trusted: protocol errors go back to it.
     if q.response_type != "code" {
-        return Ok(redirect_error(&q.redirect_uri, "unsupported_response_type", q.state.as_deref()));
+        return Ok(redirect_error(
+            &q.redirect_uri,
+            "unsupported_response_type",
+            q.state.as_deref(),
+        ));
     }
     // A public client has no secret: the PKCE verifier is all that ties the
     // code to it, so it must send an S256 challenge (RFC 8252 §8.1). Forest
@@ -167,7 +183,11 @@ async fn authorize_page(
     let scopes = match resolve_scopes(&app, &q.scope) {
         Ok(s) => s,
         Err(()) => {
-            return Ok(redirect_error(&q.redirect_uri, "invalid_scope", q.state.as_deref()));
+            return Ok(redirect_error(
+                &q.redirect_uri,
+                "invalid_scope",
+                q.state.as_deref(),
+            ));
         }
     };
 
@@ -312,20 +332,34 @@ async fn authorize_decision(
     let state_param = form.state.as_deref();
 
     if form.action != "approve" {
-        return Ok(redirect_error(&form.redirect_uri, "access_denied", state_param));
+        return Ok(redirect_error(
+            &form.redirect_uri,
+            "access_denied",
+            state_param,
+        ));
     }
 
     // The displayed consent params must match what was rendered (review #2):
     // reject if the hidden client_id / redirect_uri / scope were tampered.
-    let expected =
-        consent_binding(&session.csrf_token, &form.client_id, &form.redirect_uri, &form.scope);
+    let expected = consent_binding(
+        &session.csrf_token,
+        &form.client_id,
+        &form.redirect_uri,
+        &form.scope,
+    );
     if !consent_binding_valid(&expected, &form.consent_binding) {
         return Err((StatusCode::FORBIDDEN, "consent binding mismatch").into_response());
     }
 
     let scopes = match resolve_scopes(&app, &form.scope) {
         Ok(s) => s,
-        Err(()) => return Ok(redirect_error(&form.redirect_uri, "invalid_scope", state_param)),
+        Err(()) => {
+            return Ok(redirect_error(
+                &form.redirect_uri,
+                "invalid_scope",
+                state_param,
+            ));
+        }
     };
 
     Ok(issue_code_redirect(
@@ -419,7 +453,12 @@ struct TokenForm {
     /// `client_credentials`; empty means "everything this app has".
     #[serde(default)]
     scope: String,
+    /// RFC 8628 §3.4.
+    #[serde(default)]
+    device_code: String,
 }
+
+pub(crate) const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
 async fn token(
     State(state): State<AppState>,
@@ -444,11 +483,7 @@ async fn token(
     // token, no id_token — so it returns straight from here rather than
     // being forced through the user-token response builder below.
     if form.grant_type == "client_credentials" {
-        let scopes: Vec<String> = form
-            .scope
-            .split_whitespace()
-            .map(str::to_string)
-            .collect();
+        let scopes: Vec<String> = form.scope.split_whitespace().map(str::to_string).collect();
         return match client
             .issue_client_credentials_token(&client_id, &client_secret, &scopes)
             .await
@@ -464,6 +499,38 @@ async fn token(
                 let (status, code) = oauth_error_code(&e);
                 token_error(status, code)
             }
+        };
+    }
+
+    // The device grant answers "not yet" as often as it answers with tokens,
+    // and those answers are RFC 8628 §3.5 error codes rather than failures.
+    if form.grant_type == DEVICE_CODE_GRANT {
+        if form.device_code.is_empty() {
+            return token_error(StatusCode::BAD_REQUEST, "invalid_request");
+        }
+        return match client
+            .exchange_oauth_device_code(&client_id, &client_secret, &form.device_code)
+            .await
+        {
+            Ok(OAuthDeviceToken::Issued(tokens)) => Json(json!({
+                "access_token": tokens.access_token,
+                "token_type": tokens.token_type,
+                "expires_in": tokens.expires_in_seconds,
+                "refresh_token": tokens.refresh_token,
+                "scope": tokens.scopes.join(" "),
+            }))
+            .into_response(),
+            Ok(OAuthDeviceToken::AuthorizationPending) => {
+                token_error(StatusCode::BAD_REQUEST, "authorization_pending")
+            }
+            Ok(OAuthDeviceToken::SlowDown) => token_error(StatusCode::BAD_REQUEST, "slow_down"),
+            Ok(OAuthDeviceToken::AccessDenied) => {
+                token_error(StatusCode::BAD_REQUEST, "access_denied")
+            }
+            Ok(OAuthDeviceToken::ExpiredToken) => {
+                token_error(StatusCode::BAD_REQUEST, "expired_token")
+            }
+            Err(e) => device_flow_error(&e),
         };
     }
 
@@ -507,6 +574,67 @@ async fn token(
     }
 }
 
+// ─── Device authorization endpoint (RFC 8628 §3.1) ──────────────────
+
+#[derive(Deserialize)]
+struct DeviceAuthorizationForm {
+    #[serde(default)]
+    client_id: String,
+    #[serde(default)]
+    client_secret: String,
+    #[serde(default)]
+    scope: String,
+}
+
+async fn device_authorization(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<DeviceAuthorizationForm>,
+) -> Response {
+    let Some(client) = state.oauth_apps_client.as_ref() else {
+        return token_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable");
+    };
+    let (client_id, client_secret) = match parse_basic_auth(&headers) {
+        Some((id, secret)) => (id, secret),
+        None => (form.client_id, form.client_secret),
+    };
+    if client_id.is_empty() {
+        return token_error(StatusCode::UNAUTHORIZED, "invalid_client");
+    }
+    let scopes: Vec<String> = form.scope.split_whitespace().map(str::to_string).collect();
+
+    match client
+        .initiate_oauth_device_authorization(&client_id, &client_secret, &scopes)
+        .await
+    {
+        Ok(grant) => Json(json!({
+            "device_code": grant.device_code,
+            "user_code": grant.user_code,
+            "verification_uri": grant.verification_uri,
+            "verification_uri_complete": grant.verification_uri_complete,
+            "expires_in": grant.expires_in_seconds,
+            "interval": grant.interval_seconds,
+        }))
+        .into_response(),
+        Err(e) => device_flow_error(&e),
+    }
+}
+
+/// An app not registered for the device grant is `unauthorized_client`
+/// (RFC 6749 §5.2); Forest reports it as `unsupported_grant_type`, which
+/// would tell the client the server lacks the grant altogether.
+fn device_flow_error(e: &OAuthFlowError) -> Response {
+    match e {
+        OAuthFlowError::InvalidRequest(msg) if msg == "unsupported_grant_type" => {
+            token_error(StatusCode::BAD_REQUEST, "unauthorized_client")
+        }
+        e => {
+            let (status, code) = oauth_error_code(e);
+            token_error(status, code)
+        }
+    }
+}
+
 // ─── OIDC discovery ──────────────────────────────────────────────────
 
 async fn discovery(State(state): State<AppState>) -> Response {
@@ -515,9 +643,15 @@ async fn discovery(State(state): State<AppState>) -> Response {
         "issuer": base,
         "authorization_endpoint": format!("{base}/oauth/authorize"),
         "token_endpoint": format!("{base}/oauth/token"),
+        "device_authorization_endpoint": format!("{base}/oauth/device_authorization"),
         "userinfo_endpoint": format!("{base}/oauth/userinfo"),
         "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
+        "grant_types_supported": [
+            "authorization_code",
+            "refresh_token",
+            "client_credentials",
+            DEVICE_CODE_GRANT
+        ],
         "scopes_supported": [
             "openid",
             "profile",
@@ -571,10 +705,11 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
             }
             Json(serde_json::Value::Object(claims)).into_response()
         }
-        Err(OAuthFlowError::ServerError(_)) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "server_error" })))
-                .into_response()
-        }
+        Err(OAuthFlowError::ServerError(_)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "server_error" })),
+        )
+            .into_response(),
         Err(_) => unauthorized("invalid_token"),
     }
 }
@@ -698,7 +833,7 @@ fn resolve_scopes(app: &OAuthClientInfo, requested: &str) -> Result<Vec<String>,
     Ok(out)
 }
 
-fn scope_description(scope: &str) -> &'static str {
+pub(crate) fn scope_description(scope: &str) -> &'static str {
     match scope {
         "openid" => "Confirm your identity",
         "profile" => "Your username, account ID and avatar",
@@ -728,8 +863,8 @@ pub(crate) fn consent_binding(
 ) -> String {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
-    let mut mac = <Hmac<Sha256>>::new_from_slice(csrf_token.as_bytes())
-        .expect("hmac accepts any key length");
+    let mut mac =
+        <Hmac<Sha256>>::new_from_slice(csrf_token.as_bytes()).expect("hmac accepts any key length");
     mac.update(client_id.as_bytes());
     mac.update(b"\x00");
     mac.update(redirect_uri.as_bytes());
@@ -935,7 +1070,10 @@ mod tests {
     #[test]
     fn empty_secret_is_allowed() {
         let h = basic("public-client:");
-        assert_eq!(parse_basic_auth(&h), Some(("public-client".into(), String::new())));
+        assert_eq!(
+            parse_basic_auth(&h),
+            Some(("public-client".into(), String::new()))
+        );
     }
 
     #[test]

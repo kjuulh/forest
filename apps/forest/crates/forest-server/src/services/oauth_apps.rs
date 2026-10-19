@@ -4,7 +4,12 @@ use uuid::Uuid;
 use crate::{
     State,
     repositories::oauth_apps::{OAuthAppRepository, OAuthAppRepositoryState, OAuthAppRow},
-    services::organisations::{OrganisationService, OrganisationServiceState},
+    services::{
+        device_login_aggregate::{
+            DeviceLoginAggregateService, DeviceLoginPollOutcome, InitiatedDeviceGrant,
+        },
+        organisations::{OrganisationService, OrganisationServiceState},
+    },
 };
 
 /// The fixed scope catalog an OAuth app may request (MVP).
@@ -97,9 +102,10 @@ pub enum OAuthAppError {
     InvalidCodeChallengeMethod,
 
     // ── Public clients (RFC 8252 native apps) ──
-    /// A public client may only use the authorization-code grant: it has no
-    /// secret to authenticate a client-credentials request with.
-    #[error("a public client may only use the authorization_code grant")]
+    /// A public client may only sign people in (authorization code or
+    /// device grant): it has no secret to authenticate a client-credentials
+    /// request with.
+    #[error("a public client may only use the authorization_code and device_code grants")]
     PublicClientGrant,
     /// A public client may not hold `openid`: its id_token would be signed
     /// with a client_secret it does not have.
@@ -175,9 +181,19 @@ pub const CLIENT_TOKEN_TTL_SECONDS: i64 = 3600;
 /// `grant_types` vocabulary.
 pub const GRANT_AUTHORIZATION_CODE: &str = "authorization_code";
 pub const GRANT_CLIENT_CREDENTIALS: &str = "client_credentials";
+/// RFC 8628: a person approves a code shown by a device (a CLI over SSH)
+/// in a browser anywhere, and the device polls for the app's tokens.
+pub const GRANT_DEVICE_CODE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
 /// Grants an app may be registered for.
-pub const SUPPORTED_GRANT_TYPES: &[&str] = &[GRANT_AUTHORIZATION_CODE, GRANT_CLIENT_CREDENTIALS];
+pub const SUPPORTED_GRANT_TYPES: &[&str] = &[
+    GRANT_AUTHORIZATION_CODE,
+    GRANT_CLIENT_CREDENTIALS,
+    GRANT_DEVICE_CODE,
+];
+
+/// Grants that sign a person in to an app, and so mint refresh tokens.
+const USER_GRANTS: &[&str] = &[GRANT_AUTHORIZATION_CODE, GRANT_DEVICE_CODE];
 /// Refresh-token lifetime.
 pub const REFRESH_TOKEN_TTL_SECONDS: i64 = 90 * 24 * 3600;
 
@@ -228,6 +244,25 @@ pub struct IssuedTokens {
     /// OIDC id_token (HS256 JWT signed with the client_secret), present only
     /// when the `openid` scope was granted.
     pub id_token: Option<String>,
+}
+
+/// What a device-grant token request (RFC 8628 §3.4) comes to: tokens, or
+/// what the client should do next.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceTokenOutcome {
+    Issued(IssuedTokens),
+    AuthorizationPending,
+    SlowDown,
+    AccessDenied,
+    /// Lapsed, already redeemed, unknown, or another client's.
+    ExpiredToken,
+}
+
+/// An app's pending device grant, as the approval page shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingDeviceAuthorization {
+    pub app: OAuthApp,
+    pub scopes: Vec<String>,
 }
 
 /// A user's authorization of an app (one per app), for the account UI.
@@ -830,10 +865,18 @@ impl OAuthAppService {
             .await?
             .ok_or(OAuthAppError::UnknownClient)?;
         Self::authenticate_client(&app, client_secret)?;
-        // A refresh token can only have come from the code flow, so
-        // withdrawing that grant should stop the whole family working —
-        // not just stop new logins while old sessions roll on forever.
-        Self::require_grant(&app, GRANT_AUTHORIZATION_CODE)?;
+        // A refresh token can only have come from a flow that signed a
+        // person in (the code or the device grant), so withdrawing both
+        // should stop the whole family working — not just stop new logins
+        // while old sessions roll on forever. The token does not record
+        // which of the two minted it, so either keeps it alive.
+        if !app
+            .grant_types
+            .iter()
+            .any(|g| USER_GRANTS.contains(&g.as_str()))
+        {
+            return Err(OAuthAppError::UnsupportedGrant(GRANT_AUTHORIZATION_CODE.into()).into());
+        }
 
         let refresh_hash = hash_secret(refresh_token);
 
@@ -901,6 +944,181 @@ impl OAuthAppService {
             scopes: consumed.scopes,
             id_token,
         })
+    }
+
+    // ── Device authorization grant (RFC 8628) ─────────────────────────
+
+    /// Start a device grant for an app (RFC 8628 §3.1–3.2). The grant is
+    /// bound to the app and to the scopes asked for here, which must be a
+    /// non-empty subset of the app's; a confidential app authenticates.
+    pub async fn initiate_device_authorization(
+        &self,
+        devices: &DeviceLoginAggregateService,
+        client_id: &str,
+        client_secret: &str,
+        scopes: &[String],
+    ) -> anyhow::Result<InitiatedDeviceGrant> {
+        let app = self
+            .repo
+            .get_oauth_app_by_client_id(self.repo.pool(), client_id)
+            .await?
+            .ok_or(OAuthAppError::UnknownClient)?;
+        Self::authenticate_client(&app, client_secret)?;
+        Self::require_grant(&app, GRANT_DEVICE_CODE)?;
+        if scopes.is_empty() {
+            return Err(OAuthAppError::NoScopes.into());
+        }
+        let mut granted: Vec<String> = Vec::new();
+        for scope in scopes {
+            if !app.scopes.contains(scope) {
+                return Err(OAuthAppError::UnknownScope(scope.clone()).into());
+            }
+            if !granted.contains(scope) {
+                granted.push(scope.clone());
+            }
+        }
+        devices.initiate(&app.name, "", granted, Some(app.id)).await
+    }
+
+    /// The app and scopes behind a pending device grant's user_code, for the
+    /// approval page. `None` for an unknown, finished or expired code, a
+    /// Forest CLI login, or an app that may no longer use the grant.
+    pub async fn pending_device_authorization(
+        &self,
+        devices: &DeviceLoginAggregateService,
+        user_code: &str,
+    ) -> anyhow::Result<Option<PendingDeviceAuthorization>> {
+        let Some(pending) = devices.pending(user_code).await? else {
+            return Ok(None);
+        };
+        let Some(app_id) = pending.app_id else {
+            return Ok(None);
+        };
+        let Some(app) = self
+            .repo
+            .get_oauth_app_by_id(self.repo.pool(), app_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        if Self::require_grant(&app, GRANT_DEVICE_CODE).is_err()
+            || pending.scopes.iter().any(|s| !app.scopes.contains(s))
+        {
+            return Ok(None);
+        }
+        Ok(Some(PendingDeviceAuthorization {
+            app: app.into(),
+            scopes: pending.scopes,
+        }))
+    }
+
+    /// The person approves an app's device grant: record it on the grant and
+    /// remember the consent, as an approved authorization request would.
+    pub async fn approve_device_authorization(
+        &self,
+        devices: &DeviceLoginAggregateService,
+        user_code: &str,
+        user_id: Uuid,
+        approving_ip: &str,
+        approving_user_agent: &str,
+    ) -> anyhow::Result<()> {
+        let pending = self
+            .pending_device_authorization(devices, user_code)
+            .await?
+            .ok_or(OAuthAppError::InvalidGrant)?;
+        devices
+            .approve(
+                user_code,
+                user_id,
+                approving_ip,
+                approving_user_agent,
+                Some(pending.app.app_id),
+            )
+            .await?;
+        self.repo
+            .upsert_consent(
+                self.repo.pool(),
+                pending.app.app_id,
+                user_id,
+                &pending.scopes,
+            )
+            .await
+    }
+
+    pub async fn deny_device_authorization(
+        &self,
+        devices: &DeviceLoginAggregateService,
+        user_code: &str,
+        user_id: Uuid,
+    ) -> anyhow::Result<()> {
+        let pending = devices
+            .pending(user_code)
+            .await?
+            .and_then(|p| p.app_id)
+            .ok_or(OAuthAppError::InvalidGrant)?;
+        devices.deny(user_code, user_id, Some(pending)).await
+    }
+
+    /// The device grant's token request (RFC 8628 §3.4). Only the app the
+    /// grant is bound to can redeem it, once; anyone else's device_code is
+    /// `ExpiredToken` and stays untouched. The tokens are the same kind the
+    /// code exchange mints: the app's, for the person, with the scopes they
+    /// approved, refreshable and revocable like any other.
+    pub async fn exchange_device_code(
+        &self,
+        devices: &DeviceLoginAggregateService,
+        client_id: &str,
+        client_secret: &str,
+        device_code: &str,
+    ) -> anyhow::Result<DeviceTokenOutcome> {
+        let app = self
+            .repo
+            .get_oauth_app_by_client_id(self.repo.pool(), client_id)
+            .await?
+            .ok_or(OAuthAppError::UnknownClient)?;
+        Self::authenticate_client(&app, client_secret)?;
+        // Re-checked at redemption: the grant may have been withdrawn since
+        // the device asked.
+        Self::require_grant(&app, GRANT_DEVICE_CODE)?;
+
+        let (user_id, scopes) = match devices.poll(device_code, Some(app.id)).await? {
+            DeviceLoginPollOutcome::Pending => return Ok(DeviceTokenOutcome::AuthorizationPending),
+            DeviceLoginPollOutcome::SlowDown => return Ok(DeviceTokenOutcome::SlowDown),
+            DeviceLoginPollOutcome::Denied => return Ok(DeviceTokenOutcome::AccessDenied),
+            DeviceLoginPollOutcome::Expired => return Ok(DeviceTokenOutcome::ExpiredToken),
+            DeviceLoginPollOutcome::Approved { user_id, scopes } => (user_id, scopes),
+        };
+        // The app may have been narrowed since the person approved; it gets
+        // nothing it is no longer registered for.
+        if scopes.is_empty() || scopes.iter().any(|s| !app.scopes.contains(s)) {
+            return Err(OAuthAppError::InvalidGrant.into());
+        }
+
+        let (access_token, access_hash) = generate_opaque_token(USER_ACCESS_TOKEN_PREFIX);
+        let (refresh_token, refresh_hash) = generate_opaque_token("forest_ort_");
+        let now = chrono::Utc::now();
+        self.repo
+            .insert_access_token(
+                self.repo.pool(),
+                &access_hash,
+                app.id,
+                user_id,
+                &scopes,
+                Some(&refresh_hash),
+                now + chrono::Duration::seconds(ACCESS_TOKEN_TTL_SECONDS),
+                Some(now + chrono::Duration::seconds(REFRESH_TOKEN_TTL_SECONDS)),
+            )
+            .await?;
+
+        // No id_token: there is no nonce, and a device-grant app is typically
+        // public, with no secret to sign one with.
+        Ok(DeviceTokenOutcome::Issued(IssuedTokens {
+            access_token,
+            refresh_token,
+            expires_in_seconds: ACCESS_TOKEN_TTL_SECONDS,
+            scopes,
+            id_token: None,
+        }))
     }
 
     /// List the apps a user has authorized, one entry per app, unioning scopes
@@ -1046,7 +1264,10 @@ pub fn validate_public_client(
     scopes: &[String],
     grant_types: &[String],
 ) -> Result<(), OAuthAppError> {
-    if grant_types.iter().any(|g| g != GRANT_AUTHORIZATION_CODE) {
+    if grant_types
+        .iter()
+        .any(|g| g != GRANT_AUTHORIZATION_CODE && g != GRANT_DEVICE_CODE)
+    {
         return Err(OAuthAppError::PublicClientGrant);
     }
     if scopes.iter().any(|s| s == "openid") {
@@ -1762,8 +1983,12 @@ mod tests {
     // ── Public clients ───────────────────────────────────────────────
 
     #[test]
-    fn a_public_client_may_only_use_the_code_grant_without_openid() {
+    fn a_public_client_may_only_sign_people_in_without_openid() {
         let code = vec![GRANT_AUTHORIZATION_CODE.to_string()];
+        let device = vec![
+            GRANT_AUTHORIZATION_CODE.to_string(),
+            GRANT_DEVICE_CODE.to_string(),
+        ];
         let both = vec![
             GRANT_AUTHORIZATION_CODE.to_string(),
             GRANT_CLIENT_CREDENTIALS.to_string(),
@@ -1772,6 +1997,7 @@ mod tests {
         let oidc = vec!["openid".to_string(), "profile".to_string()];
 
         assert!(validate_public_client(&gateway, &code).is_ok());
+        assert!(validate_public_client(&gateway, &device).is_ok());
         assert_eq!(
             validate_public_client(&gateway, &both).unwrap_err(),
             OAuthAppError::PublicClientGrant

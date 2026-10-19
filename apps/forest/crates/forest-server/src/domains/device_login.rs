@@ -48,6 +48,11 @@ pub enum DeviceGrantEvent {
         scopes: Vec<String>,
         expires_at: DateTime<Utc>,
         interval_seconds: i32,
+        /// The OAuth app the grant is for, when it signs a person in to an
+        /// app rather than to the Forest CLI. Absent in every event recorded
+        /// before app grants existed, which were all Forest CLI logins.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        app_id: Option<Uuid>,
     },
     Approved {
         user_id: Uuid,
@@ -104,6 +109,9 @@ pub struct DeviceGrantAggregate {
     pub scopes: Vec<String>,
     pub expires_at: Option<DateTime<Utc>>,
     pub interval_seconds: i32,
+    /// `Some` for an OAuth app's grant, `None` for a Forest CLI login. The two
+    /// redeem through different endpoints and must never cross.
+    pub app_id: Option<Uuid>,
     pub approved_user_id: Option<Uuid>,
     pub approving_ip: Option<String>,
     pub approving_user_agent: Option<String>,
@@ -123,6 +131,7 @@ impl Default for DeviceGrantAggregate {
             scopes: Vec::new(),
             expires_at: None,
             interval_seconds: 0,
+            app_id: None,
             approved_user_id: None,
             approving_ip: None,
             approving_user_agent: None,
@@ -150,8 +159,10 @@ impl Aggregate for DeviceGrantAggregate {
                 scopes,
                 expires_at,
                 interval_seconds,
+                app_id,
             } => {
                 self.status = DeviceGrantStatus::Pending;
+                self.app_id = *app_id;
                 self.grant_id = Some(*grant_id);
                 self.device_code_hash.clone_from(device_code_hash);
                 self.user_code.clone_from(user_code);
@@ -241,6 +252,7 @@ pub struct InitiateDeviceGrantParams {
     pub scopes: Vec<String>,
     pub expires_at: DateTime<Utc>,
     pub interval_seconds: i32,
+    pub app_id: Option<Uuid>,
 }
 
 impl DeviceGrantAggregate {
@@ -273,6 +285,7 @@ impl DeviceGrantAggregate {
             scopes: params.scopes,
             expires_at: params.expires_at,
             interval_seconds: params.interval_seconds,
+            app_id: params.app_id,
         });
 
         Ok(grant_id)
@@ -466,6 +479,7 @@ mod tests {
             scopes: vec![],
             expires_at: t0() + Duration::seconds(900),
             interval_seconds: 5,
+            app_id: None,
         }
     }
 
@@ -774,6 +788,7 @@ mod tests {
                 scopes: vec!["a".into()],
                 expires_at: t0(),
                 interval_seconds: 5,
+                app_id: Some(Uuid::now_v7()),
             },
             DeviceGrantEvent::Approved {
                 user_id: Uuid::now_v7(),
@@ -794,6 +809,28 @@ mod tests {
             let back: DeviceGrantEvent = serde_json::from_value(json).unwrap();
             assert_eq!(event.event_type(), back.event_type());
         }
+    }
+
+    #[test]
+    fn an_initiated_event_recorded_before_app_grants_replays_as_a_forest_cli_login() {
+        // Events already in the store carry no `app_id`; they must keep
+        // replaying, and as what they were.
+        let stored = serde_json::json!({
+            "type": "Initiated",
+            "grant_id": Uuid::now_v7(),
+            "device_code_hash": "abc",
+            "user_code": "ABCDEFGH",
+            "client_name": "forest-cli",
+            "client_version": "0.3.2",
+            "scopes": [],
+            "expires_at": t0(),
+            "interval_seconds": 5,
+        });
+        let event: DeviceGrantEvent = serde_json::from_value(stored).unwrap();
+        let mut state = DeviceGrantAggregate::default();
+        state.apply(&event);
+        assert_eq!(state.status, DeviceGrantStatus::Pending);
+        assert_eq!(state.app_id, None);
     }
 
     // ---- code generators ----

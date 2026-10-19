@@ -245,6 +245,30 @@ impl OAuthAppRepository {
         Ok(row)
     }
 
+    /// Fetch by app id alone: a device grant records the app it is for, and
+    /// the approval page names that app.
+    pub async fn get_oauth_app_by_id(
+        &self,
+        db: impl PgExecutor<'_>,
+        app_id: Uuid,
+    ) -> anyhow::Result<Option<OAuthAppRow>> {
+        let row = sqlx::query_as!(
+            OAuthAppRow,
+            r#"
+            SELECT id, organisation_id, name, description, homepage_url, client_id,
+                   client_secret_hash, redirect_uris, scopes, grant_types, public,
+                   created_by, created_at, updated_at
+            FROM oauth_apps
+            WHERE id = $1
+            "#,
+            app_id,
+        )
+        .fetch_optional(db)
+        .await?;
+
+        Ok(row)
+    }
+
     // ── Machine (client-credentials) tokens ──────────────────────────
     //
     // Deliberately a separate table from `oauth_access_tokens`: these

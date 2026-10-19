@@ -1206,6 +1206,37 @@ pub struct OAuthIssuedTokens {
     pub id_token: Option<String>,
 }
 
+/// A device grant just started for an app (RFC 8628 §3.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthDeviceAuthorization {
+    /// Secret to the client; never shown to the person or logged.
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub verification_uri_complete: String,
+    pub expires_in_seconds: i64,
+    pub interval_seconds: i32,
+}
+
+/// An app's pending device grant, for the approval page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingOAuthDeviceAuthorization {
+    pub client_id: String,
+    pub name: String,
+    pub homepage_url: String,
+    pub scopes: Vec<String>,
+}
+
+/// The answer to a device-grant token request (RFC 8628 §3.4–3.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OAuthDeviceToken {
+    Issued(OAuthIssuedTokens),
+    AuthorizationPending,
+    SlowDown,
+    AccessDenied,
+    ExpiredToken,
+}
+
 /// What a token turned out to belong to: the app, its organisation and the
 /// granted scopes, plus the user when the app holds it on someone's behalf.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1445,6 +1476,43 @@ pub trait ForestOAuthApps: Send + Sync {
         client_id: &str,
         user_id: &str,
     ) -> Result<Vec<String>, PlatformError>;
+
+    // ── Device authorization grant (RFC 8628) for an app ──
+
+    async fn initiate_oauth_device_authorization(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        scopes: &[String],
+    ) -> Result<OAuthDeviceAuthorization, OAuthFlowError>;
+
+    /// The app's pending grant behind a user_code; `None` for anything else,
+    /// a Forest CLI login included.
+    async fn lookup_oauth_device_authorization(
+        &self,
+        user_code: &str,
+    ) -> Result<Option<PendingOAuthDeviceAuthorization>, PlatformError>;
+
+    async fn approve_oauth_device_authorization(
+        &self,
+        user_code: &str,
+        user_id: &str,
+        approving_ip: &str,
+        approving_user_agent: &str,
+    ) -> Result<(), PlatformError>;
+
+    async fn deny_oauth_device_authorization(
+        &self,
+        user_code: &str,
+        user_id: &str,
+    ) -> Result<(), PlatformError>;
+
+    async fn exchange_oauth_device_code(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+        device_code: &str,
+    ) -> Result<OAuthDeviceToken, OAuthFlowError>;
 }
 
 #[cfg(test)]

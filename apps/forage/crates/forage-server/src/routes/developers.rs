@@ -13,7 +13,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Router};
-use forage_core::platform::{validate_slug, OAuthApp, PlatformError};
+use forage_core::platform::{OAuthApp, PlatformError, validate_slug};
 use forage_core::session::CachedOrg;
 use minijinja::context;
 use serde::Deserialize;
@@ -28,10 +28,7 @@ pub fn router() -> Router<AppState> {
         .route("/orgs/{org}/settings/developers", post(create_app))
         .route("/orgs/{org}/settings/developers/new", get(new_app_page))
         .route("/orgs/{org}/settings/developers/{app_id}", get(app_detail))
-        .route(
-            "/orgs/{org}/settings/developers/{app_id}",
-            post(update_app),
-        )
+        .route("/orgs/{org}/settings/developers/{app_id}", post(update_app))
         .route(
             "/orgs/{org}/settings/developers/{app_id}/rotate",
             post(rotate_secret),
@@ -166,7 +163,13 @@ struct AppForm {
     grant_authorization_code: Option<String>,
     #[serde(default)]
     grant_client_credentials: Option<String>,
+    /// RFC 8628: a CLI on a machine without a browser (an SSH session)
+    /// signs a person in with a code they approve on another device.
+    #[serde(default)]
+    grant_device_code: Option<String>,
 }
+
+const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
 impl AppForm {
     /// Which grants the ticked boxes add up to.
@@ -181,6 +184,9 @@ impl AppForm {
         }
         if self.grant_client_credentials.is_some() {
             out.push("client_credentials".to_string());
+        }
+        if self.grant_device_code.is_some() {
+            out.push(DEVICE_CODE_GRANT.to_string());
         }
         out
     }
@@ -333,10 +339,10 @@ async fn create_app(
         Err(e) => {
             if let Some(msg) = flash_for(&e) {
                 let q = urlencoding::encode(&msg);
-                return Ok(Redirect::to(&format!(
-                    "/orgs/{org}/settings/developers/new?error={q}"
-                ))
-                .into_response());
+                return Ok(
+                    Redirect::to(&format!("/orgs/{org}/settings/developers/new?error={q}"))
+                        .into_response(),
+                );
             }
             return Err(internal_error(&state, "create oauth app", &e));
         }
@@ -344,7 +350,13 @@ async fn create_app(
 
     // Render the detail page directly so the freshly-minted secret can be
     // shown exactly once (it is never retrievable again).
-    render_app_detail(&state, &session, &org, &created.app, Some(&created.client_secret))
+    render_app_detail(
+        &state,
+        &session,
+        &org,
+        &created.app,
+        Some(&created.client_secret),
+    )
 }
 
 // ─── Detail ──────────────────────────────────────────────────────────
@@ -431,9 +443,9 @@ async fn update_app(
         )
         .await
     {
-        Ok(_) => Ok(
-            Redirect::to(&format!("/orgs/{org}/settings/developers/{app_id}")).into_response(),
-        ),
+        Ok(_) => {
+            Ok(Redirect::to(&format!("/orgs/{org}/settings/developers/{app_id}")).into_response())
+        }
         Err(e) => {
             if let Some(msg) = flash_for(&e) {
                 let q = urlencoding::encode(&msg);
@@ -516,7 +528,23 @@ mod tests {
             scope_datagateway_read: None,
             grant_authorization_code: auth_code.then(|| "on".to_string()),
             grant_client_credentials: client_creds.then(|| "on".to_string()),
+            grant_device_code: None,
         }
+    }
+
+    /// Saving the form rebuilds the app's grants from the boxes, so an app
+    /// registered for the device grant must keep it when its box is ticked.
+    #[test]
+    fn the_device_box_keeps_the_device_grant() {
+        let mut form = form(true, false);
+        form.grant_device_code = Some("on".to_string());
+        assert_eq!(
+            form.grant_type_list(),
+            vec![
+                "authorization_code".to_string(),
+                DEVICE_CODE_GRANT.to_string()
+            ]
+        );
     }
 
     /// The GitHub-App shape: one credential that both signs a user in

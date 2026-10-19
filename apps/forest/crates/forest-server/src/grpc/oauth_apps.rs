@@ -5,7 +5,10 @@ use super::error;
 use crate::{
     actor::Actor,
     grpc::authorize::{self, OrgRole},
-    services::oauth_apps::{OAuthApp, OAuthAppServiceState},
+    services::{
+        device_login_aggregate::{DeviceLoginAggregateService, DeviceLoginAggregateServiceState},
+        oauth_apps::{DeviceTokenOutcome, OAuthApp, OAuthAppServiceState},
+    },
     state::State,
 };
 
@@ -16,6 +19,10 @@ pub struct OAuthAppsServer {
 impl OAuthAppsServer {
     fn service(&self) -> crate::services::oauth_apps::OAuthAppService {
         self.state.oauth_app_service()
+    }
+
+    fn devices(&self) -> DeviceLoginAggregateService {
+        self.state.device_login_aggregate_service()
     }
 
     /// The OIDC issuer — the public web-app URL (where discovery is served).
@@ -481,6 +488,154 @@ impl OAuthAppsService for OAuthAppsServer {
                 emails: info.emails,
                 scopes: info.scopes,
             }),
+        }))
+    }
+
+    // ── Device authorization grant (RFC 8628) for an app ──
+    //
+    // Service-account only, like the rest of the authorization server: Forage
+    // fronts the public endpoints, and the app's own credentials (if it has a
+    // secret) are checked inside the service.
+
+    async fn initiate_o_auth_device_authorization(
+        &self,
+        request: tonic::Request<InitiateOAuthDeviceAuthorizationRequest>,
+    ) -> Result<tonic::Response<InitiateOAuthDeviceAuthorizationResponse>, tonic::Status> {
+        let _actor = authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+        let req = request.into_inner();
+
+        let grant = self
+            .service()
+            .initiate_device_authorization(
+                &self.devices(),
+                &req.client_id,
+                &req.client_secret,
+                &req.scopes,
+            )
+            .await
+            .map_err(oauth_flow_status)?;
+
+        Ok(tonic::Response::new(
+            InitiateOAuthDeviceAuthorizationResponse {
+                device_code: grant.device_code,
+                user_code: grant.user_code,
+                verification_uri: grant.verification_uri,
+                verification_uri_complete: grant.verification_uri_complete,
+                expires_in_seconds: grant.expires_in_seconds,
+                interval_seconds: grant.interval_seconds,
+            },
+        ))
+    }
+
+    async fn lookup_o_auth_device_authorization(
+        &self,
+        request: tonic::Request<LookupOAuthDeviceAuthorizationRequest>,
+    ) -> Result<tonic::Response<LookupOAuthDeviceAuthorizationResponse>, tonic::Status> {
+        let _actor = authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+        let req = request.into_inner();
+
+        let pending = self
+            .service()
+            .pending_device_authorization(&self.devices(), &req.user_code)
+            .await
+            .map_err(error::to_status)?
+            .ok_or_else(|| tonic::Status::not_found("no pending app device authorization"))?;
+
+        Ok(tonic::Response::new(
+            LookupOAuthDeviceAuthorizationResponse {
+                client_id: pending.app.client_id,
+                name: pending.app.name,
+                homepage_url: pending.app.homepage_url,
+                scopes: pending.scopes,
+            },
+        ))
+    }
+
+    async fn approve_o_auth_device_authorization(
+        &self,
+        request: tonic::Request<ApproveOAuthDeviceAuthorizationRequest>,
+    ) -> Result<tonic::Response<ApproveOAuthDeviceAuthorizationResponse>, tonic::Status> {
+        let _actor = authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+        let req = request.into_inner();
+        let user_id = parse_uuid(&req.user_id, "user_id")?;
+
+        self.service()
+            .approve_device_authorization(
+                &self.devices(),
+                &req.user_code,
+                user_id,
+                &req.approving_ip,
+                &req.approving_user_agent,
+            )
+            .await
+            .map_err(oauth_flow_status)?;
+
+        Ok(tonic::Response::new(
+            ApproveOAuthDeviceAuthorizationResponse {},
+        ))
+    }
+
+    async fn deny_o_auth_device_authorization(
+        &self,
+        request: tonic::Request<DenyOAuthDeviceAuthorizationRequest>,
+    ) -> Result<tonic::Response<DenyOAuthDeviceAuthorizationResponse>, tonic::Status> {
+        let _actor = authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+        let req = request.into_inner();
+        let user_id = parse_uuid(&req.user_id, "user_id")?;
+
+        self.service()
+            .deny_device_authorization(&self.devices(), &req.user_code, user_id)
+            .await
+            .map_err(oauth_flow_status)?;
+
+        Ok(tonic::Response::new(
+            DenyOAuthDeviceAuthorizationResponse {},
+        ))
+    }
+
+    async fn exchange_o_auth_device_code(
+        &self,
+        request: tonic::Request<ExchangeOAuthDeviceCodeRequest>,
+    ) -> Result<tonic::Response<ExchangeOAuthDeviceCodeResponse>, tonic::Status> {
+        let _actor = authorize::unauthenticated_actor(&request)
+            .require_authenticated()?
+            .require_service_account()?;
+        let req = request.into_inner();
+
+        let outcome = self
+            .service()
+            .exchange_device_code(
+                &self.devices(),
+                &req.client_id,
+                &req.client_secret,
+                &req.device_code,
+            )
+            .await
+            .map_err(oauth_flow_status)?;
+
+        let (status, tokens) = match outcome {
+            DeviceTokenOutcome::Issued(tokens) => (
+                OAuthDeviceTokenStatus::Issued,
+                Some(to_proto_tokens(tokens)),
+            ),
+            DeviceTokenOutcome::AuthorizationPending => {
+                (OAuthDeviceTokenStatus::AuthorizationPending, None)
+            }
+            DeviceTokenOutcome::SlowDown => (OAuthDeviceTokenStatus::SlowDown, None),
+            DeviceTokenOutcome::AccessDenied => (OAuthDeviceTokenStatus::AccessDenied, None),
+            DeviceTokenOutcome::ExpiredToken => (OAuthDeviceTokenStatus::ExpiredToken, None),
+        };
+        Ok(tonic::Response::new(ExchangeOAuthDeviceCodeResponse {
+            status: status as i32,
+            tokens,
         }))
     }
 }

@@ -1298,7 +1298,7 @@ impl UsersService for UsersServer {
         let initiated = self
             .state
             .device_login_aggregate_service()
-            .initiate(&req.client_name, &req.client_version, req.scopes)
+            .initiate(&req.client_name, &req.client_version, req.scopes, None)
             .await
             .map_err(error::to_status)?;
 
@@ -1320,7 +1320,7 @@ impl UsersService for UsersServer {
         let outcome = self
             .state
             .device_login_aggregate_service()
-            .poll(&req.device_code)
+            .poll(&req.device_code, None)
             .await
             .map_err(error::to_status)?;
 
@@ -1329,7 +1329,7 @@ impl UsersService for UsersServer {
             DeviceLoginPollOutcome::Denied => (DeviceLoginStatus::Denied, None, None),
             DeviceLoginPollOutcome::Expired => (DeviceLoginStatus::Expired, None, None),
             DeviceLoginPollOutcome::SlowDown => (DeviceLoginStatus::SlowDown, None, None),
-            DeviceLoginPollOutcome::Approved { user_id } => {
+            DeviceLoginPollOutcome::Approved { user_id, .. } => {
                 let profile = self
                     .service()
                     .get_user(user_id)
@@ -1403,6 +1403,7 @@ impl UsersService for UsersServer {
                 user_id,
                 &req.approving_ip,
                 &req.approving_user_agent,
+                None,
             )
             .await
             .map_err(error::to_status)?;
@@ -1424,7 +1425,7 @@ impl UsersService for UsersServer {
 
         self.state
             .device_login_aggregate_service()
-            .deny(&req.user_code, user_id)
+            .deny(&req.user_code, user_id, None)
             .await
             .map_err(error::to_status)?;
 
