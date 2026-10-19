@@ -1,9 +1,3 @@
-//! `forest admin status` — what is the server, and is it running my fix?
-//!
-//! The CLI-side counterpart to the forage footer: same `StatusService.Status`
-//! fields, same question. Also reports the round trip, which is the cheapest
-//! way to tell "the registry is slow" apart from "my link is slow".
-
 use crate::grpc::GrpcClientState;
 use crate::state::State;
 
@@ -24,8 +18,6 @@ impl StatusCommand {
         let status = state.grpc_client().server_status().await?;
         let round_trip = started.elapsed();
 
-        // An older server leaves the provenance fields empty. Say so plainly
-        // instead of rendering blanks that look like a rendering bug.
         let unknown = |v: String| {
             if v.trim().is_empty() {
                 "unknown (server predates build stamping)".to_string()
@@ -40,9 +32,6 @@ impl StatusCommand {
                 value: env!("CARGO_PKG_VERSION").to_string(),
             },
             StatusRow {
-                // The server crate's own version, not the released CLI
-                // version — they are separate and only the CLI's is managed by
-                // release-please. The commit below is the real identity.
                 field: "server version (crate)".into(),
                 value: unknown(status.version),
             },

@@ -1,18 +1,3 @@
-//! `forest shell zsh|bash` — emits a single shell-integration block.
-//!
-//! Combines the global-tools PATH-prepend (formerly `forest eval`) with the
-//! shell helper functions (e.g. `forest-tmp`). Source it from your rc file:
-//!
-//!     eval "$(forest shell zsh)"   # or `bash`
-//!
-//! `forest shell install` goes further: it writes the PATH-prepend into the
-//! shell env file that non-interactive shells actually read (`~/.zshenv` for
-//! zsh, `~/.bashrc` for bash). This is what makes forest tools discoverable to
-//! shells **spawned** by other tools (e.g. Claude Code running `zsh -c` /
-//! `bash -c`), which skip the interactive-only `~/.zshrc`. Idempotent and
-//! reversible (`forest shell uninstall`). See `global::shellenv` (pure block
-//! generator) + `global::install` (rc-file writer).
-
 use clap::{Args, Parser, Subcommand};
 
 use crate::global::eval::{
@@ -58,10 +43,6 @@ pub struct InstallArgs {
 impl ShellCommand {
     pub async fn execute(&self, _state: &State) -> anyhow::Result<()> {
         match &self.subcommands {
-            // Order matters: PATH first (so the shim dir is reachable), then the
-            // helper functions, then the integration block — which *calls* one
-            // of those helpers (`forest-defer-aggregate`) on a cold cache, so it
-            // has to come after they are defined.
             ShellCommands::Zsh => {
                 print!("{}", eval_zsh());
                 print!("{}", ZSH_HELPERS);

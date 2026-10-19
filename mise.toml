@@ -4,8 +4,6 @@ _.file = ".env"
 [tools]
 rust = "1.98.1"
 
-# ─── Local stack ──────────────────────────────────────────────────
-
 [tasks."local:up"]
 description = "Bring up the local stacks for both apps (postgres, etc.)"
 depends = ["forest:local:up", "forage:local:up"]
@@ -30,13 +28,9 @@ run = "mise run local:up"
 dir = "apps/forage"
 run = "mise run local:down"
 
-# ─── Dev (run both servers) ───────────────────────────────────────
-
 [tasks."dev"]
 description = "Start both forest and forage dev servers in parallel"
 depends = ["forest:dev", "forage:dev"]
-
-# ─── Per-app passthroughs ─────────────────────────────────────────
 
 [tasks."forest:dev"]
 description = "Run forest's mise develop task in apps/forest"

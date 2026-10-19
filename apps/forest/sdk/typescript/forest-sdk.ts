@@ -1,22 +1,3 @@
-// Forest SDK for Deno/TypeScript
-//
-// Implements the Forest component protocol v2.
-// Components are invoked as subprocesses with JSON lines over stdin/stdout.
-//
-// Protocol v2 messages (all JSON lines with a "type" field):
-//   Runtime → Component:  {"type":"invoke","method":"...","spec":{},"input":{},"context":{}}
-//   Component → Runtime:  {"type":"call","id":"...","component":"...","method":"...","spec":{},"input":{}}
-//   Runtime → Component:  {"type":"call_result","id":"...","result":{}}
-//   Component → Runtime:  {"type":"return","result":{}}
-//
-// Usage:
-//   import { runOnce, type ComponentService } from "./forest-sdk.ts";
-//   runOnce(myRouter);
-
-// ============================================================
-// Types
-// ============================================================
-
 export interface CallContext {
   project?: string;
   organisation?: string;
@@ -59,10 +40,6 @@ export interface ComponentService<S> {
   templateConfig?(): TemplateConfig;
 }
 
-// ============================================================
-// Errors
-// ============================================================
-
 export class ForestError extends Error {
   constructor(message: string) {
     super(message);
@@ -83,10 +60,6 @@ export class DeserializationError extends ForestError {
     this.name = "DeserializationError";
   }
 }
-
-// ============================================================
-// Protocol v2 — streaming JSON lines
-// ============================================================
 
 interface InvokeMessage {
   type: "invoke";
@@ -119,7 +92,6 @@ interface ReturnMessage {
 
 type RuntimeMessage = InvokeMessage | CallResultMessage;
 
-// Shared line reader for stdin — components read multiple messages during their lifetime.
 let stdinReader: ReadableStreamDefaultReader<string> | null = null;
 
 function getStdinLineReader(): ReadableStreamDefaultReader<string> {
@@ -132,7 +104,6 @@ function getStdinLineReader(): ReadableStreamDefaultReader<string> {
   return stdinReader;
 }
 
-// TextLineStream splits a text stream into individual lines.
 class TextLineStream extends TransformStream<string, string> {
   #buf = "";
   constructor() {
@@ -174,19 +145,9 @@ function writeMessage(msg: CallMessage | ReturnMessage): void {
   Deno.stdout.writeSync(new TextEncoder().encode(line));
 }
 
-// ============================================================
-// callComponent — inter-component RPC
-// ============================================================
-
 let callIdCounter = 0;
 let currentContext: CallContext = {};
 
-/**
- * Call another component's method via the forest runtime.
- *
- * Writes a "call" message to stdout, waits for the runtime to send
- * a "call_result" back on stdin, and returns the result.
- */
 export async function callComponent<R = unknown>(
   component: string,
   method: string,
@@ -216,10 +177,6 @@ export async function callComponent<R = unknown>(
   return (response as CallResultMessage).result as R;
 }
 
-// ============================================================
-// Legacy helpers (for meta-methods that still use single-shot)
-// ============================================================
-
 async function readStdinAll(): Promise<string> {
   const chunks: Uint8Array[] = [];
   const reader = Deno.stdin.readable.getReader();
@@ -246,20 +203,6 @@ function writeStdout(data: string): void {
   Deno.stdout.writeSync(new TextEncoder().encode(data));
 }
 
-// ============================================================
-// Runtime
-// ============================================================
-
-/**
- * Run the component service once, handling a single method invocation.
- *
- * Protocol v2: reads an {"type":"invoke",...} message from stdin,
- * dispatches to the service, writes {"type":"return",...} to stdout.
- * The component may call other components during execution via callComponent().
- *
- * Meta-methods (_meta/describe, _meta/template_config) still use the
- * legacy single-shot protocol for compatibility with forest build.
- */
 export async function runOnce<S>(service: ComponentService<S>): Promise<void> {
   const args = Deno.args;
 
@@ -271,7 +214,6 @@ export async function runOnce<S>(service: ComponentService<S>): Promise<void> {
   const method = args[0];
 
   try {
-    // Meta-methods use legacy single-shot protocol
     if (method === "_meta/describe") {
       const descriptor: ComponentDescriptor = {
         protocol_version: "2.0",
@@ -291,7 +233,6 @@ export async function runOnce<S>(service: ComponentService<S>): Promise<void> {
       return;
     }
 
-    // Protocol v2: read invoke message
     const msg = await readMessage();
     if (msg.type !== "invoke") {
       throw new ForestError(`expected invoke message, got ${msg.type}`);
@@ -302,7 +243,6 @@ export async function runOnce<S>(service: ComponentService<S>): Promise<void> {
     const input = invoke.input ?? {};
     const context: CallContext = invoke.context ?? {};
 
-    // Store context so callComponent can forward it to sub-components
     currentContext = context;
 
     const result = await service.call(invoke.method, spec, input, context);

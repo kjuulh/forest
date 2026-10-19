@@ -3,10 +3,6 @@ use std::{future::Future, pin::Pin};
 use mire::{Aggregate, AggregateRoot, EventStore};
 use sqlx::{Postgres, Transaction};
 
-/// Forest-specific transactional projection update built on Mire's transaction scope.
-///
-/// The aggregate events and projection mutation commit atomically. An error from the
-/// projection closure drops the transaction without committing either side.
 pub(crate) trait EventStoreExt {
     async fn save_with<A, F>(
         &self,

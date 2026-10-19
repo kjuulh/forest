@@ -1,26 +1,3 @@
-//! `forest/generic@1` — a destination type implemented by an external service.
-//!
-//! Most destination types are compiled into forest. Some should not be: a type
-//! that talks to one vendor's API, needs its own identity, or is only wanted in
-//! one deployment has no business being in every forest build.
-//!
-//! A `generic` destination carries a `provider_url` in its metadata. forest dials
-//! it and speaks `forest.provider.v1.DestinationProvider`: `Describe` for the
-//! metadata schema, `Execute` to run a release. Every other metadata key is
-//! passed through untouched, so the provider sees only its own configuration.
-//!
-//! This is the same shape `forage/containers@1` already uses — a gRPC endpoint in
-//! metadata, dialled at release time — generalised so the contract is a small
-//! type-agnostic proto rather than one service's API.
-//!
-//! What that buys, concretely: the metadata schema lives with the implementation
-//! instead of being mirrored into forest's configuration, and adding a type is
-//! "deploy a service, create a destination" rather than "redeploy forest".
-//!
-//! **Providers are dialled by forest**, so they must be reachable from it. An
-//! implementation that lives somewhere forest cannot reach wants the runner
-//! (dial-in) model instead.
-
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::Context;
@@ -40,23 +17,13 @@ use crate::{
     },
 };
 
-/// Hosts a `provider_url` may point at, comma-separated. Entries are either an
-/// exact `host` / `host:port`, or a `*.suffix` wildcard.
-///
-/// Unset means **no provider is permitted**. That is deliberate: forest dials
-/// this URL carrying a release-scoped token, so an unconstrained value lets any
-/// org member point it wherever they like. Fail closed and make the deployment
-/// say what it trusts.
 pub const ALLOWED_HOSTS_ENV: &str = "FOREST_GENERIC_PROVIDER_ALLOWED_HOSTS";
 
-/// How long a provider's release token stays valid. Matches the runner path.
 const TOKEN_TTL: Duration = Duration::from_secs(3600);
 
 const PROVIDER_URL: &str = "provider_url";
 const PROVIDER_TOKEN: &str = "provider_token";
 
-/// `generic`'s own configuration. The provider's own fields are not knowable
-/// until there is a URL to ask, and come back from `Describe` at creation time.
 pub fn metadata_schema() -> Vec<forest_models::MetadataFieldSchema> {
     vec![
             forest_models::MetadataFieldSchema {
@@ -86,21 +53,15 @@ pub fn metadata_schema() -> Vec<forest_models::MetadataFieldSchema> {
 
 pub struct GenericV1Destination {
     pub artifact_files: ArtifactStagingRegistry,
-    /// For reading the declaration `annotate` recorded. See `release_config`.
     pub db: sqlx::PgPool,
-    /// For announcing signals a provider reports, so a gate waiting on one
-    /// re-evaluates immediately rather than on the next sweep.
     pub nats: async_nats::Client,
     pub release_tokens: ReleaseTokenRegistry,
-    /// forest's own externally-reachable address, handed to the provider so it
-    /// can call back for artifacts if it needs them.
     pub external_host: String,
 }
 
 struct GenericMetadata {
     provider_url: String,
     provider_token: Option<String>,
-    /// Everything that isn't `generic`'s own configuration.
     passthrough: HashMap<String, String>,
 }
 
@@ -129,9 +90,6 @@ impl GenericMetadata {
     }
 }
 
-/// Redacts `provider_token`. Derived `Debug` on a struct holding a credential
-/// is one `tracing::debug!` away from putting it in the logs, which is exactly
-/// what marking the field `sensitive` is supposed to prevent.
 impl std::fmt::Debug for GenericMetadata {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GenericMetadata")
@@ -154,7 +112,6 @@ fn allowed_hosts() -> Vec<String> {
         .collect()
 }
 
-/// Check a provider URL against the allowlist.
 pub fn check_host_allowed(url: &str) -> anyhow::Result<()> {
     let allowed = allowed_hosts();
     if allowed.is_empty() {
@@ -181,7 +138,6 @@ pub fn check_host_allowed(url: &str) -> anyhow::Result<()> {
     )
 }
 
-/// Host (and port, if given) of a URL, lowercased.
 fn authority_of(url: &str) -> anyhow::Result<String> {
     let (_scheme, rest) = url
         .split_once("://")
@@ -191,8 +147,6 @@ fn authority_of(url: &str) -> anyhow::Result<String> {
         .split(['/', '?', '#'])
         .next()
         .unwrap_or_default()
-        // Strip any userinfo — `user@host` must match on `host`, not on the
-        // whole thing, or `evil.com@trusted.internal` style tricks slip past.
         .rsplit('@')
         .next()
         .unwrap_or_default()
@@ -213,20 +167,12 @@ fn matches_host(pattern: &str, authority: &str) -> bool {
         .unwrap_or(authority);
 
     if let Some(suffix) = pattern.strip_prefix("*.") {
-        // `*.internal` matches `a.internal` and `a.internal:4050`, not `internal`
-        // itself and not `notinternal`.
         return host.ends_with(&format!(".{suffix}"));
     }
 
-    // An exact pattern matches either with or without the port.
     pattern == authority || pattern == host
 }
 
-/// A project's config block, flattened for a provider that receives a flat
-/// string map.
-///
-/// Nested structure has no meaning there, so it is skipped rather than encoded
-/// as JSON into a value someone would have to guess the shape of.
 fn flatten_config(config: &serde_json::Value) -> Option<HashMap<String, String>> {
     let serde_json::Value::Object(config) = config else {
         return None;
@@ -258,7 +204,6 @@ impl GenericV1Destination {
             .with_context(|| format!("failed to connect to provider at {}", meta.provider_url))
     }
 
-    /// Attach the provider's bearer token, when the destination sets one.
     fn authed<T>(meta: &GenericMetadata, message: T) -> anyhow::Result<tonic::Request<T>> {
         let mut request = tonic::Request::new(message);
         if let Some(token) = &meta.provider_token {
@@ -279,23 +224,6 @@ impl GenericV1Destination {
             .into_inner())
     }
 
-    /// Per-release variables this project supplies for the destination.
-    ///
-    /// A destination describes a *place* — an account, a region, a cluster —
-    /// and is shared by every project that releases there. What differs per
-    /// project is small: which service, which container. Those come from the
-    /// project's own `forest.cue`, rendered by `release prepare` into
-    /// `forest/config.json` next to whatever manifests the destination needs.
-    ///
-    /// Returned flattened to strings so it can be merged straight over the
-    /// destination's metadata. Absent config is normal, not an error: most
-    /// destination types carry everything they need on the destination itself.
-    ///
-    /// Read from the declaration `annotate` recorded, which is the same record
-    /// the scheduler filtered this release's destinations with — so the config a
-    /// destination receives and the reason it was chosen cannot come apart.
-    /// Artifacts annotated before that column existed have nothing recorded and
-    /// fall back to scanning the files, unchanged.
     async fn release_config(
         &self,
         release: &ReleaseItem,
@@ -319,10 +247,6 @@ impl GenericV1Destination {
                 tracing::debug!("no recorded declaration for this artifact — scanning its files");
             }
             Err(e) => {
-                // Fall through rather than fail: a release that cannot read its
-                // config should still be able to run on the destination's own
-                // metadata, which is what every release did before projects
-                // could contribute config at all.
                 tracing::warn!("could not read the recorded declaration: {e:#}");
             }
         }
@@ -348,17 +272,6 @@ impl GenericV1Destination {
                 continue;
             };
 
-            // `destination` in the rendered item is the pattern the project
-            // wrote, not the resolved name, so match it the same way the
-            // release did rather than comparing strings. Shared with the
-            // scheduler via `destination_selector` — the two disagreeing is
-            // what let a release be scheduled somewhere its config was then
-            // (correctly) withheld.
-            //
-            // Type as well as name, for the same reason the scheduler consults
-            // it: a project with an ECS item and a terraform item in one
-            // environment has two records whose selectors can both match, and
-            // the first by name is not necessarily the right one.
             let selected = item
                 .get("destination")
                 .and_then(|d| d.as_str())
@@ -387,9 +300,6 @@ impl GenericV1Destination {
         HashMap::new()
     }
 
-    /// Run `Execute`, streaming log lines into the release log.
-    ///
-    /// Returns the plan text for `RELEASE_MODE_PLAN`.
     async fn execute(
         &self,
         logger: &DestinationLogger,
@@ -400,8 +310,6 @@ impl GenericV1Destination {
     ) -> anyhow::Result<Option<String>> {
         let mut client = self.connect(meta).await?;
 
-        // A provider that needs the release's artifacts calls back with this.
-        // Most act on infrastructure that already exists and never use it.
         let release_token = self
             .release_tokens
             .create_token(
@@ -419,9 +327,6 @@ impl GenericV1Destination {
             .await
             .context("failed to mint a release token for the provider")?;
 
-        // Destination metadata is the place; the project's config is what it
-        // contributes about itself. Project wins on conflict — a destination
-        // naming one project's service would defeat the point of sharing it.
         let mut metadata = meta.passthrough.clone();
         for (key, value) in self.release_config(release, destination).await {
             metadata.insert(key, value);
@@ -469,16 +374,8 @@ impl GenericV1Destination {
                     }
                 }
                 Some(Event::Signal(sig)) => {
-                    // A provider says what it saw; forest knows which release
-                    // it is about. Recorded here rather than by the provider
-                    // calling back, so the provider protocol stays free of any
-                    // forest dependency.
                     let status = sig.status.trim().to_ascii_uppercase();
                     if !crate::services::release_signals::is_valid_status(&status) {
-                        // Not fatal to the release — a provider that
-                        // mis-reports a signal has still deployed — but it must
-                        // not be stored, or a gate would wait on a state
-                        // nothing can ever match.
                         logger.log_stderr(&format!(
                             "provider reported signal '{}' with unknown status '{}'; ignoring \
                              (expected one of {:?})",
@@ -514,9 +411,6 @@ impl GenericV1Destination {
                     )
                     .await
                     {
-                        // Same reasoning: the deploy is what matters, and a
-                        // signal that failed to store is recoverable by the
-                        // next report. Losing the release over it would not be.
                         logger
                             .log_stderr(&format!("failed to record signal '{}': {e:#}", sig.name));
                     }
@@ -535,9 +429,6 @@ impl GenericV1Destination {
             }
         }
 
-        // A provider that dies mid-release has not succeeded, and forest does not
-        // assume otherwise. This is the same reasoning as treating an ECS
-        // rollout timeout as failure: absence of a result is not a good result.
         let outcome = outcome.with_context(|| {
             format!(
                 "provider at {} closed the stream without reporting an outcome",
@@ -581,10 +472,6 @@ impl DestinationEdge for GenericV1Destination {
         metadata_schema()
     }
 
-    /// Ask the provider what it accepts, then hold the destination to it.
-    ///
-    /// The schema lives with the implementation, so this is the single source of
-    /// truth — there is no copy of it in forest's configuration to drift.
     async fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
         let meta = GenericMetadata::from_metadata(metadata)?;
 
@@ -690,13 +577,9 @@ impl DestinationEdge for GenericV1Destination {
 mod tests {
     use super::*;
 
-    /// The allowlist is read from the process environment, which every test in
-    /// this module shares. Without this they race and fail at random.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-        // A panicking test poisons the lock; that test has already failed and
-        // there is no shared state to corrupt, so don't fail the rest too.
         ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -728,8 +611,6 @@ mod tests {
 
     #[test]
     fn userinfo_cannot_smuggle_a_host_past_the_allowlist() {
-        // `evil.com@trusted.internal` resolves to trusted.internal, and the
-        // reverse ordering must not read as trusted either.
         assert_eq!(
             authority_of("http://evil.com@trusted.internal").unwrap(),
             "trusted.internal",
@@ -757,7 +638,6 @@ mod tests {
             assert!(check_host_allowed("http://b.internal").is_err());
         });
 
-        // Pinning the port is stricter and must stay strict.
         with_allowlist("a.internal:4060", || {
             assert!(check_host_allowed("http://a.internal:4060").is_ok());
             assert!(check_host_allowed("http://a.internal:9999").is_err());
@@ -769,9 +649,7 @@ mod tests {
         with_allowlist("*.internal", || {
             assert!(check_host_allowed("http://a.internal:4060").is_ok());
             assert!(check_host_allowed("http://a.b.internal").is_ok());
-            // The bare suffix is not a subdomain of itself…
             assert!(check_host_allowed("http://internal").is_err());
-            // …and neither is a host that merely ends with the same letters.
             assert!(check_host_allowed("http://notinternal").is_err());
             assert!(check_host_allowed("http://evil.com").is_err());
         });

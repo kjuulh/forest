@@ -109,7 +109,6 @@ pub async fn execute() -> anyhow::Result<()> {
                 let key = BASE64_STANDARD
                     .decode(key)
                     .context("FOREST_TERRAFORM_STATE_SIGNING_KEY was not base64")?;
-                // Fail closed on a short key rather than sign with it.
                 anyhow::ensure!(
                     key.len() >= 32,
                     "FOREST_TERRAFORM_STATE_SIGNING_KEY must decode to at least 32 bytes, got {}",

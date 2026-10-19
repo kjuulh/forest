@@ -1,10 +1,3 @@
-//! `forest state` — reach a project's terraform@1 state outside a release
-//! (understory-io/forest#282).
-//!
-//! Every subcommand requires the **Admin** role in the project's organisation
-//! — reads included, since a state carries secrets — and is recorded
-//! server-side, naming you and the state.
-
 use anyhow::Context;
 use forest_grpc_interface::TerraformStateRef;
 
@@ -116,13 +109,10 @@ impl EnvCommand {
             .issue_terraform_state_credential(target, self.write, self.ttl)
             .await?;
 
-        // Exports alone on stdout, so `eval "$(...)"` takes exactly these.
         for (key, value) in [
             ("TF_HTTP_ADDRESS", cred.address.as_str()),
             ("TF_HTTP_LOCK_ADDRESS", cred.lock_address.as_str()),
             ("TF_HTTP_UNLOCK_ADDRESS", cred.unlock_address.as_str()),
-            // The runner sets these too; terraform's defaults (LOCK/UNLOCK)
-            // are not what forest's backend routes.
             ("TF_HTTP_LOCK_METHOD", "POST"),
             ("TF_HTTP_UNLOCK_METHOD", "POST"),
             ("TF_HTTP_USERNAME", cred.username.as_str()),
@@ -246,7 +236,6 @@ impl UnlockCommand {
     }
 }
 
-/// `module.x.aws_thing.name[0]`-style addresses from a v4 state document.
 fn resource_addresses(document: &serde_json::Value) -> Vec<String> {
     let mut out = Vec::new();
     let Some(resources) = document.get("resources").and_then(|r| r.as_array()) else {

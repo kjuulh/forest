@@ -1,19 +1,3 @@
-//! Forest context store — kubectl-style profile switcher.
-//!
-//! A **context** is a named bundle of `(server URL, auth state)`. One context
-//! is active at a time; commands operate against the active one unless
-//! overridden by `--context` or `FOREST_CONTEXT`. See TASKS/019-context.md.
-//!
-//! Layout under `$XDG_DATA_HOME/forest/`:
-//!
-//! ```text
-//! contexts.json              registry: known contexts + active name
-//! contexts/
-//!   <name>/
-//!     user-state.json        per-context auth state (UserState)
-//!     user-state.lock        per-context file lock
-//! ```
-
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow};
@@ -22,27 +6,7 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_CONTEXT: &str = "default";
 const DEFAULT_SERVER: &str = "http://localhost:4040";
 
-/// Derive a `CUE_REGISTRY` value from a Forest server URL.
-///
-/// The convention across deployments is:
-///
-///   server   `https://api.forest.understory.sh`
-///   →
-///   CUE_REGISTRY = `forest.sh=registry.api.forest.understory.sh,registry.cuelang.org`
-///
-/// i.e. the `forest.sh` CUE module namespace points at
-/// `registry.<server-host>`, with the public CUE registry kept as a
-/// fallback so cuelang.org modules still resolve.
-///
-/// Returns `None` when the server URL can't be parsed or has no host
-/// (e.g. someone wrote `forest_server = "localhost:4040"` without a
-/// scheme). Callers should fall back to whatever the parent shell
-/// already had in `CUE_REGISTRY`.
 pub fn derive_cue_registry(server: &str) -> Option<String> {
-    // Tolerate URLs missing a scheme by trying the raw value first;
-    // if that fails, retry with `https://` prepended. This keeps the
-    // helper friendly to half-typed user input without pulling in a
-    // proper URL parser.
     let after_scheme = server
         .split_once("://")
         .map(|(_, rest)| rest)
@@ -55,8 +19,6 @@ pub fn derive_cue_registry(server: &str) -> Option<String> {
     Some(format!("forest.sh=registry.{host},registry.cuelang.org"))
 }
 
-/// On-disk shape of `contexts.json`. Kept stable; adding fields requires
-/// `#[serde(default)]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextsFile {
     pub active: String,
@@ -68,18 +30,10 @@ pub struct ContextsFile {
 pub struct ContextEntry {
     pub name: String,
     pub server: String,
-    /// ISO 8601 UTC timestamp. Best-effort; missing on legacy migrations.
     #[serde(default)]
     pub created_at: Option<String>,
-    /// Optional default organisation for this context. Currently unused;
-    /// reserved for follow-up CLI polish.
     #[serde(default)]
     pub default_organisation: Option<String>,
-    /// Optional public-facing web UI URL (no trailing slash), used by
-    /// `forest auth login --web` to know where to send the browser. See
-    /// TASKS/022-device-login.md §1.3. When `None`, the CLI falls back
-    /// to `FOREST_WEB_URL`, then a "strip leading `api.`" convention
-    /// (`api.forest.x` → `forest.x`).
     #[serde(default)]
     pub web_url: Option<String>,
 }
@@ -95,14 +49,6 @@ impl ContextEntry {
         }
     }
 
-    /// Resolve the web URL for this context, walking the fallback chain
-    /// documented in TASKS/022-device-login.md §1.3:
-    ///   1. explicit `web_url` field
-    ///   2. `FOREST_WEB_URL` env var (per-invocation override)
-    ///   3. convention: strip leading `api.` label from the host,
-    ///      `https://` enforced. Localhost-by-port maps to the web
-    ///      UI's default dev port (3000).
-    ///   4. `None` when no rule applies.
     pub fn resolve_web_url(&self) -> Option<String> {
         if let Some(url) = self.web_url.as_ref().filter(|s| !s.is_empty()) {
             return Some(url.trim_end_matches('/').to_string());
@@ -116,33 +62,18 @@ impl ContextEntry {
     }
 }
 
-/// Convention: `https://api.forest.dev.foo` → `https://forest.dev.foo`,
-/// `http://localhost:4040` → `http://localhost:3000` (web UI's dev
-/// port, per `apps/forage/crates/forage-server/src/main.rs:81`).
-/// Returns None for shapes we can't safely derive (raw IPs, server URLs
-/// without a leading `api.` label, etc.) — callers should surface a
-/// clear "configure web_url" error rather than guess. Pre-rename
-/// contexts pointing at `forest.understory.sh` (no `api.` prefix) land
-/// here and surface that error cleanly instead of silently misrouting.
 fn derive_web_url_from_server(server: &str) -> Option<String> {
-    // Manual parse — avoids pulling in the `url` crate just for this.
-    // We accept `<scheme>://<host>[:<port>][/<rest>]` and ignore the rest.
     let (scheme, rest) = server.split_once("://")?;
     if scheme != "http" && scheme != "https" {
         return None;
     }
     let authority = rest.split('/').next()?;
-    // Strip port if present — the convention maps the API's gRPC port
-    // (e.g. 4040) to the web UI's HTTP port (3000), not the same number.
     let host = authority.split(':').next()?;
 
-    // Localhost special case.
     if host == "localhost" || host == "127.0.0.1" {
         return Some(format!("{scheme}://{host}:3000"));
     }
 
-    // Generic case: first label must be "api"; strip it and force
-    // https (the web UI in production is HTTPS-only).
     let rest_of_host = host.strip_prefix("api.")?;
     Some(format!("https://{rest_of_host}"))
 }
@@ -151,8 +82,6 @@ fn now_iso8601() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
-/// Validate a context name against the same regex tool names use
-/// (§018 §1a.1).
 pub fn validate_name(name: &str) -> Result<()> {
     use forest_manifest::names::{NameError, validate_tool_name};
     match validate_tool_name(name) {
@@ -171,23 +100,12 @@ pub fn validate_name(name: &str) -> Result<()> {
     }
 }
 
-/// The forest server a command talks to, and what to call it when telling a
-/// person so.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerTarget {
-    /// The context name, or the URL itself when `--forest-server` chose it.
     pub label: String,
     pub server: String,
 }
 
-/// Which server a command talks to: `--forest-server` / `FOREST_SERVER` if set
-/// and non-empty, otherwise the context named by `--context` /
-/// `FOREST_CONTEXT`, otherwise the active context.
-///
-/// The one place this precedence lives. The gRPC client connects with it and
-/// `forest publish` names its target with it; when the two resolved
-/// separately, publish announced the stored active context while uploading to
-/// the one `--context` named (understory-io/forest#298).
 pub fn resolve_server_target(
     forest_server: Option<&str>,
     context: Option<&str>,
@@ -206,15 +124,12 @@ pub fn resolve_server_target(
     })
 }
 
-/// Filesystem-backed context registry.
 #[derive(Debug, Clone)]
 pub struct ContextStore {
     data_dir: PathBuf,
 }
 
 impl ContextStore {
-    /// Construct using XDG defaults (`$XDG_DATA_HOME/forest/` or
-    /// `~/.local/share/forest/`). Tests prefer `with_root` for isolation.
     pub fn from_env() -> Result<Self> {
         let data_dir = dirs::data_local_dir()
             .ok_or_else(|| anyhow!("unable to resolve XDG data dir"))?
@@ -222,7 +137,6 @@ impl ContextStore {
         Ok(Self { data_dir })
     }
 
-    /// Test-friendly constructor pointing at a specific data root.
     pub fn with_root(data_dir: PathBuf) -> Self {
         Self { data_dir }
     }
@@ -235,27 +149,19 @@ impl ContextStore {
         self.data_dir.join("contexts.json")
     }
 
-    /// Per-context directory holding `user-state.json` + `user-state.lock`.
     pub fn context_dir(&self, name: &str) -> PathBuf {
         self.data_dir.join("contexts").join(name)
     }
 
-    /// Path the existing `UserStateLoader` should target for `name`.
     pub fn user_state_dir(&self, name: &str) -> PathBuf {
         self.context_dir(name)
     }
 
-    /// Load the registry, migrating from a legacy single user-state.json if
-    /// necessary. Always returns a valid file; bootstraps `default` on first
-    /// run.
     pub fn load_or_bootstrap(&self) -> Result<ContextsFile> {
         if let Some(file) = self.read_file()? {
             return Ok(file);
         }
 
-        // Bootstrap. Two flavours:
-        //   - Legacy single user-state.json present → adopt as `default`.
-        //   - Nothing at all → fresh empty `default`.
         let legacy = self.data_dir.join("user-state.json");
         let server_default = std::env::var("FOREST_SERVER")
             .ok()
@@ -265,8 +171,6 @@ impl ContextStore {
         let entry = ContextEntry::new(DEFAULT_CONTEXT, server_default);
 
         if legacy.exists() {
-            // Move the legacy file into contexts/default/user-state.json
-            // *before* writing contexts.json so a crash mid-migration is recoverable.
             let target = self.context_dir(DEFAULT_CONTEXT).join("user-state.json");
             std::fs::create_dir_all(target.parent().unwrap())
                 .context("creating contexts/default dir")?;
@@ -277,7 +181,6 @@ impl ContextStore {
                     target.display()
                 )
             })?;
-            // Also move the .lock if present, best-effort.
             let legacy_lock = self.data_dir.join("user-state.lock");
             if legacy_lock.exists() {
                 let _ = std::fs::rename(
@@ -312,7 +215,6 @@ impl ContextStore {
             .with_context(|| format!("creating {}", self.data_dir.display()))?;
         let body = serde_json::to_vec_pretty(file)?;
         let path = self.contexts_file();
-        // Atomic write: tempfile in same dir + rename.
         let rand: u64 = rand::random();
         let tmp = self.data_dir.join(format!(".contexts.tmp.{rand:016x}"));
         std::fs::write(&tmp, &body).with_context(|| format!("writing {}", tmp.display()))?;
@@ -339,14 +241,6 @@ impl ContextStore {
             })
     }
 
-    /// Resolve a context by name, or the active one if `name` is None,
-    /// *without* triggering the first-run bootstrap. Returns `Ok(None)`
-    /// when no `contexts.json` exists on disk.
-    ///
-    /// This is the right entry point for callers that want to *read*
-    /// the context state (banners, env overlays) without side-effects.
-    /// Use [`Self::resolve`] when bootstrapping is desired (typical
-    /// command execution).
     pub fn try_resolve(&self, name: Option<&str>) -> Result<Option<ContextEntry>> {
         let Some(file) = self.read_file()? else {
             return Ok(None);
@@ -355,7 +249,6 @@ impl ContextStore {
         Ok(file.contexts.iter().find(|c| c.name == want).cloned())
     }
 
-    /// Resolve a context by name, or the active one if `name` is None.
     pub fn resolve(&self, name: Option<&str>) -> Result<ContextEntry> {
         let file = self.load_or_bootstrap()?;
         let want = name.unwrap_or(&file.active);
@@ -411,7 +304,6 @@ impl ContextStore {
         if file.contexts.len() == before {
             anyhow::bail!("context '{name}' not found");
         }
-        // If we deleted the active context with --force, pick a fallback active.
         if name == file.active {
             file.active = file
                 .contexts
@@ -454,26 +346,10 @@ impl ContextStore {
         Ok(())
     }
 
-    /// Install-time provisioning: idempotently register a context with
-    /// "first-run takes the default" semantics.
-    ///
-    /// - If `contexts.json` doesn't yet exist, the new entry becomes the
-    ///   sole context and is set active.
-    /// - If it does exist and the name is new, the entry is appended;
-    ///   the previously-active context stays active.
-    /// - If a context with that name already exists, its server URL is
-    ///   updated in place (so re-running `install.sh` with a refreshed
-    ///   FOREST_PROFILE picks up the change without manual cleanup).
-    ///
-    /// Differs from [`Self::create`] in two ways: it never errors on
-    /// duplicate names, and the "should I become active" decision is
-    /// derived from the disk state rather than a caller-supplied flag.
     pub fn provision(&self, name: &str, server: &str) -> Result<ContextEntry> {
         validate_name(name)?;
         match self.read_file()? {
             None => {
-                // First run: skip the load_or_bootstrap default and
-                // make the provisioned context the only one.
                 let entry = ContextEntry::new(name, server);
                 let file = ContextsFile {
                     active: name.to_string(),
@@ -514,9 +390,6 @@ impl ContextStore {
         Ok(())
     }
 
-    /// Set (or clear, with `web_url=None`) the web_url for a context.
-    /// Used by `forest context set-web-url` and by FOREST_PROFILE
-    /// provisioning when a `web=` value is supplied.
     pub fn set_web_url(&self, name: &str, web_url: Option<&str>) -> Result<()> {
         let mut file = self.load_or_bootstrap()?;
         let entry = file
@@ -554,7 +427,6 @@ mod tests {
         assert_eq!(target.server, "https://api.home.example");
     }
 
-    /// #298: `--context work` must name, and reach, work, whatever is active.
     #[test]
     fn a_named_context_wins_over_the_active_one() {
         let td = TempDir::new().unwrap();
@@ -576,7 +448,6 @@ mod tests {
         assert_eq!(target.label, "https://api.other.example");
     }
 
-    /// FOREST_SERVER= (set but empty) is how CI sometimes spells "unset".
     #[test]
     fn an_empty_server_falls_through_to_the_context() {
         let td = TempDir::new().unwrap();
@@ -604,7 +475,6 @@ mod tests {
     fn bootstrap_migrates_legacy_user_state() {
         let td = TempDir::new().unwrap();
         let legacy = td.path().join("forest").join("user-state.json");
-        // The store is rooted at td/forest, so simulate the legacy file living there.
         let data_dir = td.path().join("forest");
         std::fs::create_dir_all(&data_dir).unwrap();
         std::fs::write(&legacy, br#"{"user_id":"x","username":"u","emails":[],"access_token":"a","refresh_access":"r"}"#).unwrap();
@@ -671,7 +541,6 @@ mod tests {
         let td = TempDir::new().unwrap();
         let s = store(&td);
         s.create("a", "http://x", false).unwrap();
-        // Drop a file inside the context dir.
         std::fs::write(s.context_dir("a").join("user-state.json"), "{}").unwrap();
         s.rename("a", "b").unwrap();
         assert!(!s.context_dir("a").exists());
@@ -687,8 +556,6 @@ mod tests {
         let entry = s.resolve(Some("env")).unwrap();
         assert_eq!(entry.server, "http://new");
     }
-
-    // ── web_url resolution chain (TASKS/022-device-login.md §1.3) ────
 
     #[test]
     fn resolve_web_url_uses_explicit_field_first() {
@@ -729,10 +596,6 @@ mod tests {
 
     #[test]
     fn resolve_web_url_returns_none_when_api_prefix_missing() {
-        // Hosts without a leading `api.` label have no convention; the
-        // CLI must surface a clear error rather than silently guess.
-        // Stale pre-rename contexts pointing at `forest.understory.sh`
-        // land here.
         let e = ContextEntry::new("p", "https://forest.understory.sh");
         assert_eq!(e.resolve_web_url(), None);
     }
@@ -805,13 +668,10 @@ mod tests {
         assert!(validate_name("ok-name").is_ok());
     }
 
-    // ── provision ────────────────────────────────────────────────
-
     #[test]
     fn provision_on_empty_disk_creates_sole_active_context() {
         let td = TempDir::new().unwrap();
         let s = store(&td);
-        // No bootstrap was triggered yet — `contexts.json` does not exist.
         assert!(!s.contexts_file().exists());
 
         let entry = s
@@ -820,8 +680,6 @@ mod tests {
         assert_eq!(entry.name, "understory-prod");
         assert_eq!(entry.server, "https://api.forest.understory.sh");
 
-        // The provisioned context is the only one AND is active —
-        // the bootstrap default never got created.
         let file = s.list().unwrap();
         assert_eq!(file.contexts.len(), 1);
         assert_eq!(file.contexts[0].name, "understory-prod");
@@ -832,7 +690,6 @@ mod tests {
     fn provision_does_not_change_active_when_other_contexts_exist() {
         let td = TempDir::new().unwrap();
         let s = store(&td);
-        // Bootstrap a `default` so the file exists with active=default.
         let _ = s.load_or_bootstrap().unwrap();
         assert_eq!(s.active().unwrap().name, "default");
 
@@ -855,11 +712,8 @@ mod tests {
         s.provision("prod", "https://new.example.com").unwrap();
         let entry = s.resolve(Some("prod")).unwrap();
         assert_eq!(entry.server, "https://new.example.com");
-        // Only one entry: re-provisioning didn't duplicate.
         assert_eq!(s.list().unwrap().contexts.len(), 1);
     }
-
-    // ── derive_cue_registry ──────────────────────────────────────
 
     #[test]
     fn derive_cue_registry_pulls_host_and_prepends_registry() {
@@ -888,9 +742,7 @@ mod tests {
     #[test]
     fn derive_cue_registry_returns_none_for_no_host() {
         assert_eq!(derive_cue_registry(""), None);
-        // Bare port with no host: nothing to derive from.
         assert_eq!(derive_cue_registry(":4040"), None);
-        // Just `/path` with no host either.
         assert_eq!(derive_cue_registry("/api"), None);
     }
 }

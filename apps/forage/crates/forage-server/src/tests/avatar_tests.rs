@@ -1,12 +1,3 @@
-//! `/avatars/{identifier}` — the endpoint the release timeline points every
-//! deployer's face at.
-//!
-//! A release knows who deployed it only by username, so the route has to accept
-//! one, and most users have no uploaded picture at all — only the URL Google or
-//! GitHub gave us at sign-in. These cover the resolution, and the ways it is
-//! allowed to come up empty: the caller sees a 404 and the card falls back to
-//! an initial, never a broken image.
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use forage_core::auth::{AuthError, UserProfile};
@@ -106,9 +97,6 @@ async fn unknown_user_is_not_found() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-/// An upload records its own `/avatars/{user_id}` URL on the account. Reaching
-/// this point means that upload could not be served, so following the URL would
-/// come straight back here — 404 instead of looping the browser.
 #[tokio::test]
 async fn a_picture_url_pointing_back_here_is_not_followed() {
     let response = get_avatar(
@@ -126,7 +114,6 @@ async fn a_picture_url_pointing_back_here_is_not_followed() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-/// Only http(s) is ever handed back to the browser as a redirect target.
 #[tokio::test]
 async fn a_non_http_picture_url_is_not_followed() {
     let response = get_avatar(
@@ -142,7 +129,6 @@ async fn a_non_http_picture_url_is_not_followed() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-/// Anything that is not a username never reaches the user lookup.
 #[tokio::test]
 async fn an_identifier_that_cannot_be_a_username_is_not_found() {
     let response = get_avatar(

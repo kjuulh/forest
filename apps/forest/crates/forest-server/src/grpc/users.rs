@@ -25,12 +25,6 @@ impl UsersServer {
         self.state.user_service()
     }
 
-    /// Apply the registration email-domain regex (if configured). Maps the
-    /// pure-core `DomainNotAllowed` error to a generic `permission_denied`
-    /// gRPC status that does *not* leak the configured pattern to clients.
-    /// On rejection, logs the domain (text after the last `@`) only —
-    /// never the full address — so operators can tune the regex without
-    /// pulling PII into logs.
     fn enforce_registration_policy(&self, email: &str) -> Result<(), tonic::Status> {
         if self.state.registration_policy().check_email(email).is_err() {
             let domain = email.rsplit_once('@').map(|(_, d)| d).unwrap_or("<no-@>");
@@ -45,8 +39,6 @@ impl UsersServer {
 
 #[async_trait::async_trait]
 impl UsersService for UsersServer {
-    // ── Authentication ───────────────────────────────────────────────
-
     async fn register(
         &self,
         request: tonic::Request<RegisterRequest>,
@@ -68,10 +60,6 @@ impl UsersService for UsersServer {
             .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::internal("user not found after registration"))?;
 
-        // When verification is required, the registered user has no
-        // verified email yet (native register inserts verified=false), so
-        // we return user info but no tokens. The caller (forage) is
-        // expected to drive the verification flow.
         if self.state.config.require_email_verification {
             return Ok(tonic::Response::new(RegisterResponse {
                 user: Some(profile_to_grpc_user(profile)),
@@ -145,10 +133,6 @@ impl UsersService for UsersServer {
             .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::internal("user not found"))?;
 
-        // Block login when the operator requires email verification and
-        // none of the user's emails are verified. Forage uses the
-        // canonical detail string "email_not_verified" to render a
-        // resend-verification page.
         if self.state.config.require_email_verification {
             let has_verified = self
                 .service()
@@ -160,8 +144,6 @@ impl UsersService for UsersServer {
             }
         }
 
-        // Check MFA status — if the user has verified MFA, return a challenge
-        // instead of issuing tokens immediately.
         let mfa = self
             .service()
             .get_mfa_for_user(authenticated.user_id)
@@ -247,13 +229,11 @@ impl UsersService for UsersServer {
             .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::unauthenticated("session expired or revoked"))?;
 
-        // Revoke old session
         self.service()
             .logout(session.session_id)
             .await
             .map_err(error::to_status)?;
 
-        // Issue new tokens
         let (refresh_token, hash) = self
             .state
             .tokens()
@@ -293,7 +273,6 @@ impl UsersService for UsersServer {
         &self,
         _request: tonic::Request<LogoutRequest>,
     ) -> std::result::Result<tonic::Response<LogoutResponse>, tonic::Status> {
-        // TODO: extract session from auth context and revoke
         Err(tonic::Status::unimplemented("not yet implemented"))
     }
 
@@ -301,8 +280,6 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<TokenInfoRequest>,
     ) -> std::result::Result<tonic::Response<TokenInfoResponse>, tonic::Status> {
-        // The auth layer already verified the token and inserted AppClaims.
-        // We just read them back — no database hit needed.
         let claims = request
             .extensions()
             .get::<crate::tokens::AppClaims>()
@@ -310,13 +287,9 @@ impl UsersService for UsersServer {
 
         Ok(tonic::Response::new(TokenInfoResponse {
             user_id: claims.user_id.clone(),
-            // The JWT exp claim is validated by the auth layer; returning 0 here
-            // since the client only cares whether the call succeeds or not.
             expires_at: 0,
         }))
     }
-
-    // ── User CRUD ────────────────────────────────────────────────────
 
     async fn get_user(
         &self,
@@ -343,12 +316,6 @@ impl UsersService for UsersServer {
                         "provider and provider_user_id are both required",
                     ));
                 }
-                // `identities.provider` holds the enum's wire name
-                // lowercased — `oauth_provider_github`, not `github` —
-                // because that is what the *write* path stores (see
-                // `link_oauth_provider`). Normalise through the same
-                // round-trip so callers can say either and a lookup can
-                // never silently miss the rows it is looking for.
                 let providers = provider_spellings(&id.provider).ok_or_else(|| {
                     tonic::Status::invalid_argument(format!("unknown provider: {}", id.provider))
                 })?;
@@ -437,10 +404,6 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<ListUsersRequest>,
     ) -> std::result::Result<tonic::Response<ListUsersResponse>, tonic::Status> {
-        // Username/email search is an enumeration vector — gate behind
-        // *any* authenticated actor. (Admin-only would be ideal, but
-        // Forest has no platform-admin concept today.) Closes
-        // adversarial review gap #5.
         let unauth = crate::grpc::authorize::unauthenticated_actor(&request);
         let _actor = unauth.require_authenticated()?.into_actor();
 
@@ -480,15 +443,10 @@ impl UsersService for UsersServer {
         }))
     }
 
-    // ── Stats ────────────────────────────────────────────────────────
-
     async fn get_user_stats(
         &self,
         request: tonic::Request<GetUserStatsRequest>,
     ) -> std::result::Result<tonic::Response<GetUserStatsResponse>, tonic::Status> {
-        // Stats are aggregate counts (release / annotation totals) used
-        // on public-ish profile pages. Allow any authenticated caller —
-        // not just self — but require a session.
         let unauth = crate::grpc::authorize::unauthenticated_actor(&request);
         let _actor = unauth.require_authenticated()?.into_actor();
 
@@ -528,8 +486,6 @@ impl UsersService for UsersServer {
         }))
     }
 
-    // ── Password management ──────────────────────────────────────────
-
     async fn change_password(
         &self,
         request: tonic::Request<ChangePasswordRequest>,
@@ -551,8 +507,6 @@ impl UsersService for UsersServer {
 
         Ok(tonic::Response::new(ChangePasswordResponse {}))
     }
-
-    // ── Email management ─────────────────────────────────────────────
 
     async fn add_email(
         &self,
@@ -588,9 +542,6 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<VerifyEmailRequest>,
     ) -> std::result::Result<tonic::Response<VerifyEmailResponse>, tonic::Status> {
-        // User-self only: a logged-in user can verify their own email.
-        // Cross-user verification by JWT is rejected. The service-account
-        // path lives on `confirm_email_verification`.
         let claims = request
             .extensions()
             .get::<crate::tokens::AppClaims>()
@@ -619,16 +570,12 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<ConfirmEmailVerificationRequest>,
     ) -> std::result::Result<tonic::Response<ConfirmEmailVerificationResponse>, tonic::Status> {
-        // Service-account-only. The caller (forage) has already validated
-        // a redemption token; we just flip the bit.
         let _actor = crate::grpc::authorize::unauthenticated_actor(&request)
             .require_authenticated()?
             .require_service_account()?;
 
         let req = request.into_inner();
 
-        // Look up the owning user from the email. The caller is not
-        // expected to know user_id.
         let profile = self
             .service()
             .get_user_by_email(&req.email)
@@ -666,14 +613,10 @@ impl UsersService for UsersServer {
         Ok(tonic::Response::new(RemoveEmailResponse {}))
     }
 
-    // ── OAuth ────────────────────────────────────────────────────────
-
     async fn o_auth_login(
         &self,
         request: tonic::Request<OAuthLoginRequest>,
     ) -> std::result::Result<tonic::Response<OAuthLoginResponse>, tonic::Status> {
-        // Require service-account auth — only trusted callers (e.g. Forage)
-        // can submit pre-verified identity info.
         let _actor = crate::grpc::authorize::unauthenticated_actor(&request)
             .require_authenticated()?
             .require_service_account()?;
@@ -695,7 +638,6 @@ impl UsersService for UsersServer {
             ));
         }
 
-        // Look up existing user by OAuth identity.
         let existing_user_id = self
             .service()
             .find_user_by_oauth(&provider_str, &req.provider_user_id)
@@ -709,7 +651,6 @@ impl UsersService for UsersServer {
         };
 
         let (user_id, is_new_user) = if let Some(uid) = existing_user_id {
-            // Known identity — just log them in.
             (uid, false)
         } else if let Some(existing_profile) = self
             .service()
@@ -717,9 +658,6 @@ impl UsersService for UsersServer {
             .await
             .map_err(error::to_status)?
         {
-            // Email already belongs to an existing user (e.g. registered with
-            // password or another OAuth provider). Link this new provider and
-            // log them in.
             self.service()
                 .link_oauth_provider(
                     existing_profile.user_id,
@@ -732,10 +670,6 @@ impl UsersService for UsersServer {
                 .map_err(error::to_status)?;
             (existing_profile.user_id, false)
         } else {
-            // Completely new user — create account with placeholder username.
-            // Apply the registration domain regex here (signup branch only;
-            // login branches above are exempt so existing users aren't
-            // locked out when the operator tightens the regex).
             self.enforce_registration_policy(&req.provider_email)?;
 
             let placeholder_username = format!("user-{}", Uuid::now_v7().simple());
@@ -759,8 +693,6 @@ impl UsersService for UsersServer {
             (registered.user_id, true)
         };
 
-        // Set profile picture from provider data if user doesn't already have one.
-        // Uses a conditional update to avoid race conditions with concurrent logins.
         if let Some(ref data) = provider_data
             && let Some(picture_url) = data.get("picture_url").and_then(|v| v.as_str())
             && !picture_url.is_empty()
@@ -772,7 +704,6 @@ impl UsersService for UsersServer {
                 .map_err(error::to_status)?;
         }
 
-        // Load user profile.
         let profile = self
             .service()
             .get_user(user_id)
@@ -780,7 +711,6 @@ impl UsersService for UsersServer {
             .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::internal("user not found after OAuth login"))?;
 
-        // Issue tokens (same pattern as register/login).
         let (refresh_token, hash) = self
             .state
             .tokens()
@@ -829,9 +759,6 @@ impl UsersService for UsersServer {
             .user_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
-        // Self-or-SA: Forage's OAuth signup flow auto-links via its
-        // service account; users can also link providers to their own
-        // account.
         let _actor = unauth
             .require_authenticated()?
             .require_user_self_or_service_account(user_id)?;
@@ -846,9 +773,6 @@ impl UsersService for UsersServer {
             Some(req.provider_email.as_str())
         };
 
-        // Merge display_name into provider_data_json so the read path
-        // can surface it via OAuthConnection.provider_display_name.
-        // If the caller passed neither, store None.
         let provider_data =
             build_link_provider_data(&req.provider_display_name, &req.provider_data_json);
 
@@ -878,10 +802,6 @@ impl UsersService for UsersServer {
             .user_id
             .parse::<Uuid>()
             .map_err(|_| tonic::Status::invalid_argument("invalid user_id"))?;
-        // Unlink is user-self only (no service-account bypass): Forage's
-        // signup-time service account has no legitimate need to unlink
-        // providers on behalf of arbitrary users. Closes adversarial
-        // review gap #10.
         let _actor = unauth.require_authenticated()?.require_user_self(user_id)?;
 
         let provider = forest_grpc_interface::OAuthProvider::try_from(req.provider)
@@ -894,8 +814,6 @@ impl UsersService for UsersServer {
 
         Ok(tonic::Response::new(UnlinkOAuthProviderResponse {}))
     }
-
-    // ── Personal access tokens ───────────────────────────────────────
 
     async fn create_personal_access_token(
         &self,
@@ -974,11 +892,6 @@ impl UsersService for UsersServer {
         request: tonic::Request<DeletePersonalAccessTokenRequest>,
     ) -> std::result::Result<tonic::Response<DeletePersonalAccessTokenResponse>, tonic::Status>
     {
-        // PATs are addressed by token_id only — the caller doesn't supply
-        // the owning user. The gate gives us an authenticated actor and
-        // we then branch by variant to either scope the delete to the
-        // user's own user_id (closing enumeration via token_id) or to
-        // let a service account bypass (used by background cleanup).
         let actor = crate::grpc::authorize::unauthenticated_actor(&request)
             .require_authenticated()?
             .into_actor();
@@ -996,9 +909,6 @@ impl UsersService for UsersServer {
                     .await
                     .map_err(error::to_status)?;
                 if n == 0 {
-                    // Mirror "not found" for both "doesn't exist" and
-                    // "exists but not yours" so token ids aren't
-                    // enumerable.
                     return Err(tonic::Status::not_found("token not found"));
                 }
             }
@@ -1009,8 +919,6 @@ impl UsersService for UsersServer {
                     .map_err(error::to_status)?;
             }
             Actor::App { .. } => {
-                // Apps are org-scoped; PATs are user-scoped. There is
-                // no owner relationship between an App and a PAT.
                 return Err(tonic::Status::permission_denied(
                     "app tokens cannot delete personal access tokens",
                 ));
@@ -1019,8 +927,6 @@ impl UsersService for UsersServer {
 
         Ok(tonic::Response::new(DeletePersonalAccessTokenResponse {}))
     }
-
-    // ── MFA ──────────────────────────────────────────────────────────
 
     async fn setup_mfa(
         &self,
@@ -1044,7 +950,6 @@ impl UsersService for UsersServer {
             .parse()
             .map_err(|_| tonic::Status::internal("invalid user_id in claims"))?;
 
-        // Get user email for the provisioning URI.
         let profile = self
             .service()
             .get_user(user_id)
@@ -1057,7 +962,6 @@ impl UsersService for UsersServer {
             .map(|e| e.email.as_str())
             .unwrap_or("user");
 
-        // Generate a cryptographically random TOTP secret.
         let secret = Secret::generate_secret();
         let secret_bytes = secret
             .to_bytes()
@@ -1108,7 +1012,6 @@ impl UsersService for UsersServer {
             .parse()
             .map_err(|_| tonic::Status::invalid_argument("invalid mfa_id"))?;
 
-        // Load MFA record and verify it belongs to the calling user.
         let mfa = self
             .service()
             .get_mfa_for_user(user_id)
@@ -1120,7 +1023,6 @@ impl UsersService for UsersServer {
             return Err(tonic::Status::permission_denied("MFA ID mismatch"));
         }
 
-        // Validate the TOTP code.
         let totp = TOTP::new(
             Algorithm::SHA1,
             6,
@@ -1166,7 +1068,6 @@ impl UsersService for UsersServer {
             .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::not_found("MFA not enabled"))?;
 
-        // Require the current TOTP code to confirm the disable request.
         let totp = TOTP::new(
             Algorithm::SHA1,
             6,
@@ -1195,7 +1096,6 @@ impl UsersService for UsersServer {
     ) -> std::result::Result<tonic::Response<VerifyLoginMfaResponse>, tonic::Status> {
         let req = request.into_inner();
 
-        // Consume the MFA session token — single-use, expires in 5 minutes.
         let state_info = self
             .service()
             .consume_oauth_state(&req.mfa_session_token)
@@ -1214,7 +1114,6 @@ impl UsersService for UsersServer {
             .and_then(|s| s.parse().ok())
             .ok_or_else(|| tonic::Status::internal("invalid MFA session data"))?;
 
-        // Load MFA record and validate the TOTP code.
         let mfa = self
             .service()
             .get_mfa_for_user(user_id)
@@ -1236,13 +1135,11 @@ impl UsersService for UsersServer {
             return Err(tonic::Status::unauthenticated("invalid TOTP code"));
         }
 
-        // Record successful use.
         self.service()
             .touch_mfa(mfa.id)
             .await
             .map_err(error::to_status)?;
 
-        // Load the full user profile for the response.
         let profile = self
             .service()
             .get_user(user_id)
@@ -1250,7 +1147,6 @@ impl UsersService for UsersServer {
             .map_err(error::to_status)?
             .ok_or_else(|| tonic::Status::internal("user not found"))?;
 
-        // Issue tokens (same pattern as login/register).
         let (refresh_token, hash) = self
             .state
             .tokens()
@@ -1287,8 +1183,6 @@ impl UsersService for UsersServer {
             }),
         }))
     }
-
-    // ── Device authorization grant (RFC 8628) ────────────────────────
 
     async fn initiate_device_login(
         &self,
@@ -1387,7 +1281,6 @@ impl UsersService for UsersServer {
         &self,
         request: tonic::Request<ApproveDeviceLoginRequest>,
     ) -> std::result::Result<tonic::Response<ApproveDeviceLoginResponse>, tonic::Status> {
-        // Service-account-only — see TASKS/022-device-login.md §1.4.
         let _actor = crate::grpc::authorize::unauthenticated_actor(&request)
             .require_authenticated()?
             .require_service_account()?;
@@ -1432,8 +1325,6 @@ impl UsersService for UsersServer {
         Ok(tonic::Response::new(DenyDeviceLoginResponse {}))
     }
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────
 
 fn profile_to_grpc_user(profile: crate::services::users::UserProfile) -> User {
     User {
@@ -1481,19 +1372,6 @@ fn pat_info_to_grpc(info: crate::services::users::PersonalAccessTokenInfo) -> Pe
     }
 }
 
-/// Every spelling of a provider that could be sitting in
-/// `identities.provider`, from any accepted input spelling.
-///
-/// The column is not consistent across the table's history. Current
-/// writes store the enum wire name lowercased
-/// (`oauth_provider_github`), but rows created by earlier versions hold
-/// the short form (`github`). Matching one spelling silently misses the
-/// other half of the table, and reports it as "no such person" — which
-/// is indistinguishable from the truth, so nobody ever finds out.
-///
-/// Returning both and matching on either is deliberate: it costs one
-/// array parameter and removes a whole class of read that depends on
-/// when a row happened to be written.
 fn provider_spellings(provider: &str) -> Option<Vec<String>> {
     let trimmed = provider.trim().to_ascii_lowercase();
     if trimmed.is_empty() {
@@ -1504,7 +1382,6 @@ fn provider_spellings(provider: &str) -> Option<Vec<String>> {
         return None;
     }
     let wire = as_enum.as_str_name().to_lowercase();
-    // e.g. `oauth_provider_github` -> also accept `github`
     let short = wire
         .strip_prefix("oauth_provider_")
         .unwrap_or(&wire)
@@ -1541,31 +1418,14 @@ fn datetime_to_timestamp(dt: chrono::DateTime<chrono::Utc>) -> prost_types::Time
     }
 }
 
-// Note: per-handler authz lives on the typed gate in
-// `crate::grpc::authorize` (`UnauthenticatedActor` → `AuthenticatedActor`
-// → `Actor`). Free helpers used to live here; they were removed once
-// the gate replaced them.
-
-/// Compose a `provider_data` JSONB value to store on `identities` from
-/// the request fields. If the caller supplied a JSON blob, parse and
-/// optionally merge `display_name` into it under the `"display_name"`
-/// key. Returns `None` when both inputs are empty so we don't write a
-/// pointless `{}` row.
 fn build_link_provider_data(display_name: &str, data_json: &str) -> Option<serde_json::Value> {
     let mut value = if data_json.is_empty() {
         serde_json::Value::Object(serde_json::Map::new())
     } else {
-        // Tolerate malformed JSON — we'd rather store the link than
-        // refuse it because the caller sent garbage extras.
         serde_json::from_str(data_json)
             .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
     };
 
-    // Coerce non-object JSON (arrays, numbers, strings) to an empty
-    // object. Without this, a well-formed but non-object data_json
-    // would silently drop the display_name in the merge step below
-    // (the Object pattern match would fail). Caught by second
-    // adversarial review.
     if !matches!(value, serde_json::Value::Object(_)) {
         value = serde_json::Value::Object(serde_json::Map::new());
     }
@@ -1585,15 +1445,6 @@ fn build_link_provider_data(display_name: &str, data_json: &str) -> Option<serde
     }
 }
 
-/// Reverse of [`build_link_provider_data`]. Extract the display name (if
-/// present) and re-serialise the *remaining* JSON for the wire — the
-/// `display_name` key is removed from the JSON so the value rides on
-/// exactly one field (`provider_display_name`) rather than two.
-///
-/// Returns empty strings when no data is available — gRPC `string`
-/// fields are non-nullable. Returns empty JSON (`""`) rather than `"{}"`
-/// when stripping `display_name` leaves nothing else so the wire stays
-/// compact.
 fn split_provider_data(data: Option<&serde_json::Value>) -> (String, String) {
     let Some(value) = data else {
         return (String::new(), String::new());
@@ -1604,9 +1455,6 @@ fn split_provider_data(data: Option<&serde_json::Value>) -> (String, String) {
         .unwrap_or("")
         .to_string();
 
-    // Clone the object so we can remove `display_name` without mutating
-    // the caller's value. Non-object JSON is preserved verbatim (no
-    // display_name to strip).
     let stripped = match value {
         serde_json::Value::Object(map) => {
             let mut cloned = map.clone();
@@ -1661,8 +1509,6 @@ mod provider_data_tests {
 
     #[test]
     fn build_tolerates_malformed_json_by_starting_fresh() {
-        // The caller sent garbage extras — we still preserve the
-        // display_name rather than rejecting the whole link.
         let v = build_link_provider_data("kjuulh", "not-json{").unwrap();
         assert_eq!(
             v.get("display_name").and_then(|x| x.as_str()),
@@ -1672,11 +1518,6 @@ mod provider_data_tests {
 
     #[test]
     fn build_coerces_non_object_json_to_empty_object_before_merging_display_name() {
-        // A caller sending a JSON array / number / string as
-        // provider_data_json would, before the second adversarial
-        // review fix, silently drop the display_name (the Object
-        // match in the merge step would fail). Verify the merge still
-        // succeeds for each non-object shape.
         for body in [r#"[1,2,3]"#, r#"42"#, r#""string-not-object""#, r#"null"#] {
             let v = build_link_provider_data("kjuulh", body)
                 .unwrap_or_else(|| panic!("expected merge to succeed for {body}"));
@@ -1685,7 +1526,6 @@ mod provider_data_tests {
                 Some("kjuulh"),
                 "display_name lost when data_json was {body}"
             );
-            // The non-object body is dropped, not preserved alongside.
             assert!(
                 matches!(v, serde_json::Value::Object(_)),
                 "result should be an object for {body}"
@@ -1704,8 +1544,6 @@ mod provider_data_tests {
         let (display, json_str) = split_provider_data(Some(&v));
         assert_eq!(display, "kjuulh");
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
-        // display_name MUST NOT appear in the JSON — it would ride twice
-        // on the wire if it did.
         assert!(
             parsed.get("display_name").is_none(),
             "display_name should be stripped, got: {json_str}"
@@ -1718,7 +1556,6 @@ mod provider_data_tests {
 
     #[test]
     fn split_returns_empty_json_when_only_display_name_present() {
-        // Stripping display_name leaves nothing → empty JSON, not "{}".
         let v = json!({"display_name": "kjuulh"});
         let (display, json_str) = split_provider_data(Some(&v));
         assert_eq!(display, "kjuulh");
@@ -1742,10 +1579,6 @@ mod provider_data_tests {
 mod provider_tests {
     use super::*;
 
-    /// The bug this exists to prevent: `identities.provider` holds
-    /// different spellings depending on when the row was written, so
-    /// matching only one silently misses half the table and reports it
-    /// as "no such person".
     #[test]
     fn every_input_spelling_yields_every_stored_spelling() {
         for input in ["github", "GitHub", "  oauth_provider_github  "] {
@@ -1761,9 +1594,6 @@ mod provider_tests {
         assert!(google.contains(&"google".to_string()));
     }
 
-    /// One of the spellings must be exactly what the write path stores,
-    /// by construction rather than by two hand-written constants that
-    /// happen to agree today.
     #[test]
     fn the_set_includes_what_the_write_path_stores() {
         let written = forest_grpc_interface::OAuthProvider::OauthProviderGithub

@@ -21,7 +21,6 @@
         </div>
     </div>
 
-    {# Type info #}
     <div class="border border-gray-200 rounded-lg overflow-hidden mb-6">
         <div class="px-5 py-3 bg-gray-50">
             <span class="text-sm font-medium text-gray-900">Type</span>
@@ -52,7 +51,6 @@
         </div>
     </div>
 
-    {# Metadata section #}
     <div class="border border-gray-200 rounded-lg overflow-hidden">
         <div class="px-5 py-3 bg-gray-50 flex items-center justify-between">
             <span class="text-sm font-medium text-gray-900">Metadata</span>
@@ -77,8 +75,6 @@
                         placeholder="key" {% if entry.sensitive %}readonly{% endif %}
                         class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono{% if entry.sensitive %} bg-gray-50 text-gray-500{% endif %}">
                     {% if entry.sensitive %}
-                    {# The page is never sent this value. The name is echoed back so
-                       the save can restore it server-side instead of blanking it. #}
                     <input type="hidden" name="preserve_sensitive_keys" value="{{ entry.key }}">
                     <div class="flex-1 flex items-center gap-2">
                         <input type="text" name="metadata_values" value="" autocomplete="off"
@@ -107,7 +103,6 @@
                     </button>
                 </div>
                 {% endfor %}
-                {# One empty row to start #}
                 <div class="px-5 py-3 flex items-center gap-3 metadata-row">
                     <input type="text" name="metadata_keys" placeholder="key"
                         class="flex-1 text-sm px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono">
@@ -135,7 +130,6 @@
             </div>
         </form>
         {% else %}
-        {# Read-only view for non-admins #}
         {% if metadata | length > 0 %}
         <div class="divide-y divide-gray-100">
             {% for entry in metadata %}

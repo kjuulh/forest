@@ -132,8 +132,6 @@ fn validate_csrf(session: &Session, form_csrf: &str) -> Result<(), Response> {
     }
 }
 
-// ─── Query params ───────────────────────────────────────────────────
-
 #[derive(Deserialize, Default)]
 struct ListQuery {
     #[serde(default)]
@@ -145,8 +143,6 @@ struct DetailQuery {
     #[serde(default)]
     test: Option<String>,
 }
-
-// ─── List integrations ──────────────────────────────────────────────
 
 async fn list_integrations(
     State(state): State<AppState>,
@@ -164,7 +160,6 @@ async fn list_integrations(
         .await
         .map_err(|e| internal_error(&state, "list integrations", &e))?;
 
-    // Build summary for each integration (count of enabled rules)
     let mut integration_summaries = Vec::new();
     for integ in &integrations {
         let rules = store
@@ -209,8 +204,6 @@ async fn list_integrations(
     Ok(Html(html).into_response())
 }
 
-// ─── Install webhook page ───────────────────────────────────────────
-
 async fn install_webhook_page(
     State(state): State<AppState>,
     session: Session,
@@ -243,8 +236,6 @@ async fn install_webhook_page(
 
     Ok(Html(html).into_response())
 }
-
-// ─── Create webhook ─────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct CreateWebhookForm {
@@ -306,8 +297,6 @@ async fn create_webhook(
         .await
         .map_err(|e| internal_error(&state, "create webhook", &e))?;
 
-    // Render the "installed" page directly (not a redirect) so we can show the API token once.
-    // The raw token only exists in the create response and is never stored in plaintext.
     let html = state
         .templates
         .render(
@@ -335,8 +324,6 @@ async fn create_webhook(
 
     Ok(Html(html).into_response())
 }
-
-// ─── Integration detail ─────────────────────────────────────────────
 
 async fn integration_detail(
     State(state): State<AppState>,
@@ -388,7 +375,6 @@ async fn integration_detail(
         })
         .collect();
 
-    // Redact sensitive config fields for display
     let config_display = match &integration.config {
         IntegrationConfig::Slack {
             team_name,
@@ -448,8 +434,6 @@ async fn integration_detail(
     Ok(Html(html).into_response())
 }
 
-// ─── Update notification rules ──────────────────────────────────────
-
 #[derive(Deserialize)]
 struct UpdateRuleForm {
     _csrf: String,
@@ -471,7 +455,6 @@ async fn update_rules(
     let enabled = form.enabled == "true";
     let store = state.integration_store.as_ref().unwrap();
 
-    // Verify integration belongs to org
     store
         .get_integration(&org, &id)
         .await
@@ -488,8 +471,6 @@ async fn update_rules(
     ))
     .into_response())
 }
-
-// ─── Toggle integration ─────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct ToggleForm {
@@ -522,8 +503,6 @@ async fn toggle_integration(
     .into_response())
 }
 
-// ─── Delete integration ─────────────────────────────────────────────
-
 #[derive(Deserialize)]
 struct CsrfForm {
     _csrf: String,
@@ -549,8 +528,6 @@ async fn delete_integration(
     Ok(Redirect::to(&format!("/orgs/{}/settings/integrations", org)).into_response())
 }
 
-// ─── Test integration ───────────────────────────────────────────────
-
 async fn test_integration(
     State(state): State<AppState>,
     session: Session,
@@ -568,7 +545,6 @@ async fn test_integration(
         .await
         .map_err(|e| internal_error(&state, "get integration", &e))?;
 
-    // Build a test notification event
     let test_event = NotificationEvent {
         id: format!("test-{}", uuid::Uuid::new_v4()),
         notification_type: "release_succeeded".into(),
@@ -606,8 +582,6 @@ async fn test_integration(
     ))
     .into_response())
 }
-
-// ─── Install Slack page ─────────────────────────────────────────────
 
 async fn install_slack_page(
     State(state): State<AppState>,
@@ -652,8 +626,6 @@ async fn install_slack_page(
 
     Ok(Html(html).into_response())
 }
-
-// ─── Create Slack (manual webhook URL fallback) ──────────────────────
 
 #[derive(Deserialize)]
 struct CreateSlackForm {
@@ -748,8 +720,6 @@ async fn create_slack(
     Ok(Html(html).into_response())
 }
 
-// ─── Reinstall Slack ─────────────────────────────────────────────────
-
 #[derive(Deserialize)]
 struct ReinstallForm {
     _csrf: String,
@@ -766,7 +736,6 @@ async fn reinstall_slack(
     require_integration_store(&state)?;
     validate_csrf(&session, &form._csrf)?;
 
-    // Verify the integration exists and is a Slack integration
     let store = state.integration_store.as_ref().unwrap();
     let integration = store.get_integration(&org, &id).await.map_err(|e| {
         error_page(
@@ -795,7 +764,6 @@ async fn reinstall_slack(
         )
     })?;
 
-    // Encode org + integration ID in state so callback can update instead of create
     let oauth_state = format!("{}:reinstall:{}", org, id);
     let redirect_uri = format!(
         "{}/integrations/slack/callback",
@@ -810,8 +778,6 @@ async fn reinstall_slack(
 
     Ok(Redirect::to(&url).into_response())
 }
-
-// ─── Slack OAuth callback ────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct SlackCallbackQuery {
@@ -834,7 +800,6 @@ async fn slack_oauth_callback(
         )
     })?;
 
-    // Parse state: either "{org}" (new install) or "{org}:reinstall:{id}" (reinstall)
     let (org, reinstall_id) = if raw_state.contains(":reinstall:") {
         let parts: Vec<&str> = raw_state.splitn(2, ":reinstall:").collect();
         (parts[0].to_string(), Some(parts[1].to_string()))
@@ -842,7 +807,6 @@ async fn slack_oauth_callback(
         (raw_state, None)
     };
 
-    // If Slack returned an error (user denied)
     if let Some(err) = query.error {
         let redirect_to = if let Some(ref rid) = reinstall_id {
             format!("/orgs/{}/settings/integrations/{}?error={}", org, rid, urlencoding::encode(&format!("Slack authorization denied: {err}")))
@@ -874,7 +838,6 @@ async fn slack_oauth_callback(
         )
     })?;
 
-    // Exchange code for token
     let http = reqwest::Client::new();
     let token_resp = http
         .post("https://slack.com/api/oauth.v2.access")
@@ -914,7 +877,6 @@ async fn slack_oauth_callback(
         .into_response());
     }
 
-    // Extract fields from Slack response
     let team_id = resp_body["team"]["id"]
         .as_str()
         .unwrap_or("")
@@ -957,7 +919,6 @@ async fn slack_oauth_callback(
     let store = state.integration_store.as_ref().unwrap();
 
     if let Some(ref existing_id) = reinstall_id {
-        // Reinstall: update existing integration's config
         store
             .update_integration_config(&org, existing_id, &integration_name, &config)
             .await
@@ -969,7 +930,6 @@ async fn slack_oauth_callback(
         ))
         .into_response())
     } else {
-        // New install: create integration
         let created = store
             .create_integration(&CreateIntegrationInput {
                 organisation: org.clone(),
@@ -1009,8 +969,6 @@ async fn slack_oauth_callback(
         Ok(Html(html).into_response())
     }
 }
-
-// ─── Helpers ────────────────────────────────────────────────────────
 
 fn notification_type_label(nt: &str) -> &str {
     match nt {

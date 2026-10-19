@@ -6,8 +6,6 @@ mod create;
 mod delete;
 mod list;
 
-/// Resolve the user id for personal-access-token operations. Falls back to the
-/// currently logged-in user when `--user-id` is not provided.
 pub(super) async fn resolve_user_id(
     state: &State,
     user_id: Option<&str>,

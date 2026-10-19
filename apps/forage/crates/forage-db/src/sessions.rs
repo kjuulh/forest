@@ -6,9 +6,6 @@ use forage_core::session::{CachedOrg, CachedUser, SessionData, SessionError, Ses
 use moka::future::Cache;
 use sqlx::PgPool;
 
-/// PostgreSQL-backed session store with a Moka write-through cache.
-/// Reads check the cache first, falling back to Postgres on miss.
-/// Writes update both cache and Postgres atomically.
 pub struct PgSessionStore {
     pool: PgPool,
     cache: Cache<String, SessionData>,
@@ -18,12 +15,11 @@ impl PgSessionStore {
     pub fn new(pool: PgPool) -> Self {
         let cache = Cache::builder()
             .max_capacity(10_000)
-            .time_to_idle(Duration::from_secs(30 * 60)) // evict after 30min idle
+            .time_to_idle(Duration::from_secs(30 * 60))
             .build();
         Self { pool, cache }
     }
 
-    /// Remove sessions inactive for longer than `max_inactive_days`.
     pub async fn reap_expired(&self, max_inactive_days: i64) -> Result<u64, SessionError> {
         let cutoff = Utc::now() - chrono::Duration::days(max_inactive_days);
         let result = sqlx::query("DELETE FROM sessions WHERE last_seen_at < $1")
@@ -32,7 +28,6 @@ impl PgSessionStore {
             .await
             .map_err(|e| SessionError::Store(e.to_string()))?;
 
-        // Moka handles its own TTL eviction, but force a sync for reaped sessions
         self.cache.run_pending_tasks().await;
 
         Ok(result.rows_affected())
@@ -64,19 +59,16 @@ impl SessionStore for PgSessionStore {
         .await
         .map_err(|e| SessionError::Store(e.to_string()))?;
 
-        // Populate cache
         self.cache.insert(id.as_str().to_string(), data).await;
 
         Ok(id)
     }
 
     async fn get(&self, id: &SessionId) -> Result<Option<SessionData>, SessionError> {
-        // Check cache first
         if let Some(data) = self.cache.get(id.as_str()).await {
             return Ok(Some(data));
         }
 
-        // Cache miss — fall back to Postgres
         let row: Option<SessionRow> = sqlx::query_as(
             "SELECT access_token, refresh_token, access_expires_at, user_id, username, user_emails, user_orgs, csrf_token, created_at, last_seen_at
              FROM sessions WHERE session_id = $1",
@@ -88,7 +80,6 @@ impl SessionStore for PgSessionStore {
 
         if let Some(row) = row {
             let data = row.into_session_data();
-            // Backfill cache
             self.cache.insert(id.as_str().to_string(), data.clone()).await;
             Ok(Some(data))
         } else {
@@ -117,7 +108,6 @@ impl SessionStore for PgSessionStore {
         .await
         .map_err(|e| SessionError::Store(e.to_string()))?;
 
-        // Update cache
         self.cache.insert(id.as_str().to_string(), data).await;
 
         Ok(())
@@ -130,14 +120,12 @@ impl SessionStore for PgSessionStore {
             .await
             .map_err(|e| SessionError::Store(e.to_string()))?;
 
-        // Evict from cache
         self.cache.invalidate(id.as_str()).await;
 
         Ok(())
     }
 }
 
-/// Extract user fields for SQL binding, shared by create and update.
 fn extract_user_fields(
     data: &SessionData,
 ) -> Result<

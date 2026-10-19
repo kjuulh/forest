@@ -1,27 +1,3 @@
-//! Public OAuth 2.0 authorization-server endpoints ("Sign in with Forest").
-//!
-//! Forage is the public HTTP edge; all validation/issuance is delegated to
-//! forest-server over gRPC (the `ForestOAuthApps` client, authenticated as a
-//! service account). The browser session is the resource owner.
-//!
-//! - `GET  /oauth/authorize` — consent screen (session-gated)
-//! - `POST /oauth/authorize` — consent decision (CSRF-protected)
-//! - `POST /oauth/token`     — code → token exchange (machine-to-machine)
-//! - `POST /oauth/device_authorization` — start a device grant (RFC 8628)
-//!
-//! The device grant is for a CLI on a machine with no usable browser (an SSH
-//! session): it gets a short code, the person approves it at `/device` on
-//! any device, and the CLI polls `/oauth/token` with
-//! `grant_type=urn:ietf:params:oauth:grant-type:device_code`. Forest binds the
-//! grant to the app and the scopes requested, and the tokens are the app's,
-//! exactly as the code flow mints them.
-//!
-//! Public clients (RFC 8252 native apps, e.g. a CLI) are supported: they hold
-//! no client_secret, so they authenticate at the token endpoint with just
-//! `client_id` in the body (`token_endpoint_auth_method: none`), must send a
-//! PKCE S256 challenge, and may redirect to a loopback URI on any port.
-//! Forest enforces all of it; Forage refuses a missing challenge up front so
-//! the person is not asked to consent to a request that cannot succeed.
 #![allow(clippy::result_large_err)]
 
 use axum::Router;
@@ -54,8 +30,6 @@ pub fn router() -> Router<AppState> {
             post(revoke_authorized_app),
         )
 }
-
-// ─── Authorized apps (resource-owner view) ───────────────────────────
 
 async fn authorized_apps_page(
     State(state): State<AppState>,
@@ -113,8 +87,6 @@ async fn revoke_authorized_app(
     Ok(Redirect::to("/settings/authorized-apps").into_response())
 }
 
-// ─── Authorize (GET) ─────────────────────────────────────────────────
-
 #[derive(Deserialize)]
 struct AuthorizeQuery {
     #[serde(default)]
@@ -145,9 +117,6 @@ async fn authorize_page(
 ) -> Result<Response, Response> {
     let client = require_client(&state).await?;
 
-    // Resolve and validate the client + redirect_uri BEFORE trusting either (or
-    // before sending an unauthenticated user to login) — on failure we render
-    // an on-site error, never redirect (open-redirect / mix-up defence).
     let app = match client.lookup_oauth_client(&q.client_id).await {
         Ok(Some(app)) => app,
         Ok(None) => return Err(invalid_client_page(&state)),
@@ -157,7 +126,6 @@ async fn authorize_page(
         return Err(invalid_redirect_page(&state));
     }
 
-    // From here, redirect_uri is trusted: protocol errors go back to it.
     if q.response_type != "code" {
         return Ok(redirect_error(
             &q.redirect_uri,
@@ -165,10 +133,6 @@ async fn authorize_page(
             q.state.as_deref(),
         ));
     }
-    // A public client has no secret: the PKCE verifier is all that ties the
-    // code to it, so it must send an S256 challenge (RFC 8252 §8.1). Forest
-    // refuses the code otherwise; saying so before login or consent spares
-    // the person a screen that cannot lead anywhere.
     if app.public
         && (non_empty(q.code_challenge.as_deref()).is_none()
             || q.code_challenge_method.as_deref() != Some("S256"))
@@ -191,10 +155,6 @@ async fn authorize_page(
         }
     };
 
-    // Authentication. With `prompt=none` we must NOT show UI, so an
-    // unauthenticated request returns `login_required` rather than bouncing to
-    // the login page (OIDC §3.1.2.6). Otherwise send the user to login,
-    // returning to this authorize URL afterwards.
     let session = match maybe_session.session {
         Some(s) => s,
         None => {
@@ -206,12 +166,6 @@ async fn authorize_page(
         }
     };
 
-    // Remembered consent + OIDC `prompt` (§3.1.2.1):
-    //   - prompt=none    → never show UI: auto-approve if already consented for
-    //                      these scopes, else error=consent_required.
-    //   - prompt=consent → always show the screen (force re-consent).
-    //   - default        → auto-approve when prior consent covers the request,
-    //                      otherwise show the screen.
     let prior = client
         .get_oauth_consent(&q.client_id, &session.user.user_id)
         .await
@@ -242,7 +196,7 @@ async fn authorize_page(
                 redirect_error(&q.redirect_uri, "consent_required", q.state.as_deref())
             });
         }
-        "consent" => { /* force the screen below */ }
+        "consent" => {}
         _ if covered => return Ok(auto_approve().await),
         _ => {}
     }
@@ -265,7 +219,6 @@ async fn authorize_page(
                     name => s,
                     description => scope_description(s),
                 }).collect::<Vec<_>>(),
-                // Echo the validated request back through the consent form.
                 client_id => &q.client_id,
                 redirect_uri => &q.redirect_uri,
                 scope => scopes.join(" "),
@@ -284,8 +237,6 @@ async fn authorize_page(
         .map_err(|e| internal_error(&state, "template error", &e))?;
     Ok(Html(html).into_response())
 }
-
-// ─── Authorize (POST — consent decision) ─────────────────────────────
 
 #[derive(Deserialize)]
 struct ConsentForm {
@@ -318,8 +269,6 @@ async fn authorize_decision(
         return Err((StatusCode::FORBIDDEN, "CSRF token mismatch").into_response());
     }
 
-    // Re-validate the client + redirect_uri server-side (never trust the
-    // posted hidden fields for the redirect target).
     let app = match client.lookup_oauth_client(&form.client_id).await {
         Ok(Some(app)) => app,
         Ok(None) => return Err(invalid_client_page(&state)),
@@ -339,8 +288,6 @@ async fn authorize_decision(
         ));
     }
 
-    // The displayed consent params must match what was rendered (review #2):
-    // reject if the hidden client_id / redirect_uri / scope were tampered.
     let expected = consent_binding(
         &session.csrf_token,
         &form.client_id,
@@ -376,10 +323,6 @@ async fn authorize_decision(
     .await)
 }
 
-/// Mint an authorization code for a consented request and 302 back to the
-/// client with `code` (+ `state`). On a flow error, redirect with the matching
-/// OAuth error. Shared by the explicit consent POST and the remembered-consent
-/// auto-approve path.
 #[allow(clippy::too_many_arguments)]
 async fn issue_code_redirect(
     client: &std::sync::Arc<dyn forage_core::platform::ForestOAuthApps>,
@@ -411,16 +354,12 @@ async fn issue_code_redirect(
             }
             Redirect::to(&append_query(redirect_uri, &params)).into_response()
         }
-        Err(OAuthFlowError::InvalidRequest(msg)) => {
-            // Forest prefixes a reason it wants shown (e.g. a public client
-            // without PKCE S256) with the error code.
-            match msg.strip_prefix("invalid_request: ") {
-                Some(description) => {
-                    redirect_error_described(redirect_uri, "invalid_request", description, state)
-                }
-                None => redirect_error(redirect_uri, "invalid_request", state),
+        Err(OAuthFlowError::InvalidRequest(msg)) => match msg.strip_prefix("invalid_request: ") {
+            Some(description) => {
+                redirect_error_described(redirect_uri, "invalid_request", description, state)
             }
-        }
+            None => redirect_error(redirect_uri, "invalid_request", state),
+        },
         Err(e) => {
             let oauth_err = match e {
                 OAuthFlowError::InvalidScope => "invalid_scope",
@@ -430,8 +369,6 @@ async fn issue_code_redirect(
         }
     }
 }
-
-// ─── Token endpoint ──────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct TokenForm {
@@ -449,11 +386,8 @@ struct TokenForm {
     code_verifier: Option<String>,
     #[serde(default)]
     refresh_token: String,
-    /// Space-delimited, per RFC 6749 §3.3. Only read for
-    /// `client_credentials`; empty means "everything this app has".
     #[serde(default)]
     scope: String,
-    /// RFC 8628 §3.4.
     #[serde(default)]
     device_code: String,
 }
@@ -469,19 +403,11 @@ async fn token(
         return token_error(StatusCode::SERVICE_UNAVAILABLE, "temporarily_unavailable");
     };
 
-    // Client credentials may arrive via HTTP Basic (RFC 6749 §2.3.1) or in the
-    // body (`client_secret_post`). Basic takes precedence when present. A
-    // public client sends only `client_id` in the body and no secret at all
-    // (`none`); the empty secret goes to Forest, which knows the app is public
-    // and skips the check — a confidential app still fails without its own.
     let (client_id, client_secret) = match parse_basic_auth(&headers) {
         Some((id, secret)) => (id, secret),
         None => (form.client_id.clone(), form.client_secret.clone()),
     };
 
-    // client_credentials answers with a different shape — no refresh
-    // token, no id_token — so it returns straight from here rather than
-    // being forced through the user-token response builder below.
     if form.grant_type == "client_credentials" {
         let scopes: Vec<String> = form.scope.split_whitespace().map(str::to_string).collect();
         return match client
@@ -502,8 +428,6 @@ async fn token(
         };
     }
 
-    // The device grant answers "not yet" as often as it answers with tokens,
-    // and those answers are RFC 8628 §3.5 error codes rather than failures.
     if form.grant_type == DEVICE_CODE_GRANT {
         if form.device_code.is_empty() {
             return token_error(StatusCode::BAD_REQUEST, "invalid_request");
@@ -574,8 +498,6 @@ async fn token(
     }
 }
 
-// ─── Device authorization endpoint (RFC 8628 §3.1) ──────────────────
-
 #[derive(Deserialize)]
 struct DeviceAuthorizationForm {
     #[serde(default)]
@@ -620,9 +542,6 @@ async fn device_authorization(
     }
 }
 
-/// An app not registered for the device grant is `unauthorized_client`
-/// (RFC 6749 §5.2); Forest reports it as `unsupported_grant_type`, which
-/// would tell the client the server lacks the grant altogether.
 fn device_flow_error(e: &OAuthFlowError) -> Response {
     match e {
         OAuthFlowError::InvalidRequest(msg) if msg == "unsupported_grant_type" => {
@@ -634,8 +553,6 @@ fn device_flow_error(e: &OAuthFlowError) -> Response {
         }
     }
 }
-
-// ─── OIDC discovery ──────────────────────────────────────────────────
 
 async fn discovery(State(state): State<AppState>) -> Response {
     let base = &state.forage_host;
@@ -671,8 +588,6 @@ async fn discovery(State(state): State<AppState>) -> Response {
     .into_response()
 }
 
-// ─── Userinfo endpoint ───────────────────────────────────────────────
-
 async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let Some(client) = state.oauth_apps_client.as_ref() else {
         return unauthorized("temporarily_unavailable");
@@ -688,7 +603,6 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
 
     match client.oauth_userinfo(token).await {
         Ok(info) => {
-            // Build a claims object containing only the granted/non-empty fields.
             let mut claims = serde_json::Map::new();
             claims.insert("sub".into(), json!(info.sub));
             if let Some(u) = info.username {
@@ -714,7 +628,6 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
     }
 }
 
-/// RFC 6749 §5.2 error code and its HTTP status.
 fn oauth_error_code(e: &OAuthFlowError) -> (StatusCode, &'static str) {
     match e {
         OAuthFlowError::InvalidClient => (StatusCode::UNAUTHORIZED, "invalid_client"),
@@ -725,7 +638,6 @@ fn oauth_error_code(e: &OAuthFlowError) -> (StatusCode, &'static str) {
     }
 }
 
-/// A 401 with the RFC 6750 `WWW-Authenticate` challenge.
 fn unauthorized(error: &str) -> Response {
     (
         StatusCode::UNAUTHORIZED,
@@ -737,8 +649,6 @@ fn unauthorized(error: &str) -> Response {
     )
         .into_response()
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────
 
 async fn require_client(
     state: &AppState,
@@ -753,24 +663,12 @@ async fn require_client(
     })
 }
 
-/// Check a redirect URI against the registered ones: exact match, except a
-/// registered loopback URI matches any port (see [`redirect_uri_matches`]).
 fn redirect_uri_allowed(app: &OAuthClientInfo, redirect_uri: &str) -> bool {
     app.redirect_uris
         .iter()
         .any(|u| redirect_uri_matches(u, redirect_uri))
 }
 
-/// Whether a requested redirect URI is allowed by a registered one. The same
-/// rule as Forest's `redirect_uri_matches`, which re-checks it when the code
-/// is minted.
-///
-/// Exact match, with one exception from RFC 8252 §7.3: a native app listens
-/// on a loopback port the OS picks at run time, so a registered
-/// `http://127.0.0.1/<path>` or `http://localhost/<path>` (with or without a
-/// port) matches a request for the same host and path on any port. The host,
-/// path and query must still match exactly; nothing that is not http on a
-/// loopback host gets this leniency.
 pub(crate) fn redirect_uri_matches(registered: &str, requested: &str) -> bool {
     if registered == requested {
         return true;
@@ -781,8 +679,6 @@ pub(crate) fn redirect_uri_matches(registered: &str, requested: &str) -> bool {
     }
 }
 
-/// `(host, path-and-query)` of an `http://` loopback URI, with the port
-/// dropped and an empty path read as `/`. `None` for anything else.
 fn loopback_parts(uri: &str) -> Option<(&str, String)> {
     let rest = uri.strip_prefix("http://")?;
     if rest.contains('#') {
@@ -810,12 +706,9 @@ fn loopback_parts(uri: &str) -> Option<(&str, String)> {
     Some((host, tail))
 }
 
-/// `error_description` for a public client that sent no PKCE S256 challenge.
 const PUBLIC_CLIENT_PKCE_REQUIRED: &str =
     "a public client must use PKCE with code_challenge_method S256";
 
-/// Resolve requested scopes against the app's allowlist. Empty request →
-/// all app scopes (RFC 6749 §3.3 default). Any unknown scope → `Err`.
 fn resolve_scopes(app: &OAuthClientInfo, requested: &str) -> Result<Vec<String>, ()> {
     let requested: Vec<&str> = requested.split_whitespace().collect();
     if requested.is_empty() {
@@ -850,11 +743,6 @@ fn non_empty(s: Option<&str>) -> Option<&str> {
     s.filter(|v| !v.is_empty())
 }
 
-/// Bind the consent-critical parameters (client_id, redirect_uri, scope) to the
-/// session so they cannot be tampered between the rendered consent screen and
-/// the submitted decision. The tag is `HMAC-SHA256(csrf_token, params)`: an
-/// attacker editing a hidden field can't forge a matching tag without the
-/// session's secret csrf_token. Closes review finding #2 (consent integrity).
 pub(crate) fn consent_binding(
     csrf_token: &str,
     client_id: &str,
@@ -879,7 +767,6 @@ pub(crate) fn consent_binding(
     hex
 }
 
-/// Constant-time comparison of two consent tags.
 fn consent_binding_valid(expected: &str, presented: &str) -> bool {
     expected.len() == presented.len()
         && expected
@@ -889,10 +776,6 @@ fn consent_binding_valid(expected: &str, presented: &str) -> bool {
             == 0
 }
 
-/// Parse client credentials from an HTTP Basic `Authorization` header
-/// (RFC 6749 §2.3.1). The userid/password are `application/x-www-form-urlencoded`
-/// before base64 encoding, so we URL-decode each component after splitting.
-/// Returns `None` if there is no usable Basic header.
 fn parse_basic_auth(headers: &HeaderMap) -> Option<(String, String)> {
     use base64::Engine;
     let raw = headers
@@ -933,8 +816,6 @@ fn redirect_error(redirect_uri: &str, error: &str, state: Option<&str>) -> Respo
     Redirect::to(&append_query(redirect_uri, &params)).into_response()
 }
 
-/// [`redirect_error`] with an RFC 6749 §4.1.2.1 `error_description`, for
-/// when the code alone would leave a client's developer guessing.
 fn redirect_error_described(
     redirect_uri: &str,
     error: &str,
@@ -1059,7 +940,6 @@ mod tests {
 
     #[test]
     fn url_decodes_components() {
-        // RFC 6749 §2.3.1: components are form-urlencoded before base64.
         let h = basic("cli%40ent:s%2Fcret");
         assert_eq!(
             parse_basic_auth(&h),
@@ -1095,9 +975,7 @@ mod tests {
             HeaderValue::from_static("Basic !!!notbase64!!!"),
         );
         assert_eq!(parse_basic_auth(&h), None);
-        // No colon separator.
         assert_eq!(parse_basic_auth(&basic("nocolon")), None);
-        // Empty client_id.
         assert_eq!(parse_basic_auth(&basic(":secret")), None);
     }
 }

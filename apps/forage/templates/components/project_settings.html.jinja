@@ -1,43 +1,9 @@
-{# ── Project settings shell ──────────────────────────────────────────
-   The shared chrome for everything under
-   `/orgs/{org}/projects/{project}/settings`.
-
-   Triggers, Policies and Pipelines used to be three standalone pages
-   reached only by typing the URL: no shared sub-nav, no project header,
-   and — the reported gap — no way back to the project. This macro is the
-   one place that chrome lives, so every section (and every *_edit page
-   hanging off one) gets the same breadcrumb, the same Back affordance and
-   the same sub-nav for free.
-
-   Deliberately dumb about content: it renders the frame and calls back
-   for the body, so the sections keep owning their own rows, forms and
-   empty states. Adding a fourth section is one entry in SECTIONS below.
-
-   Usage:
-     {% from "components/project_settings.html.jinja" import project_settings_layout %}
-     {% call project_settings_layout(current_org, current_project, "triggers",
-                                     "Triggers", "Automatically release …") %}
-       …rows / forms…
-     {% endcall %}
-
-   `crumb` is for the pages that sit one level below a section — the
-   trigger/policy edit forms. Passing it appends a final breadcrumb item
-   and re-points Back at the section instead of the project, so "back"
-   always means "the place I came from".
-#}
-
 {% set SECTIONS = [
     {"slug": "triggers",  "label": "Triggers"},
     {"slug": "policies",  "label": "Policies"},
     {"slug": "pipelines", "label": "Pipelines"},
 ] %}
 
-{# ── Sub-navigation ───────────────────────────────────────────────────
-   Two renderings of the same list: a sidebar on md+ (matching the org
-   settings sidebar, so the two settings areas feel like one idea), and a
-   horizontally scrollable pill row below that. The org sidebar simply
-   disappears on mobile; this one must not, or small screens get the
-   dead-end back again. #}
 {% macro project_settings_nav(org_name, project_name, active_section) %}
 <nav class="w-48 shrink-0 hidden md:block" aria-label="Project settings sections">
     <ul class="space-y-0.5">
@@ -62,10 +28,6 @@
 </nav>
 {%- endmacro %}
 
-{# ── Breadcrumb + back ────────────────────────────────────────────────
-   `Org › Project › Settings › Section [› crumb]`. Every item but the last
-   is a link, so the breadcrumb is itself a way out; the explicit Back
-   link next to it is the one-click version of the same move. #}
 {% macro project_settings_breadcrumb(org_name, project_name, active_section, section_title, crumb="") %}
 {% set back_label = section_title if crumb else project_name %}
 <div class="flex items-center justify-between gap-4 flex-wrap mb-4">
@@ -91,17 +53,7 @@
 </div>
 {%- endmacro %}
 
-{# ── The layout ───────────────────────────────────────────────────────
-   Project header (org / project, mono, mirroring project_detail's) so you
-   always know which project you are configuring, then the sub-nav beside
-   the caller's content. #}
 {% macro project_settings_layout(org_name, project_name, active_section, section_title, section_description="", crumb="") %}
-{# `max-w-6xl` rather than `app-container` (56rem): the sidebar eats 14rem
-   of the track, and the trigger/policy rows — name, pattern chips and three
-   action buttons on one line — are already tight at the standard width.
-   6xl is the nav's own width, so the header lines up with the `forest`
-   logo above it and the content column ends up marginally wider than it
-   was as a standalone page, never narrower. #}
 <section class="max-w-6xl mx-auto px-4 pt-10">
     {{ project_settings_breadcrumb(org_name, project_name, active_section, section_title, crumb) }}
 

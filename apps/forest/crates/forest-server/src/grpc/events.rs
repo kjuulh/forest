@@ -40,7 +40,6 @@ fn row_to_proto(row: OrgEventRow) -> OrgEvent {
     }
 }
 
-/// Shared streaming loop: fetches events from DB, filters, sends to channel.
 async fn stream_events(
     tx: mpsc::Sender<Result<OrgEvent, Status>>,
     event_bus: crate::services::event_bus::EventBus,
@@ -52,7 +51,6 @@ async fn stream_events(
     actions: Vec<String>,
     replay: bool,
 ) {
-    // Subscribe to NATS nudges for this org
     let nats_subject = format!("forest.events.{}", organisation);
     let mut nats_sub = match nats.subscribe(nats_subject).await {
         Ok(sub) => sub,
@@ -68,7 +66,6 @@ async fn stream_events(
     let mut fallback_interval = tokio::time::interval(Duration::from_secs(5));
     fallback_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-    // If replaying, immediately fetch catch-up batch
     if replay {
         match event_bus
             .fetch_since(
@@ -116,7 +113,7 @@ async fn stream_events(
                 for event in events {
                     cursor = event.sequence;
                     if tx.send(Ok(row_to_proto(event))).await.is_err() {
-                        return; // Client disconnected
+                        return;
                     }
                 }
             }
@@ -192,7 +189,6 @@ impl EventService for EventsServer {
             return Err(Status::invalid_argument("subscription_name is required"));
         }
 
-        // Load subscription from DB
         let sub = self
             .state
             .event_subscription_registry()
@@ -211,13 +207,9 @@ impl EventService for EventsServer {
         let event_bus = self.state.event_bus();
         let nats = self.state.nats.clone();
 
-        // The subscription's projects filter: empty = None (all projects)
         let project_filter = if sub.projects.len() == 1 {
             Some(sub.projects[0].clone())
         } else {
-            // Multi-project or no filter — handled by fetch_since's project param
-            // For now, None means "all". Multi-project filtering happens client-side
-            // or we could enhance fetch_since. Keep it simple.
             None
         };
 
@@ -232,7 +224,7 @@ impl EventService for EventsServer {
             project_filter,
             sub.resource_types,
             sub.actions,
-            true, // always replay from cursor
+            true,
         ));
 
         Ok(Response::new(ReceiverStream::new(rx)))

@@ -18,9 +18,6 @@ use tower::ServiceExt;
 use crate::notification_worker::NotificationDispatcher;
 use crate::test_support::*;
 
-// ─── Test webhook receiver ──────────────────────────────────────────
-
-/// A received webhook delivery, captured by the test server.
 #[derive(Debug, Clone)]
 struct ReceivedWebhook {
     body: String,
@@ -29,15 +26,12 @@ struct ReceivedWebhook {
     user_agent: Option<String>,
 }
 
-/// Shared state for the test webhook receiver.
 #[derive(Clone)]
 struct ReceiverState {
     deliveries: Arc<Mutex<Vec<ReceivedWebhook>>>,
-    /// If set, the receiver returns this status code instead of 200.
     force_status: Arc<Mutex<Option<StatusCode>>>,
 }
 
-/// Handler that captures incoming webhook POSTs.
 async fn webhook_handler(
     State(state): State<ReceiverState>,
     req: Request<Body>,
@@ -71,7 +65,6 @@ async fn webhook_handler(
     forced.unwrap_or(StatusCode::OK)
 }
 
-/// Start a test webhook receiver on a random port. Returns (url, state).
 async fn start_receiver() -> (String, ReceiverState) {
     let state = ReceiverState {
         deliveries: Arc::new(Mutex::new(Vec::new())),
@@ -147,8 +140,6 @@ fn failed_event(org: &str) -> NotificationEvent {
     }
 }
 
-// ─── End-to-end: dispatch delivers to real HTTP server ──────────────
-
 #[tokio::test]
 async fn dispatcher_delivers_webhook_to_http_server() {
     let (url, receiver) = start_receiver().await;
@@ -185,7 +176,6 @@ async fn dispatcher_delivers_webhook_to_http_server() {
     assert_eq!(d.user_agent.as_deref(), Some("Forest/1.0"));
     assert!(d.signature.is_none(), "no secret = no signature");
 
-    // Parse and verify the payload
     let payload: serde_json::Value = serde_json::from_str(&d.body).unwrap();
     assert_eq!(payload["event"], "release_succeeded");
     assert_eq!(payload["organisation"], "testorg");
@@ -234,7 +224,6 @@ async fn dispatcher_signs_webhook_with_hmac() {
     let sig = d.signature.as_ref().expect("signed webhook should have signature");
     assert!(sig.starts_with("sha256="), "signature should have sha256= prefix");
 
-    // Verify the signature ourselves
     let expected_sig = sign_payload(d.body.as_bytes(), secret);
     assert_eq!(
         sig, &expected_sig,
@@ -305,21 +294,12 @@ async fn dispatcher_records_successful_delivery() {
 
     let tasks = forage_core::integrations::router::route_notification(&event, &[integration]);
     dispatcher.dispatch(&tasks[0]).await;
-
-    // The dispatcher records delivery status via the store.
-    // InMemoryIntegrationStore stores deliveries internally;
-    // we verify it was called by checking the integration is still healthy.
-    // (Delivery recording is best-effort, so we verify the webhook arrived.)
 }
 
 #[tokio::test]
 async fn dispatcher_retries_on_server_error() {
     let (url, receiver) = start_receiver().await;
 
-    // Make the server return 500 for the first 2 calls, then 200.
-    // The dispatcher uses 3 retries with backoff [1s, 5s, 25s] which is too slow
-    // for tests. Instead, we verify the dispatcher reports failure when the server
-    // always returns 500.
     *receiver.force_status.lock().unwrap() = Some(StatusCode::INTERNAL_SERVER_ERROR);
 
     let store = Arc::new(forage_core::integrations::InMemoryIntegrationStore::new());
@@ -343,13 +323,9 @@ async fn dispatcher_retries_on_server_error() {
 
     let tasks = forage_core::integrations::router::route_notification(&event, &[integration]);
 
-    // This will attempt 3 retries with backoff — the first attempt gets 500,
-    // then the server returns 200 for subsequent attempts (force_status is taken once).
     dispatcher.dispatch(&tasks[0]).await;
 
     let deliveries = receiver.deliveries.lock().unwrap();
-    // First attempt gets 500, subsequent attempts (with backoff) get 200
-    // since force_status is consumed on first use.
     assert!(
         deliveries.len() >= 2,
         "dispatcher should retry after 500; got {} deliveries",
@@ -359,7 +335,6 @@ async fn dispatcher_retries_on_server_error() {
 
 #[tokio::test]
 async fn dispatcher_handles_unreachable_url() {
-    // Port 1 is almost certainly not listening
     let store = Arc::new(forage_core::integrations::InMemoryIntegrationStore::new());
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
 
@@ -381,18 +356,14 @@ async fn dispatcher_handles_unreachable_url() {
 
     let tasks = forage_core::integrations::router::route_notification(&event, &[integration]);
 
-    // Should not panic, just log errors and exhaust retries.
     dispatcher.dispatch(&tasks[0]).await;
 }
-
-// ─── Full flow: event → route_for_org → dispatch → receiver ────────
 
 #[tokio::test]
 async fn full_flow_event_routes_and_delivers() {
     let (url, receiver) = start_receiver().await;
     let store = Arc::new(forage_core::integrations::InMemoryIntegrationStore::new());
 
-    // Create two integrations: one for testorg, one for otherorg
     store
         .create_integration(&CreateIntegrationInput {
             organisation: "testorg".into(),
@@ -423,12 +394,10 @@ async fn full_flow_event_routes_and_delivers() {
         .await
         .unwrap();
 
-    // Fire an event for testorg only
     let event = test_event("testorg");
     let tasks =
         forage_core::integrations::router::route_notification_for_org(store.as_ref(), &event).await;
 
-    // Should only match testorg's integration (not otherorg's)
     assert_eq!(tasks.len(), 1);
 
     let dispatcher = NotificationDispatcher::new(store.clone(), String::new());
@@ -439,7 +408,6 @@ async fn full_flow_event_routes_and_delivers() {
     let deliveries = receiver.deliveries.lock().unwrap();
     assert_eq!(deliveries.len(), 1, "only testorg's hook should fire");
 
-    // Verify it was signed with testorg's secret
     let d = &deliveries[0];
     let sig = d.signature.as_ref().expect("should be signed");
     let expected = sign_payload(d.body.as_bytes(), "org-secret");
@@ -466,7 +434,6 @@ async fn disabled_integration_does_not_receive_events() {
         .await
         .unwrap();
 
-    // Disable the integration
     store
         .set_integration_enabled("testorg", &integration.id, false)
         .await
@@ -503,14 +470,12 @@ async fn disabled_rule_filters_event_type() {
         .await
         .unwrap();
 
-    // Disable the release_succeeded rule
     store
         .set_rule_enabled(&integration.id, "release_succeeded", false)
         .await
         .unwrap();
 
-    // Fire a release_succeeded event — should be filtered out
-    let event = test_event("testorg"); // release_succeeded
+    let event = test_event("testorg");
     let tasks =
         forage_core::integrations::router::route_notification_for_org(store.as_ref(), &event).await;
 
@@ -519,8 +484,7 @@ async fn disabled_rule_filters_event_type() {
         "disabled rule should filter out release_succeeded events"
     );
 
-    // Fire a release_failed event — should still be delivered
-    let event = failed_event("testorg"); // release_failed
+    let event = failed_event("testorg");
     let tasks =
         forage_core::integrations::router::route_notification_for_org(store.as_ref(), &event).await;
 
@@ -586,18 +550,14 @@ async fn multiple_integrations_all_receive_same_event() {
     assert_eq!(d1.len(), 1, "hook-1 should receive the event");
     assert_eq!(d2.len(), 1, "hook-2 should receive the event");
 
-    // Verify each has different HMAC signatures (different secrets)
     let sig1 = d1[0].signature.as_ref().unwrap();
     let sig2 = d2[0].signature.as_ref().unwrap();
     assert_ne!(sig1, sig2, "different secrets produce different signatures");
 
-    // Both payloads should be identical
     let p1: serde_json::Value = serde_json::from_str(&d1[0].body).unwrap();
     let p2: serde_json::Value = serde_json::from_str(&d2[0].body).unwrap();
     assert_eq!(p1, p2, "same event produces same payload body");
 }
-
-// ─── API token tests ────────────────────────────────────────────────
 
 #[tokio::test]
 async fn api_token_lookup_works_after_install() {
@@ -621,7 +581,6 @@ async fn api_token_lookup_works_after_install() {
     let raw_token = created.api_token.expect("new integration should have api_token");
     assert!(raw_token.starts_with("fgi_"));
 
-    // Look up by hash
     let token_hash = forage_core::integrations::hash_api_token(&raw_token);
     let found = store
         .get_integration_by_token_hash(&token_hash)
@@ -642,8 +601,6 @@ async fn api_token_lookup_fails_for_invalid_token() {
     assert!(result.is_err(), "invalid token should fail lookup");
 }
 
-// ─── "Send test notification" via the web UI route ──────────────────
-
 #[tokio::test]
 async fn test_notification_button_dispatches_to_webhook() {
     let (url, receiver) = start_receiver().await;
@@ -651,7 +608,6 @@ async fn test_notification_button_dispatches_to_webhook() {
     let (state, sessions, integrations) =
         test_state_with_integrations(MockForestClient::new(), MockPlatformClient::new());
 
-    // Create a webhook pointing at our test receiver
     let created = integrations
         .create_integration(&CreateIntegrationInput {
             organisation: "testorg".into(),
@@ -670,7 +626,6 @@ async fn test_notification_button_dispatches_to_webhook() {
     let app = crate::build_router(state);
     let cookie = create_test_session(&sessions).await;
 
-    // Hit the "Send test notification" endpoint
     let body = "_csrf=test-csrf";
     let resp = app
         .oneshot(
@@ -690,7 +645,6 @@ async fn test_notification_button_dispatches_to_webhook() {
 
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
 
-    // Give the async dispatch a moment to complete
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let deliveries = receiver.deliveries.lock().unwrap();
@@ -702,12 +656,10 @@ async fn test_notification_button_dispatches_to_webhook() {
 
     let d = &deliveries[0];
 
-    // Verify HMAC signature
     let sig = d.signature.as_ref().expect("should be signed");
     let expected = sign_payload(d.body.as_bytes(), "ui-test-secret");
     assert_eq!(sig, &expected, "HMAC signature should be verifiable");
 
-    // Verify payload is a test event
     let payload: serde_json::Value = serde_json::from_str(&d.body).unwrap();
     assert_eq!(payload["event"], "release_succeeded");
     assert_eq!(payload["organisation"], "testorg");

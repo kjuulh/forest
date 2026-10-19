@@ -92,8 +92,6 @@ async fn maintenance_grpc_returns_defaults_without_scheduling_work() {
         .unwrap();
 }
 
-/// With maintenance mode off, requests reach the scheduler as before: the
-/// rejecting scheduler's error comes back instead of a default response.
 #[tokio::test]
 async fn grpc_outside_maintenance_still_reaches_the_scheduler() {
     let service = ForageServiceImpl {

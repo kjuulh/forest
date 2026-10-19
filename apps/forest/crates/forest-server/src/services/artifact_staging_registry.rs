@@ -56,9 +56,6 @@ impl ArtifactStagingRegistry {
         destination: &str,
         category: &str,
     ) -> anyhow::Result<()> {
-        // Keyed by the file's own path, not by env/destination — so the server
-        // stays free to correct those columns later without moving the object.
-        // See `keys::artifact_file_by_name`.
         let s3_key =
             crate::object_store::keys::artifact_file_by_name(&id.id().to_string(), file_name);
         self.object_store
@@ -66,7 +63,6 @@ impl ArtifactStagingRegistry {
             .await
             .context("store artifact file in S3")?;
 
-        // Also store in DB for backward compatibility during migration
         let blob_entry = sqlx::query!(
             r#"
                 INSERT INTO blob_storage (
@@ -137,7 +133,6 @@ impl ArtifactStagingRegistry {
             .context("get artifact id")?;
         let artifact_id = rec.artifact_id;
 
-        // Get file metadata from DB
         let recs = sqlx::query!(
             "SELECT file_name, env, destination
              FROM artifact_files
@@ -202,7 +197,6 @@ impl ArtifactStagingRegistry {
         .context("get artifact id")?;
         let staging_id = rec.artifact_id;
 
-        // Get metadata from DB, content from S3
         let recs = sqlx::query!(
             r#"
                 SELECT file_name, category, env, destination
@@ -236,27 +230,8 @@ impl ArtifactStagingRegistry {
         Ok(entries)
     }
 
-    /// Freeze a staged upload into an artifact.
-    ///
-    /// Before doing so, re-derive which deployment item each uploaded file
-    /// belongs to and correct `env`/`destination` from the tree itself.
-    ///
-    /// The client sends those two values per file, and it used to be the client
-    /// that decided them — by splitting the upload path on `/`, in two
-    /// copy-pasted loops, when both the selector and the destination type
-    /// routinely contain `/`. So every client truncated the selector, and fixing
-    /// one copy left the other wrong. The server has the whole tree and each
-    /// item's own record of what it is, so it decides here instead: one
-    /// implementation, and every client is correct including the ones nobody
-    /// upgrades.
-    ///
-    /// A file the tree cannot place keeps whatever it was uploaded with — this
-    /// corrects what it can prove and touches nothing else.
     pub async fn commit_staging(&self, id: &StagingArtifactID) -> anyhow::Result<ArtifactID> {
         if let Err(e) = self.reattribute_deployment_files(id).await {
-            // Refuse the commit: a wrongly-attributed file is a release aimed at
-            // the wrong place, and this is the last point at which anyone is
-            // still watching.
             return Err(e.context("attribute this artifact's deployment files"));
         }
 
@@ -374,12 +349,6 @@ impl ArtifactStagingRegistryState for State {
 }
 
 impl ArtifactStagingRegistry {
-    /// An artifact file's content, wherever it happens to live.
-    ///
-    /// Three places, newest first: the current key, the pre-correction key that
-    /// mixed env and destination in, and the `blob_storage` copy `upload_file`
-    /// writes alongside. Older artifacts genuinely are in the older places, and
-    /// a release of one must not start failing because the key shape moved.
     async fn file_content(
         &self,
         staging_id: &uuid::Uuid,
@@ -416,8 +385,6 @@ impl ArtifactStagingRegistry {
 }
 
 impl ArtifactStagingRegistry {
-    /// Correct `artifact_files.env`/`.destination` for deployment files from the
-    /// item records in the uploaded tree. See `commit_staging`.
     async fn reattribute_deployment_files(&self, id: &StagingArtifactID) -> anyhow::Result<()> {
         use crate::services::destination_selector;
 

@@ -27,7 +27,6 @@ pub struct RecordedEvent {
 }
 
 impl EventBus {
-    /// Record an event inside an existing transaction. Call this before commit.
     pub async fn record(
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         event: EventPayload,
@@ -55,8 +54,6 @@ impl EventBus {
         })
     }
 
-    /// Record an event using the pool directly (non-transactional).
-    /// Use when the caller doesn't have an open transaction.
     pub async fn record_standalone(&self, event: EventPayload) -> anyhow::Result<RecordedEvent> {
         let metadata = serde_json::to_value(&event.metadata).context("serialize metadata")?;
 
@@ -81,8 +78,6 @@ impl EventBus {
         })
     }
 
-    /// Send a best-effort NATS nudge to wake any listeners for this org.
-    /// Call after transaction commit.
     pub async fn notify(&self, organisation: &str) {
         let subject = format!("forest.events.{}", organisation);
         if let Err(e) = self.nats.publish(subject, "".into()).await {
@@ -90,8 +85,6 @@ impl EventBus {
         }
     }
 
-    /// Convenience: record (standalone) + notify in one call.
-    /// For use in services that don't have an open transaction.
     pub async fn emit(&self, event: EventPayload) {
         let org = event.organisation.clone();
         match self.record_standalone(event).await {
@@ -100,7 +93,6 @@ impl EventBus {
         }
     }
 
-    /// Fetch events for an organisation after a given sequence.
     pub async fn fetch_since(
         &self,
         organisation: &str,
@@ -110,8 +102,6 @@ impl EventBus {
         actions: &[String],
         limit: i64,
     ) -> anyhow::Result<Vec<OrgEventRow>> {
-        // We build a simple query with optional filters.
-        // For simplicity and sqlx compatibility, we use a single query with array contains.
         let recs = sqlx::query_as!(
             OrgEventRow,
             r#"SELECT sequence, event_id, organisation, project, resource_type, action,
@@ -146,7 +136,6 @@ impl EventBus {
         Ok(recs)
     }
 
-    /// Get the current max sequence for an organisation (for "latest only" subscriptions).
     pub async fn max_sequence(&self, organisation: &str) -> anyhow::Result<i64> {
         let row = sqlx::query_scalar!(
             "SELECT COALESCE(MAX(sequence), 0) FROM org_events WHERE organisation = $1",

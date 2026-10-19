@@ -6,8 +6,6 @@ use tower::ServiceExt;
 use crate::build_router;
 use crate::test_support::*;
 
-// ─── Signup ─────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn signup_page_returns_200() {
     let response = test_app()
@@ -142,8 +140,6 @@ async fn signup_password_mismatch_shows_error() {
     assert!(html.contains("do not match"));
 }
 
-// ─── Login ──────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn login_page_returns_200() {
     let response = test_app()
@@ -194,7 +190,6 @@ async fn login_submit_success_sets_session_cookie() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/dashboard");
-    // Should have a single forage_session cookie
     let cookies: Vec<_> = response.headers().get_all("set-cookie").iter().collect();
     assert!(!cookies.is_empty());
     let cookie_str = cookies[0].to_str().unwrap();
@@ -269,8 +264,6 @@ async fn login_empty_fields_shows_validation_error() {
     assert!(html.contains("required"));
 }
 
-// ─── Session / Dashboard ────────────────────────────────────────────
-
 #[tokio::test]
 async fn dashboard_without_auth_redirects_to_login() {
     let response = test_app()
@@ -302,7 +295,6 @@ async fn dashboard_with_session_shows_page() {
         )
         .await
         .unwrap();
-    // Dashboard now renders a proper page
     assert_eq!(response.status(), StatusCode::OK);
 }
 
@@ -322,7 +314,6 @@ async fn dashboard_with_expired_token_refreshes_transparently() {
         )
         .await
         .unwrap();
-    // Should succeed (render dashboard) because refresh_token works
     assert_eq!(response.status(), StatusCode::OK);
 }
 
@@ -344,7 +335,6 @@ async fn dashboard_with_invalid_session_redirects() {
 
 #[tokio::test]
 async fn old_token_cookies_are_ignored() {
-    // Old-style cookies should not authenticate
     let response = test_app()
         .oneshot(
             Request::builder()
@@ -382,7 +372,6 @@ async fn expired_session_with_failed_refresh_redirects_to_login() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/login");
 
-    // Session should be destroyed
     assert_eq!(sessions.session_count(), 0);
 }
 
@@ -438,8 +427,6 @@ async fn login_without_remember_me_sets_session_cookie() {
     assert!(!cookie_str.contains("Max-Age="));
 }
 
-// ─── Logout ─────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn logout_destroys_session_and_redirects() {
     let (state, sessions) = test_state();
@@ -463,7 +450,6 @@ async fn logout_destroys_session_and_redirects() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/");
 
-    // Session should be destroyed
     assert_eq!(sessions.session_count(), 0);
 }
 
@@ -487,11 +473,8 @@ async fn logout_with_invalid_csrf_returns_403() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
-    // Session should NOT be destroyed
     assert_eq!(sessions.session_count(), 1);
 }
-
-// ─── return_to redirect contract (DATA-251) ──────────────────────────
 
 #[tokio::test]
 async fn signup_page_with_return_to_renders_hidden_field() {
@@ -603,11 +586,6 @@ async fn login_page_create_one_link_carries_return_to() {
     );
 }
 
-/// XSS guard: a return_to that survives `safe_return_to` (must start
-/// with `/`) but contains HTML-special characters must be escaped when
-/// rendered into the signup form's hidden field. Without MiniJinja
-/// autoescape on this would be a stored XSS — `/foo"><script>...` would
-/// break out of the value attribute.
 #[tokio::test]
 async fn signup_form_escapes_hostile_return_to() {
     let raw = r#"/foo"><script>alert(1)</script><input value=""#;
@@ -632,9 +610,6 @@ async fn signup_form_escapes_hostile_return_to() {
     );
 }
 
-/// POST /login/mfa with the challenge cookie + a return_to hidden field
-/// must land the user on the carried path, not /dashboard. Covers the
-/// MFA leg of the device-login flow.
 #[tokio::test]
 async fn login_mfa_submit_honours_return_to() {
     let response = test_app()

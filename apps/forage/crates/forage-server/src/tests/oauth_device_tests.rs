@@ -1,11 +1,3 @@
-//! The device authorization grant (RFC 8628) for an OAuth app, at Forage's
-//! HTTP edge: `POST /oauth/device_authorization`, the device_code grant at
-//! `/oauth/token`, and approving an app's code at `/device`.
-//!
-//! Forest is mocked; it owns binding, single use and expiry (its acceptance
-//! tests cover those). These pin the wire contract a CLI relies on and what
-//! the approval page shows and does.
-
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -121,7 +113,6 @@ async fn a_cli_starts_a_grant_and_polls_until_approved() {
     assert_eq!(pending.status(), StatusCode::BAD_REQUEST);
     assert_eq!(json(pending).await["error"], "authorization_pending");
 
-    // The person approves at /device, having been shown the app.
     let cookie = create_test_session(&sessions).await;
     let shown = app
         .clone()
@@ -195,7 +186,6 @@ async fn a_code_for_an_app_the_page_did_not_show_is_shown_not_approved() {
     let user_code = started["user_code"].as_str().unwrap();
     let cookie = create_test_session(&sessions).await;
 
-    // Typed into the bare /device form, which showed no app.
     let typed = app
         .oneshot(with_cookie(
             "/device",

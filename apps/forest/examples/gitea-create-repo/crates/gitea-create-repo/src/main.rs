@@ -1,21 +1,3 @@
-//! `forest-contrib/gitea-create-repo@v0.1` — REST API wrapper for
-//! creating a Gitea repository.
-//!
-//! Posts to `/api/v1/orgs/<org>/repos` (or `/api/v1/user/repos` if no
-//! `org` is given). Reads the API token from a file path so the secret
-//! never appears on the CLI or in environment listings — workflow
-//! authors deliver it via the existing Forest secret channel:
-//!
-//!   secrets:
-//!     - { name: gitea-token, target_path: /run/secrets/gitea-token, ... }
-//!   steps:
-//!     - uses: forest-contrib/gitea-create-repo@0.1.0
-//!       with:
-//!         base_url:   https://gitea.example.com
-//!         org:        my-org
-//!         name:       my-new-repo
-//!         token_path: /run/secrets/gitea-token
-
 #[allow(dead_code)]
 mod forestgen;
 
@@ -33,9 +15,6 @@ impl CommandHandler for Commands {
         _spec: &Spec,
         input: GiteaCreateRepoInput,
     ) -> Result<GiteaCreateRepoOutput, forest_sdk::Error> {
-        // ureq is blocking; offload so we don't block the runtime.
-        // run_once already uses tokio::Runtime::new which is fine for
-        // spawn_blocking.
         tokio::task::spawn_blocking(move || do_create(input))
             .await
             .map_err(|e| forest_sdk::Error::Handler(format!("join: {e}").into()))?
@@ -74,12 +53,7 @@ fn do_create(input: GiteaCreateRepoInput) -> Result<GiteaCreateRepoOutput, fores
         "default_branch": input.default_branch,
     });
 
-    let agent = ureq::AgentBuilder::new()
-        .timeout(HTTP_TIMEOUT)
-        // Gitea returns the JSON we want on 201 Created and a JSON error
-        // body on 4xx/5xx — we want to read both as JSON, so don't let
-        // ureq promote 4xx into Err automatically.
-        .build();
+    let agent = ureq::AgentBuilder::new().timeout(HTTP_TIMEOUT).build();
 
     let resp = agent
         .post(&endpoint)
@@ -93,8 +67,6 @@ fn do_create(input: GiteaCreateRepoInput) -> Result<GiteaCreateRepoOutput, fores
             .into_json()
             .map_err(|e| forest_sdk::Error::Handler(format!("parse Gitea response: {e}").into()))?,
         Err(ureq::Error::Status(code, r)) => {
-            // Surface Gitea's error body verbatim so workflow authors
-            // see "repository already exists" / "auth failed" / etc.
             let body = r
                 .into_string()
                 .unwrap_or_else(|e| format!("(failed to read body: {e})"));

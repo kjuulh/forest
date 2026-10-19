@@ -1,45 +1,14 @@
-//! Build provenance for the running binary.
-//!
-//! Answers "which commit is this server, and when was it built" without
-//! shelling into the container. Surfaced over `StatusService.Status` and, for
-//! forage, in the page footer.
-//!
-//! # Why runtime environment rather than compile-time
-//!
-//! The obvious approach is `option_env!` or a `build.rs`, baking the commit
-//! into the binary at compile time. Both are worse here:
-//!
-//! - The image is built with `context: apps/forest`, so `.git` is not in the
-//!   Docker build context — a `build.rs` calling `git rev-parse` finds nothing
-//!   and silently degrades to "dev" in exactly the builds we care about.
-//! - Passing the commit as a build arg means an `ENV` line *before*
-//!   `cargo build`, which changes the build environment on every commit and
-//!   invalidates the cached compile.
-//!
-//! Reading the environment at startup avoids both. The values are baked as
-//! `ENV` into the **final** image stage, so the image still self-describes —
-//! `docker inspect` shows them — while the expensive builder layers stay
-//! cacheable. A local `cargo run` leaves them unset and reports "dev", which
-//! is the honest answer for an unstamped build.
-
-/// Provenance of the running binary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildInfo {
-    /// Crate version of the server binary.
     pub version: String,
-    /// Short git commit, or empty when this build was not stamped.
     pub commit: String,
-    /// RFC 3339 build timestamp, or empty when not stamped.
     pub build_time: String,
 }
 
-/// Environment variable carrying the git commit, set on the image.
 const COMMIT_VAR: &str = "FOREST_GIT_SHA";
-/// Environment variable carrying the RFC 3339 build timestamp.
 const BUILD_TIME_VAR: &str = "FOREST_BUILD_TIME";
 
 impl BuildInfo {
-    /// Read provenance from the environment.
     pub fn from_env() -> Self {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -48,18 +17,11 @@ impl BuildInfo {
         }
     }
 
-    /// True when neither the commit nor the build time was stamped — a local
-    /// or otherwise unstamped build.
     pub fn is_unstamped(&self) -> bool {
         self.commit.is_empty() && self.build_time.is_empty()
     }
 }
 
-/// Read a stamp variable, treating blank/placeholder values as absent.
-///
-/// CI substitution can leave an empty string or an unexpanded `${VAR}` behind;
-/// reporting either verbatim would be worse than reporting nothing, because a
-/// caller cannot tell a real commit from a broken pipeline.
 fn read(key: &str) -> String {
     match std::env::var(key) {
         Ok(v) => {
@@ -87,8 +49,6 @@ mod tests {
 
     #[test]
     fn blank_and_placeholder_stamps_read_as_absent() {
-        // A pipeline that failed to substitute must not look like a real
-        // commit — better to report nothing than something unverifiable.
         for raw in ["", "   ", "${GIT_SHA}", "unknown"] {
             // SAFETY: single-threaded test, restored immediately below.
             unsafe { std::env::set_var("FOREST_BUILD_INFO_TEST", raw) };

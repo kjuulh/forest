@@ -53,7 +53,6 @@ impl DeployComponentCommand {
                 .with_default(false)
                 .prompt()?
             } else {
-                // If quiet we always upload
                 true
             };
 

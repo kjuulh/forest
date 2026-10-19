@@ -18,29 +18,13 @@
 </head>
 <body class="bg-white text-gray-900 antialiased flex flex-col min-h-screen">
     {% if user is defined and user %}
-    {# ── Authenticated nav ─────────────────────────────────────── #}
     <nav class="border-b border-gray-200 pt-3">
-        {# Top bar: breadcrumb + user actions #}
         <div class="max-w-6xl mx-auto px-4 pb-3 flex items-center justify-between">
             <div class="flex items-center gap-2 text-sm min-w-0">
-                {# The logo is a "home" button: it always lands on the user's
-                   overview (/dashboard), the cross-org activity page — the same
-                   way GitHub's octocat returns you to your personal dashboard.
-                   This is deliberately distinct from the DATA-248 fix, which
-                   stopped *tab/page* navigation from silently dropping the org
-                   you're inside. Going home is an explicit action, not a
-                   context leak, so the home logo is exempt from org-scoping. #}
                 <a href="/dashboard" class="text-lg font-bold tracking-tight shrink-0">forest</a>
                 {% if current_org is defined and current_org %}
                 <span class="text-gray-300">/</span>
                 {% if orgs is defined and orgs | length > 1 %}
-                {# `data-fuzzy-switcher` opts this dropdown into the
-                   type-to-filter enhancement in static/js/fuzzy-switcher.js.
-                   The search box is injected by that script, not rendered
-                   here, so with JS off this stays a plain list of links. It
-                   only appears once the list is long enough to be worth
-                   searching (see DEFAULT_MIN_ITEMS) — most people are in one
-                   or two orgs and will never see it. #}
                 <details class="relative" data-fuzzy-switcher data-fuzzy-label="Search organisations">
                     <summary class="font-medium text-gray-900 hover:text-black cursor-pointer list-none">
                         {{ current_org }}
@@ -59,10 +43,6 @@
                 {% endif %}
                 {% if projects is defined and projects | length > 0 %}
                 <span class="text-gray-300 desktop-only">/</span>
-                {# The long one: an org can have thirty-odd projects, and this
-                   was an unfiltered column you had to scroll and read. Same
-                   opt-in as the org switcher above — type to filter, ↑/↓ and
-                   Enter to jump. #}
                 <details class="relative desktop-only" data-fuzzy-switcher data-fuzzy-label="Search projects">
                     <summary class="font-medium text-gray-900 hover:text-black cursor-pointer list-none truncate">
                         {% if project_name is defined and project_name %}{{ project_name }}{% else %}Select project{% endif %}
@@ -82,14 +62,12 @@
                 {% endif %}
                 {% endif %}
             </div>
-            {# Right-side actions #}
             <div class="flex items-center gap-3 shrink-0">
                 <a href="{% if current_org is defined and current_org %}/orgs/{{ current_org }}/notifications{% else %}/notifications{% endif %}" class="text-gray-400 hover:text-gray-900 relative" title="Notifications">
                     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
                     </svg>
                 </a>
-                {# Desktop-only: username dropdown #}
                 <details class="relative desktop-only">
                     <summary class="text-sm text-gray-500 hover:text-gray-900 cursor-pointer list-none">
                         {{ user.username }}
@@ -106,7 +84,6 @@
                         </form>
                     </div>
                 </details>
-                {# Mobile-only: hamburger #}
                 <button type="button" onclick="document.getElementById('mobile-menu').classList.toggle('hidden')" class="text-gray-500 hover:text-gray-900 p-1 mobile-only">
                     <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
@@ -114,7 +91,6 @@
                 </button>
             </div>
         </div>
-        {# Mobile dropdown menu #}
         <div id="mobile-menu" class="hidden border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-2">
             {% if project_name is defined and project_name %}
             <div class="text-xs text-gray-500">
@@ -127,57 +103,28 @@
                 <button type="submit" class="text-sm text-gray-500 hover:text-gray-900 py-1">Sign out</button>
             </form>
         </div>
-        {# Tab navigation — scrollable on mobile #}
         <div class="max-w-6xl mx-auto px-4 mt-2">
             <div class="flex gap-1 -mb-px overflow-x-auto scrollbar-none">
                 {% if project_name is defined and project_name %}
-                {# ── Project-level tabs ─────────────────────────────────
-                   Overview houses the catalogue (Components + README +
-                   Install). Releases is the timeline of releases
-                   performed (deployments to environments) plus CD
-                   plumbing. Always visible — a project can configure
-                   pipelines/triggers/policies before any deploy. #}
                 <a href="/orgs/{{ current_org }}/projects/{{ project_name }}" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'project_overview' %} text-gray-900 border-gray-900{% endif %}">Overview</a>
                 <a href="/orgs/{{ current_org }}/projects/{{ project_name }}/components" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'project_components' %} text-gray-900 border-gray-900{% endif %}">Components</a>
                 <a href="/orgs/{{ current_org }}/projects/{{ project_name }}/releases" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'project_releases' %} text-gray-900 border-gray-900{% endif %}">Releases</a>
-                {# Settings is the project's release *configuration* —
-                   Triggers, Policies and Pipelines. Those were three
-                   standalone pages you could only reach by URL; the tab
-                   plus the shell in components/project_settings.html.jinja
-                   is what makes them browsable (and escapable). Mirrors
-                   the org-level Settings tab below. #}
                 <a href="/orgs/{{ current_org }}/projects/{{ project_name }}/settings" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'project_settings' %} text-gray-900 border-gray-900{% endif %}">Settings</a>
                 {% elif current_org is defined and current_org %}
-                {# ── Org-level tabs ───────────────────────────────────
-                   No separate Overview tab — Projects is the org root.
-                   Previously Overview linked to `/dashboard`, which
-                   silently dropped the org context on click (DATA-248). #}
                 <a href="/orgs/{{ current_org }}/projects" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'projects' %} text-gray-900 border-gray-900{% endif %}">Projects</a>
-                {# Org-scoped components view — `/orgs/{org}/components`.
-                   While in an org context, the Components tab shows that
-                   org's catalogue (and surfaces the org-level install
-                   button, spec 011). The global cross-org registry at
-                   `/components` is still reachable directly and from the
-                   marketing/footer nav; this tab anchors users to the
-                   org they're currently inside. #}
                 <a href="/orgs/{{ current_org }}/components" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'components' %} text-gray-900 border-gray-900{% endif %}">Components</a>
                 <a href="/orgs/{{ current_org }}/destinations" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'destinations' %} text-gray-900 border-gray-900{% endif %}">Destinations</a>
                 <a href="/orgs/{{ current_org }}/settings" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'settings' %} text-gray-900 border-gray-900{% endif %}">Settings</a>
                 {% else %}
-                {# ── Global tabs (no org context) ───────────────────── #}
                 <a href="/dashboard" class="whitespace-nowrap px-3 py-2 text-sm text-gray-500 hover:text-gray-900 border-b-2 border-transparent hover:border-gray-300{% if active_tab is defined and active_tab == 'dashboard' %} text-gray-900 border-gray-900{% endif %}">Overview</a>
                 {% endif %}
             </div>
         </div>
     </nav>
     {% else %}
-    {# ── Marketing nav ─────────────────────────────────────────── #}
     <nav class="border-b border-gray-200">
         <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
             <a href="/" class="text-xl font-bold tracking-tight">forest</a>
-            {# Pricing + Components are suppressed on the landing page
-               (which has its own CTAs) and on auth pages (login / signup
-               / complete-profile / 2FA) to keep the focus on the form. #}
             {% set show_marketing_links = not (is_landing is defined and is_landing) and not (is_auth_page is defined and is_auth_page) %}
             <div class="flex items-center gap-6">
                 {% if show_marketing_links %}
@@ -207,18 +154,9 @@
         {% block content %}{% endblock %}
     </main>
 
-    {# Minimal footer: byline plus build provenance and timings, on one small
-       line (Gitea-style). `__FOREST_RENDER_MS__` is substituted by the
-       `page_timing` middleware — it can only be known after the handler has
-       run, so it cannot be a template global. The client load time is filled
-       in by the script below from the Navigation Timing API. #}
     <footer class="border-t border-gray-200 mt-auto">
         <div class="max-w-6xl mx-auto px-4 py-4 text-xs text-gray-400 flex flex-wrap gap-x-2">
             <span>&copy; 2026 Forest</span>
-            {# No version segment on purpose: forage-server's crate version is
-               0.1.0 and is not managed by release-please, so rendering it next
-               to "Forest" would claim a product version that isn't real. The
-               commit below is the deployed server's actual identity. #}
             {% if build_commit %}
             <span aria-hidden="true">&middot;</span>
             <span><code class="font-mono">{{ build_commit }}</code></span>
@@ -262,17 +200,8 @@
     });
     </script>
     {% if user is defined and user %}
-    {# Type-to-filter for the breadcrumb switchers. Only the authenticated nav
-       has them, so marketing and auth pages don't pay for the request. A
-       module rather than the IIFE the other static scripts use, so the matcher
-       can be exported and unit-tested directly by
-       frontend/src/lib/fuzzy-switcher.test.js; `type="module"` is deferred by
-       default, so the nav is already parsed when it runs. #}
     <script type="module" src="/static/js/fuzzy-switcher.js"></script>
     {% endif %}
-    {# Pages that need page-specific JS / CSS (e.g. syntax highlighting
-       on README pages) extend this block. Kept opt-in so we don't ship
-       highlight.js on every page. #}
     {% block extra_assets %}{% endblock %}
 </body>
 </html>

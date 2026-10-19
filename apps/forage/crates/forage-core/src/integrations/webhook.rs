@@ -2,7 +2,6 @@ use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
-/// The JSON payload delivered to webhook integrations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookPayload {
     pub event: String,
@@ -28,8 +27,6 @@ pub struct ReleasePayload {
     pub error_message: Option<String>,
 }
 
-/// Compute HMAC-SHA256 signature for a webhook payload.
-/// Returns hex-encoded signature prefixed with "sha256=".
 pub fn sign_payload(body: &[u8], secret: &str) -> String {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
         .expect("HMAC accepts any key length");
@@ -54,7 +51,7 @@ mod tests {
     fn sign_payload_produces_hex_signature() {
         let sig = sign_payload(b"hello world", "my-secret");
         assert!(sig.starts_with("sha256="));
-        assert_eq!(sig.len(), 7 + 64); // "sha256=" + 64 hex chars
+        assert_eq!(sig.len(), 7 + 64);
     }
 
     #[test]

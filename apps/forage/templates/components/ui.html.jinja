@@ -1,13 +1,3 @@
-{# Shared UI macros for consistent styling across templates.
-   Usage: {% from "components/ui.html.jinja" import badge, env_badge, alert, error_block, empty_state, pagination, code_block %}
-#}
-
-{# ── Badge ─────────────────────────────────────────────────────── #}
-{# Renders an inline badge with a color variant.
-   Variants: gray (default), green, red, blue, violet, cyan, pink, orange, yellow, amber
-   Usage: {{ badge("v1.0.0") }}
-          {{ badge("binary", variant="violet") }}
-#}
 {% macro badge(label, variant="gray") %}
 {% set colors = {
     "gray": "bg-gray-100 text-gray-700",
@@ -24,10 +14,6 @@
 <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ colors[variant] | default(colors.gray) }}">{{ label }}</span>
 {%- endmacro %}
 
-{# ── Environment badge ─────────────────────────────────────────── #}
-{# Renders an environment name with appropriate color.
-   Usage: {{ env_badge("production") }}
-#}
 {% macro env_badge(env) %}
 {% if 'prod' in env and 'preprod' not in env %}{% set variant = "pink" %}
 {% elif 'preprod' in env or 'pre-prod' in env %}{% set variant = "orange" %}
@@ -38,11 +24,6 @@
 {{ badge(env, variant=variant) }}
 {%- endmacro %}
 
-{# ── Alert ─────────────────────────────────────────────────────── #}
-{# Renders a dismissible alert box.
-   Variants: error (red), success (green), info (blue), warning (yellow)
-   Usage: {{ alert("Something went wrong", variant="error") }}
-#}
 {% macro alert(message, variant="error") %}
 {% set styles = {
     "error": "bg-red-50 border-red-200 text-red-700",
@@ -55,43 +36,6 @@
 </div>
 {%- endmacro %}
 
-{# ── Error block ───────────────────────────────────────────────── #}
-{# Renders a failure reason — a stage error, a destination error, a webhook
-   delivery error — the same way everywhere.
-
-   The rule it encodes: a failure reason is never a cell inside a flex row.
-   A row is fixed-height furniture; an error is arbitrary-length prose, and
-   putting one inside the other is what made a failed pipeline stage three
-   times the height of a successful one. Callers place this *beneath* the
-   row it belongs to.
-
-   Two shapes, chosen by length:
-
-   * A short reason ("upstream stage failed") is a plain red line. Four
-     words wrapped in a bordered, tinted panel is more chrome than content
-     — the panel would be louder than the thing it contains.
-   * A long one gets the panel, because it needs the room: the tint and
-     border say where the message starts and stops when it runs to several
-     lines.
-
-   Nothing is truncated. The actionable clause of a chained error is
-   usually the *last* one — `column "x" must be an exact decimal string`,
-   after two hundred characters of URL — so cutting the tail off and
-   parking it in a `title` tooltip hides the one sentence worth reading,
-   and a tooltip cannot be selected or copied. `max-h-80` is only a safety
-   valve for a pathological message: it scrolls, so the tail stays
-   reachable and selectable either way.
-
-   `break-words` is load-bearing: error chains carry long unbroken URLs,
-   which would otherwise force horizontal overflow in a narrow container.
-
-   Colors are palette classes, never literal hex — `static/css/input.css`
-   remaps the Tailwind color variables under `prefers-color-scheme: dark`,
-   so `text-red-700` / `bg-red-50` follow the theme and a hex would not.
-
-   Usage: {{ error_block(stage.error_message) }}
-          {{ error_block(d.error_message, class="max-w-md") }}
-#}
 {% macro error_block(message, class="", short_limit=64) %}
 {%- set text = message | trim -%}
 {%- if not text -%}
@@ -102,10 +46,6 @@
 {%- endif -%}
 {%- endmacro %}
 
-{# ── Empty state ───────────────────────────────────────────────── #}
-{# Renders a centered empty state card.
-   Usage: {{ empty_state("No projects yet.", hint="Deploy with forest release create") }}
-#}
 {% macro empty_state(message, hint="") %}
 <div class="p-6 border border-gray-200 rounded-lg text-center">
     <p class="text-gray-600">{{ message }}</p>
@@ -115,10 +55,6 @@
 </div>
 {%- endmacro %}
 
-{# ── Pagination ────────────────────────────────────────────────── #}
-{# Renders prev/next pagination controls.
-   Usage: {{ pagination(base_url="/components", page=page, total_pages=total_pages, params={"q": query}) }}
-#}
 {% macro pagination(base_url, page, total_pages, params={}) %}
 {% if total_pages > 1 %}
 {% set qs = "?" %}
@@ -135,20 +71,6 @@
 {% endif %}
 {%- endmacro %}
 
-{# ── Code block ────────────────────────────────────────────────── #}
-{# Renders a dark code block with optional copy button.
-   Usage: {{ code_block("forest components add org/name@1.0", copyable=true, id="install") }}
-
-   The outer wrapper is `relative` (anchor for the copy button) and a
-   separate inner `<div>` carries `overflow-x-auto`. Keeping the scroll
-   container distinct from the positioning context means the copy button
-   stays pinned to the visible right edge — if it lived inside the
-   scroll container, scrolling right would push it out of view.
-
-   Colors use literal hex values (bypassing the Tailwind gray scale that
-   `input.css` inverts under `prefers-color-scheme: dark`) so the code
-   block stays dark-on-dark in both themes, matching `.json-pretty`.
-#}
 {% macro code_block(content, copyable=false, id="", class="") %}
 {% if copyable %}
 <div class="relative group bg-[#0a0a0a] rounded-md text-sm font-mono text-[#d1d5db] {{ class }}">
@@ -164,28 +86,14 @@
 {% endif %}
 {%- endmacro %}
 
-{# ── Kind badge ────────────────────────────────────────────────── #}
-{# Renders a component kind badge (binary/files).
-   Usage: {{ kind_badge("binary") }}
-#}
 {% macro kind_badge(kind) %}
 {% if kind == "binary" %}{{ badge("binary", variant="violet") }}{% else %}{{ badge("files", variant="cyan") }}{% endif %}
 {%- endmacro %}
 
-{# ── Visibility badge ──────────────────────────────────────────── #}
-{# Renders a public/private visibility indicator.
-   Usage: {{ visibility_badge("public") }}
-#}
 {% macro visibility_badge(visibility) %}
 {% if visibility == "public" %}{{ badge("public", variant="green") }}{% else %}{{ badge("private", variant="gray") }}{% endif %}
 {%- endmacro %}
 
-{# ── Tool shape badge ──────────────────────────────────────────── #}
-{# Renders the artefact-shape badge.
-   Accepts the snake_case ToolShape variants (component / hybrid /
-   tool_binary / tool_external / unknown).
-   Usage: {{ tool_shape_badge("tool_binary") }}
-#}
 {% macro tool_shape_badge(shape) %}
 {% if shape == "hybrid" %}{{ badge("hybrid", variant="pink") }}
 {%- elif shape == "tool_binary" %}{{ badge("tool", variant="violet") }}
@@ -194,13 +102,6 @@
 {%- else %}{{ badge("tool", variant="violet") }}{% endif %}
 {%- endmacro %}
 
-{# ── Pretty JSON block ─────────────────────────────────────────── #}
-{# Renders the server-side-tokenised JSON HTML in a styled <pre> block.
-   The `html` argument is the output of pretty_json::tokenize() — already
-   HTML-safe and pre-escaped at the Rust layer. The <details> wrapper
-   makes the section collapsible.
-   Usage: {{ pretty_json_block(manifest_html, title="Manifest") }}
-#}
 {% macro pretty_json_block(html, title="Manifest", open=false) %}
 <details class="border border-gray-200 rounded-lg overflow-hidden"{% if open %} open{% endif %}>
     <summary class="px-4 py-2 text-sm font-medium text-gray-700 cursor-pointer hover:bg-gray-50 select-none">{{ title }}</summary>
@@ -208,10 +109,6 @@
 </details>
 {%- endmacro %}
 
-{# ── Section heading ───────────────────────────────────────────── #}
-{# Renders a page heading with optional action slot.
-   Usage: {{ section_heading("Projects") }}
-#}
 {% macro section_heading(title) %}
 <div class="flex items-center justify-between mb-8">
     <h1 class="text-2xl font-bold">{{ title }}</h1>
@@ -219,20 +116,6 @@
 </div>
 {%- endmacro %}
 
-{# ── About sidebar block (spec 009) ───────────────────────────────
-   Two sub-sections so the meaning of each value is clear at a glance:
-
-   1. Links: rows with an icon + URL only. The icons (GitHub mark,
-      globe, book, lifebuoy) are self-evident enough that no label is
-      needed. The URL itself is the most informative thing to show.
-
-   2. Facts: a labeled definition list (`Domain: ...`, `Owner: ...`).
-      Free-form text fields don't have an obvious icon vocabulary, so
-      a small uppercase label keeps the meaning unambiguous.
-
-   Each sub-section renders only when at least one of its fields is
-   populated. A thin divider separates them when both are present.
-#}
 {% macro about_block(metadata) %}
 {% if metadata and metadata.has_any %}
 {% set has_links = metadata.git_url or metadata.homepage or metadata.docs_url or metadata.support_url %}
@@ -272,7 +155,6 @@
         {% if metadata.support_url %}
         <li>
             <a href="{{ metadata.support_url }}" target="_blank" rel="noopener noreferrer" title="{{ metadata.support_url }}" class="group flex items-center gap-2 text-gray-700 hover:text-gray-900 transition-colors">
-                {# Lifebuoy — clearer than the broken-link glyph for "support". #}
                 <svg class="w-4 h-4 text-gray-400 group-hover:text-gray-700 shrink-0 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path stroke-linecap="round" d="M5.6 5.6l3.2 3.2M15.2 15.2l3.2 3.2M5.6 18.4l3.2-3.2M15.2 8.8l3.2-3.2"/></svg>
                 <span class="font-medium truncate group-hover:underline">{{ metadata.support_url | prettify_url }}</span>
             </a>

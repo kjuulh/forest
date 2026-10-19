@@ -1,12 +1,3 @@
-//! The failure reason on a release page is a block, not a row cell.
-//!
-//! This exists because the bug it guards against is invisible in a template
-//! diff: a `<span>` inside the stage's flex row looked fine for "deploy
-//! failed" and only fell apart once a real chained error arrived — several
-//! hundred characters that wrapped inside the row, tripled its height and
-//! pushed the badge and timestamp around. The assertion is therefore
-//! structural: the error text must not be inside the row element.
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use forage_core::platform::{
@@ -18,8 +9,6 @@ use tower::ServiceExt;
 use crate::build_router;
 use crate::test_support::*;
 
-/// The real message from the failure this was built for: long, a repeated
-/// ~100-character URL, and a chain whose *last* clause is the actionable one.
 const LONG_ERROR: &str = "provider reported failure: compare the candidate configuration at https://commission-next.finance.understory.sh/admin/commission/compare?format=json&candidate_ref=main: https://commission-next.finance.understory.sh/admin/commission/compare?format=json&candidate_ref=main returned 500 Internal Server Error: comparison failed: source \"sdr_revenue\" row 0 column \"revenue_bloom_eur\" must be an exact decimal string";
 
 const SHORT_ERROR: &str = "upstream stage failed";
@@ -135,9 +124,6 @@ async fn render_page(slug: &str, behavior: MockPlatformBehavior) -> String {
     String::from_utf8(body.to_vec()).unwrap()
 }
 
-/// Everything between a `flex items-center` opening tag and its matching
-/// `</div>`, nesting-aware — i.e. the stage/destination rows as the browser
-/// sees them.
 fn flex_rows(html: &str) -> Vec<String> {
     let mut rows = Vec::new();
     let mut search = 0usize;
@@ -147,8 +133,6 @@ fn flex_rows(html: &str) -> Vec<String> {
         let Some(tag_start) = html[..marker].rfind("<div") else {
             continue;
         };
-        // Walk forward closing one `<div>` for every `</div>`, so a nested
-        // element cannot end the row early.
         let mut depth = 1i32;
         let mut cursor = tag_start + 4;
         let row_end = loop {
@@ -209,7 +193,6 @@ async fn a_long_error_is_a_panel_and_a_short_one_is_not() {
         "an unbroken URL has to wrap rather than overflow: {panel}"
     );
 
-    // The short reason stays a plain line -- no border, no tint.
     let short_start = html.find(SHORT_ERROR).expect("short reason rendered");
     let line_start = html[..short_start].rfind('<').unwrap();
     let line = &html[line_start..short_start];
@@ -227,8 +210,6 @@ async fn nothing_is_truncated_and_no_tooltip_stands_in_for_the_text() {
         !html.contains(&format!("title=\"{LONG_ERROR}\"")),
         "a tooltip is not a substitute for readable, selectable text"
     );
-    // Both the stage and the destination row carry the same message; both
-    // must render it whole.
     assert_eq!(
         html.matches("must be an exact decimal string").count(),
         2,

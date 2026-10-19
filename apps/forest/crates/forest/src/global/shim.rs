@@ -1,19 +1,3 @@
-//! Shim script generator.
-//!
-//! Pure module — no I/O. Generates the POSIX shell script content for a
-//! shim file as specified in TASKS/018-global-tools.md §1a.6.
-//!
-//! The shim filename is `shim_name` (file the user types on PATH); the body
-//! always embeds the **qualified** `<org>/<name>` so resolution goes
-//! through the upstream identity regardless of aliasing.
-
-/// A qualified reference to a tool: `<organisation>/<name>`.
-///
-/// `version` is intentionally NOT part of the shim body. Version pinning
-/// lives in `forest.cue` (`config.dependencies` or `config.org_catalog.X.pins`);
-/// the shim defers to `forest global run` which reads that pin at invocation
-/// time. This makes `forest global update` cheap (no shim rewrites for
-/// version bumps).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QualifiedRef {
     pub organisation: String,
@@ -29,21 +13,8 @@ impl QualifiedRef {
     }
 }
 
-/// The literal first line of every shim — used as the magic marker
-/// `forest global sync` checks before deleting orphan shims (§1a.6).
 pub const SHIM_MARKER: &str = "# forest shim — do not edit";
 
-/// Render the POSIX shell script for a shim that, when executed, exec's
-/// `forest global run <org>/<name>` with the caller's argv passed through.
-///
-/// The shim also forwards **the name it was invoked as** (`${0##*/}` — POSIX
-/// parameter expansion, no subprocess) so the tool's `argv[0]` is the name the
-/// user actually typed (DATA-510). This only differs from the component name
-/// when the shim is an alias, and that is exactly the case that matters: a
-/// tool which dispatches on its own name should see `rg`, not `ripgrep`, when
-/// it was reached through an `rg` shim.
-///
-/// Output is deterministic — same input always yields byte-identical output.
 pub fn shim_script_for(qref: &QualifiedRef) -> String {
     format!(
         "#!/bin/sh\n{SHIM_MARKER}\nexec forest global run {}/{} --as \"${{0##*/}}\" -- \"$@\"\n",
@@ -69,7 +40,6 @@ exec forest global run cuteorg/ripgrep --as \"${0##*/}\" -- \"$@\"
 
     #[test]
     fn renders_canonical_shim_for_hello() {
-        // The forest-hello example component.
         let qref = QualifiedRef::new("cuteorg", "forest-hello");
         let script = shim_script_for(&qref);
         assert_eq!(
@@ -86,8 +56,6 @@ exec forest global run cuteorg/ripgrep --as \"${0##*/}\" -- \"$@\"
 
     #[test]
     fn second_line_is_the_marker() {
-        // §1a.6: `forest global sync` deletes a shim only if its first 2
-        // lines start with the marker. Make sure the marker is on line 2.
         let s = shim_script_for(&QualifiedRef::new("o", "n"));
         let mut lines = s.lines();
         let _shebang = lines.next();
@@ -96,8 +64,6 @@ exec forest global run cuteorg/ripgrep --as \"${0##*/}\" -- \"$@\"
 
     #[test]
     fn body_uses_exec_with_double_dash_argv_separator() {
-        // §1a.6: shims must use the `--` separator so the underlying binary
-        // can receive flags without forest's clap eating them.
         let s = shim_script_for(&QualifiedRef::new("cuteorg", "ripgrep"));
         assert!(
             s.contains("exec forest global run cuteorg/ripgrep --as \"${0##*/}\" -- \"$@\""),
@@ -107,7 +73,6 @@ exec forest global run cuteorg/ripgrep --as \"${0##*/}\" -- \"$@\"
 
     #[test]
     fn output_is_deterministic() {
-        // P5 (downgraded to property test): same input -> byte-identical output.
         let qref = QualifiedRef::new("cuteorg", "ripgrep");
         let a = shim_script_for(&qref);
         let b = shim_script_for(&qref);
@@ -116,17 +81,12 @@ exec forest global run cuteorg/ripgrep --as \"${0##*/}\" -- \"$@\"
 
     #[test]
     fn ends_with_newline() {
-        // POSIX scripts SHOULD end with a newline; some shells warn otherwise.
         let s = shim_script_for(&QualifiedRef::new("o", "n"));
         assert!(s.ends_with('\n'), "must end with newline: {s:?}");
     }
 
     #[test]
     fn body_forwards_the_name_the_shim_was_invoked_as() {
-        // DATA-510: `${0##*/}` strips the directory the shell resolved, so an
-        // `rg` shim hands `rg` to the tool as argv[0] even though it resolves
-        // the upstream `cuteorg/ripgrep`. Parameter expansion, not `basename`
-        // — no subprocess on the hot path of every tool invocation.
         let s = shim_script_for(&QualifiedRef::new("cuteorg", "ripgrep"));
         assert!(s.contains("--as \"${0##*/}\""), "got: {s:?}");
         assert!(
@@ -137,8 +97,6 @@ exec forest global run cuteorg/ripgrep --as \"${0##*/}\" -- \"$@\"
 
     #[test]
     fn invoked_name_is_forwarded_before_the_argv_separator() {
-        // `--as` is forest's own flag, so it has to land on forest's side of
-        // `--`; past the separator it would reach the tool as an argument.
         let s = shim_script_for(&QualifiedRef::new("o", "n"));
         let line = s.lines().nth(2).unwrap();
         let as_at = line.find("--as").unwrap();
@@ -148,8 +106,6 @@ exec forest global run cuteorg/ripgrep --as \"${0##*/}\" -- \"$@\"
 
     #[test]
     fn body_quotes_argv_to_preserve_word_boundaries() {
-        // `"$@"` (not `$@`) is required so spaces inside individual args
-        // don't get re-split by the shell.
         let s = shim_script_for(&QualifiedRef::new("o", "n"));
         assert!(s.contains("\"$@\""), "shim must quote $@: {s:?}");
     }

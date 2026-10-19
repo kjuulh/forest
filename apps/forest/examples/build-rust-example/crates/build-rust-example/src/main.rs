@@ -1,7 +1,3 @@
-//! Minimal forest-sdk component used to demonstrate the DATA-312 build path:
-//! `forest run build` (via the depended-on `forest-contrib/build-rust`)
-//! compiles this crate, and `forest publish` ships it.
-
 use forest_sdk::{CallContext, ComponentService, Error, MethodDescriptor, MethodKind};
 
 struct Example;

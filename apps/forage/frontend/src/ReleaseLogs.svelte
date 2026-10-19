@@ -3,7 +3,6 @@
 <script>
   let { url = "" } = $props();
 
-  // State
   let destinations = $state({});
   let activeTab = $state(null);
   let connected = $state(false);
@@ -14,7 +13,6 @@
 
   let logContainer = $state(null);
 
-  // Derived: sorted destination names
   let destNames = $derived(Object.keys(destinations).sort());
   let activeLines = $derived(activeTab && destinations[activeTab] ? destinations[activeTab] : []);
 
@@ -126,7 +124,6 @@
     return `${m}m${String(s).padStart(2, "0")}s`;
   }
 
-  // Base timestamp per destination (first log line)
   let baseTimes = $derived.by(() => {
     const bt = {};
     for (const [dest, lines] of Object.entries(destinations)) {
@@ -166,7 +163,6 @@
   {:else if destNames.length === 0 && done}
     <div class="logs-empty">No logs recorded for this release.</div>
   {:else}
-    <!-- Header: tabs + controls -->
     <div class="logs-header">
       <div class="logs-tabs">
         {#each destNames as dest}
@@ -208,7 +204,6 @@
       </div>
     </div>
 
-    <!-- Log output -->
     <div class="logs-output" bind:this={logContainer} onscroll={handleScroll}>
       {#each activeLines as entry, i}
         <div

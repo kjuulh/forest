@@ -11,10 +11,6 @@ use crate::client::RunnerSession;
 use crate::destinations::{RunnerContext, RunnerDestination};
 use crate::logger::RemoteLogger;
 
-/// Executor runs work assignments received from the server.
-///
-/// It owns a set of `RunnerDestination` implementations and matches
-/// incoming assignments to the appropriate handler based on capabilities.
 pub struct Executor {
     destinations: Vec<Box<dyn RunnerDestination>>,
     active_count: Arc<AtomicI32>,
@@ -28,15 +24,10 @@ impl Executor {
         }
     }
 
-    /// Number of currently executing releases.
     pub fn active_count(&self) -> i32 {
         self.active_count.load(Ordering::Relaxed)
     }
 
-    /// Execute a single work assignment.
-    ///
-    /// Fetches all required data via gRPC, constructs a `RemoteBackend`,
-    /// and dispatches to the matching destination handler.
     pub async fn execute(
         &self,
         session: &mut RunnerSession,
@@ -53,7 +44,6 @@ impl Executor {
             .as_ref()
             .context("destination info missing type")?;
 
-        // Find matching destination handler
         let handler = self
             .destinations
             .iter()
@@ -69,14 +59,12 @@ impl Executor {
         self.active_count.fetch_add(1, Ordering::Relaxed);
         let _guard = ActiveGuard(self.active_count.clone());
 
-        // Open log stream first so we can log during data fetching
         let log_sender = session
             .open_log_stream()
             .await
             .context("failed to open log stream")?;
         let logger = RemoteLogger::new(release_token.clone(), log_sender);
 
-        // Fetch all data needed by the backend
         tracing::info!(
             release_token,
             destination = destination_info.name,
@@ -103,7 +91,6 @@ impl Executor {
             .await
             .context("failed to fetch project info")?;
 
-        // Convert proto annotation to backend type
         let annotation = ReleaseAnnotation {
             slug: annotation_resp.slug,
             source_username: non_empty(annotation_resp.source_username),
@@ -123,13 +110,11 @@ impl Executor {
             project,
         };
 
-        // Create temp dir for this release
         let temp_dir = std::env::temp_dir().join(format!("forest-runner-{}", uuid::Uuid::new_v4()));
         tokio::fs::create_dir_all(&temp_dir)
             .await
             .context("failed to create temp directory")?;
 
-        // Construct the remote backend with all pre-fetched data
         let backend = RemoteBackend::new(
             deployment_files,
             spec_files,
@@ -139,7 +124,6 @@ impl Executor {
             temp_dir.clone(),
         );
 
-        // Build DestinationConfig from the proto DestinationInfo
         let config = DestinationConfig {
             name: destination_info.name.clone(),
             environment: destination_info.environment.clone(),
@@ -158,17 +142,14 @@ impl Executor {
         let is_plan_mode = ReleaseMode::try_from(assignment.mode).unwrap_or(ReleaseMode::Deploy)
             == ReleaseMode::Plan;
 
-        // Run the destination handler
         let result = if is_plan_mode {
             run_destination_plan(handler.as_ref(), &ctx).await
         } else {
             run_destination(handler.as_ref(), &ctx).await.map(|()| None)
         };
 
-        // Cleanup temp dir (best effort)
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 
-        // Report completion
         match &result {
             Ok(plan_output) => {
                 tracing::info!(release_token, "release completed successfully");
@@ -226,7 +207,6 @@ async fn run_destination_plan(
     handler.plan(ctx).await.context("destination plan failed")
 }
 
-/// RAII guard that decrements active count on drop.
 struct ActiveGuard(Arc<AtomicI32>);
 
 impl Drop for ActiveGuard {
@@ -235,7 +215,6 @@ impl Drop for ActiveGuard {
     }
 }
 
-/// Convert empty strings to None.
 fn non_empty(s: String) -> Option<String> {
     if s.is_empty() { None } else { Some(s) }
 }

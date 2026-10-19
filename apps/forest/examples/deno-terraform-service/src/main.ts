@@ -17,8 +17,6 @@ import {
   type ForestDeploymentRollbackInput,
 } from "./forestgen.ts";
 
-// ── Commands ──
-
 const commands: CommandHandler = {
   async prepare(
     spec: Spec,
@@ -58,8 +56,6 @@ const commands: CommandHandler = {
   },
 };
 
-// ── Deployment hooks ──
-
 const deploymentHooks: ForestDeploymentHookHandler = {
   async prepare(
     spec: Spec,
@@ -88,8 +84,6 @@ const deploymentHooks: ForestDeploymentHookHandler = {
     );
   },
 };
-
-// ── Entry point ──
 
 const router = createRouter(commands, deploymentHooks);
 runOnce(router);

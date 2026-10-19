@@ -18,11 +18,6 @@ pub struct ReleaseRegistry {
     db: PgPool,
 }
 
-/// Single-project row, exposed by `get_project` + `update_project_*`.
-///
-/// Distinct from `ProjectName` (a slim newtype) because the gRPC `Project`
-/// message carries README + description + blessed metadata. Add fields
-/// here when the proto grows (visibility, …).
 #[derive(Debug, Clone)]
 pub struct ProjectRecord {
     pub id: Uuid,
@@ -33,13 +28,6 @@ pub struct ProjectRecord {
     pub metadata: ProjectMetadata,
 }
 
-/// Blessed project metadata persisted as a JSONB blob on `projects`.
-///
-/// `skip_serializing_if` keeps the JSONB tight — unset fields are simply
-/// absent from the row, which makes ad-hoc SQL queries readable and
-/// avoids storing six empty strings on every project.
-///
-/// See specs/features/009-project-metadata.md for the field contract.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectMetadata {
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -70,9 +58,6 @@ impl ProjectMetadata {
     }
 }
 
-/// Per-field length caps. No URL well-formedness check by design —
-/// the UI renders these as plain `<a href>`, and we'd rather not block
-/// a publish on a typo. See spec §Validation.
 fn validate_metadata(m: &ProjectMetadata) -> anyhow::Result<()> {
     const URL_MAX: usize = 512;
     const TEXT_MAX: usize = 256;
@@ -122,10 +107,6 @@ impl ReleaseRegistry {
         deployment_items: &[crate::services::destination_selector::DeploymentItem],
     ) -> anyhow::Result<ReleaseAnnotation> {
         let metadata = serde_json::to_value(metadata)?;
-        // What the project declared about where this artifact goes, parsed from
-        // the deployment files it just uploaded. Recorded here, once, so that
-        // scheduling a stage never has to reach into file content — see
-        // `destination_selector`.
         let deployment_items = serde_json::to_value(deployment_items)?;
         let source = serde_json::to_value(source)?;
         let context = serde_json::to_value(context)?;
@@ -266,7 +247,6 @@ impl ReleaseRegistry {
 
         let (organisation, project) = self.get_project_context(&project_id).await?;
 
-        // Pipeline mode: only when explicitly requested
         if use_pipeline {
             let pipeline = pipeline_registry
                 .get_enabled_for_project(&project_id)
@@ -289,11 +269,6 @@ impl ReleaseRegistry {
                 .await;
         }
 
-        // Non-pipeline mode: flat release to all requested destinations.
-        // What the project declared about where this artifact goes, recorded at
-        // annotate time. Absent for artifacts annotated before that column
-        // existed, which read as "declared nothing" and so fan out — exactly
-        // what they did then.
         let declared = destination_selector::recorded_declaration(&self.db, artifact_id)
             .await
             .unwrap_or_default()
@@ -306,7 +281,6 @@ impl ReleaseRegistry {
         let actor_id = actor.actor_id();
         let actor_type = actor.actor_type();
 
-        // 1. Create ONE release_intent for this release request
         let release_intent = sqlx::query!(
             "
             INSERT INTO release_intents (
@@ -336,8 +310,6 @@ impl ReleaseRegistry {
 
         let mut created_releases = Vec::new();
 
-        // 2. Create a release_states row for each destination via the event store.
-        // The partial unique index prevents duplicate in-flight releases.
         for dest in &destination_recs {
             use crate::services::release_event_store::CreateReleaseParams;
 
@@ -373,36 +345,6 @@ impl ReleaseRegistry {
         })
     }
 
-    /// Destinations for a release request, by name or by environment.
-    ///
-    /// Scoped strictly to the project's organisation so `--env dev` (or a typo
-    /// in a destination name) can never fan out into another org's
-    /// destinations, even though env and destination names collide globally.
-    ///
-    /// Shared by `release` and `release_failed` so a deploy that failed resolves
-    /// its destinations exactly the way the successful one would have.
-    /// Resolve which destinations a release targets.
-    ///
-    /// Named destinations win outright: asking for one destination releases to
-    /// that destination, not to it *and* everything sharing its environment.
-    ///
-    /// This used to be an `OR`, which made `--destination` additive rather than
-    /// restrictive — and since the CLI resolves an environment even when
-    /// destinations are given, naming one destination in a shared environment
-    /// quietly released to all of them. Environments are now only consulted
-    /// when no destination was named.
-    ///
-    /// Asking for an *environment* is narrowed by what the artifact declared for
-    /// it, using the rule the pipeline path uses
-    /// (`destination_selector::narrow_to_declared`). Before that, `--env prod`
-    /// released to every destination in `prod` regardless of the two lines of
-    /// `forest.cue` saying which one the project meant — the same bug the
-    /// pipeline path had, on the path that had supposedly been fixed.
-    ///
-    /// Naming a *destination* still means exactly that destination. A person
-    /// typing `--destination` is deliberately overriding the declaration, and an
-    /// override that silently refuses to override is worse than no override; it
-    /// is logged, not filtered.
     async fn resolve_destinations(
         &self,
         organisation: &str,
@@ -436,8 +378,6 @@ impl ReleaseRegistry {
         .context("resolve destinations")?;
 
         if by_name {
-            // Name the ones that are missing. "not all destinations exist" sends
-            // the reader back to the command line to diff two lists by eye.
             let found: std::collections::BTreeSet<&str> =
                 recs.iter().map(|r| r.name.as_str()).collect();
             let missing: Vec<&str> = destinations
@@ -461,8 +401,6 @@ impl ReleaseRegistry {
         }
 
         if by_name {
-            // An explicit --destination overrides the declaration; say so rather
-            // than quietly doing something else.
             for rec in &recs {
                 let declared_here: Vec<&str> =
                     destination_selector::selectors_for_env(declared, &rec.environment);
@@ -482,8 +420,6 @@ impl ReleaseRegistry {
             return Ok(recs);
         }
 
-        // Narrow per environment: a request may name several, and a declaration
-        // is scoped to one.
         let mut by_environment: std::collections::BTreeMap<String, Vec<DestinationRec>> =
             std::collections::BTreeMap::new();
         for rec in recs {
@@ -509,16 +445,6 @@ impl ReleaseRegistry {
         Ok(selected)
     }
 
-    /// Record a release that failed outside Forest.
-    ///
-    /// Same shape as `release`, and deliberately so: a project whose rollout
-    /// Forest only announces (DATA-637) should produce a release record whether
-    /// the deploy worked or not. Its destination is a `forest/noop@1` — the
-    /// provider really is a no-op — so the intent is honest about what Forest
-    /// did, and the FAILED state is honest about what happened downstream.
-    ///
-    /// The releases are born failed (see `create_failed_release`), so nothing
-    /// can dispatch them between creation and the failure being recorded.
     pub async fn release_failed(
         &self,
         artifact_id: &ArtifactID,
@@ -546,9 +472,6 @@ impl ReleaseRegistry {
 
         let (organisation, project) = self.get_project_context(&project_id).await?;
 
-        // Same declaration, same narrowing as a successful release: a deploy that
-        // failed outside Forest should produce a record for the destinations the
-        // project actually declared, not for every one sharing their environment.
         let declared = destination_selector::recorded_declaration(&self.db, artifact_id)
             .await
             .unwrap_or_default()
@@ -619,12 +542,6 @@ impl ReleaseRegistry {
             });
         }
 
-        // Close the intent out. Every other terminal release reaches this
-        // through `emit_event`; these never do, because they are written
-        // terminal rather than transitioned into it. Skipping it leaves the
-        // intent ACTIVE with nothing left to run, so a failed deploy reads as
-        // permanently in-flight to anything looking at intents rather than at
-        // release states.
         event_store
             .try_finalize_direct_intent(&release_intent.id)
             .await;
@@ -638,7 +555,6 @@ impl ReleaseRegistry {
         })
     }
 
-    /// Pipeline-aware release: create intent with DAG stages, then only activate root stages.
     #[allow(clippy::too_many_arguments)]
     async fn release_with_pipeline(
         &self,
@@ -664,9 +580,6 @@ impl ReleaseRegistry {
         let actor_id = actor.actor_id();
         let actor_type = actor.actor_type();
 
-        // Idempotent: if an ACTIVE pipeline intent already exists for this artifact,
-        // the partial unique index (idx_release_intents_active_artifact) will catch it
-        // and we return the existing intent instead.
         let release_intent = sqlx::query!(
             "INSERT INTO release_intents (
                 artifact, annotation_id, project_id,
@@ -701,8 +614,6 @@ impl ReleaseRegistry {
         })
     }
 
-    /// Get release status by release_intent_id
-    /// Returns all releases (destinations) for this intent with their statuses
     pub async fn get_release_status_by_intent(
         &self,
         release_intent_id: &Uuid,
@@ -827,14 +738,6 @@ impl ReleaseRegistry {
         .await
         .context("get annotations (db)")?;
 
-        // Every annotation's destinations in one round trip.
-        //
-        // This used to be a query per annotation inside the loop below. A
-        // project with a few hundred releases therefore issued a few hundred
-        // sequential queries, and `list_artifacts` — which calls this — became
-        // the slowest upstream call forage makes by a wide margin: p50 269ms
-        // against ≤21ms for everything else, and over a second at the tail,
-        // where the cost is round trips rather than work the database does.
         let artifact_ids: Vec<Uuid> = recs.iter().map(|r| r.artifact_id).collect();
 
         let dest_rows = sqlx::query!(
@@ -857,8 +760,6 @@ impl ReleaseRegistry {
         .await
         .context("get destinations for annotations")?;
 
-        // `ORDER BY rs.artifact_id, d.name` is what preserves the per-annotation
-        // ordering the loop used to get from its own `ORDER BY d.name`.
         let mut destinations_by_artifact: HashMap<Uuid, Vec<ReleaseDestination>> = HashMap::new();
         for d in dest_rows {
             destinations_by_artifact
@@ -877,11 +778,6 @@ impl ReleaseRegistry {
         let mut annotations: Vec<ReleaseAnnotation> = Vec::new();
 
         for rec in recs {
-            // Cloned rather than taken: nothing stops two annotations from
-            // naming the same artifact — `annotations` is unique on `slug`, not
-            // on `artifact_id` — and moving the vec out would hand the first
-            // annotation the destinations and leave every later one looking
-            // like it never deployed.
             let destinations = destinations_by_artifact
                 .get(&rec.artifact_id)
                 .cloned()
@@ -910,7 +806,6 @@ impl ReleaseRegistry {
     }
 
     pub async fn get_organisations(&self) -> anyhow::Result<Vec<OrganisationName>> {
-        // TODO: consider if we should cursor this
         let recs = sqlx::query!(
             "
                 SELECT DISTINCT organisation FROM projects;
@@ -927,7 +822,6 @@ impl ReleaseRegistry {
         &self,
         organisation: &OrganisationName,
     ) -> anyhow::Result<Vec<ProjectName>> {
-        // TODO: consider if we should cursor this
         let recs = sqlx::query!(
             "
                 SELECT project
@@ -961,10 +855,6 @@ impl ReleaseRegistry {
         Ok(rec.id)
     }
 
-    /// Single-project lookup. Returns `None` when the project doesn't exist
-    /// (vs. `Err` for DB failures), so callers can render a clean 404.
-    /// Surfaces the README, description, and blessed metadata as part of
-    /// the project payload.
     pub async fn get_project(
         &self,
         organisation: &str,
@@ -993,11 +883,6 @@ impl ReleaseRegistry {
         }))
     }
 
-    /// Replace the project's README markdown.
-    ///
-    /// Validates the size at the service boundary (64 KiB cap matches
-    /// the gRPC-layer guard in the handler; defence-in-depth so a buggy
-    /// caller can't poison the database).
     pub async fn update_project_readme(
         &self,
         organisation: &str,
@@ -1037,8 +922,6 @@ impl ReleaseRegistry {
         })
     }
 
-    /// Replace the project's description. ≤ 4096 chars; empty allowed
-    /// (clears). See specs/features/009-project-metadata.md.
     pub async fn update_project_description(
         &self,
         organisation: &str,
@@ -1078,10 +961,6 @@ impl ReleaseRegistry {
         })
     }
 
-    /// Replace the project's blessed metadata blob.
-    ///
-    /// Per-field length caps applied in `validate_metadata`. No URL
-    /// well-formedness check by design — see spec §Validation.
     pub async fn update_project_metadata(
         &self,
         organisation: &str,
@@ -1115,12 +994,6 @@ impl ReleaseRegistry {
         })
     }
 
-    /// Combined partial update — any field with `Some(_)` is replaced;
-    /// fields with `None` are left untouched. Atomic (single SQL).
-    ///
-    /// Used by the `UpdateProject` gRPC handler so a `forest publish`
-    /// can push README + description + metadata in one round trip
-    /// without intermediate states leaking to readers.
     pub async fn update_project_fields(
         &self,
         organisation: &str,
@@ -1221,7 +1094,6 @@ impl ReleaseRegistry {
         Ok(rec)
     }
 
-    /// Get annotation details by artifact_id (for enriching notifications).
     pub async fn get_annotation_context(
         &self,
         artifact_id: &Uuid,
@@ -1260,10 +1132,6 @@ impl ReleaseRegistry {
             repo_url: None,
         });
 
-        // Both carry the release's *owner*, and only together: the detection
-        // `--detect` recorded and the account it was linked to live in
-        // `metadata`, and `actor_type` says whether the credential that
-        // annotated belongs to a person. `release_owner` reads them.
         let metadata: HashMap<String, String> =
             serde_json::from_value(rec.metadata).unwrap_or_default();
 
@@ -1314,7 +1182,6 @@ impl ReleaseRegistry {
         .await
         .context("get_releases_by_actor")?;
 
-        // Group by release_intent_id
         let mut map: indexmap::IndexMap<Uuid, ReleaseIntentSummary> = indexmap::IndexMap::new();
 
         for rec in recs {
@@ -1391,9 +1258,6 @@ impl ReleaseRegistry {
                         name: r.type_name,
                         version: r.type_version as usize,
                         description: String::new(),
-                        // Left empty here; the caller joins the live type
-                        // registry to fill in the field schema (and with it
-                        // the `sensitive` flags).
                         fields: vec![],
                     },
                 )
@@ -1478,13 +1342,10 @@ pub struct ReleaseDestination {
     pub status: String,
 }
 
-/// A destination row as a release request resolves it.
 pub struct DestinationRec {
     pub id: Uuid,
     pub name: String,
     pub environment: String,
-    /// `organisation/name@version`. Selection compares it against the type each
-    /// declared item names — see `destination_selector::selects`.
     pub destination_type: String,
 }
 
@@ -1496,7 +1357,6 @@ pub struct ReleaseItem {
     pub project_id: Uuid,
     pub destination_id: Uuid,
     pub status: String,
-    /// Project name (resolved from project_id for downstream consumers).
     pub project: String,
 }
 
@@ -1513,7 +1373,6 @@ pub struct CreatedReleaseIntent {
     pub releases: Vec<CreatedRelease>,
     pub organisation: String,
     pub project: String,
-    /// Stages that were activated during creation (for NATS signaling).
     pub activated_stages: Vec<ActivatedStage>,
 }
 
@@ -1546,16 +1405,11 @@ pub struct AnnotationContext {
     pub source: Source,
     pub context: ArtifactContext,
     pub reference: Reference,
-    /// The annotation's metadata, verbatim. `forest.author.*` lives in here.
     pub metadata: HashMap<String, String>,
-    /// The kind of credential that annotated — `user`, `app` or
-    /// `service_account`. See `Actor::actor_type`.
     pub actor_type: Option<String>,
 }
 
 impl AnnotationContext {
-    /// The one user this release may be notified to personally, if any. See
-    /// `services::release_owner`.
     pub fn personal_recipient(&self) -> Option<String> {
         crate::services::release_owner::personal_recipient_id(
             &self.metadata,
@@ -1603,8 +1457,6 @@ mod project_metadata_tests {
 
     #[test]
     fn validate_metadata_does_not_check_url_wellformedness() {
-        // Spec §Validation: bad URLs render as bad links; not the
-        // server's job to reject them.
         let m = ProjectMetadata {
             git_url: "not a url".into(),
             ..Default::default()

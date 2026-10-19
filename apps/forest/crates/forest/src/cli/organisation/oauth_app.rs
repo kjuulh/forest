@@ -57,8 +57,6 @@ impl OAuthAppCommand {
     }
 }
 
-// ─── Row view models ─────────────────────────────────────────────────
-
 #[derive(Tabled, Serialize)]
 struct AppRow {
     #[tabled(rename = "App ID")]
@@ -99,8 +97,6 @@ async fn require_login(state: &State) -> anyhow::Result<()> {
         .context("you must be logged in")?;
     Ok(())
 }
-
-// ─── create ──────────────────────────────────────────────────────────
 
 #[derive(clap::Parser)]
 pub struct CreateCommand {
@@ -173,7 +169,6 @@ impl CreateCommand {
         require_login(state).await?;
         let org_id = super::member::resolve_org_id(state, &self.org).await?;
         let scopes = if self.scope.is_empty() && self.public {
-            // A public client may not hold `openid`.
             vec!["profile".to_string()]
         } else if self.scope.is_empty() {
             vec!["openid".to_string(), "profile".to_string()]
@@ -218,8 +213,6 @@ impl CreateCommand {
     }
 }
 
-// ─── list ────────────────────────────────────────────────────────────
-
 #[derive(clap::Parser)]
 pub struct ListCommand {
     /// Organisation ID or name
@@ -241,8 +234,6 @@ impl ListCommand {
         Ok(())
     }
 }
-
-// ─── show ────────────────────────────────────────────────────────────
 
 #[derive(clap::Parser)]
 pub struct ShowCommand {
@@ -269,8 +260,6 @@ impl ShowCommand {
         Ok(())
     }
 }
-
-// ─── update ──────────────────────────────────────────────────────────
 
 /// Change an application. Only what is given changes; the rest is read back
 /// from Forest first, since an update replaces every field. Removing a grant
@@ -364,8 +353,6 @@ impl UpdateCommand {
     }
 }
 
-// ─── rotate-secret ───────────────────────────────────────────────────
-
 #[derive(clap::Parser)]
 pub struct RotateSecretCommand {
     /// Organisation ID or name
@@ -396,8 +383,6 @@ impl RotateSecretCommand {
         Ok(())
     }
 }
-
-// ─── delete ──────────────────────────────────────────────────────────
 
 #[derive(clap::Parser)]
 pub struct DeleteCommand {

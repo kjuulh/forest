@@ -1,9 +1,6 @@
 {% extends "base.html.jinja" %}
 {% from "components/ui.html.jinja" import alert %}
 
-{# Build "?return_to=…" query suffix for outbound links so the device-login
-   user_code (and any other pending intent) survives the OAuth/magic-link
-   detour and the cross-link to /login. #}
 {% set rt_query = "" %}
 {% if return_to is defined and return_to %}
     {% set rt_query = "?return_to=" ~ return_to|urlencode %}

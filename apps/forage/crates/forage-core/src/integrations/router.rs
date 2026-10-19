@@ -1,7 +1,6 @@
 use super::{Integration, IntegrationConfig, IntegrationStore};
 use super::webhook::{ReleasePayload, WebhookPayload};
 
-/// A notification event from Forest, normalized for routing.
 #[derive(Debug, Clone)]
 pub struct NotificationEvent {
     pub id: String,
@@ -14,7 +13,6 @@ pub struct NotificationEvent {
     pub release: Option<ReleaseContext>,
 }
 
-/// Release context from the notification event.
 #[derive(Debug, Clone)]
 pub struct ReleaseContext {
     pub slug: String,
@@ -23,11 +21,6 @@ pub struct ReleaseContext {
     pub destination: String,
     pub environment: String,
     pub source_username: String,
-    /// The release's **owner** — the one person a DM may go to, and empty when
-    /// the release has no human owner (a bot wrote it, or its author has no
-    /// forest account). Forest derives it; it is not the CI credential that
-    /// happened to make the call. A release with no owner still posts to the
-    /// channel and DMs nobody.
     pub source_user_id: String,
     pub commit_sha: String,
     pub commit_branch: String,
@@ -37,7 +30,6 @@ pub struct ReleaseContext {
     pub error_message: Option<String>,
 }
 
-/// A dispatch task produced by the router: what to send where.
 #[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum DispatchTask {
@@ -48,8 +40,6 @@ pub enum DispatchTask {
         headers: std::collections::HashMap<String, String>,
         payload: WebhookPayload,
     },
-    /// Slack channel message via bot token (supports update-in-place).
-    /// Falls back to webhook_url if access_token is empty.
     Slack {
         integration_id: String,
         webhook_url: String,
@@ -58,11 +48,9 @@ pub enum DispatchTask {
         release_id: String,
         notification_id: String,
         event_type: String,
-        /// The full event, needed to rebuild the message after merging destination state.
         event: NotificationEvent,
         message: SlackMessage,
     },
-    /// Personal DM to a user who linked their Slack account.
     SlackDm {
         integration_id: String,
         access_token: String,
@@ -75,7 +63,6 @@ pub enum DispatchTask {
     },
 }
 
-/// A formatted Slack message (Block Kit compatible).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SlackMessage {
     pub text: String,
@@ -83,7 +70,6 @@ pub struct SlackMessage {
     pub blocks: Vec<serde_json::Value>,
 }
 
-/// Route a notification event to dispatch tasks based on matching integrations.
 pub fn route_notification(
     event: &NotificationEvent,
     integrations: &[Integration],
@@ -111,7 +97,6 @@ pub fn route_notification(
                 ..
             } => {
                 let message = format_slack_message(event, &std::collections::HashMap::new(), "");
-                // Group by release slug (shared across all destinations in a release)
                 let release_id = event
                     .release
                     .as_ref()
@@ -133,7 +118,6 @@ pub fn route_notification(
         .collect()
 }
 
-/// Find matching integrations and produce dispatch tasks (channel + DM).
 pub async fn route_notification_for_org(
     store: &dyn IntegrationStore,
     event: &NotificationEvent,
@@ -151,7 +135,6 @@ pub async fn route_notification_for_org(
 
     let mut tasks = route_notification(event, &integrations);
 
-    // Produce personal DM tasks for the release owner (if they linked Slack)
     if let Some(release) = &event.release {
         tracing::debug!(
             source_user_id = %release.source_user_id,
@@ -159,7 +142,6 @@ pub async fn route_notification_for_org(
             "DM routing: checking release owner"
         );
     }
-    // Only DM on actual deploy events, not bare annotations
     let dm_event_types = ["release_started", "release_succeeded", "release_failed"];
     if let Some(release) = event.release.as_ref().filter(|r| {
         !r.source_user_id.is_empty() && dm_event_types.contains(&event.notification_type.as_str())
@@ -170,7 +152,6 @@ pub async fn route_notification_for_org(
             slack_integrations = slack_count,
             "DM routing: iterating integrations for DM lookup"
         );
-        // For each Slack integration with a bot token, check if the author linked that workspace
         for integration in &integrations {
             if let IntegrationConfig::Slack {
                 team_id,
@@ -185,9 +166,8 @@ pub async fn route_notification_for_org(
                     "DM routing: checking slack integration"
                 );
                 if access_token.is_empty() || team_id.is_empty() {
-                    continue; // manual webhook, no bot token
+                    continue;
                 }
-                // Look up the release author's Slack link for this workspace
                 match store
                     .get_slack_user_link(&release.source_user_id, team_id)
                     .await
@@ -256,11 +236,6 @@ fn build_webhook_payload(event: &NotificationEvent) -> WebhookPayload {
     }
 }
 
-/// Build a compact Slack message showing release progress across destinations.
-///
-/// `forage_url` is the base URL for deep links (e.g. "https://client.dev.forage.sh").
-/// When `accumulated` is non-empty, renders all known destination statuses.
-/// When empty (first message or webhook fallback), shows just the current event's destination.
 pub fn format_slack_message(
     event: &NotificationEvent,
     accumulated: &std::collections::HashMap<String, super::DestinationStatus>,
@@ -268,7 +243,6 @@ pub fn format_slack_message(
 ) -> SlackMessage {
     let release = event.release.as_ref();
 
-    // Determine aggregate color from accumulated destinations
     let color = if accumulated.is_empty() {
         match event.notification_type.as_str() {
             "release_succeeded" => "#36a64f",
@@ -289,12 +263,10 @@ pub fn format_slack_message(
         return format_accumulated_message(event, color, accumulated, forage_url);
     });
 
-    // Fallback text (shown in notifications/previews)
     let text = format!("{status_emoji} {title}");
 
     let mut blocks: Vec<serde_json::Value> = Vec::new();
 
-    // Header: emoji + title, with "View Release" button
     let release_url = release
         .map(|r| build_release_url(event, r, forage_url))
         .unwrap_or_default();
@@ -311,7 +283,6 @@ pub fn format_slack_message(
     }
     blocks.push(header_block);
 
-    // Commit/change title
     if let Some(r) = release.filter(|r| !r.context_title.is_empty()) {
         blocks.push(serde_json::json!({
             "type": "section",
@@ -319,12 +290,10 @@ pub fn format_slack_message(
         }));
     }
 
-    // Metadata line
     if let Some(r) = release {
         blocks.push(build_metadata_context(event, r, forage_url));
         blocks.push(serde_json::json!({ "type": "divider" }));
 
-        // Single destination status
         if !r.destination.is_empty() {
             let dest_emoji = match event.notification_type.as_str() {
                 "release_succeeded" => ":white_check_mark:",
@@ -358,7 +327,6 @@ pub fn format_slack_message(
     }
 }
 
-/// Render the full multi-destination message from accumulated state.
 fn format_accumulated_message(
     event: &NotificationEvent,
     color: &str,
@@ -372,7 +340,6 @@ fn format_accumulated_message(
 
     let mut blocks: Vec<serde_json::Value> = Vec::new();
 
-    // Header with "View Release" button
     let release_url = release
         .map(|r| build_release_url(event, r, forage_url))
         .unwrap_or_default();
@@ -386,7 +353,6 @@ fn format_accumulated_message(
     }
     blocks.push(header_block);
 
-    // Commit/change title (e.g. "fix: correct timezone handling in cron scheduler (#80)")
     if let Some(r) = release.filter(|r| !r.context_title.is_empty()) {
         blocks.push(serde_json::json!({
             "type": "section",
@@ -394,21 +360,18 @@ fn format_accumulated_message(
         }));
     }
 
-    // Metadata
     if let Some(r) = release {
         blocks.push(build_metadata_context(event, r, forage_url));
     }
 
     blocks.push(serde_json::json!({ "type": "divider" }));
 
-    // Destination progress line
     let done = destinations
         .values()
         .filter(|d| d.status == "succeeded" || d.status == "failed")
         .count();
     let total = destinations.len();
 
-    // Compact destination line: ✅ dev  ✅ staging  🔄 prod  (2/3)
     let mut dest_parts: Vec<String> = Vec::new();
     let mut sorted_dests: Vec<_> = destinations.iter().collect();
     sorted_dests.sort_by_key(|(name, _)| name.as_str());
@@ -430,7 +393,6 @@ fn format_accumulated_message(
         "text": { "type": "mrkdwn", "text": format!("{}{dest_count}", dest_parts.join("  ")) }
     }));
 
-    // Show errors inline if any failed
     for (name, status) in &sorted_dests {
         if let Some(ref err) = status.error {
             blocks.push(serde_json::json!({
@@ -447,7 +409,6 @@ fn format_accumulated_message(
     }
 }
 
-/// Build the metadata context block shared by both message formats.
 fn build_metadata_context(
     event: &NotificationEvent,
     r: &ReleaseContext,
@@ -467,7 +428,6 @@ fn build_metadata_context(
         parts.push(r.source_username.clone());
     }
 
-    // Source link (e.g. GitHub commit/PR)
     if !r.context_web.is_empty() {
         parts.push(format!("<{}|source>", r.context_web));
     }
@@ -478,7 +438,6 @@ fn build_metadata_context(
     })
 }
 
-/// Build the release URL for deep linking.
 fn build_release_url(
     event: &NotificationEvent,
     r: &ReleaseContext,
@@ -496,7 +455,6 @@ fn build_release_url(
     )
 }
 
-/// Build a "View Release" button block for the header section accessory.
 fn build_view_button(url: &str) -> serde_json::Value {
     serde_json::json!({
         "type": "button",
@@ -505,9 +463,6 @@ fn build_view_button(url: &str) -> serde_json::Value {
     })
 }
 
-/// Build Slack blocks for pipeline stage progress.
-/// Renders each stage as a line: emoji + label (e.g. "✅ Deployed to `dev`", "⏳ Wait 5s").
-/// Stages are topologically sorted by `depends_on` to match pipeline execution order.
 pub fn format_pipeline_blocks(
     stages: &[crate::platform::PipelineRunStageState],
 ) -> Vec<serde_json::Value> {
@@ -515,7 +470,6 @@ pub fn format_pipeline_blocks(
         return Vec::new();
     }
 
-    // Topological sort by depends_on
     let sorted = topo_sort_stages(stages);
 
     let mut lines: Vec<String> = Vec::new();
@@ -527,7 +481,7 @@ pub fn format_pipeline_blocks(
             "FAILED" => ":x:",
             "CANCELLED" => ":no_entry_sign:",
             "AWAITING_APPROVAL" => ":shield:",
-            _ => ":radio_button:", // PENDING
+            _ => ":radio_button:",
         };
 
         let label = match stage.stage_type.as_str() {
@@ -581,32 +535,26 @@ pub fn format_pipeline_blocks(
 
     let mut blocks = Vec::new();
 
-    // Pipeline header + stages
     blocks.push(serde_json::json!({
         "type": "section",
         "text": { "type": "mrkdwn", "text": lines.join("\n") }
     }));
 
-    // Progress count
     blocks.push(serde_json::json!({
         "type": "context",
         "elements": [{ "type": "mrkdwn", "text": format!("{done}/{total} stages complete") }]
     }));
 
-    // Divider before destinations
     blocks.push(serde_json::json!({ "type": "divider" }));
 
     blocks
 }
 
-/// Topological sort of pipeline stages by `depends_on`.
-/// Falls back to input order if the graph has issues.
 fn topo_sort_stages(
     stages: &[crate::platform::PipelineRunStageState],
 ) -> Vec<crate::platform::PipelineRunStageState> {
     use std::collections::{HashMap, VecDeque};
 
-    // Build in-degree map
     let mut in_degree: HashMap<&str, usize> = HashMap::new();
     let mut dependents: HashMap<&str, Vec<&str>> = HashMap::new();
 
@@ -621,7 +569,6 @@ fn topo_sort_stages(
         }
     }
 
-    // Kahn's algorithm
     let mut queue: VecDeque<&str> = in_degree
         .iter()
         .filter(|&(_, deg)| *deg == 0)
@@ -643,7 +590,6 @@ fn topo_sort_stages(
         }
     }
 
-    // Build result in sorted order, falling back to input order for missing
     let id_to_idx: HashMap<&str, usize> = sorted_ids
         .iter()
         .enumerate()
@@ -671,11 +617,11 @@ fn aggregate_color(
     let has_failed = destinations.values().any(|d| d.status == "failed");
     let has_started = destinations.values().any(|d| d.status == "started");
     if has_failed {
-        "#dc3545" // red
+        "#dc3545"
     } else if has_started {
-        "#0d6efd" // blue (still in progress)
+        "#0d6efd"
     } else {
-        "#36a64f" // green (all done)
+        "#36a64f"
     }
 }
 
@@ -684,10 +630,6 @@ fn aggregate_emoji(event_type: &str) -> &'static str {
         "release_succeeded" => ":white_check_mark:",
         "release_failed" => ":x:",
         "release_started" => ":rocket:",
-        // An annotation is a deploy that has been announced and not yet
-        // happened, so it reads as waiting rather than as filing (DATA-637).
-        // For projects that annotate up front and release when their own CI
-        // finishes, this is the state a reader spends the most time looking at.
         "release_annotated" => ":hourglass_flowing_sand:",
         _ => ":bell:",
     }
@@ -820,7 +762,7 @@ mod tests {
             } => {
                 assert_eq!(integration_id, "s1");
                 assert!(message.text.contains("Release failed"));
-                assert_eq!(message.color, "#dc3545"); // red for failure
+                assert_eq!(message.color, "#dc3545");
             }
             _ => panic!("expected Slack task"),
         }
@@ -834,8 +776,6 @@ mod tests {
         assert_eq!(tasks.len(), 2);
     }
 
-    /// Set up an org with one Slack workspace and, optionally, a Slack link for
-    /// one user, then route an event through it.
     async fn route_with_slack(
         event: &NotificationEvent,
         linked_user: Option<&str>,
@@ -895,10 +835,6 @@ mod tests {
             .count()
     }
 
-    /// The owner of a release gets the DM. `source_user_id` on the event is the
-    /// release *owner* — forest derives it and leaves it empty where there
-    /// isn't one (`services::release_owner`), which is what the two tests below
-    /// exercise.
     #[tokio::test]
     async fn the_owner_of_a_release_is_dmd() {
         let mut event = test_event();
@@ -910,22 +846,13 @@ mod tests {
         assert_eq!(channel_posts(&tasks), 1, "the channel post still happens");
     }
 
-    /// A release with no owner — the renovate[bot] case (DATA-723). The channel
-    /// carries it to everybody, as it always did, and nobody is DM'd. In
-    /// particular the fallback that used to fill `source_user_id` with whoever
-    /// owned the CI token must not resurface: an empty owner means nobody, not
-    /// "ask the store who else to tell".
     #[tokio::test]
     async fn a_release_with_no_owner_posts_to_the_channel_and_dms_nobody() {
         let mut event = test_event();
         event.notification_type = "release_succeeded".into();
         event.release.as_mut().expect("release").source_user_id = String::new();
-        // The bot is still named on the message — the channel says who, it just
-        // has nobody to address personally.
         event.release.as_mut().expect("release").source_username = "renovate[bot]".into();
 
-        // Somebody's Slack link exists in this workspace; it is simply not this
-        // release's owner, so it must not be reached for.
         let tasks = route_with_slack(&event, Some("kasper_id")).await;
 
         assert!(
@@ -936,13 +863,10 @@ mod tests {
         assert_eq!(channel_posts(&tasks), 1, "the channel post is unchanged");
     }
 
-    /// A non-owner with a Slack link in the same workspace is not a recipient.
-    /// They see the release in the channel like everyone else.
     #[tokio::test]
     async fn a_non_owner_is_not_dmd_about_somebody_elses_release() {
         let mut event = test_event();
         event.notification_type = "release_succeeded".into();
-        // Owned by alice; the only linked Slack account belongs to kasper.
         let tasks = route_with_slack(&event, Some("kasper_id")).await;
 
         assert!(
@@ -960,10 +884,6 @@ mod tests {
         assert!(tasks.is_empty());
     }
 
-    /// The pending half of an announce-first deploy (DATA-637). A project that
-    /// annotates when CI starts and releases when it finishes spends most of the
-    /// deploy in this state, so it has to read as "on its way", not as
-    /// bookkeeping.
     #[test]
     fn slack_message_annotated_reads_as_pending() {
         let mut event = test_event();
@@ -997,7 +917,6 @@ mod tests {
     fn slack_message_includes_error() {
         let event = test_event();
         let msg = format_slack_message(&event, &HashMap::new(), "");
-        // Error message is rendered in blocks, not the fallback text field
         let blocks_str = serde_json::to_string(&msg.blocks).unwrap();
         assert!(blocks_str.contains("health check timeout"));
     }
@@ -1017,7 +936,6 @@ mod tests {
             error: None,
         });
         let msg = format_slack_message(&event, &dests, "");
-        // Should be blue (still deploying)
         assert_eq!(msg.color, "#0d6efd");
         let blocks_str = serde_json::to_string(&msg.blocks).unwrap();
         assert!(blocks_str.contains("prod-eu"));
@@ -1027,7 +945,6 @@ mod tests {
     #[test]
     fn slack_message_accumulated_all_succeeded() {
         let mut event = test_event();
-        // Set destination_count to match the 2 destinations we provide
         if let Some(ref mut r) = event.release {
             r.destination_count = 2;
         }
@@ -1043,7 +960,7 @@ mod tests {
             error: None,
         });
         let msg = format_slack_message(&event, &dests, "");
-        assert_eq!(msg.color, "#36a64f"); // green — all done, no pending
+        assert_eq!(msg.color, "#36a64f");
     }
 
     #[test]
@@ -1055,9 +972,8 @@ mod tests {
             status: "started".into(),
             error: None,
         });
-        // A destination still in progress → blue
         let msg = format_slack_message(&event, &dests, "");
-        assert_eq!(msg.color, "#0d6efd"); // blue — in progress
+        assert_eq!(msg.color, "#0d6efd");
     }
 
     #[test]
@@ -1070,7 +986,7 @@ mod tests {
             error: Some("OOM killed".into()),
         });
         let msg = format_slack_message(&event, &dests, "");
-        assert_eq!(msg.color, "#dc3545"); // red
+        assert_eq!(msg.color, "#dc3545");
         let blocks_str = serde_json::to_string(&msg.blocks).unwrap();
         assert!(blocks_str.contains("OOM killed"));
     }
@@ -1123,7 +1039,7 @@ mod tests {
         ];
 
         let blocks = format_pipeline_blocks(&stages);
-        assert_eq!(blocks.len(), 3); // stages block + progress context + divider
+        assert_eq!(blocks.len(), 3);
 
         let text = blocks[0]["text"]["text"].as_str().unwrap();
         assert!(text.contains("Deployed to `dev`"));

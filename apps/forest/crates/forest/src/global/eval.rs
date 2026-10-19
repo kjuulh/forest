@@ -1,58 +1,8 @@
-//! Shell-eval script generators for `forest shell zsh` and `forest shell bash`.
-//!
-//! Pure module — no I/O. Output is byte-stable per TASKS/018-global-tools.md
-//! §1a.7. The script prepends the shim directory to `$PATH` exactly once
-//! (idempotent under repeated sourcing thanks to the `case` guard).
-
-/// The shim directory path that the eval scripts prepend to `$PATH`.
-///
-/// Hard-coded as a literal in the emitted script — NOT resolved here.
-/// Resolution happens in the user's shell at source-time so `$XDG_CACHE_HOME`
-/// and `$HOME` expand correctly per the user's environment. The POSIX
-/// `${VAR:-default}` form means "use $XDG_CACHE_HOME if it's set and non-empty,
-/// otherwise fall back to $HOME/.cache" — matching the XDG Base Directory spec
-/// and Forest's runtime `xdg_cache_home()` resolver in `global::paths`.
 pub const SHIM_DIR_LITERAL: &str = "${XDG_CACHE_HOME:-$HOME/.cache}/forest/global/shims";
 
-/// The per-shell aggregate script that `forest shell <shell>` sources — the
-/// concatenation of every installed tool's component-declared shell integration
-/// (DATA-588). Same unexpanded-literal discipline as [`SHIM_DIR_LITERAL`]:
-/// `$HOME`/`$XDG_CACHE_HOME` expand in the user's shell, not here.
-///
-/// `{shell}` is substituted by [`shell_integration_block`]; the resolved
-/// counterpart is [`crate::global::paths::GlobalPaths::shell_aggregate`].
 const AGGREGATE_LITERAL: &str = "${XDG_CACHE_HOME:-$HOME/.cache}/forest/global/shell";
 
-/// Render the POSIX block that loads component-declared shell integrations
-/// (DATA-588).
-///
-/// This is what replaces a hand-maintained pile of `eval "$(<tool> init zsh)"`
-/// lines in the user's rc file. Components declare `include.shell.init.<shell>`
-/// in their manifest; forest captures each tool's script when the tool is
-/// fetched and concatenates them into one aggregate file. Startup therefore
-/// costs a single `source` of a single file — no process per tool, and above all
-/// no lazy download standing between the user and their prompt.
-///
-/// `FOREST_NO_SHELL_INTEGRATION=1` opts out entirely — nothing sourced, no warm
-/// started. This exists because the block runs in every interactive shell and
-/// sources third-party script: when that goes wrong, the way back to a working
-/// shell must not be "edit your rc file".
-///
-/// Cold cache (nothing captured yet, so no aggregate): kick off a detached,
-/// silent, throttled warm and arm the deferred loader, so integrations arrive in
-/// *this* shell a moment later instead of blocking it. The `forest` binary is
-/// always present — it is what emitted this block — so that call can't itself
-/// trigger a download.
-///
-/// `shell` selects the aggregate; deterministic per shell. POSIX form — fish
-/// gets [`fish_shell_integration_block`].
 pub fn shell_integration_block(shell: &str) -> String {
-    // zsh only: tool snippets register completions with `compdef`, and clap's
-    // generated footer calls it unguarded — so on a shell whose completion system
-    // hasn't been initialised yet, sourcing the aggregate prints
-    // "command not found: compdef". The guard queues those calls and replays them
-    // if compinit runs later. bash and fish need nothing equivalent: their
-    // `complete` is a builtin, always available.
     let (compdef_begin, compdef_end) = if shell == "zsh" {
         (
             "_forest_compdef_guard_begin\n  ",
@@ -83,9 +33,6 @@ pub fn shell_integration_block(shell: &str) -> String {
     )
 }
 
-/// Fish counterpart of [`shell_integration_block`]. Same intent, fish syntax:
-/// no POSIX `${VAR:-default}` (hence the `test -n` guard, matching
-/// [`fish_path_prepend`]) and `source` instead of `.`.
 pub fn fish_shell_integration_block() -> String {
     "\n\
      # forest shell — component-declared tool integrations (DATA-588).\n\
@@ -110,27 +57,14 @@ pub fn fish_shell_integration_block() -> String {
         .to_string()
 }
 
-/// Render the zsh eval script. Byte-stable; same input always yields
-/// byte-identical output.
 pub fn eval_zsh() -> String {
     render()
 }
 
-/// Render the bash eval script.
-///
-/// The POSIX `case` form works in both shells, so the output is byte-identical
-/// to `eval_zsh()`. The two functions are kept as separate entry points so the
-/// CLI can dispatch on the shell name and future-proof the divergence if it
-/// ever becomes necessary.
 pub fn eval_bash() -> String {
     render()
 }
 
-/// Render the fish eval script.
-///
-/// Fish is not POSIX: it has no `case`/`${VAR:-default}`, so it gets its own
-/// [`fish_path_prepend`] guard instead of [`posix_path_prepend`]. Deterministic:
-/// same input, byte-identical output.
 pub fn eval_fish() -> String {
     format!(
         "# forest shell — adds the global shim dir to PATH idempotently\n{}",
@@ -145,19 +79,6 @@ fn render() -> String {
     )
 }
 
-/// Render the POSIX `case`-guarded PATH-prepend for `shim_dir`.
-///
-/// This is the single source of truth for Forest's idempotent PATH injection:
-/// the `case` guard makes it safe to run more than once (double-sourcing a
-/// shell rc, re-running a launchd agent) because a second run finds `shim_dir`
-/// already present and does nothing. `eval_zsh`/`eval_bash` embed it with the
-/// unexpanded [`SHIM_DIR_LITERAL`]; the macOS LaunchAgent generator in
-/// `global::pathenv` embeds it with the *resolved* absolute shim dir (launchd
-/// has no `$XDG_CACHE_HOME`/`$HOME` to expand).
-///
-/// `shim_dir` is interpolated verbatim — callers pass either the literal or a
-/// pre-resolved absolute path. Deterministic: same input, byte-identical
-/// output.
 pub fn posix_path_prepend(shim_dir: &str) -> String {
     format!(
         "case \":$PATH:\" in\n  \
@@ -167,17 +88,6 @@ pub fn posix_path_prepend(shim_dir: &str) -> String {
     )
 }
 
-/// Render the fish idempotent PATH-prepend for the shim dir.
-///
-/// The fish analogue of [`posix_path_prepend`]: same intent (prepend the shim
-/// dir to `$PATH` exactly once, safe to re-source), expressed in fish syntax.
-/// Fish lacks POSIX `${VAR:-default}` so the `$XDG_CACHE_HOME`-with-`$HOME`
-/// fallback is a `test -n`/`set` guard (matching POSIX "unset OR empty →
-/// default"), and idempotency comes from fish's `contains` rather than a `case`
-/// block. Resolution happens in the user's shell at source time, so `$HOME` and
-/// `$XDG_CACHE_HOME` are emitted literally, never pre-expanded here.
-///
-/// Deterministic: no input, byte-identical output every call.
 pub fn fish_path_prepend() -> String {
     "set -l forest_shim_dir $HOME/.cache/forest/global/shims\n\
      if test -n \"$XDG_CACHE_HOME\"\n    \
@@ -193,11 +103,8 @@ pub fn fish_path_prepend() -> String {
 mod tests {
     use super::*;
 
-    // --- Determinism + idempotency guards ---
-
     #[test]
     fn eval_zsh_is_deterministic() {
-        // §1a.7 / P5 — same input, byte-identical output.
         assert_eq!(eval_zsh(), eval_zsh());
     }
 
@@ -208,18 +115,11 @@ mod tests {
 
     #[test]
     fn zsh_and_bash_emit_identical_scripts() {
-        // §1a.7: the POSIX case form is valid in both shells; for this spec
-        // we emit byte-identical scripts. If they diverge in a future spec,
-        // this test will be updated alongside.
         assert_eq!(eval_zsh(), eval_bash());
     }
 
-    // --- Structural invariants required for idempotency (P6) ---
-
     #[test]
     fn contains_idempotency_case_guard() {
-        // P6 (structural lemma): emitted script contains the exact substring
-        // that makes double-sourcing safe.
         let script = eval_zsh();
         let expected = format!("*\":{SHIM_DIR_LITERAL}:\"*) ;;");
         assert!(
@@ -230,7 +130,6 @@ mod tests {
 
     #[test]
     fn case_examines_path_with_leading_and_trailing_colons() {
-        // The guard wraps `$PATH` in colons so first/last entries match too.
         let script = eval_zsh();
         assert!(
             script.contains("case \":$PATH:\" in"),
@@ -257,13 +156,8 @@ mod tests {
         );
     }
 
-    // --- Negative: must NOT eagerly expand HOME or XDG_CACHE_HOME ---
-
     #[test]
     fn never_substitutes_home_at_render_time() {
-        // The script must contain literal `$HOME` and `$XDG_CACHE_HOME`, never
-        // their expanded values — expansion happens in the user's shell so the
-        // emitted script is portable across users / environments.
         let script = eval_zsh();
         let home_expanded = std::env::var("HOME").unwrap_or_default();
         if !home_expanded.is_empty() {
@@ -289,11 +183,8 @@ mod tests {
         );
     }
 
-    // --- Header / shape ---
-
     #[test]
     fn starts_with_human_readable_comment() {
-        // §1a.7 first line is a comment explaining what this script does.
         let script = eval_zsh();
         let first_line = script.lines().next().unwrap_or("");
         assert!(
@@ -301,8 +192,6 @@ mod tests {
             "first line must be a comment: {first_line:?}"
         );
     }
-
-    // --- Shared prepend helper (reused by global::pathenv) ---
 
     #[test]
     fn posix_path_prepend_is_guarded_and_prepends() {
@@ -315,8 +204,6 @@ mod tests {
 
     #[test]
     fn render_reuses_posix_path_prepend_with_the_literal() {
-        // The eval script is exactly the header comment + the shared prepend
-        // rendered against SHIM_DIR_LITERAL. Guards against the two drifting.
         let expected = format!(
             "# forest shell — adds the global shim dir to PATH idempotently\n{}",
             posix_path_prepend(SHIM_DIR_LITERAL),
@@ -326,15 +213,12 @@ mod tests {
 
     #[test]
     fn ends_with_esac() {
-        // The case block ends with `esac`; the script must close it.
         let trimmed = eval_zsh().trim_end().to_string();
         assert!(
             trimmed.ends_with("esac"),
             "script must end with `esac`: {trimmed}"
         );
     }
-
-    // --- fish (non-POSIX; separate generator) ---
 
     #[test]
     fn eval_fish_is_deterministic() {
@@ -353,8 +237,6 @@ mod tests {
 
     #[test]
     fn fish_uses_contains_guard_not_posix_case() {
-        // Idempotency in fish comes from `contains`, and fish has no POSIX
-        // `case`/`esac` — emitting those would be a syntax error under fish.
         let script = eval_fish();
         assert!(
             script.contains("if not contains -- $forest_shim_dir $PATH"),
@@ -378,7 +260,6 @@ mod tests {
 
     #[test]
     fn fish_never_pre_expands_home_or_xdg() {
-        // Same portability rule as POSIX: expansion happens in the user's shell.
         let script = eval_fish();
         let home = std::env::var("HOME").unwrap_or_default();
         if !home.is_empty() {
@@ -396,8 +277,6 @@ mod tests {
             "must contain literal $XDG_CACHE_HOME: {script}"
         );
     }
-
-    // --- component-declared shell integration (DATA-588) ------------------
 
     #[test]
     fn integration_block_is_deterministic_per_shell() {
@@ -436,8 +315,6 @@ mod tests {
 
     #[test]
     fn integration_block_guards_on_readability_before_sourcing() {
-        // A fresh install has no aggregate; sourcing unconditionally would print
-        // "no such file" above the user's first prompt on every new shell.
         for shell in ["zsh", "bash"] {
             assert!(
                 shell_integration_block(shell).contains("if [ -r \"$_forest_shell_aggregate\" ]"),
@@ -454,8 +331,6 @@ mod tests {
 
     #[test]
     fn cold_cache_branch_warms_in_background_and_defers() {
-        // The two halves of the non-blocking promise: never download inline, and
-        // still get the integrations into *this* shell.
         for b in [
             shell_integration_block("zsh"),
             shell_integration_block("bash"),
@@ -474,10 +349,6 @@ mod tests {
 
     #[test]
     fn zsh_block_guards_the_source_against_a_missing_compdef() {
-        // Tool snippets register completions at source time and clap's generated
-        // footer calls `compdef` unguarded, so a shell whose completion system is
-        // not up yet printed "command not found: compdef" on every start. The
-        // guard queues those calls instead.
         let b = shell_integration_block("zsh");
         let begin = b
             .find("_forest_compdef_guard_begin")
@@ -491,17 +362,12 @@ mod tests {
 
     #[test]
     fn only_zsh_gets_the_compdef_guard() {
-        // `complete` is a builtin in bash and fish — always available — so there
-        // is nothing to guard, and emitting a zsh-only helper call would be an
-        // unbound command.
         assert!(!shell_integration_block("bash").contains("_forest_compdef_guard"));
         assert!(!fish_shell_integration_block().contains("_forest_compdef_guard"));
     }
 
     #[test]
     fn integration_block_never_execs_a_tool_at_startup() {
-        // The whole point: startup reads a file. Any per-tool invocation here
-        // would reintroduce the cold-cache download it exists to remove.
         for b in [
             shell_integration_block("zsh"),
             shell_integration_block("bash"),
@@ -514,8 +380,6 @@ mod tests {
 
     #[test]
     fn integration_block_does_not_pre_expand_home_or_xdg() {
-        // Same portability rule as the PATH prepend: expansion happens in the
-        // user's shell, so one emitted block is valid for any user.
         for b in [
             shell_integration_block("zsh"),
             shell_integration_block("bash"),
@@ -532,9 +396,6 @@ mod tests {
 
     #[test]
     fn posix_block_cleans_up_its_temporary_variable() {
-        // The block runs in the user's interactive shell; leaving
-        // `_forest_shell_aggregate` set would leak a forest-internal name into
-        // their environment.
         for shell in ["zsh", "bash"] {
             assert!(
                 shell_integration_block(shell).contains("unset _forest_shell_aggregate"),
@@ -546,7 +407,6 @@ mod tests {
 
     #[test]
     fn fish_block_uses_fish_syntax_only() {
-        // fish has no POSIX `[ -r … ]`, `.` sourcing, or `${VAR:-default}`.
         let b = fish_shell_integration_block();
         assert!(!b.contains("${XDG_CACHE_HOME:-"), "{b}");
         assert!(b.contains("if test -n \"$XDG_CACHE_HOME\""), "{b}");
@@ -556,8 +416,6 @@ mod tests {
 
     #[test]
     fn fish_falls_back_only_when_xdg_is_empty_or_unset() {
-        // `test -n` matches POSIX ${VAR:-default} (default on unset OR empty),
-        // unlike fish's `set -q` which treats empty as set.
         assert!(
             eval_fish().contains("if test -n \"$XDG_CACHE_HOME\""),
             "must gate XDG on non-empty via test -n: {}",

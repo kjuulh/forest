@@ -9,10 +9,6 @@ use crate::domains::trigger::{
     TriggerPatterns, TriggerTargets, UpdateTriggerParams,
 };
 
-// ============================================================
-// Projection record (read model — matches `triggers` table)
-// ============================================================
-
 pub struct TriggerRecord {
     pub id: Uuid,
     pub project_id: Uuid,
@@ -31,10 +27,6 @@ pub struct TriggerRecord {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-// ============================================================
-// Service — orchestrates aggregate + projections
-// ============================================================
-
 #[derive(Clone)]
 pub struct TriggerAggregateService {
     event_store: EventStore,
@@ -45,10 +37,6 @@ impl TriggerAggregateService {
     pub fn new(event_store: EventStore, db: PgPool) -> Self {
         Self { event_store, db }
     }
-
-    // ----------------------------------------------------------
-    // Commands
-    // ----------------------------------------------------------
 
     pub async fn create(
         &self,
@@ -109,7 +97,6 @@ impl TriggerAggregateService {
             })
             .await?;
 
-        // Read back the full record from the projection
         self.get_by_name(&project_id, &root.state.name)
             .await?
             .context("trigger projection not found after create")
@@ -131,14 +118,12 @@ impl TriggerAggregateService {
             .load_or_default::<TriggerAggregate>(&key)
             .await?;
 
-        // Handle enabled toggle as a separate command
         if let Some(enabled) = enabled
             && enabled != root.state.enabled
         {
             TriggerAggregate::toggle_enabled(&mut root, enabled)?;
         }
 
-        // Handle config updates
         let has_config_update = patterns.is_some()
             || targets.is_some()
             || force_release.is_some()
@@ -157,7 +142,6 @@ impl TriggerAggregateService {
         }
 
         if !root.has_pending() {
-            // Nothing changed — just return the current record
             return self
                 .get_by_name(project_id, name)
                 .await?
@@ -244,10 +228,6 @@ impl TriggerAggregateService {
 
         Ok(())
     }
-
-    // ----------------------------------------------------------
-    // Queries (read from projections)
-    // ----------------------------------------------------------
 
     pub async fn list(&self, project_id: &Uuid) -> anyhow::Result<Vec<TriggerRecord>> {
         let recs = sqlx::query_as!(
@@ -343,12 +323,7 @@ impl TriggerAggregateService {
     }
 }
 
-// ============================================================
-// Helper for projection writes
-// ============================================================
-
 impl TriggerAggregate {
-    /// Clone the fields needed for writing projection updates inside `save_with()`.
     fn clone_for_projection(&self) -> TriggerProjectionState {
         TriggerProjectionState {
             enabled: self.enabled,
@@ -367,10 +342,6 @@ struct TriggerProjectionState {
     force_release: bool,
     use_pipeline: bool,
 }
-
-// ============================================================
-// State integration
-// ============================================================
 
 pub trait TriggerAggregateServiceState {
     fn trigger_aggregate_service(&self) -> TriggerAggregateService;

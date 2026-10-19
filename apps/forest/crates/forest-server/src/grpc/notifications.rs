@@ -16,19 +16,10 @@ pub struct NotificationsServer {
     pub state: State,
 }
 
-/// Which feed the caller is reading.
-///
-/// A person gets their own notifications; the release channel is what shows
-/// them everybody else's, and a release with no owner is nobody's to receive.
-/// A machine credential — forage's fan-out listener under the service-account
-/// key, or an app token — reads the whole stream, because that is the feed the
-/// channel post is built from.
 fn extract_audience(extensions: &http::Extensions) -> Result<Audience, tonic::Status> {
     if let Some(actor) = extensions.get::<Actor>() {
         return Ok(Audience::from_actor(actor));
     }
-    // A JWT always arrives with an `Actor` beside it; this is the belt-and-
-    // braces path, and a user token can only ever be a personal audience.
     if let Some(claims) = extensions.get::<AppClaims>() {
         return claims
             .user_id
@@ -39,9 +30,6 @@ fn extract_audience(extensions: &http::Extensions) -> Result<Audience, tonic::St
     Err(tonic::Status::unauthenticated("missing auth context"))
 }
 
-/// Extract the actor's identity from request extensions.
-/// Prefers `AppClaims` (JWT user tokens) and falls back to `Actor`
-/// (service accounts and app tokens).
 fn extract_actor_id(extensions: &http::Extensions) -> Result<Uuid, tonic::Status> {
     if let Some(claims) = extensions.get::<AppClaims>() {
         return claims
@@ -129,7 +117,6 @@ impl NotificationService for NotificationsServer {
 
         tokio::spawn(async move {
             let poll_interval = std::time::Duration::from_secs(2);
-            // Start from the current max sequence so we only deliver new notifications
             let mut last_sequence: i64 = registry.get_max_sequence().await.unwrap_or(0);
 
             loop {
@@ -150,7 +137,7 @@ impl NotificationService for NotificationsServer {
                             }
                             let grpc_notif = notification_record_to_grpc(notif);
                             if tx.send(Ok(grpc_notif)).await.is_err() {
-                                return; // Client disconnected
+                                return;
                             }
                         }
                     }
@@ -185,7 +172,6 @@ impl NotificationService for NotificationsServer {
             50
         };
 
-        // Return the most recent notifications (newest first)
         let notifications = self
             .state
             .notification_registry()
@@ -254,7 +240,7 @@ fn release_context_to_grpc(
 ) -> ReleaseContext {
     ReleaseContext {
         slug: ctx.slug.unwrap_or_default(),
-        organisation: String::new(), // populated from top-level fields
+        organisation: String::new(),
         project: String::new(),
         artifact_id: ctx.artifact_id.unwrap_or_default(),
         release_intent_id: ctx.release_intent_id.unwrap_or_default(),

@@ -1,25 +1,3 @@
-//! `/device` — browser side of the forest CLI device-login flow
-//! (TASKS/022-device-login.md §1.5).
-//!
-//! The CLI calls forest-server's `InitiateDeviceLogin` directly, then
-//! sends the user here with `?user_code=ABCD-EFGH`. We render an
-//! approval form; the POST handler calls `ApproveDeviceLogin` (or
-//! `DenyDeviceLogin`) on forest-server using forage's service-account
-//! credential — same trust pattern as `OAuthLogin`.
-//!
-//! Authentication: the GET handler requires a logged-in session. If the
-//! user isn't logged in the `Session` extractor redirects to
-//! `/login?return_to=/device?user_code=…` and brings them back.
-//!
-//! The same page approves an OAuth app's device grant (RFC 8628, e.g.
-//! `datactl auth login` over SSH). Which kind a code is decides what
-//! approving means, so the page asks Forest first: an app's grant is shown
-//! with the app and the scopes it gets, and is approved through the OAuth
-//! service, which records the consent and later hands the app its own
-//! tokens. The form echoes the client_id it showed; a code for any other app
-//! (or one typed without seeing it) is shown again instead of approved, so
-//! nobody approves an app they were not shown.
-
 #![allow(clippy::result_large_err)]
 
 use axum::extract::{Query, State};
@@ -69,8 +47,6 @@ async fn device_page(
     )
 }
 
-/// The app grant behind a code, if it is one. A Forest CLI login, an unknown
-/// code, or a deployment without the OAuth service is `None`.
 async fn app_grant(
     state: &AppState,
     user_code: &str,
@@ -90,9 +66,8 @@ async fn app_grant(
 #[derive(Deserialize)]
 struct DeviceForm {
     user_code: String,
-    action: String, // "approve" or "deny"
+    action: String,
     _csrf: String,
-    /// The app the page showed for this code; empty when it showed none.
     #[serde(default)]
     client_id: String,
 }
@@ -104,10 +79,6 @@ async fn device_submit(
     Form(form): Form<DeviceForm>,
 ) -> Result<Response, Response> {
     if state.service_account_key.is_none() {
-        // Defence in depth — the GET handler already shunts users to
-        // the "unconfigured" page, but a stale form post must not slip
-        // through to forest_client and mint a misleading
-        // "code wasn't recognised" error.
         return render_device(&state, &session, "", None, Some("unconfigured"));
     }
     if !auth::validate_csrf(&session, &form._csrf) {
@@ -130,11 +101,6 @@ async fn device_submit(
         );
     }
 
-    // Forward the approver's apparent IP + UA so forest-server's audit
-    // log captures who confirmed from where. The ALB sets
-    // X-Forwarded-For; if it's absent (local dev) we leave the IP empty
-    // rather than wire up `ConnectInfo` (which would need a different
-    // axum::serve setup).
     let approving_ip = headers
         .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
@@ -199,8 +165,6 @@ async fn device_submit(
                 )
             }
         },
-        // Anything other than approve/deny is a probable bot or tampered
-        // form. Treat as a hard 400 to avoid silent acceptance.
         _ => Err(error_page(
             &state,
             StatusCode::BAD_REQUEST,
@@ -323,8 +287,6 @@ fn render_device_for(
                 csrf_token => &session.csrf_token,
                 user_code => user_code,
                 error => error,
-                // "approved" | "denied" | None — the template uses this
-                // to swap the form for a success/cancelled banner.
                 result => result,
             },
         )

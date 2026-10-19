@@ -6,7 +6,6 @@ use forage_db::PgSessionStore;
 use notmad::{Component, ComponentInfo, MadError};
 use tokio_util::sync::CancellationToken;
 
-/// Session reaper for PostgreSQL-backed sessions.
 pub struct PgSessionReaper {
     pub store: Arc<PgSessionStore>,
     pub max_inactive_days: i64,
@@ -38,7 +37,6 @@ impl Component for PgSessionReaper {
     }
 }
 
-/// Session reaper for file-backed sessions.
 pub struct FileSessionReaper {
     pub store: Arc<FileSessionStore>,
 }

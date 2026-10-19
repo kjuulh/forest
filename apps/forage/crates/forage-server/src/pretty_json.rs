@@ -1,29 +1,6 @@
-//! Server-side pretty JSON renderer with light syntax highlighting.
-//!
-//! Spec: `specs/features/007-tools-tab.md` — the manifest section of a tool
-//! detail page renders the raw JSON with class-based syntax tokens
-//! (`.json-key`, `.json-string`, `.json-number`, `.json-bool`, `.json-null`,
-//! `.json-punct`). We tokenise server-side to avoid a client-side
-//! highlighting library; the macro `pretty_json_block(...)` wraps the
-//! pre-tokenised HTML in a styled `<pre>` block.
-//!
-//! Properties (per spec P11/P12, E13/E18):
-//! - **Total**: every `&str` input produces a `String` output without
-//!   panicking. Invalid JSON falls through to an HTML-escaped raw block.
-//! - **HTML-safe**: `<`, `>`, `&`, `"`, `'` are escaped inside any string
-//!   literal or fallback path. The output is safe to interpolate via
-//!   MiniJinja's `{{ ... | safe }}`.
-//! - **Deterministic**: identical input always yields identical output.
-
 use serde_json::Value;
 use std::fmt::Write as _;
 
-/// Pretty-print + tokenise a JSON string. The returned HTML is safe to
-/// inject via `{{ tokens | safe }}` inside a `<pre><code>` element.
-///
-/// On parse failure, returns the HTML-escaped raw input wrapped in a single
-/// `<span class="json-raw">…</span>` so the page still renders something
-/// useful for debugging (E13).
 pub fn tokenize(raw: &str) -> String {
     match serde_json::from_str::<Value>(raw) {
         Ok(value) => {
@@ -128,7 +105,6 @@ mod tests {
 
     #[test]
     fn tokenize_handles_all_value_types() {
-        // P11 — every JSON value type produces a recognised span class.
         let json = r#"{"s":"x","n":42,"b":true,"z":null,"arr":[1,2]}"#;
         let html = tokenize(json);
         assert!(html.contains("json-key"));
@@ -141,8 +117,6 @@ mod tests {
 
     #[test]
     fn tokenize_escapes_html_in_strings() {
-        // P12 — `<`, `>`, `&` in strings are escaped so we never produce
-        // raw HTML the user could inject.
         let json = r#"{"xss":"<script>alert('x')</script>"}"#;
         let html = tokenize(json);
         assert!(!html.contains("<script>"));
@@ -152,7 +126,6 @@ mod tests {
 
     #[test]
     fn tokenize_escapes_html_in_keys() {
-        // Keys are user-controlled too — escape them on the same axis.
         let json = r#"{"<bad>":"ok"}"#;
         let html = tokenize(json);
         assert!(!html.contains("<bad>"));
@@ -161,8 +134,6 @@ mod tests {
 
     #[test]
     fn tokenize_is_total_on_invalid_json() {
-        // E13/E18 — malformed input falls back to an escaped raw span;
-        // never panics, never produces unescaped HTML.
         let html = tokenize("{not valid <json>");
         assert!(html.contains("json-raw"));
         assert!(html.contains("&lt;json&gt;"));
@@ -178,7 +149,6 @@ mod tests {
     fn tokenize_handles_nested_structures() {
         let json = r#"{"a":{"b":[1,{"c":null}]}}"#;
         let html = tokenize(json);
-        // Should contain at least one nested key and the null token.
         assert!(html.contains("\"b\""));
         assert!(html.contains("json-null"));
     }
@@ -189,7 +159,3 @@ mod tests {
         assert_eq!(tokenize(json), tokenize(json));
     }
 }
-
-// proptest-based totality / XSS-injection coverage lives in the Adversarial
-// Review phase if/when proptest is added as a dev-dep. The unit tests above
-// already exercise P11/P12 directly.

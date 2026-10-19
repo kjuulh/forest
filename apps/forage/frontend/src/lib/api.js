@@ -1,26 +1,10 @@
-/**
- * Fetch timeline data from the JSON API.
- * @param {string} org
- * @param {string} project
- * @returns {Promise<{timeline: Array, lanes: Array}>}
- */
 export async function fetchTimeline(org, project) {
   const url = timelineUrl(org, project);
 
-  // The page may have started this request during HTML parse, so that it runs
-  // alongside the bundle download instead of after it — see
-  // templates/components/timeline_prefetch.html.jinja.
-  //
-  // Consumed once and then dropped: every later call is a refresh driven by a
-  // live event, and handing those a promise resolved before the page was even
-  // interactive would pin the timeline to its first state forever.
   const primed = globalThis.__forestTimeline?.[url];
   if (primed) {
     delete globalThis.__forestTimeline[url];
     const data = await primed;
-    // `null` means the prefetch failed. Fall through rather than reporting it:
-    // the request below produces the real error, so there is one place that
-    // decides what a failed timeline looks like.
     if (data) return data;
   }
 
@@ -31,24 +15,12 @@ export async function fetchTimeline(org, project) {
   return res.json();
 }
 
-/**
- * Where a timeline lives. Shared with the prefetch in the page, which has to
- * produce a byte-identical URL for the handoff to be found.
- */
 export function timelineUrl(org, project) {
   return project
     ? `/api/orgs/${org}/projects/${project}/timeline`
     : `/api/orgs/${org}/timeline`;
 }
 
-/**
- * Connect to SSE endpoint for live updates.
- * Returns a disconnect function.
- * @param {string} org
- * @param {string} project
- * @param {(type: string, data: object) => void} onEvent
- * @returns {() => void} disconnect
- */
 export function connectSSE(org, project, onEvent) {
   const url = project
     ? `/orgs/${org}/projects/${project}/events`
@@ -93,9 +65,6 @@ export function connectSSE(org, project, onEvent) {
   };
 }
 
-/**
- * Format elapsed time from seconds.
- */
 export function formatElapsed(seconds) {
   if (seconds < 0) seconds = 0;
   if (seconds < 60) return `${seconds}s`;
@@ -106,9 +75,6 @@ export function formatElapsed(seconds) {
   return `${h}h ${m % 60}m`;
 }
 
-/**
- * Format a relative timestamp.
- */
 export function timeAgo(dateStr) {
   if (!dateStr) return "";
   const date = new Date(dateStr);

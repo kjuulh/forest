@@ -1,10 +1,3 @@
-//! The project settings shell — `/orgs/{org}/projects/{project}/settings`.
-//!
-//! Triggers, Policies and Pipelines were three standalone pages: no shared
-//! sub-nav, no project header, and no way back to the project once you were
-//! on one. These cover the chrome that fixes that, and the redirects that
-//! keep the old URLs alive.
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use forage_core::platform::{Policy, PolicyConfig, Trigger};
@@ -91,10 +84,6 @@ async fn get(uri: &str) -> (StatusCode, String, Option<String>) {
     (status, String::from_utf8(body.to_vec()).unwrap(), location)
 }
 
-// ─── The shell ──────────────────────────────────────────────────────
-
-/// `/settings` has no content of its own — it opens on the first section
-/// rather than a hub page nobody would read.
 #[tokio::test]
 async fn settings_root_opens_on_triggers() {
     let (status, _, location) = get(&format!("{PROJECT}/settings")).await;
@@ -102,21 +91,17 @@ async fn settings_root_opens_on_triggers() {
     assert_eq!(location.unwrap(), format!("{PROJECT}/settings/triggers"));
 }
 
-/// The reported gap: every settings page must offer a way back. Each
-/// section carries the full breadcrumb and an explicit Back link.
 #[tokio::test]
 async fn every_section_has_a_breadcrumb_and_a_way_back() {
     for section in ["triggers", "policies", "pipelines"] {
         let (status, html, _) = get(&format!("{PROJECT}/settings/{section}")).await;
         assert_eq!(status, StatusCode::OK, "{section}");
         assert!(html.contains("aria-label=\"Breadcrumb\""), "{section}");
-        // …and the breadcrumb's own links out, plus the Back affordance.
         assert!(html.contains(&format!("href=\"{PROJECT}\"")), "{section}");
         assert!(html.contains("Back to my-api"), "{section}");
     }
 }
 
-/// One click between sections, from any section — no dead ends.
 #[tokio::test]
 async fn every_section_links_to_every_other_section() {
     for section in ["triggers", "policies", "pipelines"] {
@@ -127,7 +112,6 @@ async fn every_section_links_to_every_other_section() {
                 "{section} page is missing a link to {other}"
             );
         }
-        // The section you are on is marked, not just styled.
         assert!(
             html.contains(&format!(
                 "href=\"{PROJECT}/settings/{section}\" aria-current=\"page\""
@@ -137,17 +121,12 @@ async fn every_section_links_to_every_other_section() {
     }
 }
 
-/// The project header, so you always know what you are configuring — and
-/// the project-level tab row, which these pages used to lose entirely
-/// (they passed no `project_name`, so base.html.jinja fell back to the
-/// org tabs and the breadcrumb read "Select project").
 #[tokio::test]
 async fn sections_carry_the_project_identity() {
     for section in ["triggers", "policies", "pipelines"] {
         let (_, html, _) = get(&format!("{PROJECT}/settings/{section}")).await;
         assert!(html.contains("my-api"), "{section}");
         assert!(!html.contains("Select project"), "{section}");
-        // Project tabs, with Settings marked active.
         assert!(
             html.contains(&format!("href=\"{PROJECT}/releases\"")),
             "{section}"
@@ -159,8 +138,6 @@ async fn sections_carry_the_project_identity() {
     }
 }
 
-/// An edit form is a level below its section, so Back means the list you
-/// came from rather than the project.
 #[tokio::test]
 async fn edit_pages_go_back_to_their_section() {
     let (status, html, _) = get(&format!("{PROJECT}/settings/triggers/{TRIGGER_ID}")).await;
@@ -175,8 +152,6 @@ async fn edit_pages_go_back_to_their_section() {
     assert!(html.contains(&format!("href=\"{PROJECT}/settings/policies\"")));
 }
 
-/// Behaviour unchanged: the rows still carry their own Edit / Disable /
-/// Delete actions, addressed by id (forest#259), just at the new prefix.
 #[tokio::test]
 async fn section_rows_keep_their_actions() {
     let (_, html, _) = get(&format!("{PROJECT}/settings/triggers")).await;
@@ -186,9 +161,6 @@ async fn section_rows_keep_their_actions() {
     assert!(html.contains(&format!("action=\"{base}/delete\"")));
 }
 
-// ─── Old URLs ───────────────────────────────────────────────────────
-
-/// Bookmarks and old links keep working.
 #[tokio::test]
 async fn legacy_section_urls_redirect_into_the_shell() {
     for section in ["triggers", "policies", "pipelines"] {
@@ -219,9 +191,6 @@ async fn legacy_edit_urls_redirect_into_the_shell() {
     );
 }
 
-/// A GET redirect would silently drop a POST body, so the legacy paths
-/// keep their original submit handlers rather than redirecting: anything
-/// still posting to the old URL creates the trigger, it doesn't 405.
 #[tokio::test]
 async fn posting_to_a_legacy_section_url_still_works() {
     let (state, sessions) = populated_state();
@@ -250,12 +219,6 @@ async fn posting_to_a_legacy_section_url_still_works() {
     );
 }
 
-// ─── The supersede-pending policy type (DATA-817) ───────────────────
-
-/// The policy exists server-side but forage had no idea: the create form
-/// offered three types and reading a fourth rendered it as "unknown" with an
-/// empty soak-time config. A policy nobody can see or make is a policy nobody
-/// will use.
 #[tokio::test]
 async fn the_policies_page_offers_supersede_pending() {
     let (_, html, _) = get(&format!("{PROJECT}/settings/policies")).await;
@@ -275,8 +238,6 @@ async fn the_policies_page_offers_supersede_pending() {
     );
 }
 
-/// An existing supersede-pending policy renders as itself, with its target and
-/// guard — not as "unknown".
 #[tokio::test]
 async fn an_existing_supersede_pending_policy_renders_as_itself() {
     let policy = Policy {

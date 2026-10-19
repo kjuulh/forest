@@ -20,13 +20,11 @@
     </div>
     {% endif %}
 
-    {# ── Credentials ──────────────────────────────────────────────── #}
     <div class="mb-8 max-w-xl">
         <label class="block text-sm font-medium text-gray-700 mb-1">Client ID</label>
         <code class="block w-full px-3 py-2 text-sm font-mono bg-gray-50 border border-gray-200 rounded select-all break-all">{{ app.client_id }}</code>
     </div>
 
-    {# ── Edit form ────────────────────────────────────────────────── #}
     <form method="POST" action="/orgs/{{ current_org }}/settings/developers/{{ app.app_id }}" class="space-y-6 max-w-xl">
         <input type="hidden" name="_csrf" value="{{ csrf_token }}">
 
@@ -111,7 +109,6 @@
         <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-800">Save changes</button>
     </form>
 
-    {# ── Danger zone ──────────────────────────────────────────────── #}
     <div class="mt-12 pt-8 border-t border-gray-200 max-w-xl space-y-4">
         <div class="flex items-center justify-between gap-4">
             <div>

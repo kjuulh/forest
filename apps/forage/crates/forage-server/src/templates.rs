@@ -4,12 +4,10 @@ use anyhow::Context;
 use minijinja::Environment;
 use sha2::Digest;
 
-/// Format an ISO 8601 / RFC 3339 timestamp as a human-friendly relative time.
 fn timeago(value: &str) -> String {
     let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value)
         .or_else(|_| chrono::DateTime::parse_from_rfc3339(&format!("{value}Z")))
         .or_else(|_| {
-            // Try parsing "2026-01-01" as a date
             chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
                 .map(|d| {
                     d.and_hms_opt(0, 0, 0)
@@ -41,7 +39,6 @@ fn timeago(value: &str) -> String {
     }
 }
 
-/// Format a future ISO 8601 / RFC 3339 timestamp as a relative countdown.
 fn timeuntil(value: &str) -> String {
     let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value)
         .or_else(|_| chrono::DateTime::parse_from_rfc3339(&format!("{value}Z")))
@@ -79,7 +76,6 @@ fn timeuntil(value: &str) -> String {
     }
 }
 
-/// Format an ISO 8601 / RFC 3339 timestamp as a full human-readable datetime.
 fn datetime(value: &str) -> String {
     let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value)
         .or_else(|_| chrono::DateTime::parse_from_rfc3339(&format!("{value}Z")))
@@ -117,33 +113,20 @@ impl TemplateEngine {
         env.add_filter("urlencode", |v: String| -> String {
             urlencoding::encode(&v).into_owned()
         });
-        // Compact sha256 chip — `5df1c9…ec945`. Used in the Platforms table
-        // and anywhere a long content-address would dominate the row.
         env.add_filter("short_sha", |v: String| -> String {
             crate::manifest_view::ManifestView::short_sha(&v)
         });
-        // Human-readable byte count for manifest sizes (e.g. "438.0 KB").
         env.add_filter("human_size", |v: u64| -> String {
             crate::manifest_view::ManifestView::human_size(v)
         });
-        // Short display label for a URL — strips scheme/www, collapses
-        // GitHub/GitLab repo URLs to `org/repo`, caps to 48 chars. Used
-        // by the About sidebar (spec 009). See
-        // `forage_core::platform::prettify_url` for the rules.
         env.add_filter("prettify_url", |v: String| -> String {
             forage_core::platform::prettify_url(&v)
         });
 
-        // Default asset hashes for tests/dev — overridden in production by compute_asset_hashes.
         env.add_global("css_hash", "dev");
         env.add_global("components_js_hash", "dev");
 
-        // Build provenance for the footer. Globals rather than per-handler
-        // context: every page extends base.html.jinja, and threading these
-        // through each handler would guarantee a page that forgets them.
         let build = crate::build_info::BuildInfo::from_env();
-        // `build.version` is intentionally not exposed — see the footer
-        // comment in base.html.jinja.
         env.add_global("build_commit", build.commit);
         env.add_global("build_time", build.build_time);
 
@@ -156,8 +139,6 @@ impl TemplateEngine {
         Ok(engine)
     }
 
-    /// Compute content hashes for static assets and inject them as globals.
-    /// Templates use these for cache-busting query strings.
     fn compute_asset_hashes(&mut self) {
         fn asset_hash(path: &str) -> String {
             match std::fs::read(path) {
@@ -190,13 +171,6 @@ impl TemplateEngine {
 mod tests {
     use super::*;
 
-    /// Every page template parses.
-    ///
-    /// `path_loader` is lazy: a template is parsed the first time it is
-    /// rendered, not at startup. Nothing else in the suite renders most
-    /// of these pages, so without this a syntax error ships and is only
-    /// found by whoever opens that page in production. Parsing is cheap
-    /// and catches the whole class.
     #[test]
     fn every_page_template_parses() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -230,10 +204,6 @@ mod tests {
 
 #[cfg(test)]
 mod timeline_prefetch_tests {
-    //! The prefetch macro is a `<script>` built by string concatenation in a
-    //! template that renders with autoescaping off, so both halves are worth
-    //! pinning: that it renders at all, and that the URL it carries cannot
-    //! break out of its attribute.
     use super::*;
 
     fn engine() -> TemplateEngine {
@@ -268,10 +238,6 @@ mod timeline_prefetch_tests {
         );
     }
 
-    // Org names are slug-validated long before they reach here, so this is
-    // depth rather than a live hole — but the escaping is the only thing
-    // standing between an attribute and the rest of the document, and it is
-    // invisible when it works.
     #[test]
     fn the_url_cannot_break_out_of_its_attribute() {
         let html = releases_page("evil\"><script>alert(1)</script>");

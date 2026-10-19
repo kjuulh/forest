@@ -1,9 +1,3 @@
-//! `forest tool …` — dev helpers for authoring external tool manifests.
-//!
-//! Per TASKS/018-global-tools.md §1a.5, only `hash` lives here in this spec.
-//! Publishing external manifests is `forest components publish` against a
-//! project whose `forest.cue` declares an `external:` block.
-
 use clap::{Parser, Subcommand};
 
 use crate::state::State;

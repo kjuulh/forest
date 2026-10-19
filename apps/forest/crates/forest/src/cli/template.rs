@@ -59,7 +59,6 @@ fn render_template(
     config: &Option<&ProjectValue>,
 ) -> anyhow::Result<String> {
     let mut env = minijinja::Environment::new();
-    // Debug diagnostics, jinja is not fun to debug without
     env.set_debug(true);
 
     if let Some(config) = config {

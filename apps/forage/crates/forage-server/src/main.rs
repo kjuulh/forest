@@ -24,15 +24,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Read an env var, treating "unset" and "set to empty string" the same way.
-///
-/// The infra-platform layer wires forage's OAuth / SMTP / service-token
-/// slots through a console-managed Secrets Manager secret. Slots that the
-/// operator hasn't populated arrive as empty strings (Secrets Manager
-/// can't store `None` for a JSON value), so we have to filter those out
-/// here — otherwise `if let Ok(...)` happily picks them up and forage
-/// boots with a half-configured Slack/Google/etc. client that fails at
-/// runtime with a worse error.
 fn env_var_nonempty(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
 }
@@ -105,33 +96,16 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::router())
         .nest_service("/static", ServeDir::new("static"))
         .fallback(fallback_404)
-        // `route_layer`, not `layer`: it reads the matched route template out
-        // of the request's extensions, and only a middleware inside the router
-        // sees it. See `http_metrics`.
         .route_layer(axum::middleware::from_fn(http_metrics::layer))
-        // Inside the compression layer on purpose: registered first means
-        // innermost, so it sees uncompressed HTML and its placeholder
-        // substitution can actually match. See `page_timing`.
         .layer(axum::middleware::from_fn(page_timing::layer))
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
-        // /health, /health/ready, /health/live — see `checks` for which is
-        // which and what each one is allowed to affect.
-        //
-        // Merged after `with_state` because these routes carry their own
-        // state, which also puts them outside the layers above. That is what
-        // we want: a probe every 30s should not run page-timing placeholder
-        // substitution, should not be gzipped, and should not spend a tracing
-        // span. They are plain status codes.
         .merge(nostatus::axum_routes(nostatus::global()))
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // OTLP traces + logs + metrics when `OTEL_SERVICE_NAME` is set.
-    // Falls back to pretty fmt-only when unset, matching the previous
-    // default. The guard flushes on drop, so hold it until end of main.
     let _otel = canopy_otel::init();
 
     let config = cli::Command::parse();
@@ -150,11 +124,6 @@ async fn main() -> anyhow::Result<()> {
             forest_client = forest_client.with_service_account_key(service_key);
         }
         _ => {
-            // The CLI device-login flow and the OAuth callback path
-            // both require this key to call forest-server's
-            // service-account-only RPCs. Without it, `/device` falls
-            // back to an explicit "not configured" message rather than
-            // pretending the code is invalid.
             tracing::warn!(
                 "FOREST_SERVICE_ACCOUNT_API_KEY not set — \
                  CLI device login (/device) and any service-account-only \
@@ -170,10 +139,8 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or(3000);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    // Build components based on available configuration
     let mut mad = notmad::Mad::builder();
 
-    // Session store + integration store: PostgreSQL if DATABASE_URL is set
     let (sessions, integration_store, magic_link_store, oauth_state_store): (
         Arc<dyn SessionStore>,
         Option<Arc<dyn forage_core::integrations::IntegrationStore>>,
@@ -192,7 +159,6 @@ async fn main() -> anyhow::Result<()> {
 
         let pg_store = Arc::new(PgSessionStore::new(pool.clone()));
 
-        // Integration store (uses same pool)
         let encryption_key = std::env::var("INTEGRATION_ENCRYPTION_KEY").unwrap_or_else(|_| {
             tracing::warn!(
                 "INTEGRATION_ENCRYPTION_KEY not set — using default key (not safe for production)"
@@ -210,7 +176,6 @@ async fn main() -> anyhow::Result<()> {
         let pg_profile_pictures =
             Arc::new(forage_db::PgProfilePictureStore::new(pool));
 
-        // Session reaper component
         mad.add(session_reaper::PgSessionReaper {
             store: pg_store.clone(),
             max_inactive_days: 30,
@@ -233,7 +198,6 @@ async fn main() -> anyhow::Result<()> {
         let file_store =
             Arc::new(FileSessionStore::new(&session_dir).expect("failed to create session dir"));
 
-        // File session reaper component
         mad.add(session_reaper::FileSessionReaper {
             store: file_store.clone(),
         });
@@ -252,7 +216,6 @@ async fn main() -> anyhow::Result<()> {
 
     let forest_client = Arc::new(forest_client);
 
-    // Public URL of this Forest instance (used for OAuth redirect URIs, etc.)
     let forage_host = std::env::var("FORAGE_HOST")
         .unwrap_or_else(|_| format!("http://localhost:{port}"));
 
@@ -275,7 +238,6 @@ async fn main() -> anyhow::Result<()> {
         state = state.with_profile_picture_store(store);
     }
 
-    // Slack OAuth config (optional, enables "Add to Slack" button)
     if let (Some(client_id), Some(client_secret)) = (
         env_var_nonempty("SLACK_CLIENT_ID"),
         env_var_nonempty("SLACK_CLIENT_SECRET"),
@@ -288,8 +250,6 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Google OAuth config (optional, enables "Continue with Google" button)
-    // Forest handles the full OIDC exchange — needs both client_id and client_secret.
     if let (Some(client_id), Some(client_secret)) = (
         env_var_nonempty("GOOGLE_CLIENT_ID"),
         env_var_nonempty("GOOGLE_CLIENT_SECRET"),
@@ -306,7 +266,6 @@ async fn main() -> anyhow::Result<()> {
             .with_google_oidc_exchange(std::sync::Arc::new(exchange));
     }
 
-    // GitHub OAuth config (optional, enables "Continue with GitHub" button)
     if let (Some(client_id), Some(client_secret)) = (
         env_var_nonempty("GITHUB_APP_CLIENT_ID"),
         env_var_nonempty("GITHUB_APP_CLIENT_SECRET"),
@@ -323,7 +282,6 @@ async fn main() -> anyhow::Result<()> {
             .with_github_oidc_exchange(std::sync::Arc::new(exchange));
     }
 
-    // NATS JetStream connection (optional, enables durable notification delivery)
     let nats_jetstream = if let Ok(nats_url) = std::env::var("NATS_URL") {
         match async_nats::connect(&nats_url).await {
             Ok(client) => {
@@ -342,24 +300,10 @@ async fn main() -> anyhow::Result<()> {
     if let Some(ref store) = integration_store {
         state = state.with_integration_store(store.clone());
 
-        // The notification listener subscribes to forest's stream as a
-        // service account — it sets `organisation: None, project: None`
-        // so it gets every notification regardless of recipient. That's
-        // exactly the trust model `FOREST_SERVICE_ACCOUNT_API_KEY`
-        // already represents, so we reuse it here instead of carrying a
-        // second forest-side credential (was `FORAGE_SERVICE_TOKEN`).
-        //
-        // Forest's `poll_notifications` only references the caller's
-        // user_id in the preferences NOT-EXISTS subquery (skip-if-muted);
-        // a service-account caller has no preferences, so nothing gets
-        // muted and the listener receives the full stream — identical
-        // to the previous PAT-based behaviour, with one fewer secret to
-        // manage.
         if let Some(service_token) = forest_client.service_account_key().map(String::from) {
             let forage_url = forage_host.clone();
 
             if let Some(ref js) = nats_jetstream {
-                // JetStream mode: ingester publishes, consumer dispatches
                 tracing::info!("starting notification pipeline (JetStream)");
                 let grpc_for_consumer = forest_client.clone();
                 let token_for_consumer = service_token.clone();
@@ -376,7 +320,6 @@ async fn main() -> anyhow::Result<()> {
                     service_token: token_for_consumer,
                 });
             } else {
-                // Fallback: direct dispatch (no durability)
                 tracing::warn!(
                     "NATS_URL not set — using direct notification dispatch (no durability)"
                 );
@@ -398,7 +341,6 @@ async fn main() -> anyhow::Result<()> {
         state = state.with_oauth_state_store(store);
     }
 
-    // Magic link store + email consumer
     if let Some(store) = magic_link_store {
         state = state.with_magic_link_store(store);
 
@@ -414,7 +356,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Compute scheduler (mock for now — simulates container lifecycle)
     let compute_scheduler = Arc::new(forage_core::compute::InMemoryComputeScheduler::new());
     state = state.with_compute_scheduler(compute_scheduler.clone());
 
@@ -429,7 +370,6 @@ async fn main() -> anyhow::Result<()> {
         maintenance_mode: config.maintenance_mode,
     });
 
-    // HTTP server component
     let mode = if config.maintenance_mode {
         serve_http::ServeMode::Maintenance(Box::new(state.templates.clone()))
     } else {

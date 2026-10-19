@@ -12,7 +12,6 @@ use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use notmad::{Component, ComponentInfo, MadError};
 use tokio_util::sync::CancellationToken;
 
-/// SMTP configuration from environment variables.
 #[derive(Clone)]
 pub struct SmtpConfig {
     pub host: String,
@@ -25,11 +24,6 @@ pub struct SmtpConfig {
 
 impl SmtpConfig {
     pub fn from_env() -> Option<Self> {
-        // Treat unset and empty-string the same: the infra layer wires
-        // forage's SMTP slots through a console-managed secret where
-        // unpopulated keys arrive as "". Without this guard a blank
-        // SMTP_HOST would let SmtpConfig build, the email consumer
-        // would start, and the first send would fail at the TCP layer.
         let nonempty = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
 
         let host = nonempty("SMTP_HOST")?;
@@ -53,8 +47,6 @@ impl SmtpConfig {
     }
 }
 
-/// Background component that pulls email jobs from NATS JetStream
-/// and sends them via SMTP.
 pub struct EmailConsumer {
     pub jetstream: jetstream::Context,
     pub smtp_config: SmtpConfig,
@@ -66,7 +58,6 @@ impl Component for EmailConsumer {
     }
 
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {
-        // Ensure the stream exists.
         self.ensure_stream()
             .await
             .map_err(|e| MadError::Inner(anyhow::anyhow!(e)))?;
@@ -109,8 +100,8 @@ impl EmailConsumer {
                 name: EMAIL_STREAM_NAME.to_string(),
                 subjects: vec![EMAIL_STREAM_SUBJECTS.to_string()],
                 retention: stream::RetentionPolicy::WorkQueue,
-                max_age: Duration::from_secs(24 * 3600), // 24 hours
-                max_bytes: 104_857_600, // 100 MB
+                max_age: Duration::from_secs(24 * 3600),
+                max_bytes: 104_857_600,
                 discard: stream::DiscardPolicy::Old,
                 ..Default::default()
             })
@@ -160,7 +151,6 @@ impl EmailConsumer {
 
             Ok(builder.build())
         } else {
-            // Plain SMTP without TLS (for dev tools like Mailpit)
             Ok(AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&self.smtp_config.host)
                 .port(self.smtp_config.port)
                 .build())

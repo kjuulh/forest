@@ -2,8 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use super::router::{NotificationEvent, ReleaseContext};
 
-/// Wire format for notification events published to NATS JetStream.
-/// Mirrors `NotificationEvent` with serde support.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationEnvelope {
     pub id: String,
@@ -96,19 +94,14 @@ impl From<NotificationEnvelope> for NotificationEvent {
     }
 }
 
-/// Build the NATS subject for a notification event.
-/// Format: `forage.notifications.{org}.{type}`
 pub fn notification_subject(organisation: &str, notification_type: &str) -> String {
     format!("forage.notifications.{organisation}.{notification_type}")
 }
 
-/// The stream name used for notification delivery.
 pub const STREAM_NAME: &str = "FORAGE_NOTIFICATIONS";
 
-/// Subject filter for the stream (captures all orgs and types).
 pub const STREAM_SUBJECTS: &str = "forage.notifications.>";
 
-/// Durable consumer name for webhook dispatchers.
 pub const CONSUMER_NAME: &str = "forage-webhook-dispatcher";
 
 #[cfg(test)]

@@ -4,10 +4,8 @@
 <div class="space-y-3">
     {% for r in releases %}
     <div class="border border-gray-200 rounded-lg overflow-hidden">
-        {# ── Header row ─────────────────────────────────────────── #}
         <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
             <div class="flex items-center gap-2 min-w-0 flex-1">
-                {# Status dot #}
                 {% if r.summary_status == "RUNNING" %}
                 <span class="w-2.5 h-2.5 rounded-full bg-yellow-400 animate-pulse shrink-0"></span>
                 {% elif r.summary_status == "QUEUED" %}
@@ -49,14 +47,10 @@
             </div>
         </div>
 
-        {# ── Summary + expandable details ────────────────────── #}
         <details class="border-t border-gray-100 group" data-slug="{{ r.slug }}" {% if r.summary_status == "RUNNING" or r.summary_status == "QUEUED" or r.summary_status == "FAILED" %}open{% endif %}>
             <summary class="px-4 py-2 flex items-center gap-2 text-sm cursor-pointer list-none hover:bg-gray-50 flex-wrap">
-                {# Pipeline / env summary #}
                 {% if r.has_pipeline and r.pipeline_stages | length > 0 %}
-                    {# Pipeline icon #}
                     <svg class="w-3.5 h-3.5 text-purple-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                    {# Stage badges #}
                     {% for stage in r.pipeline_stages %}
                         {% if stage.stage_type == "deploy" %}
                         <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100">
@@ -75,7 +69,6 @@
                         </span>
                         {% endif %}
                     {% endfor %}
-                    {# Done count #}
                     {% set ns = namespace(done=0, total=0) %}
                     {% for stage in r.pipeline_stages %}
                         {% set ns.total = ns.total + 1 %}
@@ -83,7 +76,6 @@
                     {% endfor %}
                     <span class="text-xs text-gray-400">{{ ns.done }}/{{ ns.total }}</span>
                 {% elif r.has_pipeline %}
-                    {# Pipeline exists but no stages yet #}
                     <svg class="w-3.5 h-3.5 text-purple-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                     {% set ns = namespace(all_done=true) %}
                     {% for g in r.env_groups %}{% if g.status != "SUCCEEDED" %}{% set ns.all_done = false %}{% endif %}{% endfor %}
@@ -95,7 +87,6 @@
                     <span class="text-blue-600 text-sm">Queued</span>
                     {% endif %}
                 {% elif r.env_groups | length > 0 %}
-                    {# No pipeline, show env groups #}
                     {% for g in r.env_groups %}
                         {% if g.status == "RUNNING" %}
                         <span class="w-4 h-4 shrink-0 flex items-center justify-center"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse"></span></span>
@@ -122,7 +113,6 @@
                 <svg class="w-3 h-3 text-gray-400 shrink-0 ml-auto transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             </summary>
 
-            {# ── Release details ─────────────────────────────────── #}
             <div class="px-4 py-3 border-t border-gray-100 space-y-3">
                 {% if r.description %}
                 <p class="text-sm text-gray-700">{{ r.description }}</p>
@@ -135,12 +125,10 @@
                 </div>
             </div>
 
-            {# ── Pipeline stages ─────────────────────────────────── #}
             {% if r.has_pipeline and r.pipeline_stages | length > 0 %}
             <div class="border-t border-gray-100">
                 {% for stage in r.pipeline_stages %}
                 <div class="px-4 py-2.5 flex items-center gap-3 text-sm {{ 'border-b border-gray-50' if not loop.last else '' }} {{ 'opacity-50' if stage.status == 'PENDING' else '' }}">
-                    {# Status icon #}
                     {% if stage.status == "SUCCEEDED" %}
                     <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     {% elif stage.status == "RUNNING" %}
@@ -153,7 +141,6 @@
                     <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/></svg>
                     {% endif %}
 
-                    {# Stage label #}
                     {% if stage.stage_type == "deploy" %}
                     <span class="text-sm {{ 'text-gray-700' if stage.status == 'SUCCEEDED' else 'text-yellow-700' if stage.status == 'RUNNING' else 'text-red-700' if stage.status == 'FAILED' else 'text-gray-400' }}">
                         {% if stage.status == "SUCCEEDED" %}Deployed to{% elif stage.status == "RUNNING" %}Deploying to{% elif stage.status == "QUEUED" %}Queued for{% elif stage.status == "FAILED" %}Failed on{% elif stage.status == "TIMED_OUT" %}Timed out on{% elif stage.status == "CANCELLED" %}Cancelled{% else %}Deploy to{% endif %}
@@ -168,7 +155,6 @@
                     </span>
                     {% endif %}
 
-                    {# Elapsed time #}
                     {% if stage.started_at %}
                     <span class="text-xs text-gray-400 tabular-nums">{{ ts(stage.started_at) }}</span>
                     {% endif %}
@@ -182,11 +168,9 @@
             </div>
             {% endif %}
 
-            {# ── Destinations ─────────────────────────────────────── #}
             {% if r.destinations | length > 0 %}
             {% for dest in r.destinations %}
             <div class="px-4 py-2 flex items-center gap-3 text-sm {{ 'border-b border-gray-50' if not loop.last else '' }} border-t border-gray-100">
-                {# Status icon #}
                 {% if dest.status == "SUCCEEDED" %}
                 <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 {% elif dest.status == "RUNNING" or dest.status == "ASSIGNED" %}

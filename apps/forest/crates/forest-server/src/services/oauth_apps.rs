@@ -12,21 +12,6 @@ use crate::{
     },
 };
 
-/// The fixed scope catalog an OAuth app may request (MVP).
-///
-/// - `openid`:  OIDC marker — issues an `id_token` on the code exchange
-/// - `profile`: sub (user_id), username, profile_picture_url
-/// - `email`:   primary + all verified emails
-/// - `directory:read`: resolve organisation members (machine clients)
-/// - `components:publish`: publish component versions (machine clients)
-/// - `tokens:introspect`: ask Forage's `/oauth/introspect` about other tokens
-///   (resource servers, e.g. the data gateway)
-/// - `datagateway:apply` / `datagateway:read`: for the data gateway's project
-///   metrics, which the gateway checks after introspection
-///
-/// The last three grant no Forest gRPC method: `scoped_token_permits` is
-/// deny-by-default, and they have no entry there. A token minted for the data
-/// gateway can do nothing in Forest itself.
 pub const ALLOWED_SCOPES: &[&str] = &[
     "openid",
     "profile",
@@ -38,29 +23,15 @@ pub const ALLOWED_SCOPES: &[&str] = &[
     SCOPE_DATAGATEWAY_READ,
 ];
 
-/// Scope for a resource server to introspect other client tokens through
-/// Forage's `POST /oauth/introspect` (RFC 7662). Forage checks it; Forest maps
-/// it to no gRPC method.
 pub const SCOPE_TOKENS_INTROSPECT: &str = "tokens:introspect";
 
-/// Scopes the data gateway reads from an introspected token: define project
-/// metrics (`apply`) and query them (`read`). Meaningful only to the gateway.
 pub const SCOPE_DATAGATEWAY_APPLY: &str = "datagateway:apply";
 pub const SCOPE_DATAGATEWAY_READ: &str = "datagateway:read";
 
-/// Scope for reading the organisation directory — resolving a person from
-/// an external identity to their linked accounts. Only ever granted to
-/// machine clients; there is nothing here a browser login needs.
 pub const SCOPE_DIRECTORY_READ: &str = "directory:read";
 
-/// Scope for publishing component versions to the organisation's registry,
-/// for a CI job holding an OAuth app's client credentials instead of a
-/// person's token. What it lets a token call is listed, method by method,
-/// in `grpc::auth_layer::scoped_token_permits`.
 pub const SCOPE_COMPONENTS_PUBLISH: &str = "components:publish";
 
-/// Validation failures for OAuth-app management. The gRPC layer maps these
-/// to `invalid_argument` with the message surfaced to the caller.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum OAuthAppError {
     #[error("name must be between 1 and 100 characters")]
@@ -74,52 +45,33 @@ pub enum OAuthAppError {
     #[error("at least one scope is required")]
     NoScopes,
 
-    // ── Authorization-server flow errors ──
-    /// No app exists for the presented client_id.
     #[error("unknown client")]
     UnknownClient,
-    /// client_secret did not match.
     #[error("invalid client credentials")]
     InvalidClientSecret,
-    /// The app is not registered for the grant it tried to use.
     #[error("client is not authorised for the {0} grant")]
     UnsupportedGrant(String),
-    /// A machine app asked for a scope it was never registered with.
     #[error("scope not registered for this client: {0}")]
     ScopeNotGranted(String),
-    /// redirect_uri is not in the app's allowlist.
     #[error("redirect_uri not registered for this client")]
     RedirectUriNotAllowed,
-    /// The authorization code is missing, expired, already used, or bound to a
-    /// different client / redirect_uri.
     #[error("invalid or expired authorization code")]
     InvalidGrant,
-    /// PKCE verification failed.
     #[error("PKCE verification failed")]
     PkceFailed,
-    /// Unsupported code_challenge_method.
     #[error("unsupported code_challenge_method")]
     InvalidCodeChallengeMethod,
 
-    // ── Public clients (RFC 8252 native apps) ──
-    /// A public client may only sign people in (authorization code or
-    /// device grant): it has no secret to authenticate a client-credentials
-    /// request with.
     #[error("a public client may only use the authorization_code and device_code grants")]
     PublicClientGrant,
-    /// A public client may not hold `openid`: its id_token would be signed
-    /// with a client_secret it does not have.
     #[error("a public client may not request the openid scope")]
     PublicClientOpenid,
-    /// A public client has no client_secret, so there is nothing to rotate.
     #[error("a public client has no client secret to rotate")]
     PublicClientNoSecret,
-    /// A public client sent no PKCE challenge, or a `plain` one.
     #[error("a public client must use PKCE with code_challenge_method S256")]
     PkceRequired,
 }
 
-/// Public view of an OAuth app — never carries the client_secret.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthApp {
     pub app_id: Uuid,
@@ -130,10 +82,7 @@ pub struct OAuthApp {
     pub client_id: String,
     pub redirect_uris: Vec<String>,
     pub scopes: Vec<String>,
-    /// Which OAuth grants this app may use.
     pub grant_types: Vec<String>,
-    /// A public client (RFC 8252 native app): no usable secret, PKCE S256
-    /// required, `authorization_code` only, no `openid`.
     pub public: bool,
     pub created_by: Uuid,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -160,45 +109,29 @@ impl From<OAuthAppRow> for OAuthApp {
     }
 }
 
-/// An app paired with its freshly-minted raw client_secret. Returned only
-/// from create / rotate; the secret is shown to the org once and never again.
-/// Empty for a public app, which has none.
 #[derive(Debug, Clone)]
 pub struct CreatedOAuthApp {
     pub app: OAuthApp,
     pub client_secret: String,
 }
 
-/// Authorization-code lifetime (single-use, short-lived per RFC 6749 §4.1.2).
 pub const AUTH_CODE_TTL_SECONDS: i64 = 60;
-/// Access-token lifetime.
 pub const ACCESS_TOKEN_TTL_SECONDS: i64 = 8 * 3600;
-/// Machine-token lifetime. Much shorter than a user's access token: a
-/// client-credentials holder can re-mint at will with the secret it
-/// already has, so a long life buys nothing and costs blast radius.
 pub const CLIENT_TOKEN_TTL_SECONDS: i64 = 3600;
 
-/// `grant_types` vocabulary.
 pub const GRANT_AUTHORIZATION_CODE: &str = "authorization_code";
 pub const GRANT_CLIENT_CREDENTIALS: &str = "client_credentials";
-/// RFC 8628: a person approves a code shown by a device (a CLI over SSH)
-/// in a browser anywhere, and the device polls for the app's tokens.
 pub const GRANT_DEVICE_CODE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
-/// Grants an app may be registered for.
 pub const SUPPORTED_GRANT_TYPES: &[&str] = &[
     GRANT_AUTHORIZATION_CODE,
     GRANT_CLIENT_CREDENTIALS,
     GRANT_DEVICE_CODE,
 ];
 
-/// Grants that sign a person in to an app, and so mint refresh tokens.
 const USER_GRANTS: &[&str] = &[GRANT_AUTHORIZATION_CODE, GRANT_DEVICE_CODE];
-/// Refresh-token lifetime.
 pub const REFRESH_TOKEN_TTL_SECONDS: i64 = 90 * 24 * 3600;
 
-/// A minted machine token. No refresh token and no id_token — see
-/// `client_credentials_token` for why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IssuedClientToken {
     pub access_token: String,
@@ -206,21 +139,14 @@ pub struct IssuedClientToken {
     pub scopes: Vec<String>,
 }
 
-/// Who a token belongs to, as seen by a resource server: the app, its
-/// organisation and the granted scopes, plus the user when the app holds the
-/// token on someone's behalf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientPrincipal {
     pub app_id: Uuid,
     pub organisation_id: Uuid,
     pub scopes: Vec<String>,
-    /// `None` for a client-credentials token, which has no user.
     pub user: Option<DelegatingUser>,
 }
 
-/// The person a user-delegated access token (`forest_oat_`) acts for, and
-/// the organisations they belong to, so a resource server can authorise
-/// them without holding their forest session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DelegatingUser {
     pub user_id: Uuid,
@@ -234,38 +160,30 @@ pub struct UserOrganisation {
     pub name: String,
 }
 
-/// Opaque tokens minted on a successful code exchange.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IssuedTokens {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_in_seconds: i64,
     pub scopes: Vec<String>,
-    /// OIDC id_token (HS256 JWT signed with the client_secret), present only
-    /// when the `openid` scope was granted.
     pub id_token: Option<String>,
 }
 
-/// What a device-grant token request (RFC 8628 §3.4) comes to: tokens, or
-/// what the client should do next.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeviceTokenOutcome {
     Issued(IssuedTokens),
     AuthorizationPending,
     SlowDown,
     AccessDenied,
-    /// Lapsed, already redeemed, unknown, or another client's.
     ExpiredToken,
 }
 
-/// An app's pending device grant, as the approval page shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingDeviceAuthorization {
     pub app: OAuthApp,
     pub scopes: Vec<String>,
 }
 
-/// A user's authorization of an app (one per app), for the account UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthGrant {
     pub app_id: uuid::Uuid,
@@ -274,8 +192,6 @@ pub struct OAuthGrant {
     pub authorized_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// User claims resolved from an access token, gated by granted scopes. `sub`
-/// is always present; the rest are `None`/empty unless the scope was granted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Userinfo {
     pub sub: String,
@@ -286,7 +202,6 @@ pub struct Userinfo {
     pub scopes: Vec<String>,
 }
 
-/// Validated, normalized inputs for create/update.
 #[derive(Debug)]
 pub struct OAuthAppInput {
     pub name: String,
@@ -325,9 +240,6 @@ impl OAuthAppService {
         let client_id = generate_client_id();
         let client_secret = generate_client_secret();
         let secret_hash = hash_secret(&client_secret);
-        // A public client gets no secret. The column still holds a hash, of
-        // a value dropped right here, so no presented secret can ever match
-        // it; the secret checks are skipped for public apps instead.
         let client_secret = if public { String::new() } else { client_secret };
 
         let row = self
@@ -389,8 +301,6 @@ impl OAuthAppService {
         let input = validate_input(name, description, homepage_url, redirect_uris, scopes)?;
         let grant_types = validate_grant_types(grant_types)?;
 
-        // `public` is fixed at creation, so an update has to keep a public
-        // app within what a public app may hold.
         let Some(existing) = self
             .repo
             .get_oauth_app(self.repo.pool(), organisation_id, app_id)
@@ -454,9 +364,6 @@ impl OAuthAppService {
             .await
     }
 
-    // ── Authorization server ──────────────────────────────────────────
-
-    /// Public app metadata for the consent screen, by client_id.
     pub async fn lookup_client(&self, client_id: &str) -> anyhow::Result<Option<OAuthApp>> {
         let row = self
             .repo
@@ -465,10 +372,6 @@ impl OAuthAppService {
         Ok(row.map(OAuthApp::from))
     }
 
-    /// Mint a single-use authorization code, after the user has consented.
-    /// Re-validates client, redirect_uri (exact match, or any port on a
-    /// registered loopback URI), and scope subset. A public client must
-    /// send a PKCE S256 challenge.
     #[allow(clippy::too_many_arguments)]
     pub async fn create_authorization_code(
         &self,
@@ -486,8 +389,6 @@ impl OAuthAppService {
             .await?
             .ok_or(OAuthAppError::UnknownClient)?;
 
-        // Checked before anything else user-visible happens: a machine-only
-        // app should never reach a consent screen at all.
         Self::require_grant(&app, GRANT_AUTHORIZATION_CODE)?;
 
         if !app
@@ -508,9 +409,6 @@ impl OAuthAppService {
 
         let challenge = non_empty(code_challenge);
         let method = normalize_pkce_method(challenge, non_empty(code_challenge_method))?;
-        // With no secret, the PKCE verifier is the only thing tying the code
-        // to the client that asked for it, and `plain` would hand it over
-        // in the authorization request itself (RFC 8252 §8.1).
         if app.public && method.as_deref() != Some("S256") {
             return Err(OAuthAppError::PkceRequired.into());
         }
@@ -533,8 +431,6 @@ impl OAuthAppService {
             )
             .await?;
 
-        // The user just consented to these scopes — remember it so a later
-        // authorization for the same (or narrower) scopes can skip the screen.
         self.repo
             .upsert_consent(self.repo.pool(), app.id, user_id, scopes)
             .await?;
@@ -542,8 +438,6 @@ impl OAuthAppService {
         Ok((code, AUTH_CODE_TTL_SECONDS))
     }
 
-    /// Scopes the user has previously consented to for a client (empty when
-    /// none). Used by Forage to decide whether to skip the consent screen.
     pub async fn consented_scopes(
         &self,
         client_id: &str,
@@ -556,11 +450,6 @@ impl OAuthAppService {
             .unwrap_or_default())
     }
 
-    /// Exchange an authorization code for access + refresh tokens. Verifies
-    /// client credentials, single-use consumption, redirect_uri binding, and
-    /// PKCE (when a challenge was stored). A public client presents no
-    /// secret; its code always carries an S256 challenge, so the verifier
-    /// stands in for it.
     pub async fn exchange_code(
         &self,
         client_id: &str,
@@ -578,9 +467,6 @@ impl OAuthAppService {
 
         Self::authenticate_client(&row, client_secret)?;
 
-        // Re-checked here rather than trusted from issue time: a code
-        // outlives the check that minted it, and the grant may have been
-        // taken away in between.
         Self::require_grant(&row, GRANT_AUTHORIZATION_CODE)?;
 
         let code_hash = hash_secret(code);
@@ -590,7 +476,6 @@ impl OAuthAppService {
             .await?
             .ok_or(OAuthAppError::InvalidGrant)?;
 
-        // The code must belong to this client and the same redirect_uri.
         if consumed.app_id != row.id || consumed.redirect_uri != redirect_uri {
             return Err(OAuthAppError::InvalidGrant.into());
         }
@@ -640,10 +525,6 @@ impl OAuthAppService {
         })
     }
 
-    /// Build an OIDC `id_token` when the `openid` scope was granted, loading
-    /// the profile/email claims the granted scopes permit. `None` otherwise,
-    /// and always `None` for a public app: there is no secret to sign with
-    /// (and it cannot hold `openid` in the first place).
     async fn maybe_id_token(
         &self,
         app: &OAuthAppRow,
@@ -690,11 +571,6 @@ impl OAuthAppService {
         Ok(Some(token))
     }
 
-    /// Check the client_secret, except for a public app, which has none.
-    ///
-    /// A confidential app's check is exactly as it always was: a missing
-    /// or wrong secret is `InvalidClientSecret`. Whatever a public client
-    /// sends is ignored, since nothing it could send would be a secret.
     fn authenticate_client(app: &OAuthAppRow, client_secret: &str) -> Result<(), OAuthAppError> {
         if app.public {
             return Ok(());
@@ -705,13 +581,6 @@ impl OAuthAppService {
         Ok(())
     }
 
-    /// Refuse an app a grant it was never registered for.
-    ///
-    /// Both directions matter. An app is free to hold *both* grants —
-    /// acting for a user and acting as itself, the way a GitHub App does
-    /// — but it should only be able to use what it declared, so a
-    /// machine-only credential can't quietly run a login flow and a
-    /// login-only app can't mint machine tokens.
     fn require_grant(app: &OAuthAppRow, grant: &str) -> Result<(), OAuthAppError> {
         if app.grant_types.iter().any(|g| g == grant) {
             return Ok(());
@@ -719,18 +588,6 @@ impl OAuthAppService {
         Err(OAuthAppError::UnsupportedGrant(grant.to_string()))
     }
 
-    /// The `client_credentials` grant: an app authenticating as *itself*,
-    /// with no user in the loop.
-    ///
-    /// Deliberately narrower than the code flow. There is no refresh
-    /// token (the client re-mints with the secret it already holds), no
-    /// id_token (there is no subject to describe), and no consent (an
-    /// app cannot consent on a user's behalf when no user is involved).
-    ///
-    /// Requested scopes must be a subset of the app's registered scopes;
-    /// asking for more is an error rather than a silent downgrade, so a
-    /// misconfigured client fails loudly instead of quietly getting less
-    /// access than it thinks it has.
     pub async fn client_credentials_token(
         &self,
         client_id: &str,
@@ -749,8 +606,6 @@ impl OAuthAppService {
 
         Self::require_grant(&row, GRANT_CLIENT_CREDENTIALS)?;
 
-        // Empty request means "everything this app is registered for" —
-        // the conventional reading, and it keeps simple clients simple.
         let scopes = if requested_scopes.is_empty() {
             row.scopes.clone()
         } else {
@@ -775,12 +630,6 @@ impl OAuthAppService {
         })
     }
 
-    /// Resolve a machine token (`forest_cat_`) to the app behind it.
-    ///
-    /// Client tokens only, deliberately: the gRPC auth layer authenticates
-    /// callers with this, and a token an app holds on a user's behalf must
-    /// never pass as the app itself. Resource servers use
-    /// [`Self::introspect_token`], which also answers those.
     pub async fn introspect_client_token(
         &self,
         access_token: &str,
@@ -801,14 +650,6 @@ impl OAuthAppService {
         }))
     }
 
-    /// Resolve a token for a resource server (`IntrospectClientToken`).
-    ///
-    /// A machine token resolves to its app alone. An access token an app
-    /// holds on a user's behalf (`forest_oat_`) also carries that user and
-    /// the organisations they belong to — this is how a CLI signed in with
-    /// Forest reaches a resource server as the person, scoped to what they
-    /// consented to, without forwarding their session. Anything else
-    /// (unknown, expired, revoked, another kind of token) is `None`.
     pub async fn introspect_token(
         &self,
         access_token: &str,
@@ -849,9 +690,6 @@ impl OAuthAppService {
         }))
     }
 
-    /// Exchange a refresh token for a fresh access + refresh token, rotating
-    /// the refresh token. Detects reuse of an already-rotated refresh token and
-    /// revokes the whole (user, app) grant family as a defence (RFC 6749 §10.4).
     pub async fn refresh_token(
         &self,
         client_id: &str,
@@ -865,11 +703,6 @@ impl OAuthAppService {
             .await?
             .ok_or(OAuthAppError::UnknownClient)?;
         Self::authenticate_client(&app, client_secret)?;
-        // A refresh token can only have come from a flow that signed a
-        // person in (the code or the device grant), so withdrawing both
-        // should stop the whole family working — not just stop new logins
-        // while old sessions roll on forever. The token does not record
-        // which of the two minted it, so either keeps it alive.
         if !app
             .grant_types
             .iter()
@@ -880,8 +713,6 @@ impl OAuthAppService {
 
         let refresh_hash = hash_secret(refresh_token);
 
-        // Atomically consume the refresh token (single-use even under
-        // concurrent refreshes — only one UPDATE can match `revoked_at IS NULL`).
         let consumed = self
             .repo
             .consume_refresh_token(self.repo.pool(), &refresh_hash, app.id)
@@ -890,9 +721,6 @@ impl OAuthAppService {
         let consumed = match consumed {
             Some(row) => row,
             None => {
-                // Consume failed. If the token exists but is already revoked,
-                // this is reuse of a rotated token → revoke the whole family
-                // (RFC 6749 §10.4). Otherwise it's simply invalid/expired.
                 if let Some(existing) = self
                     .repo
                     .find_token_by_refresh(self.repo.pool(), &refresh_hash)
@@ -924,8 +752,6 @@ impl OAuthAppService {
             )
             .await?;
 
-        // Per OIDC, `nonce` belongs to the original authentication request and
-        // is not carried into id_tokens minted on refresh.
         let id_token = self
             .maybe_id_token(
                 &app,
@@ -946,11 +772,6 @@ impl OAuthAppService {
         })
     }
 
-    // ── Device authorization grant (RFC 8628) ─────────────────────────
-
-    /// Start a device grant for an app (RFC 8628 §3.1–3.2). The grant is
-    /// bound to the app and to the scopes asked for here, which must be a
-    /// non-empty subset of the app's; a confidential app authenticates.
     pub async fn initiate_device_authorization(
         &self,
         devices: &DeviceLoginAggregateService,
@@ -980,9 +801,6 @@ impl OAuthAppService {
         devices.initiate(&app.name, "", granted, Some(app.id)).await
     }
 
-    /// The app and scopes behind a pending device grant's user_code, for the
-    /// approval page. `None` for an unknown, finished or expired code, a
-    /// Forest CLI login, or an app that may no longer use the grant.
     pub async fn pending_device_authorization(
         &self,
         devices: &DeviceLoginAggregateService,
@@ -1012,8 +830,6 @@ impl OAuthAppService {
         }))
     }
 
-    /// The person approves an app's device grant: record it on the grant and
-    /// remember the consent, as an approved authorization request would.
     pub async fn approve_device_authorization(
         &self,
         devices: &DeviceLoginAggregateService,
@@ -1059,11 +875,6 @@ impl OAuthAppService {
         devices.deny(user_code, user_id, Some(pending)).await
     }
 
-    /// The device grant's token request (RFC 8628 §3.4). Only the app the
-    /// grant is bound to can redeem it, once; anyone else's device_code is
-    /// `ExpiredToken` and stays untouched. The tokens are the same kind the
-    /// code exchange mints: the app's, for the person, with the scopes they
-    /// approved, refreshable and revocable like any other.
     pub async fn exchange_device_code(
         &self,
         devices: &DeviceLoginAggregateService,
@@ -1077,8 +888,6 @@ impl OAuthAppService {
             .await?
             .ok_or(OAuthAppError::UnknownClient)?;
         Self::authenticate_client(&app, client_secret)?;
-        // Re-checked at redemption: the grant may have been withdrawn since
-        // the device asked.
         Self::require_grant(&app, GRANT_DEVICE_CODE)?;
 
         let (user_id, scopes) = match devices.poll(device_code, Some(app.id)).await? {
@@ -1088,8 +897,6 @@ impl OAuthAppService {
             DeviceLoginPollOutcome::Expired => return Ok(DeviceTokenOutcome::ExpiredToken),
             DeviceLoginPollOutcome::Approved { user_id, scopes } => (user_id, scopes),
         };
-        // The app may have been narrowed since the person approved; it gets
-        // nothing it is no longer registered for.
         if scopes.is_empty() || scopes.iter().any(|s| !app.scopes.contains(s)) {
             return Err(OAuthAppError::InvalidGrant.into());
         }
@@ -1110,8 +917,6 @@ impl OAuthAppService {
             )
             .await?;
 
-        // No id_token: there is no nonce, and a device-grant app is typically
-        // public, with no secret to sign one with.
         Ok(DeviceTokenOutcome::Issued(IssuedTokens {
             access_token,
             refresh_token,
@@ -1121,16 +926,12 @@ impl OAuthAppService {
         }))
     }
 
-    /// List the apps a user has authorized, one entry per app, unioning scopes
-    /// across that app's live tokens and reporting the earliest authorization.
     pub async fn list_grants(&self, user_id: Uuid) -> anyhow::Result<Vec<OAuthGrant>> {
         let rows = self
             .repo
             .list_live_grant_rows(self.repo.pool(), user_id)
             .await?;
 
-        // Rows are ordered by created_at ASC, so the first time we see an app
-        // is its earliest grant. Preserve that order in the output.
         let mut grants: Vec<OAuthGrant> = Vec::new();
         for row in rows {
             if let Some(existing) = grants.iter_mut().find(|g| g.app_id == row.app_id) {
@@ -1151,9 +952,6 @@ impl OAuthAppService {
         Ok(grants)
     }
 
-    /// Revoke a user's grant for an app — drops all of its issued tokens and
-    /// forgets the remembered consent (so the next authorization re-prompts).
-    /// Returns the number of live tokens revoked.
     pub async fn revoke_grant(&self, app_id: Uuid, user_id: Uuid) -> anyhow::Result<u64> {
         let revoked = self
             .repo
@@ -1165,8 +963,6 @@ impl OAuthAppService {
         Ok(revoked)
     }
 
-    /// Resolve an access token to user claims, gated by the token's scopes.
-    /// Returns `InvalidGrant` when the token is unknown, expired, or revoked.
     pub async fn userinfo(&self, access_token: &str) -> anyhow::Result<Userinfo> {
         let token_hash = hash_secret(access_token);
         let resolved = self
@@ -1208,9 +1004,6 @@ impl OAuthAppService {
     }
 }
 
-// ─── Pure helpers (unit-tested without a database) ────────────────────
-
-/// Validate and normalize create/update inputs.
 pub fn validate_input(
     name: &str,
     description: &str,
@@ -1258,8 +1051,6 @@ pub fn validate_input(
     })
 }
 
-/// What a public client may be registered with: the authorization-code grant
-/// alone, and no `openid`.
 pub fn validate_public_client(
     scopes: &[String],
     grant_types: &[String],
@@ -1276,11 +1067,6 @@ pub fn validate_public_client(
     Ok(())
 }
 
-/// Normalise and check an app's requested grant types.
-///
-/// An empty list means `authorization_code`, matching both the column
-/// default and every app that existed before this grant did — so an app
-/// only becomes machine-capable by asking for it.
 pub fn validate_grant_types(requested: &[String]) -> Result<Vec<String>, OAuthAppError> {
     if requested.is_empty() {
         return Ok(vec![GRANT_AUTHORIZATION_CODE.to_string()]);
@@ -1298,9 +1084,6 @@ pub fn validate_grant_types(requested: &[String]) -> Result<Vec<String>, OAuthAp
     Ok(out)
 }
 
-/// A redirect URI must be an absolute http(s) URL with no fragment. https is
-/// required, except for loopback (localhost / 127.0.0.1) which may use http
-/// for local development.
 pub fn validate_redirect_uri(uri: &str) -> Result<(), OAuthAppError> {
     let invalid = |u: &str| OAuthAppError::InvalidRedirectUri(u.to_string());
 
@@ -1329,14 +1112,6 @@ pub fn validate_redirect_uri(uri: &str) -> Result<(), OAuthAppError> {
     }
 }
 
-/// Whether a requested redirect URI is allowed by a registered one.
-///
-/// Exact match, with one exception from RFC 8252 §7.3: a native app listens
-/// on a loopback port the OS picks at run time, so a registered
-/// `http://127.0.0.1/<path>` or `http://localhost/<path>` (with or without
-/// a port) matches a request for the same host and path on any port. The
-/// host, path and query must still match exactly; nothing that is not http
-/// on a loopback host gets this leniency.
 pub fn redirect_uri_matches(registered: &str, requested: &str) -> bool {
     if registered == requested {
         return true;
@@ -1347,8 +1122,6 @@ pub fn redirect_uri_matches(registered: &str, requested: &str) -> bool {
     }
 }
 
-/// `(host, path-and-query)` of an `http://` loopback URI, with the port
-/// dropped and an empty path read as `/`. `None` for anything else.
 fn loopback_parts(uri: &str) -> Option<(&str, String)> {
     let rest = uri.strip_prefix("http://")?;
     if rest.contains('#') {
@@ -1376,30 +1149,24 @@ fn loopback_parts(uri: &str) -> Option<(&str, String)> {
     Some((host, tail))
 }
 
-/// Prefix of an access token an app holds on a user's behalf.
 pub const USER_ACCESS_TOKEN_PREFIX: &str = "forest_oat_";
 
-/// Public client identifier. Random and unguessable but not secret.
 pub fn generate_client_id() -> String {
     let mut bytes = [0u8; 16];
     rand::fill(&mut bytes[..]);
     format!("forest_oa_{}", hex::encode(bytes))
 }
 
-/// Raw client secret, shown to the org exactly once.
 pub fn generate_client_secret() -> String {
     let mut bytes = [0u8; 32];
     rand::fill(&mut bytes[..]);
     format!("forest_oas_{}", hex::encode(bytes))
 }
 
-/// SHA-256 of the raw secret; only this is persisted.
 pub fn hash_secret(secret: &str) -> Vec<u8> {
     sha2::Sha256::digest(secret.as_bytes()).to_vec()
 }
 
-/// Generate an opaque, unguessable token (`<prefix><64 hex chars>`) and its
-/// SHA-256 hash. Only the hash is stored; the raw value is returned once.
 pub fn generate_opaque_token(prefix: &str) -> (String, Vec<u8>) {
     let mut bytes = [0u8; 32];
     rand::fill(&mut bytes[..]);
@@ -1408,14 +1175,10 @@ pub fn generate_opaque_token(prefix: &str) -> (String, Vec<u8>) {
     (raw, hash)
 }
 
-/// Treat an empty string as absent (proto3 has no optional-string nuance here).
 fn non_empty(s: Option<&str>) -> Option<&str> {
     s.filter(|v| !v.is_empty())
 }
 
-/// Validate the PKCE method against the presence of a challenge. Returns the
-/// effective method to persist (defaults to "plain" when a challenge is given
-/// without an explicit method, per RFC 7636 §4.3).
 fn normalize_pkce_method(
     challenge: Option<&str>,
     method: Option<&str>,
@@ -1430,8 +1193,6 @@ fn normalize_pkce_method(
     }
 }
 
-/// Verify a PKCE `code_verifier` against the stored challenge. A no-op when no
-/// challenge was registered for the code.
 pub fn verify_pkce(
     challenge: Option<&str>,
     method: Option<&str>,
@@ -1457,11 +1218,6 @@ pub fn verify_pkce(
     }
 }
 
-/// Mint an OIDC `id_token`: a JWT signed with HS256 using the client_secret as
-/// the key (RFC 7519 + OIDC Core §3.1.3.7). Confidential clients verify it with
-/// their own secret, so no asymmetric key management / JWKS is needed. `sub`,
-/// `iss`, `aud`, `iat`, `exp` are always set; `preferred_username` / `email`
-/// only when the caller passes them (scope-gated upstream).
 #[allow(clippy::too_many_arguments)]
 pub fn mint_id_token(
     client_secret: &str,
@@ -1508,8 +1264,6 @@ pub fn mint_id_token(
     Ok(token.as_str().to_string())
 }
 
-/// Length-independent constant-time byte comparison (avoids leaking where two
-/// secrets/hashes first differ).
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -1520,8 +1274,6 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     }
     diff == 0
 }
-
-// ─── State trait ─────────────────────────────────────────────────────
 
 pub trait OAuthAppServiceState {
     fn oauth_app_service(&self) -> OAuthAppService;
@@ -1632,7 +1384,6 @@ mod tests {
         let s2 = generate_client_secret();
         assert_ne!(s1, s2);
         assert!(s1.starts_with("forest_oas_"));
-        // 32 bytes hex = 64 chars + prefix
         assert_eq!(s1.len(), "forest_oas_".len() + 64);
     }
 
@@ -1657,7 +1408,6 @@ mod tests {
         )
         .unwrap();
 
-        // A client with the client_secret can verify + read the claims.
         let key: Hmac<Sha256> = Hmac::new_from_slice(secret.as_bytes()).unwrap();
         let claims: BTreeMap<String, String> = token.verify_with_key(&key).unwrap();
         assert_eq!(claims["iss"], "https://forest.example");
@@ -1666,7 +1416,6 @@ mod tests {
         assert_eq!(claims["preferred_username"], "alice");
         assert_eq!(claims["email"], "alice@example.com");
 
-        // The wrong secret fails verification.
         let wrong: Hmac<Sha256> = Hmac::new_from_slice(b"nope").unwrap();
         let bad: Result<BTreeMap<String, String>, _> = token.verify_with_key(&wrong);
         assert!(bad.is_err());
@@ -1679,7 +1428,6 @@ mod tests {
         use sha2::Sha256;
         use std::collections::BTreeMap;
 
-        // openid only — no profile/email.
         let token =
             mint_id_token("s", "iss", "cid", "user-1", None, None, None, 1000, 4600).unwrap();
         let key: Hmac<Sha256> = Hmac::new_from_slice(b"s").unwrap();
@@ -1704,7 +1452,7 @@ mod tests {
         assert_ne!(raw1, raw2);
         assert!(raw1.starts_with("forest_oat_"));
         assert_eq!(hash1.len(), 32);
-        assert_eq!(hash1, hash_secret(&raw1)); // hash == sha256(raw)
+        assert_eq!(hash1, hash_secret(&raw1));
     }
 
     #[test]
@@ -1768,13 +1516,8 @@ mod tests {
         );
     }
 
-    // ── client_credentials grant ──────────────────────────────────────
-
     #[test]
     fn grant_types_default_to_authorization_code_only() {
-        // An app that says nothing is a login app. This is what stops
-        // every pre-existing app from silently gaining machine access
-        // when the column was added.
         assert_eq!(
             validate_grant_types(&[]).unwrap(),
             vec![GRANT_AUTHORIZATION_CODE.to_string()]
@@ -1800,11 +1543,8 @@ mod tests {
 
     #[test]
     fn an_unknown_grant_type_is_refused_rather_than_ignored() {
-        // Silently dropping it would register an app that appears to
-        // support a grant it does not.
         let err = validate_grant_types(&["implicit".to_string()]).unwrap_err();
         assert!(matches!(err, OAuthAppError::UnsupportedGrant(g) if g == "implicit"));
-        // And one bad entry fails the whole list.
         assert!(
             validate_grant_types(&["authorization_code".to_string(), "password".to_string()])
                 .is_err()
@@ -1830,8 +1570,6 @@ mod tests {
         }
     }
 
-    /// The GitHub-App shape: one credential that both acts for a user
-    /// and acts as itself.
     #[test]
     fn an_app_may_hold_both_grants() {
         let both = validate_grant_types(&[
@@ -1846,9 +1584,6 @@ mod tests {
         assert!(OAuthAppService::require_grant(&app, GRANT_CLIENT_CREDENTIALS).is_ok());
     }
 
-    /// `grant_types` has to bite in *both* directions, or it is
-    /// decoration. A machine-only credential must not be able to run a
-    /// login flow.
     #[test]
     fn each_grant_is_refused_to_an_app_that_did_not_register_it() {
         let machine_only = app_with(&[GRANT_CLIENT_CREDENTIALS]);
@@ -1865,8 +1600,6 @@ mod tests {
             Err(OAuthAppError::UnsupportedGrant(g)) if g == GRANT_CLIENT_CREDENTIALS
         ));
 
-        // An app with nothing registered can do nothing — it cannot fall
-        // back to "whatever was asked for".
         let none = app_with(&[]);
         assert!(OAuthAppService::require_grant(&none, GRANT_AUTHORIZATION_CODE).is_err());
         assert!(OAuthAppService::require_grant(&none, GRANT_CLIENT_CREDENTIALS).is_err());
@@ -1874,14 +1607,9 @@ mod tests {
 
     #[test]
     fn machine_tokens_are_short_lived_relative_to_user_tokens() {
-        // A client-credentials holder can re-mint at will with the
-        // secret it already has, so a long life buys nothing and only
-        // widens the blast radius of a leak.
         assert!(CLIENT_TOKEN_TTL_SECONDS < ACCESS_TOKEN_TTL_SECONDS);
         assert!(CLIENT_TOKEN_TTL_SECONDS > 0);
     }
-
-    // ── Loopback redirects (RFC 8252 §7.3) ───────────────────────────
 
     #[test]
     fn a_registered_loopback_redirect_matches_any_port() {
@@ -1910,7 +1638,6 @@ mod tests {
             "http://localhost:3000/cb?x=1",
             "http://localhost:4000/cb?x=1"
         ));
-        // An empty path is the root path.
         assert!(redirect_uri_matches(
             "http://127.0.0.1",
             "http://127.0.0.1:9000/"
@@ -1956,7 +1683,6 @@ mod tests {
 
     #[test]
     fn only_http_on_a_loopback_host_ignores_the_port() {
-        // https on loopback is not the native-app case.
         assert!(!redirect_uri_matches(
             "https://127.0.0.1/callback",
             "https://127.0.0.1:53817/callback"
@@ -1965,7 +1691,6 @@ mod tests {
             "http://127.0.0.1/callback",
             "https://127.0.0.1:53817/callback"
         ));
-        // A real host keeps exact matching, port and all.
         assert!(!redirect_uri_matches(
             "https://app.example:8443/callback",
             "https://app.example:9443/callback"
@@ -1979,8 +1704,6 @@ mod tests {
             "https://app.example/callback"
         ));
     }
-
-    // ── Public clients ───────────────────────────────────────────────
 
     #[test]
     fn a_public_client_may_only_sign_people_in_without_openid() {
@@ -2030,9 +1753,6 @@ mod tests {
 
     #[test]
     fn machine_and_user_tokens_are_distinguishable_by_prefix() {
-        // The two live in separate tables and must never be accepted
-        // interchangeably; distinct prefixes make a mix-up obvious in
-        // logs and in a bug report.
         let (machine, _) = generate_opaque_token("forest_cat_");
         let (user, _) = generate_opaque_token("forest_oat_");
         assert!(machine.starts_with("forest_cat_"));
@@ -2041,7 +1761,6 @@ mod tests {
     }
 }
 
-/// Property-based tests for the security-critical pure helpers (VSDD Phase 5).
 #[cfg(test)]
 mod proptests {
     use super::*;
@@ -2049,21 +1768,16 @@ mod proptests {
     use proptest::prelude::*;
 
     proptest! {
-        /// constant_time_eq agrees with `==` for arbitrary byte strings.
         #[test]
         fn constant_time_eq_matches_equality(a: Vec<u8>, b: Vec<u8>) {
             prop_assert_eq!(constant_time_eq(&a, &b), a == b);
         }
 
-        /// A slice is always constant-time-equal to itself.
         #[test]
         fn constant_time_eq_reflexive(a: Vec<u8>) {
             prop_assert!(constant_time_eq(&a, &a));
         }
 
-        /// PKCE S256: the matching verifier always validates; a different
-        /// verifier never does. (Property: only the preimage of the challenge
-        /// passes.)
         #[test]
         fn pkce_s256_only_matching_verifier_passes(verifier in ".{1,128}") {
             let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -2074,15 +1788,12 @@ mod proptests {
             prop_assert!(verify_pkce(Some(&challenge), Some("S256"), Some(&wrong)).is_err());
         }
 
-        /// PKCE plain: passes iff verifier equals challenge.
         #[test]
         fn pkce_plain_matches_equality(challenge in ".{1,64}", verifier in ".{1,64}") {
             let result = verify_pkce(Some(&challenge), Some("plain"), Some(&verifier));
             prop_assert_eq!(result.is_ok(), challenge == verifier);
         }
 
-        /// Generated tokens always carry their prefix and a 32-byte (64-hex)
-        /// random body, and the stored hash is sha256(raw).
         #[test]
         fn opaque_token_shape_is_invariant(prefix in "forest_[a-z]{2,4}_") {
             let (raw, hash) = generate_opaque_token(&prefix);
@@ -2092,8 +1803,6 @@ mod proptests {
             prop_assert_eq!(hash, hash_secret(&raw));
         }
 
-        /// Any https URL with a host and no fragment is an accepted redirect;
-        /// non-http(s) schemes are always rejected.
         #[test]
         fn redirect_https_accepted_other_schemes_rejected(
             host in "[a-z]{1,20}\\.[a-z]{2,5}",

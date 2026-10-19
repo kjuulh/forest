@@ -1,11 +1,3 @@
-/**
- * The environment palette.
- *
- * Colour here is information, not decoration — cool means the pipeline is
- * working, warm means a person is needed — so getting an environment into the
- * wrong bucket is a correctness bug, not a taste one. See
- * design/RELEASE-SWIMLANE.md.
- */
 import { describe, it, expect } from "vitest";
 import { envStage, envRank, envColorPair, orderLanes, SIGNAL } from "./colors.js";
 
@@ -19,9 +11,6 @@ describe("classifying an environment by its stage", () => {
     expect(envStage("test")).toBe("test");
   });
 
-  // forest names environments `<domain>-<stage>`, so the tail is the part that
-  // says what the environment *is*. The old substring scan got these two right
-  // by luck, and would have called `prod-metrics` production.
   it("reads the stage off the last segment", () => {
     expect(envStage("data-prod")).toBe("prod");
     expect(envStage("platform-dev")).toBe("dev");
@@ -43,8 +32,6 @@ describe("classifying an environment by its stage", () => {
 });
 
 describe("lane order", () => {
-  // Production first, closest to the page edge; the card column is on the
-  // right, so code flows right to left out to production.
   it("puts production first and works back down the pipeline", () => {
     const names = orderLanes([
       { name: "dev" }, { name: "prod" }, { name: "staging" }, { name: "preprod" },
@@ -57,7 +44,6 @@ describe("lane order", () => {
     expect(names).toEqual(["prod", "finance"]);
   });
 
-  // The server sends environments in its own order; ties must not scramble it.
   it("is stable within a rank", () => {
     const names = orderLanes([
       { name: "finance" }, { name: "billing" }, { name: "hetzner" },
@@ -89,9 +75,6 @@ describe("the palette itself", () => {
     expect(envColorPair("infrastructure-hetzner")).toEqual(envColorPair("infrastructure-hetzner"));
   });
 
-  // The rule the whole system rests on: warm belongs to "a person is needed"
-  // and "it broke". An environment that borrowed amber would make the gutter
-  // unreadable at exactly the moment it matters.
   it("never hands an environment a warm colour", () => {
     const warm = new Set(
       [SIGNAL.attention.light, SIGNAL.attention.dark, SIGNAL.failure.light, SIGNAL.failure.dark]

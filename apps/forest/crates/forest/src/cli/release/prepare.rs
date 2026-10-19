@@ -48,15 +48,8 @@ impl PrepareCommand {
             anyhow::bail!("deploy prepare should never be called from a component");
         }
 
-        // Parse project
-        //
-
         let mut project = state.project_parser().get_project().await?;
 
-        // `config.`-prefixed overrides address the deployment config block,
-        // which does not exist yet — it is merged out of the project and
-        // environment blocks further down. Everything else is component config
-        // and applies to the parsed project now.
         let (deployment_overrides, component_overrides): (Vec<&String>, Vec<&String>) = self
             .overrides
             .iter()
@@ -67,24 +60,16 @@ impl PrepareCommand {
                 .with_context(|| format!("invalid --set value: {kv}"))?;
         }
 
-        // Derive available contracts from project dependencies
         let enabled_contracts = EnabledContracts::from_project_dependencies(&project);
         enabled_contracts.require(contracts::CONTRACT_DEPLOYMENT)?;
 
         tracing::info!("enabled contracts: {}", enabled_contracts);
 
-        // Auto-resolve missing dependencies (cargo-build-style). Versioned
-        // deps that aren't already in the cache get downloaded here, so
-        // `release prepare` works on a clean checkout without the user
-        // having to remember to run `forest deps` first.
         state
             .components_service()
             .get_components_project(project.clone())
             .await
             .context("auto-resolving project dependencies")?;
-
-        // Get deployment for all dependencies
-        //
 
         let mut deployment_items = Vec::new();
 
@@ -116,9 +101,6 @@ impl PrepareCommand {
             )?;
         }
 
-        // Local deployment
-        //
-
         if let ProjectValue::Map(keys) = project.other
             && let Some(ProjectValue::Map(project)) = keys.get("project")
             && let Some(ProjectValue::Map(envs)) = project.get("env")
@@ -128,9 +110,6 @@ impl PrepareCommand {
             get_deployment_items(&mut deployment_items, None, project_config, envs)?;
         }
 
-        // Applied after the project and environment blocks have merged, so a
-        // release override wins over both — it is the most specific thing
-        // anyone said about this release.
         for item in &mut deployment_items {
             for kv in &deployment_overrides {
                 apply_deployment_config_override(item, kv)
@@ -141,7 +120,6 @@ impl PrepareCommand {
         tracing::info!("generate deployment env");
 
         let deployment_output = project.path.join(".forest").join("deployment");
-        // CHORE: Maybe keep, maybe remove .join(uuid::Uuid::now_v7().to_string());
         if deployment_output.exists() {
             tokio::fs::remove_dir_all(&deployment_output).await?;
         }
@@ -150,7 +128,6 @@ impl PrepareCommand {
             .await
             .context("create deployment preparation output")?;
 
-        // Build a resolver for inter-component calls
         let call_resolver = {
             let mut component_map: std::collections::HashMap<String, (std::path::PathBuf, String)> =
                 std::collections::HashMap::new();
@@ -165,9 +142,6 @@ impl PrepareCommand {
                         }
                     }
                     crate::models::ComponentSource::Versioned(version) => {
-                        // Versioned deps materialize in the shared cache via
-                        // `forest update`. Resolve to that cache path and
-                        // reuse the same is_deno detection used by Local.
                         let Some(cache_dir) = dirs::cache_dir() else {
                             continue;
                         };
@@ -212,7 +186,6 @@ impl PrepareCommand {
                             .get(&component_id)
                             .ok_or_else(|| anyhow::anyhow!("unknown component: {component_id}"))?;
 
-                        // Use forwarded context if available, adding project defaults
                         let ctx = match call_context {
                             Some(mut ctx) => {
                                 ctx.project = ctx.project.or(Some(project_name));
@@ -245,7 +218,6 @@ impl PrepareCommand {
             resolver
         };
 
-        // For each deployment item, send deployment prepare to component in question
         for deployment_item in deployment_items {
             tracing::info!(
                 env = deployment_item.env,
@@ -260,16 +232,6 @@ impl PrepareCommand {
                 .join(&deployment_item.destination)
                 .join(&deployment_item.destination_type);
 
-            // A project can declare destinations without a component, and that
-            // is a real case rather than a mistake: components exist to render
-            // deployment manifests, and a destination type that acts on
-            // infrastructure which already exists — `forest/generic@1` calling
-            // ecs:UpdateService, say — has no manifests to render. What such a
-            // project still needs to say is *config*: which service it is.
-            //
-            // So there is nothing to invoke, but there is something to write.
-            // Fall through to the config.json below, which is what carries the
-            // project's variables to the destination.
             let Some(component) = &deployment_item.component else {
                 tracing::info!(
                     env = deployment_item.env,
@@ -281,11 +243,6 @@ impl PrepareCommand {
                 continue;
             };
 
-            // Local deps use their declared path directly. Versioned
-            // deps were downloaded into the per-component cache dir;
-            // we read templates from there. Layout is identical to a
-            // local component, so the rest of this function is
-            // unchanged.
             let component_path = match &component.source {
                 crate::models::ComponentSource::Local(path) => path.clone(),
                 crate::models::ComponentSource::Versioned(version) => {
@@ -310,17 +267,12 @@ impl PrepareCommand {
                 .await
                 .context("create output dir")?;
 
-            // ── Pass 1: Copy/render component templates ──
-            // Components ship template files in templates/deployment/{destination_type}/
-            // These are copied to the output, with .jinja2 files rendered using config.
-            // The component binary can customize rendering via _meta/template_config.
             let template_dir = component_path
                 .join("templates")
                 .join("deployment")
                 .join(&deployment_item.destination_type);
 
             if template_dir.exists() {
-                // Get template config from the component binary (skip, rename, extra vars)
                 let template_config = if let Some(ref bp) =
                     component_binary::resolve_binary(component_path, &component.name)
                 {
@@ -354,7 +306,6 @@ impl PrepareCommand {
                     .await
                     .context("render deployment templates")?;
 
-                // Apply skip rules — remove files matching skip patterns
                 for pattern in &template_config.skip {
                     let glob_pattern = output_path.join(pattern).to_string_lossy().to_string();
                     for entry in glob::glob(&glob_pattern).into_iter().flatten().flatten() {
@@ -366,9 +317,6 @@ impl PrepareCommand {
                 }
             }
 
-            // ── Pass 2: Invoke deployment hook (optional) ──
-            // If the component has a binary or Deno runtime with deployment hooks,
-            // call prepare to get additional manifest files.
             let hook_result = {
                 let spec_json = deployment_item
                     .config
@@ -443,8 +391,6 @@ impl PrepareCommand {
                 }
             };
 
-            // Write manifests returned by the hook.
-            // Each manifest is { name: "filename.yaml", content: "..." }.
             if let Some(result) = hook_result {
                 if let Some(manifests) = result.get("manifests").and_then(|v| v.as_array()) {
                     for manifest in manifests {
@@ -478,12 +424,6 @@ impl PrepareCommand {
     }
 }
 
-/// Write the deployment item to `forest/config.json` under the destination's
-/// output path.
-///
-/// This is what carries a project's per-environment config to the destination
-/// — the destination describes a place, the config says what this project is
-/// within it. Written for every deployment item, with or without a component.
 async fn write_forest_config(
     output_path: &std::path::Path,
     deployment_item: &DeploymentItem,
@@ -530,14 +470,11 @@ fn get_deployment_items(
 
         let config_values = env_config.get("config");
 
-        // Merge config values
         let config = match (config, config_values) {
             (None, None) => None,
             (None, Some(config)) => Some(config.clone()),
             (Some(config), None) => Some(config.clone()),
             (Some(base_config), Some(patch_config)) => {
-                // Override the base config with the path
-
                 let config = merge_config(base_config.clone(), patch_config.clone());
 
                 Some(config)
@@ -558,7 +495,6 @@ fn get_deployment_items(
                 anyhow::bail!("destination is required to have a type");
             };
 
-            // We've got a component, env, destination, type
             deployment_items.push(DeploymentItem {
                 env: env.clone(),
                 destination: dest.clone(),
@@ -638,32 +574,12 @@ fn merge_config(base: ProjectValue, patch: ProjectValue) -> ProjectValue {
 
             ProjectValue::Array(base)
         }
-        (_, value) => {
-            // If the type doesn't match, we simply override the entire value
-            value
-        }
+        (_, value) => value,
     }
 }
 
-/// Apply a config override in the format "org/component.key.path=value".
-///
-/// The path before '=' is split:
-///   - "org/component" → navigates to `other[org][component][config]`
-///   - remaining dot-separated segments → nested map keys
-///
-/// Examples:
-///   "kjuulh/service.tag=abc123"           → config.tag = "abc123"
-///   "kjuulh/service.env_vars.LOG=debug"   → config.env_vars.LOG = "debug"
-/// Marks a `--set` path as addressing the deployment config block rather than a
-/// component's. Unambiguous because a component path always carries a `/`.
 const DEPLOYMENT_CONFIG_PREFIX: &str = "config.";
 
-/// Set one key in a deployment item's `config` block, from `config.key=value`.
-///
-/// Flat on purpose. This block is flattened to a string map before it reaches a
-/// generic destination's provider, so nesting here would be silently dropped at
-/// the far end — better to refuse the shape than to render something the
-/// provider never sees.
 fn apply_deployment_config_override(item: &mut DeploymentItem, kv: &str) -> anyhow::Result<()> {
     let (path, value) = kv
         .split_once('=')
@@ -699,7 +615,6 @@ fn apply_config_override(root: &mut ProjectValue, kv: &str) -> anyhow::Result<()
         .split_once('=')
         .ok_or_else(|| anyhow::anyhow!("expected KEY=VALUE format"))?;
 
-    // Split "org/component.key.subkey" into component ref + config path
     let (component_part, config_path) = path
         .split_once('.')
         .ok_or_else(|| anyhow::anyhow!("expected org/component.key format, got: {path}"))?;
@@ -708,7 +623,6 @@ fn apply_config_override(root: &mut ProjectValue, kv: &str) -> anyhow::Result<()
         .split_once('/')
         .ok_or_else(|| anyhow::anyhow!("expected org/component, got: {component_part}"))?;
 
-    // Navigate to other[org][name][config]
     let ProjectValue::Map(root_map) = root else {
         anyhow::bail!("project config root is not a map");
     };
@@ -734,7 +648,6 @@ fn apply_config_override(root: &mut ProjectValue, kv: &str) -> anyhow::Result<()
         anyhow::bail!("component '{org}/{name}' config block is not a map");
     };
 
-    // Navigate nested keys (e.g. "env_vars.LOG_LEVEL")
     let keys: Vec<&str> = config_path.split('.').collect();
     let mut current = config_map;
 
@@ -787,8 +700,6 @@ mod deployment_config_override_tests {
 
     #[test]
     fn replaces_the_fallback_the_project_declared() {
-        // The whole point: forest.cue carries `main` for a render with no
-        // override, and the release replaces it with what CI actually pushed.
         let mut i = item();
         apply_deployment_config_override(&mut i, "config.image_tag=main").unwrap();
         apply_deployment_config_override(&mut i, "config.image_tag=main-601f507").unwrap();
@@ -820,23 +731,18 @@ mod deployment_config_override_tests {
 
     #[test]
     fn the_prefix_is_what_routes_a_set_to_one_target_or_the_other() {
-        // One flag, two destinations for the value. A component path always
-        // carries a '/', so `config.` cannot collide with one.
         let component = "understory/service.image.tag=main-601f507";
         let deployment = "config.image_tag=main-601f507";
 
         assert!(!component.starts_with(DEPLOYMENT_CONFIG_PREFIX));
         assert!(deployment.starts_with(DEPLOYMENT_CONFIG_PREFIX));
 
-        // And each is only accepted by the handler it routes to.
         assert!(apply_deployment_config_override(&mut item(), component).is_err());
         apply_deployment_config_override(&mut item(), deployment).unwrap();
     }
 
     #[test]
     fn rejects_a_nested_key_rather_than_dropping_it_silently() {
-        // The block is flattened to a string map before the provider sees it,
-        // so a nested key would vanish somewhere the author cannot see.
         let err = apply_deployment_config_override(&mut item(), "config.image.tag=main-601f507")
             .unwrap_err()
             .to_string();

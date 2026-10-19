@@ -1,21 +1,3 @@
-/**
- * Release-timeline fixtures, one per state the swim lane has to distinguish.
- *
- * Shared by the unit tests and the visual gallery so the two cannot drift: a
- * screenshot of a state that no test covers, or vice versa, is how a rendering
- * bug survives a green suite.
- *
- * Shapes mirror the `/timeline` payload — see `platform.rs`, which sends
- * destination rows plus pipeline stages, with plan stages carrying
- * approval_status in Rust's Debug spelling ("AWAITINGAPPROVAL").
- *
- * `release` + `expect` is one release resolved on its own. A fixture may also
- * carry `below` — older releases rendered underneath it, newest first — plus
- * `expectBelow`, one expectation object each. Those exist because the gutter
- * resolves lane states *across* releases: what sits below a release changes
- * what the rail draws for it, and a fixture of one release cannot show that.
- */
-
 const plan = (env, status, approval) => ({
   id: `plan-${env}`, stage_type: "plan", environment: env, status,
   ...(approval ? { approval_status: approval } : {}),
@@ -23,9 +5,6 @@ const plan = (env, status, approval) => ({
 const deploy = (env, status) => ({
   id: `deploy-${env}`, stage_type: "deploy", environment: env, status,
 });
-// Destinations are *placements within* an environment, and an environment can
-// hold several. Most fixtures only need one, so the name defaults; the ones
-// exercising a partial rollout name each placement themselves.
 const dest = (env, status, isCurrent = false, name = `${env}-main`) => ({
   name, environment: env, status, is_current: isCurrent,
 });
@@ -33,10 +12,6 @@ const wait = (seconds, status) => ({
   id: `wait-${seconds}`, stage_type: "wait", duration_seconds: seconds, status,
 });
 
-// A real provider failure, kept at its real length. The swim lane must not
-// render this text -- it is a nowrap flex row, and a few hundred characters of
-// chained error turns one placement into a paragraph. The lane says that it
-// failed and links to the release page, which renders the message in full.
 export const PROVIDER_ERROR =
   'provider reported failure: compare the candidate configuration at ' +
   'https://commission-next.finance.understory.sh/admin/commission/compare?format=json&candidate_ref=main: ' +

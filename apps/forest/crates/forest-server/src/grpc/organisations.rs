@@ -156,8 +156,6 @@ impl OrganisationService for OrganisationsServer {
         }))
     }
 
-    // -- Member management --------------------------------------------------------
-
     async fn add_member(
         &self,
         request: tonic::Request<AddMemberRequest>,
@@ -317,8 +315,6 @@ impl OrganisationService for OrganisationsServer {
         }))
     }
 
-    // -- Allowed-domain auto-invite (DATA-252) --------------------------------
-
     async fn add_allowed_domain(
         &self,
         request: tonic::Request<AddAllowedDomainRequest>,
@@ -371,8 +367,6 @@ impl OrganisationService for OrganisationsServer {
         let req = request.into_inner();
         let organisation_id = parse_org_id(&req.organisation_id)?;
 
-        // Members can see the list (handy for the org settings page in
-        // forage); only admins can mutate.
         crate::grpc::authorize::require_org_access_by_id(
             &self.state.db,
             &actor,
@@ -580,9 +574,6 @@ fn verify_domain_err_to_status(e: VerifyAllowedDomainError) -> tonic::Status {
         Invalid(inner) => tonic::Status::invalid_argument(inner.to_string()),
         NotMember | NotAdmin => tonic::Status::permission_denied(e.to_string()),
         NotFound => tonic::Status::not_found(e.to_string()),
-        // Treat DNS lookup failures as Unavailable — the operation isn't
-        // a user error, it's a transient infrastructure problem the
-        // caller can retry.
         DnsLookup(_) => tonic::Status::unavailable(e.to_string()),
         Other(inner) => error::to_status(inner),
     }

@@ -76,7 +76,6 @@ impl ShowCommand {
 
         let stages_filter: Option<&str> = self.stage.as_deref();
 
-        // Fetch plan output for each plan stage in scope.
         let mut plan_outputs: BTreeMap<String, forest_grpc_interface::GetPlanOutputResponse> =
             BTreeMap::new();
         for stage in intent_state
@@ -97,10 +96,6 @@ impl ShowCommand {
             }
         }
 
-        // Signals say what a destination's status cannot: flux@1 reports
-        // `reconcile` DEGRADED when the push landed but nothing told Flux to
-        // sync, which a bare SUCCEEDED would hide. A server without the
-        // signal service just shows none.
         let signals = match grpc.list_signals(intent_id).await {
             Ok(signals) => signals,
             Err(e) => {
@@ -122,16 +117,10 @@ impl ShowCommand {
         let format = state.config.format;
         let json_mode = matches!(format, OutputFormat::Json);
 
-        // Render header eagerly so the user sees structure before the
-        // potentially long log replay starts.
         if !json_mode && !self.logs_only {
             print!("{}", output.render_header());
         }
 
-        // Collect logs by destination via WaitRelease, the stream `release
-        // create` follows live. By default only what is persisted: the stream
-        // stays open until the release is terminal, and a plan parked on its
-        // approval never gets there until someone has read this very output.
         let mode = if self.follow {
             WatchMode::Follow
         } else {
@@ -182,9 +171,6 @@ impl ShowCommand {
             })
             .ok();
 
-        // Without the stream, the intent state fetched above still says which
-        // stages are parked. Not narrowed by --stage: a parked plan is why the
-        // stages after it are pending, so `--stage deploy-prod` needs it too.
         let awaiting: Vec<String> = match &watch {
             Some(w) => w.progress.awaiting_approval(),
             None => intent_state
@@ -198,7 +184,6 @@ impl ShowCommand {
             w.end == WatchEnd::Snapshot && !w.progress.is_terminal() && awaiting.is_empty()
         });
 
-        // With --stage, keep the logs of that stage's destinations only.
         if stages_filter.is_some() {
             log_buffers
                 .retain(|dest, _| output.destinations.iter().any(|d| d.destination == *dest));
@@ -218,7 +203,6 @@ impl ShowCommand {
             println!("{json}");
         } else if self.logs_only {
             render_logs_only(&output.plan_outputs, &log_buffers);
-            // stderr, so `--logs-only > release.log` stays the logs alone.
             for hint in &hints {
                 eprintln!("{hint}");
             }
@@ -259,8 +243,6 @@ pub(crate) struct ResolvedRelease {
     pub(crate) intent_state: forest_grpc_interface::ReleaseIntentState,
 }
 
-/// Treat the target as a release-intent UUID first; fall back to slug.
-/// UUIDs are unambiguous so the order avoids accidental collisions.
 pub(crate) async fn resolve_target(
     state: &State,
     target: &str,
@@ -284,8 +266,6 @@ pub(crate) async fn resolve_target(
             .with_context(|| format!("release-intent {intent_id} not found in {organisation}"))?;
         let artifact_id: Uuid = intent_state.artifact_id.parse().context("artifact_id")?;
 
-        // No GetArtifactById RPC; look up the annotation via project's
-        // annotation listing and match on id.
         let annotations = grpc
             .get_release_annotations_by_project(&organisation, &intent_state.project)
             .await
@@ -461,8 +441,6 @@ impl Display for IntentPickItem {
     }
 }
 
-// ── Output structure (also the JSON shape) ──────────────────────────
-
 #[derive(Serialize)]
 struct ShowOutput {
     slug: String,
@@ -478,9 +456,7 @@ struct ShowOutput {
     destinations: Vec<DestView>,
     plan_outputs: Vec<PlanView>,
     logs: Vec<DestLogView>,
-    /// Stages parked on a plan approval; `forest release approve` clears them.
     awaiting_approval: Vec<String>,
-    /// The snapshot ended before the release did.
     in_progress: bool,
 }
 
@@ -842,8 +818,6 @@ fn render_destination(out: &mut String, d: &DestView) {
     }
 }
 
-/// The `HealthStatus` wire value as the name the server stores and a person
-/// reads.
 fn signal_status_name(status: i32) -> &'static str {
     use forest_grpc_interface::HealthStatus;
     match HealthStatus::try_from(status) {
@@ -860,8 +834,6 @@ fn signal_icon(status: &str) -> &'static str {
     match status {
         "HEALTHY" => "✓",
         "PROGRESSING" => "▶",
-        // A warning, not a cross: the destination succeeded, and this says
-        // what that success does not yet mean.
         "DEGRADED" => "⚠",
         "UNHEALTHY" | "MISSING" => "✗",
         _ => "•",
@@ -870,7 +842,6 @@ fn signal_icon(status: &str) -> &'static str {
 
 fn render_stage(out: &mut String, s: &StageView) {
     use std::fmt::Write;
-    // A parked plan stage stays ACTIVE; without this it reads as running.
     let awaiting = s.approval_status.as_deref() == Some("AWAITING_APPROVAL");
     let _ = writeln!(
         out,
@@ -893,7 +864,6 @@ fn stage_icon(status: &str) -> &'static str {
         "SUCCEEDED" => "✓",
         "ACTIVE" | "RUNNING" | "ASSIGNED" => "▶",
         "FAILED" | "CANCELLED" | "TIMED_OUT" => "✗",
-        // Neither a tick nor a cross: it did not run, and it did not go wrong.
         "SUPERSEDED" => "⇥",
         "PENDING" | "QUEUED" => "◌",
         _ => "•",
@@ -925,8 +895,6 @@ fn stage_status_name(status: i32) -> &'static str {
         _ => "UNSPECIFIED",
     }
 }
-
-// ── Small prompt helpers (mirrors `commit.rs`) ──────────────────────
 
 async fn prompt_org_select(state: &State) -> anyhow::Result<String> {
     let resp = state
@@ -986,9 +954,6 @@ mod tests {
         }
     }
 
-    /// The case #298 is about: the destination SUCCEEDED, but Flux was never
-    /// told to sync. The warning has to be on the destination's own lines,
-    /// not only somewhere in the log dump.
     #[test]
     fn a_degraded_reconcile_shows_under_a_succeeded_destination() {
         let mut out = String::new();
@@ -1022,9 +987,6 @@ mod tests {
         }
     }
 
-    /// A parked plan stage is ACTIVE on the wire. Shown as bare ACTIVE it
-    /// reads as a plan still running, which is how a person ends up waiting
-    /// on a release that is waiting on them.
     #[test]
     fn a_parked_plan_stage_says_it_is_awaiting_approval() {
         let mut out = String::new();

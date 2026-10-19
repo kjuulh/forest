@@ -11,8 +11,6 @@ pub struct PolicyRegistry {
     db: PgPool,
 }
 
-// ── Database record ─────────────────────────────────────────────────
-
 pub struct PolicyRecord {
     pub id: Uuid,
     pub project_id: Uuid,
@@ -24,15 +22,11 @@ pub struct PolicyRecord {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-// ── Domain types ────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyType {
     SoakTime,
     BranchRestriction,
     Approval,
-    /// Collapse a queue of pending releases for one target to the newest.
-    /// A *selection* policy, not a gate — see design/SKIP-TO-LATEST.md §6.
     SupersedePending,
 }
 
@@ -80,23 +74,13 @@ pub struct ApprovalConfig {
     pub required_approvals: i32,
 }
 
-/// Deploy the newest pending release for a target and mark the ones it
-/// overtook SUPERSEDED, instead of grinding through every queued one.
-///
-/// Default off, and there is no default-on path: a project with no such policy
-/// behaves exactly as it does today. See design/SKIP-TO-LATEST.md.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SupersedePendingConfig {
     pub target_environment: String,
 
-    /// Only supersede a pending release when the newer one names the same
-    /// branch — the nearest guard against skipping a genuinely divergent
-    /// release that forest can enforce from what it records.
     #[serde(default)]
     pub same_branch_only: bool,
 
-    /// Not implemented; `validate_config` rejects `true`. Carried so the
-    /// contract is settled before anything can set it. See §3 of the design.
     #[serde(default)]
     pub cancel_in_progress: bool,
 }
@@ -163,8 +147,6 @@ impl PolicyConfig {
     }
 }
 
-// ── Evaluation result ───────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub struct ApprovalStateInfo {
     pub required_approvals: i32,
@@ -190,8 +172,6 @@ pub struct PolicyEvaluation {
     pub approval_state: Option<ApprovalStateInfo>,
 }
 
-// ── CRUD params ─────────────────────────────────────────────────────
-
 pub struct CreatePolicyParams {
     pub project_id: Uuid,
     pub name: String,
@@ -203,11 +183,8 @@ pub struct UpdatePolicyParams {
     pub config: Option<PolicyConfig>,
 }
 
-// ── Implementation ──────────────────────────────────────────────────
-
 impl PolicyRegistry {
     pub async fn create(&self, params: CreatePolicyParams) -> anyhow::Result<PolicyRecord> {
-        // Validate config
         self.validate_config(&params.config)?;
 
         let policy_type = params.config.policy_type().as_str().to_string();
@@ -304,8 +281,6 @@ impl PolicyRegistry {
         Ok(recs)
     }
 
-    /// Evaluate all enabled policies for a project against a target environment.
-    /// Returns evaluation results for each relevant policy.
     pub async fn evaluate_for_environment(
         &self,
         project_id: &Uuid,
@@ -358,11 +333,6 @@ impl PolicyRegistry {
                     if c.target_environment != target_environment {
                         continue;
                     }
-                    // A selection policy, not a gate: it chooses which pending
-                    // release is the candidate and never blocks one. Reported
-                    // as passed so it is visible in `policy evaluate` without
-                    // ever flipping `all_passed` — the collapse itself is
-                    // driven from services/supersede.rs, not from here.
                     evaluations.push(PolicyEvaluation {
                         policy_name: policy.name.clone(),
                         policy_type: PolicyType::SupersedePending,
@@ -381,13 +351,6 @@ impl PolicyRegistry {
         Ok(evaluations)
     }
 
-    /// The enabled supersede-pending policy for this project+environment, if
-    /// there is one, with the name the reason text will quote.
-    ///
-    /// Read directly rather than through `evaluate_for_environment`, because
-    /// this policy is not a gate: there is no pass/fail to report, only a
-    /// configuration to act on. Returns `None` — meaning "behave exactly as
-    /// forest does today" — for every project that has not opted in.
     pub async fn supersede_pending_for_environment(
         &self,
         project_id: &Uuid,
@@ -408,8 +371,6 @@ impl PolicyRegistry {
             let config: SupersedePendingConfig = match serde_json::from_value(policy.config) {
                 Ok(c) => c,
                 Err(e) => {
-                    // A policy we cannot parse must not silently start
-                    // superseding deploys on a default config.
                     tracing::warn!(
                         policy = %policy.name,
                         "skipping unparseable supersede_pending config: {e}"
@@ -424,8 +385,6 @@ impl PolicyRegistry {
 
         Ok(None)
     }
-
-    // ── Internal helpers ────────────────────────────────────────────
 
     fn validate_config(&self, config: &PolicyConfig) -> anyhow::Result<()> {
         match config {
@@ -481,7 +440,6 @@ impl PolicyRegistry {
         config: &SoakTimeConfig,
         policy_name: &str,
     ) -> anyhow::Result<PolicyEvaluation> {
-        // Find the most recent successful release to the source environment
         let last_success = sqlx::query_scalar!(
             r#"SELECT MAX(rs.updated_at) as "max_updated_at"
             FROM release_states rs

@@ -1,31 +1,13 @@
-//! Filesystem primitives for the global-tools layer.
-//!
-//! - Atomic writes (tempfile + fsync + rename) — covers `forest.cue`,
-//!   `forest.lock`, shim files, cached binaries.
-//! - Read helpers for config + lockfile.
-//! - Lazy directory creation.
-//!
-//! No locking primitive yet — flock comes in a separate small module once
-//! per-process write-paths actually start to race.
-
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
-/// Atomically write `bytes` to `dest` with mode 0644 (data files).
-///
-/// Steps:
-///   1. Ensure parent dir exists.
-///   2. Create a sibling tempfile in the same directory (so rename(2) is atomic).
-///   3. Write + fsync the bytes.
-///   4. Rename onto `dest`.
 pub async fn atomic_write(dest: &Path, bytes: &[u8]) -> Result<()> {
     atomic_write_with_mode(dest, bytes, 0o644).await
 }
 
-/// Atomically write `bytes` to `dest` with mode 0755 — for executables/shims.
 pub async fn atomic_write_executable(dest: &Path, bytes: &[u8]) -> Result<()> {
     atomic_write_with_mode(dest, bytes, 0o755).await
 }
@@ -78,7 +60,6 @@ fn sibling_tempfile(dest: &Path) -> Result<std::path::PathBuf> {
     Ok(parent.join(format!(".{stem}.tmp.{rand:016x}")))
 }
 
-/// Read a file to a String if it exists; return None if absent.
 pub async fn read_optional(path: &Path) -> Result<Option<String>> {
     match fs::read_to_string(path).await {
         Ok(s) => Ok(Some(s)),
@@ -87,7 +68,6 @@ pub async fn read_optional(path: &Path) -> Result<Option<String>> {
     }
 }
 
-/// Ensure a directory exists (creates with default umask).
 pub async fn ensure_dir(path: &Path) -> Result<()> {
     fs::create_dir_all(path)
         .await
@@ -95,7 +75,6 @@ pub async fn ensure_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Delete a file if it exists; silent if not.
 pub async fn remove_if_present(path: &Path) -> Result<()> {
     match fs::remove_file(path).await {
         Ok(()) => Ok(()),

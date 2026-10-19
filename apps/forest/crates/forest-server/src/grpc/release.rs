@@ -72,24 +72,12 @@ impl ReleaseService for ReleaseServer {
             .context("artifact id")
             .to_internal_error()?;
 
-        // Extract source/context/ref info for both the annotate call and notification context
         let mut source: release_registry::Source = req
             .source
             .map(|s| s.into())
             .context("source is required")
             .to_internal_error()?;
 
-        // Two different people can be on one annotation, and conflating them is
-        // what made every release read as the token owner regardless of who did
-        // the work.
-        //
-        // The *actor* is whoever the token authenticated. It is never
-        // caller-supplied, so `source.user_id` stays the audit anchor: it says
-        // which credential made this call, and it keeps saying that below.
-        //
-        // The *author* is whoever wrote the commit, which the CLI sniffs out of
-        // the CI environment under `--detect`. It is display attribution, not
-        // an authentication claim — see the note on trust below.
         match &actor {
             Actor::User { user_id } => source.user_id = Some(user_id.to_string()),
             Actor::App { app_id, .. } => source.user_id = Some(app_id.to_string()),
@@ -99,16 +87,6 @@ impl ReleaseService for ReleaseServer {
         }
 
         match release_author::DetectedAuthor::from_metadata(&req.metadata) {
-            // The annotation says who wrote the change. Link it to a forest
-            // account where we can, and keep the raw handle where we cannot —
-            // never silently swap in the token's owner.
-            //
-            // Trust: the signals are caller-supplied, so a token holder can
-            // name somebody else here. That is deliberate — none of this is an
-            // authorisation decision. The credential that actually made the
-            // call is recorded on `release_intents.actor_id`/`actor_type`,
-            // which is what `get_releases_by_actor` reads and what an audit
-            // must read; it is a separate column and nothing below touches it.
             Some(detected) => {
                 let resolved = release_author::resolve(&self.state.user_service(), &detected).await;
 
@@ -122,18 +100,6 @@ impl ReleaseService for ReleaseServer {
                 source.username = resolved.username;
                 source.email = resolved.email;
 
-                // The whole identity moves, not just the name.
-                //
-                // Leaving `user_id` on the actor made `source` describe two
-                // different people: it said `madsgodvinjensen` and pointed at
-                // kjuulh's account. Anything reading the name got the author
-                // and anything reading the id got the token owner — and Slack
-                // DM routing reads the id, so every release notified whoever
-                // owned the CI token instead of whoever wrote the change
-                // (`integrations::router`, "the release author's Slack link").
-                //
-                // A `source` that names one person and identifies another is
-                // not a safer record, just a quieter wrong one.
                 if let Some(user_id) = resolved.user_id {
                     source.user_id = Some(user_id.clone());
                     req.metadata
@@ -141,10 +107,6 @@ impl ReleaseService for ReleaseServer {
                 }
             }
 
-            // No detection: the annotation never said who wrote this, so the
-            // authenticated user is the best answer available. This is the
-            // pre-existing behaviour and every annotation made without
-            // `--detect` still gets it.
             None => {
                 if let Actor::User { user_id } = &actor {
                     let user = self
@@ -172,15 +134,6 @@ impl ReleaseService for ReleaseServer {
             .context("ref is required")
             .to_internal_error()?;
 
-        // The project's declaration, parsed from the deployment files this
-        // artifact already carries. Derived server-side rather than sent by the
-        // client, which is what makes it work for every project on its next
-        // release regardless of which CLI version built the artifact — and for
-        // trigger-fired releases, where there is no client at all.
-        //
-        // A file that will not parse fails the annotate (see
-        // `parse_declaration`): recording a partial declaration would silently
-        // narrow what later stages schedule.
         let deployment_files = self
             .state
             .artifact_staging_registry()
@@ -221,12 +174,6 @@ impl ReleaseService for ReleaseServer {
             .notification_registry()
             .create_notification(
                 "RELEASE_ANNOTATED",
-                // An annotation is the front half of a deploy: something has
-                // been recorded and a release for it has not happened yet. The
-                // title says that, because it is what a reader of the
-                // notification wants to know — "Artifact annotated: <slug>"
-                // named the mechanism and buried the state (DATA-637). The slug
-                // is still carried in the context, and every renderer shows it.
                 &format!("Release pending: {}/{}", &proj.organisation, &proj.project),
                 &format!(
                     "Artifact {} annotated in {}/{} — awaiting release",
@@ -239,11 +186,6 @@ impl ReleaseService for ReleaseServer {
                     artifact_id: Some(artifact_id.to_string()),
                     source_username: source.username.clone(),
                     source_email: source.email.clone(),
-                    // Who this release may be told to *personally* — the owner,
-                    // and nobody else. Not `source.user_id`: that is the actor,
-                    // and where the author did not link to an account it stays
-                    // the actor, which is how a renovate[bot] release DM'd
-                    // whoever owns the CI token (`services::release_owner`).
                     source_user_id: release_owner::personal_recipient_id(
                         &req.metadata,
                         source.user_id.as_deref(),
@@ -280,8 +222,6 @@ impl ReleaseService for ReleaseServer {
             })
             .await;
 
-        // When annotation_only is set, skip trigger evaluation entirely
-        // (used by `forest release create` to avoid auto-releases).
         if req.annotation_only {
             tracing::debug!("annotation_only=true, skipping trigger evaluation");
             return Ok(Response::new(AnnotateReleaseResponse {
@@ -289,7 +229,6 @@ impl ReleaseService for ReleaseServer {
             }));
         }
 
-        // Evaluate triggers
         let match_data = AnnotationMatchData::from_parts(&source, &art_context, &reference);
 
         tracing::debug!(
@@ -323,7 +262,6 @@ impl ReleaseService for ReleaseServer {
             Ok(trigger_matches) => {
                 tracing::debug!(count = trigger_matches.len(), "triggers evaluated");
                 for trigger_match in trigger_matches {
-                    // Evaluate branch restriction policies for each target environment
                     let branch = reference.commit_branch.as_deref();
                     let mut blocked = false;
                     for env in &trigger_match.target_environments {
@@ -383,7 +321,6 @@ impl ReleaseService for ReleaseServer {
                                 destinations = created.releases.len(),
                                 "trigger fired successfully"
                             );
-                            // Signal the IntentCoordinator for pipeline releases
                             if trigger_match.use_pipeline {
                                 let _ = self
                                     .state
@@ -430,8 +367,6 @@ impl ReleaseService for ReleaseServer {
             .context("get release annotation by slug")
             .to_internal_error()?;
 
-        // The annotation carries its owning project; require the caller
-        // belongs to that org before exposing release metadata.
         authorize::require_org_access(
             &self.state.db,
             &actor,
@@ -478,23 +413,6 @@ impl ReleaseService for ReleaseServer {
         }))
     }
 
-    /// Report that the deploy an annotation announced never happened.
-    ///
-    /// The announce-first shape (DATA-637) has a hole in it: a project whose
-    /// rollout Forest does not perform annotates first — which subscribers see
-    /// as pending — and releases once its own CI has finished. If that CI fails
-    /// there is nothing to fail, so nothing ever contradicts the pending state.
-    ///
-    /// This closes it by recording the release that did not work, rather than by
-    /// emitting a notification about it. Same intent, same destination, same
-    /// history as the successful path — a project whose successes are releases
-    /// and whose failures are loose notifications would under-report itself in
-    /// every view over the release history. The destination is a
-    /// `forest/noop@1`, which is the honest description of what Forest did
-    /// either way; only the outcome differs.
-    ///
-    /// The releases are born FAILED in one transaction, so the scheduler cannot
-    /// pick one up and succeed it in the window before the failure is written.
     async fn report_release_failed(
         &self,
         request: tonic::Request<ReportReleaseFailedRequest>,
@@ -561,10 +479,6 @@ impl ReleaseService for ReleaseServer {
             .map(|r| r.environment.clone())
             .collect();
 
-        // Reuse the annotation's own context so the failure carries the same
-        // commit, author and links the pending notification did. Without it the
-        // failure renders as a bare title with none of the provenance that makes
-        // it actionable.
         let ann_ctx = self
             .state
             .release_registry()
@@ -594,7 +508,6 @@ impl ReleaseService for ReleaseServer {
                     error_message: Some(req.reason.clone()),
                     source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
                     source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
-                    // The owner, not the actor — see the note in `annotate`.
                     source_user_id: ann_ctx.as_ref().and_then(|a| a.personal_recipient()),
                     source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
                     run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
@@ -656,7 +569,6 @@ impl ReleaseService for ReleaseServer {
             .context("artifact id")
             .to_internal_error()?;
 
-        // Authorize: look up the org from the artifact's project
         let release_org = sqlx::query_scalar!(
             r#"SELECT p.organisation FROM annotations a
              JOIN projects p ON a.project_id = p.id
@@ -679,7 +591,6 @@ impl ReleaseService for ReleaseServer {
             .await?;
         }
 
-        // Evaluate branch restriction policies before releasing
         let ann_ctx_for_policy = self
             .state
             .release_registry()
@@ -690,11 +601,9 @@ impl ReleaseService for ReleaseServer {
             .as_ref()
             .and_then(|a| a.reference.commit_branch.clone());
 
-        // Collect all target environments to check policies against
         let target_envs: Vec<String> = if !req.environments.is_empty() {
             req.environments.clone()
         } else {
-            // When releasing to specific destinations, resolve their environments
             Vec::new()
         };
 
@@ -713,8 +622,6 @@ impl ReleaseService for ReleaseServer {
                     .unwrap_or_default();
 
                 for eval in &evaluations {
-                    // Only enforce branch_restriction at request time.
-                    // soak_time is handled by the scheduler (deferred retry).
                     if !eval.passed && eval.policy_type == PolicyType::BranchRestriction {
                         return Err(tonic::Status::failed_precondition(format!(
                             "blocked by policy '{}': {}",
@@ -749,7 +656,6 @@ impl ReleaseService for ReleaseServer {
             .map(|r| r.destination.clone())
             .collect();
 
-        // Fetch annotation context to enrich the started notification
         let ann_ctx = self
             .state
             .release_registry()
@@ -781,7 +687,6 @@ impl ReleaseService for ReleaseServer {
                     destination_count: dest_count as i32,
                     source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
                     source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
-                    // The owner, not the actor — see the note in `annotate`.
                     source_user_id: ann_ctx.as_ref().and_then(|a| a.personal_recipient()),
                     source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
                     run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),
@@ -820,7 +725,6 @@ impl ReleaseService for ReleaseServer {
             })
             .await;
 
-        // Signal the IntentCoordinator to evaluate this pipeline
         if !created.activated_stages.is_empty() || req.use_pipeline {
             let _ = self
                 .state
@@ -832,14 +736,6 @@ impl ReleaseService for ReleaseServer {
                 .await;
         }
 
-        // A pipeline release is created with every stage PENDING — the
-        // coordinator activates the first one on its next sweep — so there are
-        // no `releases` rows yet and this list would come back empty. Callers
-        // read the intent id out of here, so an empty list left `forest release
-        // create --pipeline` failing with "no intents returned" on a pipeline
-        // that had in fact started correctly, and with no handle to approve it
-        // by. Surface the intent itself instead; destination and environment
-        // are genuinely not known yet, and are left blank rather than invented.
         let intents: Vec<ReleaseIntent> = if created.releases.is_empty() {
             vec![ReleaseIntent {
                 release_intent_id: created.release_intent_id.to_string(),
@@ -904,9 +800,7 @@ impl ReleaseService for ReleaseServer {
 
         let nats = self.state.nats.clone();
 
-        // Spawn a task that subscribes to NATS status changes and streams updates
         tokio::spawn(async move {
-            // Subscribe to status changes for this intent
             let nats_subject = format!("forest.release.status.{}", release_intent_id);
             let mut nats_sub = match nats.subscribe(nats_subject).await {
                 Ok(sub) => sub,
@@ -926,25 +820,19 @@ impl ReleaseService for ReleaseServer {
             > = std::collections::HashMap::new();
             let mut log_cursors: std::collections::HashMap<uuid::Uuid, i64> =
                 std::collections::HashMap::new();
-            // Track last-seen stage statuses for pipeline stage updates
             let mut last_stage_statuses: std::collections::HashMap<String, String> =
                 std::collections::HashMap::new();
 
             let mut fallback_interval = tokio::time::interval(std::time::Duration::from_secs(2));
             fallback_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            // The first pass replays everything persisted so far; say when it
-            // is over, so `forest release show` can stop there instead of
-            // following a parked release that never finishes.
             let mut replay_announced = false;
 
             loop {
-                // Wait for either a NATS notification or the fallback timer
                 tokio::select! {
                     _msg = nats_sub.next() => {}
                     _ = fallback_interval.tick() => {}
                 }
 
-                // Stream pipeline stage updates (if this is a pipeline release)
                 if let Ok(Some(intent_row)) = sqlx::query!(
                     "SELECT stages, stage_states FROM release_intents WHERE id = $1",
                     release_intent_id,
@@ -1011,9 +899,6 @@ impl ReleaseService for ReleaseServer {
                     }
                 }
 
-                // Fetch current state and stream updates. The block yields
-                // whether the release is done rather than breaking out, so the
-                // first pass can still end with the replay marker below.
                 let done = 'pass: {
                     match release_registry
                         .get_release_status_by_intent(&release_intent_id)
@@ -1021,8 +906,6 @@ impl ReleaseService for ReleaseServer {
                     {
                         Ok(status_infos) => {
                             if status_infos.is_empty() {
-                                // For pipeline releases with no deploy steps yet (e.g. wait stage),
-                                // check if pipeline is fully complete via stage_states
                                 break 'pass !last_stage_statuses.is_empty()
                                     && last_stage_statuses.values().all(|s| {
                                         matches!(
@@ -1117,7 +1000,6 @@ impl ReleaseService for ReleaseServer {
                                 }
                             }
 
-                            // For pipeline releases, also check stage_states for completion
                             if !last_stage_statuses.is_empty() {
                                 let all_stages_terminal = last_stage_statuses.values().all(|s| {
                                     matches!(
@@ -1125,7 +1007,6 @@ impl ReleaseService for ReleaseServer {
                                         "SUCCEEDED" | "FAILED" | "CANCELLED" | "SUPERSEDED"
                                     )
                                 });
-                                // Pipeline not done yet even if current releases are finalized
                                 break 'pass all_finalized && all_stages_terminal;
                             }
 
@@ -1183,9 +1064,6 @@ impl ReleaseService for ReleaseServer {
             ));
         }
 
-        // This endpoint is self-scoped: callers may only ask about their
-        // own activity. Without this check any authenticated user could
-        // enumerate every other user's release history.
         let caller_matches = match (&caller, req.actor_type.as_str(), actor_id) {
             (Actor::User { user_id }, "user", id) => *user_id == id,
             (Actor::App { app_id, .. }, "app", id) => *app_id == id,
@@ -1271,7 +1149,6 @@ impl ReleaseService for ReleaseServer {
         let req = request.into_inner();
         tracing::debug!("get projects: {req:?}");
 
-        // Check org membership before listing projects
         if let Some(get_projects_request::Query::Organisation(ref org)) = req.query {
             authorize::require_org_access(
                 &self.state.db,
@@ -1387,9 +1264,6 @@ impl ReleaseService for ReleaseServer {
         let actor = authorize::extract_actor(&request)?;
         let req = request.into_inner();
 
-        // Member is enough to update mutable project fields — same level
-        // as project creation. Tighten to Admin if metadata curation
-        // needs to be gated; spec 008/009 don't require Admin for v1.
         authorize::require_org_access(
             &self.state.db,
             &actor,
@@ -1398,9 +1272,6 @@ impl ReleaseService for ReleaseServer {
         )
         .await?;
 
-        // Map proto field-mask (`optional` fields) → service-layer
-        // partial update. Empty values clear; absent fields are left
-        // untouched. Length/validation caps re-enforced in the service.
         let metadata = req.metadata.map(proto_metadata_to_record);
         let rec = self
             .state
@@ -1414,8 +1285,6 @@ impl ReleaseService for ReleaseServer {
             )
             .await
             .map_err(|e| {
-                // Surface validation failures as InvalidArgument so the
-                // CLI can show a useful message instead of a 500.
                 let msg = format!("{e:#}");
                 if msg.contains("exceeds") {
                     tonic::Status::invalid_argument(msg)
@@ -1494,8 +1363,6 @@ impl ReleaseService for ReleaseServer {
             })
             .collect();
 
-        // Pipeline run data has moved to GetReleaseIntentStates.
-        // Keep the field empty for backwards compatibility.
         Ok(Response::new(GetDestinationStatesResponse {
             destinations,
             pipeline_runs: Vec::new(),
@@ -1594,8 +1461,6 @@ impl ReleaseService for ReleaseServer {
             .context("invalid release_intent_id")
             .to_internal_error()?;
 
-        // Resolve owning org from the intent's project so we can authorize
-        // the caller before doing any mutation.
         let intent_org = sqlx::query_scalar!(
             "SELECT p.organisation FROM release_intents ri
              JOIN projects p ON p.id = ri.project_id
@@ -1696,7 +1561,6 @@ impl ReleaseService for ReleaseServer {
 
         tx.commit().await.context("commit").to_internal_error()?;
 
-        // Nudge coordinator to re-evaluate
         let _ = self
             .state
             .nats
@@ -1822,7 +1686,6 @@ impl ReleaseService for ReleaseServer {
 
         tx.commit().await.context("commit").to_internal_error()?;
 
-        // Nudge coordinator to re-evaluate
         let _ = self
             .state
             .nats
@@ -1843,9 +1706,6 @@ impl ReleaseService for ReleaseServer {
             .clone()
             .ok_or_else(|| tonic::Status::invalid_argument("project is required"))?;
 
-        // Admin, like `forest state`: a drift check refreshes against the
-        // destination's credentials and returns the plan text, and reading
-        // state is admin-only for now (forest#282).
         authorize::require_project_access(
             &self.state.db,
             &actor,
@@ -1935,7 +1795,6 @@ impl ReleaseService for ReleaseServer {
 
         let stage_state = stage_states.get(&req.stage_id);
 
-        // Collect plan outputs from all child release_states for this stage
         let plan_rows: Vec<PlanOutputRow> = sqlx::query_as(
             r#"SELECT rs.destination_id, rs.plan_output, rs.status,
                       d.name as destination_name
@@ -1962,7 +1821,6 @@ impl ReleaseService for ReleaseServer {
             })
             .collect();
 
-        // Backward compat: first non-empty output
         let plan_output = outputs
             .iter()
             .find(|o| !o.plan_output.is_empty())
@@ -2265,7 +2123,7 @@ impl From<grpc::Source> for crate::services::release_registry::Source {
         Self {
             username: value.user,
             email: value.email,
-            user_id: None, // set server-side from the authenticated actor
+            user_id: None,
             source_type: value.source_type,
             run_url: value.run_url,
         }
@@ -2354,8 +2212,6 @@ impl From<release_registry::Project> for grpc::Project {
         Self {
             organisation: value.organisation,
             project: value.project,
-            // README + description + metadata aren't populated on the
-            // slim release_registry::Project — fetch via GetProject.
             readme: String::new(),
             description: String::new(),
             metadata: Some(Default::default()),

@@ -22,7 +22,6 @@ enum SchemaClass {
 struct LoweringContext<'a> {
     schemas: &'a BTreeMap<String, SchemaOrRef>,
     classifications: BTreeMap<String, SchemaClass>,
-    /// Inline enums promoted to named types during lowering.
     promoted_type_defs: RefCell<Vec<ir::TypeDef>>,
 }
 
@@ -55,7 +54,6 @@ impl<'a> LoweringContext<'a> {
         schema_or_ref: &SchemaOrRef,
         _schemas: &BTreeMap<String, SchemaOrRef>,
     ) -> SchemaClass {
-        // Forest base types: names starting with "Forest" or containing "forest."
         if name.starts_with("Forest") || name.contains("forest.") {
             return SchemaClass::ForestBase;
         }
@@ -76,8 +74,6 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    /// Check if a schema's allOf contains a $ref whose target name ends with
-    /// the given suffix. This matches both `ForestSpec` and `forest.Spec` patterns.
     fn has_allof_ref_matching(schema: &Schema, suffix: &str) -> bool {
         let Some(all_of) = &schema.all_of else {
             return false;
@@ -87,7 +83,6 @@ impl<'a> LoweringContext<'a> {
                 let ref_name = ref_path
                     .strip_prefix("#/components/schemas/")
                     .unwrap_or(ref_path);
-                // Match "ForestSpec", "forest.Spec", etc.
                 if ref_name.ends_with(suffix)
                     && (ref_name.starts_with("Forest") || ref_name.contains("forest."))
                 {
@@ -98,14 +93,11 @@ impl<'a> LoweringContext<'a> {
         false
     }
 
-    // ── $ref resolution ──────────────────────────────────────────────
-
     fn resolve_ref<'b>(&'b self, ref_path: &str) -> CodegenResult<&'a Schema> {
         let path = ref_path
             .strip_prefix("#/components/schemas/")
             .ok_or_else(|| Error::LoweringError(format!("unsupported $ref path: {ref_path}")))?;
 
-        // Dot-notation: "SchemaName.propertyName"
         if let Some((schema_name, prop_name)) = path.split_once('.') {
             let parent = self.get_schema(schema_name)?;
             let properties = parent.properties.as_ref().ok_or_else(|| {
@@ -137,7 +129,6 @@ impl<'a> LoweringContext<'a> {
         let path = ref_path
             .strip_prefix("#/components/schemas/")
             .ok_or_else(|| Error::LoweringError(format!("unsupported $ref path: {ref_path}")))?;
-        // For dot-notation refs, we don't produce a named type reference
         if path.contains('.') {
             return Err(Error::LoweringError(format!(
                 "dot-notation ref cannot be used as type name: {ref_path}"
@@ -145,8 +136,6 @@ impl<'a> LoweringContext<'a> {
         }
         Ok(path.to_string())
     }
-
-    // ── allOf helpers ────────────────────────────────────────────────
 
     fn collect_required_fields(&self, schema: &Schema) -> Vec<String> {
         let mut required: Vec<String> = schema.required.clone().unwrap_or_default();
@@ -166,12 +155,9 @@ impl<'a> LoweringContext<'a> {
         required
     }
 
-    // ── Type lowering ────────────────────────────────────────────────
-
     fn lower_type_ref(&self, schema_or_ref: &SchemaOrRef) -> CodegenResult<ir::TypeRef> {
         match schema_or_ref {
             SchemaOrRef::Ref(r) => {
-                // Dot-notation refs: resolve inline
                 if r.ref_path.contains('.') {
                     let resolved = self.resolve_ref(&r.ref_path)?;
                     self.lower_schema_type_ref(resolved)
@@ -185,7 +171,6 @@ impl<'a> LoweringContext<'a> {
     }
 
     fn lower_schema_type_ref(&self, schema: &Schema) -> CodegenResult<ir::TypeRef> {
-        // Handle oneOf by preferring a $ref branch
         if let Some(one_of) = &schema.one_of {
             for variant in one_of {
                 if let SchemaOrRef::Ref(r) = variant
@@ -277,18 +262,13 @@ impl<'a> LoweringContext<'a> {
         })
     }
 
-    /// Lower a field's type, handling inline enums specially.
-    /// Multi-value inline enums are matched against existing types or promoted
-    /// to new named types.
     fn lower_field_type(&self, field_name: &str, schema: &Schema) -> CodegenResult<ir::TypeRef> {
         if let Some(enum_vals) = &schema.enum_values
             && enum_vals.len() > 1
         {
-            // Try to match an existing user type with the same enum values
             if let Some(type_name) = self.find_matching_enum_type(schema, enum_vals) {
                 return Ok(ir::TypeRef::Named(type_name));
             }
-            // Promote to a new named type
             let promoted_name = to_pascal_case(field_name);
             let enum_def = lower_enum_values(schema, enum_vals)?;
             self.promoted_type_defs.borrow_mut().push(ir::TypeDef {
@@ -301,7 +281,6 @@ impl<'a> LoweringContext<'a> {
         self.lower_schema_type_ref(schema)
     }
 
-    /// Try to find a user-defined enum type with matching values.
     fn find_matching_enum_type(
         &self,
         schema: &Schema,
@@ -323,8 +302,6 @@ impl<'a> LoweringContext<'a> {
         }
         None
     }
-
-    // ── Top-level lowering ───────────────────────────────────────────
 
     fn lower(&self) -> CodegenResult<ir::Module> {
         let mut spec = None;
@@ -351,7 +328,6 @@ impl<'a> LoweringContext<'a> {
             }
         }
 
-        // Append any inline enums that were promoted to named types
         type_defs.extend(self.promoted_type_defs.borrow_mut().drain(..));
 
         Ok(ir::Module {
@@ -361,8 +337,6 @@ impl<'a> LoweringContext<'a> {
             type_defs,
         })
     }
-
-    // ── Component ────────────────────────────────────────────────────
 
     #[allow(dead_code)]
     fn lower_component(&self, schema: &Schema) -> CodegenResult<ir::Component> {
@@ -403,8 +377,6 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
-    // ── Spec ─────────────────────────────────────────────────────────
-
     fn lower_spec(&self, schema: &Schema) -> CodegenResult<ir::Spec> {
         let props = schema
             .properties
@@ -421,12 +393,7 @@ impl<'a> LoweringContext<'a> {
         Ok(ir::Spec { fields })
     }
 
-    // ── Commands ─────────────────────────────────────────────────────
-
     fn lower_commands(&self, schema: &Schema) -> CodegenResult<Vec<ir::Command>> {
-        // A component may define `#Commands: sdk.#ForestCommands & {}` with no
-        // command entries. In that case the schema has no `properties` key (or
-        // an empty one), which is valid — simply return an empty list.
         let props = match schema.properties.as_ref() {
             Some(p) => p,
             None => return Ok(Vec::new()),
@@ -453,8 +420,6 @@ impl<'a> LoweringContext<'a> {
         Ok(commands)
     }
 
-    // ── Hooks ────────────────────────────────────────────────────────
-
     fn lower_hooks(&self, schema: &Schema) -> CodegenResult<Vec<ir::HookGroup>> {
         let props = schema
             .properties
@@ -478,11 +443,8 @@ impl<'a> LoweringContext<'a> {
     }
 
     fn lower_hook_actions(&self, topic_schema: &Schema) -> CodegenResult<Vec<ir::HookAction>> {
-        // Collect action schemas from allOf refs first (base contract),
-        // then overlay inline properties (user overrides like description).
         let mut merged_actions: BTreeMap<String, &Schema> = BTreeMap::new();
 
-        // 1. Collect from allOf refs (e.g. DeploymentHooks contract)
         if let Some(all_of) = &topic_schema.all_of {
             for item in all_of {
                 if let SchemaOrRef::Ref(r) = item {
@@ -501,11 +463,9 @@ impl<'a> LoweringContext<'a> {
             }
         }
 
-        // 2. Inline properties override/extend base actions
         let inline_props = topic_schema.properties.as_ref();
 
         let mut actions = Vec::new();
-        // Process all known action names (from base + inline)
         let action_names: Vec<String> = {
             let mut names: Vec<String> = merged_actions.keys().cloned().collect();
             if let Some(props) = inline_props {
@@ -522,7 +482,6 @@ impl<'a> LoweringContext<'a> {
             let base_schema = merged_actions.get(action_name);
             let inline_schema = inline_props.and_then(|p| p.get(action_name));
 
-            // Use inline for description (user override), base for input/output
             let desc_schema: Option<&Schema> = match inline_schema {
                 Some(SchemaOrRef::Schema(s)) => Some(s.as_ref()),
                 Some(SchemaOrRef::Ref(r)) => Some(self.resolve_ref(&r.ref_path)?),
@@ -566,10 +525,7 @@ impl<'a> LoweringContext<'a> {
         Ok(actions)
     }
 
-    // ── User types ───────────────────────────────────────────────────
-
     fn lower_user_type(&self, name: &str, schema: &Schema) -> CodegenResult<ir::TypeDef> {
-        // Top-level enum type
         if let Some(enum_vals) = &schema.enum_values {
             let enum_def = lower_enum_values(schema, enum_vals)?;
             return Ok(ir::TypeDef {
@@ -578,7 +534,6 @@ impl<'a> LoweringContext<'a> {
             });
         }
 
-        // Map type (object with additionalProperties, no named properties)
         if schema.properties.is_none() {
             if let Some(additional) = &schema.additional_properties {
                 let inner = self.lower_type_ref(additional)?;
@@ -589,7 +544,6 @@ impl<'a> LoweringContext<'a> {
             }
         }
 
-        // Struct type
         let required = self.collect_required_fields(schema);
         let fields = if let Some(props) = &schema.properties {
             self.lower_properties(props, &required)?
@@ -602,8 +556,6 @@ impl<'a> LoweringContext<'a> {
             kind: ir::TypeDefKind::Struct(ir::StructDef { fields }),
         })
     }
-
-    // ── Shared helpers ───────────────────────────────────────────────
 
     fn extract_description(&self, schema: &Schema) -> CodegenResult<String> {
         let Some(props) = &schema.properties else {
@@ -642,8 +594,6 @@ impl<'a> LoweringContext<'a> {
         }
     }
 }
-
-// ── Free functions ───────────────────────────────────────────────────
 
 fn lower_enum_values(schema: &Schema, vals: &[serde_json::Value]) -> CodegenResult<ir::EnumDef> {
     match schema.schema_type.as_deref() {
@@ -708,16 +658,13 @@ fn lower_constraints(schema: &Schema) -> Vec<ir::Constraint> {
     }
     if let Some(v) = &schema.exclusive_minimum {
         if let Some(true) = v.as_bool() {
-            // OpenAPI 3.0 boolean style — shift minimum by 1
             if let Some(n) = &schema.minimum
                 && let Some(i) = n.as_i64()
             {
-                // Replace Minimum with ExclusiveMinimum
                 constraints.retain(|c| !matches!(c, ir::Constraint::Minimum(_)));
                 constraints.push(ir::Constraint::ExclusiveMinimum(i));
             }
         } else if let Some(i) = v.as_i64() {
-            // OpenAPI 3.1 number style
             constraints.push(ir::Constraint::ExclusiveMinimum(i));
         }
     }

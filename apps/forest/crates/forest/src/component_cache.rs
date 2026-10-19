@@ -24,10 +24,6 @@ impl ComponentCache {
         Ok(cache.join("components"))
     }
 
-    /// Resolve the cache directory for a (org, name, version) tuple.
-    /// Used by `release prepare` to find a versioned dependency's
-    /// downloaded files (templates, schemas, …) when reading the
-    /// component as a path-like source.
     pub async fn versioned_component_dir(
         &self,
         organisation: &str,
@@ -48,7 +44,6 @@ impl ComponentCache {
             .await
             .context("failed to get cache")?;
 
-        // cache is [organisation]/[name]/[version]/[component...]
         if !component_cache_path.exists() {
             tracing::debug!("found no local cache, skipping");
             return Ok(CacheComponents::default());
@@ -65,7 +60,6 @@ impl ComponentCache {
             .await
             .context("read organisations entry")?
         {
-            // Skip the content-addressable binary cache directory
             if organisation_entry.file_name() == "bin" {
                 continue;
             }
@@ -96,19 +90,6 @@ impl ComponentCache {
                         name_entry.path().to_string_lossy()
                     ))?
                 {
-                    // One unparseable component in the cache must not take the
-                    // scan down with it. The cache holds everything ever pulled
-                    // on this machine, most of which a given project does not
-                    // depend on — so a single bad entry would otherwise make
-                    // every project unloadable, with an error naming a component
-                    // the project has never heard of.
-                    //
-                    // Not hypothetical: every CUE component published before the
-                    // cue.mod fix is missing its module file and fails to parse,
-                    // so one stale entry bricked unrelated projects.
-                    //
-                    // A project that actually depends on the bad component still
-                    // fails, later, where the error can name the dependency.
                     let mut component =
                         match self.get_component_from_path(&version_entry.path()).await {
                             Ok(component) => component,
@@ -164,10 +145,6 @@ impl ComponentCache {
         file_path: &str,
         file_content: &[u8],
     ) -> anyhow::Result<()> {
-        // Path-traversal refusal: the publisher controls `file_path`,
-        // and a malicious or buggy publisher must not be able to write
-        // outside the per-component cache dir. Reject `..`, absolute,
-        // or empty rel_paths before joining.
         if file_path.is_empty()
             || file_path.starts_with('/')
             || file_path.starts_with('\\')
@@ -196,11 +173,6 @@ impl ComponentCache {
         }
 
         tracing::trace!("writing component file: {}", dest.display());
-        // Truncating write — re-downloads overwrite. The cache is
-        // content-addressed by (org, name, version); if the version
-        // is the same, the bytes should be the same (immutable
-        // versions). This makes interrupted-then-retried downloads
-        // converge.
         tokio::fs::write(&dest, file_content)
             .await
             .with_context(|| format!("failed to write component file {}", dest.display()))?;

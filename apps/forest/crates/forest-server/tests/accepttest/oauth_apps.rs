@@ -1,9 +1,3 @@
-//! End-to-end tests for organisation-owned OAuth applications (M1).
-//!
-//! Exercises the full CRUD lifecycle through the gRPC surface against a real
-//! database, plus authorization boundaries (non-admins / non-members are
-//! denied) and input validation (redirect URIs, scopes).
-
 use forest_grpc_interface::*;
 use tonic::metadata::MetadataValue;
 
@@ -29,7 +23,6 @@ async fn register_user(fixture: &Fixture) -> String {
     resp.into_inner().tokens.expect("tokens").access_token
 }
 
-/// Create an org as `token` (creator becomes admin) and return (name, id).
 async fn create_org(fixture: &Fixture, token: &str) -> (String, String) {
     let name = format!("org-{}", uuid::Uuid::now_v7());
     fixture
@@ -69,7 +62,6 @@ async fn full_lifecycle_create_list_get_update_rotate_delete() {
     let (_org, org_id) = create_org(&fixture, &token).await;
     let mut client = fixture.oauth_apps();
 
-    // Create
     let created = client
         .create_o_auth_app(authed(&token, default_create(&org_id)))
         .await
@@ -87,7 +79,6 @@ async fn full_lifecycle_create_list_get_update_rotate_delete() {
     assert!(created.client_secret.starts_with("forest_oas_"));
     let app_id = app.app_id.clone();
 
-    // List — exactly one app, secret never exposed in the listing
     let listed = client
         .list_o_auth_apps(authed(
             &token,
@@ -101,7 +92,6 @@ async fn full_lifecycle_create_list_get_update_rotate_delete() {
     assert_eq!(listed.apps.len(), 1);
     assert_eq!(listed.apps[0].app_id, app_id);
 
-    // Get
     let got = client
         .get_o_auth_app(authed(
             &token,
@@ -117,7 +107,6 @@ async fn full_lifecycle_create_list_get_update_rotate_delete() {
         .expect("app");
     assert_eq!(got.client_id, app.client_id);
 
-    // Update
     let updated = client
         .update_o_auth_app(authed(
             &token,
@@ -142,7 +131,6 @@ async fn full_lifecycle_create_list_get_update_rotate_delete() {
     assert_eq!(updated.scopes, vec!["profile"]);
     assert_eq!(updated.client_id, app.client_id, "client_id is stable");
 
-    // Rotate secret — new secret, same client_id
     let rotated = client
         .rotate_o_auth_app_secret(authed(
             &token,
@@ -158,7 +146,6 @@ async fn full_lifecycle_create_list_get_update_rotate_delete() {
     assert_ne!(rotated.client_secret, created.client_secret);
     assert_eq!(rotated.app.expect("app").client_id, app.client_id);
 
-    // Delete, then get → not found
     client
         .delete_o_auth_app(authed(
             &token,
@@ -189,7 +176,6 @@ async fn non_member_cannot_manage_apps() {
     let owner = register_user(&fixture).await;
     let (_org, org_id) = create_org(&fixture, &owner).await;
 
-    // An app belonging to the org.
     let app = fixture
         .oauth_apps()
         .create_o_auth_app(authed(&owner, default_create(&org_id)))
@@ -199,7 +185,6 @@ async fn non_member_cannot_manage_apps() {
         .app
         .expect("app");
 
-    // A different user who is not a member of the org.
     let outsider = register_user(&fixture).await;
     let mut client = fixture.oauth_apps();
 
@@ -258,7 +243,6 @@ async fn invalid_redirect_uri_and_scope_are_rejected() {
     let (_org, org_id) = create_org(&fixture, &token).await;
     let mut client = fixture.oauth_apps();
 
-    // Non-loopback http redirect → invalid_argument.
     let mut bad_uri = default_create(&org_id);
     bad_uri.redirect_uris = vec!["http://app.example/cb".into()];
     let err = client
@@ -267,7 +251,6 @@ async fn invalid_redirect_uri_and_scope_are_rejected() {
         .expect_err("bad redirect");
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
 
-    // Unknown scope → invalid_argument.
     let mut bad_scope = default_create(&org_id);
     bad_scope.scopes = vec!["profile".into(), "admin".into()];
     let err = client

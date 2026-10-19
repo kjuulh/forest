@@ -13,9 +13,6 @@ use crate::{
     services::release_registry::ReleaseItem,
 };
 
-/// Forage containers v1 — sends the desired-state resource bundle to a
-/// forage cluster via gRPC (`ForageService.ApplyResources`), then
-/// streams `WatchRollout` until the rollout succeeds or fails.
 pub struct ForageV1Destination {}
 
 #[async_trait::async_trait]
@@ -97,13 +94,11 @@ impl DestinationEdge for ForageV1Destination {
     ) -> anyhow::Result<()> {
         let meta = ForageV1Metadata::from_metadata(&destination.metadata)?;
 
-        // Validate connectivity to the forage endpoint
         logger.log_stdout(&format!(
             "forage/containers@1: validating connectivity to {} (namespace: {}, region: {})",
             meta.forage_url, meta.namespace, meta.region
         ));
 
-        // Quick connection check — we don't send any payload, just verify the endpoint is reachable
         let _client = ForageServiceClient::connect(meta.forage_url.clone())
             .await
             .context(format!(
@@ -128,7 +123,6 @@ impl DestinationEdge for ForageV1Destination {
             meta.forage_url, meta.namespace, meta.region
         ));
 
-        // Connect to forage gRPC
         let mut client = ForageServiceClient::connect(meta.forage_url.clone())
             .await
             .context(format!(
@@ -136,9 +130,6 @@ impl DestinationEdge for ForageV1Destination {
                 meta.forage_url
             ))?;
 
-        // Build the resource list.  For now we create a single ContainerService
-        // resource from the release metadata.  In the future this will parse the
-        // actual deployment files from the artifact.
         let resource_name = destination.name.clone();
         let image = meta.image.unwrap_or_else(|| {
             format!(
@@ -177,7 +168,6 @@ impl DestinationEdge for ForageV1Destination {
             "forage/containers@1: applying 1 resource ({resource_name}: {image})"
         ));
 
-        // Apply resources
         let apply_resp = client
             .apply_resources(ApplyResourcesRequest {
                 apply_id: release.id.to_string(),
@@ -193,7 +183,6 @@ impl DestinationEdge for ForageV1Destination {
             "forage/containers@1: rollout started (id: {rollout_id})"
         ));
 
-        // Watch rollout until completion
         let mut stream = client
             .watch_rollout(WatchRolloutRequest {
                 rollout_id: rollout_id.clone(),
@@ -239,21 +228,15 @@ impl DestinationEdge for ForageV1Destination {
     }
 }
 
-/// Validated metadata for the forage/containers@1 destination type.
 struct ForageV1Metadata {
-    /// gRPC endpoint of the forage cluster (e.g. "http://forage.example.com:4050").
     forage_url: String,
 
-    /// Forage namespace for resource isolation (usually the org name).
     namespace: String,
 
-    /// Region for compute placement.
     region: String,
 
-    /// Container image (optional — defaults to registry.forage.sh/{org}/{dest_name}).
     image: Option<String>,
 
-    /// Replica count (optional — defaults to 1).
     replicas: u32,
 }
 

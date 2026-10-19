@@ -28,8 +28,6 @@ impl RevealCommand {
             .await
             .context("reveal destination metadata")?;
 
-        // Value alone on stdout so `$(...)` capture is clean; the label goes to
-        // stderr like the other destination commands.
         eprintln!("{} @ {}", self.name, self.key);
         println!("{value}");
 

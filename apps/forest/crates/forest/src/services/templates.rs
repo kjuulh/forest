@@ -147,7 +147,6 @@ fn render_template(
     extra_globals: &[(&str, &str)],
 ) -> anyhow::Result<String> {
     let mut env = minijinja::Environment::new();
-    // Debug diagnostics, jinja is not fun to debug without
     env.set_debug(true);
 
     if let Some(config) = config {
@@ -188,9 +187,6 @@ fn render_template(
         },
     );
 
-    // Custom test: `is configured` returns true for any non-undefined, non-none value,
-    // including empty objects `{}`. This avoids the Jinja2 pitfall where `{% if config.foo %}`
-    // is false for `{}` because empty dicts are falsy.
     env.add_test("configured", |value: minijinja::Value| -> bool {
         !value.is_undefined() && !value.is_none()
     });

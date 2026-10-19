@@ -2,16 +2,9 @@
 {% from "components/timestamp.html.jinja" import timeago as ts %}
 {% from "components/ui.html.jinja" import badge, kind_badge, visibility_badge, tool_shape_badge, empty_state, code_block, pretty_json_block, about_block %}
 
-{# One detail page for every artefact. The shape (component / hybrid /
-   tool_binary / tool_external) drives which sections render: tool surfaces
-   only appear when the artefact ships a tool facet. #}
 {% set is_tool = summary.shape == "hybrid" or summary.shape == "tool_binary" or summary.shape == "tool_external" %}
 
 {% block content %}
-{# Layout mirrors project_detail.html.jinja: a 3-track grid on xl+
-   (`1fr | 48rem | 1fr`) keeps the centered content viewport-centered;
-   the right track hosts the sidebar. Below xl, the grid collapses to a
-   single column and the sidebar stacks under the main content. #}
 <section class="pt-12 pb-8 px-4 grid grid-cols-1 xl:grid-cols-[1fr_minmax(0,48rem)_1fr] gap-x-8">
     <div class="mx-auto w-full max-w-3xl xl:mx-0 xl:max-w-none xl:col-start-2">
     <div class="mb-2">
@@ -20,20 +13,12 @@
 
     <div class="flex items-start justify-between mb-6 gap-4">
         <div class="min-w-0">
-            {# Single visual unit: monospace path, dimmer org and slash
-               recede so the component name leads. Matches project header
-               for visual parity. #}
             <h1 class="font-mono text-3xl tracking-tight leading-tight">
                 <span class="text-gray-500">{{ summary.organisation }}</span><span class="text-gray-300 mx-0.5">/</span><span class="font-bold text-gray-900">{{ summary.name }}</span>
             </h1>
-            {# Description: handler resolves project.description → component manifest description fallback. #}
             {% if project_description %}
             <p class="mt-1 text-gray-600">{{ project_description }}</p>
             {% endif %}
-            {# Component-specific badges: version + shape + visibility.
-               Unlike the project Overview (which hides these because they
-               vary per component), the component detail IS pinned to a
-               version so the chips are unambiguous. #}
             <div class="mt-2 flex items-center gap-2 flex-wrap">
                 {% if summary.latest_version %}{{ badge("v" ~ (selected_version | default(summary.latest_version))) }}{% endif %}
                 {{ tool_shape_badge(summary.shape) }}
@@ -41,8 +26,6 @@
                 {{ visibility_badge(summary.visibility) }}
             </div>
         </div>
-        {# Install dropdown — same GitHub-Code-button pattern as the
-           project Overview, kept in sync for visual parity. #}
         <details class="relative shrink-0 group">
             <summary class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 cursor-pointer list-none select-none">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
@@ -75,10 +58,6 @@
         </details>
     </div>
 
-    {# ── Main content ─────────────────────────────────────────────── #}
-            {# Install / Add commands live in the header dropdown above. #}
-
-            {# README (always shown for components; tools usually skip it). #}
             {% if readme_html %}
             <div class="prose max-w-none mb-8">
                 {{ readme_html | safe }}
@@ -89,7 +68,6 @@
             </div>
             {% endif %}
 
-            {# ── Domain / Services / Ports — shape-aware ─────────────── #}
             {% if summary.shape == "hybrid" and summary.methods %}
             <div class="mb-8">
                 <h2 class="text-lg font-bold mb-3">Methods</h2>
@@ -153,7 +131,6 @@
             </div>
             {% endif %}
 
-            {# ── Default environment (include.env) ─────────────────────── #}
             {% if manifest and manifest.include and manifest.include.env %}
             <div class="mb-8">
                 <h2 class="text-lg font-bold mb-3">Default environment</h2>
@@ -179,7 +156,6 @@
             </div>
             {% endif %}
 
-            {# ── Releases — GitHub-style cards ─────────────────────────── #}
             <div id="releases" class="mb-8">
                 <h2 class="text-lg font-bold mb-4">Releases</h2>
                 {% if versions %}
@@ -211,7 +187,6 @@
                 {% endif %}
             </div>
 
-            {# ── Distribution (native platforms table) ─────────────────── #}
             {% if manifest and manifest.platforms %}
             <div class="mb-8">
                 <h2 class="text-lg font-bold mb-3">Distribution</h2>
@@ -239,19 +214,15 @@
             </div>
             {% endif %}
 
-            {# ── Raw manifest JSON — power-user debug surface ──────────── #}
             {% if manifest_html %}
             <div class="mb-8">
                 {{ pretty_json_block(manifest_html, title="View raw manifest JSON") }}
             </div>
             {% endif %}
-    </div>{# /centered content track #}
+    </div>
 
-    {# ── Sidebar ────────────────────────────────────────────────── #}
     <aside class="mx-auto w-full max-w-3xl mt-10 xl:mx-0 xl:mt-0 xl:max-w-none xl:col-start-3 xl:w-52 xl:justify-self-start">
             <div class="space-y-6">
-                {# About (blessed project metadata, spec 009) — inherits
-                   from the parent project. Macro hides itself when empty. #}
                 {{ about_block(project_metadata) }}
 
                 {% if not is_tool %}
@@ -331,15 +302,12 @@
 {% endblock %}
 
 {% block extra_assets %}
-{# Syntax highlighting for README code blocks (see project_detail). #}
 {% if readme_html %}
-{# Two themes, matched by media query — see project_detail.html.jinja. #}
 <link rel="stylesheet" href="/static/css/vendor/highlight-github.min.css"
       media="(prefers-color-scheme: light)">
 <link rel="stylesheet" href="/static/css/vendor/highlight-github-dark.min.css"
       media="(prefers-color-scheme: dark)">
 <script src="/static/js/vendor/highlight.min.js" defer></script>
-{# CUE is not in highlight.js's bundled language set — see project_detail. #}
 <script src="/static/js/vendor/highlight-cue.js" defer></script>
 <script defer>
     document.addEventListener('DOMContentLoaded', function () {

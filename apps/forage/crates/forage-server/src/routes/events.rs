@@ -31,7 +31,6 @@ async fn project_events_sse(
     session: Session,
     Path((org, project)): Path<(String, String)>,
 ) -> Result<Response, Response> {
-    // Validate access
     let orgs = &session.user.orgs;
     if !orgs.iter().any(|o| o.name == org) {
         return Err(error_page(
@@ -93,7 +92,6 @@ async fn project_events_sse(
 
     let mut grpc_stream = grpc_stream.into_inner();
 
-    // Bridge gRPC stream -> SSE via a channel
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(32);
 
     tokio::spawn(async move {
@@ -116,7 +114,7 @@ async fn project_events_sse(
                         .data(data.to_string())
                         .id(event.sequence.to_string());
                     if tx.send(Ok(sse_event)).await.is_err() {
-                        break; // Client disconnected
+                        break;
                     }
                 }
                 Err(e) => {
@@ -132,8 +130,6 @@ async fn project_events_sse(
 
     Ok(sse.into_response())
 }
-
-// ─── Release logs SSE ────────────────────────────────────────────────
 
 async fn release_logs_sse(
     State(state): State<AppState>,
@@ -169,7 +165,6 @@ async fn release_logs_sse(
 
     let access_token = session.access_token.clone();
 
-    // Fetch the artifact to get its artifact_id.
     let artifact = state
         .platform_client
         .get_artifact_by_slug(&access_token, &slug)
@@ -184,7 +179,6 @@ async fn release_logs_sse(
             )
         })?;
 
-    // Fetch release intent states to find intent IDs for this artifact.
     let release_intents = state
         .platform_client
         .get_release_intent_states(&access_token, &org, Some(&project), true)
@@ -198,7 +192,6 @@ async fn release_logs_sse(
         .collect();
 
     if intent_ids.is_empty() {
-        // No release intents — return an SSE stream that sends a "done" event and closes.
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(1);
         tokio::spawn(async move {
             let _ = tx
@@ -213,7 +206,6 @@ async fn release_logs_sse(
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(128);
 
-    // Spawn a WaitRelease stream for each release intent.
     for intent_id in intent_ids {
         let grpc = grpc_client.clone();
         let token = access_token.clone();
@@ -225,7 +217,6 @@ async fn release_logs_sse(
         });
     }
 
-    // Drop our copy of tx so the stream ends when all spawned tasks finish.
     drop(tx);
 
     let stream = ReceiverStream::new(rx);
@@ -287,7 +278,7 @@ async fn stream_release_logs(
                 };
                 if let Some(sse_event) = sse_event {
                     if tx.send(Ok(sse_event)).await.is_err() {
-                        return Ok(()); // Client disconnected
+                        return Ok(());
                     }
                 }
             }
@@ -298,7 +289,6 @@ async fn stream_release_logs(
         }
     }
 
-    // Signal that this intent's stream is done.
     let _ = tx
         .send(Ok(Event::default()
             .event("done")

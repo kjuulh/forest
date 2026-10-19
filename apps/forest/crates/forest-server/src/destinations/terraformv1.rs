@@ -33,15 +33,6 @@ use crate::{
     temp_dir::TempDirectories,
 };
 
-/// Resolve the terraform-compatible binary to invoke.
-///
-/// Priority: `TERRAFORM_EXE` env override → first of `terraform` / `tofu`
-/// found on PATH → `terraform` (let spawn fail with a clear ENOENT).
-///
-/// Existed because the production forest-server image ships OpenTofu
-/// (`tofu`), not `terraform`, and was missing the `TERRAFORM_EXE=tofu`
-/// override — every release failed with `terraform init: No such file
-/// or directory`.
 fn resolve_terraform_exe() -> String {
     if let Ok(exe) = std::env::var("TERRAFORM_EXE") {
         if !exe.is_empty() {
@@ -63,15 +54,6 @@ fn resolve_terraform_exe() -> String {
 
 #[derive(Clone)]
 pub struct TerraformStateStore {
-    // State blobs and per-state-id locks live in postgres so they survive
-    // forest-server restarts. Each successful tofu apply appends a new
-    // `terraform_states` row; `get()` returns the latest. Locks live in
-    // `terraform_state_locks` and are released on unlock or by admin
-    // DELETE if a runner crashes mid-apply.
-    //
-    // Every request to the state server must carry a credential signed for
-    // that exact state id (see `terraform_credentials`). Stateless, so it
-    // holds across restarts and replicas.
     db: PgPool,
     key: CredentialKey,
 
@@ -124,35 +106,6 @@ impl TerraformStateStore {
         Ok(())
     }
 
-    /// The state id a project's terraform keeps in this destination
-    /// (understory-io/forest#285).
-    ///
-    /// Ids used to be `<environment>.<project>` — no destination — so two
-    /// terraform destinations in one environment shared one state, and each
-    /// apply planned to destroy what the other had created.
-    ///
-    /// The rule, chosen to stay readable by an older server:
-    ///
-    /// - **The legacy id belongs to the first destination that uses it**, and
-    ///   to that destination for ever (`terraform_state_bindings`). So every
-    ///   project that exists today, and every new project with one terraform
-    ///   destination per environment — which is all of them in practice —
-    ///   keeps `<environment>.<project>`, exactly what a server from before
-    ///   this change would look up. Rolling back loses nothing.
-    /// - **Any other destination gets its own id**,
-    ///   `<environment>.<project>.<destination slug>-<hash>`. Only a project
-    ///   that really has a second terraform destination in an environment
-    ///   ever has one — the case that was broken before — and only that
-    ///   second destination's state is invisible to an older server.
-    /// - Nothing is counted, so adding or removing a destination never moves
-    ///   anyone's state.
-    ///
-    /// The one refusal: a destination that already **completed** a release of
-    /// this project before the legacy id was claimed. It was sharing the legacy
-    /// state under the old scheme, so a fresh state of its own would plan to
-    /// re-create resources that exist; that needs a person. "Completed", not
-    /// "started", so two new destinations racing their first run cannot
-    /// refuse each other.
     pub async fn resolve_state_id(
         &self,
         destination: &Destination,
@@ -230,17 +183,6 @@ impl TerraformStateStore {
         ))
     }
 
-    /// The state id an **operator** means by (organisation, environment,
-    /// project, destination?), for the access in understory-io/forest#282.
-    ///
-    /// The same rule as [`resolve_state_id`](Self::resolve_state_id) — the
-    /// legacy id is its first destination's, every other destination has its
-    /// own — but it never writes: looking at a state must not be what decides
-    /// which destination owns the legacy id.
-    ///
-    /// `destination` may be left out when there is one answer: the environment
-    /// has one terraform destination, or the only state is a legacy one nobody
-    /// has claimed yet.
     pub async fn lookup_state_id(
         &self,
         organisation: &str,
@@ -301,8 +243,6 @@ impl TerraformStateStore {
                         .await
                         .map_err(StateLookupError::Internal)? =>
                 {
-                    // A pre-#285 state no run has claimed since: there is only
-                    // one state, so there is only one answer.
                     return Ok(legacy);
                 }
                 many => {
@@ -315,8 +255,6 @@ impl TerraformStateStore {
         };
 
         Ok(match owner {
-            // Unclaimed: the legacy id is what this destination's first run
-            // takes, unless another destination's run gets there first.
             None => legacy,
             Some(owner) if owner == destination => legacy,
             Some(_) => Self::destination_state_id(environment, project_id, &destination),
@@ -338,7 +276,6 @@ impl TerraformStateStore {
         Ok(exists)
     }
 
-    /// One stored version of a state (0 = latest): (version, created_at, content).
     pub async fn version(
         &self,
         state_id: &str,
@@ -361,7 +298,6 @@ impl TerraformStateStore {
         Ok(row.map(|r| (r.id, r.created_at, r.content)))
     }
 
-    /// Stored versions, newest first: (version, created_at, size in bytes).
     pub async fn versions(
         &self,
         state_id: &str,
@@ -387,15 +323,10 @@ impl TerraformStateStore {
             .collect())
     }
 
-    /// The only id there was before #285. Still what existing states use.
     pub fn legacy_state_id(environment: &str, project_id: &str) -> String {
         format!("{environment}.{project_id}")
     }
 
-    /// A destination's own state id. The name is slugged for readability and
-    /// hashed for uniqueness: destination names contain `/`, which cannot
-    /// appear in the one path segment the backend routes on, and two names can
-    /// slug alike (`dev/eu-west-1/core`, `dev-eu-west-1-core`).
     pub fn destination_state_id(environment: &str, project_id: &str, destination: &str) -> String {
         use sha2::Digest as _;
 
@@ -413,11 +344,6 @@ impl TerraformStateStore {
         format!("{environment}.{project_id}.{slug}-{}", &hash[..12])
     }
 
-    /// The read-write credential a release run carries as `TF_HTTP_PASSWORD`.
-    ///
-    /// Scoped to this state id, named after the destination so the state
-    /// server's request log says which destination touched which state, and
-    /// sized to a run (`RUNNER_TTL`).
     pub fn runner_credential(&self, state_id: &str, destination: &Destination) -> String {
         self.key.issue(
             state_id,
@@ -427,9 +353,6 @@ impl TerraformStateStore {
         )
     }
 
-    /// A credential for an operator, and when it expires (unix seconds).
-    /// Callers are responsible for having authorised `principal` against the
-    /// state's project first. The lifetime is capped at `MAX_OPERATOR_TTL`.
     pub fn operator_credential(
         &self,
         state_id: &str,
@@ -445,8 +368,6 @@ impl TerraformStateStore {
         )
     }
 
-    /// The backend URLs for a state id, in the shape terraform's HTTP backend
-    /// wants them: (address, lock, unlock).
     pub fn addresses(&self, state_id: &str) -> (String, String, String) {
         let base = format!("{}/{state_id}", self.external_url.trim_end_matches('/'));
         (
@@ -463,14 +384,10 @@ impl TerraformStateStore {
         self.key.verify(state_id, &password)
     }
 
-    /// The holder of a state's lock, if any. Public so an operator path can
-    /// report what it is about to break.
     pub async fn lock_holder(&self, state_id: &str) -> anyhow::Result<Option<String>> {
         self.get_lock(state_id).await
     }
 
-    /// Break a state's lock regardless of holder — `terraform force-unlock`
-    /// for someone who has no terraform. Returns the lock id removed.
     pub async fn force_unlock(&self, state_id: &str) -> anyhow::Result<Option<String>> {
         let removed = sqlx::query_scalar!(
             r#"DELETE FROM terraform_state_locks WHERE state_id = $1 RETURNING lock_id"#,
@@ -555,7 +472,6 @@ impl TerraformStateStore {
             return Ok(UnlockState::Available);
         }
 
-        // Either no lock exists (already unlocked) or another holder owns it.
         let held_by_other = sqlx::query_scalar!(
             r#"SELECT 1 FROM terraform_state_locks WHERE state_id = $1"#,
             project_id,
@@ -573,11 +489,9 @@ impl TerraformStateStore {
     }
 }
 
-/// Why an operator's state reference did not resolve.
 #[derive(Debug)]
 pub enum StateLookupError {
     NotFound(String),
-    /// Ambiguous, or naming a destination the state does not belong to.
     Invalid(String),
     Internal(anyhow::Error),
 }
@@ -604,11 +518,6 @@ pub trait TerraformStateStoreState {
 }
 
 impl TerraformStateStoreState for State {
-    // Built per call. It used to be a process-wide `OnceLock`, because the
-    // in-memory password map had to be shared; with stateless credentials
-    // there is nothing to share, and the singleton pinned whichever pool the
-    // first caller happened to hold — which in the test harness is a pool that
-    // dies with its test.
     fn terraform_state_store(&self) -> TerraformStateStore {
         TerraformStateStore {
             db: self.db.clone(),
@@ -645,8 +554,6 @@ impl TerraformV1Server {
         Ok(())
     }
 
-    /// The state backend's routes, separate from `serve` so tests can drive
-    /// them in-process.
     pub fn router(state: State) -> axum::Router {
         axum::Router::new()
             .route("/{state_id}", get(Self::get_state).post(Self::post_state))
@@ -664,11 +571,6 @@ impl TerraformV1Server {
             .with_state(state)
     }
 
-    /// Every route goes through here first. `write` routes (state POST, lock,
-    /// unlock) need a read-write credential; GET takes either.
-    ///
-    /// Each authorised request is logged with the credential's principal —
-    /// that line is the record of who read or wrote which state.
     fn authorise(
         state: &State,
         state_id: &str,
@@ -768,10 +670,6 @@ impl TerraformV1Server {
         match lock {
             LockState::Held => Ok(StatusCode::OK.into_response()),
             LockState::Wait => {
-                // Terraform's HTTP backend reads a 409 body as the current
-                // holder's LockInfo, and prints its ID — which is what
-                // `terraform force-unlock <ID>` needs. Returning a bare
-                // string left an operator with no ID to unlock.
                 let holder = store.lock_holder(&state_id).await.ok().flatten();
                 Ok((
                     StatusCode::CONFLICT,
@@ -815,10 +713,6 @@ pub struct LockRequest {
 }
 
 impl LockRequest {
-    /// Parsed by hand, after authorisation, rather than with axum's `Json`
-    /// extractor: an extractor runs before the handler, so a request with no
-    /// credential would otherwise be answered 415/422 — telling an anonymous
-    /// caller about the body shape before telling it no.
     fn parse(body: &[u8]) -> Result<Self, ApiError> {
         serde_json::from_slice(body).map_err(|_| ApiError::BadRequest)
     }
@@ -830,9 +724,7 @@ pub enum ApiError {
     BadRequest,
     NotFound,
     InternalServerError,
-    /// No credential, or one not signed for this state, or expired.
     Unauthorized,
-    /// A valid read-only credential on a route that writes.
     Forbidden,
 }
 
@@ -893,32 +785,6 @@ pub struct TerraformV1Destination {
     pub plans: TerraformPlanStore,
 }
 
-/// The directories this release should run terraform in, for this destination.
-///
-/// `release prepare` gives every rendered deployment item a directory of its
-/// own — `{env}/{selector}/{type}` — and drops that item's `forest/config.json`
-/// inside it. Reading those records is the only reliable way back from the
-/// uploaded tree to a directory: the selector is a regex, it routinely contains
-/// a `/` (`^dev/.*$`), and a path with a `/` in one of its components is not
-/// recoverable by listing one level.
-///
-/// Listing one level is what this did, and it is the second half of `fungus`'s
-/// failed release: `^dev/.*$` lands on disk as `^dev/` then `.*$/`, `read_dir`
-/// of the environment sees only `^dev`, and joining the destination's type onto
-/// that names a directory nobody ever wrote. `tokio::process` reports a missing
-/// working directory as a spawn failure, so it surfaced as `terraform init: No
-/// such file or directory (os error 2)` — indistinguishable, from the release
-/// view, from a missing terraform binary. Selectors with no `/` in them
-/// (`hetzner-dev`) resolved fine, which is why this went unnoticed.
-///
-/// The item is chosen by `destination_selector::selects`, the same rule that
-/// scheduled the release — so a destination cannot be sent work that a different
-/// item declared, and a terraform-typed item cannot claim an ECS destination's
-/// directory.
-///
-/// An artifact carrying no item records at all falls back to the original scan.
-/// That is the compatibility hinge: those are artifacts prepared before item
-/// records existed, and they are exactly the ones whose selectors held no `/`.
 async fn work_dirs(
     temp_dir: &std::path::Path,
     destination: &Destination,
@@ -931,8 +797,6 @@ async fn work_dirs(
     let items = match destination_selector::parse_items(files) {
         Ok(items) => items,
         Err(e) => {
-            // Degrade rather than fail: a release that cannot read its own item
-            // records should still get the behaviour it had before they existed.
             tracing::warn!("could not read this release's deployment items: {e:#}");
             Vec::new()
         }
@@ -948,8 +812,6 @@ async fn work_dirs(
             .map(|parsed| temp_dir.join(&parsed.root))
             .collect();
 
-        // `parse_items` orders deepest-root-first for attribution; terraform
-        // wants a stable order and does not care which.
         dirs.sort();
         dirs.dedup();
 
@@ -959,18 +821,6 @@ async fn work_dirs(
     legacy_work_dirs(temp_dir, destination).await
 }
 
-/// The pre-item-record scan, kept for artifacts that carry no `forest/config.json`.
-///
-/// One level under `{env}/`, each entry treated as a regex over the destination
-/// name, the destination's own type joined on. Correct only while no selector
-/// contains a `/`; see `work_dirs`.
-/// A destination gets exactly one terraform root per release.
-///
-/// Every root a destination runs shares that destination's one state id, so a
-/// second root — two component usages whose selectors both match, say — would
-/// see the first root's resources as absent from its config and plan to
-/// destroy them. That is #285 inside a single destination; refuse it rather
-/// than apply it.
 fn ensure_one_root(dirs: &[std::path::PathBuf], destination: &Destination) -> anyhow::Result<()> {
     match dirs {
         [] => anyhow::bail!("failed to find a destination match for submitted release"),
@@ -1002,7 +852,6 @@ async fn legacy_work_dirs(
     let mut dirs = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
         if !entry.file_type().await?.is_dir() {
-            // Ignore forest dirs
             continue;
         }
 
@@ -1040,17 +889,12 @@ async fn legacy_work_dirs(
     Ok(dirs)
 }
 
-/// A release's artifact laid out on disk, and the terraform roots in it that
-/// belong to this destination. Holding `_temp` keeps the directory alive.
 struct Staged {
     _temp: crate::temp_dir::GuardedTempDirectory,
     root: std::path::PathBuf,
     dirs: Vec<std::path::PathBuf>,
 }
 
-/// A work dir's path relative to the temp root: the key a saved plan is
-/// stored under, identical between the plan stage and the deploy stage because
-/// both lay out the same artifact.
 fn root_key(root: &std::path::Path, dir: &std::path::Path) -> String {
     dir.strip_prefix(root)
         .unwrap_or(dir)
@@ -1058,12 +902,10 @@ fn root_key(root: &std::path::Path, dir: &std::path::Path) -> String {
         .into_owned()
 }
 
-/// The file `plan -out` writes and `apply` reads, inside each work dir.
 const PLAN_FILE: &str = "forest.tfplan";
 const LOCK_FILE: &str = ".terraform.lock.hcl";
 
 impl TerraformV1Destination {
-    /// The HTTP-backend environment for this release's state.
     async fn backend_env(
         &self,
         release: &ReleaseItem,
@@ -1083,8 +925,6 @@ impl TerraformV1Destination {
         ])
     }
 
-    /// Write the release's files into a fresh temp dir and find this
-    /// destination's roots in it.
     async fn stage(
         &self,
         release: &ReleaseItem,
@@ -1127,8 +967,6 @@ impl TerraformV1Destination {
         })
     }
 
-    /// Plan every root, keep each binary plan, and return the text a reviewer
-    /// approves — every root's, not just the last one's.
     async fn plan_and_save(
         &self,
         logger: &DestinationLogger,
@@ -1155,8 +993,6 @@ impl TerraformV1Destination {
 
         let output = join_plan_outputs(outputs);
         if destroy {
-            // Said before the plan so it cannot be missed by someone skimming
-            // for "Plan:" at the bottom.
             return Ok(format!(
                 "⚠ DESTROY PLAN — approving this removes everything shown below, and the deploy \
                  stage applies it as-is.\n\n{output}"
@@ -1165,8 +1001,6 @@ impl TerraformV1Destination {
         Ok(output)
     }
 
-    /// Apply what the plan stage saved, root for root. Refuses a root with no
-    /// saved plan rather than planning it afresh.
     async fn apply_saved(
         &self,
         logger: &DestinationLogger,
@@ -1187,8 +1021,6 @@ impl TerraformV1Destination {
         .await
     }
 
-    /// The pre-#284 path, for releases that never had a plan stage: plan and
-    /// apply in one go, as a direct `forest release` always has.
     async fn run_unplanned(
         &self,
         logger: &DestinationLogger,
@@ -1230,7 +1062,6 @@ impl TerraformV1Destination {
     }
 }
 
-/// Plan every root with `-out`, returning each root's text and binary plan.
 async fn plan_roots(
     logger: &DestinationLogger,
     destination: &Destination,
@@ -1272,8 +1103,6 @@ async fn plan_roots(
     Ok((outputs, saved))
 }
 
-/// Apply what the plan stage saved, root for root. Refuses a root with no
-/// saved plan rather than planning it afresh.
 async fn apply_roots(
     logger: &DestinationLogger,
     destination: &Destination,
@@ -1302,9 +1131,6 @@ async fn apply_roots(
             .find(|p| p.work_dir == key)
             .expect("checked above");
 
-        // The providers the plan was made with, not whatever `init` would
-        // resolve today: terraform refuses a plan whose providers changed
-        // underneath it.
         if let Some(lock) = &plan.lock_file {
             tokio::fs::write(dir.join(LOCK_FILE), lock)
                 .await
@@ -1318,9 +1144,6 @@ async fn apply_roots(
             .await
             .context("terraform init")?;
 
-        // No -auto-approve: a saved plan is already approved, and terraform
-        // refuses it outright if the state moved since ("Saved plan is
-        // stale").
         run_command(
             logger,
             destination,
@@ -1341,7 +1164,6 @@ async fn apply_roots(
     Ok(())
 }
 
-/// Like `run_command` but also captures and returns stdout.
 async fn run_command_capture(
     logger: &DestinationLogger,
     destination: &Destination,
@@ -1356,8 +1178,6 @@ async fn run_command_capture(
     Ok(output)
 }
 
-/// Run terraform, capture stdout, and hand back the exit code rather than
-/// failing on a nonzero one — for `-detailed-exitcode`, where 2 is an answer.
 async fn run_command_status(
     logger: &DestinationLogger,
     destination: &Destination,
@@ -1408,8 +1228,6 @@ async fn run_command_status(
     }
 
     let exit = proc.wait().await.context("terraform failed")?;
-    // The reader may still be draining the pipe when the process exits;
-    // without this the captured plan can lose its last lines.
     if let Some(task) = stdout_task {
         let _ = task.await;
     }
@@ -1418,9 +1236,6 @@ async fn run_command_status(
     Ok((exit.code().unwrap_or(-1), output))
 }
 
-/// The drift check, per root: refresh-only, so it asks "did the world move
-/// away from state?" rather than "does config differ from state?"; unlocked,
-/// because it writes nothing and must not queue behind — or block — a release.
 async fn drift_roots(
     logger: &DestinationLogger,
     destination: &Destination,
@@ -1514,10 +1329,6 @@ async fn run_command(
     Ok(())
 }
 
-/// The environment every terraform invocation gets. One builder for both
-/// the capturing and the streaming path, which were two near-identical
-/// copies — and the AWS profile has to be in both, or init and plan would
-/// authenticate differently.
 async fn command(
     destination: &Destination,
     path: &std::path::Path,
@@ -1537,8 +1348,6 @@ async fn command(
         cmd.env(k, v);
     }
 
-    // Point at a network mirror (pull-through cache) so ephemeral work
-    // dirs don't hit GitHub directly for provider downloads.
     if let Ok(mirror_url) = std::env::var("FOREST_TERRAFORM_PROVIDER_MIRROR_URL") {
         let cli_config = path.join(".terraformrc");
         tokio::fs::write(
@@ -1552,12 +1361,9 @@ async fn command(
         cmd.env("TF_CLI_CONFIG_FILE", &cli_config);
     }
 
-    // Before the TF_VAR pass, so a destination naming a role gets one.
     if let Some(aws_config) = write_aws_profile(path, destination).await {
         cmd.env("AWS_CONFIG_FILE", &aws_config)
             .env("AWS_PROFILE", "forest")
-            // A stale AWS_PROFILE in forest-server's own environment would
-            // otherwise win over the file we just wrote.
             .env_remove("AWS_ACCESS_KEY_ID")
             .env_remove("AWS_SECRET_ACCESS_KEY")
             .env_remove("AWS_SESSION_TOKEN");
@@ -1570,9 +1376,6 @@ async fn command(
     cmd
 }
 
-/// Every root's plan, labelled when there is more than one. Before #284 only
-/// the last root's output survived the loop, so a destination with two roots
-/// showed half its plan for approval.
 fn join_plan_outputs(outputs: Vec<(String, String)>) -> String {
     if outputs.len() == 1 {
         return outputs
@@ -1603,9 +1406,6 @@ impl DestinationEdge for TerraformV1Destination {
     }
 
     fn metadata_schema(&self) -> Vec<forest_models::MetadataFieldSchema> {
-        // Terraform passes all metadata keys as TF_VAR_* environment variables.
-        // The fields below document the keys consumed by the runner itself; any
-        // additional keys are forwarded verbatim to the Terraform configuration.
         vec![
             forest_models::MetadataFieldSchema {
                 name: "tf_workspace".into(),
@@ -1636,9 +1436,6 @@ impl DestinationEdge for TerraformV1Destination {
         release: &ReleaseItem,
         destination: &Destination,
     ) -> anyhow::Result<()> {
-        // A deploy stage whose plan stage saved a plan has nothing to prepare:
-        // planning again here would print a plan into the log that is not the
-        // one about to be applied.
         if !self
             .plans
             .load(release.release_intent_id, release.destination_id)
@@ -1682,8 +1479,6 @@ impl DestinationEdge for TerraformV1Destination {
 
         let result = self.apply_saved(logger, release, destination, saved).await;
 
-        // Spent if it applied, stale if it did not: either way it must not be
-        // applied again, and it holds secrets.
         if let Err(e) = self.plans.discard(intent, dest).await {
             tracing::warn!("could not discard applied plans: {e:#}");
         }
@@ -1727,28 +1522,6 @@ enum Mode {
     Apply,
 }
 
-/// Teach the AWS SDK to assume a role, when the destination names one.
-///
-/// A destination carrying `aws_role_arn` gets a generated AWS config profile in
-/// the run directory and `AWS_CONFIG_FILE` / `AWS_PROFILE` pointing at it. The
-/// terraform-aws provider then does the assume itself, through the SDK's normal
-/// credential resolution, and no component has to know about any of it.
-///
-/// Doing it here rather than in each component's `provider "aws"` block is the
-/// point. A provider-level `assume_role` works, but it has to be added to every
-/// component and kept consistent across them, and a component that forgets it
-/// silently falls back to whatever standing credential the destination carries.
-/// One runner, one mechanism, every component.
-///
-/// A profile rather than injected `AWS_SESSION_TOKEN`: the SDK re-assumes when
-/// the session expires, so an apply that outlives the role's session duration
-/// keeps working. Injecting static session credentials would strand a long
-/// apply — an ACM validation wait is exactly the case that gets close.
-///
-/// Where the *base* credentials come from depends on what else the destination
-/// has. Static keys become a source profile; otherwise the SDK is pointed at
-/// the ECS task role forest-server itself runs as, which is the shape worth
-/// wanting — nothing standing anywhere.
 async fn write_aws_profile(
     path: &std::path::Path,
     destination: &Destination,
@@ -1768,9 +1541,6 @@ async fn write_aws_profile(
         .map(String::as_str)
         .unwrap_or("eu-west-1");
 
-    // Names the deploy in CloudTrail. Truncated because STS rejects a session
-    // name over 64 characters, and that arrives as an opaque AccessDenied on
-    // the assume rather than as a validation error.
     let mut session_name = format!("forest-{}", destination.environment);
     session_name.truncate(64);
     let session_name: String = session_name
@@ -1795,14 +1565,9 @@ async fn write_aws_profile(
         .map(String::as_str)
         .unwrap_or_default();
 
-    // Built line by line and joined, not as one format! with continuations.
-    // An AWS config file must have no leading whitespace on its keys, and a
-    // multi-line string literal is exactly where stray indentation creeps in.
     let mut lines: Vec<String> = Vec::new();
 
     if !access_key.is_empty() && !secret_key.is_empty() {
-        // Role chaining from the destination's own keys. Transitional: it lets
-        // a destination move to a role before its keys are removed.
         lines.push("[profile forest-source]".into());
         lines.push(format!("aws_access_key_id = {access_key}"));
         lines.push(format!("aws_secret_access_key = {secret_key}"));
@@ -1811,9 +1576,6 @@ async fn write_aws_profile(
         lines.push(format!("role_arn = {role_arn}"));
         lines.push("source_profile = forest-source".into());
     } else {
-        // `EcsContainer` because forest-server runs as an ECS task; the SDK
-        // reads the task role from the container credentials endpoint and
-        // assumes from there. No standing credential is involved at any point.
         lines.push("[profile forest]".into());
         lines.push(format!("role_arn = {role_arn}"));
         lines.push("credential_source = EcsContainer".into());
@@ -1826,10 +1588,6 @@ async fn write_aws_profile(
 
     let config_path = path.join(".aws-config");
     if let Err(e) = tokio::fs::write(&config_path, config).await {
-        // Deliberately not fatal here: the apply fails on its own with a
-        // credentials error, which is a clearer signal than this one, and
-        // failing here would also mask a destination that never needed the
-        // profile.
         tracing::error!(
             error = %e,
             path = %config_path.display(),
@@ -1838,8 +1596,6 @@ async fn write_aws_profile(
         return None;
     }
 
-    // 0600. The file holds a role ARN and, in the transitional case, the
-    // destination's access keys.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -1896,9 +1652,6 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_role_arn_is_the_same_as_none() {
-        // Metadata keys are strings and a cleared one arrives empty rather
-        // than absent, so this is the shape a migrated-then-reverted
-        // destination actually has.
         let dir = tempfile::tempdir().unwrap();
         let dest = destination_with(&[("aws_role_arn", "")]);
 
@@ -1923,7 +1676,6 @@ mod tests {
 
         assert!(config.contains("[profile forest]"));
         assert!(config.contains("role_arn = arn:aws:iam::462774209206:role/ForestTerraformDeploy"));
-        // The whole point: no standing credential anywhere in the chain.
         assert!(
             config.contains("credential_source = EcsContainer"),
             "without static keys the base credentials must be the task role, got:\n{config}"
@@ -1949,8 +1701,6 @@ mod tests {
             .expect("a profile");
         let config = std::fs::read_to_string(&path).unwrap();
 
-        // Role chaining, so a destination can move to a role before its keys
-        // are removed rather than in the same change.
         assert!(config.contains("[profile forest-source]"));
         assert!(config.contains("source_profile = forest-source"));
         assert!(config.contains("aws_access_key_id = AKIAEXAMPLE"));
@@ -1961,8 +1711,6 @@ mod tests {
     async fn the_session_name_is_bounded_and_sts_safe() {
         let dir = tempfile::tempdir().unwrap();
         let mut dest = destination_with(&[("aws_role_arn", "arn:aws:iam::1:role/r")]);
-        // Environments are free-form strings; a long one with characters STS
-        // rejects would fail the assume with an opaque AccessDenied.
         dest.environment = format!("platform/prod {}", "x".repeat(120));
 
         let path = write_aws_profile(dir.path(), &dest)
@@ -2004,9 +1752,6 @@ mod tests {
 
     #[test]
     fn resolve_terraform_exe_uses_env_override_when_set() {
-        // Single test to avoid env-var races between parallel cases — and it
-        // holds TERRAFORM_EXE_LOCK, because the saved-plan tests below spawn
-        // the real binary and would otherwise resolve `my-custom-tf` mid-run.
         let _exe = TERRAFORM_EXE_LOCK.blocking_lock();
         let prev = std::env::var("TERRAFORM_EXE").ok();
 
@@ -2018,8 +1763,6 @@ mod tests {
         unsafe {
             std::env::set_var("TERRAFORM_EXE", "");
         }
-        // Empty env falls through to PATH search (or "terraform" fallback);
-        // never returns the empty string.
         assert!(!resolve_terraform_exe().is_empty());
 
         match prev {
@@ -2068,18 +1811,13 @@ mod tests {
         let a = TerraformStateStore::destination_state_id("dev", "p1", "dev/eu-west-1/core");
         let b = TerraformStateStore::destination_state_id("dev", "p1", "dev-eu-west-1-core");
 
-        // The backend routes on one path segment, and a destination name
-        // carries slashes.
         assert!(!a.contains('/'), "{a}");
         assert!(a.starts_with("dev.p1.dev-eu-west-1-core-"), "{a}");
-        // Same slug, different names: the hash keeps them apart.
         assert_ne!(a, b);
-        // Deterministic: every run for a destination finds the same state.
         assert_eq!(
             a,
             TerraformStateStore::destination_state_id("dev", "p1", "dev/eu-west-1/core")
         );
-        // And never the legacy id, which is how existing states stay put.
         assert_ne!(a, TerraformStateStore::legacy_state_id("dev", "p1"));
     }
 
@@ -2098,13 +1836,6 @@ mod tests {
         assert!(err.contains("share one state"), "{err}");
     }
 
-    /// `fungus`'s selector, and the reason its release said `terraform init: No
-    /// such file or directory (os error 2)`.
-    ///
-    /// `^dev/.*$` lands on disk as two directories. Listing one level under the
-    /// environment sees `^dev`, and joining the destination's type onto that
-    /// names `platform-dev/^dev/forest/terraform@1` — a directory nobody wrote.
-    /// The item's own record says where it really is.
     #[tokio::test]
     async fn a_selector_containing_a_slash_still_resolves_to_its_directory() {
         let temp = std::path::Path::new("/tmp/forest-work-dirs-test");
@@ -2132,8 +1863,6 @@ mod tests {
         );
     }
 
-    /// And the type is consulted here too, so a terraform destination cannot be
-    /// handed the directory an ECS item rendered.
     #[tokio::test]
     async fn an_item_of_another_type_does_not_supply_a_directory() {
         let temp = std::path::Path::new("/tmp/forest-work-dirs-test");
@@ -2154,7 +1883,6 @@ mod tests {
         assert!(dirs.is_empty(), "got: {dirs:?}");
     }
 
-    /// A project declaring both kinds gets the terraform one, and only it.
     #[tokio::test]
     async fn the_right_item_of_several_supplies_the_directory() {
         let temp = std::path::Path::new("/tmp/forest-work-dirs-test");
@@ -2181,7 +1909,6 @@ mod tests {
         );
     }
 
-    /// Items scoped to another environment are not this destination's.
     #[tokio::test]
     async fn an_item_for_another_environment_is_ignored() {
         let temp = std::path::Path::new("/tmp/forest-work-dirs-test");
@@ -2197,15 +1924,7 @@ mod tests {
 
         assert!(dirs.is_empty(), "got: {dirs:?}");
     }
-    // ── saved plans (forest#284) ────────────────────────────────────────
-    //
-    // These drive a real tofu/terraform against a *local* backend and the
-    // built-in `terraform_data` resource, so they need no provider download,
-    // no network and no forest state server. They fail, not skip, without a
-    // binary: CI installs the pinned OpenTofu for them.
 
-    /// Held by every test that reads or writes `TERRAFORM_EXE`. The env is
-    /// process-wide and tests run in parallel.
     static TERRAFORM_EXE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     fn require_terraform() {
@@ -2237,10 +1956,6 @@ mod tests {
         )
     }
 
-    /// A release laid out the way `stage` lays one out: one root under a
-    /// fresh temp dir, every root sharing `state_dir` as its backend so a plan
-    /// and a later apply in a *different* directory see the same state — as
-    /// the plan stage and deploy stage do through forest's HTTP backend.
     fn lay_out(
         state_dir: &std::path::Path,
         input: &str,
@@ -2287,7 +2002,6 @@ output "o" {{
         let dest = destination_with(&[]);
         let state = tempfile::tempdir().unwrap();
 
-        // Plan stage: the reviewer approves input = "approved".
         let (plan_root, plan_dirs) = lay_out(state.path(), "approved");
         let (outputs, saved) = plan_roots(&logger, &dest, &[], plan_root.path(), &plan_dirs, false)
             .await
@@ -2296,8 +2010,6 @@ output "o" {{
         assert_eq!(saved.len(), 1);
         assert!(!saved[0].plan.is_empty());
 
-        // Deploy stage, in a fresh directory whose config has since changed.
-        // Before #284 this re-planned and applied "changed" — unreviewed.
         let (apply_root, apply_dirs) = lay_out(state.path(), "changed");
         apply_roots(&logger, &dest, &[], apply_root.path(), &apply_dirs, &saved)
             .await
@@ -2319,7 +2031,6 @@ output "o" {{
             .await
             .expect("plan");
 
-        // Something else applies between approval and apply.
         let (other_root, other_dirs) = lay_out(state.path(), "someone-else");
         run_command(
             &logger,
@@ -2362,7 +2073,6 @@ output "o" {{
         let dest = destination_with(&[]);
         let state = tempfile::tempdir().unwrap();
 
-        // Something exists.
         let (live_root, live_dirs) = lay_out(state.path(), "live");
         let (_, saved) = plan_roots(&logger, &dest, &[], live_root.path(), &live_dirs, false)
             .await
@@ -2372,7 +2082,6 @@ output "o" {{
             .unwrap();
         assert_eq!(state_output(state.path()).as_deref(), Some("live"));
 
-        // Destroy plan stage.
         let (plan_root, plan_dirs) = lay_out(state.path(), "live");
         let (outputs, saved) = plan_roots(&logger, &dest, &[], plan_root.path(), &plan_dirs, true)
             .await
@@ -2383,7 +2092,6 @@ output "o" {{
             outputs[0].1
         );
 
-        // Deploy stage applies that saved destroy plan.
         let (apply_root, apply_dirs) = lay_out(state.path(), "live");
         apply_roots(&logger, &dest, &[], apply_root.path(), &apply_dirs, &saved)
             .await
@@ -2410,8 +2118,6 @@ output "o" {{
         let managed = tempfile::tempdir().unwrap();
         let file = managed.path().join("managed.txt");
 
-        // Unlike terraform_data, a local_file exists outside terraform and so
-        // can drift: the hashicorp/local provider is the one download here.
         let lay_out_file = || {
             let root = tempfile::tempdir().unwrap();
             let dir = root.path().join("dev/^dev/x$/forest/terraform@1");
@@ -2458,7 +2164,6 @@ resource "local_file" "x" {{
             reports[0].output
         );
 
-        // Someone deletes it by hand.
         std::fs::remove_file(&file).unwrap();
 
         let (root, dirs) = lay_out_file();
@@ -2472,8 +2177,6 @@ resource "local_file" "x" {{
             reports[0].output
         );
 
-        // A drift check changes nothing: the state still has the resource,
-        // and the file is still gone.
         let state_json: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(state.path().join("terraform.tfstate")).unwrap(),
         )

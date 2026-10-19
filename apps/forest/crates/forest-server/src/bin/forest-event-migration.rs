@@ -166,7 +166,6 @@ struct DecodeFailure {
 
 #[derive(Debug, Serialize)]
 struct MireMigrateReport {
-    /// Compatibility columns Mire's migrations depend on, verified before they run.
     compatibility_columns_present: bool,
     mire_migrations_applied: bool,
 }
@@ -181,7 +180,6 @@ struct PrepareReport {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Aurora requires TLS, so this must happen before the pool connects.
     forest_server::tls::install_crypto_provider();
 
     let args = Args::parse();
@@ -216,11 +214,6 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Run Mire's embedded event-store migrations against an already-prepared
-/// database. Refuses to run when the compatibility columns are absent, because
-/// Mire's `001_event_store.sql` immediately indexes `transaction_id` and its
-/// `CREATE TABLE IF NOT EXISTS` will not add the column to Forest's legacy
-/// tables — the index build would fail on a half-migrated database.
 async fn mire_migrate(pool: &PgPool) -> anyhow::Result<MireMigrateReport> {
     let transaction_id = column_exists(pool, "es_events", "transaction_id").await?;
     let subscription_cursor =
@@ -523,7 +516,6 @@ async fn nullable_count(
         return Ok(None);
     }
 
-    // Table and column names come exclusively from constants in this binary.
     let sql = format!("SELECT count(*)::bigint FROM {table} WHERE {column} IS NULL");
     Ok(Some(scalar_count(pool, &sql).await?))
 }

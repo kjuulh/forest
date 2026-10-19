@@ -1,33 +1,4 @@
 #!/usr/bin/env bash
-# install.sh — install the forest CLI from a private GitHub release.
-#
-# The understory-io/forest repository is private, so unauthenticated
-# downloads return 404. This script wraps `gh release download` so
-# end users can use the GitHub CLI's existing auth (which they need
-# for day-to-day repo access anyway) instead of standing up a token
-# in $HOMEBREW_GITHUB_API_TOKEN or similar.
-#
-# ── Prereqs ───────────────────────────────────────────────────────
-#   gh CLI installed and authenticated:
-#       gh auth login                # one-time
-#       gh auth status               # verify
-#   The signed-in user must have read access to understory-io/forest.
-#
-# ── Usage ─────────────────────────────────────────────────────────
-#   ./install.sh                     # install latest release (to ~/.local/bin)
-#   ./install.sh v0.2.1              # install a specific tag
-#   PREFIX=/usr/local ./install.sh   # system-wide install (needs sudo)
-#
-# Default install location is `$HOME/.local/bin` — no sudo required.
-# Falls back to `/usr/local` when running as root (image builds, CI) or
-# when HOME is unset. Override with PREFIX=… either way.
-#
-# ── Bootstrap ─────────────────────────────────────────────────────
-#   gh release download --repo understory-io/forest --pattern install.sh -O - | bash
-#
-# Or the two-step form if you want to inspect the script first:
-#   gh release download --repo understory-io/forest --pattern install.sh
-#   bash install.sh
 
 set -euo pipefail
 
@@ -35,10 +6,6 @@ REPO="understory-io/forest"
 BIN="forest"
 VERSION="${1:-}"
 
-# Default install location resolves to $HOME/.local when there's a real
-# user (no sudo dance, XDG-conventional), and /usr/local when running
-# as root or without a HOME — covers Docker image builds, CI, and any
-# system-wide install where the operator deliberately set PREFIX.
 default_prefix() {
     if [ "$(id -u 2>/dev/null)" = "0" ] || [ -z "${HOME:-}" ]; then
         echo "/usr/local"
@@ -56,16 +23,11 @@ command -v gh >/dev/null 2>&1 \
 gh auth status >/dev/null 2>&1 \
   || err "gh CLI is not authenticated. Run 'gh auth login' first."
 
-# ── Resolve target tag ────────────────────────────────────────────
-# Empty -> latest release on the repo. `gh release view` follows the
-# repo's notion of "latest" (not strictly highest semver — release
-# marked as latest by GH, which release-please always sets).
 if [ -z "$VERSION" ]; then
     VERSION=$(gh release view --repo "$REPO" --json tagName --jq '.tagName') \
         || err "Failed to resolve latest release. Check repo access."
 fi
 
-# ── Detect platform ───────────────────────────────────────────────
 uname_s=$(uname -s)
 uname_m=$(uname -m)
 
@@ -93,7 +55,6 @@ checksum="${asset}.sha256"
 
 echo "==> Installing $BIN $VERSION ($target) to $PREFIX/bin"
 
-# ── Download tarball + checksum ───────────────────────────────────
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
@@ -104,12 +65,6 @@ gh release download "$VERSION" \
     --dir "$tmp" \
     || err "Failed to download $asset from $REPO. Check the tag exists and you have access."
 
-# ── Verify checksum ───────────────────────────────────────────────
-# The sha256 file's path-form was generated server-side relative to
-# the working directory at build time, so the check has to run in
-# the tmpdir. Pick whichever tool is on the host: `sha256sum` ships
-# in coreutils on Linux, `shasum -a 256` ships with Perl on macOS
-# (and most BSDs). Both produce identical `<hex>  <file>` output.
 verify_sha256() {
     local sumfile="$1"
     if command -v sha256sum >/dev/null 2>&1; then
@@ -123,7 +78,6 @@ verify_sha256() {
 ( cd "$tmp" && verify_sha256 "$checksum" ) \
     || err "Checksum verification failed for $asset."
 
-# ── Extract + install ─────────────────────────────────────────────
 tar -xzf "$tmp/$asset" -C "$tmp"
 
 target_path="$PREFIX/bin/$BIN"
@@ -131,10 +85,6 @@ mkdir -p "$PREFIX/bin" 2>/dev/null || true
 if [ -w "$PREFIX/bin" ]; then
     install -m 0755 "$tmp/$BIN" "$target_path"
 else
-    # /usr/local/bin (or any system path) needs sudo. When this script
-    # is being piped from curl, stdin is the pipe — `sudo` would have
-    # nowhere to read the password from. Reattach to /dev/tty if it
-    # exists, otherwise fail with a clear message.
     echo "==> $PREFIX/bin is not writable; trying sudo"
     if [ -e /dev/tty ]; then
         sudo install -m 0755 "$tmp/$BIN" "$target_path" </dev/tty
@@ -145,19 +95,8 @@ fi
 
 echo "==> $BIN $VERSION installed at $target_path"
 
-# ── PATH integration ─────────────────────────────────────────────
-# If $PREFIX/bin isn't on PATH (default-install on macOS, or any
-# PREFIX override), try to fix it by appending to the same shell rc
-# the integration block lives in. Marker comment is distinct so the
-# PATH block and the `forest shell` eval block can be re-detected
-# / managed independently.
-#
-# Same FOREST_NO_SHELL_INTEGRATION env var controls both (the user
-# almost always wants them together or not at all). Unknown shells
-# and unwritable rc files fall back to a print-this-line nudge.
 case ":$PATH:" in
     *":$PREFIX/bin:"*)
-        # Already on PATH, nothing to do.
         :
         ;;
     *)
@@ -190,8 +129,6 @@ esac"
             fi
         fi
 
-        # Fall-through nudge for cases where we couldn't auto-add
-        # (FOREST_NO_SHELL_INTEGRATION set, unknown shell, unwritable rc).
         if [ -z "${path_added:-}" ]; then
             rc="your shell config"
             case "${SHELL##*/}" in
@@ -209,21 +146,6 @@ esac"
         ;;
 esac
 
-# ── Shell integration ────────────────────────────────────────────
-# `forest shell <shell>` emits an eval-able block (PATH prepend for
-# tools installed via `forest global add` + helper functions like
-# `forest-tmp`). For users to benefit, they need an `eval` line in
-# their shell rc file. We add it once, idempotently — running the
-# installer twice doesn't duplicate the line.
-#
-# Set FOREST_NO_SHELL_INTEGRATION=1 to skip this — useful for image
-# builds, CI, and dotfile-managed setups (chezmoi/yadm/etc.) that
-# don't want random appends.
-#
-# The `command -v forest >/dev/null` guard means the appended line
-# silently no-ops in any environment where forest isn't on PATH
-# (e.g. a remote box you scp'd your dotfiles to), instead of
-# printing "command not found" on every shell start.
 if [ -z "${FOREST_NO_SHELL_INTEGRATION:-}" ]; then
     case "${SHELL##*/}" in
         zsh)  rc_path="$HOME/.zshrc";  rc_display="~/.zshrc";  forest_shell_arg="zsh"  ;;
@@ -232,63 +154,35 @@ if [ -z "${FOREST_NO_SHELL_INTEGRATION:-}" ]; then
     esac
 
     if [ -n "$rc_path" ]; then
-        # Detect ANY prior `forest shell` line so we never duplicate,
-        # even if the user added it by hand or with an older marker.
         if [ -f "$rc_path" ] && grep -qF 'forest shell' "$rc_path"; then
             echo "==> forest shell integration already present in $rc_display"
         else
             integration_block="
-# forest shell integration (added by install.sh — see \`forest shell --help\`)
 command -v forest >/dev/null 2>&1 && eval \"\$(forest shell $forest_shell_arg)\""
 
             if printf '%s\n' "$integration_block" >> "$rc_path" 2>/dev/null; then
                 echo "==> added forest shell integration to $rc_display"
                 echo "    run 'source $rc_display' or open a new shell to activate"
             else
-                # File unwritable — almost always means it's owned by
-                # root via a misconfigured shell. Print the line so
-                # the user can paste it manually.
                 echo "==> could not write to $rc_path; add this to your rc file:"
                 echo "    command -v forest >/dev/null 2>&1 && eval \"\$(forest shell $forest_shell_arg)\""
             fi
         fi
     else
-        # zsh and bash are what `forest shell` supports today; fish
-        # users can still benefit once `forest shell fish` exists.
-        # Surface a hint instead of silently doing nothing.
         echo "    note: shell integration is auto-installed for zsh and bash only"
         echo "          (detected shell: ${SHELL##*/}); skip with FOREST_NO_SHELL_INTEGRATION=1"
     fi
 fi
 
-# ── Optional first-run context provisioning ───────────────────────
-#
-# If the operator sets FOREST_PROFILE=name=...,server=... in the
-# environment, seed a context for the freshly-installed binary so the
-# user doesn't have to run `forest context create` manually after
-# install. If no context exists yet, the provisioned one becomes the
-# active default; if some do, it is added without changing the
-# active. Idempotent — re-running the installer with the same
-# FOREST_PROFILE just updates the server URL.
-#
-# Renamed from FOREST_CONTEXT to avoid colliding with forest's
-# runtime `FOREST_CONTEXT=<name>` env which selects WHICH context to
-# use per-invocation.
 if [ -n "${FOREST_PROFILE:-}" ]; then
     profile_name=""
     profile_server=""
     profile_web=""
-    # Parse comma-separated key=value pairs. Tolerant: ignores empty
-    # segments, unknown keys, and whitespace around `=`.
     IFS=','
     for pair in $FOREST_PROFILE; do
         unset IFS
         key="${pair%%=*}"
         val="${pair#*=}"
-        # Trim whitespace from BOTH key and value. Users routinely paste
-        # FOREST_PROFILE from docs / wikis with stray spaces around `=`
-        # or `,`, and a server URL with a leading space would later
-        # fail as an invalid URL with a confusing error.
         trim() { echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
         key="$(trim "$key")"
         val="$(trim "$val")"
@@ -296,7 +190,7 @@ if [ -n "${FOREST_PROFILE:-}" ]; then
             name) profile_name="$val" ;;
             server) profile_server="$val" ;;
             web) profile_web="$val" ;;
-            "") ;; # empty segment from trailing comma
+            "") ;;
             *) echo "==> FOREST_PROFILE: ignoring unknown key '$key'" >&2 ;;
         esac
         IFS=','
@@ -320,12 +214,6 @@ if [ -n "${FOREST_PROFILE:-}" ]; then
     fi
 fi
 
-# ── Next steps banner ────────────────────────────────────────────
-#
-# After a successful install the user is dropped at a prompt with no
-# breadcrumbs. Print a short hint at the end so they know what to try
-# next. This is the LAST thing the user sees from install.sh, so it
-# should be brief and actionable.
 echo
 echo "Next:"
 if [ -n "${FOREST_PROFILE:-}" ] && [ -n "${profile_name:-}" ]; then

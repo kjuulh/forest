@@ -42,7 +42,6 @@ where
         let method = req.method().clone();
         let uri = req.uri().clone();
 
-        // See: https://docs.rs/tower/latest/tower/trait.Service.html#be-careful-when-cloning-inner-services
         let clone = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);
 

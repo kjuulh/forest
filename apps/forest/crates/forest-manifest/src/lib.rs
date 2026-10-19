@@ -1,13 +1,3 @@
-//! Manifest JSON decoder + shape derivation.
-//!
-//! Shared between the forest CLI client and the forest server. Pure — no I/O,
-//! no async, no thread-local state. Parses the manifest JSON blob (the body of
-//! `GetComponentManifest`) into a typed [`Manifest`] and computes its
-//! [`ComponentShape`] per TASKS/018-global-tools.md §1a.2e.
-//!
-//! The server uses [`parse`] at `publish_manifest` time to enforce rules 1–7
-//! from §1a.2; the client uses [`parse`] at runtime as defence-in-depth.
-
 #![doc(html_no_source)]
 
 use std::collections::BTreeMap;
@@ -21,64 +11,27 @@ use names::{
     validate_tool_name,
 };
 
-// --- Public types ---------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Manifest {
     pub kind: ManifestKind,
     pub tool: Option<ToolFacet>,
     pub methods: Vec<String>,
-    /// Artifacts shipped alongside the binary (TASKS/023): default env vars,
-    /// and the component's own shell integration (DATA-588). Defaults to empty
-    /// when the manifest carries no `include` block.
     pub include: Include,
     pub platforms: BTreeMap<PlatformKey, Platform>,
-    /// Derived from `(kind, tool, methods)` at parse time. Always consistent
-    /// with the other fields; consumers should rely on `shape` rather than
-    /// re-deriving.
     pub shape: ComponentShape,
 }
 
-/// The `include` block: things shipped beside the binary and materialised into
-/// the local cache when the tool is fetched (TASKS/023). Forward-compatible —
-/// future members (e.g. `files`) slot in here.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Include {
-    /// Default environment variables, applied as defaults at run time (the
-    /// ambient shell environment always wins).
     pub env: BTreeMap<String, String>,
-    /// Shell integration the component declares for itself (DATA-588).
     pub shell: ShellIntegration,
 }
 
-/// `include.shell` — how a tool tells forest to load its shell integration
-/// (DATA-588).
-///
-/// A tool that ships an rc-file snippet (completions, a wrapper function, a
-/// `cd`-ing helper) used to require the user to add `eval "$(<tool> init zsh)"`
-/// to their rc file by hand — which is both a manual step and, because tools
-/// install lazily, a cold-start download in the middle of shell startup.
-/// Declaring it here inverts that: the component says how to produce its
-/// snippet, forest captures the output once when the tool is fetched, and
-/// `forest shell <shell>` serves it from cache. The user's rc file needs
-/// nothing but the single `eval "$(forest shell zsh)"` line it already has.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ShellIntegration {
-    /// Shell name → argv to run against the tool's own binary to print its
-    /// integration script on stdout. `{"zsh": ["init", "zsh"]}` means "run
-    /// `<tool> init zsh`".
-    ///
-    /// Keyed by shell rather than a single command because tools spell this
-    /// differently per shell (`init zsh` vs `completion fish`) and because a
-    /// tool may support only some shells.
     pub init: BTreeMap<String, Vec<String>>,
 }
 
-/// Shells a component may declare an `include.shell.init` entry for.
-///
-/// A closed set: `forest shell <shell>` has to know how to emit the snippet, so
-/// a manifest naming a shell this forest can't serve is a publish-time error
-/// rather than a silently ignored key.
 pub const SUPPORTED_SHELLS: &[&str] = &["zsh", "bash", "fish"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,7 +78,6 @@ pub enum Archive {
 pub struct Platform {
     pub sha256: String,
     pub size: Option<u64>,
-    // External-only fields. For `kind: binary` these must all be None at parse.
     pub url: Option<String>,
     pub archive: Archive,
     pub binary_in_archive: Option<String>,
@@ -140,30 +92,18 @@ pub enum ComponentShape {
     ToolExternal,
 }
 
-// --- Errors ---------------------------------------------------------------
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManifestError {
     InvalidJson(String),
     MissingKind,
     UnknownKind(String),
-    /// §1a.2 rule 2: external manifests MUST declare a tool facet.
     ExternalRequiresTool,
-    /// §1a.2 rule 7: a binary manifest needs methods OR a tool.
     BinaryRequiresMethodsOrTool,
-    /// External manifests have no describe protocol, hence no methods.
     ExternalCannotDeclareMethods,
     InvalidToolName(NameError),
-    /// `include.env` key is not a valid POSIX env name. Carries the offending key.
     InvalidEnvName(String),
-    /// `include.env` value is invalid (contains NUL). Carries the offending key.
     InvalidEnvValue(String),
-    /// `include.shell.init` names a shell this forest can't serve a snippet
-    /// for. Carries the offending shell name. Rejected rather than ignored so a
-    /// typo (`zshell`) surfaces at publish instead of silently never loading.
     UnsupportedShell(String),
-    /// `include.shell.init.<shell>` is not a non-empty array of strings, or an
-    /// argument contains a NUL. Carries the offending shell name.
     InvalidShellInit(String),
     InvalidArgvPassthrough,
     InvalidPlatformKey(String),
@@ -172,23 +112,13 @@ pub enum ManifestError {
     UnsupportedArchive(String),
     InvalidSha256(String),
     InvalidArchiveSha256(String),
-    InvalidUrl {
-        url: String,
-        reason: &'static str,
-    },
+    InvalidUrl { url: String, reason: &'static str },
     BinaryKindForbidsField(&'static str),
     ExternalKindRequires(&'static str),
     ArchiveRequiresBinaryInArchive,
     InvalidBinaryInArchive(&'static str),
 }
 
-// --- Public API -----------------------------------------------------------
-
-/// Parse a manifest JSON blob (as served by `GetComponentManifest`) into a
-/// validated typed form.
-///
-/// Total over any input string — never panics. Returns the first invariant
-/// violation as a `ManifestError`.
 pub fn parse(json: &str) -> Result<Manifest, ManifestError> {
     let value: serde_json::Value =
         serde_json::from_str(json).map_err(|e| ManifestError::InvalidJson(e.to_string()))?;
@@ -196,17 +126,14 @@ pub fn parse(json: &str) -> Result<Manifest, ManifestError> {
         .as_object()
         .ok_or_else(|| ManifestError::InvalidJson("manifest root must be a JSON object".into()))?;
 
-    // --- kind ---------------------------------------------------------
     let kind = parse_kind(obj.get("kind"))?;
 
-    // --- tool ---------------------------------------------------------
     let tool = obj
         .get("tool")
         .filter(|v| !v.is_null())
         .map(parse_tool_facet)
         .transpose()?;
 
-    // --- methods ------------------------------------------------------
     let methods = match obj.get("methods") {
         None | Some(serde_json::Value::Null) => Vec::new(),
         Some(serde_json::Value::Array(arr)) => arr
@@ -226,14 +153,10 @@ pub fn parse(json: &str) -> Result<Manifest, ManifestError> {
         }
     };
 
-    // --- include (TASKS/023) ------------------------------------------
     let include = parse_include(obj.get("include"))?;
 
-    // --- shape derivation runs BEFORE platform parsing so we catch
-    //     "wrong shape" before "wrong sha". §1a.2e.
     let shape = derive_shape(kind, tool.is_some(), !methods.is_empty())?;
 
-    // --- platforms ----------------------------------------------------
     let platforms_obj = obj
         .get("platforms")
         .and_then(|v| v.as_object())
@@ -256,8 +179,6 @@ pub fn parse(json: &str) -> Result<Manifest, ManifestError> {
     })
 }
 
-/// Parse the optional top-level `include` block. Missing/null ⇒ empty.
-/// Unknown members are ignored (forward-compat); `env` and `shell` are read.
 fn parse_include(v: Option<&serde_json::Value>) -> Result<Include, ManifestError> {
     let obj = match v {
         None | Some(serde_json::Value::Null) => return Ok(Include::default()),
@@ -297,12 +218,6 @@ fn parse_include(v: Option<&serde_json::Value>) -> Result<Include, ManifestError
     Ok(Include { env, shell })
 }
 
-/// Parse `include.shell` (DATA-588). Missing/null ⇒ empty.
-///
-/// Validation is strict on the things that would otherwise fail silently much
-/// later: an unknown shell name would simply never be served, and an empty argv
-/// would have forest exec the binary with no arguments at capture time (running
-/// the tool's default action instead of asking it for a script).
 fn parse_shell_integration(
     v: Option<&serde_json::Value>,
 ) -> Result<ShellIntegration, ManifestError> {
@@ -353,30 +268,22 @@ fn parse_shell_integration(
     Ok(ShellIntegration { init })
 }
 
-/// Pure derivation of the shape from the three discriminator inputs.
-/// Exposed separately so the resolver and the server-side validator can
-/// share a single source of truth (§1a.2e).
 pub fn derive_shape(
     kind: ManifestKind,
     has_tool: bool,
     has_methods: bool,
 ) -> Result<ComponentShape, ManifestError> {
     match (kind, has_tool, has_methods) {
-        // Binary kind.
         (ManifestKind::Binary, false, false) => Err(ManifestError::BinaryRequiresMethodsOrTool),
         (ManifestKind::Binary, false, true) => Ok(ComponentShape::Component),
         (ManifestKind::Binary, true, false) => Ok(ComponentShape::ToolBinary),
         (ManifestKind::Binary, true, true) => Ok(ComponentShape::HybridComponent),
 
-        // External kind. Rule 2 takes precedence over rule "external + methods"
-        // because "external must have a tool" is the more specific spec sentence.
         (ManifestKind::External, false, _) => Err(ManifestError::ExternalRequiresTool),
         (ManifestKind::External, true, true) => Err(ManifestError::ExternalCannotDeclareMethods),
         (ManifestKind::External, true, false) => Ok(ComponentShape::ToolExternal),
     }
 }
-
-// --- Internal parsers -----------------------------------------------------
 
 fn parse_kind(v: Option<&serde_json::Value>) -> Result<ManifestKind, ManifestError> {
     match v.and_then(|v| v.as_str()) {
@@ -469,7 +376,6 @@ fn parse_platform(raw: &serde_json::Value, kind: ManifestKind) -> Result<Platfor
         return Err(ManifestError::InvalidArchiveSha256(s.clone()));
     }
 
-    // kind-specific invariants
     match kind {
         ManifestKind::Binary => {
             if url.is_some() {
@@ -490,7 +396,6 @@ fn parse_platform(raw: &serde_json::Value, kind: ManifestKind) -> Result<Platfor
                 .as_deref()
                 .ok_or(ManifestError::ExternalKindRequires("url"))?;
             validate_external_url(url_str)?;
-            // archive ≠ "none" ⇒ binary_in_archive required.
             if !matches!(archive, Archive::None) && binary_in_archive.is_none() {
                 return Err(ManifestError::ArchiveRequiresBinaryInArchive);
             }
@@ -539,9 +444,6 @@ fn validate_external_url(url: &str) -> Result<(), ManifestError> {
     Ok(())
 }
 
-/// §1a.2d (subset enforced at the manifest layer; the full algorithm
-/// lives in `crate::global::extract::canonicalise()` when that module
-/// lands — for now we enforce the high-value defences).
 fn validate_binary_in_archive(path: &str) -> Result<(), ManifestError> {
     if path.is_empty() {
         return Err(ManifestError::InvalidBinaryInArchive("empty"));
@@ -583,8 +485,6 @@ fn validate_binary_in_archive(path: &str) -> Result<(), ManifestError> {
 mod tests {
     use super::*;
 
-    // --- derive_shape: the full 2x2x2 matrix --------------------------------
-
     #[test]
     fn shape_binary_methods_only_is_component() {
         let s = derive_shape(ManifestKind::Binary, false, true).unwrap();
@@ -605,7 +505,6 @@ mod tests {
 
     #[test]
     fn shape_binary_no_tool_no_methods_is_rule7_violation() {
-        // §1a.2 rule 7: binary needs methods OR tool.
         let err = derive_shape(ManifestKind::Binary, false, false).unwrap_err();
         assert_eq!(err, ManifestError::BinaryRequiresMethodsOrTool);
     }
@@ -624,7 +523,6 @@ mod tests {
 
     #[test]
     fn shape_external_with_methods_is_rejected() {
-        // §1a.2e: `external + methods` is invalid (no describe).
         let err = derive_shape(ManifestKind::External, true, true).unwrap_err();
         assert_eq!(err, ManifestError::ExternalCannotDeclareMethods);
     }
@@ -632,12 +530,8 @@ mod tests {
     #[test]
     fn shape_external_no_tool_no_methods_is_rejected() {
         let err = derive_shape(ManifestKind::External, false, true).unwrap_err();
-        // Either rule could fire first; rule 2 (external requires tool)
-        // is the more specific and friendlier message — assert it.
         assert_eq!(err, ManifestError::ExternalRequiresTool);
     }
-
-    // --- parse: happy paths for each shape ---------------------------------
 
     #[test]
     fn parses_tool_binary_manifest() {
@@ -675,8 +569,6 @@ mod tests {
         );
     }
 
-    // --- include { env } (TASKS/023) ---------------------------------------
-
     #[test]
     fn parses_tool_binary_with_include_env() {
         let json = r#"{
@@ -696,7 +588,6 @@ mod tests {
 
     #[test]
     fn manifest_without_include_has_empty_env() {
-        // Pre-feature manifests stay valid; include defaults to empty.
         let json = r#"{
             "kind": "binary",
             "tool": {"name": "hello", "argv_passthrough": true},
@@ -709,9 +600,6 @@ mod tests {
         assert!(m.include.shell.init.is_empty());
     }
 
-    // --- include { shell } (DATA-588) --------------------------------------
-
-    /// A tool-binary manifest with `include.shell.init` set to `body`.
     fn shell_manifest(body: &str) -> String {
         format!(
             r#"{{
@@ -727,8 +615,6 @@ mod tests {
 
     #[test]
     fn parses_component_declared_shell_init_per_shell() {
-        // The whole point of DATA-588: the component says how to produce its
-        // integration script, so the user's rc file doesn't have to.
         let m = parse(&shell_manifest(
             r#"{"zsh": ["init", "zsh"], "fish": ["completion", "fish"]}"#,
         ))
@@ -780,15 +666,12 @@ mod tests {
 
     #[test]
     fn unknown_shell_name_is_rejected() {
-        // A typo must fail at publish, not silently never load.
         let err = parse(&shell_manifest(r#"{"zshell": ["init", "zsh"]}"#)).unwrap_err();
         assert_eq!(err, ManifestError::UnsupportedShell("zshell".into()));
     }
 
     #[test]
     fn empty_shell_init_argv_is_rejected() {
-        // An empty argv would exec the tool with no arguments at capture time,
-        // running its default action instead of printing a script.
         let err = parse(&shell_manifest(r#"{"zsh": []}"#)).unwrap_err();
         assert_eq!(err, ManifestError::InvalidShellInit("zsh".into()));
     }
@@ -803,9 +686,6 @@ mod tests {
 
     #[test]
     fn nul_in_shell_init_argv_is_rejected() {
-        // An argv element goes straight into an exec, where a NUL cannot
-        // survive the C-string boundary. `\u0000` is the JSON escape, so the
-        // Rust source itself stays plain ASCII.
         let err = parse(&shell_manifest(r#"{"zsh": ["init", "z\u0000sh"]}"#)).unwrap_err();
         assert_eq!(err, ManifestError::InvalidShellInit("zsh".into()));
     }
@@ -828,8 +708,6 @@ mod tests {
 
     #[test]
     fn every_supported_shell_is_accepted() {
-        // SUPPORTED_SHELLS is the contract between the manifest and
-        // `forest shell <shell>`; each entry must actually parse.
         for shell in SUPPORTED_SHELLS {
             let m = parse(&shell_manifest(&format!(r#"{{"{shell}": ["init"]}}"#))).unwrap();
             assert!(m.include.shell.init.contains_key(*shell), "{shell}");
@@ -865,8 +743,6 @@ mod tests {
 
     #[test]
     fn rejects_env_value_with_nul() {
-        // Build the JSON via serde so the NUL byte is escaped to `\u0000`;
-        // serde decodes it back to a real NUL, which our value validator rejects.
         let json = serde_json::json!({
             "kind": "binary",
             "tool": {"name": "hello", "argv_passthrough": true},
@@ -910,7 +786,6 @@ mod tests {
 
     #[test]
     fn ignores_unknown_include_members() {
-        // Forward-compat: a future `files` member is ignored by today's parser.
         let json = r#"{
             "kind": "binary",
             "tool": {"name": "hello", "argv_passthrough": true},
@@ -967,7 +842,6 @@ mod tests {
 
     #[test]
     fn parses_external_bare_executable() {
-        // archive: "none", no binary_in_archive.
         let json = r#"{
             "kind": "external",
             "tool": {"name": "jq", "argv_passthrough": true},
@@ -985,8 +859,6 @@ mod tests {
         assert!(matches!(p.archive, Archive::None));
         assert!(p.binary_in_archive.is_none());
     }
-
-    // --- parse: rule violations --------------------------------------------
 
     #[test]
     fn rejects_invalid_json() {
@@ -1070,7 +942,6 @@ mod tests {
 
     #[test]
     fn rejects_http_url() {
-        // §1a.2 rule 4: external URLs must be https://.
         let json = r#"{
             "kind": "external",
             "tool": {"name": "x", "argv_passthrough": true},
@@ -1107,8 +978,6 @@ mod tests {
 
     #[test]
     fn rejects_binary_with_url_field() {
-        // §1a.2 rule 4: for `kind: binary`, url/archive/binary_in_archive
-        // must all be absent.
         let json = r#"{
             "kind": "binary",
             "tool": {"name": "x", "argv_passthrough": true},
@@ -1254,11 +1123,8 @@ mod tests {
         assert!(is_path, "got {err:?}");
     }
 
-    // --- argv_passthrough = false is reserved -------------------------------
-
     #[test]
     fn rejects_argv_passthrough_false() {
-        // §1a.1: false is reserved.
         let json = r#"{
             "kind": "binary",
             "tool": {"name": "x", "argv_passthrough": false},

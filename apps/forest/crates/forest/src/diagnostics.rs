@@ -1,24 +1,8 @@
-//! miette diagnostics for the build/publish dispatch path (DATA-312).
-//!
-//! Forest's command machinery traffics in `anyhow` and flattens errors to
-//! strings as they pass through the `notmad` runner (see
-//! [`crate::cli::unwrap_run_errors`]). A `miette::Diagnostic`'s rich structure
-//! — labelled spans, related sub-diagnostics, help text — would not survive
-//! that flattening. So instead of returning Diagnostics up the stack, the
-//! build/publish leaves *render* them to a string here ([`render`]) and bail
-//! with that string via anyhow. `main` prints the bailed string verbatim, so
-//! the graphical report reaches the user intact.
-//!
-//! Scope is deliberately narrow (DATA-312): only the new build/publish path
-//! produces these. Everything else keeps plain anyhow errors.
-
 use std::path::Path;
 
 use miette::{Diagnostic, GraphicalReportHandler, GraphicalTheme, LabeledSpan, NamedSource};
 use thiserror::Error;
 
-/// Render a diagnostic to a string using miette's graphical handler, honouring
-/// `NO_COLOR` and non-TTY stderr (no ANSI when piped).
 pub fn render(diag: &dyn Diagnostic) -> String {
     let handler = if use_color() {
         GraphicalReportHandler::new()
@@ -26,14 +10,10 @@ pub fn render(diag: &dyn Diagnostic) -> String {
         GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor())
     };
     let mut out = String::new();
-    // render_report only errors if the writer errors; a String never does.
     let _ = handler.render_report(&mut out, diag);
     out
 }
 
-/// Wrap a diagnostic in an `anyhow::Error` whose payload is the fully-rendered
-/// graphical report. Leaf code does `return Err(report(diag))` and the existing
-/// anyhow-based machinery prints it as-is.
 pub fn report(diag: impl Diagnostic + Send + Sync + 'static) -> anyhow::Error {
     anyhow::Error::msg(render(&diag))
 }
@@ -43,12 +23,6 @@ fn use_color() -> bool {
     std::env::var_os("NO_COLOR").is_none() && std::io::stderr().is_terminal()
 }
 
-// ============================================================
-// CUE evaluation failures
-// ============================================================
-
-/// A `cue export` failure, with a source span pointing at the offending line
-/// when CUE reported a `file:line:col` location we can map back to bytes.
 #[derive(Debug, Error, Diagnostic)]
 #[error("manifest does not evaluate")]
 #[diagnostic(
@@ -64,10 +38,6 @@ pub struct CueEvalError {
 }
 
 impl CueEvalError {
-    /// Build from the raw `cue` stderr. Best-effort: if a `file:line:col` can
-    /// be parsed and the file read, the diagnostic underlines that line;
-    /// otherwise it falls back to a span-less report carrying the cleaned
-    /// message. Either way the user gets something far better than a Debug dump.
     pub fn from_cue_stderr(working_dir: &Path, stderr: &str) -> Self {
         let reason = clean_cue_message(stderr);
 
@@ -95,15 +65,6 @@ impl CueEvalError {
     }
 }
 
-// ============================================================
-// Publish preflight failures
-// ============================================================
-
-/// One preflight check failure, rendered as a related sub-diagnostic. The
-/// check ID (e.g. `C8`) becomes the diagnostic code so users can grep it.
-///
-/// `Diagnostic` is hand-implemented (not derived) because the code is dynamic
-/// — it carries the check's stable ID, which the derive macro can't express.
 #[derive(Debug, Error)]
 #[error("{message}")]
 pub struct PreflightFailure {
@@ -136,8 +97,6 @@ impl Diagnostic for PreflightFailure {
     }
 }
 
-/// Aggregate "publish requirements not met" diagnostic — one related entry per
-/// failed check, so the user sees the full punch list in one report.
 #[derive(Debug, Error, Diagnostic)]
 #[error("publish requirements not met ({} issue{})", failures.len(), if failures.len() == 1 { "" } else { "s" })]
 #[diagnostic(
@@ -150,8 +109,6 @@ pub struct PublishPreflightFailed {
 }
 
 impl PublishPreflightFailed {
-    /// Build from the preflight failures plus the component's CUE source (used
-    /// to underline the offending field where we can locate it).
     pub fn new(
         failures: &[crate::services::preflight::CheckFailure],
         manifest: Option<&CueManifestSource>,
@@ -185,17 +142,12 @@ impl PublishPreflightFailed {
     }
 }
 
-/// The CUE manifest source used to locate spans for preflight failures.
 pub struct CueManifestSource {
     pub name: String,
     pub content: String,
 }
 
 impl CueManifestSource {
-    /// Read the component's manifest for span mapping. Prefers
-    /// `forest.component.cue`, falls back to `forest.cue`. Returns `None` if
-    /// neither is readable — span mapping is best-effort, so callers degrade
-    /// to a span-less report.
     pub fn load(dir: &Path) -> Option<Self> {
         for name in ["forest.component.cue", "forest.cue"] {
             if let Ok(content) = std::fs::read_to_string(dir.join(name)) {
@@ -209,9 +161,6 @@ impl CueManifestSource {
     }
 }
 
-/// Map a preflight check ID to the manifest field whose line we underline.
-/// Checks with no single locatable field (e.g. C6 "no artifact on disk")
-/// return `None` and render help-only.
 fn field_for_check(id: &str) -> Option<&'static str> {
     match id {
         "C3" => Some("name"),
@@ -220,12 +169,6 @@ fn field_for_check(id: &str) -> Option<&'static str> {
     }
 }
 
-// ============================================================
-// Missing required tools
-// ============================================================
-
-/// One missing tool, rendered as a related sub-diagnostic. The tool name is the
-/// diagnostic code; the install hint (if declared) is the help.
 #[derive(Debug, Error)]
 #[error("`{name}` is not installed or not on PATH")]
 pub struct MissingTool {
@@ -245,10 +188,6 @@ impl Diagnostic for MissingTool {
     }
 }
 
-/// Aggregate "required tools are missing" diagnostic — one related entry per
-/// missing tool. Raised before dispatching to a component that declared
-/// `requires.tools`, so the user sees the full list up front instead of a
-/// mid-run spawn failure. DATA-312.
 #[derive(Debug, Error, Diagnostic)]
 #[error("`{component}` needs {} tool{} that {} not installed", tools.len(), if tools.len() == 1 { "" } else { "s" }, if tools.len() == 1 { "is" } else { "are" })]
 #[diagnostic(
@@ -262,7 +201,6 @@ pub struct MissingTools {
 }
 
 impl MissingTools {
-    /// Build from the component name and the tools that failed the PATH check.
     pub fn new(
         component: impl Into<String>,
         missing: Vec<crate::tools::which::RequiredTool>,
@@ -280,14 +218,6 @@ impl MissingTools {
     }
 }
 
-// ============================================================
-// Source-mapping helpers
-// ============================================================
-
-/// Locate `<field>:` in CUE source and return a span covering the key. Used to
-/// underline the offending line in preflight diagnostics. Best-effort: matches
-/// the first `field:` (optionally preceded by whitespace) and returns `None` if
-/// not found.
 fn locate_field(src: &str, field: &str) -> Option<miette::SourceSpan> {
     let mut offset = 0usize;
     for line in src.split_inclusive('\n') {
@@ -302,9 +232,6 @@ fn locate_field(src: &str, field: &str) -> Option<miette::SourceSpan> {
     None
 }
 
-/// Reduce cue's multi-line stderr to a concise one-line reason. cue prints the
-/// human message first, then an indented `file:line:col` location line; we keep
-/// the message line(s) and drop the location (it's surfaced as the span).
 fn clean_cue_message(stderr: &str) -> String {
     let msg = stderr
         .lines()
@@ -315,10 +242,8 @@ fn clean_cue_message(stderr: &str) -> String {
     msg.trim_end_matches(':').to_string()
 }
 
-/// Parse the first `file.cue:line:col` location out of cue's stderr.
 fn parse_cue_location(stderr: &str) -> Option<(std::path::PathBuf, usize, usize)> {
     for token in stderr.split_whitespace() {
-        // Trim surrounding punctuation cue sometimes adds (e.g. trailing ':').
         let token = token.trim_matches(|c| c == ':' || c == '(' || c == ')');
         if !token.contains(".cue:") {
             continue;
@@ -332,8 +257,6 @@ fn parse_cue_location(stderr: &str) -> Option<(std::path::PathBuf, usize, usize)
     None
 }
 
-/// Convert a 1-based line/column into a byte-offset span covering from the
-/// position to the end of that line.
 fn line_col_to_span(src: &str, line: usize, col: usize) -> miette::SourceSpan {
     let mut offset = 0usize;
     for (idx, line_str) in src.split_inclusive('\n').enumerate() {
@@ -402,8 +325,6 @@ mod tests {
             hint: "Use MAJOR.MINOR.PATCH.".into(),
         }];
         let diag = PublishPreflightFailed::new(&failures, Some(&manifest));
-        // Renders without panicking and includes the check id, message, hint,
-        // and the underlined source line.
         let rendered = render(&diag);
         assert!(rendered.contains("C8"), "rendered: {rendered}");
         assert!(

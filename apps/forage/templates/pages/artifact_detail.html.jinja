@@ -4,7 +4,6 @@
 
 {% block content %}
 <section class="app-container pt-12 pb-12">
-    {# ── Breadcrumb + heading ──────────────────────────────────── #}
     <div class="mb-8">
         <div class="flex items-center gap-2 text-sm text-gray-500 mb-2">
             <a href="/orgs/{{ org_name }}/projects/{{ project_name }}" class="hover:text-gray-700">{{ project_name }}</a>
@@ -12,7 +11,6 @@
             <a href="/orgs/{{ org_name }}/projects/{{ project_name }}/releases" class="hover:text-gray-700">Releases</a>
         </div>
         <div class="flex items-center gap-3">
-            {# Status dot #}
             {% if summary_status == "RUNNING" %}
             <span class="w-3 h-3 rounded-full bg-yellow-400 animate-pulse shrink-0"></span>
             {% elif summary_status == "QUEUED" %}
@@ -29,10 +27,6 @@
             <span class="w-3 h-3 rounded-full bg-gray-300 shrink-0"></span>
             {% endif %}
 
-            {# The h1 should be a one-line subject. Commit messages can be
-               multi-paragraph; take just the first line and clamp to 120
-               chars. Full text is in a `title=` tooltip and rendered in
-               full inside the collapsible Details block below. #}
             {% set raw_title = artifact.commit_message or artifact.title or "" %}
             {% set first_line = (raw_title | split("\n") | first) or "" %}
             <h1 class="text-2xl font-bold" title="{{ raw_title }}">
@@ -44,7 +38,6 @@
         </div>
         <p class="text-sm font-mono text-gray-400 mt-1">{{ artifact.slug }}</p>
 
-        {# ── Metadata pills ────────────────────────────────────── #}
         <div class="flex flex-wrap items-center gap-2 mt-3">
             {% if artifact.branch %}
             <span class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
@@ -81,17 +74,11 @@
     </div>
 
     {% if artifact.description and not artifact.description is startingwith("Branch:") %}
-    {# Description (commit body or annotation context). Multi-paragraph
-       commit messages are common; preserve their formatting with
-       `whitespace-pre-wrap break-words` and clamp to 800 chars + ellipsis
-       so a 50-line commit doesn't dominate the page. Full text is in the
-       Details block below for power-user inspection. #}
     <div class="mb-8">
         <p class="text-gray-700 whitespace-pre-wrap break-words" title="{{ artifact.description }}">{{ artifact.description[:800] }}{% if artifact.description | length > 800 %}…{% endif %}</p>
     </div>
     {% endif %}
 
-    {# ── Deploy action ─────────────────────────────────────────── #}
     {% if is_admin %}
     <div class="mb-8">
         <details class="border border-gray-200 rounded-lg group">
@@ -134,7 +121,6 @@
     </div>
     {% endif %}
 
-    {# ── Pipeline stages ───────────────────────────────────────── #}
     {% if has_pipeline and pipeline_stages | length > 0 %}
     <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-900 mb-3">Pipeline</h2>
@@ -142,7 +128,6 @@
             {% for stage in pipeline_stages %}
             <div>
             <div class="px-4 py-3 flex items-center gap-3 text-sm {{ 'opacity-50' if stage.status == 'PENDING' else '' }}">
-                {# Status icon #}
                 {% if stage.status == "SUCCEEDED" %}
                 <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 {% elif stage.status == "RUNNING" %}
@@ -157,7 +142,6 @@
                 <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/></svg>
                 {% endif %}
 
-                {# Stage label #}
                 {% if stage.stage_type == "deploy" %}
                 <span class="text-sm {{ 'text-gray-700' if stage.status == 'SUCCEEDED' else 'text-yellow-700' if stage.status == 'RUNNING' else 'text-red-700' if stage.status == 'FAILED' else 'text-gray-400' }}">
                     {% if stage.status == "SUCCEEDED" %}Deployed to{% elif stage.status == "RUNNING" %}Deploying to{% elif stage.status == "QUEUED" %}Queued for{% elif stage.status == "FAILED" %}Failed on{% elif stage.status == "TIMED_OUT" %}Timed out on{% elif stage.status == "CANCELLED" %}Cancelled{% else %}Deploy to{% endif %}
@@ -196,38 +180,15 @@
                 {% endif %}
                 {% endif %}
 
-                {# Elapsed time #}
                 {% if stage.started_at %}
                 <span class="text-xs text-gray-400 tabular-nums">{{ ts(stage.started_at) }}</span>
                 {% endif %}
             </div>
 
-            {#
-              Why the reason lives here and not in the row above.
-
-              The row is a flex line of fixed-size furniture -- icon, label,
-              environment badge, timestamp. An error message is prose of
-              unknown length, and a failed stage's message is routinely a
-              chained one several hundred characters long. As a flex child it
-              wrapped inside the row, tripled its height, and shoved the badge
-              and the timestamp around; the stage you were trying to read
-              became the one hardest to read. Beneath the row it has the full
-              width to itself and the row stays exactly as tall as a
-              successful one.
-            #}
             {% if stage.error_message %}
             <div class="px-4 pb-3">{{ error_block(stage.error_message) }}</div>
             {% endif %}
 
-            {#
-              What the approve button above actually approves.
-
-              Open by default while the stage is waiting, because a plan behind
-              a click is a plan people approve without reading, and a plan stage
-              exists for exactly one reason: somebody reads it first. Collapsed
-              once it has been decided -- then it is history, and the page is
-              about what happens next.
-            #}
             {% if stage.plan_output %}
             <details data-plan-output class="px-4 pb-3" {% if stage.status == "AWAITING_APPROVAL" or stage.approval_status == "AWAITING_APPROVAL" or stage.approval_status == "AWAITINGAPPROVAL" %}open{% endif %}>
                 <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700 select-none">Plan</summary>
@@ -237,7 +198,6 @@
             </div>
             {% endfor %}
         </div>
-        {# Pipeline progress #}
         {% set ns = namespace(done=0, total=0) %}
         {% for stage in pipeline_stages %}
             {% set ns.total = ns.total + 1 %}
@@ -255,7 +215,6 @@
     </div>
     {% endif %}
 
-    {# ── Policy evaluations (approval, soak, branch) ──────────── #}
     {% if policy_evaluations | length > 0 %}
     {% set pns = namespace(passed=0, total=0, pending=0) %}
     {% for eval in policy_evaluations %}
@@ -282,7 +241,6 @@
             {% endif %}
         </div>
 
-        {# ── Pending / failed policies (expanded) ──────────────── #}
         {% if pns.pending > 0 %}
         <div class="border border-gray-200 rounded-lg divide-y divide-gray-100 mb-3">
             {% for eval in policy_evaluations %}
@@ -303,7 +261,6 @@
                     <span class="text-xs text-gray-400 ml-auto">{{ eval.reason }}</span>
                 </div>
 
-                {# ── Approval UI ──────────────────────────────── #}
                 {% if eval.policy_type == "approval" and eval.approval_state %}
                 <div class="mt-3 ml-7">
                     <div class="flex items-center gap-2 text-xs text-gray-500 mb-2">
@@ -366,7 +323,6 @@
         </div>
         {% endif %}
 
-        {# ── Passed policies (collapsed) ───────────────────────── #}
         {% if pns.passed > 0 %}
         <details class="border border-gray-200 rounded-lg group">
             <summary class="px-4 py-2.5 flex items-center gap-2 text-sm text-gray-500 cursor-pointer list-none hover:bg-gray-50">
@@ -399,7 +355,6 @@
     </div>
     {% endif %}
 
-    {# ── Destinations with status ──────────────────────────────── #}
     {% if destinations | length > 0 or configured_destinations | length > 0 %}
     <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-900 mb-3">Destinations</h2>
@@ -407,7 +362,6 @@
             {% for dest in destinations %}
             <div>
             <div class="px-4 py-3 flex items-center gap-3 text-sm">
-                {# Status icon #}
                 {% if dest.status == "SUCCEEDED" %}
                 <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 {% elif dest.status == "RUNNING" or dest.status == "ASSIGNED" %}
@@ -420,14 +374,12 @@
                 <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 {% endif %}
 
-                {# Environment badge #}
                 <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full {% if 'prod' in dest.environment and 'preprod' not in dest.environment %}bg-pink-100 text-pink-800{% elif 'preprod' in dest.environment or 'pre-prod' in dest.environment %}bg-orange-100 text-orange-800{% elif 'stag' in dest.environment %}bg-yellow-100 text-yellow-800{% elif 'dev' in dest.environment %}bg-violet-100 text-violet-800{% else %}bg-gray-100 text-gray-700{% endif %}">
                     {{ dest.environment }}
                 </span>
 
                 <span class="text-gray-700">{{ dest.name }}</span>
 
-                {# Status label #}
                 {% if dest.status == "SUCCEEDED" %}
                 <span class="text-xs text-green-600">Deployed</span>
                 {% elif dest.status == "RUNNING" %}
@@ -442,7 +394,6 @@
                 <span class="text-xs text-gray-500">Cancelled</span>
                 {% endif %}
 
-                {# Timestamp #}
                 {% if dest.completed_at %}
                 <time class="text-xs text-gray-400 ml-auto tabular-nums">{{ ts(dest.completed_at) }}</time>
                 {% elif dest.started_at %}
@@ -450,10 +401,6 @@
                 {% endif %}
             </div>
 
-            {# Same treatment as a pipeline stage: the reason gets its own
-               line under the row rather than a `truncate max-w-xs` cell
-               inside it, which cut the message off at the head -- exactly
-               where a chained error keeps the clause worth reading. #}
             {% if dest.error_message %}
             <div class="px-4 pb-3">{{ error_block(dest.error_message) }}</div>
             {% endif %}
@@ -461,7 +408,6 @@
             {% endfor %}
         </div>
 
-        {# Show configured destinations that don't have live state yet #}
         {% if configured_destinations | length > 0 and destinations | length == 0 %}
         <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
             {% for cd in configured_destinations %}
@@ -479,7 +425,6 @@
     </div>
     {% endif %}
 
-    {# ── Logs ──────────────────────────────────────────────────── #}
     {% if has_release_intents %}
     <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-900 mb-3">Logs</h2>
@@ -487,7 +432,6 @@
     </div>
     {% endif %}
 
-    {# ── Spec (forest.cue) ──────────────────────────────────────── #}
     {% if artifact_spec %}
     <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-900 mb-3">Spec</h2>
@@ -495,7 +439,6 @@
     </div>
     {% endif %}
 
-    {# ── Details ───────────────────────────────────────────────── #}
     {% if artifact.commit_message or artifact.repo_url or artifact.source_email or artifact.run_url %}
     <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-900 mb-3">Details</h2>
@@ -503,9 +446,6 @@
             {% if artifact.commit_message %}
             <div class="px-4 py-3 flex items-start gap-3 text-sm">
                 <svg class="w-4 h-4 text-gray-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
-                {# Full commit message — preserve newlines (commit body
-                   paragraphs) and break long lines so the row doesn't
-                   stretch the page horizontally. #}
                 <span class="text-gray-700 whitespace-pre-wrap break-words min-w-0">{{ artifact.commit_message }}</span>
             </div>
             {% endif %}
@@ -531,7 +471,6 @@
     </div>
     {% endif %}
 
-    {# ── Links ─────────────────────────────────────────────────── #}
     {% if artifact.web or artifact.pr %}
     <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-900 mb-3">Links</h2>

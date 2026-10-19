@@ -7,7 +7,6 @@
         <a href="/orgs/{{ current_org }}/settings/integrations" class="text-sm text-gray-500 hover:text-gray-700">&larr; All integrations</a>
     </div>
 
-    {# ── Header ───────────────────────────────────────────────── #}
     <div class="flex items-start justify-between mb-8">
         <div class="flex items-start gap-4">
             <div class="w-12 h-12 rounded-lg border border-gray-200 flex items-center justify-center bg-white shrink-0">
@@ -62,7 +61,6 @@
     </div>
     {% endif %}
 
-    {# ── Configuration ────────────────────────────────────────── #}
     <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Configuration</h2>
         <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
@@ -85,7 +83,6 @@
         </div>
     </div>
 
-    {# ── Events ───────────────────────────────────────────────── #}
     <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Events</h2>
         <p class="text-sm text-gray-500 mb-3">Choose which deployment events trigger this integration.</p>
@@ -108,7 +105,6 @@
         </div>
     </div>
 
-    {# ── Recent deliveries ────────────────────────────────────── #}
     <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Recent deliveries</h2>
         {% if deliveries | length > 0 %}
@@ -136,13 +132,6 @@
                         </td>
                         <td class="px-4 py-2 align-top text-sm text-gray-700 font-mono truncate max-w-[200px]" title="{{ d.notification_id }}">{{ d.notification_id[:12] }}{% if d.notification_id | length > 12 %}&hellip;{% endif %}</td>
                         <td class="px-4 py-2 align-top text-sm text-gray-500 whitespace-nowrap">{{ d.attempted_at[:19] | replace("T", " ") }} UTC</td>
-                        {# The same error_block as the release page. The cell is
-                           capped rather than truncated: a delivery error is a
-                           chained message whose last clause is the useful one,
-                           and `truncate max-w-[250px]` showed the first clause
-                           and hid that. Cells in this row are top-aligned so a
-                           two-line reason doesn't drag its neighbours to the
-                           middle. #}
                         <td class="px-4 py-2 align-top">{% if d.error_message %}{{ error_block(d.error_message) }}{% else %}<span class="text-sm text-gray-400">—</span>{% endif %}</td>
                     </tr>
                     {% endfor %}
@@ -156,7 +145,6 @@
         {% endif %}
     </div>
 
-    {# ── Test ─────────────────────────────────────────────────── #}
     <div class="mb-8">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Testing</h2>
         <div class="border border-gray-200 rounded-lg p-4">

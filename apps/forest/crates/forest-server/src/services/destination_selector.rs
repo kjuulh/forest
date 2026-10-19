@@ -1,51 +1,6 @@
-//! Matching a project's declared destination against a real one.
-//!
-//! A project's `forest.cue` names the places it releases to as *selectors* rather
-//! than names:
-//!
-//! ```cue
-//! env: "data-prod": destinations: [{
-//!     destination: "^data-prod/.*$"
-//!     type:        "forest/generic@1"
-//! }]
-//! ```
-//!
-//! `release prepare` renders that verbatim into each deployment item's
-//! `forest/config.json`, and two things downstream have to agree on what it
-//! matches: the scheduler, deciding which destinations a deploy stage releases
-//! to, and the provider, deciding which config to hand the destination it is
-//! releasing to. They used to disagree — the provider matched the selector as a
-//! regex while the scheduler ignored it entirely and released to every
-//! destination in the environment. An ECS service artifact was scheduled at a
-//! shiitake slice registry, failed there, and the provider was left correctly
-//! refusing to supply config for a destination it could see did not match.
-//!
-//! Hence one function, called by both.
-
 use anyhow::Context;
 
-/// Does `pattern`, as declared by a project, select the destination named
-/// `destination_name`?
-///
-/// The pattern is a **regex**, not a glob and not a literal, matched
-/// **unanchored**. Anchoring is the author's to choose: the selectors in the
-/// field carry their own `^` and `$`, so anchoring here would silently change
-/// what they mean. Unanchored `is_match` is also exactly what
-/// `genericv1::release_config` has always done, and the scheduler must not be a
-/// hair narrower or wider than the thing that supplies config — narrower skips a
-/// destination that would have been configured, wider is the bug this exists to
-/// fix.
-///
-/// An unparseable pattern falls back to equality rather than to matching
-/// everything. A project with a broken selector then filters to nothing and its
-/// stage fails loudly, which is the outcome we want: the alternative reading of
-/// "this pattern is meaningless" is "so release everywhere", and that is how an
-/// artifact ends up somewhere nobody asked for.
 pub fn matches(pattern: &str, destination_name: &str) -> bool {
-    // An empty pattern selects nothing. `Regex::new("")` is perfectly valid and
-    // matches *every* string, so without this an empty selector would quietly
-    // select an entire environment — the silent widening this module exists to
-    // stop, arriving through the one input nobody writes on purpose.
     if pattern.is_empty() {
         return false;
     }
@@ -56,55 +11,23 @@ pub fn matches(pattern: &str, destination_name: &str) -> bool {
     }
 }
 
-/// One rendered deployment item — what the project declared for one
-/// (environment, destination selector, destination type) triple, plus the config
-/// it contributes about itself.
-///
-/// This is the server's record of `release prepare`'s output, parsed once at
-/// annotate time and stored on the annotation. It deliberately mirrors the CLI's
-/// `DeploymentItem` rather than sharing it: the CLI's is a local render type that
-/// also carries a component reference, and this one is a persisted record whose
-/// shape is a compatibility surface.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DeploymentItem {
     pub env: String,
 
-    /// The selector, verbatim as the project wrote it. A regex over destination
-    /// names — see [`matches`].
     pub destination: String,
 
     #[serde(default)]
     pub destination_type: String,
 
-    /// Whatever the project contributes about itself for this destination.
-    /// Absent is normal: most destination types carry everything they need.
     #[serde(default)]
     pub config: Option<serde_json::Value>,
 }
 
-/// Suffix identifying a rendered item's own record within the uploaded files.
 const ITEM_RECORD_SUFFIX: &str = "forest/config.json";
 
-/// The largest declaration we will store, serialized.
-///
-/// Only the items are stored, never the manifests beside them, so the realistic
-/// size is a few hundred bytes per (env × destination × type) triple. The cap is
-/// here so that a project which finds a way to make it enormous gets a clear
-/// error at annotate time instead of a row whose cost nobody predicted.
 const MAX_SERIALIZED_BYTES: usize = 256 * 1024;
 
-/// Parse the project's declaration out of the artifact's uploaded deployment
-/// files.
-///
-/// Takes the files rather than fetching them so that the caller owns the read
-/// (and so this is testable without a database or an object store).
-///
-/// **An item record that will not parse is an error, not a skip.** A partial
-/// declaration is a silently narrower filter — or, if every item fails, a
-/// silently absent one — and scheduling against either is the failure this
-/// column exists to prevent. Annotate is also the right place to fail: it is
-/// loud, immediate, in the CI log of whoever just pushed, and retryable, where a
-/// deploy stage failing on it lands twenty minutes later behind a wait gate.
 pub fn parse_declaration(
     files: &[(std::path::PathBuf, String)],
 ) -> anyhow::Result<Vec<DeploymentItem>> {
@@ -126,19 +49,6 @@ pub fn parse_declaration(
     Ok(items)
 }
 
-/// The config a declaration contributes for one destination, flattened for a
-/// provider that receives a flat string map.
-///
-/// The item is picked by the same [`selects`] the scheduler used, so the config a
-/// destination receives and the reason it was chosen cannot come apart. Nested
-/// structure is dropped rather than encoded as JSON into a value someone would
-/// have to guess the shape of.
-///
-/// Type included, and it matters here as much as in the scheduler: a project
-/// declaring two items for one environment — an ECS one and a terraform one, as
-/// `fungus` does — has two records whose selectors can both match a given name,
-/// and picking the first by name alone hands the ECS destination the terraform
-/// item's config.
 pub fn config_for_destination(
     items: &[DeploymentItem],
     environment: &str,
@@ -170,11 +80,6 @@ pub fn config_for_destination(
         .collect()
 }
 
-/// The declaration recorded for an artifact, if one was.
-///
-/// `None` means the artifact was annotated before the column existed — callers
-/// must fall back to whatever they did then, not treat it as "declared nothing".
-/// `Some(vec![])` is a statement: prepared, and declared nothing.
 pub async fn recorded_declaration(
     db: &sqlx::PgPool,
     artifact: &uuid::Uuid,
@@ -197,15 +102,6 @@ pub async fn recorded_declaration(
     }
 }
 
-/// Projects in `organisation` that a new destination of `destination_type` in
-/// `environment` widens (see [`widened_by_new_destination`]), as
-/// `organisation/project`, sorted.
-///
-/// "Releases into the environment" is read from history: a project with at
-/// least one release to a destination there. Its declaration is the one on its
-/// most recent annotation, which is what its next release is most likely to
-/// carry. That makes this a warning, not a guarantee — a project whose next
-/// artifact declares differently is judged by that artifact when it releases.
 pub async fn projects_widened_by(
     db: &sqlx::PgPool,
     organisation: &str,
@@ -243,8 +139,6 @@ pub async fn projects_widened_by(
             Some(value) if !value.is_null() => match serde_json::from_value(value) {
                 Ok(items) => Some(items),
                 Err(e) => {
-                    // Unreadable is not "declares nothing"; say nothing rather
-                    // than guess, and leave a trace.
                     tracing::warn!(
                         project = row.project,
                         "unreadable recorded declaration: {e}"
@@ -264,19 +158,6 @@ pub async fn projects_widened_by(
     Ok(widened)
 }
 
-/// Does a project's declared destination *type* cover a destination of type
-/// `actual`?
-///
-/// Both are the `organisation/name@version` spelling — `forest/terraform@1` —
-/// the one `destination create --type` takes and the one `release prepare`
-/// renders into each item record, so they compare directly.
-///
-/// **Blank on either side means "do not filter on type."** That is the
-/// compatibility hinge, and it has two real sources: an artifact annotated
-/// before item records carried a type at all (`destination_type` is
-/// `#[serde(default)]`), and a caller that has no type to offer. Neither is a
-/// statement about kind, and reading absence as "matches nothing" would fail
-/// stages for projects that never said anything wrong.
 pub fn type_matches(declared: &str, actual: &str) -> bool {
     let declared = declared.trim();
     let actual = actual.trim();
@@ -288,59 +169,11 @@ pub fn type_matches(declared: &str, actual: &str) -> bool {
     declared == actual
 }
 
-/// Does one declared item select this destination? **Place and kind, both.**
-///
-/// The name selector says *where*; the item's `type` says *what it renders*. A
-/// project that declared `forest/terraform@1` for `^dev/.*$` has said it ships
-/// terraform to the terraform places called `dev/…` — it has not volunteered to
-/// have a terraform plan run at an ECS service that happens to share the name
-/// shape, and it has not asked for an ECS rollout either.
-///
-/// Matching on the name alone is what scheduled a terraform plan for `fungus`
-/// at `platform-dev/eu-west-1/infrastructure-platform`, an ECS place, where the
-/// artifact carries no terraform to run. The destination it *did* declare was
-/// released to as well, so the failure read as "half the release is broken"
-/// rather than as "forest scheduled something nobody asked for".
 pub fn selects(item: &DeploymentItem, destination_name: &str, destination_type: &str) -> bool {
     matches(&item.destination, destination_name)
         && type_matches(&item.destination_type, destination_type)
 }
 
-/// Narrow a set of candidate destinations to the ones a project declared for
-/// `environment`.
-///
-/// The single implementation of the rule, shared by the pipeline path (a deploy
-/// or plan stage activating) and the request path (`forest release` naming an
-/// environment). They were separate once, which is how the pipeline path spent a
-/// release cycle ignoring declarations the request path was already honouring.
-///
-/// `describe` yields a candidate's `(name, type)`. Both are consulted — see
-/// [`selects`].
-///
-/// - Nothing declared for `environment` → every candidate **of a type the
-///   artifact renders at all** (see [`rendered_types`]). This is the
-///   compatibility hinge: a project that declares no destinations keeps
-///   releasing to the whole environment — but only to the kinds of place it
-///   has something for. Without the type half, adding a destination of a new
-///   kind to an environment silently widened every undeclared project onto it,
-///   and their next release failed there (forest#288). An artifact that renders
-///   no typed item at all still fans out to everything, as it always has.
-/// - Declared, and something matches → the matching subset.
-/// - Declared, and nothing matches → `Err` with a message naming the environment,
-///   what it holds, and the selectors that matched none of it. Never an empty
-///   success: silently deploying nothing is the failure this whole mechanism
-///   exists to prevent.
-///
-/// A candidate the declaration does not cover is simply **not scheduled**. It is
-/// not a failure and it does not appear on the release at all: no row, no red
-/// stage, and nothing counted against "stages complete". Failing it instead
-/// would be describing a project's own scoping decision as a problem with the
-/// release.
-///
-/// A selector that matches nothing while a sibling matches something is a
-/// warning, not an error — a regex is allowed not to match, and a project
-/// declaring several regions should not break because one does not exist here
-/// yet.
 pub fn narrow_to_declared<T>(
     candidates: Vec<T>,
     items: &[DeploymentItem],
@@ -374,10 +207,6 @@ pub fn narrow_to_declared<T>(
         .map(|candidate| describe_one(&describe, candidate))
         .collect();
 
-    // Matched the place but not the kind. Kept separately because it is the one
-    // exclusion worth explaining: "your selector found this destination, and
-    // then the types disagreed" is a different thing to debug from "your
-    // selector found nothing".
     let mut wrong_kind: Vec<String> = Vec::new();
 
     let selected: Vec<T> = candidates
@@ -435,14 +264,6 @@ pub fn narrow_to_declared<T>(
     Ok(selected)
 }
 
-/// Every destination type an artifact renders an item for, in any environment —
-/// or `None` when that is not known.
-///
-/// Not known means: no item records at all (an artifact prepared before they
-/// existed, or a project with no component), or any item recorded without a
-/// type (prepared before items carried one). Neither says anything about kind,
-/// so neither may narrow — reading absence as "renders nothing" would stop
-/// projects releasing that never said anything wrong.
 pub fn rendered_types(items: &[DeploymentItem]) -> Option<std::collections::BTreeSet<&str>> {
     if items.is_empty()
         || items
@@ -460,18 +281,6 @@ pub fn rendered_types(items: &[DeploymentItem]) -> Option<std::collections::BTre
     )
 }
 
-/// The undeclared half of [`narrow_to_declared`]: the whole environment, minus
-/// the kinds of destination this artifact has nothing for.
-///
-/// The type rule is the one `work_dirs` and [`selects`] already apply — a
-/// terraform destination is handed only what a terraform item rendered — so a
-/// candidate of a type the artifact never renders could only ever fail there.
-/// Skipping it is the same "not scheduled, not failed" as a declared type
-/// mismatch.
-///
-/// If that leaves nothing, it is an error rather than an empty success, for the
-/// same reason as the declared path: silently deploying nothing is the failure
-/// this module exists to prevent.
 fn narrow_undeclared<T>(
     candidates: Vec<T>,
     items: &[DeploymentItem],
@@ -517,17 +326,6 @@ fn narrow_undeclared<T>(
     Ok(selected)
 }
 
-/// Would a new destination of `destination_type` in `environment` be scheduled
-/// for this project's next release there **without the project having asked
-/// for it** — that is, through the undeclared fan-out of [`narrow_to_declared`]?
-///
-/// `items` is the project's latest recorded declaration: `None` for an
-/// artifact annotated before declarations were recorded, which fans out to
-/// everything and so always gains the destination.
-///
-/// A project that *declares* destinations for the environment is not widened
-/// by this: whether one of its selectors happens to match the new name is its
-/// own explicit choice, and it is answered by the selector, not by fan-out.
 pub fn widened_by_new_destination(
     items: Option<&[DeploymentItem]>,
     environment: &str,
@@ -549,7 +347,6 @@ pub fn widened_by_new_destination(
     }
 }
 
-/// `name (type)`, or just the name when the caller has no type to offer.
 fn describe_one<T>(describe: &impl Fn(&T) -> (&str, &str), candidate: &T) -> String {
     let (name, destination_type) = describe(candidate);
     if destination_type.is_empty() {
@@ -559,9 +356,6 @@ fn describe_one<T>(describe: &impl Fn(&T) -> (&str, &str), candidate: &T) -> Str
     }
 }
 
-/// The same shape for the other side of the comparison, so a failure message
-/// puts `^dev/.*$ (forest/terraform@1)` next to
-/// `platform-dev/… (forest/generic@1)` and the mismatch reads off the line.
 fn describe_declared(item: &DeploymentItem) -> String {
     if item.destination_type.is_empty() {
         item.destination.clone()
@@ -570,18 +364,11 @@ fn describe_declared(item: &DeploymentItem) -> String {
     }
 }
 
-/// A parsed item record together with the directory it governs.
 pub struct ParsedItem {
-    /// The item's root: everything under it belongs to this item.
     pub root: std::path::PathBuf,
     pub item: DeploymentItem,
 }
 
-/// Every deployment item in an uploaded tree, deepest root first.
-///
-/// Deepest-first so attribution picks the innermost enclosing item, for the case
-/// of one item's root sitting inside another's (destination `a` with type `t/u`
-/// nests inside destination `a/t` with type `u/v`).
 pub fn parse_items(files: &[(std::path::PathBuf, String)]) -> anyhow::Result<Vec<ParsedItem>> {
     let mut parsed = Vec::new();
 
@@ -605,7 +392,6 @@ pub fn parse_items(files: &[(std::path::PathBuf, String)]) -> anyhow::Result<Vec
             );
         }
 
-        // <item root>/forest/config.json -> <item root>
         let root = path
             .parent()
             .and_then(|p| p.parent())
@@ -619,15 +405,6 @@ pub fn parse_items(files: &[(std::path::PathBuf, String)]) -> anyhow::Result<Vec
     Ok(parsed)
 }
 
-/// Which item each deployment file belongs to, as `(file_name, env, destination)`.
-///
-/// This is the decision that used to live in the CLI — in two copies, which is
-/// how one of them kept truncating selectors after the other was fixed. Deciding
-/// it here means every client gets it right, including the ones nobody upgrades:
-/// the server has the whole tree, and the tree says what each file is for.
-///
-/// A file under no item is omitted. Its `(env, destination)` cannot be known,
-/// and recording a guess is what produced the original bug.
 pub fn attribute_files<'a>(
     files: &'a [(std::path::PathBuf, String)],
     items: &[ParsedItem],
@@ -648,12 +425,6 @@ pub fn attribute_files<'a>(
     attributed
 }
 
-/// The selectors a declaration names for one environment.
-///
-/// An environment the project said nothing about yields nothing, which callers
-/// read as "no declaration, do not filter" — the backwards-compatible default
-/// that keeps every project which declares no destinations releasing to whole
-/// environments.
 pub fn selectors_for_env<'a>(items: &'a [DeploymentItem], env: &str) -> Vec<&'a str> {
     let mut selectors: Vec<&str> = items
         .iter()
@@ -675,8 +446,6 @@ mod tests {
         selectors_for_env, type_matches, widened_by_new_destination,
     };
 
-    /// What `release prepare` writes, at the path it writes it to — selector and
-    /// destination type both carrying a `/`.
     fn item_record(env: &str, selector: &str) -> (PathBuf, String) {
         (
             PathBuf::from(format!(
@@ -690,7 +459,6 @@ mod tests {
         )
     }
 
-    /// The shape every project in the field actually writes.
     #[test]
     fn an_anchored_selector_matches_its_place_and_nothing_else() {
         let selector = "^data-prod/.*$";
@@ -700,25 +468,17 @@ mod tests {
             "data-prod/eu-west-1/infrastructure-data-ecs"
         ));
 
-        // The destination that took the misrouted release: same environment,
-        // different place. This assertion is the bug.
         assert!(!matches(selector, "data"));
 
-        // Neighbouring environments must not be caught by a prod selector.
         assert!(!matches(selector, "data-dev/eu-west-1/infrastructure-data"));
     }
 
-    /// Anchoring belongs to whoever wrote the selector. Documented as a test
-    /// because the tempting "helpful" change here is to wrap every pattern in
-    /// `^…$`, which would quietly narrow every selector already deployed.
     #[test]
     fn an_unanchored_selector_is_left_unanchored() {
         assert!(matches("data-prod", "data-prod/eu-west-1/x"));
         assert!(matches("data-prod", "legacy-data-prod-mirror"));
     }
 
-    /// A pattern that will not compile means "this one destination", not
-    /// "every destination".
     #[test]
     fn an_unparseable_pattern_falls_back_to_equality() {
         let broken = "^(data-prod";
@@ -728,20 +488,12 @@ mod tests {
         assert!(!matches(broken, "anything-else"));
     }
 
-    /// `annotate` used to split the rendered path on `/` and keep one
-    /// component, so artifacts uploaded before that was fixed recorded
-    /// `^data-prod` where the project wrote `^data-prod/.*$`. Truncating a
-    /// regex at a `/` drops a constraint, so it can only ever match *more* —
-    /// which is why reading such a value is a widening, never a narrowing, and
-    /// why the pipeline path was still correct for the destinations in play.
     #[test]
     fn a_truncated_selector_still_matches_what_the_full_one_would() {
         assert!(matches("^data-prod", "data-prod/eu-west-1/x"));
         assert!(!matches("^data-prod", "data"));
     }
 
-    /// The whole point: the selector survives here intact, where the path-derived
-    /// `artifact_files.destination` column records it cut at the first `/`.
     #[test]
     fn the_declaration_keeps_the_selector_whole() {
         let files = vec![item_record("data", "^data-prod/.*$")];
@@ -754,7 +506,6 @@ mod tests {
         assert_eq!(items[0].destination_type, "forest/generic@1");
     }
 
-    /// Manifests sit beside the item record and must not be mistaken for one.
     #[test]
     fn only_item_records_are_read() {
         let files = vec![
@@ -775,9 +526,6 @@ mod tests {
         assert_eq!(items[0].destination, "^data-dev/.*$");
     }
 
-    /// A project that prepared nothing declared nothing. Distinct from `NULL`,
-    /// which means "annotated before this existed" — both fan out, but only one
-    /// of them is a statement.
     #[test]
     fn no_item_records_is_an_empty_declaration_not_an_error() {
         let files = vec![(
@@ -788,9 +536,6 @@ mod tests {
         assert!(parse_declaration(&files).expect("parse").is_empty());
     }
 
-    /// The contract that keeps a partial declaration from ever being stored.
-    /// If this test is ever "fixed" by making the parse skip bad records, the
-    /// filter silently narrows and nothing reports it.
     #[test]
     fn an_unparseable_item_record_fails_the_whole_parse() {
         let files = vec![
@@ -803,7 +548,6 @@ mod tests {
 
         let err = parse_declaration(&files).expect_err("must not silently skip");
 
-        // The reader needs to know which file, or they are diffing a tree by eye.
         assert!(
             format!("{err:#}").contains("data/x/forest/generic@1/forest/config.json"),
             "error should name the file, got: {err:#}"
@@ -845,9 +589,6 @@ mod tests {
         assert_eq!(selectors_for_env(&items, "data-dev"), vec!["^data-dev/.*$"]);
         assert_eq!(selectors_for_env(&items, "data"), vec!["^data-prod/.*$"]);
 
-        // `canopy-hubspot-ingest`'s live shape: its pipeline deploys `data-prod`
-        // while its forest.cue still declares `data`. Nothing declared for the
-        // stage's environment means no filtering, not an empty filter.
         assert!(selectors_for_env(&items, "data-prod").is_empty());
     }
 
@@ -884,9 +625,6 @@ mod tests {
         );
     }
 
-    /// The slice-registry case: a destination the project did not declare gets
-    /// no config. This is what `genericv1` was already doing correctly while the
-    /// scheduler sent releases there anyway.
     #[test]
     fn a_destination_the_project_did_not_declare_gets_no_config() {
         let items = vec![item(
@@ -906,7 +644,6 @@ mod tests {
             serde_json::json!({ "service": "x" }),
         )];
 
-        // The selector would match, but it was declared for another environment.
         assert!(
             config_for_destination(&items, "data-prod", "data-prod/x", "forest/generic@1")
                 .is_empty()
@@ -936,10 +673,6 @@ mod tests {
         assert!(!config.contains_key("list"), "arrays are dropped");
     }
 
-    /// `Regex::new("")` is valid and matches every string, so the naive
-    /// implementation turned an empty selector into "release to the whole
-    /// environment" — the silent widening this module exists to stop, arriving
-    /// through the one input nobody writes deliberately.
     #[test]
     fn an_empty_selector_selects_nothing_not_everything() {
         assert!(!matches("", "data-prod/eu-west-1/x"));
@@ -947,7 +680,6 @@ mod tests {
         assert!(!matches("", ""));
     }
 
-    /// And it should never reach the column in the first place.
     #[test]
     fn an_item_naming_no_selector_is_refused_at_annotate() {
         let files = vec![(
@@ -975,8 +707,6 @@ mod tests {
         assert!(format!("{err:#}").contains("names no environment"));
     }
 
-    /// The corollary for the read side: an empty selector already sitting in the
-    /// column (written before the guard existed) must not select anything either.
     #[test]
     fn an_empty_selector_already_recorded_still_selects_nothing() {
         let items = vec![DeploymentItem {
@@ -990,19 +720,6 @@ mod tests {
         assert!(!matches(&items[0].destination, "anything"));
     }
 
-    // ── The declared-type intersection ──────────────────────────────────
-    //
-    // `fungus` is the worked example throughout. Its forest.cue declares two
-    // items for one environment:
-    //
-    //     understory/service  ^dev/.*$          forest/terraform@1
-    //     project             ^platform-dev/.*$ forest/generic@1
-    //
-    // and `platform-dev` holds two destinations, one of each type. Selecting on
-    // the name alone puts every item at every destination whose name matches
-    // any of them.
-
-    /// A candidate as the scheduler describes it: name, then type.
     fn dest(name: &str, destination_type: &str) -> (String, String) {
         (name.to_string(), destination_type.to_string())
     }
@@ -1020,9 +737,6 @@ mod tests {
         }
     }
 
-    /// The bug, in one assertion. A terraform item and an ECS destination in the
-    /// same environment: the selector reaches it, the type does not, so it is
-    /// not scheduled.
     #[test]
     fn a_terraform_item_does_not_schedule_an_ecs_destination() {
         let items = vec![declared("platform-dev", "dev.*", "forest/terraform@1")];
@@ -1038,8 +752,6 @@ mod tests {
             ),
         ];
 
-        // Unanchored on purpose: this is what `fungus` shipped, and both names
-        // match it. Only the type tells them apart.
         assert!(matches(
             "dev.*",
             "platform-dev/eu-west-1/infrastructure-platform"
@@ -1055,8 +767,6 @@ mod tests {
         );
     }
 
-    /// And the other direction, which is the same mistake wearing the other hat:
-    /// an ECS item must not schedule a terraform plan.
     #[test]
     fn an_ecs_item_does_not_schedule_a_terraform_destination() {
         let items = vec![declared(
@@ -1085,9 +795,6 @@ mod tests {
         );
     }
 
-    /// `fungus` as it stands today: both types declared, both destinations
-    /// reached. The filter is an intersection, not a veto — over-filtering would
-    /// break the very release it is meant to fix.
     #[test]
     fn a_project_declaring_both_types_schedules_both() {
         let items = vec![
@@ -1112,10 +819,6 @@ mod tests {
         assert_eq!(selected.len(), 2, "got: {selected:?}");
     }
 
-    /// A destination excluded only by its type is *out of scope*, not failed. It
-    /// leaves no release row, so it cannot show up red on the release view and
-    /// cannot be counted against the stages that are in scope — which is the
-    /// difference between `0/2 complete` with a phantom terraform row and `1/1`.
     #[test]
     fn a_destination_of_an_undeclared_type_is_skipped_not_failed() {
         let items = vec![declared("platform-dev", ".*", "forest/generic@1")];
@@ -1132,10 +835,6 @@ mod tests {
         assert_eq!(selected[0].0, "a");
     }
 
-    /// When the *only* thing wrong is the type, the message has to say so.
-    /// "matches none of them" next to a destination the selector obviously
-    /// matches is the kind of error that sends someone to rewrite a working
-    /// regex.
     #[test]
     fn a_type_only_mismatch_says_it_is_a_type_mismatch() {
         let items = vec![declared("platform-dev", "^dev/.*$", "forest/terraform@1")];
@@ -1156,10 +855,6 @@ mod tests {
         );
     }
 
-    /// The compatibility hinge. An artifact annotated before item records
-    /// carried a type has `destination_type: ""`, which is not a claim about
-    /// kind — filtering on it would fail stages for projects that never said
-    /// anything wrong.
     #[test]
     fn an_item_with_no_recorded_type_still_gates_on_the_name_alone() {
         let items = vec![declared("platform-dev", "^dev/.*$", "")];
@@ -1185,7 +880,6 @@ mod tests {
         );
     }
 
-    /// And a caller with no type to offer is not filtered either.
     #[test]
     fn a_candidate_with_no_known_type_is_not_filtered_out() {
         assert!(type_matches("", "forest/generic@1"));
@@ -1193,9 +887,6 @@ mod tests {
         assert!(type_matches("", ""));
     }
 
-    /// Types compare as the whole `organisation/name@version` string. `@1` and
-    /// `@2` of one type are different destination types, and forest already
-    /// treats them that way everywhere else.
     #[test]
     fn types_compare_whole_including_the_version() {
         assert!(type_matches("forest/terraform@1", "forest/terraform@1"));
@@ -1207,10 +898,6 @@ mod tests {
         ));
     }
 
-    /// Declaring nothing at all for an environment still fans out — the hinge
-    /// every project that names no destinations depends on. Unchanged by the
-    /// type filter, and asserted here because the filter now runs over items
-    /// rather than over selectors.
     #[test]
     fn nothing_declared_for_the_environment_still_fans_out_across_its_own_kinds() {
         let items = vec![
@@ -1230,9 +917,6 @@ mod tests {
         assert_eq!(selected.len(), 3, "every destination of a rendered type");
     }
 
-    /// forest#288, as it would have happened: an ECS-only project that declares
-    /// nothing for `dev`, and a terraform destination added to `dev`. The new
-    /// destination must not be scheduled — its artifact has no terraform to run.
     #[test]
     fn a_new_kind_of_destination_does_not_widen_an_undeclared_project() {
         let items = vec![declared("prod", "^prod/.*$", "forest/generic@1")];
@@ -1251,8 +935,6 @@ mod tests {
         );
     }
 
-    /// When the type filter leaves nothing, say so: an empty success would be a
-    /// release that silently deployed nowhere.
     #[test]
     fn an_undeclared_environment_holding_only_other_kinds_fails_loudly() {
         let items = vec![declared("prod", "^prod/.*$", "forest/generic@1")];
@@ -1272,8 +954,6 @@ mod tests {
         assert!(error.contains("forest/generic@1"), "{error}");
     }
 
-    /// The compatibility hinge, kept: with no item records at all there is no
-    /// statement about kind, so nothing is filtered.
     #[test]
     fn an_artifact_with_no_items_still_fans_out_to_everything() {
         let candidates = vec![
@@ -1286,8 +966,6 @@ mod tests {
         assert_eq!(selected.len(), 2);
     }
 
-    /// An item recorded before items carried a type says nothing about kind
-    /// either, so it must not narrow.
     #[test]
     fn an_untyped_item_anywhere_disables_the_type_filter() {
         let items = vec![
@@ -1304,9 +982,6 @@ mod tests {
         assert_eq!(selected.len(), 2);
     }
 
-    /// `destination create`'s warning asks the same question the scheduler
-    /// answers: an ECS-only project that declares nothing for `dev` is widened
-    /// by a new ECS destination there, and not by a terraform one.
     #[test]
     fn a_new_destination_widens_only_undeclared_projects_that_render_its_kind() {
         let ecs_only = vec![declared("prod", "^prod/.*$", "forest/generic@1")];
@@ -1325,8 +1000,6 @@ mod tests {
 
     #[test]
     fn a_project_declaring_the_environment_is_never_widened() {
-        // Even though `.*` would match the new name: that is the project's
-        // selector choosing it, not fan-out.
         let declaring = vec![declared("dev", ".*", "forest/terraform@1")];
 
         assert!(!widened_by_new_destination(
@@ -1355,7 +1028,6 @@ mod tests {
         ));
     }
 
-    /// And a candidate whose own type is unknown is kept, as on the declared path.
     #[test]
     fn an_undeclared_candidate_with_no_known_type_is_kept() {
         let items = vec![declared("prod", "^prod/.*$", "forest/generic@1")];
@@ -1366,8 +1038,6 @@ mod tests {
         assert_eq!(selected.len(), 1);
     }
 
-    /// `selects` is the single rule; `config_for_destination` uses it too, so a
-    /// destination cannot be scheduled by one item and configured by another.
     #[test]
     fn config_comes_from_the_item_that_selected_the_destination() {
         let items = vec![
@@ -1385,8 +1055,6 @@ mod tests {
             },
         ];
 
-        // Both selectors match this name; only the type separates them, and the
-        // terraform item is first in the list.
         let config = config_for_destination(
             &items,
             "platform-dev",
@@ -1397,13 +1065,6 @@ mod tests {
         assert_eq!(config.get("service").map(String::as_str), Some("ecs_one"));
     }
 
-    /// End to end from the real thing: the item records `forest release prepare`
-    /// writes for `fungus`, at the paths it writes them to, against the two
-    /// destinations `understory`'s `platform-dev` actually holds.
-    ///
-    /// Captured from the repo rather than invented, because the two details that
-    /// matter are easy to get wrong from memory: the selector carries a `/`, and
-    /// the two items differ only in their type.
     #[test]
     fn the_fungus_declaration_reaches_one_destination_of_each_kind() {
         let files = vec![
@@ -1441,7 +1102,6 @@ mod tests {
 
         assert_eq!(selected.len(), 2);
 
-        // And each one gets its own item's config, not the other's.
         assert_eq!(
             config_for_destination(
                 &items,
@@ -1466,10 +1126,6 @@ mod tests {
         );
     }
 
-    /// And the version of that declaration this fixes: before `fungus` anchored
-    /// its selector, the terraform item read `dev/.*`, which finds "dev" inside
-    /// "platform-dev". Anchoring was the workaround; consulting the type is what
-    /// makes the workaround unnecessary.
     #[test]
     fn the_unanchored_fungus_selector_no_longer_reaches_the_ecs_place() {
         let items = vec![
@@ -1487,8 +1143,6 @@ mod tests {
             "forest/generic@1",
         )];
 
-        // Only the generic item can claim it, and that is the one whose config
-        // and manifests belong there.
         let selected = narrow_to_declared(ecs, &items, "platform-dev", describe).expect("matches");
         assert_eq!(selected.len(), 1);
 

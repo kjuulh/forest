@@ -60,8 +60,7 @@ impl AccessToken {
 
 impl TokenService {
     pub fn generate_refresh_token(&self) -> anyhow::Result<(String, Vec<u8>)> {
-        // Generate hash
-        let mut buf = [0u8; 64]; // 64 bytes of randomness
+        let mut buf = [0u8; 64];
         rand::fill(&mut buf[..]);
         let hash = sha2::Sha256::digest(buf).to_vec();
 
@@ -75,8 +74,7 @@ impl TokenService {
             .encrypt(&nonce, &buf[..])
             .map_err(|e| anyhow::anyhow!("encrypt refresh token: {e:#}"))?;
 
-        // Concat output = protocol || nonce || cipher
-        let mut output = vec![0, 0, 1]; // 1 is protocol = aesgcm256, 0, 0 for future usage
+        let mut output = vec![0, 0, 1];
         output.extend_from_slice(&nonce);
         output.extend_from_slice(&cipher_text);
 
@@ -90,15 +88,13 @@ impl TokenService {
 
         let (protocol, rest) = refresh_token
             .split_at_checked(3)
-            .context("refresh token doesn't contain a protocol")?; // protocol (first 3 bytes)
+            .context("refresh token doesn't contain a protocol")?;
 
         if protocol[2] != 1 {
-            // 0 0 1 == aesgcm256
             anyhow::bail!("protocol version not supported")
         }
 
-        // aesgcm258
-        let (nonce, ciphertext) = rest.split_at_checked(12).context("invalid ciphertext")?; // nonce is 12 bytes long for gcm
+        let (nonce, ciphertext) = rest.split_at_checked(12).context("invalid ciphertext")?;
         let cipher =
             <Aes256Gcm as aes_gcm::KeyInit>::new_from_slice(self.refresh_token_secret.get_raw())?;
 

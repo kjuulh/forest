@@ -14,10 +14,6 @@ pub enum ReleaseEventType {
     Failed,
     Cancelled,
     TimedOut,
-    /// A newer release for the same project+destination was already pending
-    /// when this one's turn came. Only valid from QUEUED — which is what makes
-    /// "never interrupt a running deploy" and "the latest is never superseded"
-    /// enforceable rather than merely intended. See services/supersede.rs.
     Superseded,
 }
 
@@ -57,8 +53,6 @@ impl ReleaseEventType {
             Self::Failed => &["QUEUED", "ASSIGNED", "RUNNING"],
             Self::Cancelled => &["QUEUED", "ASSIGNED", "RUNNING"],
             Self::TimedOut => &["ASSIGNED", "RUNNING"],
-            // QUEUED only. A release that has left the queue is either in
-            // flight (let it finish) or already terminal (nothing to do).
             Self::Superseded => &["QUEUED"],
         }
     }
@@ -81,7 +75,6 @@ pub struct CreateReleaseParams {
     pub artifact_id: Uuid,
     pub actor: Actor,
     pub force: bool,
-    /// If part of a pipeline, the stage node ID this release belongs to.
     pub stage_id: Option<String>,
 }
 
@@ -92,9 +85,6 @@ pub struct ReleaseEventStore {
 }
 
 impl ReleaseEventStore {
-    /// Create a new release: insert release_states + first event in one tx.
-    /// Allows queuing behind in-flight releases. When `force` is set, cancels
-    /// all other QUEUED releases for this project+destination first.
     pub async fn create_release(&self, params: CreateReleaseParams) -> anyhow::Result<Uuid> {
         let release_id = Uuid::now_v7();
         let mut tx = self.db.begin().await?;
@@ -102,7 +92,6 @@ impl ReleaseEventStore {
         let actor_id = params.actor.actor_id();
         let actor_type = params.actor.actor_type();
 
-        // Force release: cancel all QUEUED releases for this destination
         let cancelled_intent_ids = if params.force {
             let cancelled = sqlx::query!(
                 "UPDATE release_states
@@ -177,7 +166,6 @@ impl ReleaseEventStore {
 
         tx.commit().await?;
 
-        // Publish NATS status updates for cancelled releases
         for (cancelled_id, cancelled_intent_id) in &cancelled_intent_ids {
             let subject = format!("forest.release.status.{}", cancelled_intent_id);
             let payload = serde_json::json!({
@@ -187,7 +175,6 @@ impl ReleaseEventStore {
             let _ = self.nats.publish(subject, payload.to_string().into()).await;
         }
 
-        // Publish to NATS after commit (best-effort, fallback sweep catches misses)
         if let Err(e) = self
             .nats
             .publish("forest.release.queued", release_id.to_string().into())
@@ -199,21 +186,6 @@ impl ReleaseEventStore {
         Ok(release_id)
     }
 
-    /// Create a release that is already failed, in one transaction.
-    ///
-    /// For a deploy Forest did not perform: CI announced it, ran it elsewhere,
-    /// and it failed (DATA-637). The release still belongs in the history —
-    /// leaving the failure as a bare notification would mean a project whose
-    /// successes are releases and whose failures are not, and every view over
-    /// the release history would quietly under-report.
-    ///
-    /// Born failed rather than created-then-failed on purpose. Creating it
-    /// QUEUED and transitioning it afterwards leaves a window — the scheduler
-    /// sweeps every 5s and a `forest/noop@1` destination completes in
-    /// milliseconds, so losing that race would report a *successful* release for
-    /// a deploy that failed. Writing the terminal state and both events in one
-    /// transaction means the release is never dispatchable and there is no race
-    /// to lose.
     pub async fn create_failed_release(
         &self,
         params: CreateReleaseParams,
@@ -243,8 +215,6 @@ impl ReleaseEventStore {
         .await
         .context("insert failed release_states")?;
 
-        // Both events, so the log still reads as a lifecycle rather than a
-        // status appearing from nowhere.
         sqlx::query!(
             "INSERT INTO release_events (
                 release_id, event_type, payload, actor_id, actor_type
@@ -272,9 +242,6 @@ impl ReleaseEventStore {
 
         tx.commit().await?;
 
-        // Deliberately not published to `forest.release.queued`: nothing should
-        // pick this up. Anyone watching the intent still learns about it through
-        // the status subject.
         let subject = format!("forest.release.status.{}", params.release_intent_id);
         let payload = serde_json::json!({
             "release_id": release_id.to_string(),
@@ -285,8 +252,6 @@ impl ReleaseEventStore {
         Ok(release_id)
     }
 
-    /// Emit an event and update materialized state atomically.
-    /// Returns Err if the current status doesn't allow this transition.
     pub async fn emit_event(
         &self,
         release_id: Uuid,
@@ -300,7 +265,6 @@ impl ReleaseEventStore {
 
         let mut tx = self.db.begin().await?;
 
-        // Lock the row and verify current status
         let row = sqlx::query!(
             "SELECT status, release_intent_id, project_id, destination_id, stage_id
              FROM release_states
@@ -326,7 +290,6 @@ impl ReleaseEventStore {
         let destination_id = row.destination_id;
         let stage_id = row.stage_id.clone();
 
-        // Insert event
         let actor_id = actor.map(|a| a.actor_id());
         let actor_type = actor.map(|a| a.actor_type());
 
@@ -343,7 +306,6 @@ impl ReleaseEventStore {
         .execute(&mut *tx)
         .await?;
 
-        // Update materialized state based on event type
         match event_type {
             ReleaseEventType::Assigned => {
                 sqlx::query!(
@@ -371,10 +333,6 @@ impl ReleaseEventStore {
                 .await?;
             }
             ReleaseEventType::Superseded => {
-                // `reason`, not `error_message` — being overtaken is not an
-                // error, and the event payload should not call it one. The
-                // text still lands in the `error_message` column, which is the
-                // one every existing view reads for "why did this end".
                 sqlx::query!(
                     "UPDATE release_states SET
                         status = $2, error_message = $3,
@@ -408,7 +366,6 @@ impl ReleaseEventStore {
             }
         }
 
-        // Write org event into outbox (same transaction)
         let org_project = sqlx::query!(
             "SELECT organisation, project FROM projects WHERE id = $1",
             project_id,
@@ -436,7 +393,6 @@ impl ReleaseEventStore {
 
         tx.commit().await?;
 
-        // Publish status change to NATS (best-effort)
         let nats_subject = format!("forest.release.status.{}", release_intent_id);
         let nats_payload = serde_json::json!({
             "release_id": release_id.to_string(),
@@ -450,13 +406,11 @@ impl ReleaseEventStore {
             tracing::warn!("failed to publish release status to NATS: {e}");
         }
 
-        // Nudge org event listeners
         if let Some(ref op) = org_project {
             let org_subject = format!("forest.events.{}", op.organisation);
             let _ = self.nats.publish(org_subject, "".into()).await;
         }
 
-        // On terminal events, signal the next queued release for this destination
         if matches!(
             event_type,
             ReleaseEventType::Succeeded
@@ -479,7 +433,6 @@ impl ReleaseEventStore {
                     .await;
             }
 
-            // If this release belongs to a pipeline, signal the coordinator to re-evaluate
             if stage_id.is_some() {
                 let _ = self
                     .nats
@@ -489,7 +442,6 @@ impl ReleaseEventStore {
                     )
                     .await;
             } else {
-                // Direct intent (no pipeline) — finalize if all child releases are terminal
                 self.try_finalize_direct_intent(&release_intent_id).await;
             }
         }
@@ -497,20 +449,6 @@ impl ReleaseEventStore {
         Ok(())
     }
 
-    /// Direct intents still ACTIVE whose every release has already finished.
-    ///
-    /// Normally impossible: `emit_event` finalizes an intent the moment its last
-    /// release goes terminal. It becomes possible whenever something writes a
-    /// terminal release *without* going through there — which
-    /// `create_failed_release` does deliberately, and which the next such
-    /// shortcut will do accidentally. The cost of missing one is an intent that
-    /// looks in flight forever, so the reaper reconciles rather than trusting
-    /// every writer to remember (DATA-637).
-    ///
-    /// `min_age_secs` keeps it off intents that are still being built: a release
-    /// created terminal is briefly the only child of an intent whose remaining
-    /// destinations have not been inserted yet, and finalizing there would close
-    /// an intent that is still growing.
     pub async fn find_orphaned_active_intents(
         &self,
         min_age_secs: i64,
@@ -541,17 +479,8 @@ impl ReleaseEventStore {
         Ok(ids)
     }
 
-    /// Finalize a direct (non-pipeline) intent when all child releases are terminal.
-    ///
-    /// Normally reached through `emit_event`, which is how every release that
-    /// transitions into a terminal state gets its intent closed. `create_failed_release`
-    /// writes its terminal state directly and so never passes through there, so
-    /// `release_failed` calls this itself — otherwise an intent whose only release
-    /// is FAILED would sit ACTIVE forever, and a project's failed deploys would
-    /// look permanently in-flight to anything reading intents (DATA-637).
     pub(crate) async fn try_finalize_direct_intent(&self, intent_id: &Uuid) {
         let result: Result<_, anyhow::Error> = async {
-            // Check if this is a direct intent (no stages) that's still ACTIVE
             let intent = sqlx::query!(
                 "SELECT id, stages, status FROM release_intents WHERE id = $1",
                 intent_id,
@@ -564,7 +493,6 @@ impl ReleaseEventStore {
                 return Ok(());
             }
 
-            // Check if all child releases are terminal
             let non_terminal = sqlx::query_scalar!(
                 r#"SELECT count(*) as "count!" FROM release_states
                  WHERE release_intent_id = $1
@@ -578,7 +506,6 @@ impl ReleaseEventStore {
                 return Ok(());
             }
 
-            // All terminal — determine intent status
             let any_failed = sqlx::query_scalar!(
                 r#"SELECT count(*) as "count!" FROM release_states
                  WHERE release_intent_id = $1
@@ -617,8 +544,6 @@ impl ReleaseEventStore {
         }
     }
 
-    /// Pick up queued releases for the fallback sweep.
-    /// Only returns releases whose destination has no ASSIGNED/RUNNING release.
     pub async fn pick_queued_releases(&self, limit: i64) -> anyhow::Result<Vec<QueuedRelease>> {
         let rows = sqlx::query_as!(
             QueuedRelease,
@@ -644,7 +569,6 @@ impl ReleaseEventStore {
         Ok(rows)
     }
 
-    /// Find the next QUEUED release for a destination (oldest first).
     pub async fn next_queued_for_destination(
         &self,
         project_id: &Uuid,
@@ -664,7 +588,6 @@ impl ReleaseEventStore {
         Ok(row)
     }
 
-    /// Get current state for a release by ID.
     pub async fn get_release_state(&self, release_id: &Uuid) -> anyhow::Result<ReleaseState> {
         let row = sqlx::query_as!(
             ReleaseState,
@@ -685,7 +608,6 @@ impl ReleaseEventStore {
         Ok(row)
     }
 
-    /// Get all release states for a given intent.
     pub async fn get_states_by_intent(
         &self,
         release_intent_id: &Uuid,
@@ -711,7 +633,6 @@ impl ReleaseEventStore {
         Ok(rows)
     }
 
-    /// Get release states by actor for history view.
     pub async fn get_states_by_actor(
         &self,
         actor_id: &Uuid,
@@ -751,8 +672,6 @@ impl ReleaseEventStore {
         Ok(rows)
     }
 
-    /// Get release state per destination: the latest completed release ("current")
-    /// plus all in-flight releases with ascending queue position.
     pub async fn get_destination_states(
         &self,
         organisation: &str,
@@ -820,13 +739,6 @@ impl ReleaseEventStore {
         Ok(rows)
     }
 
-    /// Get active pipeline runs (release_intents that have a stages DAG and
-    /// at least one non-terminal stage) for a given organisation/project.
-    ///
-    /// A pipeline is considered active if either:
-    /// - It has in-flight release_states (deploy stages: QUEUED/ASSIGNED/RUNNING), OR
-    /// - Its stage_states JSONB contains any PENDING or ACTIVE stage (covers wait stages
-    ///   and deploy stages that haven't created release_states yet).
     pub async fn get_active_pipeline_runs(
         &self,
         organisation: &str,
@@ -872,39 +784,18 @@ impl ReleaseEventStore {
         Ok(rows)
     }
 
-    /// How many intents an org-wide lookup returns. Spanning every project,
-    /// it is a recent-activity feed rather than a history, so it stays capped.
-    /// A project-scoped lookup is not — see below.
     const ORG_INTENT_LIMIT: i64 = 50;
 
-    /// Get release intent states: a release-centric view that returns
-    /// intent metadata, pipeline stages, and all release steps.
-    ///
-    /// A project-scoped lookup returns that project's **whole** history. It
-    /// used to be capped at 50 like the org-wide one, which quietly broke the
-    /// Releases timeline: forage rebuilds each release's destinations from
-    /// these steps, so a release past the cap had none, fell back to the
-    /// current-state-per-destination view, matched nothing, and rendered as an
-    /// undeployed commit with a blank swim lane — the DATA-660 bug returning
-    /// for anything old enough (DATA-662).
-    ///
-    /// Uncapping is safe here because the result is already bounded by the
-    /// project's own release count — the same bound as the artifact list this
-    /// gets joined against, which that caller fetches unbounded too — and the
-    /// steps below are one batched query rather than one per intent.
     pub async fn get_release_intent_states(
         &self,
         organisation: &str,
         project_id: Option<&Uuid>,
         include_completed: bool,
     ) -> anyhow::Result<Vec<(ReleaseIntentRow, Vec<ReleaseStepRow>)>> {
-        // Postgres treats `LIMIT NULL` as no limit, so this binds the choice
-        // rather than branching into two near-identical queries.
         let limit: Option<i64> = match project_id {
             Some(_) => None,
             None => Some(Self::ORG_INTENT_LIMIT),
         };
-        // Fetch release intents
         let intents = sqlx::query_as!(
             ReleaseIntentRow,
             r#"SELECT
@@ -951,7 +842,6 @@ impl ReleaseEventStore {
 
         let intent_ids: Vec<Uuid> = intents.iter().map(|i| i.release_intent_id).collect();
 
-        // Fetch all release steps for these intents in one query
         let steps = sqlx::query_as!(
             ReleaseStepRow,
             r#"SELECT
@@ -976,7 +866,6 @@ impl ReleaseEventStore {
         .await
         .context("get release steps for intents")?;
 
-        // Group steps by intent
         let mut steps_by_intent: std::collections::HashMap<Uuid, Vec<ReleaseStepRow>> =
             std::collections::HashMap::new();
         for step in steps {
@@ -999,7 +888,6 @@ impl ReleaseEventStore {
         Ok(results)
     }
 
-    /// Find stuck releases for the reaper.
     pub async fn find_stuck_releases(
         &self,
         assigned_timeout_secs: i64,
@@ -1022,7 +910,6 @@ impl ReleaseEventStore {
         Ok(rows)
     }
 
-    /// Update the heartbeat timestamp for an active release.
     pub async fn heartbeat_release(&self, release_id: &Uuid) -> anyhow::Result<()> {
         sqlx::query!(
             "UPDATE release_states SET last_heartbeat_at = now()
@@ -1034,7 +921,6 @@ impl ReleaseEventStore {
         Ok(())
     }
 
-    /// Update heartbeat for all active releases owned by a runner.
     pub async fn heartbeat_runner_releases(&self, runner_id: &str) -> anyhow::Result<()> {
         sqlx::query!(
             "UPDATE release_states SET last_heartbeat_at = now()
@@ -1046,7 +932,6 @@ impl ReleaseEventStore {
         Ok(())
     }
 
-    /// Find releases with stale heartbeats.
     pub async fn find_stale_heartbeats(
         &self,
         threshold_secs: i64,
@@ -1114,7 +999,6 @@ pub struct ReleaseIntentSummaryRow {
     pub status: Option<String>,
 }
 
-/// A single release row in the destination state view.
 pub struct DestinationReleaseRow {
     pub destination_id: Uuid,
     pub destination_name: String,
@@ -1132,7 +1016,6 @@ pub struct DestinationReleaseRow {
     pub stage_id: Option<String>,
 }
 
-/// An active pipeline run with its stage definitions and runtime states.
 pub struct PipelineRunRow {
     pub release_intent_id: Uuid,
     pub artifact_id: Uuid,
@@ -1147,8 +1030,6 @@ pub struct StuckRelease {
     pub status: String,
     pub runner_id: Option<String>,
 }
-
-// ── Release intent states (release-centric view) ─────────────────────
 
 pub struct ReleaseIntentRow {
     pub release_intent_id: Uuid,
@@ -1186,8 +1067,6 @@ impl ReleaseEventStoreState for State {
     }
 }
 
-/// Check approval policies for a target environment within a transaction.
-/// Returns `Some(reason)` if blocked, `None` if all policies pass.
 pub(crate) async fn check_approval_policies(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     project_id: &Uuid,
@@ -1236,15 +1115,12 @@ pub(crate) async fn check_approval_policies(
     Ok(None)
 }
 
-/// Check soak_time policies for a target environment within a transaction.
-/// Returns `Some(reason)` if blocked, `None` if all policies pass.
 pub(crate) async fn check_soak_time_policies(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     project_id: &Uuid,
     artifact_id: &Uuid,
     target_environment: &str,
 ) -> anyhow::Result<Option<String>> {
-    // Load enabled soak_time policies for this project
     let policies = sqlx::query!(
         r#"SELECT name, config
         FROM policies
@@ -1277,8 +1153,6 @@ pub(crate) async fn check_soak_time_policies(
             .and_then(|v: &serde_json::Value| v.as_i64())
             .unwrap_or(0);
 
-        // Find the most recent successful release of THIS artifact to the source environment.
-        // Scoping by artifact prevents unrelated dev deploys from resetting the soak clock.
         let last_success = sqlx::query_scalar!(
             r#"SELECT MAX(rs.updated_at) as "max_updated_at"
             FROM release_states rs
@@ -1312,7 +1186,6 @@ pub(crate) async fn check_soak_time_policies(
                 }
             }
             None => {
-                // No deploy to source env yet — soak time not applicable
                 tracing::debug!(
                     policy = %policy.name,
                     source_env,

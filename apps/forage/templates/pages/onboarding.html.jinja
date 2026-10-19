@@ -2,9 +2,6 @@
 
 {% block content %}
 <section class="max-w-lg mx-auto px-4 pt-16">
-    {# Auto-invite offers (DATA-252) — shown above the create-org form so
-       a user whose verified email matches an existing org's allowlist
-       can join with one click instead of creating a redundant org. #}
     {% include "components/join_offers_banner.html.jinja" %}
 
     <div class="text-center">

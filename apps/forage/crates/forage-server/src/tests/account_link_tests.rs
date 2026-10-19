@@ -1,11 +1,3 @@
-//! Integration tests for the OAuth account-linking routes added in
-//! spec 010-account-integrations. These exercise:
-//!
-//! - GET  /settings/account/{github,google}/connect
-//! - POST /settings/account/{github,google}/disconnect
-//! - Dispatching the existing /auth/{provider}/callback into the link
-//!   flow when the `forage_oauth_link_user` cookie is present.
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use forage_core::auth::*;
@@ -14,13 +6,10 @@ use tower::ServiceExt;
 use crate::build_router;
 use crate::test_support::*;
 
-// ─── Helpers ─────────────────────────────────────────────────────────
-
 fn url_decode(s: &str) -> String {
     urlencoding::decode(s).map(|c| c.into_owned()).unwrap_or_default()
 }
 
-/// Extract the value of a Set-Cookie header matching the given cookie name.
 fn extract_cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
     headers
         .get_all("set-cookie")
@@ -37,8 +26,6 @@ fn extract_cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<String>
         })
 }
 
-// ─── /settings/account/github/connect ────────────────────────────────
-
 #[tokio::test]
 async fn github_link_start_unauthenticated_redirects_to_login() {
     let (state, _sessions) = test_state_with_github_oauth();
@@ -54,7 +41,6 @@ async fn github_link_start_unauthenticated_redirects_to_login() {
         .await
         .unwrap();
 
-    // No session: middleware redirects to /login (302).
     assert!(response.status().is_redirection(), "expected redirect, got {}", response.status());
     let location = response.headers().get("location").unwrap().to_str().unwrap();
     assert!(
@@ -89,7 +75,6 @@ async fn github_link_start_authenticated_redirects_to_github_with_state_and_link
     assert!(location.contains("client_id=test-github-client-id"));
     assert!(location.contains(&url_decode("scope=read%3Auser%20user%3Aemail")) || location.contains("scope=read%3Auser%20user%3Aemail"));
 
-    // Both the state cookie AND the link-purpose cookie must be set.
     let state_cookie = extract_cookie(response.headers(), "forage_oauth_state");
     assert!(state_cookie.is_some(), "missing state cookie");
 
@@ -103,10 +88,6 @@ async fn github_link_start_authenticated_redirects_to_github_with_state_and_link
 
 #[tokio::test]
 async fn login_start_clears_stale_link_cookie() {
-    // Regression: a user may have started a link flow and abandoned it,
-    // leaving forage_oauth_link_user set. A subsequent click on
-    // "Sign in with GitHub" must clear it so the callback dispatches
-    // into the login branch (not the link branch).
     let (state, _sessions) = test_state_with_github_oauth();
     let app = build_router(state);
 
@@ -157,8 +138,6 @@ async fn github_link_start_returns_503_when_oauth_not_configured() {
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
-// ─── /settings/account/google/connect ────────────────────────────────
-
 #[tokio::test]
 async fn google_link_start_authenticated_redirects_to_google_with_link_cookie() {
     let (state, sessions) = test_state_with_google_oauth();
@@ -186,8 +165,6 @@ async fn google_link_start_authenticated_redirects_to_google_with_link_cookie() 
     let link_cookie = extract_cookie(response.headers(), "forage_oauth_link_user");
     assert_eq!(link_cookie.as_deref(), Some("user-123"));
 }
-
-// ─── /auth/github/callback dispatching ───────────────────────────────
 
 #[tokio::test]
 async fn github_callback_link_flow_calls_link_oauth_provider() {
@@ -247,7 +224,6 @@ async fn github_callback_link_flow_with_mismatched_user_returns_403() {
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
-    // The link cookie names a different user than the session.
     let response = app
         .oneshot(
             Request::builder()
@@ -315,8 +291,6 @@ async fn github_callback_link_flow_reports_cross_user_conflict() {
 
 #[tokio::test]
 async fn google_callback_link_flow_calls_link_oauth_provider() {
-    // Symmetric to the github link-flow test. Closes adversarial review
-    // gap #9.
     use std::sync::Arc;
 
     let mock = MockForestClient::new();
@@ -365,11 +339,6 @@ async fn google_callback_link_flow_calls_link_oauth_provider() {
 
 #[tokio::test]
 async fn callback_with_link_cookie_but_no_state_cookie_returns_403_not_link_error() {
-    // Regression for adversarial review #3: state validation must
-    // happen *before* the link-cookie dispatch, so an attacker can't
-    // probe link-vs-login by planting only a link cookie. With no
-    // state cookie, both flows should reject identically with "OAuth
-    // state mismatch" — no leakage of dispatch context.
     let (state, sessions) = test_state_with_github_oauth();
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
@@ -395,8 +364,6 @@ async fn callback_with_link_cookie_but_no_state_cookie_returns_403_not_link_erro
         body_str.contains("OAuth state mismatch"),
         "expected generic state-mismatch error, got: {body_str}"
     );
-    // Crucially: must NOT contain "Link mismatch" which would leak that
-    // we'd otherwise have taken the link branch.
     assert!(
         !body_str.contains("Link mismatch"),
         "state failure must be checked before link mismatch is computed"
@@ -405,9 +372,6 @@ async fn callback_with_link_cookie_but_no_state_cookie_returns_403_not_link_erro
 
 #[tokio::test]
 async fn authenticated_oauth_start_clears_link_cookie_before_redirect() {
-    // Regression for adversarial review #4: a logged-in user hitting
-    // the bare /auth/github URL must clear any stale link cookie so a
-    // later callback can't mis-dispatch.
     let (state, sessions) = test_state_with_github_oauth();
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
@@ -439,8 +403,6 @@ async fn authenticated_oauth_start_clears_link_cookie_before_redirect() {
 
 #[tokio::test]
 async fn github_callback_login_flow_unaffected_when_no_link_cookie() {
-    // Without the link cookie, an unauthenticated callback should still
-    // proceed down the login path and end up at /dashboard or /complete-profile.
     let (state, _sessions) = test_state_with_github_oauth();
     let app = build_router(state);
 
@@ -455,12 +417,8 @@ async fn github_callback_login_flow_unaffected_when_no_link_cookie() {
         .await
         .unwrap();
 
-    // Should not be 403 (link-mismatch). The login flow continues — exact
-    // resulting status depends on the mock, but it should be a redirect.
     assert_ne!(response.status(), StatusCode::FORBIDDEN);
 }
-
-// ─── /settings/account/{provider}/disconnect ─────────────────────────
 
 #[tokio::test]
 async fn github_disconnect_with_valid_csrf_calls_unlink() {
@@ -537,9 +495,6 @@ async fn google_disconnect_with_valid_csrf_calls_unlink() {
 
 #[tokio::test]
 async fn github_disconnect_redirects_with_banner_when_last_auth_method() {
-    // Forest refuses to strip the only sign-in method. The handler must
-    // surface that as a redirect to the account page with the banner code
-    // `last_auth_method` — not a 500 — so the user sees a clear next step.
     let behavior = MockBehavior {
         unlink_oauth_provider_result: Some(Err(AuthError::LastAuthMethod)),
         ..Default::default()
@@ -599,8 +554,6 @@ async fn disconnect_unauthenticated_redirects_to_login() {
     );
 }
 
-// ─── /settings/account rendering ─────────────────────────────────────
-
 #[tokio::test]
 async fn account_page_renders_linked_accounts_when_forest_returns_identities() {
     let behavior = MockBehavior {
@@ -659,7 +612,6 @@ async fn account_page_renders_linked_accounts_when_forest_returns_identities() {
 
 #[tokio::test]
 async fn account_page_hides_link_buttons_for_unconfigured_providers() {
-    // Default test_state has no GitHub or Google OAuth configured.
     let (state, sessions) = test_state();
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
@@ -720,8 +672,6 @@ async fn account_page_shows_link_buttons_when_provider_configured_and_no_link() 
 
 #[tokio::test]
 async fn account_page_hides_link_button_when_provider_already_linked() {
-    // Provider is configured, but the user already has a linked identity
-    // for it — the "Link GitHub" button should not be shown.
     let behavior = MockBehavior {
         list_linked_identities_result: Some(Ok(vec![LinkedIdentity {
             provider: LinkedProvider::GitHub,
@@ -763,7 +713,6 @@ async fn account_page_hides_link_button_when_provider_already_linked() {
         !body_str.contains("href=\"/settings/account/github/connect\""),
         "should NOT show GitHub link button when GitHub is already linked"
     );
-    // The disconnect form should be shown instead.
     assert!(
         body_str.contains("action=\"/settings/account/github/disconnect\""),
         "should show GitHub disconnect form"

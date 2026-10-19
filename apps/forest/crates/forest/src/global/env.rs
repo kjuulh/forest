@@ -1,38 +1,14 @@
-//! Pure resolution of the env vars to inject when running a global tool.
-//!
-//! TASKS/023 §B6/B7. Given a component's declared default env (from the
-//! manifest's `include.env`, cached beside the binary), a developer's per-tool
-//! local override (from `~/.config/forest/forest.cue`), and the set of env-var
-//! names already present in the ambient process environment, compute exactly
-//! the `(key, value)` pairs forest should set on the child.
-//!
-//! Precedence, lowest → highest:
-//!   1. component-declared env (manifest)
-//!   2. per-tool local override (user forest.cue)
-//!   3. ambient process environment (never overwritten)
-//!
-//! Pure core — no I/O. The effectful caller builds `ambient` from
-//! `std::env::vars()` and applies the result via `Command::env`.
-
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Compute the env vars to set on the child process.
-///
-/// `component` and `local` are the declared defaults and the local override.
-/// `ambient` is the set of env-var names already present in the process
-/// environment; any key in it is omitted from the result so the inherited
-/// value wins (the ambient shell environment always wins).
 pub fn resolve_injection(
     component: &BTreeMap<String, String>,
     local: &BTreeMap<String, String>,
     ambient: &BTreeSet<String>,
 ) -> BTreeMap<String, String> {
     let mut out = component.clone();
-    // Local override wins over the component default.
     for (k, v) in local {
         out.insert(k.clone(), v.clone());
     }
-    // Ambient always wins: never set a key the environment already carries.
     out.retain(|k, _| !ambient.contains(k));
     out
 }
@@ -65,8 +41,6 @@ mod tests {
 
     #[test]
     fn ambient_wins_over_component_and_local() {
-        // FUNGUS_SERVER is present in the ambient env → never injected,
-        // regardless of component/local defaults.
         let out = resolve_injection(
             &map(&[("FUNGUS_SERVER", "https://prod")]),
             &map(&[("FUNGUS_SERVER", "http://localhost")]),
@@ -103,7 +77,6 @@ mod tests {
     }
 
     proptest! {
-        /// P1 (ambient-wins): no key present in `ambient` appears in the result.
         #[test]
         fn p1_ambient_keys_never_injected(
             comp in proptest::collection::btree_map("[A-Z]{1,6}", "[a-z]{0,6}", 0..6),
@@ -117,9 +90,6 @@ mod tests {
             }
         }
 
-        /// P2 (precedence) + P3 (no-spurious-keys): every result key comes from
-        /// component ∪ local; local value wins when the key is in both and not
-        /// ambient.
         #[test]
         fn p2_precedence_and_provenance(
             comp in proptest::collection::btree_map("[A-Z]{1,6}", "c[a-z]{0,4}", 0..6),
@@ -135,8 +105,6 @@ mod tests {
             }
         }
 
-        /// P4 (idempotence): re-resolving with the result as both inputs and the
-        /// same ambient is stable.
         #[test]
         fn p4_idempotent(
             comp in proptest::collection::btree_map("[A-Z]{1,6}", "[a-z]{0,6}", 0..6),

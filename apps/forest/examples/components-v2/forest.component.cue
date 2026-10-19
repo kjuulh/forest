@@ -2,31 +2,24 @@ package kubernetes_service
 
 import "forest.sh/forest/sdk@v0"
 
-// --- Input spec: what consuming projects must provide ---
 #Spec: sdk.#ForestSpec & {
 	name:        string & =~"^[a-z][a-z0-9-]*$"
 	namespace:   string | *"default"
 	image:       string
 	environment: "dev" | "staging" | "prod"
 
-	// Core scaling & compute
 	replicas:  int & >=1 & <=100 | *1
 	resources: #Resources
 
-	// Networking
 	ports: [...#Port]
 
-	// Health probes
 	health_checks: #HealthChecks
 
-	// Environment variables
 	env_vars: [...#EnvVar]
 
-	// Labels & annotations (open maps)
 	labels: {[string]:      string}
 	annotations: {[string]: string}
 
-	// Optional features — only generated when present
 	autoscaling?: #Autoscaling
 	ingress?:     #Ingress
 	volumes?: [...#Volume]
@@ -34,7 +27,6 @@ import "forest.sh/forest/sdk@v0"
 	service_mesh?: #ServiceMesh
 }
 
-// --- Commands: actions the component can perform ---
 #Commands: sdk.#ForestCommands & {
 	prepare: {
 		description: "Generate Kubernetes manifests (Deployment, Service, Ingress, HPA, etc.)"
@@ -78,7 +70,6 @@ import "forest.sh/forest/sdk@v0"
 	}
 }
 
-// --- Lifecycle hooks ---
 #Hooks: sdk.#ForestHooks & {
 	"forest/deployment": sdk.#ForestHook & {
 		prepare: {
@@ -134,8 +125,6 @@ import "forest.sh/forest/sdk@v0"
 		}
 	}
 }
-
-// --- Domain types ---
 
 #Port: {
 	name:     string

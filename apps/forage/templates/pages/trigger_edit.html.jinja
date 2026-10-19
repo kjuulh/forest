@@ -1,10 +1,6 @@
 {% extends "base.html.jinja" %}
 {% from "components/project_settings.html.jinja" import project_settings_layout %}
 
-{# Edit form for one trigger. Sits inside the settings shell a level below
-   the Triggers section, so `crumb` points Back at Triggers rather than at
-   the project — "back" means the list you came from. #}
-
 {% block content %}
 {% call project_settings_layout(current_org, current_project, "triggers", "Triggers",
                                 "Update filter patterns and targets for this trigger.",

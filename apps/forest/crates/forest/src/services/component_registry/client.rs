@@ -51,7 +51,6 @@ impl RegistryClients {
         Ok(components)
     }
 
-    // get_clients allows getting access to a list of internal list of clients, which is initialized only once
     async fn get_clients(&self) -> anyhow::Result<&BTreeMap<RegistryName, RegistryClient>> {
         let s = self.state.clone();
         let output = self
@@ -61,7 +60,6 @@ impl RegistryClients {
                     let mut clients = BTreeMap::new();
 
                     clients.insert("forest".to_string(), s.forest_registry_client());
-                    // Get clients from global config
 
                     Ok::<_, anyhow::Error>(clients)
                 }

@@ -6,11 +6,6 @@ repository = "https://git.kjuulh.io/kjuulh/forest"
 readme = "../../README.md"
 license = "MIT"
 
-# `forest` carries its own version — release-please owns this number
-# and bumps it on each release-please PR merge. The rest of the
-# workspace continues to use `version.workspace = true` for now;
-# they're not distributed externally so their version doesn't matter
-# for users.
 version = "0.3.14"
 
 [dependencies]
@@ -51,13 +46,6 @@ uuid = { version = "1.7.0", features = ["v4", "v7"] }
 inquire = "0.9.0"
 indicatif = "0.17"
 console = "0.15"
-# `default-features = false` drops reqwest's `default-tls`, which is an alias
-# for `rustls` and hard-wires the aws-lc-rs provider. `rustls-no-provider`
-# gives the same rustls backend and leaves the provider to us; the rest of
-# this list is what `default` would have enabled anyway. reqwest 0.13 has no
-# ring feature, so this is the only way to get rustls without aws-lc-sys.
-# main() installs the ring provider — reqwest panics with "No provider set"
-# if it is missing.
 reqwest = { version = "0.13.0", default-features = false, features = [
   "charset",
   "http2",
@@ -85,11 +73,6 @@ minijinja = { version = "2.11.0", features = ["builtins"] }
 jiff = "0.2.15"
 tokio-stream = { version = "0.1.17", features = ["sync"] }
 
-# Pinned to match `canopy-otel`, the org's shared telemetry crate, which
-# forest-server depends on. When the CLI ran ahead on 0.32 the workspace
-# compiled both majors of the whole opentelemetry stack — seven duplicate
-# crate names — because 0.x releases are semver-incompatible and cargo cannot
-# unify them. Bump this together with canopy-util-rs, not ahead of it.
 opentelemetry = "0.31"
 opentelemetry_sdk = "0.31"
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }

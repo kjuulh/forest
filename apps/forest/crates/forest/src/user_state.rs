@@ -27,8 +27,6 @@ impl UserStateLoader {
         Ok(())
     }
 
-    /// Acquire an exclusive file lock for cross-process coordination.
-    /// The lock is released when the returned `File` is dropped.
     fn acquire_lock(&self) -> anyhow::Result<File> {
         self.ensure_dir()?;
         let file = File::create(self.lock_path()).context("could not create lock file")?;
@@ -70,8 +68,6 @@ impl UserStateLoader {
         Ok(())
     }
 
-    /// Read the state while holding the file lock.
-    /// Useful for check-then-act patterns (e.g. refresh token flow).
     pub async fn read_locked(&self) -> anyhow::Result<(Option<UserState>, File)> {
         self.ensure_dir()?;
         let lock = self.acquire_lock()?;
@@ -88,7 +84,6 @@ impl UserStateLoader {
         Ok((Some(state), lock))
     }
 
-    /// Write the state while already holding the lock from `read_locked`.
     pub async fn write_locked(&self, state: &UserState, _lock: &File) -> anyhow::Result<()> {
         let state_path = self.state_path();
 
@@ -112,14 +107,10 @@ pub struct UserState {
     pub emails: Vec<String>,
     pub access_token: String,
     pub refresh_access: String,
-    /// Unix timestamp at which the client should attempt a token refresh.
-    /// Computed as the midpoint between token issuance and expiry.
     #[serde(default)]
     pub refresh_after: Option<i64>,
 }
 
-/// Compute the midpoint between now and the session expiry.
-/// Tokens should be refreshed after this timestamp.
 pub fn compute_refresh_after(now: i64, expires_at: i64) -> i64 {
     now + (expires_at - now) / 2
 }
@@ -130,9 +121,6 @@ pub trait UserStateLoaderState {
 
 impl UserStateLoaderState for State {
     fn user_state(&self) -> UserStateLoader {
-        // Context-aware: resolve which named context the auth state lives in.
-        // The `--context` / FOREST_CONTEXT override wins over the registry's
-        // active marker.
         let store = crate::contexts::ContextStore::from_env().expect("resolve XDG data dir");
         let want = self.config.context.as_deref();
         let entry = store

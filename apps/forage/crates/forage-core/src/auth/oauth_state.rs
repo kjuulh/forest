@@ -1,42 +1,25 @@
-//! Per-flow state for OAuth and MFA redirects.
-//!
-//! Each OAuth/MFA flow gets a fresh, opaque state token. The token is
-//! the lookup key for any application-level intent that must survive the
-//! browser detour — primarily a `return_to` path so a device-login user
-//! lands on `/device?user_code=…` after authenticating, not `/dashboard`.
-//!
-//! Why a store (and not a cookie keyed by the state) — cookies are
-//! global-per-browser, so two tabs racing through OAuth overwrite each
-//! other's intent. The state token is already per-flow; binding intent
-//! to it is tab-safe.
-
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 
-/// Provider discriminators used by callers.
 pub const PROVIDER_GOOGLE: &str = "google";
 pub const PROVIDER_GITHUB: &str = "github";
 pub const PROVIDER_MFA: &str = "mfa";
 
-/// Errors from oauth state store operations.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum OAuthStateError {
     #[error("store error: {0}")]
     Store(String),
 }
 
-/// Data persisted for a single in-flight OAuth/MFA flow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OAuthFlowState {
     pub return_to: Option<String>,
 }
 
-/// Trait for per-flow OAuth state persistence.
 #[async_trait::async_trait]
 pub trait OAuthStateStore: Send + Sync {
-    /// Persist a new flow keyed by `(provider, state)`.
     async fn create(
         &self,
         provider: &str,
@@ -45,16 +28,13 @@ pub trait OAuthStateStore: Send + Sync {
         expires_at: DateTime<Utc>,
     ) -> Result<(), OAuthStateError>;
 
-    /// Atomically read-and-delete the flow. Returns `None` if missing or
-    /// expired or if the provider does not match (cross-provider
-    /// redemption is rejected as defence in depth).
+    /// `None` also on a provider mismatch, so a flow cannot be redeemed cross-provider.
     async fn consume(
         &self,
         provider: &str,
         state: &str,
     ) -> Result<Option<OAuthFlowState>, OAuthStateError>;
 
-    /// Remove expired rows (housekeeping; intended for the session reaper).
     async fn reap_expired(&self) -> Result<u64, OAuthStateError>;
 }
 
@@ -64,9 +44,6 @@ struct StoredFlow {
     expires_at: DateTime<Utc>,
 }
 
-/// In-memory store for development and tests. Keys by `(provider, state)`
-/// so the same nonce can't be reused across providers (matches the PG
-/// table's composite PK semantics).
 pub struct InMemoryOAuthStateStore {
     flows: Mutex<HashMap<(String, String), StoredFlow>>,
 }

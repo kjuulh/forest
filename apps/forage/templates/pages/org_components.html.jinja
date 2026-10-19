@@ -6,13 +6,6 @@
     <div class="flex items-center justify-between mb-8 gap-4">
         <h1 class="text-2xl font-bold">Components</h1>
 
-        {# ── Org-scoped install dropdown (spec 011) ─────────────────
-           `forest global add <org>` subscribes the workstation to every
-           tool the org publishes. Mirrors the per-tool dropdown in
-           `pages/project_detail.html.jinja` so the muscle memory carries
-           over. Hidden when the org has nothing to install (no
-           components AND no active query) — a filtered-empty search
-           still surfaces the button because the catalogue isn't empty. #}
         {% if components or query %}
         <details class="relative shrink-0 group">
             <summary class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 cursor-pointer list-none select-none">

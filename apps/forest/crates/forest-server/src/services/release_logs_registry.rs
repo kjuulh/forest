@@ -17,7 +17,6 @@ impl ReleaseLogsRegistry {
         Self { db }
     }
 
-    /// Insert a batch of log lines for a release attempt
     pub async fn insert_log_block(
         &self,
         attempt: Uuid,
@@ -55,7 +54,6 @@ impl ReleaseLogsRegistry {
         Ok(())
     }
 
-    /// Get all log blocks for a release attempt, ordered by sequence
     pub async fn get_logs_by_attempt(&self, attempt: Uuid) -> anyhow::Result<Vec<LogBlock>> {
         let records = sqlx::query!(
             r#"
@@ -93,7 +91,6 @@ impl ReleaseLogsRegistry {
             .collect()
     }
 
-    /// Get all log blocks for a release intent, ordered by sequence
     pub async fn get_logs_by_intent(
         &self,
         release_intent_id: Uuid,
@@ -134,8 +131,6 @@ impl ReleaseLogsRegistry {
             .collect()
     }
 
-    /// Get log blocks for a release intent and destination after a given sequence (cursor-based)
-    /// Returns blocks where sequence > after_sequence, ordered by sequence ASC
     pub async fn get_logs_after_sequence(
         &self,
         release_intent_id: Uuid,

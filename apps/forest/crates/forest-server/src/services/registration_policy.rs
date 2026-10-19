@@ -1,8 +1,3 @@
-//! Registration policy: gate which emails are allowed to create accounts
-//! (and to be added post-signup) on this Forest instance.
-//!
-//! Pure core. No I/O, no DB, no clock.
-
 use std::sync::Arc;
 
 use crate::State;
@@ -96,7 +91,6 @@ mod tests {
 
     #[test]
     fn anchored_regex_rejects_suffix_attack() {
-        // operator-supplied $ anchor protects against this
         assert_eq!(
             understory_only().check_email("kasper@understory.io.evil.com"),
             Err(RegistrationPolicyError::DomainNotAllowed)
@@ -122,9 +116,6 @@ mod tests {
 
     #[test]
     fn unanchored_regex_is_a_footgun_but_honored() {
-        // Operator wrote `@understory\.io` without a `$`. We do not
-        // auto-wrap; the spec calls this out and we log the compiled
-        // pattern at startup so they can see what they configured.
         let policy = RegistrationPolicy::new(Some(regex::Regex::new(r"@understory\.io").unwrap()));
         assert!(policy.check_email("kasper@understory.io.evil.com").is_ok());
     }

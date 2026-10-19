@@ -25,13 +25,10 @@ impl OAuthAppsServer {
         self.state.device_login_aggregate_service()
     }
 
-    /// The OIDC issuer — the public web-app URL (where discovery is served).
     fn issuer(&self) -> &str {
         self.state.config.web_app_url.as_deref().unwrap_or_default()
     }
 
-    /// Authorize the caller as an admin of `organisation_id` and return the
-    /// resolved org id. All OAuth-app management is admin-only.
     async fn authorize_admin(
         &self,
         request_actor: &Actor,
@@ -202,8 +199,6 @@ impl OAuthAppsService for OAuthAppsServer {
         Ok(tonic::Response::new(DeleteOAuthAppResponse {}))
     }
 
-    // ── Authorization server (service-account only; called by Forage) ──
-
     async fn lookup_o_auth_client(
         &self,
         request: tonic::Request<LookupOAuthClientRequest>,
@@ -262,9 +257,6 @@ impl OAuthAppsService for OAuthAppsServer {
         }))
     }
 
-    /// The client_credentials grant. Same service-account gate as the
-    /// rest of the authorization-server surface: Forage fronts it, and
-    /// the client's own credentials are checked inside the service.
     async fn issue_client_credentials_token(
         &self,
         request: tonic::Request<IssueClientCredentialsTokenRequest>,
@@ -288,13 +280,6 @@ impl OAuthAppsService for OAuthAppsServer {
         }))
     }
 
-    /// Resolve a token for a resource server: a machine token, or an access
-    /// token an app holds on a user's behalf (then with the user and their
-    /// organisations).
-    ///
-    /// An unknown, expired or revoked token all return `active: false`
-    /// with empty fields — the caller learns only that it can't be used,
-    /// which keeps this from doubling as a token-probing oracle.
     async fn introspect_client_token(
         &self,
         request: tonic::Request<IntrospectClientTokenRequest>,
@@ -319,8 +304,6 @@ impl OAuthAppsService for OAuthAppsServer {
                     scopes: p.scopes,
                     ..Default::default()
                 };
-                // Only a user-delegated token has a user; a client token
-                // leaves these empty.
                 if let Some(user) = p.user {
                     resp.user_id = user.user_id.to_string();
                     resp.username = user.username;
@@ -491,12 +474,6 @@ impl OAuthAppsService for OAuthAppsServer {
         }))
     }
 
-    // ── Device authorization grant (RFC 8628) for an app ──
-    //
-    // Service-account only, like the rest of the authorization server: Forage
-    // fronts the public endpoints, and the app's own credentials (if it has a
-    // secret) are checked inside the service.
-
     async fn initiate_o_auth_device_authorization(
         &self,
         request: tonic::Request<InitiateOAuthDeviceAuthorizationRequest>,
@@ -640,10 +617,6 @@ impl OAuthAppsService for OAuthAppsServer {
     }
 }
 
-/// Map authorization-server flow errors to gRPC statuses whose *message* is the
-/// RFC 6749 error code, so Forage can translate them into OAuth error responses
-/// (`invalid_client` → 401, `invalid_grant`/`invalid_scope` → 400). Falls back
-/// to the shared mapper for non-flow errors.
 fn oauth_flow_status(err: anyhow::Error) -> tonic::Status {
     use crate::services::oauth_apps::OAuthAppError;
     if let Some(e) = err.downcast_ref::<OAuthAppError>() {
@@ -663,13 +636,10 @@ fn oauth_flow_status(err: anyhow::Error) -> tonic::Status {
             OAuthAppError::InvalidCodeChallengeMethod => {
                 tonic::Status::invalid_argument("invalid_request")
             }
-            // RFC 6749 names these exactly.
             OAuthAppError::UnsupportedGrant(_) => {
                 tonic::Status::invalid_argument("unsupported_grant_type")
             }
             OAuthAppError::ScopeNotGranted(_) => tonic::Status::invalid_argument("invalid_scope"),
-            // Prefixed with the RFC 6749 code so Forage still maps it to
-            // `invalid_request`, and can show the rest to the person.
             OAuthAppError::PkceRequired => {
                 tonic::Status::invalid_argument(format!("invalid_request: {e}"))
             }
@@ -690,9 +660,6 @@ fn parse_uuid(value: &str, field: &str) -> Result<Uuid, tonic::Status> {
         .map_err(|_| tonic::Status::invalid_argument(format!("invalid {field}")))
 }
 
-/// OAuth-app management is performed by a logged-in org admin (a user). The
-/// service-account bypass in `require_org_access_by_id` has no `created_by`,
-/// so creation specifically requires a user actor.
 fn acting_user_id(actor: &Actor) -> Result<Uuid, tonic::Status> {
     match actor {
         Actor::User { user_id } => Ok(*user_id),

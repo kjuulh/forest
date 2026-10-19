@@ -1,10 +1,3 @@
-//! End-to-end tests for the OAuth 2.0 authorization-code flow (M2):
-//! LookupOAuthClient → CreateOAuthAuthorizationCode → ExchangeOAuthCode.
-//!
-//! The authorization-server RPCs are service-account-gated (only Forage calls
-//! them), so these run against `restricted_fixture()` which configures a
-//! service-account key. App management uses a normal user (org admin).
-
 use base64::Engine;
 use forest_grpc_interface::*;
 use sha2::Digest;
@@ -24,9 +17,6 @@ fn authed<T>(token: &str, inner: T) -> tonic::Request<T> {
     req
 }
 
-/// App management runs against the default fixture (no email gating, returns
-/// tokens). The service-account auth-server RPCs run against the restricted
-/// fixture — both share the same database, so apps are visible to both.
 async fn registered_user(fixture: &Fixture) -> (String, String) {
     let resp = fixture
         .users()
@@ -61,7 +51,6 @@ async fn create_org(fixture: &Fixture, token: &str) -> String {
     id.to_string()
 }
 
-/// Create an app and return (client_id, client_secret).
 async fn create_app(fixture: &Fixture, token: &str, org_id: &str) -> (String, String) {
     let resp = fixture
         .oauth_apps()
@@ -113,7 +102,6 @@ async fn full_authorization_code_flow_issues_tokens() {
     let org_id = create_org(&app_fx, &token).await;
     let (client_id, client_secret) = create_app(&app_fx, &token, &org_id).await;
 
-    // Lookup returns public metadata.
     let lookup = fixture
         .oauth_apps()
         .lookup_o_auth_client(authed(
@@ -129,7 +117,6 @@ async fn full_authorization_code_flow_issues_tokens() {
     assert_eq!(lookup.redirect_uris, vec![REDIRECT]);
     assert_eq!(lookup.scopes, vec!["profile", "email"]);
 
-    // Mint a code, then exchange it for tokens.
     let code = mint_code(&fixture, &client_id, &user_id, vec!["profile".into()]).await;
     let tokens = fixture
         .oauth_apps()
@@ -154,7 +141,6 @@ async fn full_authorization_code_flow_issues_tokens() {
     assert_eq!(tokens.expires_in_seconds, 8 * 3600);
     assert_eq!(tokens.scopes, vec!["profile"]);
 
-    // The access token is persisted (hashed) for the consenting user.
     let token_hash = sha2::Sha256::digest(tokens.access_token.as_bytes()).to_vec();
     let stored_user: uuid::Uuid =
         sqlx::query_scalar("SELECT user_id FROM oauth_access_tokens WHERE token_hash = $1")
@@ -164,7 +150,6 @@ async fn full_authorization_code_flow_issues_tokens() {
             .expect("token row");
     assert_eq!(stored_user.to_string(), user_id);
 
-    // Re-using the same code is rejected (single-use).
     let replay = fixture
         .oauth_apps()
         .exchange_o_auth_code(authed(
@@ -191,7 +176,6 @@ async fn userinfo_returns_claims_gated_by_scope() {
     let org_id = create_org(&app_fx, &token).await;
     let (client_id, client_secret) = create_app(&app_fx, &token, &org_id).await;
 
-    // Grant only `profile` — email claims must be withheld.
     let code = mint_code(&fixture, &client_id, &user_id, vec!["profile".into()]).await;
     let tokens = fixture
         .oauth_apps()
@@ -233,7 +217,6 @@ async fn userinfo_returns_claims_gated_by_scope() {
     assert!(info.emails.is_empty());
     assert_eq!(info.scopes, vec!["profile"]);
 
-    // A bogus access token is rejected.
     let err = fixture
         .oauth_apps()
         .get_o_auth_userinfo(authed(
@@ -277,7 +260,6 @@ async fn refresh_rotates_and_detects_reuse() {
     let code = mint_code(&fixture, &client_id, &user_id, vec!["profile".into()]).await;
     let first = exchange(&fixture, &client_id, &client_secret, &code).await;
 
-    // Refresh rotates: new access + new refresh token.
     let refreshed = fixture
         .oauth_apps()
         .refresh_o_auth_token(authed(
@@ -296,7 +278,6 @@ async fn refresh_rotates_and_detects_reuse() {
     assert!(refreshed.access_token.starts_with("forest_oat_"));
     assert_ne!(refreshed.refresh_token, first.refresh_token);
 
-    // The new access token resolves via userinfo.
     let info = fixture
         .oauth_apps()
         .get_o_auth_userinfo(authed(
@@ -312,8 +293,6 @@ async fn refresh_rotates_and_detects_reuse() {
         .expect("userinfo");
     assert_eq!(info.sub, user_id);
 
-    // Reusing the OLD (rotated) refresh token is rejected AND kills the family:
-    // the new refresh token is now also invalid.
     let reuse = fixture
         .oauth_apps()
         .refresh_o_auth_token(authed(
@@ -354,8 +333,6 @@ async fn concurrent_refresh_only_one_succeeds() {
     let code = mint_code(&fixture, &client_id, &user_id, vec!["profile".into()]).await;
     let tokens = exchange(&fixture, &client_id, &client_secret, &code).await;
 
-    // Fire two refreshes with the SAME refresh token concurrently. The atomic
-    // single-use consume must let exactly one win.
     let req = |rt: String| {
         let (cid, cs) = (client_id.clone(), client_secret.clone());
         let fx = fixture.clone();
@@ -388,7 +365,6 @@ async fn revoke_grant_invalidates_access_token() {
     let code = mint_code(&fixture, &client_id, &user_id, vec!["profile".into()]).await;
     let tokens = exchange(&fixture, &client_id, &client_secret, &code).await;
 
-    // The app_id for the grant.
     let app_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM oauth_apps WHERE client_id = $1")
         .bind(&client_id)
         .fetch_one(&fixture.db)
@@ -409,7 +385,6 @@ async fn revoke_grant_invalidates_access_token() {
         .into_inner();
     assert!(resp.revoked_count >= 1);
 
-    // The access token no longer resolves.
     let err = fixture
         .oauth_apps()
         .get_o_auth_userinfo(authed(
@@ -439,11 +414,9 @@ async fn reaper_prunes_dead_rows_but_keeps_live_token() {
         .await
         .unwrap();
 
-    // A genuine live token (must survive reaping).
     let code = mint_code(&fixture, &client_id, &user_id, vec!["profile".into()]).await;
     let live = exchange(&fixture, &client_id, &client_secret, &code).await;
 
-    // Inject an already-expired authorization code and an expired access token.
     sqlx::query(
         "INSERT INTO oauth_authorization_codes (code_hash, app_id, user_id, redirect_uri, scopes, expires_at) \
          VALUES ($1, $2, $3, $4, $5, now() - interval '1 hour')",
@@ -469,13 +442,11 @@ async fn reaper_prunes_dead_rows_but_keeps_live_token() {
     .await
     .unwrap();
 
-    // Run the reaper.
     let repo = OAuthAppRepository::new(fixture.db.clone());
     let (codes, tokens) = repo.reap_expired(&fixture.db).await.unwrap();
     assert!(codes >= 1, "expired code reaped");
     assert!(tokens >= 1, "expired token reaped");
 
-    // The live token still resolves — it was not collateral damage.
     let info = fixture
         .oauth_apps()
         .get_o_auth_userinfo(authed(
@@ -504,7 +475,6 @@ async fn openid_scope_issues_verifiable_id_token() {
     let (user_id, token) = registered_user(&app_fx).await;
     let org_id = create_org(&app_fx, &token).await;
 
-    // App registered with the openid + profile scopes.
     let created = app_fx
         .oauth_apps()
         .create_o_auth_app(authed(
@@ -536,7 +506,6 @@ async fn openid_scope_issues_verifiable_id_token() {
     .await;
     let tokens = exchange(&fixture, &client_id, &client_secret, &code).await;
 
-    // The id_token is present and verifies with the client_secret (HS256).
     assert!(!tokens.id_token.is_empty(), "openid → id_token issued");
     let key: Hmac<Sha256> = Hmac::new_from_slice(client_secret.as_bytes()).unwrap();
     let claims: BTreeMap<String, String> = tokens
@@ -545,7 +514,7 @@ async fn openid_scope_issues_verifiable_id_token() {
         .expect("id_token verifies with client_secret");
     assert_eq!(claims["sub"], user_id);
     assert_eq!(claims["aud"], client_id);
-    assert_eq!(claims["iss"], "http://forage.test.invalid"); // restricted fixture web_app_url
+    assert_eq!(claims["iss"], "http://forage.test.invalid");
     assert!(
         claims.contains_key("preferred_username"),
         "profile scope → username"
@@ -585,7 +554,6 @@ async fn id_token_echoes_oidc_nonce() {
     let client_id = app.client_id;
     let client_secret = created.client_secret;
 
-    // Mint a code carrying an OIDC nonce.
     let code = fixture
         .oauth_apps()
         .create_o_auth_authorization_code(authed(
@@ -634,25 +602,21 @@ async fn consent_is_remembered_and_cleared_on_revoke() {
         }
     };
 
-    // No consent on record yet.
     assert!(
         get_consent(client_id.clone(), user_id.clone())
             .await
             .is_empty()
     );
 
-    // Approving (minting a code) records consent.
     mint_code(&fixture, &client_id, &user_id, vec!["profile".into()]).await;
     let scopes = get_consent(client_id.clone(), user_id.clone()).await;
     assert_eq!(scopes, vec!["profile"]);
 
-    // A second approval with another scope widens (unions) the consent.
     mint_code(&fixture, &client_id, &user_id, vec!["email".into()]).await;
     let mut scopes = get_consent(client_id.clone(), user_id.clone()).await;
     scopes.sort();
     assert_eq!(scopes, vec!["email", "profile"]);
 
-    // Revoking the grant forgets the consent.
     let app_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM oauth_apps WHERE client_id = $1")
         .bind(&client_id)
         .fetch_one(&fixture.db)
@@ -680,7 +644,6 @@ async fn list_grants_reflects_authorize_and_revoke() {
     let org_id = create_org(&app_fx, &token).await;
     let (client_id, client_secret) = create_app(&app_fx, &token, &org_id).await;
 
-    // No grants yet.
     let grants = fixture
         .oauth_apps()
         .list_o_auth_grants(authed(
@@ -695,7 +658,6 @@ async fn list_grants_reflects_authorize_and_revoke() {
         .grants;
     assert!(grants.is_empty());
 
-    // Authorize → one grant appears with the granted scopes.
     let code = mint_code(
         &fixture,
         &client_id,
@@ -722,7 +684,6 @@ async fn list_grants_reflects_authorize_and_revoke() {
     assert!(grants[0].scopes.contains(&"profile".to_string()));
     assert!(grants[0].scopes.contains(&"email".to_string()));
 
-    // Revoke → grant disappears.
     let app_id = grants[0].app_id.clone();
     fixture
         .oauth_apps()
@@ -754,7 +715,6 @@ async fn wrong_secret_is_invalid_client_and_wrong_redirect_is_invalid_grant() {
     let org_id = create_org(&app_fx, &token).await;
     let (client_id, client_secret) = create_app(&app_fx, &token, &org_id).await;
 
-    // Wrong secret → invalid_client.
     let code = mint_code(&fixture, &client_id, &user_id, vec!["profile".into()]).await;
     let err = fixture
         .oauth_apps()
@@ -773,7 +733,6 @@ async fn wrong_secret_is_invalid_client_and_wrong_redirect_is_invalid_grant() {
     assert_eq!(err.code(), tonic::Code::Unauthenticated);
     assert_eq!(err.message(), "invalid_client");
 
-    // Wrong redirect_uri at exchange → invalid_grant (fresh code).
     let code = mint_code(&fixture, &client_id, &user_id, vec!["profile".into()]).await;
     let err = fixture
         .oauth_apps()
@@ -801,7 +760,6 @@ async fn unregistered_redirect_or_scope_is_rejected_at_code_creation() {
     let org_id = create_org(&app_fx, &token).await;
     let (client_id, _secret) = create_app(&app_fx, &token, &org_id).await;
 
-    // Redirect not in the allowlist.
     let err = fixture
         .oauth_apps()
         .create_o_auth_authorization_code(authed(
@@ -820,7 +778,6 @@ async fn unregistered_redirect_or_scope_is_rejected_at_code_creation() {
         .expect_err("bad redirect");
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
 
-    // Scope the app didn't register for.
     let err = fixture
         .oauth_apps()
         .create_o_auth_authorization_code(authed(
@@ -853,7 +810,6 @@ async fn pkce_s256_required_verifier_must_match() {
     let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .encode(sha2::Sha256::digest(verifier.as_bytes()));
 
-    // Mint a code bound to the S256 challenge.
     let mint = |challenge: String| {
         let client_id = client_id.clone();
         let user_id = user_id.clone();
@@ -880,7 +836,6 @@ async fn pkce_s256_required_verifier_must_match() {
         }
     };
 
-    // Wrong verifier → invalid_grant.
     let code = mint(challenge.clone()).await;
     let err = fixture
         .oauth_apps()
@@ -898,7 +853,6 @@ async fn pkce_s256_required_verifier_must_match() {
         .expect_err("pkce mismatch");
     assert_eq!(err.code(), tonic::Code::FailedPrecondition);
 
-    // Correct verifier → success.
     let code = mint(challenge).await;
     let tokens = fixture
         .oauth_apps()
@@ -920,10 +874,6 @@ async fn pkce_s256_required_verifier_must_match() {
     assert!(tokens.access_token.starts_with("forest_oat_"));
 }
 
-// ─── Public clients (RFC 8252 native apps) ───────────────────────────
-
-/// A native app's registered redirect: loopback, no port. The CLI listens on
-/// whatever port is free and asks for that one.
 const LOOPBACK: &str = "http://127.0.0.1/callback";
 const LOOPBACK_ON_PORT: &str = "http://127.0.0.1:53817/callback";
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
@@ -950,7 +900,6 @@ fn public_app_request(
     }
 }
 
-/// Create a public app for the data gateway and return its client_id.
 async fn create_public_app(fixture: &Fixture, token: &str, org_id: &str) -> String {
     let resp = fixture
         .oauth_apps()
@@ -1044,7 +993,6 @@ async fn a_public_app_has_no_secret_and_refuses_openid_and_client_credentials() 
     assert!(app.public);
     assert_eq!(app.grant_types, vec!["authorization_code"]);
 
-    // Its id_token would be signed with a secret it does not have.
     let err = app_fx
         .oauth_apps()
         .create_o_auth_app(authed(
@@ -1056,7 +1004,6 @@ async fn a_public_app_has_no_secret_and_refuses_openid_and_client_credentials() 
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
     assert!(err.message().contains("openid"), "{}", err.message());
 
-    // It has no secret to authenticate a client-credentials request with.
     let err = app_fx
         .oauth_apps()
         .create_o_auth_app(authed(
@@ -1072,7 +1019,6 @@ async fn a_public_app_has_no_secret_and_refuses_openid_and_client_credentials() 
         err.message()
     );
 
-    // An update cannot widen it into either.
     let update = |scopes: Vec<String>, grant_types: Vec<String>| UpdateOAuthAppRequest {
         organisation_id: org_id.clone(),
         app_id: app.app_id.clone(),
@@ -1114,7 +1060,6 @@ async fn a_public_app_has_no_secret_and_refuses_openid_and_client_credentials() 
         .expect("app");
     assert!(updated.public, "public is fixed at creation");
 
-    // And there is no secret to rotate.
     let err = app_fx
         .oauth_apps()
         .rotate_o_auth_app_secret(authed(
@@ -1137,8 +1082,6 @@ async fn a_public_app_must_use_s256_pkce() {
     let org_id = create_org(&app_fx, &token).await;
     let client_id = create_public_app(&app_fx, &token, &org_id).await;
 
-    // No challenge, and a `plain` one (which travels in the clear), are both
-    // refused with an error Forage can send back as `invalid_request`.
     for (challenge, method) in [("", ""), (VERIFIER, "plain"), (VERIFIER, "")] {
         let err = mint_public_code(
             &fixture,
@@ -1205,7 +1148,6 @@ async fn a_public_app_exchanges_and_refreshes_without_a_secret() {
     let client_id = create_public_app(&app_fx, &token, &org_id).await;
     let challenge = s256(VERIFIER);
 
-    // The wrong verifier fails: with no secret, it is what binds the code.
     let code = mint_public_code(
         &fixture,
         &client_id,
@@ -1222,7 +1164,6 @@ async fn a_public_app_exchanges_and_refreshes_without_a_secret() {
     assert_eq!(err.code(), tonic::Code::FailedPrecondition);
     assert_eq!(err.message(), "invalid_grant");
 
-    // So does no verifier at all.
     let code = mint_public_code(
         &fixture,
         &client_id,
@@ -1238,7 +1179,6 @@ async fn a_public_app_exchanges_and_refreshes_without_a_secret() {
         .expect_err("missing verifier");
     assert_eq!(err.code(), tonic::Code::FailedPrecondition);
 
-    // The right one, with no secret, gets tokens (and no id_token).
     let code = mint_public_code(
         &fixture,
         &client_id,
@@ -1256,7 +1196,6 @@ async fn a_public_app_exchanges_and_refreshes_without_a_secret() {
     assert!(tokens.id_token.is_empty());
     assert_eq!(tokens.scopes, vec!["datagateway:apply"]);
 
-    // Refresh needs no secret either.
     let refreshed = fixture
         .oauth_apps()
         .refresh_o_auth_token(authed(
@@ -1284,7 +1223,6 @@ async fn a_confidential_app_still_needs_its_secret_at_exchange_and_refresh() {
     let org_id = create_org(&app_fx, &token).await;
     let (client_id, client_secret) = create_app(&app_fx, &token, &org_id).await;
 
-    // A missing secret is refused, even with a valid PKCE verifier.
     let code = fixture
         .oauth_apps()
         .create_o_auth_authorization_code(authed(
@@ -1392,8 +1330,6 @@ async fn a_user_delegated_token_introspects_as_the_user_until_revoked() {
         }]
     );
 
-    // A person's own forest session is not an OAuth token, and the refresh
-    // token is not an access token.
     for not_oauth in [
         token.as_str(),
         tokens.refresh_token.as_str(),
@@ -1403,8 +1339,6 @@ async fn a_user_delegated_token_introspects_as_the_user_until_revoked() {
         assert_eq!(got, IntrospectClientTokenResponse::default(), "{not_oauth}");
     }
 
-    // It introspects as the user, but it is not a credential for Forest's own
-    // API: the auth layer accepts client tokens, never a user-delegated one.
     let err = app_fx
         .organisations()
         .list_my_organisations(authed(
@@ -1417,7 +1351,6 @@ async fn a_user_delegated_token_introspects_as_the_user_until_revoked() {
         .expect_err("a user-delegated token does not authenticate gRPC");
     assert_eq!(err.code(), tonic::Code::Unauthenticated);
 
-    // Revoking the grant ends it.
     fixture
         .oauth_apps()
         .revoke_o_auth_grant(authed(

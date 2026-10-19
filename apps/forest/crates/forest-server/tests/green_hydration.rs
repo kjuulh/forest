@@ -1,16 +1,3 @@
-//! Mire migration rehearsal gate: every historical aggregate stream must load
-//! through Mire, and a command must still commit its event and its projection
-//! atomically.
-//!
-//! These tests are skipped unless `GREEN_DATABASE_URL` points at a migrated
-//! rehearsal database (an Aurora snapshot/dump restored into a green cluster,
-//! prepared with `forest-event-migration prepare` + `mire-migrate`). They are
-//! deliberately read-only apart from the explicitly transactional smoke case,
-//! which rolls itself back.
-//!
-//! Run with:
-//!   GREEN_DATABASE_URL=postgres://... cargo test -p forest-server --test green_hydration -- --nocapture
-
 use forest_server::domains::{
     app::AppAggregate,
     component::{ComponentAggregate, VersionState},
@@ -32,7 +19,6 @@ async fn green_pool() -> Option<PgPool> {
     )
 }
 
-/// Stream ids are `{category}-{id}`; recover the aggregate id.
 async fn stream_ids_for(pool: &PgPool, category: &str) -> Vec<(String, i64)> {
     sqlx::query(
         "SELECT stream_id, stream_version FROM es_streams WHERE stream_category = $1 ORDER BY stream_id",
@@ -54,8 +40,6 @@ async fn stream_ids_for(pool: &PgPool, category: &str) -> Vec<(String, i64)> {
     .collect()
 }
 
-/// Load every stream of one category and assert Mire hydrates it to the version
-/// the stream table records. Returns how many streams were checked.
 async fn hydrate_category<A: Aggregate>(store: &EventStore, pool: &PgPool) -> usize {
     let category = A::stream_category();
     let streams = stream_ids_for(pool, category).await;
@@ -113,7 +97,6 @@ async fn every_historical_stream_loads_through_mire() {
     );
 }
 
-/// The migration must not silently drop events or reorder global positions.
 #[tokio::test]
 async fn event_log_invariants_hold_after_migration() {
     let Some(pool) = green_pool().await else {
@@ -131,7 +114,6 @@ async fn event_log_invariants_hold_after_migration() {
     .expect("count orphan events");
     assert_eq!(orphans, 0, "events exist without a stream");
 
-    // Every stream's versions must be a contiguous 1..=n run.
     let broken: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM (
            SELECT stream_id,
@@ -146,7 +128,6 @@ async fn event_log_invariants_hold_after_migration() {
     .expect("check stream version runs");
     assert_eq!(broken, 0, "streams have version gaps or are not 1-based");
 
-    // Mire's compatibility columns must be fully backfilled.
     let unfilled: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM es_events
           WHERE transaction_id IS NULL
@@ -162,7 +143,6 @@ async fn event_log_invariants_hold_after_migration() {
         "Mire compatibility columns are not fully backfilled"
     );
 
-    // The global-position sequence must not hand out a used value.
     let row = sqlx::query(
         "SELECT (SELECT last_value FROM es_events_global_position_seq) AS seq,
                 (SELECT coalesce(max(global_position), 0) FROM es_events) AS max_pos",
@@ -182,25 +162,6 @@ async fn event_log_invariants_hold_after_migration() {
     );
 }
 
-// ============================================================
-// Phase 6 — replay comparison against the live projections
-// ============================================================
-//
-// Full Mire shadow projections (standalone handlers writing `*_mire_shadow`
-// tables) are not implemented yet. What is verifiable today — and what the
-// go/no-go gate actually asks for — is that replaying the event log through
-// Mire agrees with the projection rows the live read path serves.
-//
-// For each category we replay every stream through Mire and compare the
-// resulting aggregate against the live projection row, keyed exactly the way
-// `forest-event-migration audit` composes it. Volatile replay timestamps are
-// deliberately not compared, per the runbook.
-//
-// Deleted aggregates matter here: a stream survives deletion while its
-// projection row is removed, so "stream count == projection row count" is the
-// wrong assertion. Lifecycle state is what must agree.
-
-/// Does exactly one projection row exist for this composed stream id?
 async fn projection_rows(pool: &PgPool, sql: &'static str, stream_id: &str) -> i64 {
     sqlx::query_scalar(sql)
         .bind(stream_id)
@@ -217,7 +178,6 @@ async fn replayed_lifecycle_matches_live_projections() {
     };
     let store = EventStore::new(pool.clone());
 
-    // (category, count-rows-for-this-stream-id SQL)
     const APP_SQL: &str = "SELECT count(*)::bigint FROM apps p WHERE 'app-' || p.organisation_id::text || '/' || p.name = $1";
     const DESTINATION_SQL: &str = "SELECT count(*)::bigint FROM destinations p WHERE 'destination-' || p.organisation || '/' || p.name = $1";
     const POLICY_SQL: &str = "SELECT count(*)::bigint FROM policies p WHERE 'policy-' || p.project_id::text || '/' || p.name = $1";
@@ -286,8 +246,6 @@ async fn replayed_lifecycle_matches_live_projections() {
         forest_server::domains::trigger::TriggerStatus::Active
     );
 
-    // Device grants are never deleted: every stream keeps exactly one row.
-    // Compare the stable user_code too, not just presence.
     let mut grants = 0;
     for (id, _) in stream_ids_for(&pool, "device_grant").await {
         let stream_id = format!("device_grant-{id}");
@@ -317,10 +275,6 @@ async fn replayed_lifecycle_matches_live_projections() {
     }
     println!("  device_grant   {grants} grants — presence and user_code agree");
 
-    // Components are versioned. Only `Published` versions are served by the read
-    // path: `Uploading` is an upload still in flight and `Unpublished` was
-    // removed by an owner, and neither keeps a `components` row. Compare the
-    // replayed *published* set against the projection, version by version.
     let mut components = 0;
     let mut published_total = 0i64;
     let mut skipped_total = 0i64;
@@ -347,8 +301,6 @@ async fn replayed_lifecycle_matches_live_projections() {
             published.len()
         );
 
-        // Every published version must be individually present, and every
-        // non-published version must be absent.
         for (version, state) in &root.state.versions {
             let present: i64 = sqlx::query_scalar(
                 "SELECT count(*)::bigint FROM components
@@ -388,18 +340,6 @@ async fn replayed_lifecycle_matches_live_projections() {
     assert!(compared > 0, "no streams were compared");
 }
 
-// ============================================================
-// Phase 5 — transactional command smoke on migrated data
-// ============================================================
-//
-// The whole point of routing Forest's writes through Mire's `TransactionScope`
-// is that the event append and the synchronous projection SQL still commit or
-// roll back together. Prove both directions against the migrated database.
-//
-// This test writes. It is only ever pointed at a disposable green rehearsal
-// copy, never at the source cluster.
-
-/// Count events and streams so a rollback can be shown to leave no trace.
 async fn event_store_shape(pool: &PgPool) -> (i64, i64) {
     let row = sqlx::query(
         "SELECT (SELECT count(*) FROM es_events) AS events,
@@ -423,8 +363,6 @@ async fn command_commits_event_and_projection_atomically() {
     }
 
     let store = EventStore::new(pool.clone());
-    // `apps.created_by` carries a foreign key to `users`, so take an
-    // organisation together with one of its real members.
     let row = sqlx::query(
         "SELECT m.organisation_id, m.user_id
            FROM organisation_members m
@@ -440,7 +378,6 @@ async fn command_commits_event_and_projection_atomically() {
 
     let (events_before, streams_before) = event_store_shape(&pool).await;
 
-    // ---- 1. happy path: event + projection commit together ----
     let app_id = uuid::Uuid::now_v7();
     let name = format!("mire-green-smoke-{}", &app_id.to_string()[..8]);
     let aggregate_id = format!("{organisation_id}/{name}");
@@ -496,7 +433,6 @@ async fn command_commits_event_and_projection_atomically() {
         "the projection row did not commit with the event"
     );
 
-    // The committed stream must hydrate back through Mire.
     let reloaded = store
         .load::<AppAggregate>(&aggregate_id)
         .await
@@ -508,7 +444,6 @@ async fn command_commits_event_and_projection_atomically() {
     );
     println!("committed app event + projection atomically, and it hydrates back");
 
-    // ---- 2. failure path: a broken projection must roll the event back ----
     let (events_mid, streams_mid) = event_store_shape(&pool).await;
 
     let mut doomed = store
@@ -522,13 +457,12 @@ async fn command_commits_event_and_projection_atomically() {
         .await
         .expect("begin failing scope");
     scope.save(&mut doomed).await.expect("append suspend event");
-    // Deliberate foreign-key violation: no such organisation.
     let broken = sqlx::query(
         "INSERT INTO apps (id, organisation_id, name, description, permissions, created_by, suspended, created_at, updated_at)
          VALUES ($1, $2, $3, NULL, '{}'::jsonb, $2, false, now(), now())",
     )
     .bind(uuid::Uuid::now_v7())
-    .bind(uuid::Uuid::nil()) // not a real organisation -> FK violation
+    .bind(uuid::Uuid::nil())
     .bind(format!("{name}-doomed"))
     .execute(&mut **scope.tx())
     .await;
@@ -536,7 +470,7 @@ async fn command_commits_event_and_projection_atomically() {
         broken.is_err(),
         "the projection insert was supposed to violate a foreign key"
     );
-    drop(scope); // no commit: both sides must vanish
+    drop(scope);
 
     let (events_rolled, streams_rolled) = event_store_shape(&pool).await;
     assert_eq!(

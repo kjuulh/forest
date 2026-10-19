@@ -97,21 +97,6 @@ impl InitService {
 
         let temp = self.temp.create_emphemeral_temp().await?;
 
-        // let init = choice
-        //     .component
-        //     .init
-        //     .get(&choice.init)
-        //     .expect("item from choice to match internal structure");
-
-        // let choices = self.collect_input(choice).await?;
-        // println!("choice: {}", choice.name);
-
-        // if !choices.is_empty() {
-        //     for (k, v) in &choices {
-        //         println!("  - {k}: {v}");
-        //     }
-        // }
-
         let component_path = self
             .components
             .get_component_path(&choice.component)
@@ -123,10 +108,6 @@ impl InitService {
             .await
             .context("copy init for render choice")?;
 
-        // self.apply_templates(&temp, &choices)
-        //     .await
-        //     .context("apply templates")?;
-
         Ok(Template { path: temp })
     }
 
@@ -137,47 +118,8 @@ impl InitService {
             .await
             .context("copy files to final destination")?;
 
-        // TODO: move template files into current dir
-
         Ok(())
     }
-
-    // #[tracing::instrument(skip(self), level = "trace")]
-    // async fn collect_input(
-    //     &self,
-    //     init: &crate::component_cache::models::Init,
-    // ) -> anyhow::Result<BTreeMap<String, String>> {
-    //     tracing::debug!("collecting input from user");
-    //     let mut inputs = BTreeMap::new();
-
-    //     for (input_name, input_requirements) in &init.input {
-    //         let prompt =
-    //             inquire::Text::new(input_name).with_initial_value(&input_requirements.default);
-
-    //         let prompt = if let Some(desc) = &input_requirements.description {
-    //             prompt.with_help_message(desc)
-    //         } else {
-    //             prompt
-    //         };
-
-    //         let output = if input_requirements.required {
-    //             let output = prompt.prompt()?;
-    //             if output.is_empty() {
-    //                 anyhow::bail!("{} is required", input_name)
-    //             }
-
-    //             output
-    //         } else {
-    //             prompt
-    //                 .prompt_skippable()?
-    //                 .unwrap_or_else(|| input_requirements.default.clone())
-    //         };
-
-    //         inputs.insert(input_name.clone(), output);
-    //     }
-
-    //     Ok(inputs)
-    // }
 
     async fn apply_templates(
         &self,

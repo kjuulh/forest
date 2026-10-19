@@ -1,8 +1,6 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-// ─── Core user ───────────────────────────────────────────────────────
-
 pub struct User {
     pub id: Uuid,
     pub username: String,
@@ -33,8 +31,6 @@ impl From<User> for forest_grpc_interface::User {
     }
 }
 
-// ─── Email ───────────────────────────────────────────────────────────
-
 pub struct UserEmail {
     pub email: String,
     pub verified: bool,
@@ -57,8 +53,6 @@ impl From<forest_grpc_interface::UserEmail> for UserEmail {
         }
     }
 }
-
-// ─── OAuth ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OAuthProvider {
@@ -139,17 +133,11 @@ impl From<OAuthConnection> for forest_grpc_interface::OAuthConnection {
             provider_user_id: value.provider_user_id,
             provider_email: value.provider_email.unwrap_or_default(),
             linked_at: Some(datetime_to_timestamp(value.linked_at)),
-            // The forest-models OAuthConnection does not carry these
-            // extras yet — populate empty so the wire shape is satisfied.
-            // The full data is plumbed via the services::users path that
-            // bypasses this conversion.
             provider_display_name: String::new(),
             provider_data_json: String::new(),
         }
     }
 }
-
-// ─── Auth tokens ─────────────────────────────────────────────────────
 
 pub struct AuthTokens {
     pub access_token: String,
@@ -167,16 +155,12 @@ impl From<AuthTokens> for forest_grpc_interface::AuthTokens {
     }
 }
 
-// ─── Session ─────────────────────────────────────────────────────────
-
 pub struct Session {
     pub id: Uuid,
     pub user_id: Uuid,
     pub expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
-
-// ─── Personal access token ──────────────────────────────────────────
 
 pub struct PersonalAccessToken {
     pub id: Uuid,
@@ -187,8 +171,6 @@ pub struct PersonalAccessToken {
     pub last_used: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
-
-// ─── MFA ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MfaType {
@@ -232,8 +214,6 @@ impl TryFrom<forest_grpc_interface::MfaType> for MfaType {
         }
     }
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────
 
 fn datetime_to_timestamp(dt: DateTime<Utc>) -> prost_types::Timestamp {
     prost_types::Timestamp {

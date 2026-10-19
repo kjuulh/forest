@@ -44,9 +44,6 @@ struct SchedulerInner {
     release_token_registry: ReleaseTokenRegistry,
     release_event_store: ReleaseEventStore,
     policy_registry: PolicyRegistry,
-    /// Owned by terraformv1's in-process backend; the scheduler reads it to
-    /// hand state-backend credentials to remote runners (e.g. hollow) via
-    /// WorkAssignment.terraform_state. Cheap clone (Arcs inside).
     tf_state: TerraformStateStore,
     nats: async_nats::Client,
     disable_in_process: bool,
@@ -89,7 +86,6 @@ impl Scheduler {
 }
 
 impl SchedulerInner {
-    /// Handle a specific release by ID.
     async fn handle_release(&self, release_id: Uuid) -> anyhow::Result<()> {
         tracing::debug!(%release_id, "scheduler picked up release");
 
@@ -118,19 +114,6 @@ impl SchedulerInner {
             .await?
             .context("failed to find a destination")?;
 
-        // Collapse the pending queue for this target before anything else.
-        //
-        // The single decision point for the supersede-pending policy, covering
-        // both surfaces: a pipeline run's deploy stage queues `release_states`
-        // rows here exactly as an individual deployment does, so there is one
-        // mechanism rather than two. A project without the policy pays one
-        // indexed lookup and behaves exactly as it does today.
-        //
-        // Deliberately first: superseding is *selection* — it decides which
-        // pending release is the candidate — and every gating policy below runs
-        // against whatever survives. Running a gate first would mean evaluating
-        // it against a release that is about to be retired. See
-        // design/SKIP-TO-LATEST.md.
         match crate::services::supersede::collapse_queue(
             &self.release_event_store,
             &self.policy_registry,
@@ -161,10 +144,6 @@ impl SchedulerInner {
                 return Ok(());
             }
             Err(e) => {
-                // Never let a fault in the collapse strand a deploy: fall
-                // through and dispatch, which is forest's behaviour without the
-                // policy. Failing closed here would turn an opt-in optimisation
-                // into an outage.
                 tracing::warn!(
                     %release_id,
                     "supersede check failed, dispatching as normal: {e:#}"
@@ -172,9 +151,6 @@ impl SchedulerInner {
             }
         }
 
-        // Check soak_time policies before dispatching.
-        // Branch restriction is enforced at the gRPC layer where branch info is available;
-        // the scheduler only handles soak_time deferral.
         let evaluations = self
             .policy_registry
             .evaluate_for_environment(&release_state.project_id, &dest.environment, None, None)
@@ -216,9 +192,7 @@ impl SchedulerInner {
             project: project_name,
         };
 
-        // Try remote runner first
         if let Some((runner_id, work_sender)) = self.runner_manager.try_assign(&dest_index).await {
-            // Transition QUEUED -> ASSIGNED
             if let Err(e) = self
                 .release_event_store
                 .emit_event(
@@ -232,12 +206,10 @@ impl SchedulerInner {
                 )
                 .await
             {
-                // Another instance already transitioned this release
                 tracing::debug!(%release_id, "skipping release (already transitioned): {e}");
                 return Ok(());
             }
 
-            // Create a scoped token for this release
             let token = self
                 .release_token_registry
                 .create_token(
@@ -266,11 +238,6 @@ impl SchedulerInner {
                 ReleaseMode::Deploy
             };
 
-            // Populate the artifact-store handle for destination types that
-            // need server-managed state. Today only `forest/terraform/<v>`;
-            // we add arms here as new destination types come online. The
-            // shape (URL + basic auth) is generic on purpose — the runner
-            // translates to destination-specific env vars.
             let artifact_store = if dest.destination_type.organisation == "forest"
                 && dest.destination_type.name == "terraform"
             {
@@ -317,7 +284,6 @@ impl SchedulerInner {
                     return Ok(());
                 }
                 Err(_) => {
-                    // Runner channel closed — fail immediately
                     tracing::warn!(
                         runner_id = %runner_id,
                         "failed to send work to runner (channel closed)"
@@ -351,7 +317,6 @@ impl SchedulerInner {
             }
         }
 
-        // Fallback: in-process execution
         if self.disable_in_process {
             tracing::info!(
                 %release_id,
@@ -363,7 +328,6 @@ impl SchedulerInner {
 
         tracing::info!(%release_id, destination = %dest.name, "assigning release to in-process executor");
 
-        // Transition QUEUED -> ASSIGNED (in-process)
         if let Err(e) = self
             .release_event_store
             .emit_event(
@@ -381,7 +345,6 @@ impl SchedulerInner {
             return Ok(());
         }
 
-        // Transition ASSIGNED -> RUNNING
         tracing::debug!(%release_id, "transitioning to RUNNING (in-process)");
         self.release_event_store
             .emit_event(
@@ -407,7 +370,6 @@ impl SchedulerInner {
         let logger =
             DestinationLogger::new(release_item.clone(), self.release_log_registry.clone());
 
-        // Spawn a heartbeat task that runs alongside the release execution
         let heartbeat_token = tokio_util::sync::CancellationToken::new();
         let heartbeat_cancel = heartbeat_token.clone();
         let heartbeat_store = self.release_event_store.clone();
@@ -430,16 +392,6 @@ impl SchedulerInner {
 
         let result = async {
             if is_plan_mode {
-                // Plan mode: run the plan phase only, capture output.
-                //
-                // `prepare` is only needed for destination types whose `plan`
-                // is a no-op — for those, prepare *is* the dry-run. Where
-                // `supports_plan()` holds, `plan` is self-sufficient and doing
-                // both ran the dry-run twice and discarded the first result:
-                // for forest/terraform@1 both hooks are `terraform init` +
-                // `terraform plan`, so every plan stage paid double the wall
-                // clock and double the provider API calls, and printed the
-                // plan twice in the release log.
                 if !dest_svc.supports_plan() {
                     dest_svc.prepare(&logger, &release_item, &dest).await?;
                 }
@@ -454,11 +406,9 @@ impl SchedulerInner {
                     .await?;
                 }
             } else {
-                // Normal deploy mode
                 dest_svc.prepare(&logger, &release_item, &dest).await?;
                 dest_svc.release(&logger, &release_item, &dest).await?;
 
-                // Seed a PENDING health observation so the CLI can start watching immediately
                 if let Err(e) = crate::services::release_health::seed_pending(
                     &self.release_event_store.db,
                     &self.nats,
@@ -593,8 +543,6 @@ impl Component for Scheduler {
     }
 }
 
-/// Fallback sweep: pick up any QUEUED releases that NATS might have missed.
-/// Each found release is spawned as an independent task.
 async fn sweep_queued(inner: &SchedulerInner) -> anyhow::Result<()> {
     let queued = inner.release_event_store.pick_queued_releases(10).await?;
 

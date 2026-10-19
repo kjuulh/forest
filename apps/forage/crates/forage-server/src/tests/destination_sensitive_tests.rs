@@ -1,10 +1,3 @@
-//! Sensitive destination metadata in the web UI.
-//!
-//! The platform withholds values for keys it considers credentials, so these
-//! tests pin the two things that could still leak or break:
-//!   * a withheld value must never appear in the rendered page, and
-//!   * saving the metadata form must not blank out the withheld value.
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use forage_core::platform::Destination;
@@ -13,8 +6,6 @@ use tower::ServiceExt;
 use crate::build_router;
 use crate::test_support::*;
 
-/// A terraform destination shaped like the one from DATA-575: benign config
-/// visible, credentials withheld by the platform.
 fn destination_with_withheld_keys() -> Destination {
     Destination {
         name: "platform-dev".into(),
@@ -45,9 +36,6 @@ fn state_with_destination() -> (
         MockForestClient::new(),
         MockPlatformClient::with_behavior(MockPlatformBehavior {
             list_destinations_result: Some(Ok(vec![destination_with_withheld_keys()])),
-            // The destinations page groups by environment; without a matching
-            // one the destination renders in the "other destinations" list,
-            // which shows no metadata at all and would pass vacuously.
             list_environments_result: Some(Ok(vec![forage_core::platform::Environment {
                 id: "env-prod".into(),
                 organisation: "testorg".into(),
@@ -87,7 +75,6 @@ async fn detail_page_masks_withheld_keys_and_shows_the_rest() {
     assert_eq!(response.status(), StatusCode::OK);
     let html = body_of(response).await;
 
-    // Withheld keys are named, and offer a reveal control.
     assert!(html.contains("aws_secret_access_key"), "key name should be listed");
     assert!(html.contains("cloudflare_token"));
     assert!(html.contains("reveal-btn"), "expected a reveal control");
@@ -96,11 +83,9 @@ async fn detail_page_masks_withheld_keys_and_shows_the_rest() {
         "expected the marker that keeps the value alive across a save"
     );
 
-    // Non-sensitive values still render.
     assert!(html.contains("123456789012"));
     assert!(html.contains("platform-dev"));
 
-    // The mock hands out `revealed-<key>` when asked; nothing should have asked.
     assert!(
         !html.contains("revealed-aws_secret_access_key")
             && !html.contains("revealed-cloudflare_token"),
@@ -127,11 +112,8 @@ async fn destinations_list_page_does_not_embed_withheld_values() {
     assert_eq!(response.status(), StatusCode::OK);
     let html = body_of(response).await;
 
-    // Sanity: the export button really is on the page for this destination.
     assert!(html.contains("export-dest"), "expected the export control to render");
 
-    // The export payload lives in a data attribute; it must carry the withheld
-    // key names, not their values.
     assert!(html.contains("data-sensitive-keys"));
     assert!(html.contains("aws_secret_access_key"));
     assert!(
@@ -140,7 +122,6 @@ async fn destinations_list_page_does_not_embed_withheld_values() {
         "the export attribute must not carry a withheld value"
     );
 
-    // Counts cover hidden keys too, so the page does not understate what is set.
     assert!(html.contains("4 keys"), "expected 2 visible + 2 hidden keys");
     assert!(html.contains("2 hidden"));
 }
@@ -260,17 +241,12 @@ async fn non_admin_detail_view_shows_a_mask_instead_of_the_value() {
     assert!(!html.contains("revealed-aws_secret_access_key"));
 }
 
-/// A flux destination whose *type* declares `reconcile_url` a credential
-/// (DATA-575's follow-up), alongside one key this destination declared itself.
-/// The two are hidden for different reasons and the page has to keep them apart.
 fn flux_destination_with_both_kinds() -> Destination {
     Destination {
         name: "flux-prod".into(),
         environment: "prod".into(),
         organisation: "testorg".into(),
         metadata: [("cluster_name".to_string(), "prod-eu".to_string())].into(),
-        // The platform sends the union of both kinds; it does not say which is
-        // which. That is what the type schema below is cross-referenced for.
         sensitive_keys: vec!["reconcile_url".into(), "extra_api_key".into()],
         dest_type: Some(forage_core::platform::DestinationType {
             organisation: "forest".into(),
@@ -343,21 +319,14 @@ async fn detail_html(
     body_of(response).await
 }
 
-/// Promoting a key is offered only where it means something: on keys that are
-/// still visible. An already-hidden key gets no control, because taking the mark
-/// back is deliberate and does not belong in a checkbox.
 #[tokio::test]
 async fn only_visible_keys_offer_the_promote_control() {
     let (state, sessions) = state_with_destination();
     let cookie = create_test_session(&sessions).await;
     let html = detail_html(state, &cookie, "platform-dev").await;
 
-    // Count only the rendered rows: the page's script also mentions the class,
-    // both in its row template and in the submit handler's selector.
     let markup = &html[..html.find("<script>").unwrap_or(html.len())];
 
-    // Two visible keys (tf_workspace, aws_account_id) plus the starter blank
-    // row. The two withheld keys must not contribute one.
     assert_eq!(
         markup.matches("meta-sensitive").count(),
         3,
@@ -370,9 +339,6 @@ async fn only_visible_keys_offer_the_promote_control() {
     );
 }
 
-/// The form resubmits the destination's own sensitive keys so that saving one
-/// new credential cannot silently un-hide the others. Keys the *type* declares
-/// are deliberately left out: they are not this destination's to claim.
 #[tokio::test]
 async fn resubmitted_set_carries_destination_keys_but_not_type_declared_ones() {
     let (state, sessions) = state_with_flux_destination();
@@ -394,17 +360,12 @@ async fn resubmitted_set_carries_destination_keys_but_not_type_declared_ones() {
         "a type-declared key must not be copied into the destination's set, got: {declared}"
     );
 
-    // And the page explains why reconcile_url has no control of its own.
     assert!(
         html.contains("by type"),
         "expected type-declared keys to be labelled as such"
     );
 }
 
-/// Guard against the regression that would matter most: the type schema being
-/// unavailable must not cause a type-declared key to be claimed by the
-/// destination. With no types, nothing is known to be type-declared, so the
-/// page falls back to treating every withheld key as the destination's own.
 #[tokio::test]
 async fn detail_page_still_renders_when_the_type_schema_is_unavailable() {
     let (state, sessions) = state_with_destination();

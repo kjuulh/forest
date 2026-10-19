@@ -1,11 +1,3 @@
-//! Sensitive destination metadata: values must not cross the wire unless a
-//! caller asks for one specific key.
-//!
-//! Covers DATA-575, where `destination list` printed live AWS and Cloudflare
-//! credentials. The keys that leaked there were free-form (terraform forwards
-//! anything it does not declare as a `TF_VAR_*`), so a type-schema flag alone
-//! would not have covered them — hence both declaration paths are tested.
-
 use forest_grpc_interface::*;
 use tonic::metadata::MetadataValue;
 
@@ -111,8 +103,6 @@ async fn fetch_destination(
         .expect("destination present in list")
 }
 
-/// The flux type declares `git_token` and `webhook_secret` sensitive, so those
-/// values must never appear in a GetDestinations response.
 #[tokio::test(flavor = "multi_thread")]
 async fn type_declared_sensitive_fields_are_withheld_from_the_list_response() {
     let fixture = fixture().await.expect("fixture");
@@ -157,13 +147,11 @@ async fn type_declared_sensitive_fields_are_withheld_from_the_list_response() {
 
     let found = fetch_destination(&fixture, &token, &org, &dest).await;
 
-    // Non-sensitive fields still show.
     assert_eq!(
         found.metadata.get("cluster_name").map(String::as_str),
         Some("test-cluster")
     );
 
-    // Sensitive fields: key names only, values gone.
     let mut withheld = found.sensitive_keys.clone();
     withheld.sort();
     assert_eq!(
@@ -172,8 +160,6 @@ async fn type_declared_sensitive_fields_are_withheld_from_the_list_response() {
     );
     assert!(!found.metadata.contains_key("git_token"));
     assert!(!found.metadata.contains_key("webhook_secret"));
-    // The Receiver webhook path is a capability, not configuration: holding the
-    // URL is enough to trigger reconciliation, so it withholds like a credential.
     assert!(!found.metadata.contains_key("reconcile_url"));
 
     let serialised = format!("{found:?}");
@@ -185,9 +171,6 @@ async fn type_declared_sensitive_fields_are_withheld_from_the_list_response() {
     );
 }
 
-/// DATA-575's actual shape: credentials living in free-form terraform keys, so
-/// no type schema mentions them. They are hidden because the destination itself
-/// declares them, and they survive create -> persist -> gRPC -> read back.
 #[tokio::test(flavor = "multi_thread")]
 async fn destination_declared_sensitive_keys_round_trip_and_are_withheld() {
     let fixture = fixture().await.expect("fixture");
@@ -237,8 +220,6 @@ async fn destination_declared_sensitive_keys_round_trip_and_are_withheld() {
         ]
     );
 
-    // Declared-benign keys keep their values, including the one DATA-575
-    // explicitly called fine to show.
     assert_eq!(
         found.metadata.get("aws_account_id").map(String::as_str),
         Some("123456789012")
@@ -261,7 +242,6 @@ async fn destination_declared_sensitive_keys_round_trip_and_are_withheld() {
     }
 }
 
-/// Reveal is per-key: asking for one key returns that key only.
 #[tokio::test(flavor = "multi_thread")]
 async fn reveal_returns_one_requested_value() {
     let fixture = fixture().await.expect("fixture");
@@ -307,14 +287,12 @@ async fn reveal_returns_one_requested_value() {
     assert_eq!(revealed.key, "cloudflare_token");
     assert_eq!(revealed.value, "cf_live_token");
 
-    // Revealing one key says nothing about the others.
     let still_hidden = fetch_destination(&fixture, &token, &org, &dest).await;
     assert!(
         !format!("{still_hidden:?}").contains("wJalrXUtn"),
         "the other credential must stay withheld"
     );
 
-    // Unknown keys are a not-found, not an empty string.
     let missing = fixture
         .destinations()
         .reveal_destination_metadata(authed_request(
@@ -332,7 +310,6 @@ async fn reveal_returns_one_requested_value() {
     );
 }
 
-/// A member of another org cannot reveal a credential.
 #[tokio::test(flavor = "multi_thread")]
 async fn reveal_is_denied_across_organisations() {
     let fixture = fixture().await.expect("fixture");
@@ -384,7 +361,6 @@ async fn reveal_is_denied_across_organisations() {
         "error must not carry the value"
     );
 
-    // Unauthenticated calls are rejected too.
     let unauthed = fixture
         .destinations()
         .reveal_destination_metadata(tonic::Request::new(RevealDestinationMetadataRequest {
@@ -396,8 +372,6 @@ async fn reveal_is_denied_across_organisations() {
     assert!(unauthed.is_err(), "unauthenticated reveal must be rejected");
 }
 
-/// `update` leaves the sensitive-key set alone unless the client says otherwise,
-/// so a metadata-only edit cannot accidentally unhide a credential.
 #[tokio::test(flavor = "multi_thread")]
 async fn update_preserves_sensitive_keys_unless_explicitly_set() {
     let fixture = fixture().await.expect("fixture");
@@ -422,7 +396,6 @@ async fn update_preserves_sensitive_keys_unless_explicitly_set() {
         .await
         .expect("create destination");
 
-    // Metadata-only update, as an older client would send it.
     fixture
         .destinations()
         .update_destination(authed_request(
@@ -447,7 +420,6 @@ async fn update_preserves_sensitive_keys_unless_explicitly_set() {
     assert_eq!(found.sensitive_keys, vec!["cloudflare_token".to_string()]);
     assert!(!format!("{found:?}").contains("cf_rotated"));
 
-    // Now explicitly narrow the set; the key becomes visible again.
     fixture
         .destinations()
         .update_destination(authed_request(
@@ -472,8 +444,6 @@ async fn update_preserves_sensitive_keys_unless_explicitly_set() {
     );
 }
 
-/// The type schema itself must carry the flag to clients, so a UI can render a
-/// masked input before any destination exists.
 #[tokio::test(flavor = "multi_thread")]
 async fn list_destination_types_reports_which_fields_are_sensitive() {
     let fixture = fixture().await.expect("fixture");
@@ -507,7 +477,6 @@ async fn list_destination_types_reports_which_fields_are_sensitive() {
         vec!["git_token", "reconcile_url", "webhook_secret"]
     );
 
-    // And plain config fields are not swept up.
     assert!(
         flux.fields
             .iter()
@@ -516,10 +485,6 @@ async fn list_destination_types_reports_which_fields_are_sensitive() {
     );
 }
 
-/// The trap this closes: a caller that names one key used to send a one-entry
-/// map, and the server stored metadata as one document, so everything else was
-/// deleted. `forest destination update --metadata reconcile_url=...` — the exact
-/// command the flux guide documents — wiped cluster_name and namespace with it.
 #[tokio::test(flavor = "multi_thread")]
 async fn merging_metadata_leaves_unnamed_keys_alone() {
     let fixture = fixture().await.expect("fixture");
@@ -574,7 +539,6 @@ async fn merging_metadata_leaves_unnamed_keys_alone() {
 
     let found = fetch_destination(&fixture, &token, &org, &dest).await;
 
-    // The neighbours survived.
     assert_eq!(
         found.metadata.get("cluster_name").map(String::as_str),
         Some("prod-eu")
@@ -583,12 +547,9 @@ async fn merging_metadata_leaves_unnamed_keys_alone() {
         found.metadata.get("namespace").map(String::as_str),
         Some("flux-system")
     );
-    // And the new key took effect — withheld, because the flux type declares it.
     assert!(found.sensitive_keys.iter().any(|k| k == "reconcile_url"));
 }
 
-/// A merge that names nothing must be a no-op, so a caller that only means to
-/// change the sensitive-key set does not have to send metadata it cannot see.
 #[tokio::test(flavor = "multi_thread")]
 async fn merging_an_empty_overlay_changes_no_metadata() {
     let fixture = fixture().await.expect("fixture");
@@ -620,7 +581,6 @@ async fn merging_an_empty_overlay_changes_no_metadata() {
         .await
         .expect("create destination");
 
-    // Exactly what `forest destination update --sensitive <key>` now sends.
     fixture
         .destinations()
         .update_destination(authed_request(
@@ -639,7 +599,6 @@ async fn merging_an_empty_overlay_changes_no_metadata() {
 
     let found = fetch_destination(&fixture, &token, &org, &dest).await;
 
-    // Nothing was blanked, and the credential is now withheld rather than lost.
     assert_eq!(
         found.metadata.get("tf_workspace").map(String::as_str),
         Some("platform-dev")
@@ -654,14 +613,6 @@ async fn merging_an_empty_overlay_changes_no_metadata() {
     );
 }
 
-/// The blocker behind DATA-575's tail: `destinations` predates the event store,
-/// so rows created before it have no stream. `load_or_default` reported
-/// `NonExistent` and every write bailed with "destination does not exist" — the
-/// destination was plainly listed, and nothing could mark its credentials
-/// sensitive, by CLI or UI.
-///
-/// Simulated the way prod actually looks: create normally, then delete the
-/// stream out from under the row.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_destination_with_no_event_stream_can_still_be_updated() {
     let fixture = fixture().await.expect("fixture");
@@ -693,9 +644,6 @@ async fn a_destination_with_no_event_stream_can_still_be_updated() {
         .await
         .expect("create destination");
 
-    // Strip the stream, leaving only the projection row: a pre-event-store
-    // destination.
-    // Category-prefixed, the way EventStore builds it: `destination-{org}/{name}`.
     let stream_id = format!("destination-{org}/{dest}");
     sqlx::query("DELETE FROM es_events WHERE stream_id = $1")
         .bind(&stream_id)
@@ -708,14 +656,12 @@ async fn a_destination_with_no_event_stream_can_still_be_updated() {
         .await
         .expect("delete stream");
 
-    // The row is still there and still readable.
     let found = fetch_destination(&fixture, &token, &org, &dest).await;
     assert_eq!(
         found.metadata.get("tf_workspace").map(String::as_str),
         Some("platform-dev")
     );
 
-    // This used to fail with "destination does not exist".
     fixture
         .destinations()
         .update_destination(authed_request(
@@ -734,7 +680,6 @@ async fn a_destination_with_no_event_stream_can_still_be_updated() {
 
     let found = fetch_destination(&fixture, &token, &org, &dest).await;
 
-    // The credential is withheld now, and nothing else was disturbed.
     assert_eq!(
         found.sensitive_keys,
         vec!["aws_secret_access_key".to_string()]
@@ -748,8 +693,6 @@ async fn a_destination_with_no_event_stream_can_still_be_updated() {
         "the value must be withheld, not leaked"
     );
 
-    // The seeded stream reused the row's id rather than minting a new one:
-    // releases reference destination_id, and a fresh one would orphan them.
     let row_id: uuid::Uuid =
         sqlx::query_scalar("SELECT id FROM destinations WHERE organisation = $1 AND name = $2")
             .bind(&org)

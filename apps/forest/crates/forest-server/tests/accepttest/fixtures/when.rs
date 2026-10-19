@@ -55,8 +55,6 @@ impl WhenReleaseFlow for When<ReleaseFlowData> {
         Ok(self)
     }
 
-    /// The announce-only failure path: CI deployed elsewhere, it failed, and it
-    /// says so against the annotation rather than through a destination.
     async fn release_is_reported_failed(mut self, reason: &str) -> anyhow::Result<Self> {
         let mut release_client = self.fixture().releases();
         let (token, slug, destination) = {

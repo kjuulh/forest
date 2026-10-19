@@ -1,5 +1,3 @@
-//! `/device` route tests — see `apps/forest/TASKS/022-device-login.md` §1.5.
-
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -11,9 +9,6 @@ use crate::build_router;
 use crate::state::AppState;
 use crate::test_support::*;
 
-/// State that has a service-account key configured — the happy-path
-/// precondition for the device-login flow. Mirrors what production
-/// gets when `FOREST_SERVICE_ACCOUNT_API_KEY` is set.
 fn configured_state(
     mock: MockForestClient,
 ) -> (AppState, Arc<InMemorySessionStore>) {
@@ -24,12 +19,8 @@ fn configured_state(
     )
 }
 
-// ─── Unauthenticated access ──────────────────────────────────────────
-
 #[tokio::test]
 async fn device_get_without_session_redirects_to_login() {
-    // The redirect is decided before the unconfigured-key guard, so
-    // the default test_app (no service-account key) is fine here.
     let app = test_app();
 
     let response = app
@@ -42,8 +33,6 @@ async fn device_get_without_session_redirects_to_login() {
         .await
         .unwrap();
 
-    // The Session extractor rejects with a redirect — the user code is
-    // preserved in return_to so the user lands back here after login.
     assert_eq!(
         response.status(),
         StatusCode::SEE_OTHER,
@@ -65,8 +54,6 @@ async fn device_get_without_session_redirects_to_login() {
         "user_code must be carried through to /login: {location}"
     );
 }
-
-// ─── GET /device — authenticated ─────────────────────────────────────
 
 #[tokio::test]
 async fn device_get_with_session_prefills_user_code() {
@@ -92,8 +79,6 @@ async fn device_get_with_session_prefills_user_code() {
         html.contains("Approve") && html.contains("Deny"),
         "approve/deny buttons visible"
     );
-    // Phishing-mitigation copy must be present so users see the
-    // "only approve if you started this" warning.
     assert!(
         html.contains("Only approve if you started this"),
         "warning copy must be present"
@@ -119,11 +104,8 @@ async fn device_get_without_user_code_still_renders() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let html = body_to_string(response).await;
-    // Empty input field — user types the code by hand.
     assert!(html.contains(r#"name="user_code""#));
 }
-
-// ─── POST /device — approve ──────────────────────────────────────────
 
 #[tokio::test]
 async fn device_approve_calls_forest_and_shows_success() {
@@ -157,8 +139,6 @@ async fn device_approve_calls_forest_and_shows_success() {
     );
 }
 
-// ─── POST /device — CSRF ─────────────────────────────────────────────
-
 #[tokio::test]
 async fn device_post_with_bad_csrf_is_rejected() {
     let (state, sessions) = configured_state(MockForestClient::new());
@@ -181,8 +161,6 @@ async fn device_post_with_bad_csrf_is_rejected() {
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
-
-// ─── POST /device — deny ─────────────────────────────────────────────
 
 #[tokio::test]
 async fn device_deny_calls_forest_and_shows_cancelled() {
@@ -216,8 +194,6 @@ async fn device_deny_calls_forest_and_shows_cancelled() {
     );
 }
 
-// ─── POST /device — bad action ───────────────────────────────────────
-
 #[tokio::test]
 async fn device_post_with_unknown_action_returns_400() {
     let (state, sessions) = configured_state(MockForestClient::new());
@@ -240,8 +216,6 @@ async fn device_post_with_unknown_action_returns_400() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
-
-// ─── POST /device — empty code ───────────────────────────────────────
 
 #[tokio::test]
 async fn device_post_with_empty_code_rerenders_form() {
@@ -271,8 +245,6 @@ async fn device_post_with_empty_code_rerenders_form() {
     );
 }
 
-// ─── POST /device — forest-side error ────────────────────────────────
-
 #[tokio::test]
 async fn device_approve_when_forest_rejects_shows_friendly_error() {
     let mock = MockForestClient::with_behavior(MockBehavior {
@@ -301,7 +273,6 @@ async fn device_approve_when_forest_rejects_shows_friendly_error() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let html = body_to_string(response).await;
-    // Generic message — never leak forest-server's internal error text.
     assert!(
         html.contains("wasn't recognised") || html.contains("expired"),
         "user-friendly error must render: {html}"
@@ -312,15 +283,8 @@ async fn device_approve_when_forest_rejects_shows_friendly_error() {
     );
 }
 
-// ─── Unconfigured deployment ─────────────────────────────────────────
-
 #[tokio::test]
 async fn device_get_without_service_account_key_shows_explicit_unconfigured_message() {
-    // Default test_state has no service_account_key — i.e. forage was
-    // booted without `FOREST_SERVICE_ACCOUNT_API_KEY`. The GET handler
-    // must surface that explicitly instead of pretending the flow
-    // works and then 500-ing on submit, or worse, returning the
-    // "code wasn't recognised" message that sends users in circles.
     let (state, sessions) = test_state();
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
@@ -350,7 +314,6 @@ async fn device_get_without_service_account_key_shows_explicit_unconfigured_mess
         html.contains("forest auth login --password"),
         "must give users a working fallback: {html}"
     );
-    // No form should render — the only fix is operator action.
     assert!(
         !html.contains(r#"name="action""#),
         "approve/deny form must NOT render when unconfigured: {html}"
@@ -359,12 +322,7 @@ async fn device_get_without_service_account_key_shows_explicit_unconfigured_mess
 
 #[tokio::test]
 async fn device_post_without_service_account_key_does_not_call_forest() {
-    // Stale form post from an open tab after the operator (unset) the
-    // key. Belt-and-braces: forage must not pretend to process the
-    // submission and must not hit forest_client.
     let mock = MockForestClient::with_behavior(MockBehavior {
-        // If this is consulted at all the test will succeed
-        // misleadingly, so put an error in to detect the bypass.
         approve_device_login_result: Some(Err(
             forage_core::auth::AuthError::Other("should never be called".into()),
         )),
@@ -394,15 +352,11 @@ async fn device_post_without_service_account_key_does_not_call_forest() {
         html.contains("isn't configured") || html.contains("not configured"),
         "POST must surface the same unconfigured message: {html}"
     );
-    // The mock error must not appear — proves we shunted before
-    // calling forest_client.
     assert!(
         !html.contains("should never be called"),
         "forest_client.approve_device_login must not be called when key is missing"
     );
 }
-
-// ─── helpers ─────────────────────────────────────────────────────────
 
 async fn body_to_string(response: axum::http::Response<Body>) -> String {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)

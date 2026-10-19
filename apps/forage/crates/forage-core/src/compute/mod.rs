@@ -1,9 +1,5 @@
 use std::collections::HashMap;
 
-// ---------------------------------------------------------------------------
-// Region catalog
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Region {
     pub id: &'static str,
@@ -36,10 +32,6 @@ pub const REGIONS: &[Region] = &[
 pub fn available_regions() -> Vec<&'static Region> {
     REGIONS.iter().filter(|r| r.available).collect()
 }
-
-// ---------------------------------------------------------------------------
-// Domain types
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ComputeResourceSpec {
@@ -139,10 +131,6 @@ pub struct ComputeInstance {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-// ---------------------------------------------------------------------------
-// Error
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ComputeError {
     #[error("not found: {0}")]
@@ -155,13 +143,8 @@ pub enum ComputeError {
     Internal(String),
 }
 
-// ---------------------------------------------------------------------------
-// Scheduler trait
-// ---------------------------------------------------------------------------
-
 #[async_trait::async_trait]
 pub trait ComputeScheduler: Send + Sync {
-    /// Apply a batch of resources. Returns a rollout ID for tracking.
     async fn apply_resources(
         &self,
         apply_id: &str,
@@ -170,32 +153,23 @@ pub trait ComputeScheduler: Send + Sync {
         labels: HashMap<String, String>,
     ) -> Result<String, ComputeError>;
 
-    /// Subscribe to rollout status events.
     async fn watch_rollout(
         &self,
         rollout_id: &str,
     ) -> Result<tokio::sync::mpsc::Receiver<RolloutEvent>, ComputeError>;
 
-    /// Delete resources by namespace + labels.
     async fn delete_resources(
         &self,
         namespace: &str,
         labels: HashMap<String, String>,
     ) -> Result<(), ComputeError>;
 
-    /// List rollouts for a namespace.
     async fn list_rollouts(&self, namespace: &str) -> Result<Vec<Rollout>, ComputeError>;
 
-    /// Get a specific rollout by ID.
     async fn get_rollout(&self, rollout_id: &str) -> Result<Rollout, ComputeError>;
 
-    /// List running compute instances for a namespace.
     async fn list_instances(&self, namespace: &str) -> Result<Vec<ComputeInstance>, ComputeError>;
 }
-
-// ---------------------------------------------------------------------------
-// In-memory mock scheduler
-// ---------------------------------------------------------------------------
 
 pub mod mock_scheduler;
 pub use mock_scheduler::InMemoryComputeScheduler;

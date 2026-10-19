@@ -1,20 +1,9 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @source "../../templates";
-/* The hand-written progressive-enhancement scripts, which sit directly in
-   static/js. Not recursive on purpose: static/js/components holds the built
-   Svelte bundle, and scanning *that* is what forced it to ship unminified —
-   minification mangles the string literals the scanner reads class names out
-   of. The components' own sources are scanned below instead, so the bundle is
-   free to be minified. */
 @source "../js/*.js";
 @source "../../frontend/src";
 
-/* ── Compact text utilities ───────────────────────────────────────────────
-   Small font sizes used by the pipeline-builder node editor. Tailwind's
-   heuristic scanner doesn't extract arbitrary-value classes like
-   `text-[10px]` from JS string literals, so we expose them as named
-   utilities the scanner can detect normally. */
 @utility text-2xs {
   font-size: 11px;
   line-height: 14px;
@@ -28,44 +17,31 @@
   line-height: 12px;
 }
 
-/* ── App content container — single source of truth for page width ──── */
 @utility app-container {
-  max-width: 56rem; /* same as max-w-4xl */
+  max-width: 56rem;
   margin-left: auto;
   margin-right: auto;
   padding-left: 1rem;
   padding-right: 1rem;
 }
 
-/* ── JSON pretty-printer tokens (specs/features/007) ──────────────── */
-/* Server-side tokeniser in forage-server::pretty_json emits these
-   classes; the .json-pretty wrapper scopes them so the styles only apply
-   to manifest blocks. The bg + base text colors are fixed (not Tailwind
-   variables) so the @media dark-mode palette remap can't invert them —
-   the JSON block stays dark-on-dark in both themes. */
 .json-pretty {
   background-color: #0a0a0a !important;
   color: #d1d5db !important;
 }
-.json-pretty .json-key    { color: #93c5fd; }  /* blue-300 */
-.json-pretty .json-string { color: #86efac; }  /* green-300 */
-.json-pretty .json-number { color: #fcd34d; }  /* amber-300 */
-.json-pretty .json-bool   { color: #c4b5fd; }  /* violet-300 */
-.json-pretty .json-null   { color: #f87171; }  /* red-400 */
-.json-pretty .json-punct  { color: #9ca3af; }  /* gray-400 — slightly brighter for legibility */
-.json-pretty .json-raw    { color: #f87171; }  /* red-400 — invalid fallback */
+.json-pretty .json-key    { color: #93c5fd; }
+.json-pretty .json-string { color: #86efac; }
+.json-pretty .json-number { color: #fcd34d; }
+.json-pretty .json-bool   { color: #c4b5fd; }
+.json-pretty .json-null   { color: #f87171; }
+.json-pretty .json-punct  { color: #9ca3af; }
+.json-pretty .json-raw    { color: #f87171; }
 
-/* ── Always-dark code surface (terminal/IDE aesthetic) ────────────────
-   Same problem .json-pretty solves: the @media dark-mode palette remap
-   inverts `bg-gray-950` to a near-white, breaking deliberately-dark
-   code blocks. Fix once with a literal hex background that escapes the
-   CSS-variable system. Use `class="code-surface"` on the wrapper. */
 .code-surface {
   background-color: #0a0a0a !important;
   color: #d1d5db !important;
 }
 
-/* ── Scrollbar-hidden utility for tab navigation ──────────────────────── */
 @utility scrollbar-none {
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -74,7 +50,6 @@
   }
 }
 
-/* ── Mobile/Desktop visibility ────────────────────────────────────────── */
 @utility mobile-only {
   display: none;
   @media (max-width: 39.999rem) {
@@ -88,13 +63,10 @@
   }
 }
 
-/* ── Dark mode (system preference) ──────────────────────────────────────── */
-/* Remap Tailwind's color variables so all existing utilities adapt automatically. */
 @media (prefers-color-scheme: dark) {
   :root, :host {
     color-scheme: dark;
 
-    /* Neutrals — invert the gray scale for backgrounds/surfaces/text */
     --color-white: oklch(14.5% 0.015 260);
     --color-black: oklch(98% 0.002 248);
     --color-gray-50: oklch(17.5% 0.02 260);
@@ -109,7 +81,6 @@
     --color-gray-900: oklch(93% 0.005 265);
     --color-gray-950: oklch(96.7% 0.003 265);
 
-    /* Green — darken light tints, lighten dark shades */
     --color-green-50: oklch(20% 0.04 155);
     --color-green-100: oklch(25% 0.06 155);
     --color-green-200: oklch(30% 0.08 155);
@@ -117,48 +88,39 @@
     --color-green-700: oklch(75% 0.15 150);
     --color-green-800: oklch(80% 0.12 150);
 
-    /* Red */
     --color-red-50: oklch(22% 0.04 17);
     --color-red-200: oklch(32% 0.06 18);
     --color-red-600: oklch(65% 0.2 27);
     --color-red-700: oklch(72% 0.18 27);
     --color-red-800: oklch(77% 0.15 27);
 
-    /* Blue */
     --color-blue-100: oklch(22% 0.04 255);
     --color-blue-600: oklch(62% 0.2 263);
     --color-blue-700: oklch(72% 0.17 264);
     --color-blue-800: oklch(77% 0.15 265);
 
-    /* Orange */
     --color-orange-100: oklch(25% 0.05 75);
     --color-orange-800: oklch(78% 0.13 37);
 
-    /* Yellow */
     --color-yellow-100: oklch(25% 0.06 103);
     --color-yellow-700: oklch(72% 0.12 66);
     --color-yellow-800: oklch(77% 0.1 62);
 
-    /* Violet */
     --color-violet-100: oklch(22% 0.04 295);
     --color-violet-200: oklch(28% 0.06 294);
     --color-violet-400: oklch(45% 0.14 293);
     --color-violet-600: oklch(60% 0.2 293);
     --color-violet-800: oklch(75% 0.18 293);
 
-    /* Purple */
     --color-purple-100: oklch(22% 0.04 307);
     --color-purple-800: oklch(75% 0.17 304);
 
-    /* Pink */
     --color-pink-100: oklch(22% 0.04 342);
     --color-pink-800: oklch(75% 0.15 4);
 
-    /* Amber */
     --color-amber-400: oklch(80% 0.17 84);
   }
 
-  /* Form elements — inherit the dark palette */
   input, textarea, select {
     background-color: var(--color-gray-50);
     color: var(--color-gray-900);
@@ -171,11 +133,6 @@
     border-color: var(--color-green-300);
   }
 
-  /* Tailwind Typography (prose) — the plugin bakes its color variables
-     against the LIGHT-mode palette at build time, so without an override
-     a `.prose` block in dark mode shows dark text on dark bg. Point the
-     prose variables at our inverted gray scale so READMEs read correctly
-     in both themes. */
   .prose {
     --tw-prose-body: var(--color-gray-700);
     --tw-prose-headings: var(--color-gray-900);
@@ -196,11 +153,6 @@
     --tw-prose-td-borders: var(--color-gray-200);
   }
 
-  /* The typography plugin emits explicit `background-color` on `.prose pre`
-     and `.prose code` from its baked palette — CSS variable overrides
-     above don't always win against the literal hex. Force the pre / code
-     surfaces lighter than the page bg in dark mode so they read as
-     "elevated" (GitHub-style), not "darker hole in the page". */
   .prose :where(pre):not(:where([class~="not-prose"] *)) {
     background-color: var(--color-gray-100);
     color: var(--color-gray-800);
@@ -217,21 +169,10 @@
   }
 }
 
-/* ── Keyboard highlight in the fuzzy switchers ────────────────────────
-   static/js/fuzzy-switcher.js marks the arrow-key selection with
-   `data-fuzzy-active`. Written unlayered on purpose: it has to beat the
-   `bg-gray-50` the current project already carries, and an attribute
-   selector ties with a utility class on specificity — unlayered styles
-   win over everything Tailwind emits into @layer utilities, so the
-   highlight shows on the current row too. `--color-gray-100` is remapped
-   by the dark-mode block above, so this follows the theme. */
 [data-fuzzy-active] {
   background-color: var(--color-gray-100);
 }
 
-/* The characters the fuzzy match landed on. <mark>'s default is a yellow
-   highlighter, which is far too loud for a name you are reading a dozen of;
-   weight alone is enough to show why a row is in the list. */
 [data-fuzzy-list] mark {
   background: none;
   color: inherit;

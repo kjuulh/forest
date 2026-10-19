@@ -2,9 +2,6 @@
 {% from "components/timestamp.html.jinja" import timeago as ts %}
 {% from "components/project_settings.html.jinja" import project_settings_layout %}
 
-{# Pipelines section of the project settings shell. The <details> rows and
-   the pipeline-builder are unchanged. #}
-
 {% block content %}
 {% call project_settings_layout(current_org, current_project, "pipelines", "Pipelines",
                                 "Define multi-stage deployment pipelines as a DAG") %}

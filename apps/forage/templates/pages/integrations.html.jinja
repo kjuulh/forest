@@ -12,7 +12,6 @@
     <div class="mb-6 px-4 py-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">{{ error }}</div>
     {% endif %}
 
-    {# ── Installed integrations ─────────────────────────────────── #}
     {% if integrations | length > 0 %}
     <div class="mb-12">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Installed</h2>
@@ -20,7 +19,6 @@
             {% for integ in integrations %}
             <a href="/orgs/{{ current_org }}/settings/integrations/{{ integ.id }}" class="flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors first:rounded-t-lg last:rounded-b-lg">
                 <div class="flex items-center gap-4">
-                    {# Icon #}
                     <div class="w-10 h-10 rounded-lg border border-gray-200 flex items-center justify-center bg-white shrink-0">
                         {% if integ.integration_type == "webhook" %}
                         <svg class="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -61,11 +59,9 @@
     </div>
     {% endif %}
 
-    {# ── Available integrations (marketplace) ─────────────────── #}
     <div>
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Available integrations</h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {# Webhook #}
             <a href="/orgs/{{ current_org }}/settings/integrations/install/webhook" class="group border border-gray-200 rounded-lg p-5 hover:border-gray-300 hover:shadow-sm transition-all">
                 <div class="flex items-start gap-4">
                     <div class="w-12 h-12 rounded-lg border border-gray-200 flex items-center justify-center bg-white shrink-0 group-hover:border-gray-300">
@@ -82,7 +78,6 @@
                 </div>
             </a>
 
-            {# Slack #}
             <a href="/orgs/{{ current_org }}/settings/integrations/install/slack" class="group border border-gray-200 rounded-lg p-5 hover:border-gray-300 hover:shadow-sm transition-all">
                 <div class="flex items-start gap-4">
                     <div class="w-12 h-12 rounded-lg border border-gray-200 flex items-center justify-center shrink-0 group-hover:border-gray-300">
@@ -99,7 +94,6 @@
                 </div>
             </a>
 
-            {# Discord #}
             <div class="border border-gray-200 rounded-lg p-5 opacity-60">
                 <div class="flex items-start gap-4">
                     <div class="w-12 h-12 rounded-lg border border-gray-200 flex items-center justify-center bg-white shrink-0">
@@ -117,7 +111,6 @@
                 </div>
             </div>
 
-            {# Email #}
             <div class="border border-gray-200 rounded-lg p-5 opacity-60">
                 <div class="flex items-start gap-4">
                     <div class="w-12 h-12 rounded-lg border border-gray-200 flex items-center justify-center bg-white shrink-0">

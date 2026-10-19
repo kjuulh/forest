@@ -1,19 +1,3 @@
-//! One-shot tool_binary publisher for live verification.
-//!
-//! Env:
-//!   FOREST_SERVER          gRPC endpoint (http://localhost:4040)
-//!   FOREST_ACCESS_TOKEN    bearer token (forest auth token create)
-//!   ORG_NAME, COMP_NAME, COMP_VERSION
-//!   BINARY_PATH, OS, ARCH
-//!   DESCRIPTION                  (optional — used both for the tool facet
-//!                                 AND pushed to the project as `project.description`)
-//!   README_PATH                  (optional — uploads as component file `README.md`)
-//!
-//! Project-level (spec 009) — pushed via UpdateProject:
-//!   PROJECT_GIT_URL, PROJECT_HOMEPAGE, PROJECT_DOCS_URL,
-//!   PROJECT_SUPPORT_URL, PROJECT_DOMAIN, PROJECT_OWNER
-//!   PROJECT_TAGS                 comma-separated labels
-
 use forest_grpc_interface::registry_service_client::RegistryServiceClient;
 use forest_grpc_interface::release_service_client::ReleaseServiceClient;
 use forest_grpc_interface::{
@@ -78,9 +62,6 @@ async fn main() -> anyhow::Result<()> {
     }
     client.upload_binary(futures::stream::iter(msgs)).await?;
 
-    // Upload README.md as a component file (alongside the binary). The
-    // server's `GetComponentDetail` returns it under `readme`; forage's
-    // project Overview renders it.
     if let Some(path) = readme_path {
         let content = std::fs::read(&path)?;
         println!("README {path}: {} bytes", content.len());
@@ -114,9 +95,6 @@ async fn main() -> anyhow::Result<()> {
 
     println!("OK — {org}/{name}@{version} published");
 
-    // Push project-level description + blessed metadata (spec 009).
-    // Mirrors what `forest publish` does for real publishes: read CUE,
-    // upsert the project, push UpdateProject with field-mask.
     let env_or_empty = |k: &str| std::env::var(k).unwrap_or_default();
     let metadata = ProjectMetadata {
         git_url: env_or_empty("PROJECT_GIT_URL"),
@@ -143,7 +121,6 @@ async fn main() -> anyhow::Result<()> {
             Ok(req)
         });
 
-    // Idempotent — server upserts on conflict.
     release
         .create_project(CreateProjectRequest {
             organisation: org.clone(),

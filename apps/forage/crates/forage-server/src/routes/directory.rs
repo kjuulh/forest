@@ -1,25 +1,3 @@
-//! Machine-facing directory lookup: an external identity in, a person
-//! and their linked accounts out.
-//!
-//! Why this exists: the identity graph is split. Forest owns GitHub and
-//! Google (`identities`); Forage owns Slack (`slack_user_links`, because
-//! Slack is not in Forest's `OAuthProvider` enum). Everything that could
-//! read either was session-gated — fine for a browser, useless to a
-//! service. snag wanting to turn the author of a failing dbt model into
-//! a Slack mention is the case that surfaced it.
-//!
-//! Authenticated with a `client_credentials` token, not a session, and
-//! gated on the `directory:read` scope. It is the only route in Forage
-//! that authenticates that way.
-//!
-//! ## Why lookup by provider identity matters
-//!
-//! Email is the obvious key and the wrong one. People commit from
-//! addresses their Forest account has never seen — measured across the
-//! last 100 commits of one repo, only 19 resolved by email. The linked
-//! GitHub identity is exact, and it is keyed on the provider's numeric
-//! id rather than a login because logins get renamed.
-
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -32,8 +10,6 @@ use serde_json::json;
 
 use crate::state::AppState;
 
-/// Scope a token must carry. Mirrors `SCOPE_DIRECTORY_READ` in Forest;
-/// the authoritative check is Forest's, this is the gate at the door.
 const SCOPE_DIRECTORY_READ: &str = "directory:read";
 
 pub fn routes() -> Router<AppState> {
@@ -44,19 +20,13 @@ pub fn routes() -> Router<AppState> {
 struct ResolveQuery {
     #[serde(default)]
     email: Option<String>,
-    /// `github` | `google`.
     #[serde(default)]
     provider: Option<String>,
-    /// The provider's stable id — GitHub's numeric id, not the login.
     #[serde(default)]
     provider_user_id: Option<String>,
 }
 
 impl ResolveQuery {
-    /// Exactly one lookup key, or an explanation of what was wrong.
-    ///
-    /// Accepting both and silently preferring one would make a
-    /// mis-built query look like a missing person.
     fn into_lookup(self) -> Result<DirectoryLookup, &'static str> {
         let email = self.email.filter(|v| !v.trim().is_empty());
         let provider = self.provider.filter(|v| !v.trim().is_empty());
@@ -92,11 +62,7 @@ async fn resolve(
         return error(StatusCode::UNAUTHORIZED, "invalid_token");
     };
 
-    // Authenticate before parsing the query: an unauthenticated caller
-    // shouldn't learn anything from our validation messages.
     let principal = match client.introspect_client_token(token).await {
-        // A machine client's own token only: an access token an app holds on
-        // a user's behalf is no directory credential.
         Ok(Some(p)) if p.user.is_none() => p,
         Ok(_) => return error(StatusCode::UNAUTHORIZED, "invalid_token"),
         Err(e) => {
@@ -121,10 +87,6 @@ async fn resolve(
 
     let user = match client.resolve_directory_user(lookup).await {
         Ok(Some(u)) => u,
-        // Not found is a normal answer here — most commit authors will
-        // never have a Forest account — so it is a 200 with `found:
-        // false` rather than a 404. Callers loop over people; an
-        // exception per miss would be the wrong shape.
         Ok(None) => return Json(json!({"found": false})).into_response(),
         Err(e) => {
             tracing::warn!(?e, "directory: user resolution failed");
@@ -132,9 +94,6 @@ async fn resolve(
         }
     };
 
-    // Slack lives on Forage's side of the graph. No store configured
-    // means no Slack half rather than a failed lookup — the Forest half
-    // of the answer is still worth returning.
     let slack = match state.integration_store.as_ref() {
         None => Vec::new(),
         Some(store) => match store.list_slack_user_links(&user.user_id).await {
@@ -176,7 +135,6 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
         .filter(|t| !t.is_empty())
 }
 
-/// RFC 6750-shaped error, with the challenge header on 401.
 fn error(status: StatusCode, code: &'static str) -> Response {
     if status == StatusCode::UNAUTHORIZED {
         return (
@@ -228,9 +186,6 @@ mod tests {
         );
     }
 
-    /// Silently preferring one key would make a mis-built query look
-    /// like a person who isn't there — the most confusing possible
-    /// failure for a caller.
     #[test]
     fn giving_both_keys_is_an_error_not_a_preference() {
         assert!(q(Some("a@b.test"), Some("github"), Some("1")).is_err());
@@ -246,7 +201,6 @@ mod tests {
     #[test]
     fn no_key_at_all_is_an_error() {
         assert!(q(None, None, None).is_err());
-        // Whitespace-only counts as absent, not as a key.
         assert!(q(Some("   "), None, None).is_err());
     }
 

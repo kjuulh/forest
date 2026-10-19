@@ -1,9 +1,6 @@
 {% extends "base.html.jinja" %}
 {% from "components/ui.html.jinja" import alert %}
 
-{# See signup.html.jinja for the same pattern: builds "?return_to=…" so
-   the pending device-login intent survives OAuth/magic-link redirects
-   and the cross-link to /signup. #}
 {% set rt_query = "" %}
 {% if return_to is defined and return_to %}
     {% set rt_query = "?return_to=" ~ return_to|urlencode %}

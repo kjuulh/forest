@@ -6,27 +6,19 @@
   let expanded = $state(false);
   let highlighted = $state("");
 
-  // Simple CUE syntax highlighter
   function highlightCue(src) {
-    // Escape HTML first
     let html = src
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-    // Process tokens via regex replacement
-    // Order matters: comments first, then strings, then keywords/numbers
     html = html
-      // Line comments
       .replace(/(\/\/.*)/g, '<span class="hl-comment">$1</span>')
-      // Strings (double-quoted, with escapes)
       .replace(/"(?:[^"\\]|\\.)*"/g, '<span class="hl-string">$&</span>')
-      // Keywords
       .replace(
         /\b(package|import|let|if|for|in|true|false|null|enabled|path)\b/g,
         '<span class="hl-keyword">$1</span>'
       )
-      // Numbers
       .replace(/\b(\d+)\b/g, '<span class="hl-number">$1</span>');
 
     return html;
@@ -42,7 +34,6 @@
     expanded = !expanded;
   }
 
-  // Count lines for display
   let lineCount = $derived(content ? content.split("\n").length : 0);
 </script>
 
@@ -172,7 +163,6 @@
     color: inherit;
   }
 
-  /* Syntax highlighting tokens */
   .spec-code :global(.hl-comment) {
     color: #6b7280;
     font-style: italic;

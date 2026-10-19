@@ -31,8 +31,6 @@ opentelemetry.workspace = true
 opentelemetry_sdk.workspace = true
 opentelemetry-otlp.workspace = true
 tracing-opentelemetry.workspace = true
-# Telemetry: traces + logs + metrics over OTLP. `init()` is opt-in via the
-# `OTEL_SERVICE_NAME` env var; absent ⇒ pretty fmt to stdout.
 canopy-otel = { git = "https://github.com/understory-io/canopy-util-rs", version = "0.1.0" }
 futures-util = "0.3"
 tokio-stream = "0.1"

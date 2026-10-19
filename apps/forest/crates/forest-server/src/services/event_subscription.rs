@@ -194,7 +194,6 @@ impl EventSubscriptionRegistry {
         Ok(())
     }
 
-    /// Advance the cursor for a subscription. Only moves forward (idempotent).
     pub async fn acknowledge(
         &self,
         organisation: &str,

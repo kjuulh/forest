@@ -1,11 +1,3 @@
-//! Route tests for `POST /oauth/introspect` (RFC 7662).
-//!
-//! The caller is a resource server authenticating with its own
-//! client-credentials token; the gate on THAT token (live, an app's own,
-//! holding `tokens:introspect`) is what keeps this from being a token oracle.
-//! The token asked about is an app's client token or an access token an app
-//! holds for a user; a person's forest session or PAT is never active here.
-
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -64,7 +56,6 @@ async fn a_dead_token_is_inactive_and_nothing_more() {
 
 #[tokio::test]
 async fn the_caller_must_hold_tokens_introspect() {
-    // A live token without the scope (here a directory client) may not ask.
     let (status, json) = post(
         Some("Bearer forest_cat_testtoken"),
         "token=forest_cat_gateway_ci",
@@ -112,8 +103,6 @@ async fn a_client_token_answers_as_before_with_no_user_fields() {
 
 #[tokio::test]
 async fn a_user_delegated_oauth_token_introspects_as_that_user() {
-    // `datactl` (a public client) signed kjuulh in with Forest and holds an
-    // access token on their behalf, limited to what they consented to.
     let (status, json) = post(
         Some("Bearer forest_cat_introspector"),
         "token=forest_oat_datactl_kjuulh",
@@ -141,10 +130,6 @@ async fn a_user_delegated_oauth_token_introspects_as_that_user() {
 
 #[tokio::test]
 async fn a_persons_forest_session_or_pat_is_inactive() {
-    // `mock-access` is a live session in the mock forest. A person's own
-    // session or personal access token carries everything they may do in
-    // Forest; it is not handed to resource servers, so it does not
-    // introspect, however live it is.
     for token in [
         "mock-access",
         "forest_pat_0123456789abcdef",
@@ -173,8 +158,6 @@ async fn a_dead_user_delegated_token_is_inactive() {
 
 #[tokio::test]
 async fn the_caller_must_be_an_app_itself_not_a_token_held_for_a_user() {
-    // Even with `tokens:introspect` among its scopes, a token an app holds
-    // on a person's behalf is not the resource server's own credential.
     let (status, json) = post(
         Some("Bearer forest_oat_holds_machine_scopes"),
         "token=forest_cat_gateway_ci",

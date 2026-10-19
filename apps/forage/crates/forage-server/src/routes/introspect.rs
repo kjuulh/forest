@@ -1,36 +1,3 @@
-//! `POST /oauth/introspect`: token introspection for resource servers
-//! (RFC 7662).
-//!
-//! A service that accepts forest client-credentials tokens (the data
-//! gateway, for project metrics) has to ask whether a token is live and
-//! what it may do. Forest answers that through
-//! `OAuthAppService/IntrospectClientToken`, which only the service account
-//! may call, and that key must not live in every resource server. So Forage,
-//! which already holds it, answers on its behalf, the same way it does for
-//! `/api/directory/resolve`.
-//!
-//! The caller authenticates with its OWN client-credentials token, which must
-//! carry the `tokens:introspect` scope. The token being asked about goes in
-//! the form body (`token=`), per the RFC. An unknown, expired or revoked token
-//! is `{"active": false}` and nothing else, so this is no oracle for which
-//! tokens exist.
-//!
-//! Two kinds of token are live, both minted by Forest's OAuth server:
-//!
-//! - an app's client-credentials token: `client_id`, `organisation_id` and
-//!   `scope`;
-//! - an access token an app holds on a person's behalf, from "Sign in with
-//!   Forest" (e.g. `datactl`, a public client, after the person consented
-//!   to `datagateway:apply`): the same three fields, plus
-//!   `token_kind: "user"`, `sub` (the user id), `username` and
-//!   `organisations` (`[{id, name}]`, those they belong to). This is how a
-//!   person runs a tool against a resource server as themselves, limited to
-//!   the scopes they consented to.
-//!
-//! A person's own Forest session or personal access token is NOT accepted:
-//! those carry everything the person may do in Forest, and a resource server
-//! has no business holding one. Such a token is `{"active": false}`.
-
 use axum::extract::{Form, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -41,8 +8,6 @@ use serde_json::json;
 
 use crate::state::AppState;
 
-/// Scope the CALLER's token must carry. Mirrors `SCOPE_TOKENS_INTROSPECT` in
-/// Forest, where it grants no gRPC method at all.
 const SCOPE_TOKENS_INTROSPECT: &str = "tokens:introspect";
 
 pub fn routes() -> Router<AppState> {
@@ -67,10 +32,7 @@ async fn introspect(
         return error(StatusCode::UNAUTHORIZED, "invalid_token");
     };
 
-    // Authenticate the caller before looking at what it asks about.
     let caller = match client.introspect_client_token(caller_token).await {
-        // Only an app's own token: one it holds for a user is the user's
-        // authority, not the resource server's.
         Ok(Some(p)) if p.user.is_none() => p,
         Ok(_) => return error(StatusCode::UNAUTHORIZED, "invalid_token"),
         Err(e) => {
@@ -131,7 +93,6 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
         .filter(|t| !t.is_empty())
 }
 
-/// RFC 6750-shaped error, with the challenge header on 401.
 fn error(status: StatusCode, code: &'static str) -> Response {
     if status == StatusCode::UNAUTHORIZED {
         return (

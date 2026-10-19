@@ -1,16 +1,3 @@
-//! Acceptance tests for `UnlinkOAuthProvider` — DATA-247.
-//!
-//! The unlink RPC must refuse to strip the last sign-in method from an
-//! account. Three scenarios:
-//!
-//! 1. Password user unlinks a linked OAuth provider: succeeds (password
-//!    remains as a sign-in method).
-//! 2. OAuth-only user with two linked providers unlinks one: succeeds
-//!    (the other provider remains).
-//! 3. OAuth-only user with one linked provider unlinks it: fails with
-//!    `FailedPrecondition("last_auth_method")` — that's the only way
-//!    they can sign in.
-
 use forest_grpc_interface::*;
 use tonic::metadata::MetadataValue;
 
@@ -31,8 +18,6 @@ fn unique_email() -> String {
     format!("unlink-{}@example.com", uuid::Uuid::now_v7())
 }
 
-/// Register a user (gets a password and a `native` identity row), return
-/// the access token and user_id.
 async fn register(fixture: &Fixture) -> (String, String) {
     let mut users = fixture.users();
     let resp = users
@@ -49,10 +34,6 @@ async fn register(fixture: &Fixture) -> (String, String) {
     (tokens.access_token, user_id)
 }
 
-/// Strip the password and the `native` identity row so the user behaves
-/// like an OAuth-only account. Acceptance tests use this rather than
-/// going through the OAuth login RPC because the latter requires a
-/// service-account token and a fully-stubbed provider exchange.
 async fn make_oauth_only(db: &sqlx::PgPool, user_id: &str) {
     let uid: uuid::Uuid = user_id.parse().expect("valid uuid");
     sqlx::query!(
@@ -192,7 +173,6 @@ async fn unlink_fails_when_it_would_be_last_auth_method() {
         "wire code must be stable for callers"
     );
 
-    // The github identity must still be present after a refused unlink.
     let still_linked = sqlx::query_scalar!(
         r#"
         SELECT EXISTS(

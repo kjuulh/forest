@@ -6,9 +6,6 @@ pub mod webhook;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-// ── Integration types ────────────────────────────────────────────────
-
-/// An org-level notification integration (Slack workspace, webhook URL, etc.).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Integration {
     pub id: String,
@@ -20,13 +17,10 @@ pub struct Integration {
     pub created_by: String,
     pub created_at: String,
     pub updated_at: String,
-    /// The raw API token, only populated when the integration is first created.
-    /// After creation, this is None (only the hash is stored).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_token: Option<String>,
 }
 
-/// Supported integration types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IntegrationType {
@@ -58,7 +52,6 @@ impl IntegrationType {
     }
 }
 
-/// Type-specific configuration for an integration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IntegrationConfig {
@@ -79,9 +72,6 @@ pub enum IntegrationConfig {
     },
 }
 
-// ── Notification rules ───────────────────────────────────────────────
-
-/// Which event types an integration should receive.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationRule {
     pub id: String,
@@ -90,7 +80,6 @@ pub struct NotificationRule {
     pub enabled: bool,
 }
 
-/// Known notification event types.
 pub const NOTIFICATION_TYPES: &[&str] = &[
     "release_annotated",
     "release_started",
@@ -98,51 +87,40 @@ pub const NOTIFICATION_TYPES: &[&str] = &[
     "release_failed",
 ];
 
-// ── Slack user links ─────────────────────────────────────────────────
-
-/// Links a Forage user to their Slack identity in a workspace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlackUserLink {
     pub id: String,
-    pub user_id: String,        // Forage/Forest user ID
-    pub team_id: String,        // Slack workspace ID
-    pub team_name: String,      // Slack workspace name (display)
-    pub slack_user_id: String,  // Slack user ID (U-xxx)
-    pub slack_username: String, // Slack display name
+    pub user_id: String,
+    pub team_id: String,
+    pub team_name: String,
+    pub slack_user_id: String,
+    pub slack_username: String,
     pub created_at: String,
 }
 
-/// Per-destination deployment status within a release.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DestinationStatus {
     pub environment: String,
-    pub status: String, // "started", "succeeded", "failed"
+    pub status: String,
     pub error: Option<String>,
 }
 
-/// Tracks a posted Slack message so we can update it in-place.
-/// One ref per (integration, release_slug) — accumulates all destinations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlackMessageRef {
     pub id: String,
     pub integration_id: String,
-    pub release_id: String,      // release slug (shared across destinations)
-    pub channel_id: String,      // Slack channel where posted
-    pub message_ts: String,      // Slack message timestamp (for chat.update)
-    pub last_event_type: String, // Last event that updated this message
-    /// Accumulated per-destination statuses. Key = destination name.
+    pub release_id: String,
+    pub channel_id: String,
+    pub message_ts: String,
+    pub last_event_type: String,
     #[serde(default)]
     pub destinations: HashMap<String, DestinationStatus>,
-    /// Cached release title for message rebuilds.
     #[serde(default)]
     pub release_title: String,
     pub created_at: String,
     pub updated_at: String,
 }
 
-// ── Delivery log ─────────────────────────────────────────────────────
-
-/// Record of a notification delivery attempt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationDelivery {
     pub id: String,
@@ -180,8 +158,6 @@ impl DeliveryStatus {
     }
 }
 
-// ── Create/Update inputs ─────────────────────────────────────────────
-
 #[derive(Debug, Clone)]
 pub struct CreateIntegrationInput {
     pub organisation: String,
@@ -190,8 +166,6 @@ pub struct CreateIntegrationInput {
     pub config: IntegrationConfig,
     pub created_by: String,
 }
-
-// ── Error type ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum IntegrationError {
@@ -211,31 +185,26 @@ pub enum IntegrationError {
     Encryption(String),
 }
 
-// ── Repository trait ─────────────────────────────────────────────────
-
-/// Persistence trait for integration management. Implemented by forage-db.
 #[async_trait::async_trait]
 pub trait IntegrationStore: Send + Sync {
-    /// List all integrations for an organisation.
     async fn list_integrations(
         &self,
         organisation: &str,
     ) -> Result<Vec<Integration>, IntegrationError>;
 
-    /// Get a single integration by ID (must belong to the given org).
+    /// Must only return an integration that belongs to `organisation`.
     async fn get_integration(
         &self,
         organisation: &str,
         id: &str,
     ) -> Result<Integration, IntegrationError>;
 
-    /// Create a new integration with default notification rules (all enabled).
+    /// Enables every notification rule by default.
     async fn create_integration(
         &self,
         input: &CreateIntegrationInput,
     ) -> Result<Integration, IntegrationError>;
 
-    /// Enable or disable an integration.
     async fn set_integration_enabled(
         &self,
         organisation: &str,
@@ -243,20 +212,17 @@ pub trait IntegrationStore: Send + Sync {
         enabled: bool,
     ) -> Result<(), IntegrationError>;
 
-    /// Delete an integration and its rules/deliveries (cascading).
     async fn delete_integration(
         &self,
         organisation: &str,
         id: &str,
     ) -> Result<(), IntegrationError>;
 
-    /// List notification rules for an integration.
     async fn list_rules(
         &self,
         integration_id: &str,
     ) -> Result<Vec<NotificationRule>, IntegrationError>;
 
-    /// Set whether a specific notification type is enabled for an integration.
     async fn set_rule_enabled(
         &self,
         integration_id: &str,
@@ -264,7 +230,6 @@ pub trait IntegrationStore: Send + Sync {
         enabled: bool,
     ) -> Result<(), IntegrationError>;
 
-    /// Record a delivery attempt.
     async fn record_delivery(
         &self,
         integration_id: &str,
@@ -273,21 +238,18 @@ pub trait IntegrationStore: Send + Sync {
         error_message: Option<&str>,
     ) -> Result<(), IntegrationError>;
 
-    /// List enabled integrations for an org that have a matching rule for the given event type.
     async fn list_matching_integrations(
         &self,
         organisation: &str,
         notification_type: &str,
     ) -> Result<Vec<Integration>, IntegrationError>;
 
-    /// List recent delivery attempts for an integration, newest first.
     async fn list_deliveries(
         &self,
         integration_id: &str,
         limit: usize,
     ) -> Result<Vec<NotificationDelivery>, IntegrationError>;
 
-    /// Update the configuration (and optionally the name) of an existing integration.
     async fn update_integration_config(
         &self,
         organisation: &str,
@@ -296,57 +258,42 @@ pub trait IntegrationStore: Send + Sync {
         config: &IntegrationConfig,
     ) -> Result<(), IntegrationError>;
 
-    /// Look up an integration by its API token hash. Used for API authentication.
     async fn get_integration_by_token_hash(
         &self,
         token_hash: &str,
     ) -> Result<Integration, IntegrationError>;
 
-    // ── Slack user links ──────────────────────────────────────────────
-
-    /// Get the Slack user link for a Forage user in a given workspace, if any.
     async fn get_slack_user_link(
         &self,
         user_id: &str,
         team_id: &str,
     ) -> Result<Option<SlackUserLink>, IntegrationError>;
 
-    /// Create or update the Slack user link for a given (user_id, team_id) pair.
     async fn upsert_slack_user_link(&self, link: &SlackUserLink) -> Result<(), IntegrationError>;
 
-    /// Remove the Slack user link for a given (user_id, team_id) pair.
     async fn delete_slack_user_link(
         &self,
         user_id: &str,
         team_id: &str,
     ) -> Result<(), IntegrationError>;
 
-    /// List all Slack user links for a Forage user (one per connected workspace).
     async fn list_slack_user_links(
         &self,
         user_id: &str,
     ) -> Result<Vec<SlackUserLink>, IntegrationError>;
 
-    // ── Slack message refs ────────────────────────────────────────────
-
-    /// Get the Slack message ref for a release in a specific integration, if any.
     async fn get_slack_message_ref(
         &self,
         integration_id: &str,
         release_id: &str,
     ) -> Result<Option<SlackMessageRef>, IntegrationError>;
 
-    /// Create or update the Slack message ref for a given (integration_id, release_id) pair.
     async fn upsert_slack_message_ref(
         &self,
         msg_ref: &SlackMessageRef,
     ) -> Result<(), IntegrationError>;
 }
 
-// ── Token generation ────────────────────────────────────────────────
-
-/// Generate a crypto-random API token for an integration.
-/// Format: `fgi_` prefix + 32 bytes hex-encoded.
 pub fn generate_api_token() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 32];
@@ -355,7 +302,6 @@ pub fn generate_api_token() -> String {
     format!("fgi_{encoded}")
 }
 
-/// SHA-256 hash of a token for storage. Only the hash is persisted.
 pub fn hash_api_token(token: &str) -> String {
     use sha2::{Digest, Sha256};
     let hash = Sha256::digest(token.as_bytes());
@@ -366,9 +312,7 @@ fn hex_encode(data: &[u8]) -> String {
     data.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-// ── Validation ───────────────────────────────────────────────────────
-
-/// Validate a webhook URL. Must be HTTPS (or localhost for development).
+/// Rejects anything but HTTPS, except localhost for development.
 pub fn validate_webhook_url(url: &str) -> Result<(), IntegrationError> {
     if url.starts_with("https://") {
         return Ok(());
@@ -381,7 +325,6 @@ pub fn validate_webhook_url(url: &str) -> Result<(), IntegrationError> {
     ))
 }
 
-/// Validate an integration name (reuse slug rules: lowercase alphanumeric + hyphens, max 64).
 pub fn validate_integration_name(name: &str) -> Result<(), IntegrationError> {
     if name.is_empty() {
         return Err(IntegrationError::InvalidInput(
@@ -393,7 +336,6 @@ pub fn validate_integration_name(name: &str) -> Result<(), IntegrationError> {
             "Integration name too long (max 64 characters)".to_string(),
         ));
     }
-    // Allow more characters than slugs: spaces, #, etc. for human-readable names
     if name.chars().any(|c| c.is_control()) {
         return Err(IntegrationError::InvalidInput(
             "Integration name contains invalid characters".to_string(),
@@ -402,14 +344,10 @@ pub fn validate_integration_name(name: &str) -> Result<(), IntegrationError> {
     Ok(())
 }
 
-// ── In-memory store (for tests) ──────────────────────────────────────
-
-/// In-memory integration store for testing. Not for production use.
 pub struct InMemoryIntegrationStore {
     integrations: std::sync::Mutex<Vec<Integration>>,
     rules: std::sync::Mutex<Vec<NotificationRule>>,
     deliveries: std::sync::Mutex<Vec<NotificationDelivery>>,
-    /// Stores token_hash -> integration_id for lookup.
     token_hashes: std::sync::Mutex<HashMap<String, String>>,
     slack_user_links: std::sync::Mutex<Vec<SlackUserLink>>,
     slack_message_refs: std::sync::Mutex<Vec<SlackMessageRef>>,
@@ -434,7 +372,6 @@ impl Default for InMemoryIntegrationStore {
     }
 }
 
-/// Prefix for integration API tokens.
 pub const TOKEN_PREFIX: &str = "fgi_";
 
 #[async_trait::async_trait]
@@ -496,14 +433,11 @@ impl IntegrationStore for InMemoryIntegrationStore {
             updated_at: now,
             api_token: Some(raw_token),
         };
-        // Store without the raw token
         let stored = Integration { api_token: None, ..integration.clone() };
         store.push(stored);
 
-        // Store token hash
         self.token_hashes.lock().unwrap().insert(token_hash, id.clone());
 
-        // Create default rules
         let mut rules = self.rules.lock().unwrap();
         for nt in NOTIFICATION_TYPES {
             rules.push(NotificationRule {
@@ -543,7 +477,6 @@ impl IntegrationStore for InMemoryIntegrationStore {
         if store.len() == len {
             return Err(IntegrationError::NotFound(id.to_string()));
         }
-        // Cascade delete rules
         let mut rules = self.rules.lock().unwrap();
         rules.retain(|r| r.integration_id != id);
         Ok(())
@@ -631,7 +564,6 @@ impl IntegrationStore for InMemoryIntegrationStore {
             .filter(|d| d.integration_id == integration_id)
             .cloned()
             .collect();
-        // Sort newest first (by attempted_at descending)
         matching.sort_by(|a, b| b.attempted_at.cmp(&a.attempted_at));
         matching.truncate(limit);
         Ok(matching)
@@ -868,7 +800,6 @@ mod tests {
     fn generate_api_token_has_prefix_and_length() {
         let token = generate_api_token();
         assert!(token.starts_with("fgi_"));
-        // fgi_ (4) + 64 hex chars (32 bytes) = 68 total
         assert_eq!(token.len(), 68);
     }
 
@@ -885,7 +816,7 @@ mod tests {
         let h1 = hash_api_token(token);
         let h2 = hash_api_token(token);
         assert_eq!(h1, h2);
-        assert_eq!(h1.len(), 64); // SHA-256 = 32 bytes = 64 hex chars
+        assert_eq!(h1.len(), 64);
     }
 
     #[test]
@@ -913,18 +844,15 @@ mod tests {
             .await
             .unwrap();
 
-        // Token is returned on creation
         assert!(created.api_token.is_some());
         let token = created.api_token.unwrap();
         assert!(token.starts_with("fgi_"));
 
-        // Token lookup works
         let token_hash = hash_api_token(&token);
         let found = store.get_integration_by_token_hash(&token_hash).await.unwrap();
         assert_eq!(found.id, created.id);
-        assert!(found.api_token.is_none()); // not stored in plaintext
+        assert!(found.api_token.is_none());
 
-        // Stored integration doesn't have the raw token
         let listed = store.list_integrations("myorg").await.unwrap();
         assert!(listed[0].api_token.is_none());
     }

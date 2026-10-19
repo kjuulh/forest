@@ -1,29 +1,3 @@
-//! Device-login grant aggregate (RFC 8628 device authorization grant).
-//!
-//! Pure domain core for the `forest auth login --web` flow. See
-//! `apps/forest/TASKS/022-device-login.md` for the full spec.
-//!
-//! The state machine is:
-//!
-//! ```text
-//!     NonExistent
-//!         │ initiate
-//!         ▼
-//!      Pending ──── approve ────► Approved ──── consume ────► Consumed
-//!         │                          │                          │
-//!         │ deny                     │ (TTL elapses             │ (terminal,
-//!         ▼                          │  before consume)         │  externally
-//!       Denied                       ▼                          │  masked as
-//!         │ (TTL elapses)         Expired                       │  Expired)
-//!         ▼
-//!      Expired
-//! ```
-//!
-//! `Consumed` is an internal terminal state distinguished from `Expired`
-//! so a replay attacker cannot mint a second token pair from the same
-//! device_code. Externally (via the gRPC `Poll` response) it is reported
-//! as `Expired` — indistinguishable from a normal TTL expiry.
-
 use anyhow::bail;
 use chrono::{DateTime, Utc};
 use mire::{Aggregate, AggregateRoot, EventData};
@@ -31,10 +5,6 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
-
-// ============================================================
-// Events
-// ============================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -48,9 +18,6 @@ pub enum DeviceGrantEvent {
         scopes: Vec<String>,
         expires_at: DateTime<Utc>,
         interval_seconds: i32,
-        /// The OAuth app the grant is for, when it signs a person in to an
-        /// app rather than to the Forest CLI. Absent in every event recorded
-        /// before app grants existed, which were all Forest CLI logins.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         app_id: Option<Uuid>,
     },
@@ -84,10 +51,6 @@ impl EventData for DeviceGrantEvent {
     }
 }
 
-// ============================================================
-// Aggregate state
-// ============================================================
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceGrantStatus {
     NonExistent,
@@ -109,8 +72,6 @@ pub struct DeviceGrantAggregate {
     pub scopes: Vec<String>,
     pub expires_at: Option<DateTime<Utc>>,
     pub interval_seconds: i32,
-    /// `Some` for an OAuth app's grant, `None` for a Forest CLI login. The two
-    /// redeem through different endpoints and must never cross.
     pub app_id: Option<Uuid>,
     pub approved_user_id: Option<Uuid>,
     pub approving_ip: Option<String>,
@@ -186,7 +147,6 @@ impl Aggregate for DeviceGrantAggregate {
             }
             DeviceGrantEvent::Denied { user_id, .. } => {
                 self.status = DeviceGrantStatus::Denied;
-                // Record who denied — useful for audit even though tokens never issue.
                 self.approved_user_id = Some(*user_id);
             }
             DeviceGrantEvent::Consumed { at } => {
@@ -200,30 +160,15 @@ impl Aggregate for DeviceGrantAggregate {
     }
 }
 
-// ============================================================
-// External poll-status mapping
-// ============================================================
-
-/// Status returned to the polling CLI. Distinct from the internal
-/// [`DeviceGrantStatus`] so that `Consumed` is masked as `Expired`
-/// (preventing a replay attacker from distinguishing a stolen-but-used
-/// device_code from a naturally-expired one).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollStatus {
     Pending,
-    /// The grant is approved and not yet consumed. The caller should now
-    /// call [`DeviceGrantAggregate::consume`] and return tokens to the CLI.
     Approved,
     Denied,
     Expired,
 }
 
 impl DeviceGrantAggregate {
-    /// Compute what the CLI poller should see right now.
-    ///
-    /// Idempotent and read-only — emitting an `Expired` event for grants
-    /// past their TTL is the responsibility of the background sweep,
-    /// not the poller.
     pub fn poll_status(&self, now: DateTime<Utc>) -> PollStatus {
         let past_ttl = self.expires_at.map(|exp| now >= exp).unwrap_or(false);
 
@@ -239,10 +184,6 @@ impl DeviceGrantAggregate {
         }
     }
 }
-
-// ============================================================
-// Commands (pure business logic)
-// ============================================================
 
 pub struct InitiateDeviceGrantParams {
     pub device_code_hash: String,
@@ -344,9 +285,6 @@ impl DeviceGrantAggregate {
         Ok(())
     }
 
-    /// Mark an approved grant as consumed. Called by the service layer
-    /// when a successful poll returns tokens to the CLI. Single-use:
-    /// a second call returns Err.
     pub fn consume(root: &mut AggregateRoot<Self>, now: DateTime<Utc>) -> anyhow::Result<()> {
         match root.state.status {
             DeviceGrantStatus::Approved => {}
@@ -366,9 +304,6 @@ impl DeviceGrantAggregate {
         Ok(())
     }
 
-    /// Mark a non-terminal grant as expired. Idempotent on already-terminal
-    /// states (returns Ok with no event recorded). Intended for a periodic
-    /// sweep job that walks grants whose `expires_at` has passed.
     pub fn expire(root: &mut AggregateRoot<Self>, now: DateTime<Utc>) -> anyhow::Result<()> {
         match root.state.status {
             DeviceGrantStatus::NonExistent => bail!("device grant does not exist"),
@@ -383,28 +318,16 @@ impl DeviceGrantAggregate {
     }
 }
 
-/// Stream key for a device-grant aggregate: the `grant_id` UUID as string.
-/// Forage looks up grants by `user_code`; the service layer translates that
-/// to a `grant_id` via the projection table.
 pub fn stream_key(grant_id: &Uuid) -> String {
     grant_id.to_string()
 }
 
-// ============================================================
-// Code generators (RFC 8628 §6.1 — user_code and device_code)
-// ============================================================
-
-/// Unambiguous user-code alphabet. 32 symbols, no vowels (avoids accidental
-/// words), no 0/O/1/I/L (avoids visual confusion). 32 symbols gives exactly
-/// 5 bits per character → 40 bits of entropy for an 8-char code.
 pub const USER_CODE_ALPHABET: &[u8] = b"BCDFGHJKLMNPQRSTVWXZ23456789";
 
-/// Length of a generated user code (before grouping with a dash).
 pub const USER_CODE_LEN: usize = 8;
 
-/// Generate a user code as `XXXX-XXXX` from the unambiguous alphabet.
 pub fn generate_user_code<R: Rng + ?Sized>(rng: &mut R) -> String {
-    debug_assert_eq!(USER_CODE_ALPHABET.len(), 28); // panics in tests if alphabet edited inconsistently
+    debug_assert_eq!(USER_CODE_ALPHABET.len(), 28);
     let alphabet_len = USER_CODE_ALPHABET.len() as u32;
     let mut chars = Vec::with_capacity(USER_CODE_LEN + 1);
     for i in 0..USER_CODE_LEN {
@@ -417,9 +340,6 @@ pub fn generate_user_code<R: Rng + ?Sized>(rng: &mut R) -> String {
     String::from_utf8(chars).expect("alphabet is ASCII")
 }
 
-/// Normalize a user-supplied code: uppercase, strip dashes and whitespace.
-/// Forage's approval endpoint calls this before lookup so the user can
-/// paste `abcdefgh`, `abcd efgh`, or `ABCD-EFGH` interchangeably.
 pub fn normalize_user_code(input: &str) -> String {
     input
         .chars()
@@ -428,11 +348,8 @@ pub fn normalize_user_code(input: &str) -> String {
         .collect()
 }
 
-/// Length in bytes of the random material for a device_code (≥ 128 bits per
-/// RFC 8628 §5.2; we use 256 to match other forest secrets).
 pub const DEVICE_CODE_BYTES: usize = 32;
 
-/// Generate a device_code: 32 random bytes, base64url-no-pad encoded.
 pub fn generate_device_code<R: Rng + ?Sized>(rng: &mut R) -> String {
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -442,17 +359,11 @@ pub fn generate_device_code<R: Rng + ?Sized>(rng: &mut R) -> String {
     URL_SAFE_NO_PAD.encode(buf)
 }
 
-/// SHA-256 hash of a device_code, hex-encoded. The hash — not the raw code —
-/// is what we store in the projection and use as the stream lookup key.
 pub fn hash_device_code(device_code: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(device_code.as_bytes());
     hex::encode(hasher.finalize())
 }
-
-// ============================================================
-// Unit tests
-// ============================================================
 
 #[cfg(test)]
 mod tests {
@@ -482,8 +393,6 @@ mod tests {
             app_id: None,
         }
     }
-
-    // ---- initiate ----
 
     #[test]
     fn initiate_records_initiated_event() {
@@ -526,8 +435,6 @@ mod tests {
         assert!(DeviceGrantAggregate::initiate(&mut root, p).is_err());
     }
 
-    // ---- approve ----
-
     #[test]
     fn approve_from_pending_succeeds() {
         let mut root = fresh_root();
@@ -559,7 +466,7 @@ mod tests {
     fn approve_rejects_after_ttl() {
         let mut root = fresh_root();
         DeviceGrantAggregate::initiate(&mut root, default_params()).unwrap();
-        let later = t0() + Duration::seconds(901); // past expires_at
+        let later = t0() + Duration::seconds(901);
         assert!(
             DeviceGrantAggregate::approve(
                 &mut root,
@@ -570,7 +477,7 @@ mod tests {
             )
             .is_err()
         );
-        assert_eq!(root.state.status, DeviceGrantStatus::Pending); // unchanged
+        assert_eq!(root.state.status, DeviceGrantStatus::Pending);
     }
 
     #[test]
@@ -591,8 +498,6 @@ mod tests {
         );
     }
 
-    // ---- deny ----
-
     #[test]
     fn deny_from_pending_succeeds() {
         let mut root = fresh_root();
@@ -609,8 +514,6 @@ mod tests {
             .unwrap();
         assert!(DeviceGrantAggregate::deny(&mut root, Uuid::now_v7(), t0()).is_err());
     }
-
-    // ---- consume ----
 
     #[test]
     fn consume_from_approved_succeeds() {
@@ -649,8 +552,6 @@ mod tests {
         assert!(DeviceGrantAggregate::consume(&mut root, later).is_err());
     }
 
-    // ---- expire ----
-
     #[test]
     fn expire_from_pending_transitions() {
         let mut root = fresh_root();
@@ -666,11 +567,9 @@ mod tests {
         DeviceGrantAggregate::deny(&mut root, Uuid::now_v7(), t0()).unwrap();
         let before = root.pending_count();
         DeviceGrantAggregate::expire(&mut root, t0() + Duration::seconds(901)).unwrap();
-        assert_eq!(root.pending_count(), before); // no new event
+        assert_eq!(root.pending_count(), before);
         assert_eq!(root.state.status, DeviceGrantStatus::Denied);
     }
-
-    // ---- poll_status ----
 
     #[test]
     fn poll_status_pending_when_fresh() {
@@ -713,9 +612,6 @@ mod tests {
         DeviceGrantAggregate::approve(&mut root, Uuid::now_v7(), "ip".into(), "ua".into(), t0())
             .unwrap();
         DeviceGrantAggregate::consume(&mut root, t0()).unwrap();
-        // Even still within TTL, a consumed grant is reported as Expired
-        // to the poller — prevents replay attackers from distinguishing
-        // a stolen-and-used device_code from natural expiry.
         assert_eq!(root.state.poll_status(t0()), PollStatus::Expired);
     }
 
@@ -730,12 +626,8 @@ mod tests {
     #[test]
     fn poll_status_nonexistent_reports_expired() {
         let root = fresh_root();
-        // Never initiated. Treat lookup miss as Expired to avoid leaking
-        // existence to brute-forcers.
         assert_eq!(root.state.poll_status(t0()), PollStatus::Expired);
     }
-
-    // ---- hydration ----
 
     #[test]
     fn hydrate_full_lifecycle() {
@@ -774,8 +666,6 @@ mod tests {
         assert_eq!(replayed.state.grant_id, Some(id));
     }
 
-    // ---- serde ----
-
     #[test]
     fn event_serde_roundtrip() {
         let events = vec![
@@ -813,8 +703,6 @@ mod tests {
 
     #[test]
     fn an_initiated_event_recorded_before_app_grants_replays_as_a_forest_cli_login() {
-        // Events already in the store carry no `app_id`; they must keep
-        // replaying, and as what they were.
         let stored = serde_json::json!({
             "type": "Initiated",
             "grant_id": Uuid::now_v7(),
@@ -832,8 +720,6 @@ mod tests {
         assert_eq!(state.status, DeviceGrantStatus::Pending);
         assert_eq!(state.app_id, None);
     }
-
-    // ---- code generators ----
 
     #[test]
     fn user_code_only_uses_alphabet() {
@@ -856,10 +742,6 @@ mod tests {
 
     #[test]
     fn user_code_has_reasonable_distribution() {
-        // Crude smoke test: across 5000 codes, every alphabet symbol should
-        // appear at least once. With 32 symbols and 8 char/code that's
-        // ~10000 char draws; missing a symbol entirely would suggest a
-        // generator bug.
         let mut rng = StdRng::seed_from_u64(7);
         let mut seen = std::collections::HashSet::new();
         for _ in 0..5_000 {
@@ -884,7 +766,6 @@ mod tests {
     fn device_code_is_long_and_url_safe() {
         let mut rng = StdRng::seed_from_u64(123);
         let code = generate_device_code(&mut rng);
-        // 32 bytes base64url-no-pad → 43 chars
         assert_eq!(code.len(), 43);
         for c in code.chars() {
             assert!(

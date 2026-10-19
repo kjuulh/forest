@@ -9,14 +9,6 @@ import { darkMirrorCss } from "./gallery/dark-mirror.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const INPUT_CSS = join(HERE, "..", "static", "css", "input.css");
 
-// Separate from vite.config.js: that one builds a custom-element library bundle
-// for the server to serve. This one serves a design testbed — the real
-// components, the real stylesheet, against fixtures instead of a server.
-
-// The release cards ask the server for /avatars/<username>. There is no forage
-// server behind the gallery, so stand in for one: kjuulh has a picture, anybody
-// else does not — which is exactly the pair the avatar slot has to render, the
-// picture and the initial it falls back to when the request 404s.
 const AVATAR = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
   <rect width="48" height="48" fill="#0f766e"/>
   <circle cx="24" cy="18" r="8" fill="#99f6e4"/>
@@ -41,9 +33,6 @@ function stubAvatars() {
   };
 }
 
-// Serves the app's dark palette re-scoped to `[data-theme="dark"]`, so the
-// toolbar's theme switch drives the real thing rather than a copy of it.
-// See gallery/dark-mirror.js.
 function darkMirror() {
   const VIRTUAL = "/@gallery/dark-mirror.css";
   return {

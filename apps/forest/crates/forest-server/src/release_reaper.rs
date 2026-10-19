@@ -27,17 +27,12 @@ impl ReleaseReaper {
             runner_manager,
             assigned_timeout: Duration::from_secs(5 * 60),
             running_timeout: Duration::from_secs(60 * 60),
-            // 3 missed heartbeats (30s each) = 90s threshold
             heartbeat_timeout: Duration::from_secs(90),
-            // Long enough that an intent still having its releases created
-            // cannot be mistaken for one that is finished. Nothing takes
-            // minutes to insert a handful of rows.
             intent_finalize_grace: Duration::from_secs(2 * 60),
         }
     }
 
     async fn reap(&self) -> anyhow::Result<()> {
-        // Check for stale heartbeats first (faster detection)
         let stale = self
             .release_event_store
             .find_stale_heartbeats(self.heartbeat_timeout.as_secs() as i64)
@@ -76,7 +71,6 @@ impl ReleaseReaper {
             }
         }
 
-        // Fallback: catch releases that predate the heartbeat column (last_heartbeat_at IS NULL)
         let stuck = self
             .release_event_store
             .find_stuck_releases(
@@ -113,9 +107,6 @@ impl ReleaseReaper {
             }
         }
 
-        // Reconcile intents whose releases all finished but which were never
-        // closed out. `emit_event` does this for anything that transitions into
-        // a terminal state; this catches whatever wrote one directly instead.
         let orphaned = self
             .release_event_store
             .find_orphaned_active_intents(self.intent_finalize_grace.as_secs() as i64)

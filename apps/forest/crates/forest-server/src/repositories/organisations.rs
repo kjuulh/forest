@@ -8,8 +8,6 @@ pub struct OrganisationRepository {
     db: sqlx::PgPool,
 }
 
-// -- Row types ----------------------------------------------------------------
-
 pub struct OrganisationRow {
     pub id: Uuid,
     pub name: String,
@@ -57,8 +55,6 @@ pub struct JoinOfferRow {
     pub organisation_name: String,
     pub matched_domain: String,
 }
-
-// -- Repository implementation ------------------------------------------------
 
 impl OrganisationRepository {
     pub fn pool(&self) -> &sqlx::PgPool {
@@ -323,8 +319,6 @@ impl OrganisationRepository {
         Ok(row.unwrap_or(0))
     }
 
-    // -- Allowed-domain auto-invite (DATA-252) --------------------------------
-
     pub async fn add_allowed_domain(
         &self,
         db: impl PgExecutor<'_>,
@@ -377,9 +371,6 @@ impl OrganisationRepository {
         Ok(rows)
     }
 
-    /// Fetch a single allowed-domain row by (org_id, domain). Used by the
-    /// verify-domain service path to retrieve the verification token
-    /// before performing the DNS lookup.
     pub async fn get_allowed_domain(
         &self,
         db: impl PgExecutor<'_>,
@@ -403,10 +394,6 @@ impl OrganisationRepository {
         Ok(row)
     }
 
-    /// Mark an allowed-domain row as DNS-verified. Idempotent — repeat
-    /// calls don't clobber the original verified_at timestamp; only the
-    /// first successful verification sets it. Returns true if the row
-    /// transitioned (or stayed) verified after this call.
     pub async fn mark_dns_verified(
         &self,
         db: impl PgExecutor<'_>,
@@ -448,18 +435,6 @@ impl OrganisationRepository {
         Ok(res.rows_affected() > 0)
     }
 
-    /// Compute the join offers for a user: orgs they're not already in
-    /// where at least one of their verified emails matches an allowed
-    /// domain whose policy actively grants offers (i.e. not 'manual_only')
-    /// AND whose DNS ownership has been proven (`dns_verified_at IS NOT
-    /// NULL`).
-    ///
-    /// Domain extraction uses the **rightmost** '@' (`substring(... from
-    /// '@([^@]+)$')`), matching Rust's `rsplit_once('@')`. This is the
-    /// belt-and-suspenders defense against a malformed multi-`@` email
-    /// sneaking past upstream validation: even if `a@b@c.com` is stored,
-    /// the extracted domain is `c.com` (the deliverable mailbox), not the
-    /// attacker-controlled middle segment.
     pub async fn list_join_offers(
         &self,
         db: impl PgExecutor<'_>,
@@ -495,11 +470,6 @@ impl OrganisationRepository {
         Ok(rows)
     }
 
-    /// Single-org variant: re-checks eligibility for the accept-offer path.
-    /// Returns the matched domain if eligible, None otherwise. Used so
-    /// the accept handler can't grant access based on a stale offer.
-    /// Same domain-extraction and DNS-verified-gate logic as
-    /// `list_join_offers`.
     pub async fn find_join_offer(
         &self,
         db: impl PgExecutor<'_>,
@@ -562,8 +532,6 @@ impl OrganisationRepository {
         Ok(rows)
     }
 }
-
-// -- State trait --------------------------------------------------------------
 
 pub trait OrganisationRepositoryState {
     fn organisation_repository(&self) -> OrganisationRepository;

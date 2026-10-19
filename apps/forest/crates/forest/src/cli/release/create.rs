@@ -18,12 +18,10 @@ use super::{
 /// Usage: `forest release create --env prod`
 #[derive(clap::Parser)]
 pub struct CreateCommand {
-    // ── Required ─────────────────────────────────────────────────────
     /// Target environment to release to.
     #[arg(long, short = 'e', alias = "env")]
     environment: String,
 
-    // ── Optional overrides ───────────────────────────────────────────
     /// Release title. Defaults to the latest git commit subject.
     #[arg(long)]
     title: Option<String>,
@@ -146,7 +144,6 @@ pub struct CreateCommand {
 
 impl CreateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
-        // ── Resolve project identity from forest.cue ─────────────────
         let (detected_org, detected_project) = super::detect::project(state).await;
 
         let organisation = self.organisation.clone().or(detected_org).context(
@@ -158,10 +155,6 @@ impl CreateCommand {
                 "project name not found: set project.name in forest.cue or pass --project",
             )?;
 
-        // ── Resolve source context ───────────────────────────────────
-        // Explicit flags win. CI providers win over local git because CI
-        // checkouts are often detached and may not have the same remote
-        // metadata as the canonical source repository.
         let ci = CiInfo::detect();
         let git = GitInfo::detect().await;
 
@@ -201,7 +194,6 @@ impl CreateCommand {
             .or(ci.repo_url.clone())
             .or(git.remote_url.clone());
 
-        // ── Build annotation context from CI/git if not provided ──────
         let title = self.title.clone().or(ci.title.clone()).unwrap_or_else(|| {
             git.subject
                 .clone()
@@ -223,12 +215,6 @@ impl CreateCommand {
         let context_pr = self.context_pr.clone().or(ci.context_pr.clone());
         let version = self.version.clone().or(ci.version.clone());
 
-        // ── Resolve author info ──────────────────────────────────────
-        //
-        // `--detect` asks "who wrote this"; in Woodpecker/Drone that can be
-        // answered directly from the CI env, and in GitHub Actions `annotate`
-        // resolves it from the event payload. With the flag off, preserve the
-        // old local fallback chain.
         let (source_username, source_email) = if self.detect {
             (
                 self.source_username.clone().or(ci.author_name.clone()),
@@ -251,17 +237,14 @@ impl CreateCommand {
 
         let total_steps = if self.skip_commit { 2 } else { 3 };
 
-        // ── 1. Prepare ───────────────────────────────────────────────
         tracing::info!("step 1/{total_steps}: prepare");
         let prepare = PrepareCommand {
             overrides: self.overrides.clone(),
         };
         prepare.execute(state).await.context("prepare")?;
 
-        // ── 2. Annotate (annotation_only — no auto-release) ─────────
         tracing::info!("step 2/{total_steps}: annotate");
 
-        // Include --set overrides in annotation metadata for traceability
         let mut metadata = self.metadata.clone();
         for (i, kv) in self.overrides.iter().enumerate() {
             metadata.push(format!("override.{i}={kv}"));
@@ -306,7 +289,6 @@ impl CreateCommand {
             return Ok(());
         }
 
-        // ── 3. Release ───────────────────────────────────────────────
         tracing::info!("step 3/3: release");
         let commit = CommitCommand {
             slug: Some(slug),
@@ -325,9 +307,6 @@ impl CreateCommand {
     }
 }
 
-/// Reads organisation and project name from the forest.cue/toml project file.
-/// Reads author identity from the local forest auth state.
-/// Falls back gracefully — returns (None, None) if not logged in.
 async fn detect_author(state: &State) -> (Option<String>, Option<String>) {
     match state.user_state().get_state().await {
         Ok(Some(user)) => {
@@ -345,7 +324,6 @@ async fn detect_author(state: &State) -> (Option<String>, Option<String>) {
     }
 }
 
-/// Best-effort source information collected from CI environment variables.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct CiInfo {
     source_type: Option<String>,
@@ -558,28 +536,19 @@ fn pull_request_url(repo_url: Option<&str>, number: Option<&str>, segment: &str)
     Some(format!("{repo_url}/{segment}/{number}"))
 }
 
-/// Best-effort git information collected from the local repository.
 struct GitInfo {
     sha: Option<String>,
     branch: Option<String>,
-    /// Full commit message (subject + body).
     message: Option<String>,
-    /// First line of the commit message.
     subject: Option<String>,
-    /// Remaining lines after the subject (if any).
     body: Option<String>,
     remote_url: Option<String>,
-    /// Whether the working tree has uncommitted changes.
     dirty: bool,
-    /// Git user.name from config.
     author_name: Option<String>,
-    /// Git user.email from config.
     author_email: Option<String>,
 }
 
 impl GitInfo {
-    /// Collect git info from the working directory. Never fails — missing
-    /// values are simply `None`.
     async fn detect() -> Self {
         let (sha, branch, message, remote_url, dirty, author_name, author_email) = tokio::join!(
             git_output(&["rev-parse", "HEAD"]),
@@ -593,8 +562,6 @@ impl GitInfo {
 
         let (subject, body) = split_message(message.as_deref());
 
-        // When dirty, append -dirty to the SHA so it's clear the commit
-        // doesn't fully represent what was released.
         let sha = match (sha, dirty) {
             (Some(s), true) => Some(format!("{s}-dirty")),
             (sha, _) => sha,
@@ -614,10 +581,7 @@ impl GitInfo {
     }
 }
 
-/// Returns true if the git working tree has uncommitted changes
-/// (staged or unstaged, including untracked files).
 async fn git_is_dirty() -> bool {
-    // `git status --porcelain` outputs nothing when clean.
     git_output(&["status", "--porcelain"])
         .await
         .is_some_and(|s| !s.is_empty())

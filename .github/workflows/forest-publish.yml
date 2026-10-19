@@ -1,55 +1,5 @@
 name: forest publish
 
-# Reusable workflow: build and publish a forest component to the registry
-# from a tagged release (DATA-583).
-#
-# Every understory repo that ships a forest component calls this instead of
-# copy-pasting the steps, so publishes stay consistent across the org and a fix
-# here reaches all of them. The caller's workflow is a thin `uses:` block; see
-# `apps/forest/docs/docs/guides/ci-cd.md` for the secrets and how to add it to
-# a new repo.
-#
-# ── The version comes from forest.cue, not from this workflow ──────────
-#
-# `forest.component.version` in forest.cue is the source of truth, and
-# release-please bumps it (via its `generic` updater and an
-# `# x-release-please-version` annotation) in the same commit it tags. By the
-# time the tag exists the file already carries the right version, and
-# `forest publish` simply reads it.
-#
-# So on a normal release this workflow does not *set* the version — it *checks*
-# it. A tag whose version disagrees with forest.cue means someone tagged by
-# hand, and publishing would ship a version nobody declared, so the job fails.
-#
-# Pre-release tags (`v0.1.99-ci.1`, `v0.2.0-rc.1` — any semver prerelease) are
-# the deliberate exception. They exist to exercise this pipeline, or to cut a
-# release candidate, without a commit bumping forest.cue. For those the tag
-# wins and is passed through `FOREST_COMPONENT_VERSION`, which both
-# `forest run build` and `forest publish` read — so the version stamped into
-# the binary matches the version the registry records. Overriding the publish
-# alone would leave the artifact misreporting itself.
-#
-# ── Why three jobs ─────────────────────────────────────────────────────
-#
-# The registry hosts binaries; it does not build them. `forest run build`
-# dispatches the depended-on build component (`forest-contrib/build-go` et al,
-# DATA-312), which writes `.forest/component/output/<os>/<arch>/<name>`;
-# `forest publish` uploads whatever it finds there. The build therefore has to
-# happen in CI, and it has to happen before the publish.
-#
-#   prepare → resolve one version for the whole run, once.
-#   build   → a matrix leg per runner, each building the platforms it can.
-#   publish → gather every leg's artifacts, upload them as one version.
-#
-# The matrix exists because cross-compiling is not always possible. A pure-Go
-# component with CGO off builds all four platforms from a single Linux runner,
-# which is the default here and costs one job. A component that binds a system
-# framework, or a Rust component with awkward native deps, needs a *native*
-# runner per platform — `build-matrix` fans those out, and each leg sets
-# `FOREST_BUILD_TARGETS` so it builds only its own share. Publishing is
-# deliberately a single job regardless: one version, one upload, one place for
-# it to fail.
-
 on:
   workflow_call:
     inputs:
@@ -144,9 +94,6 @@ permissions:
   contents: read
 
 jobs:
-  # ── Resolve one version for the whole run ─────────────────────────────
-  # Done once, in its own job, so every build leg and the publish agree by
-  # construction rather than by each re-deriving it and hoping.
   prepare:
     name: resolve version
     runs-on: ubuntu-latest
@@ -239,7 +186,6 @@ jobs:
           echo "component=$organisation/$name" >> "$GITHUB_OUTPUT"
           echo "Publishing $organisation/$name@$version"
 
-  # ── Build each leg of the matrix ──────────────────────────────────────
   build:
     name: build ${{ matrix.name }}
     needs: prepare
@@ -249,8 +195,6 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.build-matrix) }}
     env:
-      # Resolved once in `prepare`; see the note there for why it is not left
-      # to forest's own derivation.
       CUE_REGISTRY: ${{ needs.prepare.outputs.cue-registry }}
     defaults:
       run:
@@ -268,10 +212,6 @@ jobs:
           mise use -g "cue@${{ inputs.cue-version }}"
           cue version
 
-      # Only for components importing private understory Go modules. The
-      # emptiness test lives in the script rather than an `if:` because the
-      # `secrets` context is not dependably available to step conditions in a
-      # reusable workflow; an unsupplied optional secret arrives as "".
       - name: Configure access to private Go modules
         env:
           GO_PRIVATE_MODULES_PAT: ${{ secrets.go-private-modules-pat }}
@@ -287,10 +227,6 @@ jobs:
           echo "GOPRIVATE=github.com/understory-io/*" >> "$GITHUB_ENV"
           echo "GONOSUMDB=github.com/understory-io/*" >> "$GITHUB_ENV"
 
-      # understory-io/forest is private, so install.sh wraps `gh release
-      # download` rather than curl. FOREST_PROFILE provisions the context in
-      # the same step; FOREST_NO_SHELL_INTEGRATION keeps it from appending to a
-      # shell rc no interactive shell will ever read.
       - name: Install forest CLI
         env:
           GH_TOKEN: ${{ secrets.forest-repo-token }}
@@ -330,18 +266,6 @@ jobs:
           bash "$RUNNER_TEMP/install.sh" "$tag"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      # A dirty worktree ends up *inside the released binary*. Go's build info
-      # records `vcs.modified`, and a component that reports its own version
-      # (pgjump does) then prints `0.1.8 (39d32d3) [dirty]` — a release
-      # advertising itself as a scratch build. Rust's `git-version`-style
-      # stamps behave the same way.
-      #
-      # Warn rather than fail: the artifact is still correct, and a repo may
-      # legitimately generate an untracked file during setup. But say so
-      # loudly, with the offending paths, because the alternative is noticing
-      # months later that every release is marked dirty and having no idea
-      # which step did it. Anything a build genuinely produces belongs in
-      # .gitignore.
       - name: Check the worktree is clean before building
         run: |
           set -euo pipefail
@@ -353,9 +277,6 @@ jobs:
             echo "Worktree is clean."
           fi
 
-      # Build and publish must agree on the version, so the override — when
-      # there is one — is exported here as well as in the publish job. Absent
-      # on a normal release, which is exactly "read forest.cue".
       - name: Build
         env:
           FOREST_TOKEN: ${{ secrets.forest-token }}
@@ -366,11 +287,6 @@ jobs:
           forest --version
           forest run build
 
-      # The pre-build check can pass and the binary still come out `[dirty]`,
-      # because Go samples VCS state *during* compilation — so anything the
-      # build itself creates counts. Checking again afterwards is what
-      # distinguishes "the repo arrived dirty" from "the build dirtied it",
-      # which is the difference between fixing .gitignore and fixing the build.
       - name: Check what the build left behind
         run: |
           set -euo pipefail
@@ -398,18 +314,6 @@ jobs:
             done
           fi
 
-      # Tarred rather than uploaded as a loose tree: upload-artifact roots the
-      # archive at the least common ancestor of the matched files, so a leg
-      # that produced a single platform would restore at a different depth than
-      # one that produced three. A tarball pins the layout.
-      #
-      # The tarball's *filename* carries the leg name too, not just the
-      # artifact name. `download-artifact` with `merge-multiple` flattens every
-      # artifact into one directory, so legs sharing an inner filename collide
-      # there — which shows up as `gzip: trailing garbage ignored` and a tree
-      # holding only whichever leg landed last. Invisible with the default
-      # single-leg matrix; immediate once anyone splits platforms across
-      # runners.
       - name: Package build output
         run: tar -czf "$RUNNER_TEMP/forest-output-${{ matrix.name }}.tar.gz" -C .forest/component output
 
@@ -420,7 +324,6 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-  # ── Publish once, from every leg's artifacts ──────────────────────────
   publish:
     name: publish
     needs: [prepare, build]
@@ -488,8 +391,6 @@ jobs:
           path: ${{ runner.temp }}/forest-artifacts
           merge-multiple: true
 
-      # Every leg's tarball extracts into the same tree, reassembling the full
-      # platform set `forest publish` expects to find.
       - name: Restore build output
         run: |
           set -euo pipefail
@@ -506,10 +407,6 @@ jobs:
           echo "Reassembled platforms:"
           find .forest/component/output -mindepth 2 -maxdepth 2 -type d | sort
 
-      # `forest publish` derives the manifest by executing the binary for the
-      # *runner's own* platform and asking it to describe itself, so a publish
-      # runner outside the built set fails deep inside the publish with a much
-      # worse message than this one.
       - name: Check the publish runner's platform was built
         run: |
           set -euo pipefail
@@ -532,18 +429,12 @@ jobs:
             exit 1
           fi
 
-      # Re-running a tag is safe: the registry refuses a version that is already
-      # published, so this fails cleanly rather than double-publishing or
-      # silently overwriting. A half-finished upload is rolled back by the CLI's
-      # abort-on-drop guard, leaving the version free to retry.
       - name: Publish
         env:
           FOREST_TOKEN: ${{ secrets.forest-token }}
           FOREST_COMPONENT_VERSION: ${{ needs.prepare.outputs.override == 'true' && needs.prepare.outputs.version || '' }}
         run: forest publish
 
-      # Prove the version actually resolves from the registry rather than
-      # trusting the publish's own exit code.
       - name: Verify the published version resolves
         env:
           FOREST_TOKEN: ${{ secrets.forest-token }}

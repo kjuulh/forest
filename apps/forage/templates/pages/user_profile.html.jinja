@@ -4,7 +4,6 @@
 {% block content %}
 <section class="app-container pt-12">
     <div class="flex items-start gap-6 mb-8">
-        {# Avatar #}
         {% if profile.profile_picture_url %}
         <img src="{{ profile.profile_picture_url }}" alt="{{ profile.username }}" class="w-20 h-20 rounded-full object-cover shrink-0">
         {% else %}
@@ -31,7 +30,6 @@
         {% if heatmap.weeks | length > 0 %}
         <div class="overflow-x-auto pb-2">
             <div class="inline-block">
-                {# Month labels #}
                 <div class="flex text-xs text-gray-400 mb-1" style="padding-left: 28px;">
                     {% set ns = namespace(last_col=-2) %}
                     {% for m in heatmap.month_labels %}
@@ -42,7 +40,6 @@
                 </div>
 
                 <div class="flex gap-0.5">
-                    {# Day-of-week labels #}
                     <div class="flex flex-col gap-0.5 text-xs text-gray-400 pr-1" style="width: 24px;">
                         <span style="height: 11px;"></span>
                         <span style="height: 11px; line-height: 11px; font-size: 9px;">Mon</span>
@@ -53,7 +50,6 @@
                         <span style="height: 11px;"></span>
                     </div>
 
-                    {# Grid of weeks #}
                     {% for week in heatmap.weeks %}
                     <div class="flex flex-col gap-0.5">
                         {% for day in week %}
@@ -79,7 +75,6 @@
                     {% endfor %}
                 </div>
 
-                {# Legend #}
                 <div class="flex items-center justify-end gap-1 mt-2 text-xs text-gray-400">
                     <span>Less</span>
                     <div class="rounded-sm bg-gray-100" style="width: 11px; height: 11px;"></div>
@@ -96,7 +91,6 @@
         {% endif %}
     </div>
 
-    {# Recent releases #}
     <div class="border-t border-gray-200 pt-6 mt-6">
         <h2 class="text-sm font-semibold text-gray-900 mb-4">Recent releases</h2>
         {% if recent_releases | length > 0 %}
@@ -136,7 +130,6 @@
         {% endif %}
     </div>
 
-    {# Contributed projects #}
     <div class="border-t border-gray-200 pt-6 mt-6 pb-12">
         <h2 class="text-sm font-semibold text-gray-900 mb-4">Projects</h2>
         {% if contributed_projects | length > 0 %}

@@ -2,8 +2,6 @@ use anyhow::Context;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-/// Upsert a health observation for a release + destination.
-/// Publishes a NATS message for streaming subscribers.
 pub async fn upsert_observation(
     db: &PgPool,
     nats: &async_nats::Client,
@@ -48,7 +46,6 @@ pub async fn upsert_observation(
     .await
     .context("upsert health observation")?;
 
-    // Publish NATS event for streaming subscribers
     let nats_subject = format!("forest.release.health.{}", release_intent_id);
     let payload = serde_json::json!({
         "release_intent_id": release_intent_id.to_string(),
@@ -63,7 +60,6 @@ pub async fn upsert_observation(
     Ok(())
 }
 
-/// Get all health observations for a release intent.
 pub async fn get_observations_for_intent(
     db: &PgPool,
     release_intent_id: Uuid,
@@ -94,8 +90,6 @@ pub async fn get_observations_for_intent(
         .collect())
 }
 
-/// Seed a PENDING health observation when a release is created.
-/// This ensures the WatchReleaseHealth stream immediately has data.
 pub async fn seed_pending(
     db: &PgPool,
     nats: &async_nats::Client,
@@ -140,7 +134,6 @@ pub struct HealthObservationRow {
     pub observed_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// Compute the aggregate health status from per-destination statuses.
 pub fn aggregate_status(rows: &[HealthObservationRow]) -> &'static str {
     if rows.is_empty() {
         return "UNSPECIFIED";

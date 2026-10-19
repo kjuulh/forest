@@ -96,8 +96,6 @@ pub fn router() -> Router<AppState> {
         .route("/settings/account/mfa/disable", post(mfa_disable))
 }
 
-// ─── Signup ─────────────────────────────────────────────────────────
-
 async fn signup_page(
     State(state): State<AppState>,
     maybe: MaybeSession,
@@ -132,7 +130,6 @@ async fn signup_submit(
         return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
     }
 
-    // Validate
     if let Err(e) = validate_username(&form.username) {
         return render_signup(&state, &form.username, &form.email, "", Some(e.0), rt);
     }
@@ -153,25 +150,18 @@ async fn signup_submit(
         );
     }
 
-    // Register via forest-server
     match state
         .forest_client
         .register(&form.username, &form.email, &form.password)
         .await
     {
         Ok(RegisterResult::VerificationRequired) => {
-            // Forest withheld tokens. Drive the verification email and
-            // show the "check your inbox" page. No session created.
-            // Pass return_to so a device-login flow survives the
-            // email-verify detour and gets back to /device after the
-            // user signs in.
             if let Err(e) = enqueue_verification_email(&state, &form.email, rt).await {
                 tracing::error!(error = %e, "failed to enqueue verification email after signup");
             }
             render_verify_email_check_inbox(&state, &form.email)
         }
         Ok(RegisterResult::Success(tokens)) => {
-            // Fetch user info for the session cache
             let user_cache = match state
                 .forest_client
                 .get_user(&tokens.access_token)
@@ -301,8 +291,6 @@ fn render_signup(
     Ok(Html(html).into_response())
 }
 
-// ─── Login ──────────────────────────────────────────────────────────
-
 #[derive(Deserialize)]
 struct ReturnToParams {
     return_to: Option<String>,
@@ -424,7 +412,6 @@ async fn login_submit(
             }
         }
         Ok(LoginResult::MfaRequired { mfa_session_token }) => {
-            // Store the MFA session token in a short-lived cookie and show the challenge page.
             use axum::http::header::SET_COOKIE;
             use axum::http::HeaderValue;
 
@@ -456,10 +443,6 @@ async fn login_submit(
             Ok(response)
         }
         Ok(LoginResult::EmailNotVerified) => {
-            // Forest is enforcing email verification. Re-trigger a
-            // verification email and show the resend page (idempotent
-            // behavior if the user has already received one — rate
-            // limit handles the rest).
             let email_for_resend = form.identifier.clone();
             if email_for_resend.contains('@') {
                 if let Err(e) = enqueue_verification_email(&state, &email_for_resend, rt).await {
@@ -486,8 +469,6 @@ async fn login_submit(
         Err(e) => render_login(&state, &form.identifier, Some(e.to_string()), rt),
     }
 }
-
-// ─── MFA challenge (login flow) ──────────────────────────────────────
 
 #[derive(Deserialize)]
 struct MfaForm {
@@ -602,7 +583,6 @@ async fn login_mfa_submit(
     match state.sessions.create(session_data).await {
         Ok(session_id) => {
             let session_cookie = auth::session_cookie(&session_id, true);
-            // Clear the MFA session cookie
             let clear_mfa = "forage_mfa_session=; HttpOnly; SameSite=Lax; Path=/login; Max-Age=0";
             let dest = rt.unwrap_or("/dashboard");
             let mut response = (session_cookie, Redirect::to(dest)).into_response();
@@ -645,8 +625,6 @@ fn render_login(
     Ok(Html(html).into_response())
 }
 
-// ─── Logout ─────────────────────────────────────────────────────────
-
 async fn logout_submit(
     State(state): State<AppState>,
     session: Session,
@@ -655,15 +633,12 @@ async fn logout_submit(
     if !auth::validate_csrf(&session, &form._csrf) {
         return Err(error_page(&state, StatusCode::FORBIDDEN, "Invalid request", "CSRF validation failed. Please try again."));
     }
-    // Best-effort logout on forest-server
     if let Ok(Some(data)) = state.sessions.get(&session.session_id).await {
         let _ = state.forest_client.logout(&data.refresh_token).await;
     }
     let _ = state.sessions.delete(&session.session_id).await;
     Ok((auth::clear_session_cookie(), Redirect::to("/")))
 }
-
-// ─── Tokens ─────────────────────────────────────────────────────────
 
 async fn tokens_page(
     State(state): State<AppState>,
@@ -788,8 +763,6 @@ async fn delete_token_submit(
     Ok(Redirect::to("/settings/tokens").into_response())
 }
 
-// ─── Account settings ────────────────────────────────────────────────
-
 #[derive(Deserialize, Default)]
 struct AccountPageQuery {
     flash: Option<String>,
@@ -828,7 +801,6 @@ async fn account_page(
     let linked_accounts =
         forage_core::auth::merge_linked_identities(forest_identities, &slack_links);
 
-    // Fetch fresh user info to get current mfa_enabled state.
     let mfa_enabled = state
         .forest_client
         .get_user(&session.access_token)
@@ -849,8 +821,6 @@ async fn account_page(
     )
 }
 
-/// Translate a `?flash=...` query parameter into a user-facing message.
-/// Returning `None` keeps the banner hidden.
 fn flash_message(flash: Option<&str>) -> Option<&'static str> {
     match flash? {
         "linked_github" => Some("GitHub account linked."),
@@ -860,7 +830,6 @@ fn flash_message(flash: Option<&str>) -> Option<&'static str> {
     }
 }
 
-/// Translate a `?error=...` query parameter into a user-facing message.
 fn error_message(error: Option<&str>) -> Option<&'static str> {
     match error? {
         "access_denied_github" => Some("GitHub authorisation was cancelled."),
@@ -996,7 +965,6 @@ async fn update_username_submit(
         .await
     {
         Ok(updated_user) => {
-            // Update cached username in session
             if let Ok(Some(mut session_data)) = state.sessions.get(&session.session_id).await {
                 if let Some(ref mut user) = session_data.user {
                     user.username = updated_user.username;
@@ -1099,7 +1067,6 @@ async fn add_email_submit(
         .await
     {
         Ok(result) => {
-            // Update cached emails in session
             if let Ok(Some(mut session_data)) = state.sessions.get(&session.session_id).await {
                 if let Some(ref mut user) = session_data.user {
                     user.emails.push(UserEmail {
@@ -1112,8 +1079,6 @@ async fn add_email_submit(
                     .update(&session.session_id, session_data)
                     .await;
             }
-            // Drive the verification flow for the newly added email if
-            // forest signaled it.
             if result.email_verification_required {
                 if let Err(e) =
                     enqueue_verification_email(&state, &result.email.email, None).await
@@ -1159,7 +1124,6 @@ async fn remove_email_submit(
         .await
     {
         Ok(()) => {
-            // Update cached emails in session
             if let Ok(Some(mut session_data)) = state.sessions.get(&session.session_id).await {
                 if let Some(ref mut user) = session_data.user {
                     user.emails.retain(|e| e.email != form.email);
@@ -1178,22 +1142,12 @@ async fn remove_email_submit(
     }
 }
 
-// ─── Resend verification email (account settings) ───────────────────
-
 #[derive(Deserialize)]
 struct ResendVerificationForm {
     _csrf: String,
     email: String,
 }
 
-/// Resend a verification email for an unverified address on the
-/// session user's account. Triggered by the "Try sending again" button
-/// next to each unverified email in /settings/account.
-///
-/// Ownership check is critical: we only resend for emails that already
-/// belong to the caller — otherwise this becomes a free "trigger an
-/// email to anyone" endpoint and forest's email-verification token
-/// (issued by forage) leaks signal about who has an account.
 async fn resend_verification_submit(
     State(state): State<AppState>,
     session: Session,
@@ -1208,11 +1162,6 @@ async fn resend_verification_submit(
         ));
     }
 
-    // The submitted email must belong to the caller AND must currently
-    // be unverified — verified emails don't need a resend, and a
-    // resend request for one that's not on the account is a likely
-    // probe / tampered form. The error message is generic to avoid
-    // leaking which case triggered (not-yours vs already-verified).
     let owned_unverified = session
         .user
         .emails
@@ -1243,8 +1192,6 @@ async fn resend_verification_submit(
     );
     Ok(Redirect::to("/settings/account?flash=verification_resent").into_response())
 }
-
-// ─── MFA setup / disable (account settings) ──────────────────────────
 
 async fn mfa_setup_start(
     State(state): State<AppState>,
@@ -1317,7 +1264,6 @@ async fn mfa_verify_setup(
         .verify_mfa_setup(&session.access_token, &form.mfa_id, &form.code)
         .await
         .map_err(|e| {
-            // Re-render the setup page with an error rather than a bare 500
             let msg = match &e {
                 forage_core::auth::AuthError::InvalidCredentials => {
                     "Invalid code. Please check your authenticator app and try again.".to_string()
@@ -1367,7 +1313,6 @@ async fn mfa_disable(
     Ok(Redirect::to("/settings/account").into_response())
 }
 
-/// Generate a simple SVG QR code from a provisioning URI using the qrcode crate.
 fn generate_qr_svg(data: &str) -> String {
     use qrcode::{QrCode, EcLevel};
     use qrcode::render::svg;
@@ -1381,8 +1326,6 @@ fn generate_qr_svg(data: &str) -> String {
         Err(_) => String::new(),
     }
 }
-
-// ─── Notification preferences ────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct UpdateNotificationPreferenceForm {
@@ -1421,8 +1364,6 @@ async fn update_notification_preference(
 
     Ok(Redirect::to("/settings/account").into_response())
 }
-
-// ─── Slack user enrollment ────────────────────────────────────────────
 
 async fn slack_connect(
     State(state): State<AppState>,
@@ -1463,7 +1404,6 @@ async fn slack_user_callback(
     session: Session,
     Query(query): Query<SlackUserCallbackQuery>,
 ) -> Result<Response, Response> {
-    // Handle user-denied case
     if let Some(err) = query.error {
         tracing::warn!("Slack user OAuth denied: {err}");
         return Ok(Redirect::to("/settings/account").into_response());
@@ -1478,7 +1418,6 @@ async fn slack_user_callback(
         )
     })?;
 
-    // Verify state matches our user_id to prevent CSRF
     let state_param = query.state.unwrap_or_default();
     if state_param != session.user.user_id {
         return Err(error_page(
@@ -1512,7 +1451,6 @@ async fn slack_user_callback(
         slack_config.redirect_host
     );
 
-    // Exchange the authorization code for a user access token
     let http = reqwest::Client::new();
     let token_resp = http
         .post("https://slack.com/api/oauth.v2.access")
@@ -1554,7 +1492,6 @@ async fn slack_user_callback(
         ));
     }
 
-    // For user-scoped OAuth, the user token is nested under authed_user
     let authed_user = resp_body.get("authed_user").ok_or_else(|| {
         internal_error(
             &state,
@@ -1568,7 +1505,6 @@ async fn slack_user_callback(
     let team_id = resp_body["team"]["id"].as_str().unwrap_or("").to_string();
     let team_name = resp_body["team"]["name"].as_str().unwrap_or("").to_string();
 
-    // Fetch display name via users.identity (requires identity.basic user scope)
     let slack_username = if user_access_token.is_empty() {
         slack_user_id.clone()
     } else {
@@ -1644,21 +1580,12 @@ async fn slack_disconnect(
     Ok(Redirect::to("/settings/account").into_response())
 }
 
-// ─── Google OAuth ───────────────────────────────────────────────────
-
 use axum::http::HeaderMap;
 
-/// Generate a random state value for OAuth CSRF protection (same entropy as CSRF tokens).
 fn generate_oauth_state() -> String {
     generate_csrf_token()
 }
 
-/// Pick the post-auth destination for a freshly-minted session.
-///
-/// New (OAuth/magic-link) users must pick a username via
-/// `/auth/complete-profile`; we forward `return_to` through that step so
-/// the original intent survives. Returning users go straight to
-/// `return_to` (validated) or `/dashboard` as fallback.
 fn post_auth_dest(is_new_user: bool, return_to: Option<&str>) -> String {
     if is_new_user {
         match return_to {
@@ -1673,13 +1600,8 @@ fn post_auth_dest(is_new_user: bool, return_to: Option<&str>) -> String {
     }
 }
 
-/// Lifetime for OAuth/MFA flow state rows. Matches the cookie Max-Age
-/// used by the state-anchor cookies (10 min).
 const OAUTH_FLOW_TTL_SECS: i64 = 600;
 
-/// Write a row to the OAuth state store, if one is configured. No-op
-/// without a store (the cookie-based CSRF anchor still works; we just
-/// lose the per-flow `return_to`).
 async fn persist_oauth_flow(
     state: &AppState,
     provider: &str,
@@ -1704,9 +1626,6 @@ async fn persist_oauth_flow(
         })
 }
 
-/// Read-and-delete the OAuth flow row. Returns the previously-stored
-/// `return_to` (validated via [`auth::safe_return_to`]) or `None` if no
-/// store is wired, the row is missing/expired, or the value isn't safe.
 async fn consume_oauth_flow_return_to(
     state: &AppState,
     provider: &str,
@@ -1725,7 +1644,6 @@ async fn consume_oauth_flow_return_to(
     }
 }
 
-/// GET /auth/google — redirect to Google's consent screen.
 async fn google_oauth_start(
     State(state): State<AppState>,
     maybe: MaybeSession,
@@ -1733,10 +1651,6 @@ async fn google_oauth_start(
 ) -> Result<Response, Response> {
     let rt = auth::safe_return_to(rt_params.return_to.as_deref());
     if maybe.session.is_some() {
-        // Logged-in user hit the bare login route. Clear any stale link
-        // cookie *before* bouncing — otherwise an abandoned link flow's
-        // cookie lingers until expiry and could mis-dispatch a later
-        // login callback.
         let dest = rt.unwrap_or("/dashboard");
         return Ok(redirect_clearing_link_cookie(dest, "google"));
     }
@@ -1753,9 +1667,6 @@ async fn google_oauth_start(
     let oauth_state = generate_oauth_state();
     let redirect_uri = format!("{}/auth/google/callback", config.redirect_host);
 
-    // Persist per-flow return_to keyed by the OAuth state. The cookie
-    // below anchors the flow to this browser; the store is what keeps
-    // return_to safe from cross-tab cookie overwrite.
     persist_oauth_flow(
         &state,
         forage_core::auth::oauth_state::PROVIDER_GOOGLE,
@@ -1772,14 +1683,10 @@ async fn google_oauth_start(
         urlencoding::encode(&oauth_state),
     );
 
-    // Store state in a short-lived cookie for validation on callback.
     let state_cookie = format!(
         "forage_oauth_state={}; HttpOnly; SameSite=Lax; Path=/auth/google; Max-Age=600",
         oauth_state
     );
-    // Clear any stale link-purpose cookie left from an abandoned link
-    // flow on this browser — otherwise the callback would dispatch into
-    // the link branch unexpectedly.
     let clear_link = "forage_oauth_link_user=; HttpOnly; SameSite=Lax; Path=/auth/google; Max-Age=0";
 
     let mut headers = HeaderMap::new();
@@ -1799,12 +1706,6 @@ async fn google_oauth_start(
     Ok((StatusCode::FOUND, headers).into_response())
 }
 
-/// OAuth 2.0 authorization-code callback query parameters. Used by
-/// both Google and GitHub callbacks — both providers conform to the
-/// same RFC 6749 §4.1.2 shape (`code` on success, `error` on denial,
-/// always `state`). Renamed from `GoogleCallbackQuery` so the GitHub
-/// callback doesn't pick up Google-specific fields if this struct ever
-/// gains one.
 #[derive(Deserialize)]
 struct OAuthCallbackQuery {
     code: Option<String>,
@@ -1812,29 +1713,16 @@ struct OAuthCallbackQuery {
     error: Option<String>,
 }
 
-/// GET /auth/google/callback — handle the OAuth callback from Google.
-///
-/// See `github_oauth_callback` doc for the link-vs-login dispatch logic.
 async fn google_oauth_callback(
     State(state): State<AppState>,
     maybe: MaybeSession,
     jar: CookieJar,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> Result<Response, Response> {
-    // ── 1. CSRF anchor: validate the OAuth state cookie FIRST. ────────
-    // Doing this before reading the link cookie prevents an attacker
-    // from leaking link-vs-login dispatch context through error-path
-    // disclosure (e.g. a forged `?error=access_denied` with a planted
-    // link cookie used to bounce to `/settings/account` rather than
-    // `/login`). State mismatch produces a generic 403 — no clue about
-    // which branch we'd have taken.
     let expected_state = jar
         .get("forage_oauth_state")
         .map(|c| c.value().to_string());
     let received_state = query.state.as_deref().unwrap_or("");
-    // Require a non-empty expected state so an injected empty-value
-    // `forage_oauth_state=` cookie combined with a missing `?state=`
-    // parameter (both `""`) can't pass the equality check.
     match expected_state {
         Some(ref expected) if !expected.is_empty() && expected == received_state => {}
         _ => {
@@ -1847,9 +1735,6 @@ async fn google_oauth_callback(
         }
     }
 
-    // Read-and-delete the per-flow return_to keyed by the OAuth state.
-    // Single-use — must happen at most once per callback irrespective of
-    // which branch we take below.
     let return_to = consume_oauth_flow_return_to(
         &state,
         forage_core::auth::oauth_state::PROVIDER_GOOGLE,
@@ -1857,7 +1742,6 @@ async fn google_oauth_callback(
     )
     .await;
 
-    // ── 2. Dispatch link-vs-login. ────────────────────────────────────
     let link_cookie_user_id = jar
         .get(LINK_PURPOSE_COOKIE)
         .map(|c| c.value().to_string());
@@ -1882,7 +1766,6 @@ async fn google_oauth_callback(
         return Ok(Redirect::to(dest).into_response());
     }
 
-    // Handle denial from Google.
     if query.error.is_some() {
         return Ok(Redirect::to(if is_link_flow {
             "/settings/account?error=access_denied_google"
@@ -1913,7 +1796,6 @@ async fn google_oauth_callback(
 
     let redirect_uri = format!("{}/auth/google/callback", config.redirect_host);
 
-    // Step 1: Exchange the authorization code with Google via OIDC.
     let oidc = state.google_oidc_exchange.as_ref().ok_or_else(|| {
         error_page(
             &state,
@@ -1936,7 +1818,6 @@ async fn google_oauth_callback(
             )
         })?;
 
-    // If we're linking (not logging in), branch into the link flow.
     if is_link_flow {
         let session = maybe.session.as_ref().expect("is_link_flow implies session");
         return Ok(complete_link_flow(
@@ -1949,7 +1830,6 @@ async fn google_oauth_callback(
         .await);
     }
 
-    // Step 2: Tell Forest to find-or-create this user by their verified identity.
     let result = state
         .forest_client
         .oauth_login("google", &identity.sub, &identity.email, &identity.name, identity.picture_url.as_deref())
@@ -1972,7 +1852,6 @@ async fn google_oauth_callback(
             }
         })?;
 
-    // Build session (same pattern as login_submit / signup_submit).
     let user_cache = {
         let orgs = match state
             .platform_client
@@ -2028,7 +1907,6 @@ async fn google_oauth_callback(
 
     let mut jar = auth::session_cookie(&session_id, true);
 
-    // Clear the OAuth state cookie.
     let mut clear_cookie = axum_extra::extract::cookie::Cookie::from("forage_oauth_state");
     clear_cookie.set_path("/auth/google");
     clear_cookie.make_removal();
@@ -2038,9 +1916,6 @@ async fn google_oauth_callback(
     Ok((jar, Redirect::to(&redirect_to)).into_response())
 }
 
-// ─── GitHub OAuth ───────────────────────────────────────────────────
-
-/// GET /auth/github — redirect to GitHub's authorization screen.
 async fn github_oauth_start(
     State(state): State<AppState>,
     maybe: MaybeSession,
@@ -2084,7 +1959,6 @@ async fn github_oauth_start(
         "forage_oauth_state={}; HttpOnly; SameSite=Lax; Path=/auth/github; Max-Age=600",
         oauth_state
     );
-    // Clear any stale link-purpose cookie (see google_oauth_start).
     let clear_link = "forage_oauth_link_user=; HttpOnly; SameSite=Lax; Path=/auth/github; Max-Age=0";
 
     let mut headers = HeaderMap::new();
@@ -2104,30 +1978,16 @@ async fn github_oauth_start(
     Ok((StatusCode::FOUND, headers).into_response())
 }
 
-/// GET /auth/github/callback — handle the OAuth callback from GitHub.
-///
-/// Dispatches between two flows based on the `forage_oauth_link_user`
-/// cookie set by `/settings/account/github/connect`:
-///   - Cookie present + session matches → **link flow** (Forest
-///     `LinkOAuthProvider`).
-///   - Cookie absent + no session → **login flow** (existing
-///     `OAuthLogin` behaviour).
-///   - Cookie absent + session present → bounce to /dashboard.
-///   - Cookie present + session missing or mismatched → 403.
 async fn github_oauth_callback(
     State(state): State<AppState>,
     maybe: MaybeSession,
     jar: CookieJar,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> Result<Response, Response> {
-    // CSRF anchor first — see google_oauth_callback for rationale.
     let expected_state = jar
         .get("forage_oauth_state")
         .map(|c| c.value().to_string());
     let received_state = query.state.as_deref().unwrap_or("");
-    // Require a non-empty expected state so an injected empty-value
-    // `forage_oauth_state=` cookie combined with a missing `?state=`
-    // parameter (both `""`) can't pass the equality check.
     match expected_state {
         Some(ref expected) if !expected.is_empty() && expected == received_state => {}
         _ => {
@@ -2140,7 +2000,6 @@ async fn github_oauth_callback(
         }
     }
 
-    // Single-use read of the per-flow return_to (see google_oauth_callback).
     let return_to = consume_oauth_flow_return_to(
         &state,
         forage_core::auth::oauth_state::PROVIDER_GITHUB,
@@ -2159,8 +2018,6 @@ async fn github_oauth_callback(
             == link_cookie_user_id;
 
     if !is_link_flow && link_cookie_user_id.is_some() {
-        // Cookie set for linking, but session is missing or belongs to
-        // a different user — refuse to proceed.
         return Err(error_page(
             &state,
             StatusCode::FORBIDDEN,
@@ -2204,7 +2061,6 @@ async fn github_oauth_callback(
 
     let redirect_uri = format!("{}/auth/github/callback", config.redirect_host);
 
-    // Step 1: Exchange code with GitHub via OIDC exchange.
     let oidc = state.github_oidc_exchange.as_ref().ok_or_else(|| {
         error_page(
             &state,
@@ -2227,7 +2083,6 @@ async fn github_oauth_callback(
             )
         })?;
 
-    // If we're linking (not logging in), branch into the link flow.
     if is_link_flow {
         let session = maybe.session.as_ref().expect("is_link_flow implies session");
         return Ok(complete_link_flow(
@@ -2240,7 +2095,6 @@ async fn github_oauth_callback(
         .await);
     }
 
-    // Step 2: Tell Forest to find-or-create this user.
     let result = state
         .forest_client
         .oauth_login("github", &identity.sub, &identity.email, &identity.name, identity.picture_url.as_deref())
@@ -2263,7 +2117,6 @@ async fn github_oauth_callback(
             }
         })?;
 
-    // Build session (same pattern as Google).
     let user_cache = {
         let orgs = match state
             .platform_client
@@ -2327,8 +2180,6 @@ async fn github_oauth_callback(
     Ok((jar, Redirect::to(&redirect_to)).into_response())
 }
 
-// ─── Complete Profile (username selection for OAuth users) ──────────
-
 async fn complete_profile_page(
     State(state): State<AppState>,
     session: Session,
@@ -2360,7 +2211,6 @@ async fn complete_profile_submit(
         return Ok(Redirect::to(rt.unwrap_or("/dashboard")).into_response());
     }
 
-    // Validate CSRF.
     if !auth::validate_csrf(&session, &form._csrf) {
         return Err(error_page(
             &state,
@@ -2370,12 +2220,10 @@ async fn complete_profile_submit(
         ));
     }
 
-    // Validate username.
     if let Err(e) = validate_username(&form.username) {
         return render_complete_profile(&state, &session.csrf_token, &form.username, Some(e.0), rt);
     }
 
-    // Update username on forest-server.
     state
         .forest_client
         .update_username(&session.access_token, &session.user.user_id, &form.username)
@@ -2402,7 +2250,6 @@ async fn complete_profile_submit(
             }
         })?;
 
-    // Update session: set new username and clear needs_username flag.
     let mut updated = session.session_data.clone();
     if let Some(ref mut user) = updated.user {
         user.username = form.username;
@@ -2452,8 +2299,6 @@ fn render_complete_profile(
     Ok(Html(html).into_response())
 }
 
-// ─── Magic Link ─────────────────────────────────────────────────────
-
 #[derive(Deserialize)]
 struct MagicLinkForm {
     email: String,
@@ -2461,7 +2306,6 @@ struct MagicLinkForm {
     return_to: Option<String>,
 }
 
-/// GET /auth/magic-link — show the magic link email form.
 async fn magic_link_page(
     State(state): State<AppState>,
     maybe: MaybeSession,
@@ -2484,7 +2328,6 @@ async fn magic_link_page(
     render_magic_link_form(&state, "", None, rt)
 }
 
-/// POST /auth/magic-link — send a magic link email.
 async fn magic_link_request(
     State(state): State<AppState>,
     maybe: MaybeSession,
@@ -2504,12 +2347,10 @@ async fn magic_link_request(
         )
     })?;
 
-    // Validate email.
     if let Err(e) = validate_email(&form.email) {
         return render_magic_link_form(&state, &form.email, Some(e.0), rt);
     }
 
-    // Rate limit: max 3 per 15 minutes per email.
     let since = Utc::now() - chrono::Duration::minutes(15);
     let count = store
         .count_recent(
@@ -2531,7 +2372,6 @@ async fn magic_link_request(
         return render_magic_link_sent(&state, &form.email);
     }
 
-    // Generate token and store hash.
     let (raw_token, token_hash) =
         forage_core::auth::magic_link::generate_magic_link_token();
     let expires_at = Utc::now() + chrono::Duration::minutes(15);
@@ -2555,14 +2395,12 @@ async fn magic_link_request(
             )
         })?;
 
-    // Build magic link URL.
     let verify_url = format!(
         "{}/auth/magic-link/verify?token={}",
         state.forage_host,
         urlencoding::encode(&raw_token)
     );
 
-    // Publish email job to NATS (if available).
     if let Some(ref js) = state.email_jetstream {
         let envelope = forage_core::integrations::email::EmailEnvelope {
             to: form.email.clone(),
@@ -2600,7 +2438,6 @@ async fn magic_link_request(
         tracing::warn!(email = %form.email, url = %verify_url, "NATS not configured, magic link email not sent (token stored)");
     }
 
-    // Always show success (prevents email enumeration).
     render_magic_link_sent(&state, &form.email)
 }
 
@@ -2609,7 +2446,6 @@ struct MagicLinkVerifyQuery {
     token: Option<String>,
 }
 
-/// GET /auth/magic-link/verify?token=xxx — verify and consume a magic link token.
 async fn magic_link_verify(
     State(state): State<AppState>,
     maybe: MaybeSession,
@@ -2669,7 +2505,6 @@ async fn magic_link_verify(
         .return_to
         .filter(|r| auth::safe_return_to(Some(r)).is_some());
 
-    // Call Forest to find-or-create user by email identity.
     let result = state
         .forest_client
         .oauth_login("magic-link", &email, &email, "", None)
@@ -2692,7 +2527,6 @@ async fn magic_link_verify(
             }
         })?;
 
-    // Build session (same pattern as Google OAuth callback).
     let user_cache = {
         let orgs = match state
             .platform_client
@@ -2808,19 +2642,13 @@ fn render_magic_link_sent(state: &AppState, email: &str) -> Result<Response, Res
     Ok(Html(html).into_response())
 }
 
-// ─── Profile Picture ─────────────────────────────────────────────────
-
-const MAX_PICTURE_SIZE: usize = 2 * 1024 * 1024; // 2 MB
+const MAX_PICTURE_SIZE: usize = 2 * 1024 * 1024;
 const MAX_AVATAR_DIMENSION: u32 = 512;
 
-/// Decode an uploaded image and re-encode as WebP.
-/// This strips any embedded payloads (polyglot files, EXIF scripts, etc.)
-/// and normalizes the output to a safe, known format.
 fn reencode_avatar(data: &[u8]) -> Result<Vec<u8>, String> {
     let img = image::load_from_memory(data)
         .map_err(|e| format!("failed to decode image: {e}"))?;
 
-    // Resize if larger than max dimension, preserving aspect ratio.
     let img = if img.width() > MAX_AVATAR_DIMENSION || img.height() > MAX_AVATAR_DIMENSION {
         img.resize(
             MAX_AVATAR_DIMENSION,
@@ -2908,7 +2736,6 @@ async fn upload_picture_submit(
         )
     })?;
 
-    // Decode and re-encode as WebP to strip any embedded payloads.
     let webp_data = reencode_avatar(&raw_data).map_err(|e| {
         tracing::warn!("image re-encode failed: {e}");
         error_page(
@@ -2943,7 +2770,6 @@ async fn upload_picture_submit(
             )
         })?;
 
-    // Update session cache with new picture URL.
     if let Ok(Some(mut session_data)) = state.sessions.get(&session.session_id).await {
         if let Some(ref mut user) = session_data.user {
             user.profile_picture_url = Some(avatar_url);
@@ -2989,7 +2815,6 @@ async fn remove_picture_submit(
             )
         })?;
 
-    // Update session cache to clear picture URL.
     if let Ok(Some(mut session_data)) = state.sessions.get(&session.session_id).await {
         if let Some(ref mut user) = session_data.user {
             user.profile_picture_url = None;
@@ -3000,15 +2825,6 @@ async fn remove_picture_submit(
     Ok(Redirect::to("/settings/account").into_response())
 }
 
-/// Serve a user's avatar, by user id *or* by username.
-///
-/// Uploaded pictures are keyed by user id, which is what `profile_picture_url`
-/// points back at after an upload — that stays the fast path. But the views
-/// that want to show a face usually only know a username: the release timeline
-/// knows who deployed a release as `source_user`, not as an id. So a username
-/// is resolved to its account here, and a user who signed in with Google or
-/// GitHub — who has no upload at all, only the URL their provider gave us — is
-/// redirected on to that picture rather than 404ing.
 async fn serve_avatar(
     State(state): State<AppState>,
     maybe: MaybeSession,
@@ -3018,8 +2834,6 @@ async fn serve_avatar(
         return avatar_response(pic);
     }
 
-    // Resolving a name needs the caller's token, which also keeps lookups by
-    // username behind the same login as the pages that ask for them.
     let session = match maybe.session {
         Some(s) => s,
         None => return StatusCode::NOT_FOUND.into_response(),
@@ -3042,16 +2856,10 @@ async fn serve_avatar(
     }
 
     match profile.profile_picture_url.as_deref() {
-        // Only ever hand the browser on to an external http(s) picture. A URL
-        // pointing back at our own /avatars/ would loop: the upload it names is
-        // exactly what the store lookup above already came up empty for.
         Some(url)
             if (url.starts_with("https://") || url.starts_with("http://"))
                 && !url.contains("/avatars/") =>
         {
-            // A timeline shows the same handful of deployers over and over, and
-            // every card asking costs a user lookup. Let the browser hold the
-            // answer briefly — privately, since where it points is personal.
             (
                 [(
                     axum::http::header::CACHE_CONTROL,
@@ -3065,7 +2873,6 @@ async fn serve_avatar(
     }
 }
 
-/// The uploaded picture for a user id, if there is a store and it holds one.
 async fn stored_avatar(state: &AppState, user_id: &str) -> Option<forage_db::ProfilePicture> {
     let store = state.profile_picture_store.as_ref()?;
     match store.get(user_id).await {
@@ -3096,8 +2903,6 @@ fn avatar_response(pic: forage_db::ProfilePicture) -> Response {
     (headers, pic.data).into_response()
 }
 
-// ─── Email verification (signup + add_email) ─────────────────────────
-
 async fn enqueue_verification_email(
     state: &AppState,
     email: &str,
@@ -3108,7 +2913,6 @@ async fn enqueue_verification_email(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("magic-link store not configured"))?;
 
-    // Rate-limit: 3 sends per email per 15 minutes (per type).
     let since = Utc::now() - chrono::Duration::minutes(15);
     let count = store
         .count_recent(
@@ -3243,8 +3047,6 @@ async fn verify_email_redeem(
     let Some((email, stored_return_to)) = consumed.map(|c| (c.email, c.return_to)) else {
         return Ok(render_verify_email_failed(&state));
     };
-    // Validate the stored value at consume time too (defence in depth —
-    // the row could outlive a policy change to `safe_return_to`).
     let return_to = stored_return_to
         .as_deref()
         .and_then(|r| auth::safe_return_to(Some(r)))
@@ -3252,17 +3054,9 @@ async fn verify_email_redeem(
 
     if let Err(e) = state.forest_client.confirm_email_verification(&email).await {
         tracing::error!(error = %e, email = %email, "confirm_email_verification failed");
-        // Token is already consumed (single-use absolute). User must
-        // request a new one via /auth/verify-email/resend.
         return Ok(render_verify_email_failed(&state));
     }
 
-    // If a return_to was carried from the original signup/login attempt,
-    // smooth out the journey: send the (still-unauthenticated) user to
-    // /login with that return_to preserved, so post-login they land on
-    // the pending intent (e.g. /device?user_code=…). Without this, the
-    // user lands on a success page and has to re-discover their entry
-    // point manually — that's the workaround DATA-251 calls out.
     if let Some(rt) = return_to {
         return Ok(Redirect::to(&format!(
             "/login?return_to={}",
@@ -3291,8 +3085,6 @@ async fn verify_email_redeem(
             )
         })?;
 
-    // Set Referrer-Policy: no-referrer so the raw token never leaks
-    // via a Referer header on links inside the success page.
     let mut response = Html(html).into_response();
     response.headers_mut().insert(
         axum::http::header::REFERRER_POLICY,
@@ -3351,9 +3143,6 @@ async fn verify_email_resend_submit(
     State(state): State<AppState>,
     Form(form): Form<VerifyEmailResendForm>,
 ) -> Result<Response, Response> {
-    // Always render the "check your inbox" page regardless of validation
-    // outcome to avoid leaking which emails are registered. Internal
-    // logs capture the actual outcome.
     if validate_email(&form.email).is_err() {
         tracing::info!(email = %form.email, "verify-email resend skipped: invalid email");
         return render_verify_email_check_inbox(&state, &form.email).map_err(|s| s.into_response());
@@ -3363,14 +3152,6 @@ async fn verify_email_resend_submit(
     }
     render_verify_email_check_inbox(&state, &form.email).map_err(|s| s.into_response())
 }
-
-// ─── Account-level OAuth account linking (GitHub / Google) ──────────
-//
-// These routes let a signed-in user explicitly link an external OAuth
-// identity to their Forest account. Distinct from `/auth/<provider>`,
-// which mints a session. The two share the provider's authorize URL
-// and callback; dispatch happens via the `forage_oauth_link_user`
-// cookie set here. See `specs/features/010-account-integrations.md`.
 
 const LINK_PURPOSE_COOKIE: &str = "forage_oauth_link_user";
 
@@ -3405,9 +3186,6 @@ fn build_link_start_response(
     Ok((StatusCode::FOUND, headers).into_response())
 }
 
-/// Build the cookie header values that clear the link/state cookies for a
-/// provider — used after a successful or failed link callback so the
-/// cookies don't leak into a later login attempt.
 fn clear_link_cookies(provider: &str) -> [String; 2] {
     let path = format!("/auth/{provider}");
     [
@@ -3416,11 +3194,6 @@ fn clear_link_cookies(provider: &str) -> [String; 2] {
     ]
 }
 
-/// Build a 302 redirect response that *also* clears the link-purpose
-/// cookie for the given provider. Used by the login-start routes when
-/// they bounce an already-authenticated user — without this, an
-/// abandoned link cookie would survive the redirect and mis-dispatch a
-/// later login callback.
 fn redirect_clearing_link_cookie(location: &str, provider: &str) -> Response {
     let clear = format!(
         "{LINK_PURPOSE_COOKIE}=; HttpOnly; SameSite=Lax; Path=/auth/{provider}; Max-Age=0"
@@ -3435,10 +3208,6 @@ fn redirect_clearing_link_cookie(location: &str, provider: &str) -> Response {
     (StatusCode::FOUND, headers).into_response()
 }
 
-/// GET /settings/account/github/connect — kick off the GitHub linking
-/// flow. Requires an active session; sets the link-purpose cookie and
-/// redirects to GitHub's authorize URL. The callback at
-/// `/auth/github/callback` dispatches based on this cookie.
 async fn github_link_start(
     State(state): State<AppState>,
     session: Session,
@@ -3465,8 +3234,6 @@ async fn github_link_start(
     build_link_start_response(&state, &session, "github", &auth_url, &oauth_state)
 }
 
-/// GET /settings/account/google/connect — symmetric to the GitHub
-/// version. Uses `openid email profile` scope.
 async fn google_link_start(
     State(state): State<AppState>,
     session: Session,
@@ -3498,8 +3265,6 @@ struct ProviderDisconnectForm {
     _csrf: String,
 }
 
-/// POST /settings/account/github/disconnect — unlink the user's GitHub
-/// identity from their Forest account.
 async fn github_link_disconnect(
     State(state): State<AppState>,
     session: Session,
@@ -3514,8 +3279,6 @@ async fn github_link_disconnect(
     .await
 }
 
-/// POST /settings/account/google/disconnect — unlink the user's Google
-/// identity from their Forest account.
 async fn google_link_disconnect(
     State(state): State<AppState>,
     session: Session,
@@ -3560,9 +3323,6 @@ async fn disconnect_oauth_provider(
                 ),
                 forage_core::auth::AuthError::NotAuthenticated
                 | forage_core::auth::AuthError::InvalidCredentials => Redirect::to("/login").into_response(),
-                // Forest refused to strip the last sign-in method. Send
-                // the user back to the account page with a banner —
-                // `error_message()` renders the human-readable string.
                 forage_core::auth::AuthError::LastAuthMethod => {
                     Redirect::to("/settings/account?error=last_auth_method").into_response()
                 }
@@ -3578,9 +3338,6 @@ async fn disconnect_oauth_provider(
     Ok(Redirect::to("/settings/account").into_response())
 }
 
-/// Continue the OAuth callback as a *link* flow (rather than login).
-/// Reused by both github and google callbacks once they have decoded
-/// the OIDC identity.
 async fn complete_link_flow(
     state: &AppState,
     session: &Session,

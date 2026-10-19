@@ -1,4 +1,3 @@
-// Hand-mirrored from forest.component.cue; replaced by codegen output once wired.
 #![allow(clippy::upper_case_acronyms)]
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -37,7 +36,6 @@ pub struct GitCommitPushOutput {
 }
 
 pub trait CommandHandler: Send + Sync {
-    /// Stage, commit, and push the contents of a working directory.
     fn git_commit_push(
         &self,
         spec: &Spec,

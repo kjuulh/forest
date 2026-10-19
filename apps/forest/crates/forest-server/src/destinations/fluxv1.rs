@@ -16,8 +16,6 @@ use crate::{
 
 use super::in_process_backend::InProcessBackend;
 
-/// Flux v2 GitOps destination — thin adapter that delegates to
-/// `FluxV1Handler` from the `forest-runner` crate via an `InProcessBackend`.
 pub struct FluxV1Destination {
     pub temp: TempDirectories,
     pub artifact_files: ArtifactStagingRegistry,
@@ -25,16 +23,8 @@ pub struct FluxV1Destination {
     pub nats: async_nats::Client,
 }
 
-/// The release signal a reconcile outcome is recorded as.
 pub const RECONCILE_SIGNAL: &str = "reconcile";
 
-/// How a reconcile outcome reads as a release signal: `(status, detail)`, or
-/// `None` when nothing was asked of Flux and there is nothing to say.
-///
-/// A failed reconcile is DEGRADED rather than UNHEALTHY: the release is in
-/// git and Flux applies it on its next poll, so nothing is broken, but it is
-/// not running yet either, and a gate waiting on `reconcile` HEALTHY must not
-/// open on it.
 fn reconcile_signal(outcome: &ReconcileOutcome) -> Option<(&'static str, String)> {
     match outcome {
         ReconcileOutcome::NotRequested => None,
@@ -142,9 +132,6 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "text".into(),
                 default_value: String::new(),
-                // Deliberately not sensitive: this is a filesystem path, not key
-                // material. The key itself never enters metadata, and hiding the
-                // path only makes a misconfigured runner harder to debug.
                 sensitive: false,
             },
             forest_models::MetadataFieldSchema {
@@ -201,9 +188,6 @@ impl DestinationEdge for FluxV1Destination {
                 required: false,
                 field_type: "url".into(),
                 default_value: String::new(),
-                // The URL embeds the Receiver's `.status.webhookPath`, and
-                // anyone holding it can trigger reconciliation. Cluster-internal
-                // in practice, but it is a capability, not configuration.
                 sensitive: true,
             },
             forest_models::MetadataFieldSchema {
@@ -266,9 +250,6 @@ impl DestinationEdge for FluxV1Destination {
             .await
             .context("flux release failed")?;
 
-        // Recorded here rather than inside the handler, so forest-runner's
-        // flux code keeps no dependency on forest-server's storage — the same
-        // split as genericv1's provider signals.
         if let Some((status, detail)) = reconcile_signal(&outcome) {
             let row = release_signals::SignalRow {
                 name: RECONCILE_SIGNAL.to_string(),
@@ -290,8 +271,6 @@ impl DestinationEdge for FluxV1Destination {
             )
             .await
             {
-                // The deploy is what matters; losing the release over a
-                // signal that failed to store would be the wrong trade.
                 logger.log_stderr(&format!(
                     "[flux@1] failed to record the {RECONCILE_SIGNAL} signal: {e:#}"
                 ));
@@ -317,8 +296,6 @@ mod tests {
         assert_eq!(status, "HEALTHY");
     }
 
-    /// Not UNHEALTHY: the release is in git and lands on Flux's next poll.
-    /// Not HEALTHY either, or "SUCCEEDED" goes back to hiding it.
     #[test]
     fn a_failed_reconcile_is_degraded_and_says_why() {
         let (status, detail) = reconcile_signal(&ReconcileOutcome::Failed {

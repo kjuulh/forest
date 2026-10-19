@@ -33,8 +33,6 @@ impl DestinationService for DestinationServer {
         )
         .await?;
 
-        // Never log the request wholesale: `req.metadata` carries credentials.
-        // Key names are enough to debug a create.
         tracing::debug!(
             organisation = %req.organisation,
             name = %req.name,
@@ -90,9 +88,6 @@ impl DestinationService for DestinationServer {
             })
             .await;
 
-        // After the create, so a failure here cannot cost the destination. And
-        // advisory: a query error is logged and reported as "none known"
-        // rather than failing a create that has already happened.
         let widened_projects = match crate::services::destination_selector::projects_widened_by(
             &self.state.db,
             &req.organisation,
@@ -130,9 +125,6 @@ impl DestinationService for DestinationServer {
         )
         .await?;
 
-        // Merging an empty overlay changes nothing, so skip the write rather
-        // than record an event that says the metadata stayed the same. This is
-        // the shape a caller sends when it only means to touch sensitive_keys.
         if !(req.merge_metadata && req.metadata.is_empty()) {
             self.state
                 .destination_aggregate_service()
@@ -147,8 +139,6 @@ impl DestinationService for DestinationServer {
                 .to_internal_error()?;
         }
 
-        // Guarded by an explicit flag so older clients, which cannot send the
-        // field, don't silently clear an existing set.
         if req.set_sensitive_keys {
             self.state
                 .destination_aggregate_service()
@@ -260,8 +250,6 @@ impl DestinationService for DestinationServer {
             tonic::Status::not_found(format!("destination has no metadata key '{}'", req.key))
         })?;
 
-        // One key per call, and the key name is recorded — pulling a
-        // credential leaves a trail. The value never enters the audit event.
         self.state
             .event_bus()
             .emit(EventPayload {
@@ -310,10 +298,6 @@ impl DestinationService for DestinationServer {
             .context("failed to find destinations")
             .to_internal_error()?;
 
-        // The projection stores only the type's coordinates, so join the live
-        // type registry to recover each field schema. Without this the
-        // `sensitive` flags are invisible here and type-declared credentials
-        // would be serialised in full.
         let dest_services = self.state.destination_services();
         for dest in &mut destinations {
             let t = &dest.destination_type;
@@ -322,8 +306,6 @@ impl DestinationService for DestinationServer {
             }
         }
 
-        // The `Destination -> proto` conversion is what drops sensitive values;
-        // see `forest_models::Destination::partition_metadata`.
         Ok(Response::new(GetDestinationsResponse {
             destinations: destinations.into_iter().map(|n| n.into()).collect(),
         }))

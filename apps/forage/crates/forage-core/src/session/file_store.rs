@@ -4,8 +4,6 @@ use chrono::{Duration, Utc};
 
 use super::{SessionData, SessionError, SessionId, SessionStore};
 
-/// File-based session store. Each session is a JSON file in a directory.
-/// Suitable for local development — sessions survive server restarts.
 pub struct FileSessionStore {
     dir: PathBuf,
     max_inactive: Duration,
@@ -23,7 +21,6 @@ impl FileSessionStore {
     }
 
     fn session_path(&self, id: &SessionId) -> PathBuf {
-        // Use a safe filename: replace any non-alphanumeric chars
         let safe_name: String = id
             .as_str()
             .chars()
@@ -32,7 +29,6 @@ impl FileSessionStore {
         self.dir.join(format!("{safe_name}.json"))
     }
 
-    /// Remove sessions inactive for longer than `max_inactive`.
     pub fn reap_expired(&self) {
         let cutoff = Utc::now() - self.max_inactive;
         let entries = match std::fs::read_dir(&self.dir) {

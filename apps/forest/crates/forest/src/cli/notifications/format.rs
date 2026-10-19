@@ -12,7 +12,6 @@ pub fn format_notification(notif: &Notification) -> String {
     );
 
     if let Some(ctx) = &notif.release_context {
-        // User who triggered the action
         if !ctx.source_username.is_empty() {
             let user = if !ctx.source_email.is_empty() {
                 format!("{} <{}>", ctx.source_username, ctx.source_email)
@@ -22,7 +21,6 @@ pub fn format_notification(notif: &Notification) -> String {
             out.push_str(&format!("\n  by {user}"));
         }
 
-        // Context title / description (PR title, release label, etc.)
         if !ctx.context_title.is_empty() {
             out.push_str(&format!("\n  title: {}", ctx.context_title));
             if !ctx.context_description.is_empty() {
@@ -30,7 +28,6 @@ pub fn format_notification(notif: &Notification) -> String {
             }
         }
 
-        // Git info
         if !ctx.commit_sha.is_empty() || !ctx.commit_branch.is_empty() {
             let sha = if ctx.commit_sha.len() > 7 {
                 &ctx.commit_sha[..7]
@@ -48,12 +45,10 @@ pub fn format_notification(notif: &Notification) -> String {
             }
         }
 
-        // Slug
         if !ctx.slug.is_empty() {
             out.push_str(&format!("\n  slug: {}", ctx.slug));
         }
 
-        // Destination info
         if !ctx.destination.is_empty() {
             let env_suffix = if !ctx.environment.is_empty() {
                 format!(" ({})", ctx.environment)
@@ -65,12 +60,10 @@ pub fn format_notification(notif: &Notification) -> String {
             out.push_str(&format!("\n  destinations: {}", ctx.destination_count));
         }
 
-        // Web link
         if !ctx.context_web.is_empty() {
             out.push_str(&format!("\n  link: {}", ctx.context_web));
         }
 
-        // Error (for failures)
         if !ctx.error_message.is_empty() {
             out.push_str(&format!("\n  error: {}", ctx.error_message));
         }

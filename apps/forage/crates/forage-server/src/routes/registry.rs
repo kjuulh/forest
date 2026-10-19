@@ -17,9 +17,6 @@ use crate::pretty_json;
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
-    // One surface for every artefact (specs/features/007). Components and
-    // tools live on the same routes; the detail page renders shape-aware
-    // sections (install / methods / upstream / releases / manifest).
     Router::new()
         .route("/components", get(components_search))
         .route("/components/{org}/{name}", get(component_detail))
@@ -28,8 +25,6 @@ pub fn router() -> Router<AppState> {
             get(component_version_detail),
         )
         .route("/orgs/{org}/components", get(org_components))
-        // Project-level Components tab — lists every version published
-        // under this project. Sibling to Releases (the deployment timeline).
         .route(
             "/orgs/{org}/projects/{project}/components",
             get(project_components),
@@ -57,10 +52,6 @@ fn require_registry(state: &AppState) -> Result<&dyn forage_core::registry::Fore
         })
 }
 
-/// Build the (description, metadata) pair the project + component
-/// templates need for the header and About sidebar. Project description
-/// wins; the component manifest description is the fallback. See spec
-/// 009 §"Forest UI".
 fn project_overview_ctx(
     project: Option<&forage_core::platform::Project>,
     component_description: Option<&str>,
@@ -87,8 +78,6 @@ fn project_overview_ctx(
     (description, metadata_ctx)
 }
 
-/// Deduplicate component summaries by (organisation, name), keeping the first occurrence
-/// (which is the latest version since results are sorted by updated_at DESC).
 fn dedup_components(
     components: Vec<forage_core::registry::ComponentSummary>,
 ) -> Vec<forage_core::registry::ComponentSummary> {
@@ -99,7 +88,6 @@ fn dedup_components(
         .collect()
 }
 
-/// Extract optional user context from MaybeSession for template rendering.
 fn maybe_user_context(
     maybe_session: &MaybeSession,
 ) -> (
@@ -119,13 +107,6 @@ fn maybe_user_context(
     }
 }
 
-/// GET /components — public search/browse.
-///
-/// Always calls `search_public_components`, which the backend filters to
-/// `visibility = 'public'` regardless of the caller. Logged-in users
-/// still see their nav chrome (user menu, org list) but the result set
-/// is the public catalog — private org components live under
-/// `/orgs/{org}/components`, which requires session + org membership.
 async fn components_search(
     State(state): State<AppState>,
     maybe_session: MaybeSession,
@@ -180,24 +161,11 @@ async fn components_search(
     Ok(Html(html).into_response())
 }
 
-/// GET /components/{org}/{name} — component detail page.
-///
-/// Per specs/features/008, when a project with the same name exists in
-/// this org we 303-redirect to the canonical project Overview. The legacy
-/// component-detail page only renders for orphaned components (no
-/// matching project) so external links continue to resolve.
 async fn component_detail(
     State(state): State<AppState>,
     maybe_session: MaybeSession,
     Path((org, name)): Path<(String, String)>,
 ) -> Result<Response, Response> {
-    // Project canonicalisation: redirect to the project Overview when a
-    // same-named project exists. Only consult `list_projects` for sessions
-    // that have an access token — anonymous traffic can't pass an org
-    // membership check, so it skips the lookup and lands on the legacy
-    // page directly (matches public-component-detail behaviour). 303 = soft
-    // redirect; reversible. A `list_projects` failure is logged then skipped
-    // — degrades to the legacy page rather than 5xx on a transient blip.
     if let Some(ref session) = maybe_session.session {
         match state
             .platform_client
@@ -220,15 +188,6 @@ async fn component_detail(
 
     let registry = require_registry(&state)?;
 
-    // GitHub-style single-URL permission model: same `/components/<org>/<name>`
-    // serves both public and private components, gated by the session's
-    // org membership. Sessioned viewers reach the authenticated RPC
-    // (`get_component_detail`) which returns the component when the user
-    // has access. Anonymous viewers reach `get_public_component_detail`
-    // which only returns public components. Either RPC returning NotFound
-    // means "you can't see this here" — 404 is the same UX whether the
-    // component doesn't exist or the viewer simply lacks access (matching
-    // GitHub's repo behaviour).
     let (detail_res, project_info) = match maybe_session.session {
         Some(ref session) => {
             let (d, p) = tokio::join!(
@@ -306,14 +265,6 @@ async fn component_detail(
     Ok(Html(html).into_response())
 }
 
-/// GET /components/{org}/{name}/{version} — version-specific detail.
-///
-/// GitHub-style single-URL permission model: serves both public and
-/// private versions at the same path, gated by session. Sessioned
-/// viewers go through the authenticated RPC (`get_component_detail` +
-/// `get_component_manifest`); anonymous viewers reach the public
-/// variants. Either source returning NotFound surfaces as a 404 — same
-/// UX whether the version doesn't exist or the viewer lacks access.
 async fn component_version_detail(
     State(state): State<AppState>,
     maybe_session: MaybeSession,
@@ -407,7 +358,6 @@ async fn component_version_detail(
     Ok(Html(html).into_response())
 }
 
-/// GET /orgs/{org}/components — org-scoped component list.
 async fn org_components(
     State(state): State<AppState>,
     session: Session,
@@ -454,12 +404,6 @@ async fn org_components(
     Ok(Html(html).into_response())
 }
 
-
-/// `GET /orgs/{org}/projects/{project}/components` — project's Components tab.
-///
-/// Lists every published version. Distinct from the Overview's sidebar
-/// summary (top 3 + "see all") and from the global `/orgs/{org}/components`
-/// (across-projects search).
 async fn project_components(
     State(state): State<AppState>,
     session: Session,

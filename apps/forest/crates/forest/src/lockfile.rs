@@ -1,14 +1,3 @@
-//! forest.lock — records the resolved dependency snapshot for a project.
-//!
-//! Like Cargo.lock, this records all dependencies:
-//! - **Registry deps**: org/name@version os/arch sha256:hash
-//! - **Path deps**: org/name@version path:/relative/path
-//!
-//! Path deps are "soft-locked" — the lock records what version was seen,
-//! but resolution always uses whatever is on disk (just like Cargo).
-//!
-//! Registry deps are "hard-locked" — the SHA-256 is verified on download.
-
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -16,7 +5,6 @@ use anyhow::Context;
 
 const LOCK_FILE_NAME: &str = "forest.lock";
 
-/// A lock file entry.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LockEntry {
     pub organisation: String,
@@ -25,17 +13,16 @@ pub struct LockEntry {
     pub source: LockSource,
 }
 
-/// Where a locked dependency comes from.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LockSource {
-    /// Registry dependency — locked to a specific binary hash per platform.
     Registry {
         os: String,
         arch: String,
         sha256: String,
     },
-    /// Local path dependency — records the path, but always resolves from disk.
-    Path { path: String },
+    Path {
+        path: String,
+    },
 }
 
 impl LockEntry {
@@ -71,14 +58,12 @@ impl LockEntry {
     }
 }
 
-/// The lock file contents.
 #[derive(Debug, Clone, Default)]
 pub struct LockFile {
     entries: BTreeMap<String, LockEntry>,
 }
 
 impl LockFile {
-    /// Load from a project directory. Returns empty if no lock file exists.
     pub async fn load(project_dir: &Path) -> anyhow::Result<Self> {
         let path = project_dir.join(LOCK_FILE_NAME);
         if !path.exists() {
@@ -104,7 +89,6 @@ impl LockFile {
         Ok(Self { entries })
     }
 
-    /// Save to a project directory.
     pub async fn save(&self, project_dir: &Path) -> anyhow::Result<()> {
         let path = project_dir.join(LOCK_FILE_NAME);
         let mut content = String::from("# forest.lock — do not edit manually\n");
@@ -120,13 +104,11 @@ impl LockFile {
         Ok(())
     }
 
-    /// Add or update an entry.
     pub fn insert(&mut self, entry: LockEntry) {
         let key = entry.key();
         self.entries.insert(key, entry);
     }
 
-    /// Look up the expected hash for a registry component+platform.
     pub fn get(&self, org: &str, name: &str, version: &str, os: &str, arch: &str) -> Option<&str> {
         let key = format!("{org}/{name}@{version} {os}/{arch}");
         self.entries.get(&key).and_then(|e| match &e.source {
@@ -135,8 +117,6 @@ impl LockFile {
         })
     }
 
-    /// Check if a hash matches the lock file expectation.
-    /// Returns Ok if matches or no entry exists. Returns Err if mismatch.
     pub fn verify(
         &self,
         org: &str,
@@ -161,7 +141,6 @@ impl LockFile {
     }
 }
 
-/// Parse a single lock file line.
 fn parse_lock_line(line: &str) -> Option<LockEntry> {
     let parts: Vec<&str> = line.splitn(3, ' ').collect();
     if parts.len() < 2 {
@@ -172,7 +151,6 @@ fn parse_lock_line(line: &str) -> Option<LockEntry> {
     let (org_name, version) = component.split_once('@')?;
     let (org, name) = org_name.split_once('/')?;
 
-    // Path dep: "org/name@version path:/some/path"
     if parts[1].starts_with("path:") {
         let path = parts[1].strip_prefix("path:")?;
         return Some(LockEntry {
@@ -185,7 +163,6 @@ fn parse_lock_line(line: &str) -> Option<LockEntry> {
         });
     }
 
-    // Registry dep: "org/name@version os/arch sha256:hash"
     if parts.len() != 3 {
         return None;
     }
@@ -291,7 +268,6 @@ mod tests {
             lock.verify("org", "comp", "1.0.0", "linux", "amd64", "sha256:WRONG")
                 .is_err()
         );
-        // No entry → ok (first time)
         assert!(
             lock.verify("org", "other", "1.0.0", "linux", "amd64", "sha256:anything")
                 .is_ok()
@@ -309,7 +285,6 @@ mod tests {
                 path: "./local".into(),
             },
         });
-        // get() only returns registry hashes, not path entries
         assert!(lock.get("org", "comp", "1.0.0", "linux", "amd64").is_none());
     }
 }

@@ -6,13 +6,8 @@ use forage_core::integrations::{
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// PostgreSQL-backed integration store.
 pub struct PgIntegrationStore {
     pool: PgPool,
-    /// AES-256 key for encrypting/decrypting integration configs.
-    /// In production this comes from INTEGRATION_ENCRYPTION_KEY env var.
-    /// For simplicity, we use a basic XOR-based obfuscation for now
-    /// and will upgrade to proper AES when the `aes-gcm` crate is added.
     encryption_key: Vec<u8>,
 }
 
@@ -55,8 +50,6 @@ impl PgIntegrationStore {
     }
 }
 
-/// Simple XOR obfuscation. This is NOT production-grade encryption.
-/// TODO: Replace with AES-256-GCM when aes-gcm dependency is added.
 fn xor_bytes(data: &[u8], key: &[u8]) -> Vec<u8> {
     if key.is_empty() {
         return data.to_vec();
@@ -120,7 +113,6 @@ impl IntegrationStore for PgIntegrationStore {
         let raw_token = generate_api_token();
         let token_hash = hash_api_token(&raw_token);
 
-        // Insert integration with token hash
         sqlx::query(
             "INSERT INTO integrations (id, organisation, integration_type, name, config_encrypted, enabled, created_by, created_at, updated_at, api_token_hash)
              VALUES ($1, $2, $3, $4, $5, true, $6, $7, $7, $8)",
@@ -146,7 +138,6 @@ impl IntegrationStore for PgIntegrationStore {
             }
         })?;
 
-        // Create default notification rules (all enabled)
         for nt in NOTIFICATION_TYPES {
             sqlx::query(
                 "INSERT INTO notification_rules (id, integration_id, notification_type, enabled)
@@ -302,7 +293,6 @@ impl IntegrationStore for PgIntegrationStore {
         .map_err(|e| IntegrationError::Store(e.to_string()))?;
 
         if result.rows_affected() == 0 {
-            // Rule doesn't exist yet — create it
             sqlx::query(
                 "INSERT INTO notification_rules (id, integration_id, notification_type, enabled)
                  VALUES ($1, $2, $3, $4)",
@@ -424,8 +414,6 @@ impl IntegrationStore for PgIntegrationStore {
         self.row_to_integration(row)
     }
 
-    // ── Slack user links ─────────────────────────────────────────
-
     async fn get_slack_user_link(
         &self,
         user_id: &str,
@@ -516,8 +504,6 @@ impl IntegrationStore for PgIntegrationStore {
             })
             .collect())
     }
-
-    // ── Slack message refs ───────────────────────────────────────
 
     async fn get_slack_message_ref(
         &self,

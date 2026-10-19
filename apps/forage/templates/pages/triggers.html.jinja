@@ -1,11 +1,6 @@
 {% extends "base.html.jinja" %}
 {% from "components/project_settings.html.jinja" import project_settings_layout %}
 
-{# Triggers section of the project settings shell. The rows, the create
-   form and its script are unchanged — only the surrounding chrome
-   (project header, Triggers/Policies/Pipelines sub-nav, breadcrumb and
-   Back) now comes from the shared layout. #}
-
 {% block content %}
 {% call project_settings_layout(current_org, current_project, "triggers", "Triggers",
                                 "Automatically release artifacts matching these rules") %}
@@ -23,7 +18,6 @@
                     <span class="font-medium text-gray-900">{{ trigger.name }}</span>
                 </div>
 
-                {# Summary of patterns #}
                 <div class="flex items-center gap-1.5 text-xs text-gray-500 flex-wrap">
                     {% if trigger.branch_pattern %}
                     <code class="bg-gray-100 px-1.5 py-0.5 rounded">branch: {{ trigger.branch_pattern }}</code>
@@ -92,7 +86,6 @@
 
             <p class="text-sm text-gray-500 mb-2">Add at least one filter pattern. Artifacts matching <strong>all</strong> patterns will be auto-released.</p>
 
-            {# Pattern rows #}
             <div class="space-y-3" id="pattern-rows">
             </div>
 
@@ -103,7 +96,6 @@
 
             <hr class="border-gray-200">
 
-            {# Target environments #}
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-2">Target environments</label>
                 {% if environments | length > 0 %}
@@ -120,7 +112,6 @@
                 {% endif %}
             </div>
 
-            {# Pipeline selection #}
             {% if pipelines | length > 0 %}
             <div>
                 <div class="flex items-center gap-2 mb-2">
@@ -135,14 +126,12 @@
             </div>
             {% endif %}
 
-            {# Options #}
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="force-release" name="force_release" value="true"
                     class="rounded border-gray-300">
                 <label for="force-release" class="text-sm text-gray-700">Force release (skip queue)</label>
             </div>
 
-            {# Auto-generated name preview #}
             <div class="flex items-center gap-2 text-sm text-gray-500">
                 <span>Name:</span>
                 <span id="trigger-name-preview" class="font-mono text-gray-700"></span>

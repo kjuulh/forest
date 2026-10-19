@@ -1,13 +1,3 @@
-//! `forest self update` / `forest self check` — keep the forest CLI
-//! current. Because `forest` is the bootstrap tool for the whole
-//! org workflow, there is no outer package manager to do this — the
-//! binary has to update itself.
-//!
-//! Implementation matches `scripts/install.sh`: shell out to `gh`
-//! (which the user already has authenticated for repo access) for
-//! both the version check and the artifact download, then atomically
-//! replace the running binary via `install(1)`.
-
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -19,14 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::State;
 
-/// GitHub repo the releases live on. Hard-coded because this is the
-/// canonical distribution location — no benefit to making it
-/// configurable.
 const REPO: &str = "understory-io/forest";
 
-/// How long a successful version check is considered fresh before we
-/// hit the network again. 24h keeps the noise low while still
-/// catching new releases reasonably quickly.
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Parser)]
@@ -60,23 +44,15 @@ impl SelfCommand {
     }
 }
 
-// ─── Version probing ────────────────────────────────────────────────
-
 fn current_version() -> Version {
-    // CARGO_PKG_VERSION is set at compile time from the forest crate's
-    // Cargo.toml. release-please owns that field on every release PR.
     Version::parse(env!("CARGO_PKG_VERSION")).expect("CARGO_PKG_VERSION is valid semver")
 }
 
-/// Strip the `v` prefix from a release tag and parse as semver.
 fn tag_to_version(tag: &str) -> anyhow::Result<Version> {
     let stripped = tag.strip_prefix('v').unwrap_or(tag);
     Version::parse(stripped).with_context(|| format!("parse version from tag {tag:?}"))
 }
 
-/// Ask `gh` for the repo's "latest" release. Falls back gracefully if
-/// `gh` is missing or unauthenticated — callers must treat this as
-/// best-effort.
 async fn fetch_latest_version() -> anyhow::Result<Version> {
     let output = tokio::process::Command::new("gh")
         .args([
@@ -115,10 +91,6 @@ async fn print_check_status() -> anyhow::Result<()> {
     }
 }
 
-// ─── Update mechanism ───────────────────────────────────────────────
-
-/// Map the current host platform to the release target triple our
-/// build matrix emits (see `.github/workflows/release.yml`).
 fn release_target() -> anyhow::Result<&'static str> {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         Ok("aarch64-apple-darwin")
@@ -147,9 +119,6 @@ async fn perform_update(version: Option<&str>) -> anyhow::Result<()> {
     let tmp = tempfile::tempdir().context("create temp dir for download")?;
 
     eprintln!("==> Downloading {asset}…");
-    // `gh release download` will fail loudly if the tag doesn't exist
-    // or the user lacks repo access. It also writes its own progress
-    // output to stdout, so we don't need to wrap it in a spinner here.
     let status = tokio::process::Command::new("gh")
         .args([
             "release",
@@ -198,18 +167,7 @@ async fn perform_update(version: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Verify the freshly-downloaded tarball against the matching
-/// `*.sha256` file in `dir`. Picks whichever SHA-256 tool the host
-/// provides:
-///
-///   - `sha256sum` (coreutils, default on Linux)
-///   - `shasum -a 256` (BSD / macOS, ships with Perl)
-///
-/// Both consume the same `<hex>  <filename>` format, so either's
-/// `-c` mode validates the file produced by either tool on the
-/// build side.
 async fn verify_sha256(dir: &Path, checksum_file: &str) -> anyhow::Result<()> {
-    // Candidates in priority order: (tool name, args before the file).
     let candidates: &[(&str, &[&str])] =
         &[("sha256sum", &["-c"]), ("shasum", &["-a", "256", "-c"])];
 
@@ -221,12 +179,10 @@ async fn verify_sha256(dir: &Path, checksum_file: &str) -> anyhow::Result<()> {
             .status()
             .await;
         match result {
-            // Tool ran, verify either passed or failed loudly — done.
             Ok(status) if status.success() => return Ok(()),
             Ok(_) => {
                 anyhow::bail!("checksum verification failed for {checksum_file}");
             }
-            // Tool missing: silently try the next one.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => return Err(e).with_context(|| format!("invoke {tool}")),
         }
@@ -237,13 +193,6 @@ async fn verify_sha256(dir: &Path, checksum_file: &str) -> anyhow::Result<()> {
     )
 }
 
-/// Atomically replace the current binary with the freshly-downloaded
-/// one. Tries unprivileged `install(1)` first; falls back to `sudo`
-/// if the destination needs root.
-///
-/// `install(1)` works on a running binary on Unix because the kernel
-/// keeps the old inode alive for the current process — new
-/// invocations pick up the new file.
 fn replace_binary(new_binary: &Path, current_exe: &Path) -> anyhow::Result<()> {
     let direct = std::process::Command::new("install")
         .args(["-m", "0755"])
@@ -276,19 +225,9 @@ fn replace_binary(new_binary: &Path, current_exe: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-// ─── Background nag ─────────────────────────────────────────────────
-//
-// Called at the end of every successful forest command (see cli.rs).
-// Cached so we only hit GitHub once per `CHECK_INTERVAL`. Silent on
-// any failure — a broken version check must never break the user's
-// actual command.
-
 #[derive(Serialize, Deserialize, Default)]
 struct UpdateCache {
-    /// Seconds since UNIX epoch of the last successful probe.
     last_check_unix: u64,
-    /// Tag name of the latest release at the time of probe, without
-    /// the `v` prefix. Empty / missing means "probe failed".
     latest_version: Option<String>,
 }
 
@@ -321,13 +260,6 @@ fn write_cache(cache: &UpdateCache) {
     let _ = std::fs::write(&path, bytes);
 }
 
-/// Print a one-line nag if a newer release exists. Best-effort:
-/// silent on any failure (no `gh`, no network, no cache directory).
-///
-/// Skip conditions:
-///   - `CI=true` env (most CI systems set this)
-///   - `FOREST_NO_UPDATE_CHECK` env set (any value) — explicit opt-out
-///   - stderr isn't a TTY (piping forest output to a file, redirecting in tests)
 pub async fn maybe_print_update_nag() {
     if std::env::var_os("CI").is_some() {
         return;
@@ -356,8 +288,6 @@ pub async fn maybe_print_update_nag() {
                 });
                 s
             }
-            // Silent fail — `gh` might be missing, no auth, no network.
-            // Don't pester users mid-command about it.
             Err(_) => return,
         }
     } else {
@@ -372,11 +302,6 @@ pub async fn maybe_print_update_nag() {
     };
     let current = current_version();
     if latest > current {
-        // Single line, leading newline so it isn't glued to the
-        // command's last bit of output. The second line links to the
-        // GitHub release so curious users can read the changelog
-        // before upgrading — important for `forest`, which sits in
-        // the bootstrap path and shouldn't surprise users mid-release.
         eprintln!(
             "\n✨ forest {latest} is available (you have {current}). \
              Run `forest self update` to upgrade.\n   \
@@ -391,8 +316,6 @@ mod tests {
 
     #[test]
     fn current_version_parses() {
-        // Just confirms CARGO_PKG_VERSION is valid semver — the assert
-        // is implicit in `current_version()` itself (it'd panic).
         let _ = current_version();
     }
 
@@ -410,8 +333,6 @@ mod tests {
 
     #[test]
     fn release_target_compiles_for_current_platform() {
-        // Smoke test: just ensure release_target returns *something*
-        // (Ok or Err) without panicking on the current host.
         let _ = release_target();
     }
 

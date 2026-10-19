@@ -1,45 +1,19 @@
-//! User-global config decoder.
-//!
-//! Pure module — no I/O. Parses the JSON produced by evaluating
-//! `~/.config/forest/forest.cue` (via the shell-side `cue_eval` module)
-//! into a typed [`UserConfig`].
-//!
-//! Schema source of truth: `cue/forest-sdk/user_config.cue` and
-//! TASKS/018-global-tools.md §1a.4.
-
 use std::collections::BTreeMap;
 
 use crate::global::names::{NameError, validate_env_name, validate_env_value, validate_tool_name};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UserConfig {
-    /// Arbitrary string→string kv set by `forest global set`.
     pub user: BTreeMap<String, String>,
-    /// Per-tool pins. Key is `<org>/<name>`.
     pub dependencies: BTreeMap<String, Dependency>,
-    /// Org-catalogue subscriptions. Key is the organisation name.
     pub org_catalog: BTreeMap<String, OrgCatalog>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dependency {
-    /// The concrete resolved version. For a floating dep (`pinned == false`)
-    /// this is the last-known latest — refreshed by `forest global update`
-    /// and used as-is on the offline warm path. For a pinned dep it is the
-    /// version the user asked for and never changes on its own.
     pub version: String,
-    /// `true` when the user fixed an explicit `@<version>` (e.g.
-    /// `forest global add org/tool@1.2.3`). Pinned tools are **never**
-    /// touched by `forest global update` — including the automatic
-    /// background one. A bare `forest global add org/tool` leaves this
-    /// `false`, meaning "track latest".
     pub pinned: bool,
-    /// Optional client-side shim alias. If `None`, the shim name comes from
-    /// the component manifest's `tool.name`.
     pub shim_name: Option<String>,
-    /// Per-tool local env override (TASKS/023 §B5). Hand-edited in
-    /// `forest.cue` — not settable via the CLI. Overrides the component's
-    /// declared `include.env` defaults, but the ambient shell env still wins.
     pub env: BTreeMap<String, String>,
 }
 
@@ -47,34 +21,22 @@ pub struct Dependency {
 pub struct OrgCatalog {
     pub enabled: bool,
     pub banned: Vec<String>,
-    /// Per-tool pins inside this catalogue: upstream `tool.name` → version.
     pub pins: BTreeMap<String, String>,
-    /// Alias map: upstream `tool.name` → local shim_name.
     pub aliases: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UserConfigError {
     InvalidJson(String),
-    /// The CUE evaluator emits `{"config": {...}}` — if the outer shape is
-    /// wrong, we surface this clearly rather than silently treating the input
-    /// as the inner config.
     MissingConfigRoot,
     InvalidDependencyKey(String),
     InvalidVersion(String),
     InvalidShimName(NameError),
     InvalidAliasName(NameError),
-    /// A per-tool `env` key is not a valid POSIX env name. Carries the key.
     InvalidEnvName(String),
-    /// A per-tool `env` value is invalid (contains NUL). Carries the key.
     InvalidEnvValue(String),
 }
 
-/// Parse the JSON form of `~/.config/forest/forest.cue` (i.e. the output of
-/// `cue eval --out json` applied to that file).
-///
-/// Expected outer shape: `{ "config": { "user": {...}, "dependencies": {...}, "org_catalog": {...} } }`.
-/// Any missing sub-section defaults to empty.
 pub fn parse(json: &str) -> Result<UserConfig, UserConfigError> {
     let value: serde_json::Value =
         serde_json::from_str(json).map_err(|e| UserConfigError::InvalidJson(e.to_string()))?;
@@ -234,8 +196,6 @@ pub fn parse(json: &str) -> Result<UserConfig, UserConfigError> {
     })
 }
 
-/// Parse a per-tool dependency `env` override (TASKS/023 §B5). Missing/null ⇒
-/// empty. Object of string→string; keys must be POSIX env names, values NUL-free.
 fn parse_dep_env(
     value: Option<&serde_json::Value>,
 ) -> Result<BTreeMap<String, String>, UserConfigError> {
@@ -265,9 +225,6 @@ fn is_qualified_dep_key(s: &str) -> bool {
 }
 
 fn is_semver_shape(s: &str) -> bool {
-    // Minimal semver-shape check: three dot-separated non-empty ASCII-digit
-    // groups, optionally followed by `-<pre>` or `+<build>` segments.
-    // Mirrors the CUE regex `^\d+\.\d+\.\d+`.
     let core = s.split(['-', '+']).next().unwrap_or(s);
     let parts: Vec<_> = core.split('.').collect();
     if parts.len() != 3 {
@@ -309,8 +266,6 @@ where
 mod tests {
     use super::*;
 
-    // --- Happy paths --------------------------------------------------------
-
     #[test]
     fn parses_empty_config() {
         let json = r#"{"config": {}}"#;
@@ -334,7 +289,6 @@ mod tests {
         let dep = c.dependencies.get("cuteorg/ripgrep").unwrap();
         assert_eq!(dep.version, "14.1.1");
         assert!(dep.shim_name.is_none());
-        // Absent `pinned` defaults to floating (tracks latest).
         assert!(!dep.pinned);
     }
 
@@ -435,7 +389,6 @@ mod tests {
 
     #[test]
     fn parses_full_org_catalog_subscription() {
-        // Mirrors examples/global-tools/user-config/forest.cue.
         let json = r#"{
             "config": {
                 "dependencies": {
@@ -461,10 +414,6 @@ mod tests {
 
     #[test]
     fn parses_catalog_with_default_enabled_true() {
-        // `enabled: bool | *true` in the CUE schema — if CUE evaluates and
-        // emits the default, the JSON contains `"enabled": true`. We don't
-        // tolerate a missing `enabled` field (CUE will always emit it), but
-        // we DO tolerate missing `banned`/`pins`/`aliases` (empty by default).
         let json = r#"{
             "config": {
                 "org_catalog": {
@@ -481,8 +430,6 @@ mod tests {
 
     #[test]
     fn parses_disabled_catalog_subscription() {
-        // `enabled: false` is a valid state (subscription preserved for
-        // historical reasons but inactive).
         let json = r#"{
             "config": {
                 "org_catalog": {
@@ -493,8 +440,6 @@ mod tests {
         let c = parse(json).unwrap();
         assert!(!c.org_catalog.get("cuteorg").unwrap().enabled);
     }
-
-    // --- Negative paths -----------------------------------------------------
 
     #[test]
     fn rejects_invalid_json() {
@@ -526,7 +471,6 @@ mod tests {
 
     #[test]
     fn rejects_invalid_shim_name() {
-        // shim_name must be a valid tool name (same regex).
         let json = r#"{
             "config": {
                 "dependencies": {
@@ -541,7 +485,6 @@ mod tests {
 
     #[test]
     fn rejects_invalid_alias_target_name() {
-        // `aliases: {upstream → mine}` — mine must validate.
         let json = r#"{
             "config": {
                 "org_catalog": {
@@ -556,8 +499,6 @@ mod tests {
 
     #[test]
     fn rejects_invalid_version_string() {
-        // The CUE schema enforces semver shape, but a defensive client check
-        // shields against a hand-edited forest.cue that slipped through.
         let json = r#"{
             "config": {
                 "dependencies": {

@@ -21,7 +21,6 @@ impl DestinationRegistry {
         sensitive_keys: Vec<String>,
         destination_type: DestinationType,
     ) -> anyhow::Result<()> {
-        // Resolve environment name to environment_id
         let env = sqlx::query!(
             "SELECT id FROM environments WHERE organisation = $1 AND name = $2",
             organisation,

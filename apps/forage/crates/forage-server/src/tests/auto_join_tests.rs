@@ -1,10 +1,3 @@
-//! Route tests for the auto-invite by verified email domain flow (DATA-252).
-//!
-//! Uses the in-process axum router + mock platform client. Asserts on
-//! rendered HTML and form-submit redirects rather than spinning up a
-//! browser — server-rendered MiniJinja has no client-side state, so this
-//! covers the same surface a Playwright spec would.
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use forage_core::platform::{
@@ -21,8 +14,6 @@ fn body_to_string(body: Body) -> impl std::future::Future<Output = String> {
         String::from_utf8(bytes.to_vec()).unwrap()
     }
 }
-
-// ─── Admin: access page render ───────────────────────────────────────────
 
 #[tokio::test]
 async fn access_page_renders_existing_domains() {
@@ -59,8 +50,6 @@ async fn access_page_renders_existing_domains() {
         html.contains("Add domain"),
         "admin should see the add-domain form"
     );
-    // The unverified row should expose the TXT instructions + token so
-    // the admin can publish the record.
     assert!(
         html.contains("_forest-verify.understory.io"),
         "should show the TXT record name"
@@ -103,7 +92,6 @@ async fn access_page_verified_row_hides_dns_instructions() {
         .unwrap();
     let html = body_to_string(response.into_body()).await;
     assert!(html.contains("DNS verified"));
-    // The verify button is hidden — token does not need to be visible.
     assert!(
         !html.contains("Verify DNS"),
         "verified row should not show the verify button"
@@ -133,14 +121,11 @@ async fn access_page_non_admin_hides_add_form() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let html = body_to_string(response.into_body()).await;
-    // Members can see the list; only admins see the form.
     assert!(
         !html.contains("Add domain"),
         "non-admin should not see add-domain form"
     );
 }
-
-// ─── Admin: add domain ───────────────────────────────────────────────────
 
 #[tokio::test]
 async fn add_domain_redirects_back_on_success() {
@@ -179,8 +164,6 @@ async fn add_domain_redirects_back_on_success() {
 
 #[tokio::test]
 async fn add_invalid_domain_re_renders_page_with_error() {
-    // Forest rejects malformed hostnames; forage should surface the
-    // server-side message inline rather than show a flat 500.
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
         add_allowed_domain_result: Some(Err(PlatformError::InvalidArgument(
             "domain is not a valid hostname".into(),
@@ -212,8 +195,6 @@ async fn add_invalid_domain_re_renders_page_with_error() {
         "validation error must surface inline"
     );
 }
-
-// ─── Admin: verify domain ────────────────────────────────────────────────
 
 #[tokio::test]
 async fn verify_domain_success_renders_info_flash() {
@@ -339,8 +320,6 @@ async fn non_admin_cannot_add_domain() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
-// ─── Admin: remove domain ────────────────────────────────────────────────
-
 #[tokio::test]
 async fn remove_domain_redirects_back() {
     let (state, sessions) = test_state();
@@ -363,15 +342,8 @@ async fn remove_domain_redirects_back() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
 }
 
-// ─── User: join offers banner on dashboard ───────────────────────────────
-
 #[tokio::test]
 async fn onboarding_dashboard_no_orgs_shows_join_offer_banner() {
-    // Regression: a brand-new user with no orgs but a verified email at
-    // a DNS-verified allowlist domain must still see the auto-invite
-    // banner. The dashboard handler used to take the no-orgs onboarding
-    // branch and skip the banner entirely (DATA-252 manual smoke caught
-    // this).
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
         list_orgs_result: Some(Ok(vec![])),
         list_join_offers_result: Some(Ok(vec![JoinOffer {
@@ -455,7 +427,6 @@ async fn dashboard_shows_join_offer_banner() {
 
 #[tokio::test]
 async fn dashboard_without_offers_hides_banner() {
-    // Default mock returns no offers.
     let (state, sessions) = test_state();
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
@@ -478,8 +449,6 @@ async fn dashboard_without_offers_hides_banner() {
         "no banner should render when there are no offers"
     );
 }
-
-// ─── User: accept offer ──────────────────────────────────────────────────
 
 #[tokio::test]
 async fn accept_offer_redirects_to_dashboard() {
@@ -516,9 +485,6 @@ async fn accept_offer_redirects_to_dashboard() {
 
 #[tokio::test]
 async fn accept_offer_no_longer_eligible_shows_403() {
-    // Mirrors the "admin removed the domain after the banner loaded" path —
-    // forest-server returns PermissionDenied, forage renders a clean 403
-    // page instead of a 500.
     let platform = MockPlatformClient::with_behavior(MockPlatformBehavior {
         accept_join_offer_result: Some(Err(PlatformError::PermissionDenied(
             "you are not currently eligible to join this organisation".into(),

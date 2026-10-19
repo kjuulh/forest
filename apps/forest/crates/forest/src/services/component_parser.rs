@@ -15,7 +15,6 @@ pub struct ComponentParser {}
 
 impl ComponentParser {
     pub async fn parse(&self, path: &Path) -> anyhow::Result<RawComponent> {
-        // Try v1 (TOML) first
         if let Some(component_spec) = get_component_spec_path(path).await? {
             return Ok(RawComponent {
                 component_spec,
@@ -23,7 +22,6 @@ impl ComponentParser {
             });
         }
 
-        // Try v2 (CUE) — extract minimal metadata from forest.cue via cue export
         if path.join(COMPONENT_CUE_FILE_NAME).exists() {
             if let Some(component_spec) = get_component_spec_from_cue(path).await? {
                 return Ok(RawComponent {
@@ -37,7 +35,6 @@ impl ComponentParser {
     }
 }
 
-/// Parse a v2 component's metadata from forest.cue via `cue export`.
 async fn get_component_spec_from_cue(path: &Path) -> anyhow::Result<Option<RawComponentSpec>> {
     let forest_cue = path.join("forest.cue");
     let spec_cue = path.join("spec.cue");
@@ -46,12 +43,6 @@ async fn get_component_spec_from_cue(path: &Path) -> anyhow::Result<Option<RawCo
         return Ok(None);
     }
 
-    // Run from inside the component, with relative file names. `cue` finds the
-    // module root by walking up from its working directory, not from the files
-    // it was handed, so evaluating an absolute path from elsewhere loads the
-    // component with whatever module the caller happens to be standing in —
-    // usually the project being built, which is not a CUE module at all. The
-    // component's own cue.mod is then invisible and every import in it fails.
     let output = crate::tools::cue::output(|| {
         let mut cmd = tokio::process::Command::new("cue");
         cmd.current_dir(path);
@@ -75,7 +66,6 @@ async fn get_component_spec_from_cue(path: &Path) -> anyhow::Result<Option<RawCo
 
     let doc: serde_json::Value = serde_json::from_slice(&output.stdout)?;
 
-    // Extract component metadata from forest.component section
     let component = doc.get("forest").and_then(|f| f.get("component"));
 
     let (name, organisation, version) = match component {
@@ -88,7 +78,6 @@ async fn get_component_spec_from_cue(path: &Path) -> anyhow::Result<Option<RawCo
                 .get("version")
                 .and_then(|v| v.as_str())
                 .unwrap_or("0.0.0");
-            // Organisation comes from project section
             let org = doc
                 .get("project")
                 .and_then(|p| p.get("organisation"))
@@ -111,7 +100,6 @@ async fn get_component_spec_from_cue(path: &Path) -> anyhow::Result<Option<RawCo
             organisation,
             version,
         },
-        // v2 components don't use TOML fields — commands come from the binary
         dependencies: Default::default(),
         templates: Default::default(),
         init: Default::default(),
@@ -203,9 +191,6 @@ mod test {
         Ok(())
     }
 
-    /// A component that imports from its own module, laid out on disk exactly
-    /// as a published one is: `cue.mod/module.cue`, a package to import, and a
-    /// `forest.cue` that imports it.
     fn write_component_importing_its_own_module(root: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(root.join("cue.mod"))?;
         std::fs::create_dir_all(root.join("sub"))?;
@@ -228,18 +213,6 @@ mod test {
         Ok(())
     }
 
-    /// `cue` finds its module root by walking up from its *working directory*,
-    /// not from the files it is handed. So a component was only parseable while
-    /// forest happened to be standing inside it — which it never is: it parses
-    /// components out of the cache while sitting in the project being built.
-    ///
-    /// The whole of a published component's `cue.mod` was invisible, and every
-    /// import in it failed with "imports are unavailable because there is no
-    /// cue.mod/module.cue file" — naming the very file that was sitting right
-    /// there next to it.
-    ///
-    /// This test deliberately does not change the working directory: being
-    /// parseable from somewhere else is the entire property.
     #[tokio::test]
     async fn a_component_is_parsed_against_its_own_module_not_the_callers() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -252,8 +225,6 @@ mod test {
             .expect("a component with a cue.mod parses from any working directory")
             .expect("forest.cue is present, so a spec is returned");
 
-        // Resolved through the import, so this value only exists if the
-        // component's own module was actually loaded.
         assert_eq!(
             spec.component.organisation, "understory",
             "organisation comes from the imported package, so reading it back \
@@ -263,10 +234,6 @@ mod test {
         assert_eq!(spec.component.version, "1.0.0");
     }
 
-    /// `spec.cue` is passed alongside forest.cue when present, and it moved
-    /// from an absolute path to a relative one at the same time as the working
-    /// directory changed. If that pair ever disagrees, cue is handed a file
-    /// that is not there.
     #[tokio::test]
     async fn a_components_spec_cue_is_still_picked_up() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -284,14 +251,10 @@ mod test {
             .expect("forest.cue and spec.cue are unified")
             .expect("a spec is returned");
 
-        // spec.cue is in the same package, so a conflict with forest.cue would
-        // have failed the export outright and returned None.
         assert_eq!(spec.component.name, "demo");
         assert_eq!(spec.component.organisation, "understory");
     }
 
-    /// Components without a cue.mod — everything published before the module
-    /// file was included, and anything with no imports — must keep parsing.
     #[tokio::test]
     async fn a_component_with_no_module_still_parses() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -314,9 +277,6 @@ mod test {
         assert_eq!(spec.component.version, "2.0.0");
     }
 
-    /// A component whose CUE does not evaluate is skipped rather than fatal:
-    /// `parse` turns the None into "failed to find component in path", which
-    /// the caller now warns about instead of taking the whole scan down.
     #[tokio::test]
     async fn a_component_that_does_not_evaluate_is_skipped_not_fatal() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -339,9 +299,6 @@ mod test {
         );
     }
 
-    /// The end-to-end shape: `parse` dispatches to the CUE path via the
-    /// forest.component.cue marker, so the fix has to hold through it and not
-    /// just in the helper.
     #[tokio::test]
     async fn parse_reaches_the_cue_path_and_resolves_the_module() {
         let dir = tempfile::tempdir().expect("tempdir");

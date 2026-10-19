@@ -1,19 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================================================
-# Forest E2E — fresh machine developer experience test
-#
-# Simulates a new user going from zero to a working project:
-#   1. Register + login
-#   2. Create an organisation
-#   3. Publish the SDK (CUE-only component)
-#   4. Publish a component (terraform-service)
-#   5. Create a consumer project from scratch
-#   6. Add the component as a dependency
-#   7. Update, validate, run commands, release prepare
-# ============================================================
-
 FOREST="forest --forest-server ${FOREST_SERVER}"
 PASS="E2e-Test-Password-123!"
 STAMP="$(date +%s)"
@@ -24,33 +11,24 @@ step() { echo -e "\n=== $1 ==="; }
 ok()   { echo "  ✓ $1"; }
 fail() { echo "  ✗ $1"; exit 1; }
 
-# ----------------------------------------------------------
 step "1. Register and login"
-# ----------------------------------------------------------
 
-# Register (non-interactive via env var)
 FOREST_PASSWORD="$PASS" $FOREST auth register \
     --username "$USER" \
     --email "${USER}@test.local" \
     && ok "registered $USER" || fail "register"
 
-# Login
 FOREST_PASSWORD="$PASS" $FOREST auth login --username "$USER" \
     && ok "logged in" || fail "login"
 
-# Verify
 $FOREST auth status && ok "auth status" || fail "auth status"
 
-# ----------------------------------------------------------
 step "2. Create organisation"
-# ----------------------------------------------------------
 
 $FOREST organisation create --name "$ORG" \
     && ok "created org $ORG" || fail "create org"
 
-# ----------------------------------------------------------
 step "3. Publish SDK (CUE-only component)"
-# ----------------------------------------------------------
 
 mkdir -p /tmp/sdk/cue.mod
 cat > /tmp/sdk/cue.mod/module.cue << EOF
@@ -173,13 +151,10 @@ cd /tmp/sdk
 cue eval forest.cue spec.cue > /dev/null && ok "SDK CUE validates" || fail "SDK CUE invalid"
 $FOREST publish && ok "published SDK" || fail "publish SDK"
 
-# Verify OCI registry serves it
 curl -sf "http://forest-server:4042/v2/forest.sh/${ORG}/sdk/manifests/v0.1.0" > /dev/null \
     && ok "SDK OCI manifest served" || fail "SDK OCI manifest"
 
-# ----------------------------------------------------------
 step "4. Verify CUE module import from registry"
-# ----------------------------------------------------------
 
 mkdir -p /tmp/cue-test/cue.mod
 cat > /tmp/cue-test/cue.mod/module.cue << EOF
@@ -208,7 +183,6 @@ EOF
 cd /tmp/cue-test
 cue eval test.cue && ok "CUE import from registry works" || fail "CUE import broken"
 
-# Verify type checking
 cat > /tmp/cue-test/bad.cue << EOF
 package verify
 
@@ -228,9 +202,7 @@ else
     fail "CUE type checking not working"
 fi
 
-# ----------------------------------------------------------
 step "5. Create consumer project from scratch"
-# ----------------------------------------------------------
 
 PROJECT_DIR="/tmp/my-project"
 rm -rf "$PROJECT_DIR"
@@ -269,13 +241,10 @@ EOF
 cd "$PROJECT_DIR"
 cue eval forest.cue && ok "project CUE validates" || fail "project CUE invalid"
 
-# Verify export
 OUTPUT=$(CUE_REGISTRY="${CUE_REGISTRY}" cue export --out json forest.cue 2>&1)
 echo "$OUTPUT" | grep -q '"my-project"' && ok "project exports correctly" || fail "project export: $OUTPUT"
 
-# ----------------------------------------------------------
 step "6. Run project commands"
-# ----------------------------------------------------------
 
 cd "$PROJECT_DIR"
 $FOREST run dev 2>&1 | grep -q "hello from dev" \
@@ -284,29 +253,20 @@ $FOREST run dev 2>&1 | grep -q "hello from dev" \
 $FOREST run test 2>&1 | grep -q "running tests" \
     && ok "forest run test" || fail "forest run test"
 
-# Check help shows commands
 $FOREST run --help 2>&1 | grep -q "dev" \
     && ok "forest run --help lists commands" || fail "run --help"
 
-# ----------------------------------------------------------
 step "7. Update and lock file"
-# ----------------------------------------------------------
 
 $FOREST update && ok "forest update" || fail "forest update"
 
-# Lock file should exist (even if only header for no deps)
 test -f forest.lock && ok "forest.lock created" || fail "no forest.lock"
 
-# ----------------------------------------------------------
 step "8. Validate (no deployment deps = clean)"
-# ----------------------------------------------------------
 
 $FOREST validate 2>&1 && ok "forest validate (no components)" || true
-# ↑ No components to validate — should succeed with 0 components
 
-# ----------------------------------------------------------
 step "9. Release prepare (should fail — no deployment deps)"
-# ----------------------------------------------------------
 
 RELEASE_OUTPUT=$($FOREST release prepare 2>&1 || true)
 if echo "$RELEASE_OUTPUT" | grep -q "no dependencies implement"; then
@@ -316,11 +276,8 @@ else
     fail "release prepare should have errored"
 fi
 
-# ----------------------------------------------------------
 step "10. Create a template-only component for release testing"
-# ----------------------------------------------------------
 
-# Create a minimal component with deployment templates (no binary needed)
 COMP_DIR="/tmp/e2e-deployer"
 rm -rf "$COMP_DIR"
 mkdir -p "$COMP_DIR/cue.mod"
@@ -384,7 +341,6 @@ import "forest.sh/${ORG}/sdk@v0"
 }
 EOF
 
-# Template file — just echoes the config
 cat > "$COMP_DIR/templates/deployment/forest/terraform@1/main.tf" << 'EOF'
 # E2E test deployment template
 resource "null_resource" "e2e" {
@@ -394,7 +350,6 @@ resource "null_resource" "e2e" {
 }
 EOF
 
-# Create a minimal shell script "binary" that implements the component protocol
 cat > "$COMP_DIR/e2e-deployer" << 'SCRIPT'
 #!/bin/sh
 # Minimal component binary — reads JSON from stdin, responds to protocol methods
@@ -419,7 +374,6 @@ esac
 SCRIPT
 chmod +x "$COMP_DIR/e2e-deployer"
 
-# Write meta.json so resolve_binary can find it via cached descriptor
 mkdir -p "$COMP_DIR/.forest/component"
 cat > "$COMP_DIR/.forest/component/meta.json" << 'META'
 {
@@ -436,11 +390,8 @@ META
 
 ok "created template component with shell binary"
 
-# ----------------------------------------------------------
 step "11. Set up project with deployment component"
-# ----------------------------------------------------------
 
-# Update the consumer project to include the deployer component
 cd "$PROJECT_DIR"
 
 cat > "$PROJECT_DIR/cue.mod/module.cue" << EOF
@@ -492,9 +443,7 @@ EOF
 
 cue eval forest.cue > /dev/null && ok "project with deployer validates" || fail "project CUE invalid"
 
-# ----------------------------------------------------------
 step "12. Create server-side resources (project + destination)"
-# ----------------------------------------------------------
 
 $FOREST project create -o "$ORG" -p "my-project" \
     && ok "created project" || fail "create project"
@@ -509,21 +458,15 @@ $FOREST destination create \
     --type "forest/terraform@1" \
     && ok "created destination" || fail "create destination"
 
-# ----------------------------------------------------------
 step "13. Release prepare (with component)"
-# ----------------------------------------------------------
 
 $FOREST release prepare \
     && ok "release prepare succeeded" || fail "release prepare"
 
-# Verify artifacts were generated
 test -d .forest/deployment/dev && ok "deployment artifacts exist" || fail "no deployment artifacts"
 
-# ----------------------------------------------------------
 step "14. Full release: create (prepare + annotate + release)"
-# ----------------------------------------------------------
 
-# Initialize a git repo so release create can detect context
 cd "$PROJECT_DIR"
 git init -q
 git config user.name "E2E Test"
@@ -538,9 +481,7 @@ $FOREST release create \
     --no-wait \
     && ok "release create succeeded" || fail "release create"
 
-# ----------------------------------------------------------
 step "15. Verify release state"
-# ----------------------------------------------------------
 
 RELEASES_OUTPUT=$($FOREST project releases -o "$ORG" -p "my-project" 2>&1 || true)
 echo "$RELEASES_OUTPUT"
@@ -550,7 +491,6 @@ else
     ok "release submitted (state check is best-effort)"
 fi
 
-# ----------------------------------------------------------
 echo ""
 echo "============================================"
 echo "  All E2E tests passed!"

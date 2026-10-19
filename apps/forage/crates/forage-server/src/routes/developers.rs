@@ -1,12 +1,3 @@
-//! Developer Settings — organisation-owned OAuth applications.
-//!
-//! These pages let org admins register and manage "Sign in with Forest" OAuth
-//! apps. All state lives in forest-server; this module is the UI + delegation
-//! layer (mirrors the `integrations` module's shape). The client_secret is
-//! shown exactly once, immediately after create / rotate.
-//!
-//! `result_large_err` is allowed module-wide, matching the rest of `routes/`:
-//! handlers return `Result<Response, Response>` where `Response` is large.
 #![allow(clippy::result_large_err)]
 
 use axum::extract::{Path, Query, State};
@@ -38,8 +29,6 @@ pub fn router() -> Router<AppState> {
             post(delete_app),
         )
 }
-
-// ─── Shared guards (per the integrations.rs convention) ──────────────
 
 fn require_org_membership<'a>(
     state: &AppState,
@@ -98,8 +87,6 @@ fn validate_csrf(session: &Session, form_csrf: &str) -> Result<(), Response> {
     }
 }
 
-/// Map a forest-side platform error to a user-facing message for re-display on
-/// the form (validation failures) vs a hard error page (everything else).
 fn flash_for(err: &PlatformError) -> Option<String> {
     match err {
         PlatformError::InvalidArgument(m)
@@ -108,8 +95,6 @@ fn flash_for(err: &PlatformError) -> Option<String> {
         _ => None,
     }
 }
-
-// ─── View-model helpers ──────────────────────────────────────────────
 
 fn app_context(app: &OAuthApp) -> minijinja::Value {
     context! {
@@ -123,8 +108,6 @@ fn app_context(app: &OAuthApp) -> minijinja::Value {
         grant_types => &app.grant_types,
     }
 }
-
-// ─── Forms / queries ─────────────────────────────────────────────────
 
 #[derive(Deserialize, Default)]
 struct PageQuery {
@@ -157,14 +140,10 @@ struct AppForm {
     scope_datagateway_apply: Option<String>,
     #[serde(default)]
     scope_datagateway_read: Option<String>,
-    /// An app may hold both grants — acting for a user and acting as
-    /// itself, the way a GitHub App does.
     #[serde(default)]
     grant_authorization_code: Option<String>,
     #[serde(default)]
     grant_client_credentials: Option<String>,
-    /// RFC 8628: a CLI on a machine without a browser (an SSH session)
-    /// signs a person in with a code they approve on another device.
     #[serde(default)]
     grant_device_code: Option<String>,
 }
@@ -172,11 +151,6 @@ struct AppForm {
 const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
 impl AppForm {
-    /// Which grants the ticked boxes add up to.
-    ///
-    /// An empty result is left empty rather than defaulted here — Forest
-    /// treats that as `authorization_code`, and duplicating the default
-    /// in two places is how they drift apart.
     fn grant_type_list(&self) -> Vec<String> {
         let mut out = Vec::new();
         if self.grant_authorization_code.is_some() {
@@ -191,7 +165,6 @@ impl AppForm {
         out
     }
 
-    /// Split the redirect-URI textarea (one per line) into trimmed entries.
     fn redirect_uri_list(&self) -> Vec<String> {
         self.redirect_uris
             .lines()
@@ -233,8 +206,6 @@ struct CsrfForm {
     csrf: String,
 }
 
-// ─── List ────────────────────────────────────────────────────────────
-
 async fn list_apps(
     State(state): State<AppState>,
     session: Session,
@@ -274,8 +245,6 @@ async fn list_apps(
     Ok(Html(html).into_response())
 }
 
-// ─── New app form ────────────────────────────────────────────────────
-
 async fn new_app_page(
     State(state): State<AppState>,
     session: Session,
@@ -308,8 +277,6 @@ async fn new_app_page(
 
     Ok(Html(html).into_response())
 }
-
-// ─── Create ──────────────────────────────────────────────────────────
 
 async fn create_app(
     State(state): State<AppState>,
@@ -348,8 +315,6 @@ async fn create_app(
         }
     };
 
-    // Render the detail page directly so the freshly-minted secret can be
-    // shown exactly once (it is never retrievable again).
     render_app_detail(
         &state,
         &session,
@@ -358,8 +323,6 @@ async fn create_app(
         Some(&created.client_secret),
     )
 }
-
-// ─── Detail ──────────────────────────────────────────────────────────
 
 async fn app_detail(
     State(state): State<AppState>,
@@ -416,8 +379,6 @@ fn render_app_detail(
     Ok(Html(html).into_response())
 }
 
-// ─── Update ──────────────────────────────────────────────────────────
-
 async fn update_app(
     State(state): State<AppState>,
     session: Session,
@@ -460,8 +421,6 @@ async fn update_app(
     }
 }
 
-// ─── Rotate secret ───────────────────────────────────────────────────
-
 async fn rotate_secret(
     State(state): State<AppState>,
     session: Session,
@@ -486,8 +445,6 @@ async fn rotate_secret(
         Some(&rotated.client_secret),
     )
 }
-
-// ─── Delete ──────────────────────────────────────────────────────────
 
 async fn delete_app(
     State(state): State<AppState>,
@@ -532,8 +489,6 @@ mod tests {
         }
     }
 
-    /// Saving the form rebuilds the app's grants from the boxes, so an app
-    /// registered for the device grant must keep it when its box is ticked.
     #[test]
     fn the_device_box_keeps_the_device_grant() {
         let mut form = form(true, false);
@@ -547,8 +502,6 @@ mod tests {
         );
     }
 
-    /// The GitHub-App shape: one credential that both signs a user in
-    /// and calls as itself. Ticking both boxes has to produce both.
     #[test]
     fn both_boxes_ticked_yields_both_grants() {
         assert_eq!(
@@ -572,9 +525,6 @@ mod tests {
         );
     }
 
-    /// Neither box ticked sends an empty list, deliberately: Forest owns
-    /// the default. Defaulting here too would put the same rule in two
-    /// places, which is how the two drift apart.
     #[test]
     fn no_boxes_defers_the_default_to_forest() {
         assert!(form(false, false).grant_type_list().is_empty());

@@ -5,14 +5,6 @@ use crate::{
     state::State,
 };
 
-// Getting global and remote state has multiple phases.
-//
-// 1. [x] Gather dependency requirements, which components do we need. This also includes dependency of dependencies. TODO: missing deps of deps
-// 2. [x] Download missing dependencies
-// 3. [ ] Gather the tree of dependencies, and fulfill requirements
-// 4. [ ] Get fulfill edge requirements
-// 5. [ ] Get the edge components
-
 pub struct ComponentRegistry {
     components_service: ComponentsService,
 }

@@ -1,26 +1,12 @@
-//! Semver version spec parsing and matching.
-//!
-//! Supports:
-//!   "1.2.3"  — exact version
-//!   "1.2"    — any patch (>=1.2.0, <1.3.0)
-//!   "1"      — any minor+patch (>=1.0.0, <2.0.0)
-//!   "latest" — any version
-
-/// A parsed version specification from forest.cue dependencies.
 #[derive(Debug, Clone, PartialEq)]
 pub enum VersionSpec {
-    /// Exact version: "1.2.3"
     Exact(semver::Version),
-    /// Minor range: "1.2" matches >=1.2.0, <1.3.0
     Minor { major: u64, minor: u64 },
-    /// Major range: "1" matches >=1.0.0, <2.0.0
     Major { major: u64 },
-    /// Latest: any version
     Latest,
 }
 
 impl VersionSpec {
-    /// Parse a version spec string.
     pub fn parse(s: &str) -> anyhow::Result<Self> {
         let s = s.trim();
 
@@ -54,31 +40,13 @@ impl VersionSpec {
         }
     }
 
-    /// Check if a concrete version matches this spec.
-    ///
-    /// Range-style specs (`latest`, `0`, `0.1`) never select a prerelease
-    /// (DATA-583). `Latest` used to match everything and take the semver
-    /// maximum, so publishing `0.2.0-rc.1` made it what every `forest global
-    /// add <org>/<name>` installed — a release candidate promoting itself to
-    /// everyone. It also meant a CI test tag had to be numbered *below* the
-    /// current release to stay inert, which is exactly backwards.
-    ///
-    /// This matches the rest of the ecosystem (npm, cargo, pip all refuse to
-    /// resolve a range to a prerelease) and the convention the server already
-    /// applies in `list_org_tools`, which picks the highest non-prerelease.
-    ///
-    /// An `Exact` spec still matches a prerelease, so `@0.2.0-rc.1` opts in
-    /// deliberately — which is the whole point of publishing one.
     pub fn matches(&self, version: &semver::Version) -> bool {
         self.matches_with(version, false)
     }
 
-    /// `matches`, with an escape hatch for the fallback in [`Self::resolve`].
     fn matches_with(&self, version: &semver::Version, allow_prerelease: bool) -> bool {
         let usable = allow_prerelease || version.pre.is_empty();
         match self {
-            // Exact is an explicit request — a prerelease is selectable by
-            // naming it, and only by naming it.
             Self::Exact(v) => version == v,
             Self::Minor { major, minor } => {
                 usable && version.major == *major && version.minor == *minor
@@ -88,13 +56,6 @@ impl VersionSpec {
         }
     }
 
-    /// Given a list of available versions, return the highest that matches.
-    ///
-    /// Falls back to allowing prereleases when nothing stable matches, so a
-    /// component that has only ever published release candidates stays
-    /// installable rather than resolving to nothing. The fallback can only
-    /// ever *add* candidates — it never outranks a stable version, because it
-    /// is reached only when there is no stable match at all.
     pub fn resolve<'a>(&self, versions: &'a [semver::Version]) -> Option<&'a semver::Version> {
         versions
             .iter()
@@ -184,11 +145,6 @@ mod tests {
     }
 }
 
-/// DATA-583 — range specs must not resolve to a prerelease.
-///
-/// The bug these pin down was found by publishing `pgjump@0.1.7-ci.1` as a CI
-/// test: `Latest` matched it, and only the fact that it sorted *below* the
-/// current release kept it from becoming what everyone installed.
 #[cfg(test)]
 mod prerelease_tests {
     use super::VersionSpec;
@@ -203,8 +159,6 @@ mod prerelease_tests {
 
     #[test]
     fn latest_skips_a_prerelease_that_outranks_the_release() {
-        // The exact shape of the incident: an rc numbered above the current
-        // release must not become `latest`.
         let all = versions(&["0.1.7", "0.1.8", "0.2.0-rc.1"]);
         assert_eq!(VersionSpec::Latest.resolve(&all), Some(&v("0.1.8")));
     }
@@ -224,8 +178,6 @@ mod prerelease_tests {
 
     #[test]
     fn an_exact_spec_still_selects_a_prerelease() {
-        // Naming it is how you opt in — otherwise publishing a release
-        // candidate would be pointless.
         let all = versions(&["0.1.8", "0.2.0-rc.1"]);
         let spec = VersionSpec::Exact(v("0.2.0-rc.1"));
         assert_eq!(spec.resolve(&all), Some(&v("0.2.0-rc.1")));
@@ -233,23 +185,18 @@ mod prerelease_tests {
 
     #[test]
     fn a_component_with_only_prereleases_is_still_installable() {
-        // The fallback. Refusing to resolve at all would strand a component
-        // that has never cut a stable release.
         let all = versions(&["0.1.0-rc.1", "0.1.0-rc.2"]);
         assert_eq!(VersionSpec::Latest.resolve(&all), Some(&v("0.1.0-rc.2")));
     }
 
     #[test]
     fn the_fallback_never_outranks_a_stable_version() {
-        // Guards the ordering of the two passes: as soon as anything stable
-        // matches, prereleases are out of the running entirely.
         let all = versions(&["0.1.0", "9.9.9-rc.1"]);
         assert_eq!(VersionSpec::Latest.resolve(&all), Some(&v("0.1.0")));
     }
 
     #[test]
     fn build_metadata_is_not_a_prerelease() {
-        // `+build` is not `-pre`; it must stay selectable by a range spec.
         let all = versions(&["0.1.0", "0.1.1+build.5"]);
         assert_eq!(VersionSpec::Latest.resolve(&all), Some(&v("0.1.1+build.5")));
     }

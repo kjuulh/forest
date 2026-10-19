@@ -3,10 +3,6 @@ use mire::{Aggregate, AggregateRoot, EventData};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// ============================================================
-// Events
-// ============================================================
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum AppEvent {
@@ -44,10 +40,6 @@ impl EventData for AppEvent {
     }
 }
 
-// ============================================================
-// Aggregate state
-// ============================================================
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppStatus {
     NonExistent,
@@ -65,7 +57,6 @@ pub struct AppAggregate {
     pub permissions: serde_json::Value,
     pub suspended: bool,
     pub created_by: Option<Uuid>,
-    /// Token IDs tracked for aggregate-level validation.
     pub token_ids: Vec<Uuid>,
 }
 
@@ -130,10 +121,6 @@ impl Aggregate for AppAggregate {
     }
 }
 
-// ============================================================
-// Commands (pure business logic)
-// ============================================================
-
 pub struct CreateAppParams {
     pub organisation_id: Uuid,
     pub name: String,
@@ -171,7 +158,7 @@ impl AppAggregate {
             AppStatus::Active => {}
         }
         if root.state.suspended {
-            return Ok(()); // idempotent
+            return Ok(());
         }
         root.record(AppEvent::Suspended);
         Ok(())
@@ -184,7 +171,7 @@ impl AppAggregate {
             AppStatus::Active => {}
         }
         if !root.state.suspended {
-            return Ok(()); // idempotent
+            return Ok(());
         }
         root.record(AppEvent::Unsuspended);
         Ok(())
@@ -237,14 +224,9 @@ impl AppAggregate {
     }
 }
 
-/// Stream key for an app aggregate: `{organisation_id}/{name}`
 pub fn stream_key(organisation_id: &Uuid, name: &str) -> String {
     format!("{organisation_id}/{name}")
 }
-
-// ============================================================
-// Unit tests
-// ============================================================
 
 #[cfg(test)]
 mod tests {
@@ -265,8 +247,6 @@ mod tests {
         }
     }
 
-    // -- Create --
-
     #[test]
     fn create_app_records_event() {
         let mut root = new_root();
@@ -284,8 +264,6 @@ mod tests {
         AppAggregate::create(&mut root, default_params()).unwrap();
         assert!(AppAggregate::create(&mut root, default_params()).is_err());
     }
-
-    // -- Suspend --
 
     #[test]
     fn suspend_and_unsuspend() {
@@ -305,11 +283,9 @@ mod tests {
         AppAggregate::create(&mut root, default_params()).unwrap();
         AppAggregate::suspend(&mut root).unwrap();
         let count_before = root.pending_count();
-        AppAggregate::suspend(&mut root).unwrap(); // no-op
+        AppAggregate::suspend(&mut root).unwrap();
         assert_eq!(root.pending_count(), count_before);
     }
-
-    // -- Delete --
 
     #[test]
     fn delete_transitions() {
@@ -324,8 +300,6 @@ mod tests {
         let mut root = new_root();
         assert!(AppAggregate::delete(&mut root).is_err());
     }
-
-    // -- Tokens --
 
     #[test]
     fn create_token_tracks_id() {
@@ -351,8 +325,6 @@ mod tests {
         AppAggregate::revoke_token(&mut root, tid).unwrap();
         assert!(!root.state.token_ids.contains(&tid));
     }
-
-    // -- Hydration --
 
     #[test]
     fn hydrate_full_lifecycle() {
@@ -394,8 +366,6 @@ mod tests {
         assert!(!replayed.state.suspended);
         assert!(replayed.state.token_ids.is_empty());
     }
-
-    // -- Serde --
 
     #[test]
     fn event_serde_roundtrip() {

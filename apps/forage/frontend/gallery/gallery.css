@@ -1,31 +1,8 @@
-/* The gallery renders with the app's real stylesheet.
- *
- * It used to load Tailwind v3 from a CDN, which meant the gallery and the app
- * disagreed about the one thing the gallery exists to show: what the component
- * looks like. The app is on Tailwind v4 with a dark-mode palette remap and a
- * handful of custom utilities, none of which the CDN build had — so a colour
- * checked here could be wrong in production, and dark mode could not be seen at
- * all.
- *
- * Importing the app's own input.css fixes that. `@source` paths inside it
- * resolve relative to that file, so the app's template and script globs still
- * work; the extra source below adds the Svelte components, which in the real
- * build are scanned via the non-minified bundle instead.
- */
 @import "../../static/css/input.css";
 
 @source "../src/**/*.svelte";
 @source "./*.js";
 
-/* ── Gallery chrome ───────────────────────────────────────────────────────
- * Deliberately plain, and deliberately not Tailwind: nothing here should be
- * mistakable for the component under test.
- */
-
-/* The page behind the component is the app's page, not a stand-in for it. A
- * gallery with its own background is how a card ends up looking elevated here
- * and recessed in production — these follow the app's palette, which the dark
- * mirror re-themes along with everything else. */
 :root {
   --gal-bg: var(--color-white, #fff);
   --gal-fg: var(--color-gray-900, #111827);

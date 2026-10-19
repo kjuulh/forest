@@ -1,9 +1,3 @@
-//! Deno/TypeScript component invocation.
-//!
-//! Implements Forest component protocol v2 with streaming JSON lines.
-//! Components can call other components during execution via call/call_result
-//! message pairs, mediated by the runtime.
-
 use std::path::Path;
 
 use anyhow::Context;
@@ -14,23 +8,19 @@ use std::time::Duration;
 const COMPONENT_TIMEOUT: Duration = Duration::from_secs(120);
 const DESCRIBE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Callback for resolving inter-component calls.
-/// Given a component identifier, method, spec, and input, invokes the target
-/// component and returns its result.
 pub type ComponentCallResolver = Box<
     dyn Fn(
-            String,                          // component identifier
-            String,                          // method
-            serde_json::Value,               // spec
-            serde_json::Value,               // input
-            Option<forest_sdk::CallContext>, // context from the caller
+            String,
+            String,
+            serde_json::Value,
+            serde_json::Value,
+            Option<forest_sdk::CallContext>,
         ) -> std::pin::Pin<
             Box<dyn std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>,
         > + Send
         + Sync,
 >;
 
-/// Check if Deno is available on the system.
 pub async fn check_deno_available() -> anyhow::Result<()> {
     match tokio::process::Command::new("deno")
         .arg("--version")
@@ -48,13 +38,10 @@ pub async fn check_deno_available() -> anyhow::Result<()> {
     }
 }
 
-/// Detect if a component directory contains a Deno component.
 pub fn is_deno_component(path: &Path) -> bool {
     is_deno_component_with_meta(path, None, None, None)
 }
 
-/// Detect if a component directory contains a Deno component,
-/// checking the shared cache if org/name/version are provided.
 pub fn is_deno_component_with_meta(
     path: &Path,
     organisation: Option<&str>,
@@ -69,13 +56,10 @@ pub fn is_deno_component_with_meta(
     path.join("src").join("main.ts").exists() && path.join("src").join("forest-sdk.ts").exists()
 }
 
-/// Get the entrypoint for a Deno component.
 pub fn resolve_entrypoint(path: &Path) -> Option<String> {
     resolve_entrypoint_with_meta(path, None, None, None)
 }
 
-/// Get the entrypoint for a Deno component,
-/// checking the shared cache if org/name/version are provided.
 pub fn resolve_entrypoint_with_meta(
     path: &Path,
     organisation: Option<&str>,
@@ -93,7 +77,6 @@ pub fn resolve_entrypoint_with_meta(
     None
 }
 
-/// Read meta.json from the shared cache or local `.forest/` directory.
 fn read_meta_json(
     path: &Path,
     organisation: Option<&str>,
@@ -113,10 +96,6 @@ fn read_meta_json(
     serde_json::from_str(&content).ok()
 }
 
-/// Invoke a Deno component method using protocol v2.
-///
-/// Spawns the component, sends an invoke message, then enters a loop
-/// handling call/return messages until the component returns its final result.
 pub async fn invoke_deno_component(
     component_dir: &Path,
     entrypoint: &str,
@@ -177,12 +156,10 @@ pub async fn invoke_deno_component(
     let stdout = child.stdout.take().context("failed to get stdout")?;
     let stderr = child.stderr.take().context("failed to get stderr")?;
 
-    // Send invoke message
     let invoke_line = serde_json::to_string(&invoke_msg)? + "\n";
     stdin.write_all(invoke_line.as_bytes()).await?;
     stdin.flush().await?;
 
-    // Stream stderr to tracing in background
     let stderr_handle = tokio::spawn(async move {
         let reader = BufReader::new(stderr);
         let mut lines = reader.lines();
@@ -191,7 +168,6 @@ pub async fn invoke_deno_component(
         }
     });
 
-    // Read stdout lines, handling call/return protocol
     let mut stdout_reader = BufReader::new(stdout);
     let result = tokio::time::timeout(COMPONENT_TIMEOUT, async {
         loop {
@@ -267,7 +243,6 @@ pub async fn invoke_deno_component(
     .await
     .context("deno component timed out")??;
 
-    // Wait for process to finish
     drop(stdin);
     let _ = child.wait().await;
     stderr_handle.abort();
@@ -275,7 +250,6 @@ pub async fn invoke_deno_component(
     Ok(result)
 }
 
-/// Invoke without callback support (for simple cases).
 pub async fn invoke_deno_component_simple(
     component_dir: &Path,
     entrypoint: &str,
@@ -296,7 +270,6 @@ pub async fn invoke_deno_component_simple(
     .await
 }
 
-/// Describe a Deno component by invoking `_meta/describe`.
 pub async fn describe_deno_component(
     component_dir: &Path,
     entrypoint: &str,
@@ -334,12 +307,10 @@ pub async fn describe_deno_component(
     Ok(descriptor)
 }
 
-/// Load a cached descriptor from meta.json.
 pub fn load_cached_descriptor(path: &Path) -> Option<forest_sdk::ComponentDescriptor> {
     load_cached_descriptor_with_meta(path, None, None, None)
 }
 
-/// Load a cached descriptor from meta.json, checking the shared cache if org/name/version are provided.
 pub fn load_cached_descriptor_with_meta(
     path: &Path,
     organisation: Option<&str>,

@@ -3,14 +3,6 @@ use drop_queue::DropQueue;
 use mire::EventStore;
 use sqlx::PgPool;
 
-/// Connect to NATS with optional authentication.
-///
-/// Supported auth methods (checked in order):
-/// - **Credentials file**: Set `NATS_CREDS` to the full creds file content (JWT + NKey seed).
-/// - **NKey**: Set `NATS_NKEY_SEED` to the seed (starts with `SU`).
-/// - **User/Password**: Set `NATS_USER` and `NATS_PASSWORD`.
-/// - **Token**: Set `NATS_TOKEN`.
-/// - **None**: Plain unauthenticated connection.
 async fn connect_nats(url: &str) -> anyhow::Result<async_nats::Client> {
     if let Ok(creds) = std::env::var("NATS_CREDS") {
         tracing::info!("connecting to NATS with credentials file");
@@ -56,8 +48,6 @@ pub struct State {
     pub drop_queue: DropQueue,
     pub event_store: EventStore,
     pub object_store: crate::object_store::ObjectStore,
-    /// DNS resolver for org-domain ownership verification (DATA-252).
-    /// Production: `HickoryResolver`. Tests inject `MockDnsResolver`.
     pub dns_resolver: std::sync::Arc<dyn crate::dns::DnsResolver>,
 
     pub config: Config,
@@ -71,59 +61,24 @@ pub struct Config {
     pub access_token_secret_key: Vec<u8>,
     pub refresh_token_secret_key: Vec<u8>,
 
-    /// Signs terraform@1 state credentials (`FOREST_TERRAFORM_STATE_SIGNING_KEY`,
-    /// base64). Its own secret so that rotating the access-token secret does not
-    /// revoke every state credential, and vice versa. `None` falls back to a key
-    /// derived from `access_token_secret_key`, with a warning at startup.
     pub terraform_state_signing_key: Option<Vec<u8>>,
 
-    /// Optional pre-hashed service account API key (SHA-256).
-    /// Set via `FOREST_SERVICE_ACCOUNT_API_KEY` env var.
-    /// Grants `Actor::ServiceAccount` with full cross-org access.
     pub service_account_token_hash: Option<Vec<u8>>,
 
-    /// Optional regex restricting which email addresses may register
-    /// (and be added post-signup). Set via
-    /// `FOREST_REGISTRATION_EMAIL_DOMAIN_REGEX`. When set,
-    /// `require_email_verification` must also be true.
     pub registration_email_domain_regex: Option<regex::Regex>,
 
-    /// When true, native registration requires the email-verification
-    /// flow to complete before unverified accounts can act. Set via
-    /// `FOREST_REQUIRE_EMAIL_VERIFICATION`. Required when
-    /// `registration_email_domain_regex` is set.
     pub require_email_verification: bool,
 
-    /// Public-facing URL of the forage web app (no trailing slash), e.g.
-    /// `https://forage.example.com`. Used to build the
-    /// `verification_uri` returned from `InitiateDeviceLogin`. Set via
-    /// `FOREST_WEB_APP_URL`. When `None`, `InitiateDeviceLogin` returns
-    /// `failed_precondition` — i.e. the operator must opt in before
-    /// the web-login flow becomes usable.
     pub web_app_url: Option<String>,
 
-    /// How much work `NativeCredentials` spends hashing a password.
-    ///
-    /// A `Config` field rather than an environment variable on purpose:
-    /// nothing a deployment can set should be able to weaken this.
     pub password_hashing: PasswordHashing,
 }
 
-/// Argon2 cost, as a choice rather than numbers, so the call sites read as
-/// what they are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PasswordHashing {
-    /// OWASP-recommended Argon2id parameters. ~100-200 ms per hash, which is
-    /// the entire point of a password hash.
     #[default]
     Production,
 
-    /// Minimum cost. **Never valid outside a test.**
-    ///
-    /// The acceptance suite registers a user in 129 places; at production cost
-    /// that hashing measured as two thirds of its runtime — 132 tests in
-    /// 2.61 s with it, 0.86 s without. None of them asserts anything about how
-    /// expensive a hash is.
     InsecureFastForTests,
 }
 
@@ -131,7 +86,6 @@ impl PasswordHashing {
     pub(crate) fn params(self) -> argon2::Params {
         match self {
             Self::Production => argon2::Params::DEFAULT,
-            // m=8 KiB, t=1, p=1 — argon2's floor.
             Self::InsecureFastForTests => {
                 argon2::Params::new(8, 1, 1, None).expect("argon2 floor is valid")
             }
@@ -139,9 +93,6 @@ impl PasswordHashing {
     }
 }
 
-/// Pure validator for inter-field invariants on `Config`.
-/// Called at startup, before opening DB connections, so misconfigured
-/// instances never reach a serving state.
 pub fn validate_config(config: &Config) -> anyhow::Result<()> {
     if config.registration_email_domain_regex.is_some() && !config.require_email_verification {
         anyhow::bail!(
@@ -153,17 +104,6 @@ pub fn validate_config(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Open the pool with a bounded connection count.
-///
-/// `PgPool::connect` uses sqlx's default of 10, which is right for one server
-/// and wrong for a test suite: nextest runs a process per test — 32 on a
-/// 32-core machine — and 32 x 10 is 320 connections against a postgres whose
-/// `max_connections` is 100. That does not bite today only because
-/// production-cost hashing keeps those processes busy instead of connecting;
-/// make hashing cheap and it fails at once with "pool timed out while waiting
-/// for an open connection".
-///
-/// Default stays 10, so production is unchanged unless the variable is set.
 async fn connect_pool() -> anyhow::Result<sqlx::PgPool> {
     let url = std::env::var("DATABASE_URL").context("failed to find DATABASE_URL in env")?;
     let max = std::env::var("DATABASE_MAX_CONNECTIONS")
@@ -181,9 +121,6 @@ impl State {
     pub async fn new(config: Config) -> anyhow::Result<Self> {
         let pool = connect_pool().await?;
 
-        // Aurora PostgreSQL supports SQLx's advisory migration lock. Keep it
-        // enabled so rolling deployments cannot execute schema changes from
-        // multiple replicas concurrently.
         sqlx::migrate!("./migrations/").run(&pool).await?;
 
         let event_store = EventStore::new(pool.clone());
@@ -217,10 +154,6 @@ impl State {
         })
     }
 
-    /// Construct a State with a caller-provided DNS resolver — used by
-    /// acceptance tests to swap in a `MockDnsResolver`. Skips the system
-    /// DNS init that `new()` performs (CI runners may lack a usable
-    /// `/etc/resolv.conf`).
     pub async fn new_with_dns(
         config: Config,
         dns_resolver: std::sync::Arc<dyn crate::dns::DnsResolver>,

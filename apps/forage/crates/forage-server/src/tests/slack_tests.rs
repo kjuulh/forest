@@ -18,8 +18,6 @@ fn build_app_with_integrations() -> (
     (app, sessions, integrations)
 }
 
-// ─── Install Slack page ─────────────────────────────────────────────
-
 #[tokio::test]
 async fn install_slack_page_returns_200() {
     let (app, sessions, _) = build_app_with_integrations();
@@ -85,13 +83,9 @@ async fn install_slack_page_shows_manual_form_without_oauth() {
         .await
         .unwrap();
     let text = String::from_utf8_lossy(&body);
-    // Should show manual webhook URL form
     assert!(text.contains("hooks.slack.com"));
-    // Should NOT show "Add to Slack" button (no OAuth configured)
     assert!(!text.contains("Add to Slack"));
 }
-
-// ─── Create Slack (manual webhook URL) ──────────────────────────────
 
 #[tokio::test]
 async fn create_slack_success_shows_installed_page() {
@@ -118,10 +112,9 @@ async fn create_slack_success_shows_installed_page() {
         .unwrap();
     let text = String::from_utf8_lossy(&body);
     assert!(text.contains("installed"));
-    assert!(text.contains("fgi_")); // API token shown
+    assert!(text.contains("fgi_"));
     assert!(text.contains("#deploys"));
 
-    // Verify it was created as Slack type
     let all = integrations.list_integrations("testorg").await.unwrap();
     assert_eq!(all.len(), 1);
     assert_eq!(all[0].name, "#deploys");
@@ -205,7 +198,6 @@ async fn create_slack_rejects_non_slack_url() {
         .await
         .unwrap();
 
-    // Should redirect back to install page with error
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
     let location = resp.headers().get("location").unwrap().to_str().unwrap();
     assert!(location.contains("install/slack"));
@@ -253,14 +245,11 @@ async fn create_slack_rejects_empty_name() {
         .await
         .unwrap();
 
-    // Should redirect back with error
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
     let location = resp.headers().get("location").unwrap().to_str().unwrap();
     assert!(location.contains("install/slack"));
     assert!(location.contains("error="));
 }
-
-// ─── Slack integration detail ───────────────────────────────────────
 
 #[tokio::test]
 async fn slack_integration_detail_shows_config() {
@@ -314,7 +303,6 @@ async fn slack_integration_detail_manual_mode_shows_webhook_url() {
     let (app, sessions, integrations) = build_app_with_integrations();
     let cookie = create_test_session(&sessions).await;
 
-    // Manual mode: empty team_name
     let created = integrations
         .create_integration(&CreateIntegrationInput {
             organisation: "testorg".into(),
@@ -355,8 +343,6 @@ async fn slack_integration_detail_manual_mode_shows_webhook_url() {
     assert!(text.contains("hooks.slack.com"));
 }
 
-// ─── Slack in integrations catalog ──────────────────────────────────
-
 #[tokio::test]
 async fn integrations_page_shows_slack_as_available() {
     let (app, sessions, _) = build_app_with_integrations();
@@ -378,11 +364,8 @@ async fn integrations_page_shows_slack_as_available() {
         .await
         .unwrap();
     let text = String::from_utf8_lossy(&body);
-    // Slack should be a clickable link to install page
     assert!(text.contains("install/slack"));
 }
-
-// ─── Slack shows in installed list ──────────────────────────────────
 
 #[tokio::test]
 async fn integrations_page_shows_installed_slack() {
@@ -426,8 +409,6 @@ async fn integrations_page_shows_installed_slack() {
     assert!(text.contains("#alerts"));
     assert!(text.contains("Slack"));
 }
-
-// ─── Slack OAuth callback without session ───────────────────────────
 
 #[tokio::test]
 async fn slack_callback_without_state_returns_error() {
@@ -487,11 +468,8 @@ async fn slack_callback_without_oauth_config_returns_503() {
         .await
         .unwrap();
 
-    // No SlackConfig set, so should return 503
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
-
-// ─── Reinstall Slack ─────────────────────────────────────────────────
 
 #[tokio::test]
 async fn reinstall_slack_redirects_to_oauth_error_without_slack_config() {
@@ -533,7 +511,6 @@ async fn reinstall_slack_redirects_to_oauth_error_without_slack_config() {
         .await
         .unwrap();
 
-    // No SlackConfig set → 503
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 

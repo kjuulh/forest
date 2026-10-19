@@ -1,11 +1,3 @@
-//! Resolver for XDG-style filesystem locations.
-//!
-//! Centralises the three paths Forest's global-tools layer touches:
-//! - `~/.config/forest/forest.cue` (user config — `$XDG_CONFIG_HOME`)
-//! - `~/.local/state/forest/forest.lock` (lockfile — `$XDG_STATE_HOME`)
-//! - `~/.cache/forest/...` (cache: `bin/<sha>` for content-addressed binaries,
-//!   `global/shims/` for shims — `$XDG_CACHE_HOME`)
-
 use std::path::PathBuf;
 
 const APP_DIR: &str = "forest";
@@ -14,8 +6,6 @@ const LEGACY_CONFIG_FILE: &str = "forest.toml";
 const LOCKFILE: &str = "forest.lock";
 const LOCK_GUARD_FILE: &str = ".lock";
 
-/// Bundle of resolved locations. Constructed once per CLI invocation;
-/// cloned by reference into anything that needs paths.
 #[derive(Debug, Clone)]
 pub struct GlobalPaths {
     config_dir: PathBuf,
@@ -24,7 +14,6 @@ pub struct GlobalPaths {
 }
 
 impl GlobalPaths {
-    /// Resolve from the user's XDG environment (or defaults).
     pub fn from_env() -> anyhow::Result<Self> {
         let config_dir = xdg_config_home()?.join(APP_DIR);
         let state_dir = xdg_state_home()?.join(APP_DIR);
@@ -36,7 +25,6 @@ impl GlobalPaths {
         })
     }
 
-    /// Explicit constructor for tests.
     pub fn with_roots(config_dir: PathBuf, state_dir: PathBuf, cache_dir: PathBuf) -> Self {
         Self {
             config_dir,
@@ -81,42 +69,19 @@ impl GlobalPaths {
         self.cache_dir.join("components").join("bin")
     }
 
-    /// The content-addressed **directory** for one binary's bytes
-    /// (`bin/<hex>`). The binaries themselves live inside it, named after the
-    /// component (DATA-510) — see [`Self::cached_binary`].
-    ///
-    /// One hash can be known under several names (an alias, or two components
-    /// whose artifacts dedupe to the same bytes), so the directory holds a
-    /// hard-linked entry per name rather than a single file.
     pub fn cached_binary_dir(&self, sha: &str) -> PathBuf {
-        // sha may be "sha256:hex" or "hex" — strip the prefix so the on-disk
-        // name is always just the hex digest.
         let hex = sha.strip_prefix("sha256:").unwrap_or(sha);
         self.binary_cache_dir().join(hex)
     }
 
-    /// The executable for `sha`, materialised under its real name:
-    /// `bin/<hex>/<bin_name>`.
-    ///
-    /// Naming the file after the component is the whole point — `exec`ing this
-    /// path makes the child's `argv[0]` basename the component name instead of
-    /// a sha256 digest, which multi-call binaries and usage text depend on.
     pub fn cached_binary(&self, sha: &str, bin_name: &str) -> PathBuf {
         self.cached_binary_dir(sha).join(bin_name)
     }
 
-    /// Pre-DATA-510 location: the content-addressed path *was* the executable.
-    /// Identical to [`Self::cached_binary_dir`] — kept as a distinct name so
-    /// the migration code reads unambiguously at its call sites.
     pub fn legacy_cached_binary_file(&self, sha: &str) -> PathBuf {
         self.cached_binary_dir(sha)
     }
 
-    /// Per-(org, name, version) directory for the `include` block shipped
-    /// beside a tool's binary (TASKS/023). Keyed by version — not by binary
-    /// sha — so it loads on the offline warm path and never collides when two
-    /// versions dedupe to the same binary. Future include members (e.g. files)
-    /// live as siblings in this dir.
     pub fn tool_include_dir(&self, org: &str, name: &str, version: &str) -> PathBuf {
         self.cache_dir
             .join("components")
@@ -126,39 +91,20 @@ impl GlobalPaths {
             .join(version)
     }
 
-    /// The cached `env` map for a tool version (TASKS/023). JSON object of
-    /// string→string written on cold fetch, read on every run.
     pub fn tool_include_env_file(&self, org: &str, name: &str, version: &str) -> PathBuf {
         self.tool_include_dir(org, name, version).join("env.json")
     }
 
-    /// The cached `include.shell.init` declaration for a tool version
-    /// (DATA-588): JSON object of shell → argv, written on cold fetch.
-    ///
-    /// Cached rather than re-read from the manifest because everything that
-    /// consumes it — deciding whether a snippet still needs capturing — has to
-    /// work offline, on the warm path, without a registry round-trip.
     pub fn tool_include_shell_file(&self, org: &str, name: &str, version: &str) -> PathBuf {
         self.tool_include_dir(org, name, version).join("shell.json")
     }
 
-    /// The captured shell-integration script for one tool version and shell
-    /// (DATA-588) — the stdout of `<binary> <include.shell.init.<shell>>`.
-    ///
-    /// Keyed by version alongside `env.json` so an upgrade re-captures rather
-    /// than serving the old tool's script, and so a downgrade finds its own.
     pub fn tool_shell_snippet(&self, org: &str, name: &str, version: &str, shell: &str) -> PathBuf {
         self.tool_include_dir(org, name, version)
             .join("shell")
             .join(format!("{shell}.sh"))
     }
 
-    /// The aggregate script `forest shell <shell>` tells the user's rc file to
-    /// source: every installed tool's captured snippet, concatenated (DATA-588).
-    ///
-    /// One file is the whole point. Shell startup reads a single path instead of
-    /// exec'ing one process per tool, and rebuilding it is how a warm makes new
-    /// integrations available to the next shell without the rc file changing.
     pub fn shell_aggregate(&self, shell: &str) -> PathBuf {
         self.cache_dir()
             .join("global")
@@ -166,7 +112,6 @@ impl GlobalPaths {
             .join(format!("{shell}.sh"))
     }
 
-    /// Directory holding the per-shell aggregates.
     pub fn shell_aggregate_dir(&self) -> PathBuf {
         self.cache_dir().join("global").join("shell")
     }
@@ -225,7 +170,6 @@ mod tests {
 
     #[test]
     fn lockfile_lives_under_state_dir() {
-        // §1a.4 — XDG_STATE_HOME, not config, not cache.
         assert_eq!(
             fixed().lockfile(),
             PathBuf::from("/state/forest/forest.lock")
@@ -262,8 +206,6 @@ mod tests {
 
     #[test]
     fn cached_binary_nests_the_real_name_under_the_hash_dir() {
-        // DATA-510: the hash is a directory; the file inside carries the
-        // component name so argv[0] reads as the tool, not the digest.
         assert_eq!(
             fixed().cached_binary("sha256:abc123", "shiitake"),
             PathBuf::from("/cache/forest/components/bin/abc123/shiitake"),
@@ -276,8 +218,6 @@ mod tests {
 
     #[test]
     fn cached_binary_file_name_is_exactly_the_bin_name() {
-        // The property `forest global run` relies on: basename(exec path) is
-        // what the child sees as argv[0].
         let p = fixed().cached_binary("abc123", "forest-hello");
         assert_eq!(p.file_name().unwrap(), "forest-hello");
     }
@@ -292,20 +232,14 @@ mod tests {
 
     #[test]
     fn legacy_binary_file_is_the_path_the_hash_dir_now_occupies() {
-        // Migration hinges on these being the same path: what used to be a
-        // file becomes a directory.
         assert_eq!(
             fixed().legacy_cached_binary_file("sha256:abc123"),
             fixed().cached_binary_dir("abc123"),
         );
     }
 
-    // --- shell integration (DATA-588) ------------------------------------
-
     #[test]
     fn shell_declaration_sits_beside_the_env_cache() {
-        // Both are per-(tool, version) include artifacts; keeping them in one
-        // directory means one mkdir and one obvious place to look.
         let p = fixed();
         assert_eq!(
             p.tool_include_shell_file("understory", "gitnow", "0.5.0"),
@@ -321,8 +255,6 @@ mod tests {
 
     #[test]
     fn snippets_are_keyed_by_version_and_shell() {
-        // Version-keyed so an upgrade re-captures instead of serving the old
-        // tool's script.
         let p = fixed();
         assert_eq!(
             p.tool_shell_snippet("understory", "gitnow", "0.5.0", "zsh"),
@@ -340,8 +272,6 @@ mod tests {
 
     #[test]
     fn aggregate_is_one_stable_path_per_shell() {
-        // The emitted rc snippet hard-codes this path as a literal, so it must
-        // not depend on which tools are installed.
         let p = fixed();
         assert_eq!(
             p.shell_aggregate("zsh"),
@@ -355,8 +285,6 @@ mod tests {
 
     #[test]
     fn aggregate_lives_next_to_the_shims_not_inside_them() {
-        // `forest global sync` deletes unknown files in the shims dir; the
-        // aggregate must not be swept up by it.
         let p = fixed();
         assert_ne!(p.shell_aggregate_dir(), p.shims_dir());
         assert!(!p.shell_aggregate("zsh").starts_with(p.shims_dir()));

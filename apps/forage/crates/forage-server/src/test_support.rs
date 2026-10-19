@@ -24,7 +24,6 @@ use forage_core::session::{
 use crate::state::AppState;
 use crate::templates::TemplateEngine;
 
-/// Configurable mock behavior for testing different scenarios.
 #[derive(Default)]
 pub(crate) struct MockBehavior {
     pub register_result: Option<Result<RegisterResult, AuthError>>,
@@ -53,7 +52,6 @@ pub(crate) struct MockBehavior {
     pub deny_device_login_result: Option<Result<(), AuthError>>,
 }
 
-/// Configurable mock behavior for platform (orgs, projects, artifacts).
 #[derive(Default)]
 pub(crate) struct MockPlatformBehavior {
     pub list_orgs_result: Option<Result<Vec<Organisation>, PlatformError>>,
@@ -73,10 +71,6 @@ pub(crate) struct MockPlatformBehavior {
     pub create_org_rule_set_result: Option<Result<OrgRuleSet, PlatformError>>,
     pub update_org_rule_set_result: Option<Result<OrgRuleSet, PlatformError>>,
     pub delete_org_rule_set_result: Option<Result<(), PlatformError>>,
-    // Records `"<op>:<name>"` for every rule CRUD call the routes make. The
-    // routes address triggers, policies and pipelines by id and resolve that
-    // id to a name before calling the API, so a test needs to see the name
-    // that actually came out the far side.
     pub rule_action_calls: Option<Arc<Mutex<Vec<String>>>>,
     pub list_triggers_result: Option<Result<Vec<Trigger>, PlatformError>>,
     pub list_policies_result: Option<Result<Vec<Policy>, PlatformError>>,
@@ -93,7 +87,6 @@ pub(crate) struct MockPlatformBehavior {
     pub set_notification_preference_result: Option<Result<(), PlatformError>>,
     pub list_destination_types_result: Option<Result<Vec<DestinationTypeInfo>, PlatformError>>,
     pub reveal_destination_metadata_result: Option<Result<String, PlatformError>>,
-    // DATA-252 — allowed-domain auto-invite.
     pub list_allowed_domains_result:
         Option<Result<Vec<forage_core::platform::AllowedDomain>, PlatformError>>,
     pub add_allowed_domain_result:
@@ -104,20 +97,11 @@ pub(crate) struct MockPlatformBehavior {
     pub list_join_offers_result:
         Option<Result<Vec<forage_core::platform::JoinOffer>, PlatformError>>,
     pub accept_join_offer_result: Option<Result<OrgMember, PlatformError>>,
-    // DATA-660 — the timeline needs both the current-state-per-destination
-    // view and the per-release deploy history to tell a superseded release
-    // from one that never deployed.
     pub get_destination_states_result:
         Option<Result<forage_core::platform::DeploymentStates, PlatformError>>,
     pub get_release_intent_states_result:
         Option<Result<Vec<forage_core::platform::ReleaseIntentState>, PlatformError>>,
-    // DATA-703 — per-project artifacts, so a test can give each project its
-    // own releases and assert how a cross-project feed orders them.
-    // Takes precedence over `list_artifacts_result`; a project with no entry
-    // returns no artifacts.
     pub list_artifacts_by_project: Option<std::collections::HashMap<String, Vec<Artifact>>>,
-    // DATA-863 — the artifact page renders the plan a reviewer is approving,
-    // so a test needs to be able to give it one.
     pub get_plan_output_result: Option<Result<forage_core::platform::PlanOutput, PlatformError>>,
 }
 
@@ -142,7 +126,6 @@ pub(crate) fn ok_user() -> User {
     }
 }
 
-/// Mock forest client with per-test configurable behavior.
 pub(crate) struct MockForestClient {
     behavior: Mutex<MockBehavior>,
 }
@@ -1145,8 +1128,6 @@ impl ForestPlatform for MockPlatformClient {
         })
     }
 
-    // -- Auto-invite (DATA-252) -----------------------------------------------
-
     async fn list_allowed_domains(
         &self,
         _access_token: &str,
@@ -1272,14 +1253,6 @@ pub(crate) fn test_state_with_integrations(
     (state, sessions, integrations)
 }
 
-// ─── Mock OAuth-apps client ──────────────────────────────────────────
-
-/// What Forest answers for a `forest_oat_` access token (after the prefix):
-/// `datactl_kjuulh` is `datactl`, a public client, acting for `kjuulh` with
-/// the data gateway's scopes; `holds_machine_scopes` is a user-delegated
-/// token whose app was registered with machine scopes (`tokens:introspect`,
-/// `directory:read`), which must still never pass as the app itself.
-/// Anything else is dead.
 pub(crate) fn mock_user_delegated_principal(token: &str) -> Option<ClientPrincipal> {
     let scopes: Vec<String> = match token {
         "datactl_kjuulh" => vec!["datagateway:apply".into(), "datagateway:read".into()],
@@ -1309,22 +1282,14 @@ pub(crate) fn mock_user_delegated_principal(token: &str) -> Option<ClientPrincip
 
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
-/// In-memory implementation of [`ForestOAuthApps`] that behaves like the real
-/// forest-server store (create → list → get → update → rotate → delete) so
-/// route tests can exercise the full lifecycle. Optionally forced into an
-/// error to test the failure paths.
 type MockCodes = std::collections::HashMap<String, (String, Vec<String>, String, Option<String>)>;
 
 pub(crate) struct MockOAuthAppsClient {
     apps: Mutex<Vec<OAuthApp>>,
     counter: Mutex<u32>,
     forced_error: Option<PlatformError>,
-    /// Issued authorization codes → (user_id, scopes, redirect_uri, PKCE S256
-    /// challenge).
     codes: Mutex<MockCodes>,
-    /// Remembered consent: client_id → consented scopes.
     consents: Mutex<std::collections::HashMap<String, Vec<String>>>,
-    /// Device grants, in the order started.
     device_grants: Mutex<Vec<MockDeviceGrant>>,
 }
 
@@ -1368,12 +1333,10 @@ impl MockOAuthAppsClient {
         }
     }
 
-    /// The device grants started so far.
     pub(crate) fn device_grants(&self) -> Vec<MockDeviceGrant> {
         self.device_grants.lock().unwrap().clone()
     }
 
-    /// Register a seeded app for the device grant too.
     pub(crate) fn allow_device_grant(&self, client_id: &str) {
         for app in self.apps.lock().unwrap().iter_mut() {
             if app.client_id == client_id {
@@ -1382,9 +1345,6 @@ impl MockOAuthAppsClient {
         }
     }
 
-    /// Mirror Forest's secret check loosely: a known confidential app must
-    /// present some secret, a public one need not. (Unknown clients pass, as
-    /// they always have here, so tests can use ad-hoc client ids.)
     fn authenticate_client(
         &self,
         client_id: &str,
@@ -1399,7 +1359,6 @@ impl MockOAuthAppsClient {
         }
     }
 
-    /// Seed a prior consent (for remembered-consent auto-approve tests).
     pub(crate) fn seed_consent(&self, client_id: &str, scopes: Vec<String>) {
         self.consents
             .lock()
@@ -1407,8 +1366,6 @@ impl MockOAuthAppsClient {
             .insert(client_id.into(), scopes);
     }
 
-    /// Seed an app directly (for OAuth-flow route tests that don't go through
-    /// the create handler).
     pub(crate) fn seed_app(
         &self,
         client_id: &str,
@@ -1418,8 +1375,6 @@ impl MockOAuthAppsClient {
         self.seed(client_id, redirect_uris, scopes, false);
     }
 
-    /// Seed a public client (a native app such as `datactl`): no secret,
-    /// PKCE S256 required.
     pub(crate) fn seed_public_app(
         &self,
         client_id: &str,
@@ -1479,7 +1434,6 @@ impl ForestOAuthApps for MockOAuthAppsClient {
             client_id: format!("forest_oa_{id}"),
             redirect_uris: redirect_uris.to_vec(),
             scopes: scopes.to_vec(),
-            // Mirror Forest: an empty list means the default, not "none".
             grant_types: if grant_types.is_empty() {
                 vec!["authorization_code".to_string()]
             } else {
@@ -1558,7 +1512,6 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         app.homepage_url = homepage_url.into();
         app.redirect_uris = redirect_uris.to_vec();
         app.scopes = scopes.to_vec();
-        // Mirror Forest: an empty list means the default, not "none".
         app.grant_types = if grant_types.is_empty() {
             vec!["authorization_code".to_string()]
         } else {
@@ -1653,7 +1606,6 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         {
             return Err(OAuthFlowError::InvalidRequest("redirect_uri".into()));
         }
-        // Mirror Forest: a public client must bind the code to PKCE S256.
         let challenge = match (code_challenge, code_challenge_method) {
             (Some(c), Some("S256")) => Some(c.to_string()),
             _ if app.public => {
@@ -1682,7 +1634,6 @@ impl ForestOAuthApps for MockOAuthAppsClient {
                 challenge,
             ),
         );
-        // Mirror forest: approving records (unions) consent.
         let mut consents = self.consents.lock().unwrap();
         let entry = consents.entry(client_id.into()).or_default();
         for s in scopes {
@@ -1711,16 +1662,11 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         &self,
         access_token: &str,
     ) -> Result<Option<ClientPrincipal>, OAuthFlowError> {
-        // Any non-empty client token is a directory-capable client; the real
-        // gate is Forest's. A few names stand for other principals, so the
-        // introspection route can be told apart from the directory one.
         if let Some(user_token) = access_token.strip_prefix("forest_oat_") {
             return Ok(mock_user_delegated_principal(user_token));
         }
         let scopes = match access_token {
             "" | "forest_cat_revoked" => return Ok(None),
-            // Client-credentials tokens carry the `forest_cat_` prefix; anything
-            // else (a user's forest session or PAT) is no OAuth token at all.
             t if !t.starts_with("forest_cat_") => return Ok(None),
             "forest_cat_introspector" => vec!["tokens:introspect".into()],
             "forest_cat_gateway_ci" => vec!["datagateway:apply".into(), "datagateway:read".into()],
@@ -1758,7 +1704,6 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         code_verifier: Option<&str>,
     ) -> Result<OAuthIssuedTokens, OAuthFlowError> {
         self.authenticate_client(client_id, client_secret)?;
-        // Single-use: remove on exchange.
         let entry = self.codes.lock().unwrap().remove(code);
         let (_user, scopes, stored_redirect, challenge) =
             entry.ok_or(OAuthFlowError::InvalidGrant)?;
@@ -1825,7 +1770,6 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         if let Some(err) = &self.forced_error {
             return Err(err.clone());
         }
-        // Report the seeded apps as grants (route tests only need shape).
         Ok(self
             .apps
             .lock()
@@ -2006,8 +1950,6 @@ impl ForestOAuthApps for MockOAuthAppsClient {
         if access_token != "forest_oat_mocktoken" {
             return Err(OAuthFlowError::InvalidGrant);
         }
-        // Mocked claims for the test user; gating mirrors the real service —
-        // here we always grant profile + email for the canned token.
         Ok(OAuthUserinfo {
             sub: "user-1".into(),
             username: Some("testuser".into()),
@@ -2033,7 +1975,6 @@ pub(crate) fn test_state_with_oauth_apps(
     (state, sessions)
 }
 
-/// Mock OIDC exchange that returns a fixed identity.
 pub(crate) struct MockOidcExchange {
     pub result: Mutex<Option<Result<auth::OidcIdentity, AuthError>>>,
 }
@@ -2102,7 +2043,6 @@ pub(crate) fn test_state_with_github_oauth() -> (AppState, Arc<InMemorySessionSt
     (state, sessions)
 }
 
-/// Set up both GitHub and Google OAuth for testing the unified linking UI.
 pub(crate) fn test_state_with_both_oauth() -> (AppState, Arc<InMemorySessionStore>) {
     let (state, sessions) = test_state();
     let state = state
@@ -2121,22 +2061,14 @@ pub(crate) fn test_state_with_both_oauth() -> (AppState, Arc<InMemorySessionStor
     (state, sessions)
 }
 
-/// Configurable mock behavior for registry (component discovery).
 #[derive(Default)]
 pub(crate) struct MockRegistryBehavior {
     pub search_components_result: Option<Result<ComponentSearchResult, PlatformError>>,
-    /// Result returned by `search_public_components`. When `None`, falls
-    /// back to `search_components_result` so existing tests that set up
-    /// public catalog fixtures don't have to change.
     pub search_public_components_result: Option<Result<ComponentSearchResult, PlatformError>>,
     pub get_component_detail_result: Option<Result<ComponentDetail, PlatformError>>,
-    /// Result for `get_public_component_detail`. Falls back to
-    /// `get_component_detail_result` when `None`.
     pub get_public_component_detail_result: Option<Result<ComponentDetail, PlatformError>>,
     pub list_component_versions_result: Option<Result<Vec<ComponentVersionInfo>, PlatformError>>,
     pub get_component_manifest_result: Option<Result<String, PlatformError>>,
-    /// Result for `get_public_component_manifest`. Falls back to
-    /// `get_component_manifest_result` when `None`.
     pub get_public_component_manifest_result: Option<Result<String, PlatformError>>,
     pub list_org_tools_result: Option<Result<Vec<ToolSummary>, PlatformError>>,
 }
@@ -2302,7 +2234,6 @@ pub(crate) fn default_test_orgs() -> Vec<CachedOrg> {
     }]
 }
 
-/// Create a test session and return the cookie header value.
 pub(crate) async fn create_test_session(sessions: &Arc<InMemorySessionStore>) -> String {
     let now = Utc::now();
     let data = SessionData {
@@ -2328,7 +2259,6 @@ pub(crate) async fn create_test_session(sessions: &Arc<InMemorySessionStore>) ->
     format!("forage_session={}", session_id)
 }
 
-/// Create a test session with an expired access token but valid refresh token.
 pub(crate) async fn create_expired_session(sessions: &Arc<InMemorySessionStore>) -> String {
     let now = Utc::now();
     let data = SessionData {
@@ -2354,9 +2284,6 @@ pub(crate) async fn create_expired_session(sessions: &Arc<InMemorySessionStore>)
     format!("forage_session={}", session_id)
 }
 
-/// Create a test session with "member" role (non-admin, for authorization tests).
-/// Test session whose primary email is unverified — used by the
-/// "Try sending again" flow tests on /settings/account.
 pub(crate) async fn create_test_session_unverified_email(
     sessions: &Arc<InMemorySessionStore>,
 ) -> String {
@@ -2413,7 +2340,6 @@ pub(crate) async fn create_test_session_member(sessions: &Arc<InMemorySessionSto
     format!("forage_session={}", session_id)
 }
 
-/// Create a test session for an OAuth user who needs to pick a username.
 pub(crate) async fn create_test_session_needs_username(
     sessions: &Arc<InMemorySessionStore>,
 ) -> String {
@@ -2441,11 +2367,6 @@ pub(crate) async fn create_test_session_needs_username(
     format!("forage_session={}", session_id)
 }
 
-/// Create a test session that's a member of multiple orgs. The first
-/// entry is treated as the session's "default" org by `default_test_orgs`
-/// callers; later entries cover routes that take an org from the URL
-/// path and let us assert the path org (not the session default) drives
-/// rendering.
 pub(crate) async fn create_test_session_with_orgs(
     sessions: &Arc<InMemorySessionStore>,
     org_names: &[&str],
@@ -2483,7 +2404,6 @@ pub(crate) async fn create_test_session_with_orgs(
     format!("forage_session={}", session_id)
 }
 
-/// Create a test session with no cached orgs (for onboarding tests).
 pub(crate) async fn create_test_session_no_orgs(sessions: &Arc<InMemorySessionStore>) -> String {
     let now = Utc::now();
     let data = SessionData {

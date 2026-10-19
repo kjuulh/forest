@@ -9,16 +9,11 @@ use tokio_util::sync::CancellationToken;
 
 use crate::forest_client::GrpcForestClient;
 
-// ── Dispatcher ──────────────────────────────────────────────────────
-
-/// HTTP client for dispatching webhooks and Slack messages.
 pub struct NotificationDispatcher {
     http: reqwest::Client,
     store: Arc<dyn IntegrationStore>,
     forage_url: String,
-    /// gRPC client for querying pipeline state (optional — absent in tests).
     grpc: Option<Arc<GrpcForestClient>>,
-    /// Service token for authenticating gRPC calls to fetch pipeline state.
     service_token: String,
 }
 
@@ -37,7 +32,6 @@ impl NotificationDispatcher {
         self
     }
 
-    /// Execute a dispatch task with retry (3 attempts, exponential backoff).
     pub async fn dispatch(&self, task: &DispatchTask) {
         let (integration_id, notification_id) = match task {
             DispatchTask::Webhook {
@@ -57,7 +51,7 @@ impl NotificationDispatcher {
             } => (integration_id.clone(), notification_id.clone()),
         };
 
-        let delays = [1, 5, 25]; // seconds
+        let delays = [1, 5, 25];
         for (attempt, delay) in delays.iter().enumerate() {
             match self.try_dispatch(task).await {
                 Ok(()) => {
@@ -73,7 +67,6 @@ impl NotificationDispatcher {
                     return;
                 }
                 Err(e) => {
-                    // Don't retry errors that will never succeed
                     let non_retryable = is_non_retryable_error(&e);
                     if non_retryable {
                         tracing::error!(
@@ -173,7 +166,6 @@ impl NotificationDispatcher {
                 message,
                 ..
             } => {
-                // If we have a bot token, use chat.postMessage/chat.update for update-in-place
                 if !access_token.is_empty() && !channel_id.is_empty() && !release_id.is_empty() {
                     self.dispatch_slack_bot(
                         integration_id,
@@ -185,7 +177,6 @@ impl NotificationDispatcher {
                     )
                     .await
                 } else {
-                    // Fallback: webhook URL (no update-in-place possible)
                     self.dispatch_slack_webhook(webhook_url, message).await
                 }
             }
@@ -199,13 +190,11 @@ impl NotificationDispatcher {
                 message: _,
                 ..
             } => {
-                // DM uses the same bot token post/update pattern, but channel = user ID.
-                // Prefix release_id so the message ref is distinct from channel messages.
                 let dm_release_id = format!("dm:{slack_user_id}:{release_id}");
                 self.dispatch_slack_bot(
                     integration_id,
                     access_token,
-                    slack_user_id, // Slack accepts user ID as channel for DMs
+                    slack_user_id,
                     &dm_release_id,
                     event_type,
                     event,
@@ -215,8 +204,6 @@ impl NotificationDispatcher {
         }
     }
 
-    /// Post or update a Slack message via the bot token API.
-    /// Merges per-destination status into the message ref and rebuilds the message.
     async fn dispatch_slack_bot(
         &self,
         integration_id: &str,
@@ -229,14 +216,12 @@ impl NotificationDispatcher {
         use forage_core::integrations::{DestinationStatus, SlackMessageRef};
         use forage_core::integrations::router::format_slack_message;
 
-        // Get existing ref (with accumulated destinations) if we already posted
         let existing_ref = self
             .store
             .get_slack_message_ref(integration_id, release_id)
             .await
             .unwrap_or(None);
 
-        // Merge this notification's destination into the accumulated map
         let mut destinations = existing_ref
             .as_ref()
             .map(|r| r.destinations.clone())
@@ -261,10 +246,8 @@ impl NotificationDispatcher {
             }
         }
 
-        // Build the message with the full accumulated state
         let mut message = format_slack_message(event, &destinations, &self.forage_url);
 
-        // Query pipeline stages and insert before destinations
         if let Some(ref r) = event.release {
             if !r.release_intent_id.is_empty() {
                 if let Some(stages) = self
@@ -274,9 +257,6 @@ impl NotificationDispatcher {
                     let pipeline_blocks =
                         forage_core::integrations::router::format_pipeline_blocks(&stages);
                     if !pipeline_blocks.is_empty() {
-                        // Insert pipeline before the destination section.
-                        // Find the last "context" block (metadata); pipeline goes right after it,
-                        // pushing destinations and errors down.
                         let insert_at = message
                             .blocks
                             .iter()
@@ -303,13 +283,9 @@ impl NotificationDispatcher {
             "blocks": message.blocks,
         }]);
 
-        // The `text` field is a fallback for notifications/accessibility only.
-        // Slack renders it above attachments in some clients, causing duplication.
-        // Use a minimal fallback; the attachment blocks carry the rich content.
         let fallback_text = format!("Release update: {}/{}", event.organisation, event.project);
 
         if let Some(ref msg_ref) = existing_ref {
-            // Update existing message
             let payload = serde_json::json!({
                 "channel": msg_ref.channel_id,
                 "ts": msg_ref.message_ts,
@@ -337,12 +313,10 @@ impl NotificationDispatcher {
                         release_id = %release_id,
                         "slack message not found, posting new one"
                     );
-                    // Fall through to post a new one
                 } else {
                     return Err(format!("slack chat.update: {err}"));
                 }
             } else {
-                // Update the ref with merged destinations
                 let updated = SlackMessageRef {
                     id: msg_ref.id.clone(),
                     integration_id: integration_id.to_string(),
@@ -360,10 +334,8 @@ impl NotificationDispatcher {
             }
         }
 
-        // Try to join the channel first
         let _ = self.slack_join_channel(access_token, channel).await;
 
-        // Post new message
         let payload = serde_json::json!({
             "channel": channel,
             "text": fallback_text,
@@ -387,7 +359,6 @@ impl NotificationDispatcher {
             return Err(format!("slack chat.postMessage: {err}"));
         }
 
-        // Store the message ref with initial destinations
         let ts = body["ts"].as_str().unwrap_or_default();
         let posted_channel = body["channel"].as_str().unwrap_or(channel);
 
@@ -410,7 +381,6 @@ impl NotificationDispatcher {
         Ok(())
     }
 
-    /// Try to join a Slack channel. Silently succeeds if already a member or channel is private.
     async fn slack_join_channel(&self, access_token: &str, channel: &str) -> Result<(), String> {
         let payload = serde_json::json!({ "channel": channel });
 
@@ -432,16 +402,12 @@ impl NotificationDispatcher {
             tracing::info!(channel = %channel, "bot joined slack channel");
         } else {
             let err = body["error"].as_str().unwrap_or("unknown");
-            // channel_not_found, method_not_supported_for_channel_type (private), already_in_channel
-            // These are all acceptable — we tried our best
             tracing::debug!(channel = %channel, error = %err, "conversations.join failed (may be private channel)");
         }
 
         Ok(())
     }
 
-    /// Fetch pipeline stages for a release intent via gRPC.
-    /// Returns None if gRPC is not configured or the call fails.
     async fn fetch_pipeline_stages(
         &self,
         organisation: &str,
@@ -458,12 +424,11 @@ impl NotificationDispatcher {
                 &self.service_token,
                 organisation,
                 Some(project),
-                true, // include_completed so we get the current intent
+                true,
             )
             .await
         {
             Ok(intents) => {
-                // Find the matching release intent
                 intents
                     .into_iter()
                     .find(|i| i.release_intent_id == release_intent_id)
@@ -480,7 +445,6 @@ impl NotificationDispatcher {
         }
     }
 
-    /// Fallback: post via incoming webhook URL (no update-in-place).
     async fn dispatch_slack_webhook(
         &self,
         webhook_url: &str,
@@ -513,7 +477,6 @@ impl NotificationDispatcher {
     }
 }
 
-/// Slack API errors that will never succeed on retry.
 fn is_non_retryable_error(err: &str) -> bool {
     const NON_RETRYABLE: &[&str] = &[
         "channel_not_found",
@@ -530,9 +493,6 @@ fn is_non_retryable_error(err: &str) -> bool {
     NON_RETRYABLE.iter().any(|code| err.contains(code))
 }
 
-// ── Proto conversion ────────────────────────────────────────────────
-
-/// Convert a proto Notification to our domain NotificationEvent.
 pub fn proto_to_event(n: &forage_grpc::Notification) -> NotificationEvent {
     let notification_type = match n.notification_type() {
         forage_grpc::NotificationType::ReleaseAnnotated => "release_annotated",
@@ -574,16 +534,10 @@ pub fn proto_to_event(n: &forage_grpc::Notification) -> NotificationEvent {
     }
 }
 
-// ── Listener component ──────────────────────────────────────────────
-
-/// Background component that listens to Forest's notification stream
-/// for all orgs with active integrations, and dispatches to configured channels.
 pub struct NotificationListener {
     pub grpc: Arc<GrpcForestClient>,
     pub store: Arc<dyn IntegrationStore>,
-    /// Service token (PAT) for authenticating with forest-server's NotificationService.
     pub service_token: String,
-    /// Base URL of the Forage web UI for deep links (e.g. "https://forage.example.com").
     pub forage_url: String,
 }
 
@@ -598,9 +552,6 @@ impl Component for NotificationListener {
                 .with_grpc(self.grpc.clone(), self.service_token.clone()),
         );
 
-        // For now, listen on the global stream (no org filter).
-        // Forest's ListenNotifications with no org filter returns all notifications
-        // the authenticated user has access to.
         let mut backoff = 1u64;
 
         loop {
@@ -620,7 +571,6 @@ impl Component for NotificationListener {
                         }
                     }
 
-                    // Wait before reconnecting, but respect cancellation
                     tokio::select! {
                         _ = cancellation_token.cancelled() => break,
                         _ = tokio::time::sleep(Duration::from_secs(backoff)) => {}

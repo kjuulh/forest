@@ -8,8 +8,6 @@ use super::{
     release_registry::{ReleaseItem, ReleaseRegistry},
 };
 
-/// Emit a release event AND create a notification.
-/// Used by the CompleteRelease gRPC handler (runner path).
 pub async fn finalize_release(
     release_event_store: &ReleaseEventStore,
     release_registry: &ReleaseRegistry,
@@ -61,8 +59,6 @@ pub async fn finalize_release(
     .await
 }
 
-/// Create a release notification without updating status.
-/// Used by the Scheduler (in-process path) which manages its own events.
 pub async fn send_notification(
     release_registry: &ReleaseRegistry,
     notification_registry: &NotificationRegistry,
@@ -154,9 +150,6 @@ async fn create_release_notification(
         environment: dest_env,
         source_username: ann_ctx.as_ref().and_then(|a| a.source.username.clone()),
         source_email: ann_ctx.as_ref().and_then(|a| a.source.email.clone()),
-        // The release owner, or nobody. Deliberately not the actor: a release
-        // nobody owns (a bot's, an unlinked author's) still posts to the
-        // channel and DMs no one — see `services::release_owner`.
         source_user_id: ann_ctx.as_ref().and_then(|a| a.personal_recipient()),
         source_type: ann_ctx.as_ref().and_then(|a| a.source.source_type.clone()),
         run_url: ann_ctx.as_ref().and_then(|a| a.source.run_url.clone()),

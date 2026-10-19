@@ -34,12 +34,10 @@ pub fn router() -> Router<AppState> {
         .merge(registry::router())
 }
 
-/// Render an error page with the given status code, heading, and message.
 fn error_page(state: &AppState, status: StatusCode, heading: &str, message: &str) -> Response {
     error_page_detail(state, status, heading, message, None)
 }
 
-/// Render an error page with optional error detail (shown in a collapsible section).
 fn error_page_detail(
     state: &AppState,
     status: StatusCode,
@@ -64,7 +62,6 @@ fn error_page_detail(
     }
 }
 
-/// Log an error and render a 500 page with the error detail.
 fn internal_error(state: &AppState, context: &str, err: &dyn std::fmt::Display) -> Response {
     let detail = format!("{err:#}");
     tracing::error!("{context}: {detail}");
@@ -77,8 +74,6 @@ fn internal_error(state: &AppState, context: &str, err: &dyn std::fmt::Display) 
     )
 }
 
-/// Log a warning for a failed call and return the default value.
-/// Use for supplementary data where graceful degradation is acceptable.
 fn warn_default<T: Default>(context: &str, result: Result<T, impl std::fmt::Display>) -> T {
     match result {
         Ok(v) => v,
@@ -89,24 +84,9 @@ fn warn_default<T: Default>(context: &str, result: Result<T, impl std::fmt::Disp
     }
 }
 
-/// Render markdown → sanitised HTML. Shared by the registry and platform
-/// routes so the project Overview and the legacy component-detail page
-/// produce identical output for the same source markdown.
-///
-/// `class` is allowed on `<code>` and `<pre>` so the `language-<lang>`
-/// hint pulldown-cmark emits for fenced blocks survives sanitisation
-/// and reaches highlight.js on the client. The class values are
-/// further restricted to the `language-*` prefix so attackers can't
-/// inject arbitrary Tailwind utility classes (e.g. `hidden`) that
-/// would visually rewrite the document.
 pub(super) fn render_markdown(md: &str) -> String {
     use std::collections::{HashMap, HashSet};
 
-    // Enable GFM tables alongside the CommonMark baseline. Tables are
-    // ubiquitous in component / project READMEs (think "platforms" or
-    // "inputs" rows), and rendering them as plain `|--|` text in the
-    // sidebar looked unfinished. Other GFM extensions stay off by
-    // default — add them deliberately when there's a use case.
     let mut opts = pulldown_cmark::Options::empty();
     opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
 
@@ -121,8 +101,6 @@ pub(super) fn render_markdown(md: &str) -> String {
     ammonia::Builder::default()
         .tag_attributes(tag_attrs)
         .attribute_filter(|_element, attribute, value| {
-            // For `class`, only allow `language-*` tokens. Drop the
-            // attribute entirely if any token doesn't match.
             if attribute == "class" {
                 let all_lang = value
                     .split_ascii_whitespace()
@@ -194,9 +172,6 @@ mod markdown_tests {
 
     #[test]
     fn arbitrary_class_token_dropped() {
-        // Inline HTML smuggling the `hidden` class shouldn't survive.
-        // pulldown-cmark passes raw HTML straight through, so this is
-        // the ammonia layer's job.
         let html = render_markdown(r#"<div class="hidden">x</div>"#);
         assert!(!html.contains("class=\"hidden\""), "{html}");
     }

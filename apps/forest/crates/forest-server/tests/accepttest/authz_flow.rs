@@ -1,8 +1,3 @@
-//! Authorization boundary tests.
-//!
-//! These tests verify that authenticated users CANNOT access resources
-//! belonging to organisations they are not a member of.
-
 use forest_grpc_interface::*;
 use tonic::metadata::MetadataValue;
 
@@ -19,7 +14,6 @@ fn unauthed_request<T>(inner: T) -> tonic::Request<T> {
     tonic::Request::new(inner)
 }
 
-/// Register a new user and return their access token.
 async fn register_user(fixture: &crate::accepttest::fixtures::Fixture) -> String {
     let mut users = fixture.users();
     let username = format!("user-{}", uuid::Uuid::now_v7());
@@ -37,7 +31,6 @@ async fn register_user(fixture: &crate::accepttest::fixtures::Fixture) -> String
     resp.into_inner().tokens.expect("tokens").access_token
 }
 
-/// Create an organisation and return its name.
 async fn create_org(fixture: &crate::accepttest::fixtures::Fixture, token: &str) -> String {
     let mut org_client = fixture.organisations();
     let name = format!("org-{}", uuid::Uuid::now_v7());
@@ -53,7 +46,6 @@ async fn create_org(fixture: &crate::accepttest::fixtures::Fixture, token: &str)
     name
 }
 
-/// Set up a full org with environment + destination, return (org, env, dest) names.
 async fn setup_org_with_destination(
     fixture: &crate::accepttest::fixtures::Fixture,
     token: &str,
@@ -109,10 +101,6 @@ async fn setup_org_with_destination(
     (org, env_name, dest_name)
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// Tests: Unauthenticated access
-// ═══════════════════════════════════════════════════════════════════════
-
 #[tokio::test(flavor = "multi_thread")]
 async fn unauthenticated_cannot_list_projects() {
     let fixture = fixture().await.unwrap();
@@ -164,19 +152,13 @@ async fn unauthenticated_cannot_create_destination() {
     assert_eq!(result.unwrap_err().code(), tonic::Code::Unauthenticated);
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// Tests: Cross-org access (user B tries to access org A's resources)
-// ═══════════════════════════════════════════════════════════════════════
-
 #[tokio::test(flavor = "multi_thread")]
 async fn user_cannot_list_projects_in_other_org() {
     let fixture = fixture().await.unwrap();
 
-    // User A creates an org with a project
     let token_a = register_user(&fixture).await;
     let org_a = create_org(&fixture, &token_a).await;
 
-    // Create a project in org A
     fixture
         .releases()
         .create_project(authed_request(
@@ -189,7 +171,6 @@ async fn user_cannot_list_projects_in_other_org() {
         .await
         .expect("create project");
 
-    // User B (not a member of org A) tries to list org A's projects
     let token_b = register_user(&fixture).await;
 
     let result = fixture
@@ -204,7 +185,6 @@ async fn user_cannot_list_projects_in_other_org() {
         ))
         .await;
 
-    // This SHOULD fail with PermissionDenied, but currently returns data
     match result {
         Ok(resp) => {
             let projects = resp.into_inner().projects;
@@ -229,7 +209,6 @@ async fn user_cannot_list_projects_in_other_org() {
 async fn user_cannot_create_destination_in_other_org() {
     let fixture = fixture().await.unwrap();
 
-    // User A creates an org with an environment
     let token_a = register_user(&fixture).await;
     let org_a = create_org(&fixture, &token_a).await;
     let env_name = format!("env-{}", uuid::Uuid::now_v7());
@@ -248,7 +227,6 @@ async fn user_cannot_create_destination_in_other_org() {
         .await
         .expect("create env");
 
-    // User B tries to create a destination in org A
     let token_b = register_user(&fixture).await;
 
     let result = fixture
@@ -282,11 +260,9 @@ async fn user_cannot_create_destination_in_other_org() {
 async fn user_cannot_create_environment_in_other_org() {
     let fixture = fixture().await.unwrap();
 
-    // User A creates an org
     let token_a = register_user(&fixture).await;
     let org_a = create_org(&fixture, &token_a).await;
 
-    // User B tries to create an environment in org A
     let token_b = register_user(&fixture).await;
 
     let result = fixture
@@ -312,12 +288,9 @@ async fn user_cannot_create_environment_in_other_org() {
 async fn user_cannot_delete_destination_in_other_org() {
     let fixture = fixture().await.unwrap();
 
-    // User A sets up org with destination
     let token_a = register_user(&fixture).await;
     let (org_a, _env, dest) = setup_org_with_destination(&fixture, &token_a).await;
 
-    // User B tries to delete it by claiming it lives in org A.
-    // The server must refuse because B is not a member of org A.
     let token_b = register_user(&fixture).await;
 
     let result = fixture
@@ -341,11 +314,9 @@ async fn user_cannot_delete_destination_in_other_org() {
 async fn user_cannot_release_to_other_orgs_destination() {
     let fixture = fixture().await.unwrap();
 
-    // User A sets up org with destination and an annotated artifact
     let token_a = register_user(&fixture).await;
     let (org_a, _env, _dest) = setup_org_with_destination(&fixture, &token_a).await;
 
-    // Create project + artifact in org A
     fixture
         .releases()
         .create_project(authed_request(
@@ -358,13 +329,10 @@ async fn user_cannot_release_to_other_orgs_destination() {
         .await
         .expect("create project");
 
-    // User B registers and tries to release to org A's destination
     let token_b = register_user(&fixture).await;
 
-    // First, user B needs an artifact. Create their own org and artifact.
     let org_b = create_org(&fixture, &token_b).await;
 
-    // User B tries to annotate a release in org A's project
     let result = fixture
         .releases()
         .annotate_release(authed_request(
@@ -408,14 +376,13 @@ async fn user_cannot_release_to_other_orgs_destination() {
         result.is_err(),
         "SECURITY: user B annotated a release in org A's project",
     );
-    let _ = org_b; // used to create user B's org
+    let _ = org_b;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn user_cannot_list_triggers_in_other_org() {
     let fixture = fixture().await.unwrap();
 
-    // User A creates org + project
     let token_a = register_user(&fixture).await;
     let org_a = create_org(&fixture, &token_a).await;
 
@@ -431,7 +398,6 @@ async fn user_cannot_list_triggers_in_other_org() {
         .await
         .expect("create project");
 
-    // User B tries to list triggers in org A's project
     let token_b = register_user(&fixture).await;
 
     let mut trigger_client =
@@ -465,11 +431,9 @@ async fn user_cannot_list_triggers_in_other_org() {
 async fn user_cannot_get_destination_states_for_other_org() {
     let fixture = fixture().await.unwrap();
 
-    // User A creates org with destination
     let token_a = register_user(&fixture).await;
     let (org_a, _env, _dest) = setup_org_with_destination(&fixture, &token_a).await;
 
-    // User B tries to get destination states for org A
     let token_b = register_user(&fixture).await;
 
     let result = fixture
@@ -570,10 +534,6 @@ async fn user_cannot_get_release_intent_states_for_other_org() {
     assert_eq!(result.unwrap_err().code(), tonic::Code::PermissionDenied);
 }
 
-// ── CheckDrift (forest#286) ──────────────────────────────────────────
-
-/// A drift check runs a plan with the destination's credentials and returns
-/// its text, so it is at least as sensitive as a plan: org admins only.
 #[tokio::test(flavor = "multi_thread")]
 async fn user_cannot_check_drift_for_other_orgs_project() {
     let fixture = fixture().await.unwrap();
@@ -613,8 +573,6 @@ async fn user_cannot_check_drift_for_other_orgs_project() {
     assert_eq!(status.code(), tonic::Code::PermissionDenied, "{status:?}");
 }
 
-/// Admin only, like `forest state` (forest#282): a member of the right org is
-/// still refused.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_member_who_is_not_an_admin_cannot_check_drift() {
     let fixture = fixture().await.unwrap();
@@ -682,8 +640,6 @@ async fn a_member_who_is_not_an_admin_cannot_check_drift() {
     assert_eq!(status.code(), tonic::Code::PermissionDenied, "{status:?}");
 }
 
-/// An admin gets an answer, not a panic, for a project that has never
-/// deployed: there is nothing to compare against, and it says so.
 #[tokio::test(flavor = "multi_thread")]
 async fn check_drift_without_a_deploy_says_there_is_nothing_to_compare() {
     let fixture = fixture().await.unwrap();

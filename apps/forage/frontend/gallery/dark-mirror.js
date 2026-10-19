@@ -1,19 +1,5 @@
-/**
- * Re-expose the app's dark palette under an explicit `[data-theme="dark"]`.
- *
- * The app switches theme on `@media (prefers-color-scheme: dark)` alone, which
- * a page cannot toggle — so without this the gallery could not show dark mode
- * at all, and dark is exactly where hand-picked lane colours go wrong.
- *
- * Copying the palette into the gallery would work until someone edited one of
- * the two copies. So this reads the app's own input.css and rewrites that block
- * instead: one palette, no drift, and a loud failure if the shape it depends on
- * ever changes.
- */
-
 const MEDIA = "@media (prefers-color-scheme: dark)";
 
-/** Index just past the `}` that closes the block opening at `open`. */
 function matchBrace(css, open) {
   let depth = 0;
   for (let i = open; i < css.length; i++) {
@@ -23,11 +9,6 @@ function matchBrace(css, open) {
   return -1;
 }
 
-/**
- * Split a rule body into top-level `selector { ... }` rules.
- * Declarations sitting directly in the body (there are none today) are kept
- * verbatim so nothing is silently dropped.
- */
 function topLevelRules(body) {
   const rules = [];
   let i = 0;
@@ -45,10 +26,6 @@ function topLevelRules(body) {
   return rules;
 }
 
-/**
- * `:root`/`:host` carry the palette itself and become the themed root;
- * everything else is a descendant of it.
- */
 function scopeSelector(selector, scope) {
   return selector
     .split(",")

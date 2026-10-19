@@ -13,8 +13,6 @@ use tokio_util::sync::CancellationToken;
 use crate::forest_client::GrpcForestClient;
 use crate::notification_worker::NotificationDispatcher;
 
-/// Background component that pulls notification events from NATS JetStream
-/// and dispatches webhooks to matching integrations.
 pub struct NotificationConsumer {
     pub jetstream: jetstream::Context,
     pub store: Arc<dyn IntegrationStore>,
@@ -113,7 +111,7 @@ impl NotificationConsumer {
                 }
                 msg = messages.next() => {
                     let Some(msg) = msg else {
-                        return Ok(()); // Stream closed
+                        return Ok(());
                     };
                     let msg = msg.map_err(|e| format!("message error: {e}"))?;
 
@@ -143,7 +141,6 @@ impl NotificationConsumer {
         Self::process_payload(&msg.payload, self.store.as_ref(), dispatcher).await
     }
 
-    /// Process a raw notification payload. Extracted for testability without NATS.
     pub async fn process_payload(
         payload: &[u8],
         store: &dyn IntegrationStore,
@@ -175,8 +172,6 @@ impl NotificationConsumer {
             return Ok(());
         }
 
-        // Dispatch all tasks sequentially within this message.
-        // JetStream provides parallelism across messages.
         for task in &tasks {
             dispatcher.dispatch(task).await;
         }

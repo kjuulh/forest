@@ -11,8 +11,6 @@ use tokio_util::sync::CancellationToken;
 use crate::forest_client::GrpcForestClient;
 use crate::notification_worker::proto_to_event;
 
-/// Background component that listens to Forest's notification stream
-/// and publishes events to NATS JetStream for durable processing.
 pub struct NotificationIngester {
     pub grpc: Arc<GrpcForestClient>,
     pub jetstream: jetstream::Context,
@@ -25,7 +23,6 @@ impl Component for NotificationIngester {
     }
 
     async fn run(&self, cancellation_token: CancellationToken) -> Result<(), MadError> {
-        // Ensure the JetStream stream exists
         self.ensure_stream().await.map_err(|e| {
             MadError::Inner(anyhow::anyhow!("failed to create JetStream stream: {e}"))
         })?;
@@ -71,8 +68,8 @@ impl NotificationIngester {
                 name: STREAM_NAME.to_string(),
                 subjects: vec![STREAM_SUBJECTS.to_string()],
                 retention: stream::RetentionPolicy::WorkQueue,
-                max_age: Duration::from_secs(7 * 24 * 3600), // 7 days
-                max_bytes: 1_073_741_824,                     // 1 GB
+                max_age: Duration::from_secs(7 * 24 * 3600),
+                max_bytes: 1_073_741_824,
                 discard: stream::DiscardPolicy::Old,
                 ..Default::default()
             })
@@ -125,15 +122,12 @@ impl NotificationIngester {
                     let payload = serde_json::to_vec(&envelope)
                         .map_err(|e| format!("serialize envelope: {e}"))?;
 
-                    // Publish with ack — JetStream confirms persistence
                     if let Err(e) = self
                         .jetstream
                         .publish(subject, payload.into())
                         .await
                         .map_err(|e| format!("publish: {e}"))
                         .and_then(|ack_future| {
-                            // We don't block on the ack to keep the stream flowing,
-                            // but we log failures. In practice, JetStream will buffer.
                             tokio::spawn(async move {
                                 if let Err(e) = ack_future.await {
                                     tracing::warn!(error = %e, "JetStream publish ack failed");

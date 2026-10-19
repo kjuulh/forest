@@ -7,10 +7,6 @@ use uuid::Uuid;
 use crate::domains::policy::{self, CreatePolicyParams, PolicyAggregate, UpdatePolicyConfigParams};
 use crate::services::policy::PolicyRecord;
 
-// ============================================================
-// Service — orchestrates aggregate + projection for writes
-// ============================================================
-
 #[derive(Clone)]
 pub struct PolicyAggregateService {
     event_store: EventStore,
@@ -192,10 +188,6 @@ impl PolicyAggregateService {
         Ok(rec)
     }
 }
-
-// ============================================================
-// State integration
-// ============================================================
 
 pub trait PolicyAggregateServiceState {
     fn policy_aggregate_service(&self) -> PolicyAggregateService;

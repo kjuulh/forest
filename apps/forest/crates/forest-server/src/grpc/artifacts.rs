@@ -132,7 +132,6 @@ impl ArtifactService for ArtifactServer {
             .await
             .to_internal_error()?;
 
-        // Return the forest.cue file, or the first spec file if forest.cue isn't found
         let content = spec_files
             .iter()
             .find(|(path, _)| path.file_name().is_some_and(|n| n == "forest.cue"))

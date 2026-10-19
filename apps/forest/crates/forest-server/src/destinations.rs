@@ -179,20 +179,14 @@ impl DestinationService {
 pub trait DestinationEdge {
     fn name(&self) -> DestinationIndex;
 
-    /// Human-readable description of this destination type.
     fn description(&self) -> &str {
         ""
     }
 
-    /// Declared metadata field schemas for this destination type.
-    /// Used to populate `DestinationType.fields` in the gRPC response so
-    /// clients can render a dynamic creation form.
     fn metadata_schema(&self) -> Vec<forest_models::MetadataFieldSchema> {
         vec![]
     }
 
-    /// Validate that the given metadata contains all required fields for this
-    /// destination type. Called during destination creation.
     #[allow(unused_variables)]
     async fn validate_metadata(&self, metadata: &HashMap<String, String>) -> anyhow::Result<()> {
         Ok(())
@@ -214,8 +208,6 @@ pub trait DestinationEdge {
         destination: &Destination,
     ) -> anyhow::Result<()>;
 
-    /// Run the plan/dry-run phase for this destination (e.g. terraform plan).
-    /// Returns the captured plan output text, or None if not supported.
     #[allow(unused_variables)]
     async fn plan(
         &self,
@@ -226,14 +218,10 @@ pub trait DestinationEdge {
         Ok(None)
     }
 
-    /// Whether this destination type supports the plan phase.
     fn supports_plan(&self) -> bool {
         false
     }
 
-    /// Compare what `deployed` rendered with what is actually running, and
-    /// change neither (forest#286). `deployed` is the destination's last
-    /// successful release. `None` means this type has no drift check.
     #[allow(unused_variables)]
     async fn drift(
         &self,
@@ -245,7 +233,6 @@ pub trait DestinationEdge {
     }
 }
 
-/// One root's drift, as a destination reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DriftReport {
     pub work_dir: String,

@@ -1,10 +1,3 @@
-//! The terraform@1 state backend refuses anything without a credential signed
-//! for that exact state (understory-io/forest#281).
-//!
-//! Driven through the real router in-process against the test database, so
-//! these exercise the handlers, the credential check and the lock table
-//! together — the same path a `tofu init`/`plan`/`apply` takes.
-
 use axum::body::{Body, to_bytes};
 use base64::Engine as _;
 use forest_server::destinations::terraform_credentials::Scope;
@@ -32,7 +25,6 @@ async fn call(
     auth: Option<&str>,
     body: &str,
 ) -> (StatusCode, http::HeaderMap, String) {
-    // As terraform's HTTP backend sends it.
     let mut req = Request::builder()
         .method(method)
         .uri(uri)
@@ -99,7 +91,6 @@ async fn a_credential_for_another_state_is_refused() {
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // And the old shape of password — a random UUID — opens nothing.
     let (status, _, _) = call(
         &f.state,
         Method::GET,
@@ -117,7 +108,6 @@ async fn a_read_only_credential_reads_and_cannot_write_lock_or_unlock() {
     let id = state_id();
     let ro = operator(&f.state, &id, Scope::ReadOnly);
 
-    // Authorised to read; there is simply no state yet.
     let (status, _, _) = call(&f.state, Method::GET, &format!("/{id}"), Some(&ro), "").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
@@ -162,8 +152,6 @@ async fn a_read_write_credential_does_the_whole_terraform_cycle() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, state_body);
 
-    // A second locker is told who holds it, as terraform's LockInfo — which is
-    // what an operator needs for `terraform force-unlock <ID>`.
     let (status, _, body) = call(
         &f.state,
         Method::POST,
@@ -212,7 +200,6 @@ async fn force_unlock_breaks_a_lock_whoever_holds_it() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_runner_credential_is_accepted_for_its_own_state() {
-    // What `TerraformV1Destination::run` hands to tofu.
     let f = fixture().await.unwrap();
     let id = state_id();
     let destination = forest_models::Destination {
@@ -250,12 +237,6 @@ async fn the_runner_credential_is_accepted_for_its_own_state() {
         .unwrap();
 }
 
-/// Real OpenTofu against the real backend, through the credential: init, apply,
-/// state list, a lock conflict that names its holder, force-unlock, and a
-/// read-only credential that can plan but not apply.
-///
-/// Ignored by default because CI has no `tofu`; run with
-/// `cargo test -p forest-server --test tests tofu_ -- --ignored`.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs tofu on PATH"]
 async fn tofu_drives_the_backend_with_a_forest_credential() {
@@ -323,11 +304,9 @@ async fn tofu_drives_the_backend_with_a_forest_credential() {
         text(&listed)
     );
 
-    // A wrong credential cannot even read.
     let other = operator(&f.state, &state_id(), Scope::ReadWrite);
     assert!(!tofu(&other, &["state", "list"]).status.success());
 
-    // Read-only: a plan without locking works, an apply does not.
     ok(
         &tofu(&ro, &["plan", "-lock=false", "-input=false"]),
         "read-only plan",
@@ -339,7 +318,6 @@ async fn tofu_drives_the_backend_with_a_forest_credential() {
         "a read-only credential must not apply"
     );
 
-    // A crashed run's lock: tofu is told the holder's ID...
     sqlx::query(
         "INSERT INTO terraform_state_locks (state_id, lock_id) VALUES ($1, 'crashed-apply')",
     )
@@ -355,7 +333,6 @@ async fn tofu_drives_the_backend_with_a_forest_credential() {
         text(&blocked)
     );
 
-    // ...and `force-unlock <ID>` with a read-write credential clears it.
     ok(
         &tofu(&rw, &["force-unlock", "-force", "crashed-apply"]),
         "force-unlock",

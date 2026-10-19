@@ -33,9 +33,6 @@ pub fn router() -> Router<AppState> {
             "/orgs/{org}/projects/{project}/releases",
             get(project_releases),
         )
-        // Legacy /deployments URL — kept as a redirect to /releases for
-        // external links. The deployment timeline (and CD action chips)
-        // now live under "Releases" since a release IS a deployment.
         .route(
             "/orgs/{org}/projects/{project}/deployments",
             get(deployments_to_releases_redirect),
@@ -78,7 +75,6 @@ pub fn router() -> Router<AppState> {
         .route("/orgs/{org}/settings", get(org_settings))
         .route("/orgs/{org}/settings/usage", get(usage))
         .route("/orgs/{org}/settings/compute", get(compute_page))
-        // Legacy redirects
         .route("/orgs/{org}/usage", get(redirect_usage))
         .route("/orgs/{org}/compute", get(redirect_compute))
         .route(
@@ -113,13 +109,6 @@ pub fn router() -> Router<AppState> {
             "/orgs/{org}/projects/{project}/deploy",
             post(deploy_release),
         )
-        // ── Project settings shell ──────────────────────────────────
-        // Triggers, Policies and Pipelines are sections of one settings
-        // area rather than three standalone pages. The canonical URLs
-        // live under `/settings`; the bare `/triggers`-style paths below
-        // 303 into them so bookmarks and old links survive. Their POST
-        // routes stay mapped to the same submit handlers, so a form or
-        // script still posting to the old path keeps working.
         .route(
             "/orgs/{org}/projects/{project}/settings",
             get(project_settings_redirect),
@@ -172,7 +161,6 @@ pub fn router() -> Router<AppState> {
             "/orgs/{org}/projects/{project}/settings/pipelines/{id}/delete",
             post(delete_pipeline),
         )
-        // Legacy standalone URLs — GET redirects into the shell above.
         .route(
             "/orgs/{org}/projects/{project}/triggers",
             get(triggers_redirect).post(create_trigger_submit),
@@ -260,10 +248,6 @@ fn orgs_context(orgs: &[CachedOrg]) -> Vec<minijinja::Value> {
         .collect()
 }
 
-/// Convert the blessed project metadata into a template-friendly context.
-/// `has_any` lets the template branch on whether to render the About
-/// block at all (matches the 008 clean-empty-state policy). URL
-/// shortening is done in the template via the `prettify_url` filter.
 fn project_metadata_to_context(m: &forage_core::platform::ProjectMetadata) -> minijinja::Value {
     context! {
         git_url => &m.git_url,
@@ -300,7 +284,6 @@ fn require_org_membership<'a>(
     })
 }
 
-/// Require the user to be an admin or owner of the organisation.
 #[allow(clippy::result_large_err)]
 fn require_admin(state: &AppState, org: &CachedOrg) -> Result<(), Response> {
     if org.role == "owner" || org.role == "admin" {
@@ -315,16 +298,10 @@ fn require_admin(state: &AppState, org: &CachedOrg) -> Result<(), Response> {
     }
 }
 
-// ─── Dashboard ──────────────────────────────────────────────────────
-
 async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Response, Response> {
     let orgs = &session.user.orgs;
 
     if orgs.is_empty() {
-        // No orgs: show onboarding with create org form. Still fetch
-        // join offers — a brand-new user whose verified email matches an
-        // org's allowlist is exactly the audience auto-invite is for
-        // (DATA-252).
         let join_offers = warn_default(
             "onboarding: list_join_offers",
             state
@@ -354,20 +331,6 @@ async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Re
         return Ok(Html(html).into_response());
     }
 
-    // Fetch recent activity: for each org, get projects, then artifacts.
-    //
-    // Collect every project's artifacts first and sort by `created_at` at the
-    // end. Filling the list project by project instead — and stopping at the
-    // first five projects — pinned the feed to whichever projects
-    // `list_projects` happened to return first (it has no ORDER BY, so that is
-    // heap order, unrelated to recency). One busy project with ten or more
-    // releases filled the whole list on its own and the loop broke, so the
-    // dashboard showed that project's history and never the org's newest work
-    // — "Recent activity" sat frozen at a release days old while other
-    // projects deployed all day (DATA-703).
-    //
-    // Same collect-then-sort shape as the notifications and profile feeds
-    // below, which were already correct.
     const RECENT_ACTIVITY_LIMIT: usize = 10;
 
     struct ActivityItem {
@@ -396,8 +359,6 @@ async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Re
             first_org_projects = projects.clone();
         }
 
-        // One round trip per project, issued concurrently: covering every
-        // project costs about what the old capped five did serially.
         let client = &state.platform_client;
         let token = session.access_token.as_str();
         let org_name = org.name.as_str();
@@ -432,9 +393,6 @@ async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Re
         }
     }
 
-    // Newest first, then cap. `created_at` is RFC3339 rendered from a UTC
-    // timestamp, so the offset is always `+00:00` and a lexicographic compare
-    // orders it correctly — the same compare the profile feed uses.
     activity.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     activity.truncate(RECENT_ACTIVITY_LIMIT);
 
@@ -452,8 +410,6 @@ async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Re
         })
         .collect();
 
-    // Auto-invite offers — surfaced as a banner if any are present (DATA-252).
-    // Soft-fail: a failure here shouldn't break the dashboard.
     let join_offers = warn_default(
         "dashboard: list_join_offers",
         state
@@ -487,8 +443,6 @@ async fn dashboard(State(state): State<AppState>, session: Session) -> Result<Re
 
     Ok(Html(html).into_response())
 }
-
-// ─── Notifications ───────────────────────────────────────────────────
 
 struct NotifRelease {
     org: String,
@@ -536,7 +490,6 @@ async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRe
         let dest_states = dest_states.unwrap_or_default();
         let release_intents = release_intents.unwrap_or_default();
 
-        // Index destination states by artifact_id.
         let mut states_by_artifact: std::collections::HashMap<
             &str,
             Vec<&forage_core::platform::DestinationState>,
@@ -547,7 +500,6 @@ async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRe
             }
         }
 
-        // Index pipeline stages by artifact_id.
         let mut intent_stages_by_artifact: std::collections::HashMap<
             &str,
             &[forage_core::platform::PipelineRunStageState],
@@ -558,7 +510,6 @@ async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRe
             }
         }
 
-        // Fetch pipeline configs per project to know which projects have pipelines.
         let mut pipelines_by_project: std::collections::HashMap<String, bool> =
             std::collections::HashMap::new();
         for p in &projects {
@@ -586,7 +537,6 @@ async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRe
                 Err(_) => continue,
             };
             for artifact in artifacts {
-                // Filter to current user's releases.
                 let is_mine = artifact
                     .source
                     .as_ref()
@@ -602,16 +552,13 @@ async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRe
                     .cloned()
                     .unwrap_or_default();
 
-                // Compute summary status.
                 let aid = artifact.artifact_id.as_str();
                 let summary_status = compute_summary_status(&matching_states, || {
                     intent_stages_by_artifact.contains_key(aid)
                 });
 
-                // Build env groups for display.
                 let env_groups = build_env_groups(&matching_states);
 
-                // Build pipeline stages from intent data.
                 let mut pipeline_stages: Vec<minijinja::Value> = Vec::new();
                 if let Some(run_stages) = intent_stages_by_artifact.get(aid) {
                     let sorted = topo_sort_run_stages(run_stages);
@@ -642,8 +589,6 @@ async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRe
                 let project_has_pipeline = pipelines_by_project.contains_key(project);
                 let has_pipeline = !pipeline_stages.is_empty() || project_has_pipeline;
 
-                // Build destinations (deduped — one row per destination,
-                // latest state).
                 let destinations: Vec<minijinja::Value> = dedupe_destinations(&matching_states)
                     .into_iter()
                     .map(|ds| {
@@ -688,7 +633,6 @@ async fn fetch_notifications(state: &AppState, session: &Session) -> Vec<NotifRe
         }
     }
 
-    // Sort: in-progress first (RUNNING, QUEUED), then by created_at descending.
     releases.sort_by(|a, b| {
         let active = |s: &str| matches!(s, "RUNNING" | "QUEUED");
         let a_active = active(&a.summary_status);
@@ -735,8 +679,6 @@ struct NotificationsQuery {
     #[serde(default)]
     _partial: Option<String>,
 }
-
-// ─── Org settings ──────────────────────────────────────────────────
 
 async fn org_settings(
     State(state): State<AppState>,
@@ -786,9 +728,6 @@ async fn notifications_page(
     render_notifications(state, session, query, current_org).await
 }
 
-// Org-scoped variant: same notifications list, but `current_org` comes
-// from the URL so the nav chrome keeps the user anchored in the org they
-// arrived from. DATA-248.
 async fn org_notifications_page(
     State(state): State<AppState>,
     session: Session,
@@ -808,7 +747,6 @@ async fn render_notifications(
     let releases = fetch_notifications(&state, &session).await;
     let release_values = notifications_to_values(releases);
 
-    // Partial render: return just the list HTML for AJAX polling.
     if query._partial.is_some() {
         let html = state
             .templates
@@ -840,8 +778,6 @@ async fn render_notifications(
 
     Ok(Html(html).into_response())
 }
-
-// ─── Create organisation ────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct CreateOrgForm {
@@ -879,7 +815,6 @@ async fn create_org_submit(
     }
 
     if !validate_slug(&form.name) {
-        // Re-render onboarding/dashboard with error
         let html = state
             .templates
             .render(
@@ -905,7 +840,6 @@ async fn create_org_submit(
         .await
     {
         Ok(org_id) => {
-            // Update session with new org
             if let Ok(Some(mut session_data)) = state.sessions.get(&session.session_id).await {
                 if let Some(ref mut user) = session_data.user {
                     user.orgs.push(CachedOrg {
@@ -951,8 +885,6 @@ async fn create_org_submit(
     }
 }
 
-// ─── Projects list ──────────────────────────────────────────────────
-
 async fn projects_list(
     State(state): State<AppState>,
     session: Session,
@@ -988,8 +920,6 @@ async fn projects_list(
     Ok(Html(html).into_response())
 }
 
-// ─── Project detail ─────────────────────────────────────────────────
-
 async fn project_detail(
     State(state): State<AppState>,
     session: Session,
@@ -1018,11 +948,6 @@ async fn project_detail(
             None => Ok(vec![]),
         }
     };
-    // Per specs/features/008: the project Overview folds in the canonical
-    // component's detail (shape, tool facet, README, manifest) when the
-    // 1:1 name match holds. If the component doesn't exist yet (fresh
-    // project) or the call fails, the Overview renders the Get-started
-    // panel — no error to the user.
     let comp_detail_fut = async {
         match state.registry_client.as_ref() {
             Some(registry) => registry
@@ -1052,9 +977,6 @@ async fn project_detail(
     let projects = warn_default("list_projects", projects);
     let environments = warn_default("list_environments", environments);
     let component_versions = warn_default("list_component_versions", component_versions);
-    // Project-level description + blessed metadata. A missing project
-    // (Ok(None)) or a transient gRPC failure both degrade to empty —
-    // the Overview still renders with the component-level fallback.
     let project_info: Option<forage_core::platform::Project> = match project_info {
         Ok(p) => p,
         Err(e) => {
@@ -1063,7 +985,6 @@ async fn project_detail(
         }
     };
 
-    // Environment options for the deploy dropdown (sorted by sort_order).
     let mut sorted_envs = environments.clone();
     sorted_envs.sort_by_key(|e| e.sort_order);
     let env_options: Vec<minijinja::Value> = if !sorted_envs.is_empty() {
@@ -1072,7 +993,6 @@ async fn project_detail(
             .map(|e| context! { name => e.name })
             .collect()
     } else {
-        // Fallback: derive from artifact destinations
         let mut env_seen = std::collections::HashSet::new();
         artifacts
             .iter()
@@ -1082,26 +1002,13 @@ async fn project_detail(
             .collect()
     };
 
-    // Whether the Overview renders its embedded release-timeline summary at
-    // all. The component fetches everything it draws from
-    // /api/orgs/{org}/projects/{project}/timeline; this used to build a second,
-    // parallel timeline server-side — destination states, release intents and
-    // pipelines included — purely to answer a yes/no question.
     let project_has_timeline = !artifacts.is_empty();
 
-    // Project Overview folds in the canonical component's catalog data.
-    // When the component exists: shape badge, install copy, README markdown,
-    // manifest pretty JSON + structured view. When it doesn't, all of these
-    // are None/empty and the template shows the Get-started panel.
     let comp_summary = comp_detail.as_ref().map(|d| d.summary.clone());
     let comp_versions = comp_detail
         .as_ref()
         .map(|d| d.versions.clone())
         .unwrap_or_default();
-    // Prefer the project-level README over a component's `component_files`
-    // README (which may be tied to a single version). Falls back to the
-    // component README when the project doesn't carry one — same policy
-    // as the description below.
     let project_readme = project_info
         .as_ref()
         .map(|p| p.readme.as_str())
@@ -1115,8 +1022,6 @@ async fn project_detail(
             .map(|d| super::render_markdown(&d.readme))
             .unwrap_or_default()
     };
-    // Description: project-level wins, component manifest as fallback.
-    // See spec 009 §"Forest UI".
     let project_description = project_info
         .as_ref()
         .map(|p| p.description.clone())
@@ -1167,11 +1072,6 @@ async fn project_detail(
                 project_metadata => project_metadata_ctx,
                 manifest_html => manifest_html,
                 manifest => manifest_view,
-                // Whether to render the embedded release-timeline summary
-                // on Overview. We hide the section entirely when zero
-                // releases exist so the page stays clean — the timeline
-                // component would otherwise render its own empty state
-                // and crowd the Overview's Get-started panel.
                 project_has_timeline => project_has_timeline,
             },
         )
@@ -1179,13 +1079,6 @@ async fn project_detail(
 
     Ok(Html(html).into_response())
 }
-
-// ─── Project releases (deployment timeline + CD plumbing) ────────────
-//
-// One canonical "Releases" tab shows every release performed for a
-// project: the timeline of which artefacts went to which environments,
-// plus links to Pipelines / Triggers / Policies management. The legacy
-// /deployments URL 303-redirects here.
 
 async fn project_releases(
     State(state): State<AppState>,
@@ -1261,15 +1154,11 @@ async fn project_releases(
     Ok(Html(html).into_response())
 }
 
-/// Legacy `/orgs/{org}/projects/{project}/deployments` — 303s to the
-/// consolidated Releases tab. Kept for external-link survival.
 async fn deployments_to_releases_redirect(
     Path((org, project)): Path<(String, String)>,
 ) -> Response {
     Redirect::to(&format!("/orgs/{org}/projects/{project}/releases")).into_response()
 }
-
-// ─── Artifact detail ─────────────────────────────────────────────────
 
 async fn artifact_detail(
     State(state): State<AppState>,
@@ -1311,7 +1200,6 @@ async fn artifact_detail(
             .platform_client
             .list_environments(&session.access_token, &org),
     );
-    // Fetch artifact spec after we have the artifact_id (needs artifact_result first).
 
     let artifact = artifact_result.map_err(|e| match e {
         forage_core::platform::PlatformError::NotFound(_) => error_page(
@@ -1323,7 +1211,6 @@ async fn artifact_detail(
         other => internal_error(&state, "failed to fetch artifact", &other),
     })?;
 
-    // Fetch artifact spec now that we have the artifact_id.
     let artifact_spec = state
         .platform_client
         .get_artifact_spec(&session.access_token, &artifact.artifact_id)
@@ -1337,21 +1224,18 @@ async fn artifact_detail(
         .iter()
         .any(|pl| pl.enabled);
 
-    // Filter destination states to this artifact.
     let matching_states: Vec<&forage_core::platform::DestinationState> = dest_states
         .destinations
         .iter()
         .filter(|ds| ds.artifact_id.as_deref() == Some(&artifact.artifact_id))
         .collect();
 
-    // Compute summary status.
     let summary_status = compute_summary_status(&matching_states, || {
         release_intents
             .iter()
             .any(|ri| ri.artifact_id == artifact.artifact_id && !ri.stages.is_empty())
     });
 
-    // Build pipeline stages from the most recent release intent for this artifact.
     let mut pipeline_stages: Vec<minijinja::Value> = Vec::new();
     let latest_intent = release_intents
         .iter()
@@ -1369,17 +1253,6 @@ async fn artifact_detail(
             } else {
                 base_status
             };
-            // A plan stage is the one place this page asks somebody to agree
-            // to something, and until DATA-863 it asked without showing what.
-            // The swimlane had a "View plan" button; this page, the one the
-            // approve link in Slack opens, rendered the stage row and nothing
-            // else -- so a reviewer approved a plan they had to go and find.
-            //
-            // Fetched per stage rather than once for the release because the
-            // output is recorded against the stage, and a pipeline may plan
-            // more than one environment. A failure is not fatal: an
-            // unreachable plan is a page without a plan on it, which is what
-            // there was before, and never a page that will not load.
             let plan_output = if rs.stage_type == "plan" {
                 match state
                     .platform_client
@@ -1417,7 +1290,6 @@ async fn artifact_detail(
 
     let has_pipeline = !pipeline_stages.is_empty() || project_has_pipeline;
 
-    // Fetch policy evaluations for active release intents.
     struct PolicyEvalEntry {
         policy_name: String,
         policy_type: String,
@@ -1513,11 +1385,8 @@ async fn artifact_detail(
         .map(|o| o.role == "owner" || o.role == "admin")
         .unwrap_or(false);
 
-    // Build env groups.
     let env_groups = build_env_groups(&matching_states);
 
-    // Build destinations with status (deduped — one row per destination,
-    // latest state).
     let destinations: Vec<minijinja::Value> = dedupe_destinations(&matching_states)
         .into_iter()
         .map(|ds| {
@@ -1552,7 +1421,6 @@ async fn artifact_detail(
                 projects => projects,
                 active_tab => "project_releases",
                 artifact => {
-                    // Parse auto-generated description for fallback metadata.
                     let desc_meta = artifact.context.description.as_deref()
                         .filter(|d| d.starts_with("Branch:"))
                         .map(parse_description_metadata)
@@ -1612,7 +1480,6 @@ async fn artifact_detail(
     Ok(Html(html).into_response())
 }
 
-/// Compute summary status from destination states.
 fn compute_summary_status<F: FnOnce() -> bool>(
     matching_states: &[&forage_core::platform::DestinationState],
     has_intent_stages: F,
@@ -1647,7 +1514,6 @@ fn compute_summary_status<F: FnOnce() -> bool>(
     }
 }
 
-/// Destination-aware status override for deploy stages.
 fn deploy_stage_display_status<'a>(
     rs: &'a forage_core::platform::PipelineRunStageState,
     matching_states: &[&forage_core::platform::DestinationState],
@@ -1667,8 +1533,6 @@ fn deploy_stage_display_status<'a>(
     &rs.status
 }
 
-/// Parse auto-generated description like "Branch: main. Source: github_actions. Author: tnielsen."
-/// into a map of key-value pairs. Used as fallback when structured fields are empty.
 fn parse_description_metadata(desc: &str) -> std::collections::HashMap<String, String> {
     let mut meta = std::collections::HashMap::new();
     for part in desc.split(". ") {
@@ -1680,21 +1544,6 @@ fn parse_description_metadata(desc: &str) -> std::collections::HashMap<String, S
     meta
 }
 
-/// Destination states for one release, rebuilt from that release's own
-/// deploy steps.
-///
-/// `get_destination_states` answers "what is on each destination *now*" —
-/// `DISTINCT ON (destination_id)`, one row per destination, naming whichever
-/// artifact currently occupies it. So the moment a later release takes over a
-/// destination, the earlier one matches nothing: `has_dests` goes false, it
-/// gets collapsed into the "N hidden commits" group, and `dest_envs` comes out
-/// empty so the swim lane draws no dot — even though it really did deploy
-/// (DATA-660).
-///
-/// A release intent's steps are the per-release history, so they are the right
-/// source. Queue position exists only on the live rows (it is a property of the
-/// queue, not of a past deploy), so carry it across where the destination still
-/// holds this release.
 fn steps_to_destination_states(
     steps: &[&forage_core::platform::ReleaseStepState],
     live: &[&forage_core::platform::DestinationState],
@@ -1719,20 +1568,12 @@ fn steps_to_destination_states(
                 queued_at: s.queued_at.clone(),
                 completed_at: s.completed_at.clone(),
                 queue_position: live_match.and_then(|ds| ds.queue_position),
-                // A step that was assigned but never recorded a start is
-                // still under way; `assigned_at` is the best start we have.
                 started_at: s.started_at.clone().or_else(|| s.assigned_at.clone()),
             }
         })
         .collect()
 }
 
-/// Build env groups for display (grouped by best status).
-/// Reduce to one entry per destination_id, keeping the most recent state.
-/// Forest's release_states retains terminal rows alongside new in-flight
-/// ones for the same destination — without this, a re-deploy yields two
-/// rows that crash the Svelte `{#each ... (dest.name)}` with a duplicate
-/// key.
 fn dedupe_destinations<'a>(
     matching_states: &[&'a forage_core::platform::DestinationState],
 ) -> Vec<&'a forage_core::platform::DestinationState> {
@@ -1743,10 +1584,6 @@ fn dedupe_destinations<'a>(
             .or(ds.queued_at.as_deref())
             .unwrap_or("")
     }
-    // Dedupe by destination_name (the field the Svelte `{#each ... (dest.name)}`
-    // keys on). This is a strictly tighter guarantee than deduping by
-    // destination_id and handles the rare case where forest yields two
-    // entries with the same name.
     let mut by_name: std::collections::HashMap<&str, &forage_core::platform::DestinationState> =
         std::collections::HashMap::new();
     let mut order: Vec<&str> = Vec::new();
@@ -1822,8 +1659,6 @@ fn build_env_groups(
     env_groups
 }
 
-// ─── Usage ──────────────────────────────────────────────────────────
-
 async fn usage(
     State(state): State<AppState>,
     session: Session,
@@ -1860,8 +1695,6 @@ async fn usage(
 
     Ok(Html(html).into_response())
 }
-
-// ─── Deploy release ────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct DeployForm {
@@ -1908,8 +1741,6 @@ async fn deploy_release(
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/releases")).into_response())
 }
 
-// ─── User profile ──────────────────────────────────────────────────
-
 async fn user_profile(
     State(state): State<AppState>,
     session: Session,
@@ -1931,7 +1762,6 @@ async fn user_profile(
 
     let orgs = &session.user.orgs;
 
-    // Fetch contributions: collect artifacts created by this user across all orgs/projects.
     let profile_data = build_user_profile_data(&state, &session, orgs, &username).await;
 
     let html = state
@@ -1962,14 +1792,12 @@ async fn user_profile(
     Ok(Html(html).into_response())
 }
 
-/// User profile data: heatmap, recent releases, and contributed projects.
 struct UserProfileData {
     heatmap: minijinja::Value,
     recent_releases: Vec<minijinja::Value>,
     contributed_projects: Vec<minijinja::Value>,
 }
 
-/// Build user profile data: contribution heatmap, recent releases, and contributed projects.
 async fn build_user_profile_data(
     state: &AppState,
     session: &Session,
@@ -1986,7 +1814,6 @@ async fn build_user_profile_data(
     let mut day_counts: HashMap<chrono::NaiveDate, u32> = HashMap::new();
     let mut total_contributions = 0u32;
 
-    // Collect recent releases (sorted by created_at desc, capped at 10).
     struct RecentRelease {
         org: String,
         project: String,
@@ -1998,11 +1825,9 @@ async fn build_user_profile_data(
     }
     let mut all_releases: Vec<RecentRelease> = Vec::new();
 
-    // Track unique org/project pairs for contributed projects.
     let mut project_set: HashSet<(String, String)> = HashSet::new();
     let mut project_release_counts: HashMap<(String, String), u32> = HashMap::new();
 
-    // Fetch artifacts from all orgs/projects (best effort).
     for org in orgs {
         let projects = match state
             .platform_client
@@ -2032,12 +1857,10 @@ async fn build_user_profile_data(
                     continue;
                 }
 
-                // Track contributed project.
                 let key = (org.name.clone(), project.clone());
                 project_set.insert(key.clone());
                 *project_release_counts.entry(key).or_default() += 1;
 
-                // Collect for recent releases list.
                 all_releases.push(RecentRelease {
                     org: org.name.clone(),
                     project: project.clone(),
@@ -2048,7 +1871,6 @@ async fn build_user_profile_data(
                     created_at: artifact.created_at.clone(),
                 });
 
-                // Heatmap day counts.
                 if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&artifact.created_at) {
                     let date = dt.date_naive();
                     if date >= grid_start && date <= today {
@@ -2060,7 +1882,6 @@ async fn build_user_profile_data(
         }
     }
 
-    // Sort releases by created_at descending, take top 10.
     all_releases.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     all_releases.truncate(10);
     let recent_releases: Vec<minijinja::Value> = all_releases
@@ -2078,7 +1899,6 @@ async fn build_user_profile_data(
         })
         .collect();
 
-    // Build contributed projects list sorted by release count descending.
     let mut contributed_projects: Vec<((String, String), u32)> =
         project_release_counts.into_iter().collect();
     contributed_projects.sort_by(|a, b| b.1.cmp(&a.1));
@@ -2093,8 +1913,6 @@ async fn build_user_profile_data(
         })
         .collect();
 
-    // Build the grid: 53 columns (weeks) x 7 rows (days).
-    // Use a power scale (sqrt) to map counts to 5 levels (0-4).
     let max_count = day_counts.values().copied().max().unwrap_or(0);
 
     let mut weeks: Vec<minijinja::Value> = Vec::new();
@@ -2114,7 +1932,6 @@ async fn build_user_profile_data(
             in_range => in_range,
         });
 
-        // End of week (Saturday) — flush to weeks.
         if current.weekday() == chrono::Weekday::Sat || current == today {
             weeks.push(minijinja::Value::from_serialize(&week_days));
             week_days = Vec::new();
@@ -2125,7 +1942,6 @@ async fn build_user_profile_data(
         weeks.push(minijinja::Value::from_serialize(&week_days));
     }
 
-    // Month labels: first occurrence of each month in the grid.
     let mut month_labels: Vec<minijinja::Value> = Vec::new();
     let mut last_month = None;
     let mut col = 0usize;
@@ -2157,21 +1973,14 @@ async fn build_user_profile_data(
     }
 }
 
-/// Map a contribution count to an opacity 0.0–1.0 using a power scale (sqrt).
-/// This gives a smooth gradient where low counts still have visible color
-/// and high counts don't dwarf everything else.
 fn contribution_opacity(count: u32, max_count: u32) -> String {
     if count == 0 || max_count == 0 {
         return "0".to_string();
     }
-    // sqrt scale: brings low values up, compresses high values.
-    // Min opacity 0.15 so even 1 contribution is visible.
     let ratio = (count as f64).sqrt() / (max_count as f64).sqrt();
     let opacity = 0.15 + ratio * 0.85;
     format!("{:.2}", opacity.clamp(0.15, 1.0))
 }
-
-// ─── Timeline builder (shared between dashboard, project detail, releases) ───
 
 struct ArtifactWithProject {
     artifact: forage_core::platform::Artifact,
@@ -2180,11 +1989,9 @@ struct ArtifactWithProject {
 
 const RELEASE_TIMELINE_CONTEXT_LIMIT: usize = 20;
 
-/// Pipeline info indexed by project name, for overlaying onto releases.
 type PipelinesByProject =
     std::collections::HashMap<String, Vec<forage_core::platform::ReleasePipeline>>;
 
-/// Topologically sort pipeline run stage states by their `depends_on` edges.
 fn topo_sort_run_stages(
     stages: &[forage_core::platform::PipelineRunStageState],
 ) -> Vec<&forage_core::platform::PipelineRunStageState> {
@@ -2249,8 +2056,6 @@ fn topo_sort_run_stages(
     result
 }
 
-// ─── Serialisable API types (for the JSON timeline endpoint) ─────────
-
 #[derive(Debug, Serialize)]
 pub struct ApiTimelineResponse {
     pub timeline: Vec<ApiTimelineItem>,
@@ -2307,10 +2112,6 @@ pub struct ApiDestinationState {
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub queue_position: Option<i32>,
-    /// Whether this destination still holds this release — i.e. this is what
-    /// is deployed there now, rather than something a later release replaced.
-    /// Per destination, not per release: a release can still be live on prod
-    /// while already superseded on dev.
     pub is_current: bool,
 }
 
@@ -2346,8 +2147,6 @@ pub struct ApiLane {
     pub description: Option<String>,
 }
 
-/// Build a serialisable timeline from the same inputs as `build_timeline`.
-/// The logic is kept intentionally parallel so both renderers stay in sync.
 fn build_timeline_json(
     items: Vec<ArtifactWithProject>,
     environments: &[forage_core::platform::Environment],
@@ -2356,7 +2155,6 @@ fn build_timeline_json(
     pipelines_by_project: &PipelinesByProject,
     approval_envs: &[String],
 ) -> ApiTimelineResponse {
-    // Index destination states by artifact_id.
     let mut states_by_artifact: std::collections::HashMap<
         &str,
         Vec<&forage_core::platform::DestinationState>,
@@ -2367,18 +2165,12 @@ fn build_timeline_json(
         }
     }
 
-    // Index pipeline run stages and intent IDs by artifact_id.
     let mut intent_stages_by_artifact: std::collections::HashMap<
         &str,
         &[forage_core::platform::PipelineRunStageState],
     > = std::collections::HashMap::new();
     let mut intent_id_by_artifact: std::collections::HashMap<&str, &str> =
         std::collections::HashMap::new();
-    // Deploy steps per artifact — the release-centric deploy history, which is
-    // what the timeline needs rather than the current-state-per-destination
-    // view. Accumulated across intents: re-releasing the same artifact opens a
-    // second intent, and `dedupe_destinations` picks the most recent state per
-    // destination from the union.
     let mut steps_by_artifact: std::collections::HashMap<
         &str,
         Vec<&forage_core::platform::ReleaseStepState>,
@@ -2419,11 +2211,6 @@ fn build_timeline_json(
         let artifact = item.artifact;
         let project = item.project_name;
 
-        // What is on the destinations right now, and what this release itself
-        // deployed. Prefer the latter — see `steps_to_destination_states`. A
-        // release with no steps recorded (older than the intent window, or
-        // never released) falls back to the live view, which is what every
-        // release used to get.
         let live_states = states_by_artifact
             .get(artifact.artifact_id.as_str())
             .cloned()
@@ -2432,10 +2219,6 @@ fn build_timeline_json(
             .get(artifact.artifact_id.as_str())
             .map(|steps| steps_to_destination_states(steps, &live_states, &artifact.artifact_id))
             .unwrap_or_default();
-        // Destinations this release still holds. `get_destination_states` is
-        // the current-state-per-destination view — the wrong source for
-        // history (DATA-660), and exactly the right one for currency: a name
-        // in here means the destination has not moved on to a later release.
         let live_dest_names: std::collections::HashSet<&str> = live_states
             .iter()
             .map(|ds| ds.destination_name.as_str())
@@ -2449,9 +2232,6 @@ fn build_timeline_json(
 
         let mut release_envs: Vec<String> = Vec::new();
         let mut release_env_statuses: Vec<String> = Vec::new();
-        // Dedupe — a re-deploy leaves both the old terminal state row and
-        // the new in-flight one for the same destination_name, which the
-        // Svelte `{#each ... (dest.name)}` then crashes on.
         let destinations: Vec<ApiDestinationState> = dedupe_destinations(&matching_states)
             .into_iter()
             .map(|ds| {
@@ -2482,7 +2262,6 @@ fn build_timeline_json(
             .cloned()
             .collect();
 
-        // Per-environment best status for grouping.
         let mut env_best_status: std::collections::HashMap<&str, &str> =
             std::collections::HashMap::new();
         for ds in &matching_states {
@@ -2525,14 +2304,12 @@ fn build_timeline_json(
             })
             .collect();
 
-        // Build pipeline stages — same logic as build_timeline.
         let pipeline_stages: Vec<ApiPipelineStage> = {
             let mut stages = Vec::new();
 
             if let Some(run_stages) = intent_stages_by_artifact.get(artifact.artifact_id.as_str()) {
                 let sorted = topo_sort_run_stages(run_stages);
                 for rs in sorted {
-                    // Same destination-aware override as build_timeline.
                     let display_status = if rs.stage_type == "deploy"
                         && (rs.status == "RUNNING" || rs.status == "ASSIGNED")
                     {
@@ -2571,7 +2348,6 @@ fn build_timeline_json(
                     } else {
                         None
                     };
-                    // For plan stages, use AWAITING_APPROVAL as display status when appropriate
                     let display_status = if rs.stage_type == "plan"
                         && rs.approval_status.as_deref() == Some("AWAITING_APPROVAL")
                     {
@@ -2595,7 +2371,6 @@ fn build_timeline_json(
                     });
                 }
             }
-            // No heuristic fallback — same rationale as build_timeline.
             stages
         };
 
@@ -2664,7 +2439,6 @@ fn build_timeline_json(
         });
     }
 
-    // Build lanes — same logic as build_timeline.
     let lanes: Vec<ApiLane> = if !environments.is_empty() {
         let mut envs = environments.to_vec();
         envs.sort_by_key(|e| e.sort_order);
@@ -2692,9 +2466,6 @@ fn build_timeline_json(
             .collect()
     };
 
-    // Truncate: keep everything up to the last deployed release, plus enough
-    // older items for the full Releases page. The Overview component still
-    // renders only its own `limit="3"` subset.
     let last_deployed_idx = raw_releases
         .iter()
         .rposition(|r| r.has_dests)
@@ -2745,8 +2516,6 @@ fn build_timeline_json(
 
     ApiTimelineResponse { timeline, lanes }
 }
-
-// ─── GET /api/orgs/{org}/projects/{project}/timeline ─────────────────
 
 async fn timeline_api(
     State(state): State<AppState>,
@@ -2838,8 +2607,6 @@ async fn timeline_api(
     Ok(Json(data).into_response())
 }
 
-// ─── GET /api/orgs/{org}/timeline ────────────────────────────────────
-
 async fn org_timeline_api(
     State(state): State<AppState>,
     session: Session,
@@ -2895,13 +2662,12 @@ async fn org_timeline_api(
         &dest_states,
         &release_intents,
         &pipelines_by_project,
-        &[], // org timeline doesn't have per-project policy context
+        &[],
     );
 
     Ok(Json(data).into_response())
 }
 
-/// Fetch all artifacts across projects and return as ArtifactWithProject list.
 async fn fetch_org_artifacts(
     state: &AppState,
     access_token: &str,
@@ -2927,8 +2693,6 @@ async fn fetch_org_artifacts(
     items
 }
 
-// ─── Releases (Up-inspired pipeline) ─────────────────────────────────
-
 async fn releases_page(
     State(state): State<AppState>,
     session: Session,
@@ -2937,11 +2701,6 @@ async fn releases_page(
     let orgs = &session.user.orgs;
     require_org_membership(&state, orgs, &org)?;
 
-    // This page is a shell around <release-timeline>, which fetches what it
-    // draws from /api/orgs/{org}/timeline. The handler used to build the whole
-    // thing a second time for a template that never read it: every project's
-    // pipelines, one sequential request at a time, plus every artifact in the
-    // org — all discarded a few lines later.
     let environments = warn_default(
         "list_environments",
         state
@@ -2977,8 +2736,6 @@ async fn releases_page(
 
     Ok(Html(html).into_response())
 }
-
-// ─── Destinations ────────────────────────────────────────────────────
 
 async fn destinations_page(
     State(state): State<AppState>,
@@ -3037,9 +2794,6 @@ async fn destinations_page(
                         .iter()
                         .map(|(k, v)| context! { key => k, value => v })
                         .collect();
-                    // Only non-sensitive values are exported. Withheld keys are
-                    // listed by name so an import prompts for them rather than
-                    // silently writing a placeholder over a real credential.
                     let metadata_json = serde_json::to_string(&d.metadata).unwrap_or_default();
                     context! {
                         name => d.name,
@@ -3066,7 +2820,6 @@ async fn destinations_page(
         })
         .collect();
 
-    // Also collect destinations not associated with any known environment
     let known_envs: std::collections::HashSet<&str> =
         environments.iter().map(|e| e.name.as_str()).collect();
     let orphan_dests: Vec<minijinja::Value> = org_destinations
@@ -3227,15 +2980,10 @@ struct CreateDestinationForm {
     metadata_keys: Vec<String>,
     #[serde(default, deserialize_with = "deserialize_string_or_seq")]
     metadata_values: Vec<String>,
-    /// Metadata keys the operator marked as credentials. Used for keys the
-    /// destination type does not declare — the type's own sensitive fields are
-    /// handled by the platform without the form saying anything.
     #[serde(default, deserialize_with = "deserialize_string_or_seq")]
     sensitive_keys: Vec<String>,
 }
 
-/// HTML forms send a single value as a string, multiple values as a sequence.
-/// This deserializer handles both cases.
 fn deserialize_string_or_seq<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -3279,7 +3027,6 @@ fn parse_metadata(keys: &[String], values: &[String]) -> std::collections::HashM
         .collect()
 }
 
-/// Trims, drops blanks, sorts and de-duplicates a form-supplied key list.
 fn sanitise_sensitive_keys(keys: &[String]) -> Vec<String> {
     let mut out: Vec<String> = keys
         .iter()
@@ -3391,11 +3138,6 @@ async fn destination_detail(
             )
         })?;
 
-    // A withheld key is hidden for one of two reasons, and the page has to tell
-    // them apart. Keys the *type* declares sensitive are hidden for every
-    // destination of that type and are not the destination's to give up, so the
-    // form must never echo them back into its own sensitive set. What is left is
-    // what this destination declared, and that is what the form resubmits.
     let type_sensitive_keys: std::collections::BTreeSet<&str> = dest
         .dest_type
         .as_ref()
@@ -3419,8 +3161,6 @@ async fn destination_detail(
         .filter(|k| !type_sensitive_keys.contains(k.as_str()))
         .collect();
 
-    // Withheld keys carry no value: the platform did not send one. They render
-    // as a masked row with a reveal control instead.
     let mut meta_entries: Vec<minijinja::Value> = dest
         .metadata
         .iter()
@@ -3485,9 +3225,6 @@ struct RevealQuery {
     key: String,
 }
 
-/// Returns one withheld metadata value as plain text, for the reveal control on
-/// the detail page. One key per request, mirroring the platform RPC — there is
-/// no endpoint that hands back every credential on a destination.
 async fn reveal_destination_metadata(
     State(state): State<AppState>,
     session: Session,
@@ -3511,7 +3248,6 @@ async fn reveal_destination_metadata(
                 axum::http::header::CONTENT_TYPE,
                 "text/plain; charset=utf-8",
             ),
-            // Keep it out of any shared cache or history.
             (axum::http::header::CACHE_CONTROL, "no-store, max-age=0"),
         ],
         value,
@@ -3526,11 +3262,8 @@ struct UpdateDestinationForm {
     metadata_keys: Vec<String>,
     #[serde(default, deserialize_with = "deserialize_string_or_seq")]
     metadata_values: Vec<String>,
-    /// Keys whose values the page never received, so the form cannot echo them
-    /// back. Without these the save below would blank out live credentials.
     #[serde(default, deserialize_with = "deserialize_string_or_seq")]
     preserve_sensitive_keys: Vec<String>,
-    /// The sensitive-key set to store. Empty means "leave it as it is".
     #[serde(default, deserialize_with = "deserialize_string_or_seq")]
     sensitive_keys: Vec<String>,
     #[serde(default)]
@@ -3559,15 +3292,7 @@ async fn update_destination_submit(
 
     let mut metadata = parse_metadata(&form.metadata_keys, &form.metadata_values);
 
-    // The update RPC replaces the whole metadata map, but this page is never
-    // sent the withheld values — so re-read each one here, server-side, and put
-    // it back. Skipping this would delete live credentials on every save.
-    // The values are fetched into this handler only; they never reach the
-    // browser.
     for key in sanitise_sensitive_keys(&form.preserve_sensitive_keys) {
-        // A blank field means "leave it alone" — the row renders empty because
-        // the value was withheld, not because the operator cleared it. Only a
-        // non-empty entry counts as a deliberate replacement.
         if metadata.get(&key).is_some_and(|v| !v.is_empty()) {
             continue;
         }
@@ -3603,8 +3328,6 @@ async fn update_destination_submit(
     ))
     .into_response())
 }
-
-// ─── Members ────────────────────────────────────────────────────────
 
 async fn members_page(
     State(state): State<AppState>,
@@ -3801,10 +3524,6 @@ async fn remove_member_submit(
 
     Ok(Redirect::to(&format!("/orgs/{org}/settings/members")).into_response())
 }
-
-// ─── Auto-Release Policies ──────────────────────────────────────────
-
-// ─── Organisation rule sets ──────────────────────────────────────────
 
 #[derive(Serialize)]
 struct OrgRuleProjectPreview {
@@ -4157,24 +3876,6 @@ fn org_pipeline_example() -> String {
     .unwrap_or_else(|_| "[]".into())
 }
 
-// ─── Addressing a rule by id ────────────────────────────────────────
-//
-// Trigger, policy and pipeline names are free text, and a release rule is
-// routinely named after the pattern it matches — `(feat|feature)/.*-to-platform-dev`
-// is a real one. Interpolating a name like that into `/triggers/{name}/delete`
-// yields extra path segments, so axum matched no route at all and the
-// Edit / Disable / Delete buttons 404'd before any handler ran.
-//
-// Action URLs therefore address a rule by its id, which is opaque and
-// URL-safe. The forest gRPC API still keys these resources by name, so each
-// handler resolves the id back to a name before calling it. `name` stays the
-// human-readable label in the UI; only the addressing changed.
-//
-// Resolution costs one extra list call on the action path. That is the same
-// call the corresponding page handler already makes, and it doubles as an
-// existence check — an id that no longer resolves renders "Not found" rather
-// than forwarding a stale name to the API.
-
 async fn resolve_trigger_name(
     state: &AppState,
     session: &Session,
@@ -4256,26 +3957,10 @@ async fn resolve_pipeline_name(
         })
 }
 
-// ─── Project settings shell ─────────────────────────────────────────
-//
-// `/orgs/{org}/projects/{project}/settings` is the project's release
-// configuration: Triggers, Policies and Pipelines under one header, one
-// sub-nav and one breadcrumb (see
-// `templates/components/project_settings.html.jinja`). Before this they
-// were three standalone pages with no shared chrome and no way back to
-// the project — you had to know the URL, and once there, retype it.
-//
-// `/settings` itself has no content of its own, so it 303s to the first
-// section rather than rendering an empty hub. Triggers leads because it
-// is the one people reach for most.
-
 async fn project_settings_redirect(Path((org, project)): Path<(String, String)>) -> Response {
     Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/triggers")).into_response()
 }
 
-/// The legacy standalone section URLs. GET 303s into the settings shell;
-/// the POST routes on the same paths still reach the original submit
-/// handlers, so nothing that already posts there breaks.
 async fn triggers_redirect(Path((org, project)): Path<(String, String)>) -> Response {
     Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/triggers")).into_response()
 }
@@ -4310,8 +3995,6 @@ async fn edit_policy_redirect(
     ))
     .into_response()
 }
-
-// ─── Triggers (auto-release triggers) ───────────────────────────────
 
 async fn triggers_page(
     State(state): State<AppState>,
@@ -4478,7 +4161,6 @@ async fn create_trigger_submit(
         ));
     }
 
-    // At least one filter pattern is required
     let has_pattern = non_empty(&form.branch_pattern).is_some()
         || non_empty(&form.title_pattern).is_some()
         || non_empty(&form.author_pattern).is_some()
@@ -4508,7 +4190,6 @@ async fn create_trigger_submit(
         ));
     }
 
-    // Auto-generate name from first pattern if not provided
     let name = if form.name.trim().is_empty() {
         let pattern = non_empty(&form.branch_pattern)
             .or_else(|| non_empty(&form.title_pattern))
@@ -4826,8 +4507,6 @@ async fn edit_trigger_submit(
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/triggers")).into_response())
 }
 
-// ─── Policies (deployment gating) ──────────────────────────────────
-
 async fn policies_page(
     State(state): State<AppState>,
     session: Session,
@@ -4959,21 +4638,6 @@ async fn policies_page(
     Ok(Html(html).into_response())
 }
 
-/// Map an environment name to its swim-lane colour.
-///
-/// Mirrors `STAGES` in `frontend/src/lib/colors.js`, which is where the palette
-/// is actually decided — environments get cool hues so that amber and red are
-/// free to mean "a person is needed" and "it broke" wherever they appear, and
-/// production is the heaviest mark in the gutter. See
-/// `design/RELEASE-SWIMLANE.md`.
-///
-/// The browser derives its own colours (it needs a light/dark pair, and the
-/// server cannot know the viewer's theme), so this is the light-mode value and
-/// exists for any other consumer of the timeline JSON. Keep the two in step.
-///
-/// Classification is by *stage* — the last `-`/`_`-separated segment naming
-/// one — so `data-prod` is production and `platform-dev` is development. The
-/// previous substring scan got those right by luck and `prod-metrics` wrong.
 fn env_lane_color(name: &str) -> &'static str {
     match env_stage(name) {
         Some("prod") => "#2563eb",
@@ -4985,10 +4649,6 @@ fn env_lane_color(name: &str) -> &'static str {
     }
 }
 
-/// The pipeline stage an environment belongs to, or `None`.
-///
-/// Checks the last segment, then the first, then the whole name — the tail
-/// wins because forest environments are named `<domain>-<stage>`.
 fn env_stage(name: &str) -> Option<&'static str> {
     const STAGES: &[(&str, &[&str])] = &[
         ("prod", &["prod", "production", "live"]),
@@ -5030,8 +4690,6 @@ mod env_lane_color_tests {
         assert_eq!(env_stage("platform_dev"), Some("dev"));
     }
 
-    // The case the old substring scan got wrong: it contains "prod", but it is
-    // not production.
     #[test]
     fn does_not_call_prod_metrics_production() {
         assert_eq!(env_stage("prod-metrics"), Some("prod"));
@@ -5052,9 +4710,6 @@ mod env_lane_color_tests {
         assert_eq!(env_stage(""), None);
     }
 
-    // Warm is reserved for "a person is needed" and "it broke". An environment
-    // that borrowed amber or red would make the gutter unreadable at exactly
-    // the moment it matters.
     #[test]
     fn never_hands_an_environment_a_warm_colour() {
         for name in [
@@ -5099,20 +4754,16 @@ struct CreatePolicyForm {
     name: String,
     #[serde(default)]
     policy_type: String,
-    // SoakTime fields
     #[serde(default)]
     source_environment: String,
     #[serde(default)]
     target_environment: String,
     #[serde(default)]
     duration_seconds: Option<i64>,
-    // BranchRestriction fields
     #[serde(default)]
     branch_pattern: String,
-    // Approval fields
     #[serde(default)]
     required_approvals: Option<i32>,
-    // SupersedePending fields. A checkbox, so absent means false.
     #[serde(default)]
     same_branch_only: Option<String>,
 }
@@ -5555,8 +5206,6 @@ async fn edit_policy_submit(
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/settings/policies")).into_response())
 }
 
-// ─── Release Pipelines ──────────────────────────────────────────────
-
 #[tracing::instrument(skip(state, session), fields(org, project))]
 async fn pipelines_page(
     State(state): State<AppState>,
@@ -5851,8 +5500,6 @@ fn non_empty(s: &str) -> Option<String> {
     }
 }
 
-// ── Approval routes ──────────────────────────────────────────────────
-
 #[derive(Deserialize)]
 struct ApprovalForm {
     csrf_token: String,
@@ -5979,8 +5626,6 @@ async fn reject_release_submit(
 
     Ok(Redirect::to(&format!("/orgs/{org}/projects/{project}/releases/{slug}")).into_response())
 }
-
-// ── Plan stage approve / reject / output ─────────────────────────────
 
 #[derive(Deserialize)]
 struct PlanStageForm {
@@ -6130,10 +5775,6 @@ async fn get_plan_output_api(
     }))
     .into_response())
 }
-
-// ---------------------------------------------------------------------------
-// Compute
-// ---------------------------------------------------------------------------
 
 async fn compute_page(
     State(state): State<AppState>,
@@ -6331,8 +5972,6 @@ async fn regions_api() -> impl IntoResponse {
     Json(regions)
 }
 
-// ─── Auto-invite by verified email domain (DATA-252) ────────────────────
-
 #[derive(Deserialize)]
 struct AccessFormSubmit {
     domain: String,
@@ -6353,17 +5992,12 @@ async fn access_page(
     access_page_inner(state, session, org, AccessPageFlash::None).await
 }
 
-/// Inline flash for re-renders from the access page's POST handlers.
-/// Adding/removing/verifying domains stay on the same page (instead of
-/// a flat error_page) so the user gets context.
 enum AccessPageFlash {
     None,
     Error(String),
     Info(String),
 }
 
-/// Shared renderer for the access page so POST handlers can re-render
-/// inline with a flash message instead of a flat error_page.
 async fn access_page_inner(
     state: AppState,
     session: Session,
@@ -6446,7 +6080,6 @@ async fn add_allowed_domain_submit(
         Err(PlatformError::InvalidArgument(msg))
         | Err(PlatformError::AlreadyExists(msg))
         | Err(PlatformError::PermissionDenied(msg)) => {
-            // Re-render with the validation error inline.
             access_page_inner(state, session, org, AccessPageFlash::Error(msg)).await
         }
         Err(e) => Err(internal_error(&state, "add_allowed_domain", &e)),
@@ -6563,9 +6196,6 @@ async fn accept_join_offer_submit(
         .accept_join_offer(&session.access_token, &org_id)
         .await
         .map_err(|e| match e {
-            // The auto-invite server-side check failed (e.g. domain removed
-            // since the banner loaded). Bounce them back to the dashboard
-            // with a flat error rather than a 500.
             PlatformError::PermissionDenied(msg) => {
                 error_page(&state, StatusCode::FORBIDDEN, "Not eligible", &msg)
             }
@@ -6578,8 +6208,6 @@ async fn accept_join_offer_submit(
         "auto_invite.accepted_via_forage"
     );
 
-    // The user's cached org list is now stale; bouncing to dashboard
-    // forces a refresh via the existing session-refresh middleware.
     Ok(Redirect::to("/").into_response())
 }
 

@@ -1,12 +1,5 @@
 {% extends "base.html.jinja" %}
 
-{# Dark mode is handled in static/css/input.css via a CSS-variable
-   palette remap (@media prefers-color-scheme: dark). Every gray /
-   coloured utility automatically inverts in dark mode — DO NOT add
-   `dark:` variants here, they undo the remap and produce the
-   exact "dark text on dark surface" bug we just fixed. Use plain
-   light-mode colour tokens and trust the remap. #}
-
 {% block content %}
 <section class="max-w-md mx-auto px-4 pt-24">
     {% if app %}

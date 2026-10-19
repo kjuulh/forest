@@ -1,18 +1,3 @@
-/**
- * The handoff between the page's prefetch and the component.
- *
- * The page starts the timeline request during HTML parse so it runs alongside
- * the bundle download rather than after it, and parks the promise on
- * `window.__forestTimeline` keyed by URL. Two things have to hold or the
- * optimisation turns into a bug:
- *
- *   - the URL the page builds and the URL the component looks up must match
- *     exactly, or the handoff silently misses and everything still works —
- *     just slowly, which is the kind of regression nobody notices;
- *   - the prefetch is consumed *once*. Every later call is a refresh driven by
- *     a live event, and handing those the promise resolved before the page was
- *     interactive would pin the timeline to its first state forever.
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { fetchTimeline, timelineUrl } from "./api.js";
 
@@ -62,7 +47,6 @@ describe("fetchTimeline", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  // The one that matters: a refresh has to see the server, not the page load.
   it("uses the primed payload once, then goes to the network", async () => {
     prime(timelineUrl("understory", "forage"), PAYLOAD);
     await expect(fetchTimeline("understory", "forage")).resolves.toEqual(PAYLOAD);
@@ -71,8 +55,6 @@ describe("fetchTimeline", () => {
   });
 
   it("falls back to the network when the prefetch failed", async () => {
-    // The page resolves a failed prefetch to null rather than rejecting, so the
-    // real request below is what decides whether this is an error.
     prime(timelineUrl("understory", "forage"), null);
     await expect(fetchTimeline("understory", "forage")).resolves.toEqual(FRESH);
     expect(fetchMock).toHaveBeenCalledOnce();

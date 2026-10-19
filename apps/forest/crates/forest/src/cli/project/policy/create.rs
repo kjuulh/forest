@@ -21,7 +21,6 @@ pub struct CreateCommand {
     #[arg(long = "type", short = 't')]
     policy_type: String,
 
-    // ── soak_time fields ────────────────────
     /// Source environment (for soak_time)
     #[arg(long)]
     source_environment: Option<String>,
@@ -34,12 +33,10 @@ pub struct CreateCommand {
     #[arg(long)]
     duration: Option<i64>,
 
-    // ── branch_restriction fields ───────────
     /// Branch pattern regex (for branch_restriction)
     #[arg(long)]
     branch_pattern: Option<String>,
 
-    // ── supersede_pending fields ────────────
     /// Only supersede a pending release when the newer one is on the same
     /// branch (for supersede_pending). Off by default: every pending release
     /// for the target collapses to the newest, whatever branch it came from.
@@ -119,10 +116,6 @@ impl CreateCommand {
                         SupersedePendingConfig {
                             target_environment: target.clone(),
                             same_branch_only: self.same_branch_only,
-                            // Not settable: forest cannot interrupt an in-flight
-                            // deploy into a defined state, so the policy lets a
-                            // running deploy finish and collapses the queue
-                            // behind it. See design/SKIP-TO-LATEST.md.
                             cancel_in_progress: false,
                         },
                     )),

@@ -15,15 +15,6 @@ use crate::services::release_pipeline::{
     init_stage_states, is_pipeline_complete,
 };
 
-/// The IntentCoordinator is the single saga orchestrator for pipeline release intents.
-///
-/// It owns the full lifecycle of a pipeline: activating stages, completing wait stages,
-/// propagating cancellations, enforcing soak_time policies, and marking the intent as
-/// SUCCEEDED or FAILED when all stages are terminal.
-///
-/// Wake-up signals:
-///   - NATS `forest.intent.evaluate` (published when a release finishes, or a new intent is created)
-///   - 5-second periodic sweep (crash recovery, timer expiry, soak_time retry)
 pub struct IntentCoordinator {
     state: State,
 }
@@ -90,7 +81,6 @@ impl Component for IntentCoordinator {
     }
 }
 
-/// Sweep all ACTIVE pipeline intents that are due for evaluation.
 async fn sweep_active_intents(state: &State) -> anyhow::Result<()> {
     let rows = sqlx::query_scalar!(
         r#"SELECT id as "id!"
@@ -116,25 +106,9 @@ async fn sweep_active_intents(state: &State) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The core idempotent evaluation function.
-///
-/// Loads the full state of a release intent (stages, stage_states, child release_states),
-/// walks the DAG holistically, and takes all possible actions in a single transaction:
-///   - Derive ACTIVE deploy stage status from child releases
-///   - Complete expired wait stages
-///   - Propagate cancellations transitively
-///   - Activate PENDING stages whose deps are satisfied (with soak_time checks)
-///   - Compute intent-level terminal status
-///
-/// Public so acceptance tests can drive exactly one evaluation and then assert
-/// on rows. The test fixture runs the gRPC server and the `Scheduler` but not
-/// this component: it is process-wide across every acceptance test, and a
-/// background loop mutating every intent in the shared dev database would make
-/// unrelated tests flaky. A direct call needs no sleeping and cannot race.
 pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     let mut tx = state.db.begin().await?;
 
-    // Step 1: Lock the intent
     let intent = sqlx::query!(
         "SELECT id, artifact, project_id, annotation_id, stages, stage_states, status
          FROM release_intents
@@ -146,10 +120,9 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     .await?;
 
     let Some(intent) = intent else {
-        return Ok(()); // Intent doesn't exist or locked by another evaluator
+        return Ok(());
     };
 
-    // Skip non-pipeline intents and already-terminal intents
     if intent.stages.is_none() || intent.status != "ACTIVE" {
         tx.commit().await?;
         return Ok(());
@@ -165,7 +138,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
         .context("parse stage_states")?
         .unwrap_or_else(|| init_stage_states(&stages));
 
-    // Step 2: Load all release_states for this intent
     let release_rows = sqlx::query!(
         "SELECT release_id, stage_id, status, error_message
          FROM release_states
@@ -175,7 +147,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     .fetch_all(&mut *tx)
     .await?;
 
-    // Group by stage_id
     let mut releases_by_stage: HashMap<String, Vec<ReleaseRow>> = HashMap::new();
     for row in &release_rows {
         if let Some(ref stage_id) = row.stage_id {
@@ -195,7 +166,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     let mut new_release_ids: Vec<Uuid> = Vec::new();
     let mut earliest_timer: Option<chrono::DateTime<chrono::Utc>> = None;
 
-    // Step 3a: Derive status of ACTIVE stages from their children
     let stage_ids_snapshot: Vec<String> = stage_states.keys().cloned().collect();
     for stage_id in &stage_ids_snapshot {
         let state_entry = stage_states.get(stage_id).cloned();
@@ -215,7 +185,7 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 let releases: &[ReleaseRow] = stage_releases.map(|v| v.as_slice()).unwrap_or(&[]);
 
                 if releases.is_empty() {
-                    continue; // No releases yet (shouldn't happen for ACTIVE deploy)
+                    continue;
                 }
 
                 let all_terminal = releases.iter().all(|r| {
@@ -225,7 +195,7 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                     )
                 });
                 if !all_terminal {
-                    continue; // Still in progress
+                    continue;
                 }
 
                 let mut updated = current.clone();
@@ -239,7 +209,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                     }
                     StageOutcome::Failed => {
                         updated.status = StageStatus::Failed;
-                        // Aggregate error messages from failed releases
                         let errors: Vec<String> = releases
                             .iter()
                             .filter(|r| r.status != "SUCCEEDED" && r.status != "SUPERSEDED")
@@ -254,7 +223,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 changed = true;
             }
             StageConfig::Wait { .. } => {
-                // Check if wait_until has passed
                 if let Some(ref wait_until_str) = current.wait_until
                     && let Ok(wait_until) = chrono::DateTime::parse_from_rfc3339(wait_until_str)
                 {
@@ -266,7 +234,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                         stage_states.insert(stage_id.clone(), updated);
                         changed = true;
                     } else {
-                        // Track earliest timer for next_evaluate_at
                         earliest_timer = Some(match earliest_timer {
                             Some(existing) => existing.min(wait_until_utc),
                             None => wait_until_utc,
@@ -344,8 +311,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                         changed = true;
                     }
                     _ => {
-                        // Still waiting. Record what for, so a parked pipeline
-                        // says what it is parked on rather than looking hung.
                         if current.gate_waiting_on.as_deref() != Some(unmet.as_slice()) {
                             let mut updated = current.clone();
                             updated.gate_waiting_on = Some(unmet);
@@ -362,14 +327,10 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 }
             }
             StageConfig::Plan { auto_approve, .. } => {
-                // Plan stages work like deploy stages but with an approval gate
                 let stage_releases = releases_by_stage.get(stage_id);
                 let releases: &[ReleaseRow] = stage_releases.map(|v| v.as_slice()).unwrap_or(&[]);
 
                 if releases.is_empty() {
-                    // ACTIVE plan stage with no child releases — this can happen if
-                    // activation was blocked after setting status=Active. Reset to
-                    // Pending so Step 4 re-attempts activation.
                     tracing::info!(%intent_id, stage_id, "coordinator: resetting empty plan stage to Pending for re-activation");
                     let mut updated = current.clone();
                     updated.status = StageStatus::Pending;
@@ -392,16 +353,12 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 let mut updated = current.clone();
 
                 if outcome == StageOutcome::Superseded {
-                    // A newer release overtook this plan before it ran. Not a
-                    // failure, and it must not sit waiting for an approval that
-                    // is now meaningless.
                     updated.status = StageStatus::Superseded;
                     updated.completed_at = Some(now_str.clone());
                     updated.error_message = first_reason(releases);
                     stage_states.insert(stage_id.clone(), updated);
                     changed = true;
                 } else if outcome == StageOutcome::Failed {
-                    // Plan execution itself failed
                     updated.status = StageStatus::Failed;
                     updated.completed_at = Some(now_str.clone());
                     let errors: Vec<String> = releases
@@ -415,7 +372,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                     stage_states.insert(stage_id.clone(), updated);
                     changed = true;
                 } else if *auto_approve {
-                    // Auto-approve: plan succeeded, skip approval gate
                     updated.status = StageStatus::Succeeded;
                     updated.completed_at = Some(now_str.clone());
                     updated.approval_status = Some(ApprovalStatus::Approved);
@@ -423,7 +379,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                     stage_states.insert(stage_id.clone(), updated);
                     changed = true;
                 } else {
-                    // Manual approval required
                     match current.approval_status {
                         Some(ApprovalStatus::Approved) => {
                             updated.status = StageStatus::Succeeded;
@@ -439,13 +394,11 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                             changed = true;
                         }
                         _ => {
-                            // Plan succeeded but no approval yet — set awaiting
                             if current.approval_status.is_none() {
                                 updated.approval_status = Some(ApprovalStatus::AwaitingApproval);
                                 stage_states.insert(stage_id.clone(), updated);
                                 changed = true;
                             }
-                            // Stay Active, don't complete
                         }
                     }
                 }
@@ -453,7 +406,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
         }
     }
 
-    // Step 3b: Propagate cancellations transitively
     let all_stage_ids: Vec<String> = stages.keys().cloned().collect();
     loop {
         let mut propagated = false;
@@ -464,8 +416,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
             if !is_pending {
                 continue;
             }
-            // Failure first: a stage downstream of both a failed and a
-            // superseded dependency is downstream of a failure.
             if has_failed_dependency(stage_id, &stages, &stage_states) {
                 stage_states.insert(
                     stage_id.clone(),
@@ -479,9 +429,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 propagated = true;
                 changed = true;
             } else if has_superseded_dependency(stage_id, &stages, &stage_states) {
-                // Inherits Superseded, not Cancelled: the rest of this run is
-                // moot because a newer release took its place, which is a
-                // different thing from somebody cancelling it.
                 stage_states.insert(
                     stage_id.clone(),
                     StageState {
@@ -500,7 +447,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
         }
     }
 
-    // Step 3c: Find PENDING stages whose deps are all SUCCEEDED
     let ready = find_ready_stages(&stages, &stage_states);
 
     for stage_id in &ready {
@@ -510,7 +456,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
 
         match &stage_def.config {
             StageConfig::Deploy { environment } => {
-                // Check soak_time policies inside the transaction
                 let soak_blocked = check_soak_time_policies(
                     &mut tx,
                     &intent.project_id,
@@ -526,7 +471,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                         environment,
                         "coordinator: deploy stage blocked by soak_time — {reason}"
                     );
-                    // Schedule retry — use a conservative 30s or parse remaining from reason
                     let retry_at = now + chrono::Duration::seconds(30);
                     earliest_timer = Some(match earliest_timer {
                         Some(existing) => existing.min(retry_at),
@@ -670,10 +614,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 );
                 changed = true;
 
-                // The deadline is a timer like a wait stage's, so the sweep
-                // wakes to decide `on_timeout` even if no signal ever arrives.
-                // Arriving signals wake it sooner, by publishing
-                // `forest.intent.evaluate` — see services/release_signals.rs.
                 earliest_timer = Some(match earliest_timer {
                     Some(existing) => existing.min(deadline),
                     None => deadline,
@@ -687,7 +627,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 );
             }
             StageConfig::Plan { environment, .. } => {
-                // Plan stages work like deploy but create releases in plan mode
                 let soak_blocked = check_soak_time_policies(
                     &mut tx,
                     &intent.project_id,
@@ -710,10 +649,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                     });
                     continue;
                 }
-
-                // Plan stages skip external approval checks — the plan is a dry-run
-                // that should execute so users can review the output before approving.
-                // The plan stage has its own built-in approval gate (AWAITING_APPROVAL).
 
                 let resolved = resolve_stage_destinations(
                     &mut tx,
@@ -801,7 +736,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
         }
     }
 
-    // Step 4: Compute intent-level status
     let pipeline_complete = is_pipeline_complete(&stage_states);
     let intent_status = if pipeline_complete {
         if stage_states
@@ -818,10 +752,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
             .values()
             .any(|s| s.status == StageStatus::Superseded)
         {
-            // Every stage terminal, nothing failed, and at least one was
-            // overtaken: the run was collapsed into a newer one. Reporting this
-            // FAILED is what would make an opt-in optimisation look like an
-            // outage in every view over the release history.
             "SUPERSEDED"
         } else {
             "FAILED"
@@ -830,7 +760,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
         "ACTIVE"
     };
 
-    // Step 5: Persist updated state
     let stage_states_json = serde_json::to_value(&stage_states)?;
     let next_eval = if intent_status == "ACTIVE" {
         earliest_timer
@@ -850,7 +779,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     .execute(&mut *tx)
     .await?;
 
-    // Write org_events inside the transaction
     let org_project = sqlx::query!(
         "SELECT organisation, project FROM projects WHERE id = $1",
         intent.project_id,
@@ -862,12 +790,10 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
         use crate::services::event_bus::EventPayload;
         use std::collections::BTreeMap;
 
-        // Event for each stage that just completed in this evaluation
         for stage_id in stage_states.keys() {
             let Some(state_entry) = stage_states.get(stage_id) else {
                 continue;
             };
-            // Only emit for stages that completed *in this evaluation*
             if state_entry.completed_at.as_deref() != Some(&now_str) {
                 continue;
             }
@@ -897,7 +823,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
             .await?;
         }
 
-        // Pipeline completion event
         if pipeline_complete {
             let mut meta = BTreeMap::new();
             meta.insert("intent_id".into(), intent_id.to_string());
@@ -918,11 +843,8 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
         }
     }
 
-    // Step 6: Commit
     tx.commit().await?;
 
-    // Step 7: After-commit NATS signals
-    // Signal newly queued releases to the scheduler
     for rid in &new_release_ids {
         let _ = state
             .nats
@@ -930,7 +852,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
             .await;
     }
 
-    // Publish pipeline status update for WaitRelease stream
     if changed {
         let nats_subject = format!("forest.release.status.{}", intent_id);
         let nats_payload = serde_json::json!({
@@ -944,7 +865,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
             .await;
     }
 
-    // Nudge org event listeners
     if let Some(ref op) = org_project {
         let org_subject = format!("forest.events.{}", op.organisation);
         let _ = state.nats.publish(org_subject, "".into()).await;
@@ -953,16 +873,11 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     if pipeline_complete {
         tracing::info!(%intent_id, status = intent_status, "coordinator: pipeline complete");
     } else if changed {
-        // Pipeline still active and we made progress — re-evaluate immediately.
-        // This handles cascading stage transitions (e.g. wait completes → deploy activates)
-        // without waiting for the 5s sweep.
         let _ = state
             .nats
             .publish("forest.intent.evaluate", intent_id.to_string().into())
             .await;
     } else if let Some(timer) = earliest_timer {
-        // No progress but we have a pending timer (wait stage or soak_time retry).
-        // Spawn a delayed re-evaluation to fire precisely when the timer expires.
         let state = state.clone();
         let delay = (timer - chrono::Utc::now())
             .to_std()
@@ -979,14 +894,6 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// What a stage's finished child releases add up to.
-///
-/// Three-way rather than the succeeded/failed split this used to be. A child
-/// release that was superseded — overtaken by a newer pending release for the
-/// same destination — did not fail, and rendering a collapsed queue as a red
-/// pipeline would page whoever owns the project for something that worked
-/// exactly as configured. Failure still dominates: a run that half-deployed and
-/// then failed is a failure, whatever happened to the rest of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StageOutcome {
     Succeeded,
@@ -1007,12 +914,9 @@ fn outcome_of(releases: &[ReleaseRow]) -> StageOutcome {
     if releases.iter().any(|r| r.status == "SUPERSEDED") {
         return StageOutcome::Superseded;
     }
-    // Every child terminal, none succeeded, none failed, none superseded is
-    // unreachable — but a stage of unknown statuses is not a success.
     StageOutcome::Failed
 }
 
-/// The reason the first superseded child carries, for the stage to quote.
 fn first_reason(releases: &[ReleaseRow]) -> Option<String> {
     releases
         .iter()
@@ -1020,61 +924,17 @@ fn first_reason(releases: &[ReleaseRow]) -> Option<String> {
         .and_then(|r| r.error_message.clone())
 }
 
-/// A destination a stage is about to release to.
 struct StageDestination {
     id: Uuid,
     name: String,
-    /// `organisation/name@version`, as `destination create --type` spells it.
-    /// Carried because selection compares it against the type each declared
-    /// item names — see `destination_selector::selects`.
     destination_type: String,
 }
 
-/// The outcome of working out where a stage should release to.
 enum StageResolution {
     Ready(Vec<StageDestination>),
-    /// The stage cannot run, and this says why in terms the person reading the
-    /// release can act on.
     Failed(String),
 }
 
-/// Which destinations a deploy or plan stage releases to.
-///
-/// Two filters, in order.
-///
-/// **The organisation.** Environment names are globally non-unique, so without
-/// this a `dev` stage would fan out into every organisation's `dev`
-/// destinations.
-///
-/// **The project's declaration.** A stage names an environment; the project's
-/// `forest.cue` names the destinations *within* an environment it releases to,
-/// as selectors, each with the destination *type* it renders for. Resolving the
-/// environment and stopping there is what scheduled an ECS service artifact at a
-/// shiitake slice registry: the environment held both, the project had asked for
-/// one of them, and nothing consulted the ask. The declaration was recorded on
-/// the annotation at annotate time — see `destination_selector` — so this works
-/// identically for a release fired by a trigger, where no client supplied
-/// anything.
-///
-/// The type half is the second turn of the same screw. Honouring the selector
-/// but not the type still schedules work nobody declared: `fungus` declares
-/// `forest/terraform@1` for `^dev/.*$` and `forest/generic@1` for
-/// `^platform-dev/.*$`, and both selectors reached both destinations in
-/// `platform-dev` — so a terraform plan ran at an ECS place with no terraform in
-/// the artifact to run. A destination whose type this project declares nothing
-/// for is not scheduled at all; it is out of scope, not failed.
-///
-/// Declaring nothing for the stage's environment means no filtering, not an
-/// empty filter. Projects that name no destinations must keep releasing to
-/// whole environments or this fix breaks every one of them to help one.
-/// Which of a gate's requirements are not yet satisfied, rendered for a human.
-///
-/// A requirement is satisfied when *some* destination has reported that signal
-/// in one of the accepted states. Deliberately "some" and not "every
-/// destination in the preceding stage": forest does not model which
-/// destinations a gate is about, and demanding a quorum it cannot define would
-/// mean a gate that never opens for a stage that fans out. The narrower rule
-/// belongs with per-destination gates, if that turns out to be wanted.
 fn unmet_requirements(
     requires: &[SignalRequirement],
     signals: &[crate::services::release_signals::SignalRow],
@@ -1090,10 +950,6 @@ fn unmet_requirements(
                 return None;
             }
 
-            // Name what was actually seen, if anything. "waiting for rollout
-            // to be HEALTHY (currently UNHEALTHY)" is a different problem from
-            // "waiting for rollout to be HEALTHY (nothing reported)", and the
-            // two want different responses.
             let seen: Vec<&str> = signals
                 .iter()
                 .filter(|s| s.name == req.signal)
@@ -1155,8 +1011,6 @@ async fn resolve_stage_destinations(
         })
         .collect();
 
-    // Absent for artifacts annotated before the column existed, which read as
-    // "nothing declared" and therefore fan out — exactly what they do today.
     let declared = sqlx::query_scalar!(
         "SELECT deployment_items FROM annotations WHERE id = $1",
         annotation_id,
@@ -1166,15 +1020,9 @@ async fn resolve_stage_destinations(
     .context("read the project's declaration for this release")?
     .flatten();
 
-    // A JSON `null` reads as "nothing recorded", the same as a SQL NULL. Our
-    // writer only ever stores an array, but the two spellings of absent should
-    // not behave differently — one of them failing a stage would be a puzzle.
     let declared = declared.filter(|value| !value.is_null());
 
     let items: Vec<destination_selector::DeploymentItem> = match declared {
-        // Fail the stage rather than the evaluation. Propagating this error would
-        // leave the stage PENDING and let the 5s sweep retry it forever — a
-        // release that hangs silently instead of one that says what is wrong.
         Some(value) => match serde_json::from_value(value) {
             Ok(items) => items,
             Err(e) => {
@@ -1186,9 +1034,6 @@ async fn resolve_stage_destinations(
         None => Vec::new(),
     };
 
-    // The rule itself lives in `destination_selector`, shared with the request
-    // path. Two copies is how the pipeline path came to ignore declarations the
-    // request path already honoured.
     match destination_selector::narrow_to_declared(candidates, &items, environment, |dest| {
         (dest.name.as_str(), dest.destination_type.as_str())
     }) {
@@ -1235,7 +1080,6 @@ mod gate_tests {
         assert!(unmet.is_empty(), "got: {unmet:?}");
     }
 
-    /// The point of the whole thing: a gate must not open on a bad state.
     #[test]
     fn an_unhealthy_signal_does_not_satisfy_a_gate_waiting_for_healthy() {
         let unmet = unmet_requirements(
@@ -1246,8 +1090,6 @@ mod gate_tests {
         assert!(unmet[0].contains("currently UNHEALTHY"), "got: {unmet:?}");
     }
 
-    /// "Nothing reported" and "reported something bad" are different problems
-    /// wanting different responses, so they must read differently.
     #[test]
     fn nothing_reported_says_so_rather_than_naming_a_state() {
         let unmet = unmet_requirements(&[req("rollout", &["HEALTHY"])], &[]);
@@ -1256,7 +1098,6 @@ mod gate_tests {
         assert!(unmet[0].contains("rollout"), "got: {unmet:?}");
     }
 
-    /// A signal by another name is not this signal.
     #[test]
     fn a_different_signal_does_not_satisfy_the_requirement() {
         let unmet = unmet_requirements(
@@ -1283,7 +1124,6 @@ mod gate_tests {
         assert_eq!(unmet.len(), 1, "UNHEALTHY should not: {unmet:?}");
     }
 
-    /// Every requirement must be met, not any.
     #[test]
     fn all_requirements_must_be_satisfied() {
         let requires = [req("rollout", &["HEALTHY"]), req("smoke", &["HEALTHY"])];
@@ -1298,9 +1138,6 @@ mod gate_tests {
         assert!(unmet.is_empty(), "got: {unmet:?}");
     }
 
-    /// A stage that fans out reports one signal per destination. Any
-    /// destination reporting HEALTHY satisfies it — see the note on
-    /// `unmet_requirements` for why this is deliberately not a quorum.
     #[test]
     fn one_destination_reporting_is_enough() {
         let mut from_other = signal("rollout", "HEALTHY");

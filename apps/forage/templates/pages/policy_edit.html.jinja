@@ -1,9 +1,6 @@
 {% extends "base.html.jinja" %}
 {% from "components/project_settings.html.jinja" import project_settings_layout %}
 
-{# Edit form for one policy — same shell, same back-to-the-section rule as
-   trigger_edit. #}
-
 {% block content %}
 {% call project_settings_layout(current_org, current_project, "policies", "Policies",
                                 "Update the conditions this policy gates on.",

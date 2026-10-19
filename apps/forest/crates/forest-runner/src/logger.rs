@@ -3,10 +3,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use forest_grpc_interface::PushLogRequest;
 use tokio::sync::mpsc;
 
-/// Logger that streams log lines to the server via gRPC PushLogs.
-///
-/// Log lines are sent through a channel to a background task that
-/// streams them to the server. Drop the logger to flush and close.
 #[derive(Clone)]
 pub struct RemoteLogger {
     release_token: String,

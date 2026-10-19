@@ -7,25 +7,17 @@ use uuid::Uuid;
 
 use crate::State;
 
-// ── DAG definition types (stored in release_pipelines.stages) ────────────
-
-/// The full pipeline definition: a map of stage-id -> stage definition.
 pub type PipelineStages = HashMap<String, StageDefinition>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StageDefinition {
-    /// Which stages must complete before this one starts.
     #[serde(default)]
     pub depends_on: Vec<String>,
 
-    /// The stage configuration — determines both the type and its parameters.
     #[serde(flatten)]
     pub config: StageConfig,
 }
 
-/// Tagged enum for stage types. Each variant carries exactly the config it needs.
-/// Serializes with `"type": "deploy"` / `"type": "wait"` discriminator, and
-/// the variant fields are flattened into the parent object.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StageConfig {
@@ -37,22 +29,11 @@ pub enum StageConfig {
     },
     Plan {
         environment: String,
-        /// When true, auto-approve after plan succeeds (no manual gate).
         #[serde(default)]
         auto_approve: bool,
-        /// Plan removing everything the project manages at these destinations
-        /// (`terraform plan -destroy`). The deploy stage after it applies that
-        /// saved plan. Never combined with `auto_approve` — see
-        /// `validate_pipeline`.
         #[serde(default)]
         destroy: bool,
     },
-    /// Wait for evidence rather than for a duration.
-    ///
-    /// What `Wait` should have been. A wait stage sleeps and then declares the
-    /// release fine, which is a guess; a gate waits to be told, by a provider
-    /// or an agent, that the things it requires are in the states it requires.
-    /// See `services/release_signals.rs` and forest#252.
     Gate {
         requires: Vec<SignalRequirement>,
         timeout_seconds: i64,
@@ -61,22 +42,15 @@ pub enum StageConfig {
     },
 }
 
-/// One thing a gate waits to be told, and the states it will accept.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignalRequirement {
-    /// The signal's name, as its reporter calls it — `rollout`, `smoke`.
     pub signal: String,
 
-    /// Any one of these satisfies it. Empty means `["HEALTHY"]`, which is the
-    /// only reading of "wait for this signal" that is not a trap: treating an
-    /// empty list as "any status" would open the gate on UNHEALTHY.
     #[serde(default, rename = "in")]
     pub accept: Vec<String>,
 }
 
 impl SignalRequirement {
-    /// The statuses that satisfy this requirement, with the empty case
-    /// resolved.
     pub fn accepted(&self) -> Vec<String> {
         if self.accept.is_empty() {
             vec!["HEALTHY".to_string()]
@@ -89,12 +63,8 @@ impl SignalRequirement {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GateTimeout {
-    /// The default, and deliberately so: a gate whose timeout quietly let the
-    /// pipeline through would be a gate that stopped gating without saying so.
     #[default]
     Fail,
-    /// Carry on anyway, recording that the gate timed out. For a signal that
-    /// is informative rather than load-bearing.
     Proceed,
 }
 
@@ -130,7 +100,6 @@ impl StageDefinition {
         }
     }
 
-    /// A plan stage that plans a teardown. Always gated on approval.
     pub fn destroy_plan(environment: impl Into<String>, depends_on: Vec<String>) -> Self {
         Self {
             depends_on,
@@ -159,59 +128,42 @@ impl StageDefinition {
     }
 }
 
-// ── Runtime state types (stored in release_intents.stage_states) ─────────
-
 pub type StageStates = HashMap<String, StageState>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StageState {
     pub status: StageStatus,
 
-    /// When this stage became eligible to run (dependencies met).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queued_at: Option<String>,
 
-    /// When this stage actually started executing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
 
-    /// When this stage reached a terminal state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
 
-    /// UUIDs of release_states rows created for this stage (deploy stages).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_ids: Option<Vec<String>>,
 
-    /// For wait stages: ISO8601 timestamp when the wait expires.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<String>,
 
-    /// For plan stages: tracks approval lifecycle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval_status: Option<ApprovalStatus>,
 
-    /// When approval was granted/rejected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval_at: Option<String>,
 
-    /// Who approved/rejected (actor_id).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approved_by: Option<String>,
 
-    /// For gate stages: when waiting stops and `on_timeout` decides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_deadline: Option<String>,
 
-    /// For gate stages: which requirements are not yet satisfied, refreshed on
-    /// every evaluation.
-    ///
-    /// Stored rather than recomputed for display because the whole complaint
-    /// about a parked pipeline is not knowing what it is parked on — a gate
-    /// whose state you cannot see is worse than the sleep it replaced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_waiting_on: Option<Vec<String>>,
 }
@@ -225,11 +177,6 @@ pub enum ApprovalStatus {
 }
 
 impl ApprovalStatus {
-    /// The wire spelling. Deliberately not `format!("{:?}")` — `Debug` renders
-    /// the Rust variant name (`AwaitingApproval` → `AWAITINGAPPROVAL`), which
-    /// disagreed with both the value serde persists in `stage_states` and the
-    /// value `PipelineStageState.approval_status` is documented to carry.
-    /// Clients comparing against `AWAITING_APPROVAL` never matched.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::AwaitingApproval => "AWAITING_APPROVAL",
@@ -247,11 +194,6 @@ pub enum StageStatus {
     Succeeded,
     Failed,
     Cancelled,
-    /// This stage's releases were overtaken by a newer pending release for the
-    /// same target, or an upstream stage was. Terminal, and deliberately
-    /// neither Failed (nothing went wrong) nor Cancelled (nobody cancelled it)
-    /// — a collapsed queue must not page whoever owns the project.
-    /// See design/SKIP-TO-LATEST.md.
     Superseded,
 }
 
@@ -274,7 +216,6 @@ impl StageState {
     }
 }
 
-/// Simple stage type discriminator (derived from StageConfig).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StageType {
@@ -312,10 +253,6 @@ impl StageConfig {
     }
 }
 
-// ── DAG validation ───────────────────────────────────────────────────────
-
-/// Validate a pipeline definition: check for missing dependencies and cycles.
-/// Type-level validation is handled by the enum — no invalid type strings possible.
 pub fn validate_pipeline(stages: &PipelineStages) -> anyhow::Result<()> {
     if stages.is_empty() {
         anyhow::bail!("pipeline must have at least one stage");
@@ -323,9 +260,6 @@ pub fn validate_pipeline(stages: &PipelineStages) -> anyhow::Result<()> {
 
     let ids: HashSet<&str> = stages.keys().map(|s| s.as_str()).collect();
 
-    // A destroy that approves itself is `terraform destroy` on a timer. The
-    // plan stage's approval is the only thing between a pipeline run and the
-    // removal of everything the project manages, so it cannot be waived.
     for (id, def) in stages {
         if let StageConfig::Plan {
             destroy: true,
@@ -339,11 +273,6 @@ pub fn validate_pipeline(stages: &PipelineStages) -> anyhow::Result<()> {
         }
     }
 
-    // Gate configuration is checked here rather than left to the coordinator,
-    // because every way of getting it wrong produces a gate that looks fine
-    // until a release is waiting on it: one with no requirements opens
-    // instantly, one with no timeout never opens, and one naming a status
-    // forest does not know waits for something no reporter can ever send.
     for (id, def) in stages {
         if let StageConfig::Gate {
             requires,
@@ -390,7 +319,6 @@ pub fn validate_pipeline(stages: &PipelineStages) -> anyhow::Result<()> {
         }
     }
 
-    // Cycle detection via topological sort (Kahn's algorithm)
     let mut in_degree: HashMap<&str, usize> = HashMap::new();
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
 
@@ -429,7 +357,6 @@ pub fn validate_pipeline(stages: &PipelineStages) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Find all root stages (no dependencies) — these start immediately.
 pub fn find_ready_stages(stages: &PipelineStages, states: &StageStates) -> Vec<String> {
     let mut ready = Vec::new();
     for (id, def) in stages {
@@ -452,7 +379,6 @@ pub fn find_ready_stages(stages: &PipelineStages, states: &StageStates) -> Vec<S
     ready
 }
 
-/// Check if any dependency of a stage has failed/cancelled.
 pub fn has_failed_dependency(
     stage_id: &str,
     stages: &PipelineStages,
@@ -468,12 +394,6 @@ pub fn has_failed_dependency(
     })
 }
 
-/// Whether a stage is blocked because an upstream stage was superseded.
-///
-/// Separate from [`has_failed_dependency`] so the downstream stage inherits
-/// `Superseded` rather than `Cancelled`: the run did not fail and nobody
-/// cancelled it, a newer release simply took its place, and every view over the
-/// release history reads that distinction.
 pub fn has_superseded_dependency(
     stage_id: &str,
     stages: &PipelineStages,
@@ -489,7 +409,6 @@ pub fn has_superseded_dependency(
     })
 }
 
-/// Check if the entire pipeline is finished (no PENDING or ACTIVE stages).
 pub fn is_pipeline_complete(states: &StageStates) -> bool {
     states.values().all(|s| {
         matches!(
@@ -502,15 +421,12 @@ pub fn is_pipeline_complete(states: &StageStates) -> bool {
     })
 }
 
-/// Initialize stage_states from a pipeline definition: all PENDING.
 pub fn init_stage_states(stages: &PipelineStages) -> StageStates {
     stages
         .keys()
         .map(|id| (id.clone(), StageState::pending()))
         .collect()
 }
-
-// ── CRUD service ─────────────────────────────────────────────────────────
 
 pub struct PipelineRecord {
     pub id: Uuid,
@@ -523,7 +439,6 @@ pub struct PipelineRecord {
 }
 
 impl PipelineRecord {
-    /// Deserialize the stored JSON back into typed stages.
     pub fn parse_stages(&self) -> anyhow::Result<PipelineStages> {
         serde_json::from_value(self.stages.clone()).context("parse pipeline stages from DB")
     }
@@ -654,7 +569,6 @@ impl ReleasePipelineRegistry {
         Ok(rec)
     }
 
-    /// Get the first enabled pipeline for a project.
     pub async fn get_enabled_for_project(
         &self,
         project_id: &Uuid,
@@ -694,9 +608,6 @@ mod tests {
 
     #[test]
     fn approval_status_wire_spelling_is_screaming_snake_case() {
-        // Must match what serde persists in `stage_states` and what
-        // PipelineStageState.approval_status is documented to carry. `Debug`
-        // would render "AwaitingApproval" and clients would never match.
         assert_eq!(
             ApprovalStatus::AwaitingApproval.as_str(),
             "AWAITING_APPROVAL"
@@ -761,18 +672,15 @@ mod tests {
             StageDefinition::deploy("prod", vec!["soak".into()]),
         );
 
-        // All pending: only root should be ready
         let states = init_stage_states(&stages);
         let ready = find_ready_stages(&stages, &states);
         assert_eq!(ready, vec!["deploy-dev"]);
 
-        // After deploy-dev succeeds, soak should be ready
         let mut states = states;
         states.get_mut("deploy-dev").unwrap().status = StageStatus::Succeeded;
         let ready = find_ready_stages(&stages, &states);
         assert_eq!(ready, vec!["soak"]);
 
-        // After soak succeeds, deploy-prod should be ready
         states.get_mut("soak").unwrap().status = StageStatus::Succeeded;
         let ready = find_ready_stages(&stages, &states);
         assert_eq!(ready, vec!["deploy-prod"]);
@@ -803,7 +711,6 @@ mod tests {
 
     #[test]
     fn test_backward_compat_json() {
-        // Old-format JSON should still deserialize correctly
         let json = r#"{
             "deploy-dev": {
                 "type": "deploy",
@@ -959,7 +866,6 @@ mod tests {
         let ready = find_ready_stages(&stages, &states);
         assert_eq!(ready, vec!["plan-prod"]);
 
-        // After plan succeeds, deploy should be ready
         let mut states = states;
         states.get_mut("plan-prod").unwrap().status = StageStatus::Succeeded;
         let ready = find_ready_stages(&stages, &states);
@@ -1020,8 +926,6 @@ mod gate_tests {
         validate_pipeline(&stages).expect("should validate");
     }
 
-    /// A gate with nothing to wait for opens the instant it is reached, which
-    /// is a wait stage with extra steps — and looks like it is gating.
     #[test]
     fn a_gate_with_no_requirements_is_rejected() {
         let stages = gate_pipeline(vec![], 600);
@@ -1029,8 +933,6 @@ mod gate_tests {
         assert!(err.contains("requires no signals"), "got: {err}");
     }
 
-    /// A gate that never times out blocks the pipeline with nothing reporting
-    /// why — the failure mode gates exist to remove.
     #[test]
     fn a_gate_without_a_timeout_is_rejected() {
         for timeout in [0, -1] {
@@ -1040,9 +942,6 @@ mod gate_tests {
         }
     }
 
-    /// The typo case: a status no reporter can ever send means a gate that
-    /// waits forever for nothing, and it should be caught when the pipeline is
-    /// written rather than when a release is stuck behind it.
     #[test]
     fn a_gate_waiting_for_an_impossible_status_is_rejected() {
         let stages = gate_pipeline(vec![req("rollout", &["HEALTY"])], 600);
@@ -1064,8 +963,6 @@ mod gate_tests {
         assert!(err.contains("no signal name"), "got: {err}");
     }
 
-    /// Omitting `in` means HEALTHY. The alternative reading — "any status" —
-    /// would open the gate on UNHEALTHY, which is the opposite of gating.
     #[test]
     fn an_omitted_accept_list_means_healthy() {
         assert_eq!(req("rollout", &[]).accepted(), vec!["HEALTHY".to_string()]);
@@ -1078,7 +975,6 @@ mod gate_tests {
         assert_eq!(GateTimeout::default(), GateTimeout::Fail);
     }
 
-    /// The JSON a user writes has to produce the stage they meant.
     #[test]
     fn a_gate_round_trips_through_the_stored_json() {
         let json = r#"{
@@ -1115,14 +1011,11 @@ mod gate_tests {
             other => panic!("expected a gate, got {other:?}"),
         }
 
-        // And survives the round trip back out, since this is what is stored.
         let back = serde_json::to_string(&stages).expect("serialises");
         let again: PipelineStages = serde_json::from_str(&back).expect("re-parses");
         assert_eq!(again["await-demo"].config.stage_type(), StageType::Gate);
     }
 
-    /// `find_ready_stages` must not run a stage behind an unfinished gate —
-    /// the whole point of the thing.
     #[test]
     fn a_stage_behind_an_unsatisfied_gate_is_not_ready() {
         let stages = {
@@ -1155,7 +1048,6 @@ mod gate_tests {
             "finance must wait for the gate; ready = {ready:?}"
         );
 
-        // Once the gate succeeds, it may proceed.
         states.insert(
             "await-demo".into(),
             StageState {

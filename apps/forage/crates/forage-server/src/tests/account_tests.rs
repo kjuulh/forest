@@ -6,8 +6,6 @@ use tower::ServiceExt;
 use crate::build_router;
 use crate::test_support::*;
 
-// ─── Account settings page ──────────────────────────────────────────
-
 #[tokio::test]
 async fn account_page_returns_200() {
     let (state, sessions) = test_state();
@@ -47,8 +45,6 @@ async fn account_page_unauthenticated_redirects() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert!(response.headers().get("location").unwrap().to_str().unwrap().starts_with("/login"));
 }
-
-// ─── Update username ────────────────────────────────────────────────
 
 #[tokio::test]
 async fn update_username_success_redirects() {
@@ -121,8 +117,6 @@ async fn update_username_invalid_name_shows_error() {
     let html = String::from_utf8(body.to_vec()).unwrap();
     assert!(html.contains("required") || html.contains("Username"));
 }
-
-// ─── Change password ────────────────────────────────────────────────
 
 #[tokio::test]
 async fn change_password_success_redirects() {
@@ -211,8 +205,6 @@ async fn change_password_wrong_current_shows_error() {
     assert!(html.contains("incorrect") || html.contains("invalid") || html.contains("Invalid") || html.contains("wrong"));
 }
 
-// ─── Add email ──────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn add_email_success_redirects() {
     let (state, sessions) = test_state();
@@ -263,8 +255,6 @@ async fn add_email_invalid_shows_error() {
     let html = String::from_utf8(body.to_vec()).unwrap();
     assert!(html.contains("invalid") || html.contains("Invalid") || html.contains("valid email"));
 }
-
-// ─── Remove email ───────────────────────────────────────────────────
 
 #[tokio::test]
 async fn remove_email_success_redirects() {

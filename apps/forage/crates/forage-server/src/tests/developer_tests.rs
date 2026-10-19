@@ -1,9 +1,3 @@
-//! Route tests for Developer Settings (org OAuth applications, M1).
-//!
-//! The forest-server OAuth-apps client is mocked in-memory, so these cover the
-//! Forage HTTP surface: rendering, CSRF, admin authorization, and the
-//! create → list → detail → rotate → delete lifecycle wiring.
-
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -62,7 +56,6 @@ async fn create_shows_secret_once_then_lists_app() {
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
-    // Create
     let body = "_csrf=test-csrf&name=My+App&description=&homepage_url=&redirect_uris=https%3A%2F%2Fapp.example%2Fcb&scope_profile=on";
     let resp = app
         .clone()
@@ -71,12 +64,10 @@ async fn create_shows_secret_once_then_lists_app() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let text = body_text(resp).await;
-    // The client_secret is shown exactly once on the create response.
     assert!(text.contains("Client secret created"));
     assert!(text.contains("forest_oas_secret_"));
-    assert!(text.contains("forest_oa_app-1")); // client_id
+    assert!(text.contains("forest_oa_app-1"));
 
-    // List now shows the app, and never the secret.
     let resp = app
         .oneshot(get("/orgs/testorg/settings/developers", &cookie))
         .await
@@ -93,14 +84,12 @@ async fn create_with_openid_scope_is_requestable() {
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
-    // Tick openid + profile in the create form.
     let body = "_csrf=test-csrf&name=OIDC+App&redirect_uris=https%3A%2F%2Fapp.example%2Fcb&scope_openid=on&scope_profile=on";
     app.clone()
         .oneshot(post("/orgs/testorg/settings/developers", &cookie, body))
         .await
         .unwrap();
 
-    // The app is registered with the `openid` scope (shown as a chip on the list).
     let resp = app
         .oneshot(get("/orgs/testorg/settings/developers", &cookie))
         .await
@@ -124,7 +113,6 @@ async fn create_validation_error_redirects_back_with_message() {
         .oneshot(post("/orgs/testorg/settings/developers", &cookie, body))
         .await
         .unwrap();
-    // Redirects back to the form with the error surfaced as a query param.
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
     let loc = resp.headers().get("location").unwrap().to_str().unwrap();
     assert!(loc.starts_with("/orgs/testorg/settings/developers/new?error="));
@@ -165,14 +153,12 @@ async fn detail_rotate_and_delete_lifecycle() {
     let cookie = create_test_session(&sessions).await;
     let app = build_router(state);
 
-    // Create one (app-1).
     let body = "_csrf=test-csrf&name=My+App&redirect_uris=https%3A%2F%2Fapp.example%2Fcb&scope_profile=on";
     app.clone()
         .oneshot(post("/orgs/testorg/settings/developers", &cookie, body))
         .await
         .unwrap();
 
-    // Detail renders the client_id, no secret.
     let resp = app
         .clone()
         .oneshot(get("/orgs/testorg/settings/developers/app-1", &cookie))
@@ -183,7 +169,6 @@ async fn detail_rotate_and_delete_lifecycle() {
     assert!(text.contains("forest_oa_app-1"));
     assert!(!text.contains("Client secret created"));
 
-    // Rotate → new secret shown once.
     let resp = app
         .clone()
         .oneshot(post(
@@ -197,7 +182,6 @@ async fn detail_rotate_and_delete_lifecycle() {
     let text = body_text(resp).await;
     assert!(text.contains("forest_oas_rotated_app-1"));
 
-    // Delete → redirects to the list.
     let resp = app
         .clone()
         .oneshot(post(
@@ -213,7 +197,6 @@ async fn detail_rotate_and_delete_lifecycle() {
         "/orgs/testorg/settings/developers"
     );
 
-    // It's gone → detail now 404s.
     let resp = app
         .oneshot(get("/orgs/testorg/settings/developers/app-1", &cookie))
         .await

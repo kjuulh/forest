@@ -6,8 +6,6 @@ node = "latest"
 [env]
 _.file = ".env"
 
-# ─── Core Development ──────────────────────────────────────────────
-
 [tasks.develop]
 alias = ["d", "dev"]
 description = "Start the forage development server with postgres"
@@ -27,8 +25,6 @@ description = "Run all tests"
 depends = ["frontend:test"]
 run = "cargo test --workspace"
 
-# Everything, including the browser layer. Kept separate from `test` so the
-# common case stays fast and needs no browser download.
 [tasks."test:all"]
 description = "Run all tests including rendered component states"
 depends = ["frontend:test", "frontend:test:render"]
@@ -45,8 +41,6 @@ run = "cargo fmt"
 [tasks."fmt:check"]
 description = "Check formatting"
 run = "cargo fmt -- --check"
-
-# ─── Docker ────────────────────────────────────────────────────────
 
 [tasks."docker:build"]
 description = "Build forage-server Docker image"
@@ -69,8 +63,6 @@ docker push $REGISTRY/$IMAGE:$COMMIT
 docker push $REGISTRY/$IMAGE:$TIMESTAMP
 """
 
-# ─── Local Infrastructure ──────────────────────────────────────────
-
 [tasks."local:up"]
 description = "Start local services (postgres)"
 run = "docker compose -f templates/docker-compose.yaml up -d --wait"
@@ -82,8 +74,6 @@ run = "docker compose -f templates/docker-compose.yaml down -v"
 [tasks."local:logs"]
 description = "Tail local service logs"
 run = "docker compose -f templates/docker-compose.yaml logs -f"
-
-# ─── Database ──────────────────────────────────────────────────────
 
 [tasks."db:shell"]
 description = "Connect to local postgres"
@@ -97,8 +87,6 @@ run = "cargo sqlx migrate run --source crates/forage-db/src/migrations"
 description = "Prepare sqlx offline query cache"
 run = "cargo sqlx prepare --workspace"
 
-# ─── Tailwind CSS ──────────────────────────────────────────────────
-
 [tasks."tailwind:build"]
 description = "Build tailwind CSS"
 sources = ["templates/**/*.jinja", "static/css/input.css", "static/js/**/*.js"]
@@ -109,8 +97,6 @@ run = "tailwindcss -i static/css/input.css -o static/css/style.css --minify"
 description = "Watch and rebuild tailwind CSS"
 run = "tailwindcss -i static/css/input.css -o static/css/style.css --watch"
 
-# ─── Frontend (Svelte) ─────────────────────────────────────────────
-
 [tasks."frontend:install"]
 description = "Install Svelte frontend npm dependencies"
 dir = "frontend"
@@ -118,9 +104,6 @@ sources = ["frontend/package.json", "frontend/package-lock.json"]
 outputs = ["frontend/node_modules/.package-lock.json"]
 run = "npm install"
 
-# Bundles the Svelte web components (release-timeline, etc.) into
-# static/js/components/forage-components.js. `mise run dev` depends on
-# this so changes to .svelte files are picked up automatically.
 [tasks."frontend:build"]
 description = "Build Svelte web components"
 depends = ["frontend:install"]
@@ -134,22 +117,12 @@ sources = [
 outputs = ["static/js/components/forage-components.js"]
 run = "npm run build"
 
-# The Svelte components carry logic that decides what the UI *asserts* about a
-# release — whether it is finished, whether it needs you. Getting that wrong is
-# silent: the page still renders, it just says the wrong thing. So it is tested,
-# and the tests run with the rest.
 [tasks."frontend:test"]
 description = "Unit-test the Svelte component logic"
 depends = ["frontend:install"]
 dir = "frontend"
 run = "npm test"
 
-# Mounts the real components in Chromium and asserts what the DOM actually
-# shows, then loads the built bundle and checks that it too still draws a
-# timeline — everything else tests the sources, and the shipped file is built
-# with different settings. Separate from frontend:test because it needs a
-# browser: `frontend:test` stays runnable anywhere, and this one is skipped
-# rather than failing when Playwright's browsers are not installed.
 [tasks."frontend:test:render"]
 description = "Assert rendered component states, and the built bundle, in a real browser"
 depends = ["frontend:install", "frontend:build"]
@@ -168,13 +141,9 @@ depends = ["frontend:install"]
 dir = "frontend"
 run = "npm run dev"
 
-# ─── Testing Tools ────────────────────────────────────────────────
-
 [tasks."test:webhook"]
 description = "Start a webhook test server on port 9876"
 run = "python3 tools/webhook-test-server.py"
-
-# ─── Forest Commands ───────────────────────────────────────────────
 
 [tasks."forest:run"]
 description = "Run a forest command"

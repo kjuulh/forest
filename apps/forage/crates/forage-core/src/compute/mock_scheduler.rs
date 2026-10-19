@@ -14,11 +14,6 @@ struct MockState {
     instances: HashMap<String, Vec<ComputeInstance>>,
 }
 
-/// In-memory compute scheduler that simulates container lifecycle.
-///
-/// Stores rollouts and instances in memory.  When `apply_resources` is called
-/// it spawns a background task that transitions each resource through
-/// PENDING → IN_PROGRESS → SUCCEEDED with short delays.
 pub struct InMemoryComputeScheduler {
     state: Arc<Mutex<MockState>>,
 }
@@ -72,7 +67,6 @@ impl ComputeScheduler for InMemoryComputeScheduler {
             created_at: now,
         };
 
-        // Create instances for container-service resources
         let region = labels.get("region").cloned().unwrap_or("eu-west-1".into());
         let project = labels.get("project").cloned().unwrap_or_default();
         let destination = labels.get("destination").cloned().unwrap_or_default();
@@ -104,7 +98,6 @@ impl ComputeScheduler for InMemoryComputeScheduler {
                 .instances
                 .entry(namespace.to_string())
                 .or_insert_with(Vec::new);
-            // Upsert: replace existing instances with the same resource_name
             for new_inst in new_instances {
                 if let Some(existing) = ns_instances
                     .iter_mut()
@@ -117,7 +110,6 @@ impl ComputeScheduler for InMemoryComputeScheduler {
             }
         }
 
-        // Spawn background simulation
         let state = self.state.clone();
         let rid = rollout_id.clone();
         let ns = namespace.to_string();
@@ -127,7 +119,6 @@ impl ComputeScheduler for InMemoryComputeScheduler {
             .collect();
 
         tokio::spawn(async move {
-            // Transition to InProgress
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             {
                 let mut state = state.lock().await;
@@ -138,7 +129,6 @@ impl ComputeScheduler for InMemoryComputeScheduler {
                         r.message = "deploying".into();
                     }
                 }
-                // Update instance statuses
                 if let Some(instances) = state.instances.get_mut(&ns) {
                     for inst in instances.iter_mut() {
                         if inst.status == "pending" {
@@ -148,7 +138,6 @@ impl ComputeScheduler for InMemoryComputeScheduler {
                 }
             }
 
-            // Simulate per-resource completion
             for (name, _kind) in &resource_names {
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 let mut state = state.lock().await;
@@ -160,7 +149,6 @@ impl ComputeScheduler for InMemoryComputeScheduler {
                 }
             }
 
-            // Mark rollout as succeeded
             {
                 let mut state = state.lock().await;
                 if let Some(rollout) = state.rollouts.get_mut(&rid) {
@@ -195,7 +183,6 @@ impl ComputeScheduler for InMemoryComputeScheduler {
             .collect();
 
         tokio::spawn(async move {
-            // Emit pending events
             for (name, kind) in &resource_specs {
                 let _ = tx
                     .send(RolloutEvent {
@@ -207,7 +194,6 @@ impl ComputeScheduler for InMemoryComputeScheduler {
                     .await;
             }
 
-            // Poll until the rollout is done
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(150)).await;
                 let state = state.lock().await;
@@ -245,7 +231,6 @@ impl ComputeScheduler for InMemoryComputeScheduler {
     ) -> Result<(), ComputeError> {
         let mut state = self.state.lock().await;
 
-        // Remove matching rollouts
         state.rollouts.retain(|_, r| {
             if r.namespace != namespace {
                 return true;
@@ -258,13 +243,10 @@ impl ComputeScheduler for InMemoryComputeScheduler {
             false
         });
 
-        // Remove matching instances
         if let Some(instances) = state.instances.get_mut(namespace) {
             if labels.is_empty() {
                 instances.clear();
             }
-            // If labels are specified we'd filter more precisely, but for now
-            // the mock just clears the namespace.
         }
 
         Ok(())
@@ -331,12 +313,10 @@ mod tests {
 
         assert!(!rollout_id.is_empty());
 
-        // Rollout should exist
         let rollout = scheduler.get_rollout(&rollout_id).await.unwrap();
         assert_eq!(rollout.namespace, "test-ns");
         assert_eq!(rollout.resources.len(), 1);
 
-        // Instance should exist
         let instances = scheduler.list_instances("test-ns").await.unwrap();
         assert_eq!(instances.len(), 1);
         assert_eq!(instances[0].image, "registry.forage.sh/org/app:v1");
@@ -361,7 +341,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Wait for simulation to complete
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
         let rollout = scheduler.get_rollout(&rollout_id).await.unwrap();
@@ -398,7 +377,6 @@ mod tests {
         }
 
         assert!(!events.is_empty());
-        // Should have at least pending + succeeded
         assert!(events.iter().any(|e| e.status == RolloutStatus::Pending));
         assert!(events.iter().any(|e| e.status == RolloutStatus::Succeeded));
     }

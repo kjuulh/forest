@@ -78,7 +78,6 @@ impl DriftCommand {
             if !d.error.is_empty() {
                 println!("  {}", d.error);
             }
-            // Drift outranks a failure elsewhere: it is the finding.
             worst = match (worst, code) {
                 (2, _) | (_, 2) => 2,
                 (1, _) | (_, 1) => 1,

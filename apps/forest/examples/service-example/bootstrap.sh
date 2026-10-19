@@ -1,10 +1,7 @@
 #!/usr/bin/env zsh
-#
 set -e
 
 forest() { mise run forest "$@"; }
-
-# ── Identity & organisation ─────────────────────────────────────────
 
 echo "Creating user"
 FOREST_PASSWORD=Something852456 forest auth register \
@@ -14,14 +11,10 @@ FOREST_PASSWORD=Something852456 forest auth register \
 echo "Creating organisation"
 forest organisation create --name rawpotion
 
-# ── Environments ────────────────────────────────────────────────────
-
 echo "Creating environments"
 forest environment create --name dev --description "Development — feature branches and integration testing"
 forest environment create --name staging --description "Staging — pre-production verification"
 forest environment create --name prod --description "Production"
-
-# ── Destinations ────────────────────────────────────────────────────
 
 echo "Creating destinations"
 for name env in \
@@ -39,12 +32,8 @@ do
     --metadata "environment=$env"
 done
 
-# ── Project ─────────────────────────────────────────────────────────
-
 echo "Creating project"
 forest project create --organisation rawpotion --project service-example
-
-# ── Release pipeline (dev → staging → prod) ─────────────────────────
 
 echo "Creating release pipeline"
 forest project pipeline create \
@@ -79,8 +68,6 @@ forest project pipeline create \
     }
   }'
 
-# ── Trigger (main branch → pipeline) ─────────────────────────────────
-
 echo "Creating trigger"
 forest project trigger create \
   --organisation rawpotion \
@@ -89,8 +76,6 @@ forest project trigger create \
   --branch '^main$' \
   --env dev --env staging --env prod \
   --use-pipeline
-
-# ── Deployment policies (guardrails) ──────────────────────────────────
 
 echo "Creating policies"
 forest project policy create \
@@ -119,12 +104,8 @@ forest project policy create \
   --target-environment prod \
   --branch-pattern '^main$'
 
-# ── Prepare deployment artifacts ─────────────────────────────────────
-
 echo "Preparing deployment artifacts"
 forest release prepare
-
-# ── Annotate releases ────────────────────────────────────────────────
 
 echo "Annotating release 1 — auth middleware"
 forest release annotate \

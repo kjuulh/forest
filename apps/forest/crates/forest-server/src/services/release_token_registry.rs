@@ -5,7 +5,6 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-/// Scope of data a release token grants access to.
 #[derive(Debug, Clone)]
 pub struct ReleaseTokenScope {
     pub release_id: Uuid,
@@ -17,10 +16,6 @@ pub struct ReleaseTokenScope {
     pub runner_id: String,
 }
 
-/// Manages release-scoped opaque tokens for runner authentication.
-///
-/// Tokens are 256-bit random values. Only the SHA-256 hash is stored in the
-/// database; the raw token is returned to the caller and sent to the runner.
 #[derive(Clone)]
 pub struct ReleaseTokenRegistry {
     db: PgPool,
@@ -31,7 +26,6 @@ impl ReleaseTokenRegistry {
         Self { db }
     }
 
-    /// Generate a new release token. Returns the hex-encoded raw token.
     pub async fn create_token(
         &self,
         scope: ReleaseTokenScope,
@@ -68,7 +62,6 @@ impl ReleaseTokenRegistry {
         Ok(token_hex)
     }
 
-    /// Validate a token and return its scope. Returns None if invalid, expired, or revoked.
     pub async fn validate_token(
         &self,
         token_hex: &str,
@@ -102,7 +95,6 @@ impl ReleaseTokenRegistry {
         }))
     }
 
-    /// Revoke a specific token (called after CompleteRelease).
     pub async fn revoke_token(&self, token_hex: &str) -> anyhow::Result<()> {
         let raw = hex::decode(token_hex).context("invalid token format")?;
         let token_hash = Sha256::digest(&raw).to_vec();
@@ -118,8 +110,6 @@ impl ReleaseTokenRegistry {
         Ok(())
     }
 
-    /// Revoke all active tokens for a runner (called on disconnect).
-    /// Returns the scopes of revoked tokens so their releases can be failed.
     pub async fn revoke_runner_tokens(
         &self,
         runner_id: &str,
@@ -154,7 +144,6 @@ impl ReleaseTokenRegistry {
             .collect())
     }
 
-    /// Delete expired tokens older than 1 day. Returns number of deleted rows.
     pub async fn cleanup_expired(&self) -> anyhow::Result<u64> {
         let result =
             sqlx::query!("DELETE FROM release_tokens WHERE expires < now() - interval '1 day'")

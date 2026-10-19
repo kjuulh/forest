@@ -39,8 +39,6 @@ impl OrganisationCommand {
     }
 
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
-        // The --format flag is hoisted to global Config; subcommands read it
-        // from state.config.format.
         let format = state.config.format;
         match &self.commands {
             Commands::Create(cmd) => cmd.execute(state, &format).await,

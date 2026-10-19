@@ -1,10 +1,6 @@
 {% extends "base.html.jinja" %}
 {% from "components/project_settings.html.jinja" import project_settings_layout %}
 
-{# Policies section of the project settings shell. Rows and forms are
-   untouched — new policy types (forest#skip-to-latest) keep rendering
-   here without the shell knowing anything about them. #}
-
 {% block content %}
 {% call project_settings_layout(current_org, current_project, "policies", "Policies",
                                 "Gate deployments with soak times, branch restrictions, and approvals") %}
@@ -105,7 +101,6 @@
                 </p>
             </div>
 
-            {# Soak Time fields #}
             <div id="soak-time-fields">
                 <div class="grid grid-cols-2 gap-4">
                     <div>
@@ -133,7 +128,6 @@
                 </div>
             </div>
 
-            {# Branch Restriction fields #}
             <div id="branch-restriction-fields" class="hidden">
                 <div class="grid grid-cols-2 gap-4">
                     <div>
@@ -152,7 +146,6 @@
                 </div>
             </div>
 
-            {# Approval fields #}
             <div id="approval-fields" class="hidden">
                 <div class="grid grid-cols-2 gap-4">
                     <div>
@@ -172,7 +165,6 @@
                 </div>
             </div>
 
-            {# Supersede pending fields #}
             <div id="supersede-pending-fields" class="hidden">
                 <div class="grid grid-cols-2 gap-4">
                     <div>

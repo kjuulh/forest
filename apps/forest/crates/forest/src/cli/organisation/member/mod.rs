@@ -70,8 +70,6 @@ impl fmt::Display for OrgChoice {
     }
 }
 
-/// Fetches the user's organisations (optionally filtered by role) and presents
-/// an interactive select prompt. Returns the selected organisation ID.
 pub(crate) async fn prompt_org_select(state: &State, role_filter: &str) -> anyhow::Result<String> {
     let resp = state
         .grpc_client()
@@ -112,8 +110,6 @@ impl fmt::Display for MemberChoice {
     }
 }
 
-/// Fetches the members of an organisation and presents an interactive select
-/// prompt. Returns the selected user ID.
 pub(crate) async fn prompt_member_select(
     state: &State,
     organisation_id: &str,
@@ -142,11 +138,9 @@ pub(crate) async fn prompt_member_select(
     Ok(selected.user_id)
 }
 
-/// Live-search autocomplete that queries the server as the user types.
 #[derive(Clone)]
 struct UserSearchAutocomplete {
     client: crate::grpc::GrpcClient,
-    /// Cached results: (user_id, username)
     users: Vec<(String, String)>,
     last_query: String,
     last_fetch: Instant,
@@ -214,8 +208,6 @@ impl inquire::Autocomplete for UserSearchAutocomplete {
     }
 }
 
-/// Live-search prompt: as the user types, matching users are fetched from the
-/// server and shown as suggestions. Returns the selected user ID.
 pub(crate) async fn prompt_user_search(state: &State) -> anyhow::Result<String> {
     let ac = UserSearchAutocomplete::new(state.grpc_client().clone());
 

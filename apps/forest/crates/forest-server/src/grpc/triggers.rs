@@ -135,7 +135,6 @@ impl TriggerService for TriggersServer {
             .context("resolve project")
             .to_internal_error()?;
 
-        // Build patterns only if any pattern field is set
         let patterns = if req.branch_pattern.is_some()
             || req.title_pattern.is_some()
             || req.author_pattern.is_some()

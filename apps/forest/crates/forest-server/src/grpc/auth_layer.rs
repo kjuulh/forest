@@ -35,7 +35,6 @@ async fn resolve_personal_access_token(
         return Ok(None);
     };
 
-    // Touch last_used
     sqlx::query!(
         "UPDATE personal_access_tokens SET last_used = now() WHERE id = $1",
         row.id
@@ -71,7 +70,6 @@ async fn resolve_app_token(db: &sqlx::PgPool, raw_token: &str) -> anyhow::Result
         return Ok(None);
     };
 
-    // Touch last_used
     sqlx::query!(
         "UPDATE app_tokens SET last_used = now() WHERE token_hash = $1",
         &token_hash
@@ -87,18 +85,6 @@ async fn resolve_app_token(db: &sqlx::PgPool, raw_token: &str) -> anyhow::Result
     }))
 }
 
-/// The gRPC methods an OAuth client-credentials token may call, by scope.
-///
-/// Deny by default. Such a token authenticates as its app, and an app passes
-/// every org-member check in its own organisation, so without this list a
-/// token granted only `directory:read` could create releases or edit
-/// destinations. A scope not listed here grants no gRPC method at all.
-///
-/// `components:publish` covers what `forest publish` calls: the registry
-/// (reading the org's components, and the upload, manifest, commit, abort
-/// and unpublish writes, which also check the scope themselves), plus
-/// `CreateProject`/`UpdateProject`, because publishing ensures the
-/// component's project exists and records its metadata.
 const SCOPED_METHODS: &[(&str, &[&str])] = &[(
     SCOPE_COMPONENTS_PUBLISH,
     &[
@@ -108,7 +94,6 @@ const SCOPED_METHODS: &[(&str, &[&str])] = &[(
     ],
 )];
 
-/// Whether a token holding `scopes` may call the gRPC method at `path`.
 pub(crate) fn scoped_token_permits(path: &str, scopes: &[String]) -> bool {
     SCOPED_METHODS.iter().any(|(scope, methods)| {
         scopes.iter().any(|s| s == scope)
@@ -122,8 +107,6 @@ pub(crate) fn scoped_token_permits(path: &str, scopes: &[String]) -> bool {
     })
 }
 
-/// Compare the incoming token against the pre-hashed service account key
-/// held in memory (loaded from `FOREST_SERVICE_ACCOUNT_API_KEY` at startup).
 fn resolve_service_account_token(expected_hash: Option<&[u8]>, raw_token: &str) -> Option<Actor> {
     let expected = expected_hash?;
     let incoming = sha2::Sha256::digest(raw_token.as_bytes());
@@ -136,7 +119,6 @@ fn resolve_service_account_token(expected_hash: Option<&[u8]>, raw_token: &str) 
     }
 }
 
-/// Constant-time comparison to avoid timing side-channels.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -179,13 +161,8 @@ type BoxFuture<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AuthMode {
-    /// Token required; reject if missing or invalid.
     Required,
-    /// Token optional; if present and valid, extract Actor; otherwise pass through anonymously.
-    /// Used for registry browsing where private components must be visible to their org members
-    /// while anonymous users can still see public components.
     Optional,
-    /// Skip token handling entirely.
     None,
 }
 
@@ -195,32 +172,16 @@ fn auth_mode(path: &str) -> AuthMode {
         "/forest.v1.UsersService/Login",
         "/forest.v1.UsersService/RefreshToken",
         "/forest.v1.UsersService/VerifyLoginMfa",
-        // Device authorization grant: the CLI has no token yet, that's
-        // the whole point. Approve/Deny are NOT on this list — they
-        // require service-account auth and are checked at the handler
-        // level via `require_service_account()`.
         "/forest.v1.UsersService/InitiateDeviceLogin",
         "/forest.v1.UsersService/PollDeviceLogin",
         "/forest.v1.StatusService/",
-        // Runner service uses release-scoped tokens, not JWT
         "/forest.v1.RunnerService/",
-        // Standard gRPC health protocol — used by the ALB / k8s probes.
-        // Probers can't carry user credentials; refusing them makes the
-        // server look dead. The health namespace exposes only liveness, so
-        // it's safe to leave open.
         "/grpc.health.v1.Health/",
-        // Public registry endpoints — by design these never read the
-        // caller's identity and always filter to public components, so
-        // skipping token handling closes off any chance of escalating a
-        // misconfigured caller token into private reads.
         "/forest.v1.RegistryService/SearchPublicComponents",
         "/forest.v1.RegistryService/GetPublicComponentDetail",
         "/forest.v1.RegistryService/GetPublicComponentManifest",
     ];
     let optional = [
-        // Registry discovery endpoints allow anonymous browsing of public components,
-        // but must still recognise authenticated callers so they see private components
-        // from their own orgs.
         "/forest.v1.RegistryService/SearchComponents",
         "/forest.v1.RegistryService/GetComponentDetail",
     ];
@@ -301,7 +262,6 @@ where
                 }
             };
 
-            // 1. Try JWT (user tokens)
             let access_token = AccessToken::new_from(&token);
             if let Ok(access_token) = access_token
                 && let Ok(claims) = state.tokens().verify_access_token(&access_token)
@@ -318,7 +278,6 @@ where
                 return inner.call(req).await;
             }
 
-            // 2. Try service account API key (in-memory, no DB hit)
             if let Some(actor) = resolve_service_account_token(
                 state.config.service_account_token_hash.as_deref(),
                 &token,
@@ -327,32 +286,28 @@ where
                 return inner.call(req).await;
             }
 
-            // 3. Try personal access token (DB — resolves to Actor::User)
             match resolve_personal_access_token(&state.db, &token).await {
                 Ok(Some(actor)) => {
                     req.extensions_mut().insert(actor);
                     return inner.call(req).await;
                 }
-                Ok(None) => {} // not a PAT, try next
+                Ok(None) => {}
                 Err(e) => {
                     tracing::warn!(path = %path, error = %e, "PAT lookup failed");
                 }
             }
 
-            // 4. Try a legacy app token (DB)
             match resolve_app_token(&state.db, &token).await {
                 Ok(Some(actor)) => {
                     req.extensions_mut().insert(actor);
                     return inner.call(req).await;
                 }
-                Ok(None) => {} // not an app token, try next
+                Ok(None) => {}
                 Err(e) => {
                     tracing::warn!(path = %path, error = %e, "app token lookup failed");
                 }
             }
 
-            // 5. Fall back to an OAuth client-credentials token (DB), limited
-            //    to the methods its scopes cover.
             match state
                 .oauth_app_service()
                 .introspect_client_token(&token)
@@ -412,8 +367,6 @@ mod scoped_token_tests {
         }
     }
 
-    /// The point of the list: an app passes org-member checks, so anything
-    /// not listed must be refused here.
     #[test]
     fn the_publish_grant_reaches_nothing_else() {
         let s = scopes(&["components:publish"]);
@@ -442,9 +395,6 @@ mod scoped_token_tests {
         ));
     }
 
-    /// The data gateway's scopes, and the introspection scope, are for other
-    /// services: a token holding only them must reach no Forest method,
-    /// IntrospectClientToken included (Forage answers that, not the caller).
     #[test]
     fn the_resource_server_scopes_grant_no_forest_method() {
         let s = scopes(&["tokens:introspect", "datagateway:apply", "datagateway:read"]);

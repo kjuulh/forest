@@ -12,10 +12,6 @@ use forage_grpc::{
 use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 
-/// Implements the `ForageService` gRPC server trait.
-///
-/// Thin adapter: validates auth, converts proto to domain types, delegates to
-/// the `ComputeScheduler`, and converts results back to proto.
 pub struct ForageServiceImpl {
     pub scheduler: Arc<dyn ComputeScheduler>,
     pub maintenance_mode: bool,

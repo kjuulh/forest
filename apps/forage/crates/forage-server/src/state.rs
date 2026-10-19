@@ -12,7 +12,6 @@ use forage_core::registry::ForestRegistry;
 use forage_core::session::SessionStore;
 use forage_db::PgProfilePictureStore;
 
-/// Slack OAuth credentials for the "Add to Slack" flow.
 #[derive(Clone)]
 pub struct SlackConfig {
     pub client_id: String,
@@ -20,7 +19,6 @@ pub struct SlackConfig {
     pub redirect_host: String,
 }
 
-/// Google OAuth configuration.
 #[derive(Clone)]
 pub struct GoogleOAuthConfig {
     pub client_id: String,
@@ -28,7 +26,6 @@ pub struct GoogleOAuthConfig {
     pub redirect_host: String,
 }
 
-/// GitHub OAuth configuration.
 #[derive(Clone)]
 pub struct GitHubOAuthConfig {
     pub client_id: String,

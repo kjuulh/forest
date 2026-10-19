@@ -33,7 +33,6 @@ impl CommandHandler for ServiceCommands {
         let mut messages = Vec::new();
         let mut valid = true;
 
-        // Check ports
         if spec.ports.is_empty() {
             messages.push("warning: no ports defined".into());
         }
@@ -44,13 +43,11 @@ impl CommandHandler for ServiceCommands {
             }
         }
 
-        // Check replicas
         if spec.replicas < 1 {
             valid = false;
             messages.push("error: replicas must be >= 1".into());
         }
 
-        // Check health check ports are defined
         let port_numbers: Vec<i64> = spec.ports.iter().map(|p| p.port).collect();
         if !port_numbers.contains(&spec.health_checks.liveness.port) {
             messages.push(format!(
@@ -65,7 +62,6 @@ impl CommandHandler for ServiceCommands {
             ));
         }
 
-        // Check environment for duplicates
         let mut seen_keys = std::collections::HashSet::new();
         for env in &spec.environment {
             if !seen_keys.insert(&env.key) {
@@ -73,8 +69,6 @@ impl CommandHandler for ServiceCommands {
             }
         }
 
-        // Check resource requests <= limits
-        // (simplified: just report what we see)
         messages.push(format!(
             "info: resources cpu {}/{}, memory {}/{}",
             spec.resources.requests.cpu,
@@ -96,8 +90,6 @@ impl CommandHandler for ServiceCommands {
 
     fn test(&self, spec: &Spec, _input: TestInput) -> Result<TestOutput, forest_sdk::Error> {
         println!("==> Running test suite for '{}'", spec.name);
-        // In a real component, this would invoke `cargo test` or `cargo nextest run`
-        // and parse the output. Here we simulate a passing test run.
         println!("  running unit tests...");
         println!("  running integration tests...");
         let output = TestOutput {
@@ -118,7 +110,6 @@ impl CommandHandler for ServiceCommands {
         input: DockerBuildInput,
     ) -> Result<DockerBuildOutput, forest_sdk::Error> {
         let registry = if input.registry.is_empty() {
-            // Extract registry from image spec
             spec.image
                 .rsplit_once('/')
                 .map(|(reg, _)| reg.to_string())
@@ -151,7 +142,6 @@ impl CommandHandler for ServiceCommands {
             if binary_exists { "exists" } else { "not built" }
         );
 
-        // Simulate git info (in real usage, this runs in the project dir)
         let git_branch = std::env::var("FOREST_GIT_BRANCH").unwrap_or_else(|_| "unknown".into());
         let git_commit = std::env::var("FOREST_GIT_COMMIT").unwrap_or_else(|_| "unknown".into());
         let git_dirty = std::env::var("FOREST_GIT_DIRTY")

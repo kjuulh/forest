@@ -1,15 +1,3 @@
-//! `forest-contrib/render-template@v0.1` — directory-tree `{{var}}`
-//! interpolation.
-//!
-//! Walks a source directory recursively. For each file, interpolates
-//! `{{var}}` placeholders in:
-//!   - file contents (UTF-8 only; binary files pass through verbatim)
-//!   - path components (so `src/{{project}}/main.rs` lands at
-//!     `dest/<actual project>/main.rs`)
-//!
-//! Unknown placeholders abort with an error so typos surface fast.
-//! Executable bits are preserved on Unix.
-
 #[allow(dead_code)]
 mod forestgen;
 
@@ -39,8 +27,6 @@ impl CommandHandler for Commands {
     }
 }
 
-/// Reduce arbitrary JSON values to strings. Strings pass through;
-/// numbers/bools stringify; nulls become empty; objects/arrays error.
 fn scalarize(vars: &HashMap<String, serde_json::Value>) -> anyhow::Result<HashMap<String, String>> {
     let mut out = HashMap::with_capacity(vars.len());
     for (k, v) in vars {
@@ -86,11 +72,6 @@ fn walk(
             .into_string()
             .map_err(|n| anyhow::anyhow!("non-UTF-8 filename: {n:?}"))?;
 
-        // Skip VCS metadata. Templates frequently come from a `git clone`
-        // (the checkout component leaves `.git/` behind) and the rendered
-        // output should be a fresh working tree, not the template's
-        // history. If a workflow legitimately needs to render files
-        // *into* a `.git` directory we'll add an `include_vcs` opt-in.
         if file_type.is_dir() && (raw_name == ".git" || raw_name == ".hg" || raw_name == ".svn") {
             continue;
         }
@@ -127,15 +108,10 @@ fn walk(
 
             *count += 1;
         }
-        // Symlinks and other special files are skipped silently.
     }
     Ok(())
 }
 
-/// Render a single string, replacing every `{{var}}` (with optional
-/// surrounding whitespace) with the matching scalar from `vars`.
-/// Operates on `&str` byte indices; `{{` and `}}` are pure ASCII so
-/// slicing on those boundaries is always UTF-8 safe.
 fn render_str(input: &str, vars: &HashMap<String, String>) -> anyhow::Result<String> {
     let mut out = String::with_capacity(input.len());
     let mut rest = input;

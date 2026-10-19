@@ -64,8 +64,6 @@ impl ReleaseHealthService for ReleaseHealthServer {
             .observation
             .ok_or_else(|| tonic::Status::invalid_argument("observation is required"))?;
 
-        // Serialize proto to JSON via prost encoding → base64 → JSON wrapper.
-        // We store the observation as a structured JSON document.
         let observation_json = {
             let resources: Vec<serde_json::Value> = observation
                 .resources
@@ -143,13 +141,11 @@ impl ReleaseHealthService for ReleaseHealthServer {
 
         let destinations = rows
             .into_iter()
-            .map(|row| {
-                DestinationHealth {
-                    destination: row.destination_name,
-                    environment: row.environment,
-                    latest_observation: None, // Full observation is in DB as JSON; proto reconstruction TODO
-                    status: status_string_to_proto(&row.status),
-                }
+            .map(|row| DestinationHealth {
+                destination: row.destination_name,
+                environment: row.environment,
+                latest_observation: None,
+                status: status_string_to_proto(&row.status),
             })
             .collect();
 
@@ -197,14 +193,14 @@ impl ReleaseHealthService for ReleaseHealthServer {
                 let event = ReleaseHealthEvent {
                     destination: payload["destination"].as_str().unwrap_or("").to_string(),
                     environment: payload["environment"].as_str().unwrap_or("").to_string(),
-                    observation: None, // Lightweight event — client can call GetReleaseHealth for full data
+                    observation: None,
                     status: status_string_to_proto(
                         payload["status"].as_str().unwrap_or("UNSPECIFIED"),
                     ),
                 };
 
                 if tx.send(Ok(event)).await.is_err() {
-                    break; // Client disconnected
+                    break;
                 }
             }
         });

@@ -5,7 +5,6 @@ use crate::{
     services::release_registry::ReleaseItem,
 };
 
-/// Kubernetes is flux2 based currently. (git)
 pub struct KubernetesV1Destination {}
 
 #[async_trait::async_trait]

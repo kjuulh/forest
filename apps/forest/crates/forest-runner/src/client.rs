@@ -11,7 +11,6 @@ use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-/// Client that connects to a forest-server RunnerService.
 pub struct ForestRunnerClient {
     addr: String,
 }
@@ -21,8 +20,6 @@ impl ForestRunnerClient {
         Self { addr }
     }
 
-    /// Connect to the server, register as a runner, and return a session
-    /// that receives work assignments and can make authenticated calls.
     pub async fn connect(
         &self,
         runner_id: String,
@@ -37,10 +34,8 @@ impl ForestRunnerClient {
 
         let mut client = RunnerServiceClient::new(channel.clone());
 
-        // Create the outbound stream for RegisterRunner
         let (outbound_tx, outbound_rx) = mpsc::unbounded_channel::<RunnerMessage>();
 
-        // Send registration message
         outbound_tx.send(RunnerMessage {
             message: Some(runner_message::Message::Register(RunnerRegister {
                 runner_id: runner_id.clone(),
@@ -66,14 +61,12 @@ impl ForestRunnerClient {
     }
 }
 
-/// An active runner session with the forest-server.
 pub struct RunnerSession {
     client: RunnerServiceClient<tonic::transport::Channel>,
     outbound_tx: mpsc::UnboundedSender<RunnerMessage>,
     inbound: tonic::Streaming<forest_grpc_interface::ServerMessage>,
 }
 
-/// A lightweight handle that can send heartbeats without borrowing the full session.
 #[derive(Clone)]
 pub struct HeartbeatSender {
     outbound_tx: mpsc::UnboundedSender<RunnerMessage>,
@@ -90,15 +83,12 @@ impl HeartbeatSender {
 }
 
 impl RunnerSession {
-    /// Get a clone-able heartbeat sender for background tasks.
     pub fn clone_heartbeat_sender(&self) -> HeartbeatSender {
         HeartbeatSender {
             outbound_tx: self.outbound_tx.clone(),
         }
     }
 
-    /// Wait for the next work assignment from the server.
-    /// Returns None if the stream is closed.
     pub async fn next_work(&mut self) -> Option<WorkAssignment> {
         loop {
             match self.inbound.next().await {
@@ -109,7 +99,6 @@ impl RunnerSession {
                     {
                         return Some(assignment);
                     }
-                    // RegisterAck or other messages — skip
                 }
                 Some(Err(e)) => {
                     tracing::error!("stream error: {e}");
@@ -120,7 +109,6 @@ impl RunnerSession {
         }
     }
 
-    /// Send a heartbeat to the server.
     pub fn send_heartbeat(&self, active_releases: i32) {
         let _ = self.outbound_tx.send(RunnerMessage {
             message: Some(runner_message::Message::Heartbeat(RunnerHeartbeat {
@@ -129,7 +117,6 @@ impl RunnerSession {
         });
     }
 
-    /// Fetch artifact files for a release.
     pub async fn get_release_files(
         &mut self,
         release_token: &str,
@@ -153,7 +140,6 @@ impl RunnerSession {
         Ok(files)
     }
 
-    /// Fetch spec (original) files for a release.
     pub async fn get_spec_files(
         &mut self,
         release_token: &str,
@@ -177,7 +163,6 @@ impl RunnerSession {
         Ok(files)
     }
 
-    /// Fetch the release annotation (metadata context).
     pub async fn get_release_annotation(
         &mut self,
         release_token: &str,
@@ -193,7 +178,6 @@ impl RunnerSession {
         Ok(response.into_inner())
     }
 
-    /// Fetch project info (organisation + project name).
     pub async fn get_project_info(
         &mut self,
         release_token: &str,
@@ -210,8 +194,6 @@ impl RunnerSession {
         Ok((info.organisation, info.project))
     }
 
-    /// Open a log stream for pushing lines to the server.
-    /// Returns a sender for log messages and a handle that completes when the stream closes.
     pub async fn open_log_stream(
         &mut self,
     ) -> anyhow::Result<mpsc::UnboundedSender<PushLogRequest>> {
@@ -228,7 +210,6 @@ impl RunnerSession {
         Ok(tx)
     }
 
-    /// Report release completion.
     pub async fn complete_release(
         &mut self,
         release_token: &str,

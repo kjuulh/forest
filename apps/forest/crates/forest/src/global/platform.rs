@@ -1,5 +1,3 @@
-//! Host-platform detection (effectful — reads `cfg!`).
-
 use crate::global::manifest::{Arch, Os, PlatformKey};
 
 pub fn current() -> Option<PlatformKey> {

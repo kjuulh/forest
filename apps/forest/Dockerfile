@@ -19,9 +19,6 @@ ENV SQLX_OFFLINE=true
 
 RUN cargo install cargo-chef --locked --version 0.1.78
 
-# The recipe is a digest of every manifest in the workspace and nothing else, so
-# this stage re-runs on any commit but its *output* only changes when a
-# Cargo.toml or Cargo.lock does.
 FROM chef AS planner
 
 COPY . .
@@ -30,11 +27,6 @@ RUN --mount=type=ssh cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 
-# Dependencies compile against the recipe alone. This layer is keyed on
-# recipe.json, so it survives every commit that does not touch a manifest --
-# which is most of them. `.sqlx/` is not needed here: cook builds the
-# dependency graph against a skeleton workspace, and no sqlx macro runs until
-# the real sources arrive below.
 COPY --from=planner /app/recipe.json recipe.json
 
 RUN --mount=type=ssh cargo chef cook --release \
@@ -48,18 +40,6 @@ FROM debian:13-slim AS production
 
 ENV TERRAFORM_EXE=tofu
 
-# The OpenTofu every forest/terraform@1 plan and apply runs with. Pinned, not
-# "whatever apt has today" (forest#283): state written by a newer tofu can be
-# unreadable by an older one, so an unpinned install made a routine image
-# rebuild a silent state-format upgrade — and rolling the image back after it
-# could strand every terraform destination. Components also lean on
-# version-gated features (`import` blocks, `removed` blocks, `for_each` on
-# import), which want a known floor.
-#
-# To bump: pick a release from https://github.com/opentofu/opentofu/releases,
-# check its upgrade notes for state-format changes, change the number here, and
-# say in the PR that it is a tofu bump. Rolling back past a bump is only safe if
-# no apply has run on the newer version since.
 ARG TOFU_VERSION=1.12.6
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -88,13 +68,6 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser \
     && chown appuser:appuser /usr/bin/tofu
 USER appuser
 
-# Build provenance, baked into the final stage only (DATA-505 follow-up).
-#
-# Deliberately after the compile: an ARG/ENV before `cargo build` changes the
-# build environment on every commit and invalidates the cached compile. Placing
-# it here means the image still self-describes (`docker inspect` shows both
-# values, and the server reads them at startup) while the expensive builder
-# layers stay cacheable.
 ARG GIT_SHA=""
 ARG BUILD_TIME=""
 ENV FOREST_GIT_SHA=$GIT_SHA

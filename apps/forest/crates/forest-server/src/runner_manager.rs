@@ -9,7 +9,6 @@ use tokio::sync::{RwLock, mpsc};
 
 use crate::destinations::DestinationIndex;
 
-/// Tracks connected runners and assigns work to them based on capabilities.
 #[derive(Clone)]
 pub struct RunnerManager {
     inner: Arc<RwLock<RunnerManagerInner>>,
@@ -57,7 +56,6 @@ impl RunnerManager {
         }
     }
 
-    /// Register a new runner. Called when a runner sends RunnerRegister on the stream.
     pub async fn register_runner(
         &self,
         runner_id: String,
@@ -84,8 +82,6 @@ impl RunnerManager {
         );
     }
 
-    /// Unregister a runner. Called when the stream drops or the runner disconnects.
-    /// Returns the runner_id if it was found.
     pub async fn unregister_runner(&self, runner_id: &str) -> bool {
         let mut inner = self.inner.write().await;
         let removed = inner.runners.remove(runner_id).is_some();
@@ -95,7 +91,6 @@ impl RunnerManager {
         removed
     }
 
-    /// Update heartbeat timestamp for a runner.
     pub async fn update_heartbeat(&self, runner_id: &str, active_releases: i32) {
         let mut inner = self.inner.write().await;
         if let Some(runner) = inner.runners.get_mut(runner_id) {
@@ -104,18 +99,12 @@ impl RunnerManager {
         }
     }
 
-    /// Try to find a capable runner with spare capacity for the given destination type.
-    /// If found, increments active_releases and returns (runner_id, work_sender).
     pub async fn try_assign(
         &self,
         dest_type: &DestinationIndex,
     ) -> Option<(String, mpsc::Sender<WorkAssignment>)> {
         let mut inner = self.inner.write().await;
 
-        // Find a runner that:
-        // 1. Has a matching capability
-        // 2. Has spare capacity (active_releases < max_concurrent)
-        // Pick the one with the most spare capacity (simple load balancing)
         let best = inner
             .runners
             .iter_mut()
@@ -141,7 +130,6 @@ impl RunnerManager {
         }
     }
 
-    /// Decrement active_releases for a runner (called when a release completes).
     pub async fn release_completed(&self, runner_id: &str) {
         let mut inner = self.inner.write().await;
         if let Some(runner) = inner.runners.get_mut(runner_id) {
@@ -149,8 +137,6 @@ impl RunnerManager {
         }
     }
 
-    /// Check for stale runners (no heartbeat for > threshold) and remove them.
-    /// Returns the list of removed runner IDs.
     pub async fn reap_stale(&self, threshold: Duration) -> Vec<String> {
         let mut inner = self.inner.write().await;
         let now = Instant::now();
@@ -169,7 +155,6 @@ impl RunnerManager {
         stale
     }
 
-    /// Returns whether any runners are currently connected.
     pub async fn has_runners(&self) -> bool {
         let inner = self.inner.read().await;
         !inner.runners.is_empty()

@@ -18,7 +18,6 @@ forest: component: sdk.#ForestComponent & {
 				arch:    "amd64"
 				url:     "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64"
 				archive: "none"
-				// Plain executable, no `binary_in_archive`, no `archive_sha256`.
 				sha256: "5942c9b0934e510ee61eb3e30273f1b3fe2590df93933a93d7c58b81d19c8ff5"
 			},
 			{

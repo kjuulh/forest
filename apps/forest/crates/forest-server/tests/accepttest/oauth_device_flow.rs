@@ -1,13 +1,3 @@
-//! The device authorization grant (RFC 8628) for an OAuth app:
-//! InitiateOAuthDeviceAuthorization → (person approves in Forage) →
-//! ExchangeOAuthDeviceCode, as a CLI like datactl uses it over SSH.
-//!
-//! What these pin: the grant is bound to the app and the scopes it asked for,
-//! only that app redeems it, once, and what it yields is the app's ordinary
-//! user-delegated token (refreshable, revocable, introspectable as the
-//! person) — never a Forest session. Forest CLI logins share the grant table
-//! and must stay a separate kind in both directions.
-
 use forest_grpc_interface::*;
 use tonic::metadata::MetadataValue;
 
@@ -74,7 +64,6 @@ fn app_request(org_id: &str, public: bool, grant_types: &[&str]) -> CreateOAuthA
     }
 }
 
-/// A public app registered for the device grant: (app_id, client_id).
 async fn device_app(fixture: &Fixture, token: &str, org_id: &str) -> (String, String) {
     let app = fixture
         .oauth_apps()
@@ -196,8 +185,6 @@ async fn an_approved_device_grant_yields_the_apps_scoped_token_once() {
     assert_eq!(grant.interval_seconds, 5);
     assert_eq!(grant.expires_in_seconds, 900);
 
-    // Before approval the client is told to keep waiting, and polling faster
-    // than the interval is slow_down.
     let pending = exchange(&sa, &client_id, &grant.device_code).await.unwrap();
     assert_eq!(
         status(&pending),
@@ -207,7 +194,6 @@ async fn an_approved_device_grant_yields_the_apps_scoped_token_once() {
     let hurried = exchange(&sa, &client_id, &grant.device_code).await.unwrap();
     assert_eq!(status(&hurried), OAuthDeviceTokenStatus::SlowDown);
 
-    // The approval page sees the app and exactly what it asked for.
     let shown = lookup(&sa, &grant.user_code).await.expect("lookup");
     assert_eq!(shown.client_id, client_id);
     assert_eq!(shown.name, "datactl");
@@ -216,7 +202,6 @@ async fn an_approved_device_grant_yields_the_apps_scoped_token_once() {
     approve(&sa, &grant.user_code, &user_id)
         .await
         .expect("approve");
-    // Approved is no longer pending: the page cannot approve it twice.
     assert_eq!(
         lookup(&sa, &grant.user_code).await.unwrap_err().code(),
         tonic::Code::NotFound
@@ -230,8 +215,6 @@ async fn an_approved_device_grant_yields_the_apps_scoped_token_once() {
     assert!(tokens.id_token.is_empty());
     assert_eq!(tokens.scopes, vec![APPLY, READ]);
 
-    // The token is the app's, acting for the person: what the data gateway
-    // checks.
     let seen = introspect(&sa, &tokens.access_token).await;
     assert!(seen.active);
     assert_eq!(seen.app_id, app_id);
@@ -239,7 +222,6 @@ async fn an_approved_device_grant_yields_the_apps_scoped_token_once() {
     assert_eq!(seen.user_id, user_id);
     assert_eq!(seen.scopes, vec![APPLY, READ]);
 
-    // Approving recorded the consent, as an approved authorize request does.
     let consent = sa
         .oauth_apps()
         .get_o_auth_consent(authed(
@@ -254,12 +236,10 @@ async fn an_approved_device_grant_yields_the_apps_scoped_token_once() {
         .into_inner();
     assert_eq!(consent.scopes.len(), 2);
 
-    // Single use: a replay is indistinguishable from a lapsed code.
     let replay = exchange(&sa, &client_id, &grant.device_code).await.unwrap();
     assert_eq!(status(&replay), OAuthDeviceTokenStatus::ExpiredToken);
     assert!(replay.tokens.is_none());
 
-    // It refreshes like any other user-delegated token, without a secret.
     let refreshed = sa
         .oauth_apps()
         .refresh_o_auth_token(authed(
@@ -277,7 +257,6 @@ async fn an_approved_device_grant_yields_the_apps_scoped_token_once() {
         .expect("tokens");
     assert_eq!(refreshed.scopes, vec![APPLY, READ]);
 
-    // And revoking the person's grant for the app ends it.
     sa.oauth_apps()
         .revoke_o_auth_grant(authed(
             SA,
@@ -368,7 +347,6 @@ async fn another_app_can_neither_redeem_nor_burn_the_grant() {
     assert_eq!(status(&stolen), OAuthDeviceTokenStatus::ExpiredToken);
     assert!(stolen.tokens.is_none());
 
-    // The app it belongs to still redeems it.
     let issued = exchange(&sa, &client_id, &grant.device_code).await.unwrap();
     assert_eq!(status(&issued), OAuthDeviceTokenStatus::Issued);
 }
@@ -394,8 +372,6 @@ async fn concurrent_redemptions_mint_exactly_one_token_pair() {
         .collect();
     let mut issued = 0;
     for attempt in attempts {
-        // A loser either sees the grant consumed (expired_token) or loses the
-        // write race outright (an error); neither carries tokens.
         if let Ok(resp) = attempt.await.unwrap()
             && resp.tokens.is_some()
         {
@@ -434,7 +410,6 @@ async fn only_registered_apps_and_their_scopes_may_start_a_grant() {
     let err = initiate(&sa, &client_id, &[]).await.unwrap_err();
     assert_eq!(err.message(), "invalid_scope");
 
-    // An app that never asked for the device grant cannot use it.
     let code_only = app_fx
         .oauth_apps()
         .create_o_auth_app(authed(&token, app_request(&org_id, true, &[])))
@@ -448,8 +423,6 @@ async fn only_registered_apps_and_their_scopes_may_start_a_grant() {
         .unwrap_err();
     assert_eq!(err.message(), "unsupported_grant_type");
 
-    // A confidential app authenticates with its secret, as at the token
-    // endpoint.
     let confidential = app_fx
         .oauth_apps()
         .create_o_auth_app(authed(&token, app_request(&org_id, false, &[DEVICE])))
@@ -471,7 +444,6 @@ async fn only_registered_apps_and_their_scopes_may_start_a_grant() {
         .await
         .expect("confidential app with its secret");
 
-    // The authorization-server RPCs are Forage's alone.
     let err = app_fx
         .oauth_apps()
         .initiate_o_auth_device_authorization(authed(
@@ -515,7 +487,6 @@ async fn withdrawing_the_device_grant_stops_an_outstanding_one() {
         .await
         .expect("withdraw the device grant");
 
-    // Nobody is asked to approve it, and it cannot be redeemed.
     assert_eq!(
         lookup(&sa, &grant.user_code).await.unwrap_err().code(),
         tonic::Code::NotFound
@@ -562,9 +533,6 @@ async fn narrowing_the_app_stops_asking_for_scopes_it_no_longer_holds() {
     assert!(approve(&sa, &grant.user_code, &user_id).await.is_err());
 }
 
-/// The two kinds of device grant share a table and the /device page; each
-/// must be redeemable only through its own endpoint. In particular a Forest
-/// CLI poll must never turn an app's approval into a Forest session.
 #[tokio::test(flavor = "multi_thread")]
 async fn app_grants_and_forest_cli_logins_never_cross() {
     let app_fx = fixture().await.unwrap();
@@ -574,7 +542,6 @@ async fn app_grants_and_forest_cli_logins_never_cross() {
     let (_, client_id) = device_app(&app_fx, &token, &org_id).await;
     let mut users = sa.users();
 
-    // An app grant, polled as a Forest CLI login: nothing, and untouched.
     let app_grant = initiate(&sa, &client_id, &[APPLY]).await.unwrap();
     let err = users
         .approve_device_login(authed(
@@ -606,7 +573,6 @@ async fn app_grants_and_forest_cli_logins_never_cross() {
         .unwrap();
     assert_eq!(status(&issued), OAuthDeviceTokenStatus::Issued);
 
-    // A Forest CLI login, seen from the app side: not an app grant.
     let cli = users
         .initiate_device_login(InitiateDeviceLoginRequest {
             client_name: "forest-cli".into(),
@@ -622,7 +588,6 @@ async fn app_grants_and_forest_cli_logins_never_cross() {
     );
     assert!(approve(&sa, &cli.user_code, &user_id).await.is_err());
 
-    // …and it still works as a Forest CLI login, which an app cannot redeem.
     users
         .approve_device_login(authed(
             SA,
@@ -646,7 +611,6 @@ async fn app_grants_and_forest_cli_logins_never_cross() {
         .into_inner();
     assert_eq!(session.status, DeviceLoginStatus::Approved as i32);
 
-    // A Forest session token is not something the data gateway can use.
     let forest_session = session.tokens.expect("tokens").access_token;
     assert!(!introspect(&sa, &forest_session).await.active);
 }

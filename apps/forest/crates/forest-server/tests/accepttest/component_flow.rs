@@ -4,10 +4,6 @@ use tonic::metadata::MetadataValue;
 
 use crate::accepttest::fixtures::{Given, Then, When, fixture, testcase};
 
-// ============================================================
-// Test data
-// ============================================================
-
 #[derive(Clone, Default)]
 pub struct ComponentFlowData {
     pub auth_token: String,
@@ -23,10 +19,6 @@ fn authed_request<T>(token: &str, inner: T) -> tonic::Request<T> {
     req.metadata_mut().insert("authorization", val);
     req
 }
-
-// ============================================================
-// Given
-// ============================================================
 
 trait GivenComponentFlow {
     async fn a_registered_user(self) -> Self;
@@ -59,10 +51,6 @@ impl GivenComponentFlow for Given<ComponentFlowData> {
     }
 
     async fn a_component(self, org: &str, name: &str, version: &str) -> Self {
-        // Component uploads now require the caller to be a member of the
-        // organisation. Create the org as part of the fixture so the test
-        // user owns it. If the org already exists (e.g. when registering
-        // a second version), creation returns AlreadyExists and we ignore.
         let token = self.data().auth_token.clone();
         let _ = self
             .fixture()
@@ -156,10 +144,6 @@ impl GivenComponentFlow for Given<ComponentFlowData> {
     }
 }
 
-// ============================================================
-// When
-// ============================================================
-
 trait WhenComponentFlow {
     async fn begin_upload_is_called(self) -> Self;
     async fn files_are_uploaded(self, files: &[(&str, &[u8])]) -> Self;
@@ -240,10 +224,6 @@ impl WhenComponentFlow for When<ComponentFlowData> {
         self
     }
 }
-
-// ============================================================
-// Then
-// ============================================================
 
 trait ThenComponentFlow {
     async fn component_is_queryable(self) -> Self;
@@ -328,7 +308,6 @@ impl ThenComponentFlow for Then<ComponentFlowData> {
             )
         };
 
-        // Get the component id
         let resp = self
             .fixture()
             .registry()
@@ -345,7 +324,6 @@ impl ThenComponentFlow for Then<ComponentFlowData> {
 
         let component_id = resp.into_inner().component.expect("component").id;
 
-        // Stream files
         let resp = self
             .fixture()
             .registry()
@@ -424,10 +402,6 @@ impl ThenComponentFlow for Then<ComponentFlowData> {
     }
 }
 
-// ============================================================
-// Test scenarios
-// ============================================================
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_full_component_upload_flow() -> anyhow::Result<()> {
     let (given, when, then) = testcase::<ComponentFlowData>().await?;
@@ -435,14 +409,12 @@ async fn test_full_component_upload_flow() -> anyhow::Result<()> {
     let org = format!("comp-org-{}", uuid::Uuid::now_v7());
     let name = format!("comp-{}", uuid::Uuid::now_v7());
 
-    // Given a registered user and component definition
     given
         .a_registered_user()
         .await
         .a_component(&org, &name, "1.0.0")
         .await;
 
-    // When we go through the full upload flow
     when.begin_upload_is_called()
         .await
         .files_are_uploaded(&[
@@ -453,7 +425,6 @@ async fn test_full_component_upload_flow() -> anyhow::Result<()> {
         .upload_is_committed()
         .await;
 
-    // Then the component and its files are queryable
     then.component_is_queryable()
         .await
         .component_version_is_queryable()
@@ -480,13 +451,11 @@ async fn test_component_not_found_before_commit() -> anyhow::Result<()> {
         .a_component(&org, &name, "1.0.0")
         .await;
 
-    // Begin upload but don't commit
     when.begin_upload_is_called()
         .await
         .files_are_uploaded(&[("file.yaml", b"content")])
         .await;
 
-    // Component should not be queryable yet
     then.component_is_not_found().await;
 
     Ok(())
@@ -506,7 +475,6 @@ async fn test_superseded_upload_replaces_inflight() -> anyhow::Result<()> {
         .a_component(&org, &name, "1.0.0")
         .await;
 
-    // Begin first upload, upload a file, but don't commit
     given
         .clone()
         .a_begun_upload()
@@ -514,8 +482,6 @@ async fn test_superseded_upload_replaces_inflight() -> anyhow::Result<()> {
         .files_uploaded(&[("old.yaml", b"old content")])
         .await;
 
-    // Begin second upload for same version — supersedes the first
-    // Then upload new files and commit
     given
         .a_begun_upload()
         .await
@@ -524,7 +490,6 @@ async fn test_superseded_upload_replaces_inflight() -> anyhow::Result<()> {
         .upload_committed()
         .await;
 
-    // Only the second upload's files should be present
     then.component_is_queryable()
         .await
         .component_files_are_retrievable(&[("new.yaml", b"new content")])
@@ -540,7 +505,6 @@ async fn test_multiple_versions_of_same_component() -> anyhow::Result<()> {
     let org = format!("comp-org-{}", uuid::Uuid::now_v7());
     let name = format!("comp-{}", uuid::Uuid::now_v7());
 
-    // Register user first
     given
         .clone()
         .a_registered_user()
@@ -548,7 +512,6 @@ async fn test_multiple_versions_of_same_component() -> anyhow::Result<()> {
         .a_component(&org, &name, "1.0.0")
         .await;
 
-    // Publish v1.0.0
     given
         .clone()
         .a_begun_upload()
@@ -558,7 +521,6 @@ async fn test_multiple_versions_of_same_component() -> anyhow::Result<()> {
         .upload_committed()
         .await;
 
-    // Publish v2.0.0
     given
         .clone()
         .a_component(&org, &name, "2.0.0")
@@ -570,10 +532,8 @@ async fn test_multiple_versions_of_same_component() -> anyhow::Result<()> {
         .upload_committed()
         .await;
 
-    // Latest should be v2.0.0
     then.clone().component_is_queryable().await;
 
-    // v1.0.0 should still be queryable by version
     given.a_component(&org, &name, "1.0.0").await;
     then.component_version_is_queryable().await;
 
@@ -584,7 +544,6 @@ async fn test_multiple_versions_of_same_component() -> anyhow::Result<()> {
 async fn test_cannot_republish_same_version() -> anyhow::Result<()> {
     let fixture = fixture().await?;
 
-    // Register a user first
     let mut users = forest_grpc_interface::users_service_client::UsersServiceClient::new(
         fixture.channel.clone(),
     );
@@ -602,8 +561,6 @@ async fn test_cannot_republish_same_version() -> anyhow::Result<()> {
     let name = format!("comp-{}", uuid::Uuid::now_v7());
     let version = "1.0.0";
 
-    // Create the org so the registered user owns it (begin_upload now
-    // requires org membership).
     fixture
         .organisations()
         .create_organisation(authed_request(
@@ -615,7 +572,6 @@ async fn test_cannot_republish_same_version() -> anyhow::Result<()> {
 
     let mut client = fixture.registry();
 
-    // Publish v1.0.0
     let resp = client
         .begin_upload(authed_request(
             &token,
@@ -651,7 +607,6 @@ async fn test_cannot_republish_same_version() -> anyhow::Result<()> {
         .await
         .expect("commit");
 
-    // Try to publish v1.0.0 again — should fail
     let result = client
         .begin_upload(authed_request(
             &token,
@@ -676,7 +631,6 @@ async fn test_cannot_republish_same_version() -> anyhow::Result<()> {
 async fn test_upload_file_with_invalid_context() -> anyhow::Result<()> {
     let fixture = fixture().await?;
 
-    // Register user
     let mut users = forest_grpc_interface::users_service_client::UsersServiceClient::new(
         fixture.channel.clone(),
     );
@@ -692,7 +646,6 @@ async fn test_upload_file_with_invalid_context() -> anyhow::Result<()> {
 
     let mut client = fixture.registry();
 
-    // Try uploading with a completely bogus upload context
     let result = client
         .upload_file(authed_request(
             &token,
@@ -713,7 +666,6 @@ async fn test_upload_file_with_invalid_context() -> anyhow::Result<()> {
 async fn test_commit_with_invalid_context() -> anyhow::Result<()> {
     let fixture = fixture().await?;
 
-    // Register user
     let mut users = forest_grpc_interface::users_service_client::UsersServiceClient::new(
         fixture.channel.clone(),
     );

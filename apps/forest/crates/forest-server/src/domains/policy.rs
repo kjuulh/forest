@@ -4,10 +4,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// ============================================================
-// Events
-// ============================================================
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum PolicyEvent {
@@ -38,10 +34,6 @@ impl EventData for PolicyEvent {
         }
     }
 }
-
-// ============================================================
-// Aggregate state
-// ============================================================
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PolicyStatus {
@@ -115,10 +107,6 @@ impl Aggregate for PolicyAggregate {
         }
     }
 }
-
-// ============================================================
-// Config validation (pure)
-// ============================================================
 
 pub fn validate_policy_config(policy_type: &str, config: &serde_json::Value) -> anyhow::Result<()> {
     match policy_type {
@@ -204,10 +192,6 @@ pub fn validate_policy_config(policy_type: &str, config: &serde_json::Value) -> 
     Ok(())
 }
 
-// ============================================================
-// Commands (pure business logic)
-// ============================================================
-
 pub struct CreatePolicyParams {
     pub project_id: Uuid,
     pub name: String,
@@ -291,14 +275,9 @@ impl PolicyAggregate {
     }
 }
 
-/// Stream key for a policy aggregate: `{project_id}/{name}`
 pub fn stream_key(project_id: &Uuid, name: &str) -> String {
     format!("{project_id}/{name}")
 }
-
-// ============================================================
-// Unit tests
-// ============================================================
 
 #[cfg(test)]
 mod tests {
@@ -339,10 +318,6 @@ mod tests {
             config: soak_time_config(),
         }
     }
-
-    // ----------------------------------------------------------
-    // Create
-    // ----------------------------------------------------------
 
     #[test]
     fn create_policy_records_event() {
@@ -416,10 +391,6 @@ mod tests {
         assert!(PolicyAggregate::create(&mut root, params).is_err());
     }
 
-    // ----------------------------------------------------------
-    // Update config
-    // ----------------------------------------------------------
-
     #[test]
     fn update_config_changes_type_and_config() {
         let mut root = new_root();
@@ -451,10 +422,6 @@ mod tests {
         assert!(err.unwrap_err().to_string().contains("does not exist"));
     }
 
-    // ----------------------------------------------------------
-    // Toggle enabled
-    // ----------------------------------------------------------
-
     #[test]
     fn toggle_enabled() {
         let mut root = new_root();
@@ -467,10 +434,6 @@ mod tests {
         PolicyAggregate::toggle_enabled(&mut root, true).unwrap();
         assert!(root.state.enabled);
     }
-
-    // ----------------------------------------------------------
-    // Delete
-    // ----------------------------------------------------------
 
     #[test]
     fn delete_transitions_to_deleted() {
@@ -498,10 +461,6 @@ mod tests {
                 .contains("already deleted")
         );
     }
-
-    // ----------------------------------------------------------
-    // Event replay
-    // ----------------------------------------------------------
 
     #[test]
     fn hydrate_full_lifecycle() {
@@ -548,10 +507,6 @@ mod tests {
         assert_eq!(replayed.state.policy_type, "branch_restriction");
     }
 
-    // ----------------------------------------------------------
-    // Serde roundtrip
-    // ----------------------------------------------------------
-
     #[test]
     fn event_serde_roundtrip() {
         let events = vec![
@@ -576,10 +531,6 @@ mod tests {
             assert_eq!(event.event_type(), back.event_type());
         }
     }
-
-    // ----------------------------------------------------------
-    // Validation
-    // ----------------------------------------------------------
 
     #[test]
     fn validate_soak_time_requires_positive_duration() {

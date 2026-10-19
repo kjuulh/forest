@@ -1,10 +1,3 @@
-//! Operator access to terraform@1 state (understory-io/forest#282).
-//!
-//! Every call requires **org Admin** — reads included, because a pulled state
-//! carries the secrets terraform wrote into it. Kasper's call, for now; the
-//! bar can come down per call later, but not silently. Every call emits an
-//! audit event and a log line naming the actor and the state id.
-
 use std::time::Duration;
 
 use forest_grpc_interface::{terraform_state_service_server::TerraformStateService, *};
@@ -32,7 +25,6 @@ fn principal(actor: &Actor) -> String {
 }
 
 impl TerraformStateServer {
-    /// Resolve a reference to a state id. Callers authorise first.
     async fn resolve(&self, reference: &TerraformStateRef) -> Result<String, tonic::Status> {
         if reference.environment.is_empty() || reference.project.is_empty() {
             return Err(tonic::Status::invalid_argument(

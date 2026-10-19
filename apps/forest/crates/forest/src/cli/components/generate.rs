@@ -58,7 +58,6 @@ impl GenerateCommand {
             },
         };
 
-        // Generate own component types
         let openapi_json = run_cue_def_openapi(&["./forest.component.cue"]).await?;
         let generated_code = codegen.generate(openapi_json.trim())?;
 
@@ -74,7 +73,6 @@ impl GenerateCommand {
         file.flush().await?;
         tracing::info!("generated {} at {}", filename, output.display());
 
-        // Generate dependency clients
         if matches!(language.as_str(), "typescript" | "deno" | "ts") {
             self.generate_dependency_clients(&output, &codegen).await?;
         }
@@ -82,7 +80,6 @@ impl GenerateCommand {
         Ok(())
     }
 
-    /// Discover local component dependencies and generate typed clients for them.
     async fn generate_dependency_clients(
         &self,
         output: &std::path::Path,
@@ -127,12 +124,10 @@ impl GenerateCommand {
     }
 }
 
-/// Run `cue def --out openapi` on the given files in the current directory.
 async fn run_cue_def_openapi(cue_files: &[&str]) -> anyhow::Result<String> {
     run_cue_def_openapi_in_dir(cue_files, &std::env::current_dir()?).await
 }
 
-/// Run `cue def --out openapi` on the given files in a specific directory.
 async fn run_cue_def_openapi_in_dir(
     cue_files: &[&str],
     dir: &std::path::Path,
@@ -159,11 +154,7 @@ async fn run_cue_def_openapi_in_dir(
     Ok(stdout)
 }
 
-/// Parse forest.cue to find local component dependencies.
-/// Returns (component_id, local_path) pairs for dependencies that are local paths
-/// and have a forest.component.cue file (i.e., they are components, not just CUE modules).
 async fn discover_component_dependencies() -> anyhow::Result<Vec<(String, PathBuf)>> {
-    // Read forest.cue to get dependencies
     let output = crate::tools::cue::output(|| {
         let mut cmd = tokio::process::Command::new("cue");
         if let Ok(registry) = std::env::var("CUE_REGISTRY") {
@@ -188,7 +179,6 @@ async fn discover_component_dependencies() -> anyhow::Result<Vec<(String, PathBu
     let cwd = std::env::current_dir()?;
 
     for (name, spec) in deps {
-        // Local path deps resolve against the consumer's cwd.
         if let Some(path) = spec.get("path").and_then(|p| p.as_str()) {
             let dep_path = cwd.join(path);
             if dep_path.join("forest.component.cue").exists() {
@@ -197,15 +187,7 @@ async fn discover_component_dependencies() -> anyhow::Result<Vec<(String, PathBu
             continue;
         }
 
-        // Versioned deps live in the shared component cache at
-        // ~/.cache/forest/components/<org>/<name>/<version>/. The cache
-        // is populated by `forest update` (or the deployment/run
-        // resolvers when they auto-materialize). If the cache is
-        // missing forest.component.cue we silently skip — the consumer
-        // will get a clearer error from the downstream code paths
-        // that explicitly attempt to spawn the component.
         if let Some(version) = spec.get("version").and_then(|v| v.as_str()) {
-            // The dep key is "<org>/<name>"; split it.
             let Some((org, comp_name)) = name.split_once('/') else {
                 continue;
             };
@@ -217,13 +199,6 @@ async fn discover_component_dependencies() -> anyhow::Result<Vec<(String, PathBu
                     .join(comp_name)
                     .join(version);
 
-                // Only emit a typed client for deps that actually have
-                // a callable surface: a Deno runtime (`src/main.ts`),
-                // a binary (descriptor cached at `.forest/component/meta.json`),
-                // or both. Contract-only libraries (e.g. `forest/deployment`)
-                // ship only `*.cue` files and have no `#Spec` to codegen
-                // against — skip silently rather than failing the whole
-                // generate run.
                 let has_deno_runtime = dep_path.join("src").join("main.ts").exists();
                 let has_meta = dep_path
                     .join(".forest")
@@ -241,7 +216,6 @@ async fn discover_component_dependencies() -> anyhow::Result<Vec<(String, PathBu
     Ok(result)
 }
 
-/// Try to detect the codegen output directory from forest.cue's codegen.output field.
 async fn detect_codegen_output() -> Option<PathBuf> {
     let output = tokio::process::Command::new("cue")
         .args(["export", "--out", "json", "forest.cue"])
@@ -262,7 +236,6 @@ async fn detect_codegen_output() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Try to detect the codegen language from forest.cue's codegen.type field.
 async fn detect_codegen_language() -> Option<String> {
     let output = tokio::process::Command::new("cue")
         .args(["export", "--out", "json", "forest.cue"])

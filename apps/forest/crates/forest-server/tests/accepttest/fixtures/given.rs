@@ -14,10 +14,8 @@ fn authed_request<T>(token: &str, inner: T) -> tonic::Request<T> {
     req
 }
 
-/// Every acceptance destination is `forest/flux@1` unless a test says otherwise.
 const DEFAULT_DESTINATION_TYPE: &str = "forest/flux@1";
 
-/// `organisation/name@version` → the proto message.
 fn parse_destination_type(spec: &str) -> DestinationType {
     let (organisation, rest) = spec.split_once('/').expect("org/name@version");
     let (name, version) = rest.split_once('@').expect("org/name@version");
@@ -41,7 +39,6 @@ async fn create_destination(
 ) -> Given<ReleaseFlowData> {
     let mut dest_client = given.fixture().destinations();
 
-    // Create a temp directory for the local flux destination
     let local_path = format!("/tmp/forest-accept-test-{}", uuid::Uuid::now_v7());
     std::fs::create_dir_all(&local_path).expect("create local path");
 
@@ -86,11 +83,6 @@ pub trait GivenReleaseFlow {
     async fn an_organisation(self, name: &str) -> Self;
     async fn an_environment(self, name: &str) -> Self;
     async fn a_destination(self, name: &str, environment: &str) -> Self;
-    /// A destination of a named type, `organisation/name@version`.
-    ///
-    /// Selection compares a destination's type against the type each declared
-    /// item names, so a test about that intersection needs both sides to be
-    /// settable. Everything else keeps `forest/flux@1`.
     async fn a_destination_of_type(
         self,
         name: &str,
@@ -106,15 +98,11 @@ pub trait GivenReleaseFlow {
     ) -> Self;
     async fn an_uploaded_artifact(self) -> Self;
     async fn an_uploaded_artifact_declaring(self, env: &str, selectors: &[&str]) -> Self;
-    /// As above, but each selector carries the destination type it declares —
-    /// what a project shipping more than one kind of deployment writes.
     async fn an_uploaded_artifact_declaring_types(
         self,
         env: &str,
         declarations: &[(&str, &str)],
     ) -> Self;
-    /// As above, but the upload metadata carries `mislabelled_as` instead of
-    /// being blank — what a pre-0.3.10 CLI sends, having split the path itself.
     async fn an_uploaded_artifact_declaring_mislabelled(
         self,
         env: &str,
@@ -209,8 +197,6 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
         .await
     }
 
-    /// Same as `a_destination`, plus extra metadata and a set of
-    /// destination-declared sensitive keys.
     async fn a_destination_with_sensitive_keys(
         self,
         name: &str,
@@ -239,14 +225,12 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
             )
         };
 
-        // Begin
         let begin_resp = art_client
             .begin_upload_artifact(authed_request(&token, BeginUploadArtifactRequest {}))
             .await
             .expect("begin upload");
         let upload_id = begin_resp.into_inner().upload_id;
 
-        // Upload a deployment file
         let upload_stream = tokio_stream::iter(vec![UploadArtifactRequest {
             upload_id: upload_id.clone(),
             file_name: "deployment.yaml".into(),
@@ -265,7 +249,6 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
             .await
             .expect("upload artifact");
 
-        // Commit
         let commit_resp = art_client
             .commit_artifact(authed_request(&token, CommitArtifactRequest { upload_id }))
             .await
@@ -276,18 +259,7 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
         self
     }
 
-    /// An artifact whose deployment files declare `selectors` for `env` — the
-    /// shape `release prepare` produces, which the server parses at annotate
-    /// time into `annotations.deployment_items`.
-    ///
-    /// The file name mirrors prepare's layout exactly, selector and destination
-    /// type each carrying a `/`, because that layout is what the parse has to
-    /// cope with.
     async fn an_uploaded_artifact_declaring(self, env: &str, selectors: &[&str]) -> Self {
-        // The fixture's destinations are `forest/flux@1`, so that is what a
-        // declaration meant to reach them has to name. It used to say
-        // `forest/generic@1` and still matched, because nothing consulted the
-        // type — which is the bug these fixtures now have to be able to express.
         let declarations: Vec<(&str, &str)> = selectors
             .iter()
             .map(|selector| (*selector, DEFAULT_DESTINATION_TYPE))
@@ -324,11 +296,6 @@ impl GivenReleaseFlow for Given<ReleaseFlowData> {
                     "config": { "service": "accept-test-service" },
                 })
                 .to_string(),
-                // Blank, exactly as the CLI sends them: which item a file belongs
-                // to is derived server-side at commit from the item's own
-                // record. A fixture that filled these in would make
-                // `reattribute_deployment_files` a no-op in every test, leaving
-                // the behaviour every released CLI now depends on uncovered.
                 env: String::new(),
                 destination: String::new(),
                 category: "deployment".into(),

@@ -9,10 +9,8 @@ use tabled::Tabled;
 
 use crate::{grpc::GrpcClientState, models::source::Source, state::State};
 
-/// Where `forest release prepare` writes the manifests a release uploads.
 pub(crate) const DEPLOYMENT_DIR: &str = ".forest/deployment";
 
-/// Run a git command and return its trimmed stdout, or `None` on failure.
 pub(super) async fn git_output(args: &[&str]) -> Option<String> {
     let output = tokio::process::Command::new("git")
         .args(args)
@@ -28,19 +26,6 @@ pub(super) async fn git_output(args: &[&str]) -> Option<String> {
     if s.is_empty() { None } else { Some(s) }
 }
 
-/// Every file under `.forest/deployment`, or nothing at all when the directory
-/// does not exist.
-///
-/// A release does not have to deploy anything. A notification-only project — an
-/// empty `forest.cue` whose only job is to record that something shipped
-/// elsewhere (DATA-637) — never runs `forest release prepare`, so nothing ever
-/// creates `.forest/deployment`. Neither does a fresh CI checkout of a project
-/// that annotates before it prepares.
-///
-/// `WalkDir` reports a missing root as an `Err` on the first iteration rather
-/// than as an empty walk, so iterating it directly turned "there is nothing to
-/// upload" into `IO error for operation on .forest/deployment: No such file or
-/// directory` and killed the annotate outright. Absent means empty.
 pub(crate) fn deployment_files() -> anyhow::Result<Vec<PathBuf>> {
     deployment_files_in(Path::new(DEPLOYMENT_DIR))
 }
@@ -151,11 +136,6 @@ pub struct AnnotateCommand {
 
 impl AnnotateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
-        // Only read the spec file when something was left blank. A caller that
-        // named both has no reason to need a forest.cue in the directory it
-        // happens to be standing in, and `create` has auto-detected these for
-        // as long as it has existed — `annotate` demanding them was the odd
-        // one out, and every CI workflow spelled them out because of it.
         let (organisation, project_name) = match (
             self.organisation.clone(),
             self.project_name.clone(),
@@ -203,10 +183,6 @@ impl AnnotateCommand {
         )
         .await?;
 
-        // The result goes to stdout, the narration to stderr. Everything this
-        // command said used to be narration, which left `--format` with nothing
-        // to apply to and scripts scraping the slug out of a prose line
-        // (DATA-637). `--format name` now prints the slug alone.
         let slug = annotated.slug.clone();
         print!(
             "{}",
@@ -220,7 +196,6 @@ impl AnnotateCommand {
     }
 }
 
-/// Parameters for the annotate operation, shared between AnnotateCommand and CreateCommand.
 pub struct AnnotateParams {
     pub metadata: Vec<String>,
     pub source_username: Option<String>,
@@ -242,22 +217,13 @@ pub struct AnnotateParams {
     pub no_spec: bool,
     pub include_files: Vec<String>,
     pub annotation_only: bool,
-    /// Fill blank source fields from the environment. See `detect::resolve`.
     pub detect: bool,
 }
 
-/// Core annotate logic. Returns the artifact slug on success.
-/// What an annotation produced, for callers that need to act on it.
-///
-/// `slug` first, deliberately: `--format name` prints the first column, so
-/// `forest release annotate --format name` is the slug and nothing else, which
-/// is what a CI script wants to capture (DATA-637).
 #[derive(Tabled, Serialize)]
 pub struct AnnotatedRelease {
-    /// Human-friendly handle for the release — what `forest release <slug>` takes.
     pub slug: String,
 
-    /// The artifact the annotation was made against.
     #[tabled(rename = "artifact id")]
     pub artifact_id: String,
 }
@@ -277,18 +243,6 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
             .await
             .context("failed to read template file")?;
 
-        // Env and destination are left blank on purpose. Working out which
-        // deployment item a file belongs to means reading that item's own
-        // `forest/config.json`, and the client is the wrong place to decide it:
-        // this logic existed here in two copy-pasted loops that both split the
-        // upload path on `/`, which truncated every selector containing one —
-        // and fixing one copy left the other wrong. The server has the whole
-        // tree and derives it at commit, so every client is correct including
-        // ones that are never upgraded.
-        //
-        // The uploaded name stays the full path under `.forest/deployment`,
-        // which is what the server attributes from and what destination
-        // providers already receive.
         let file_path = artifact_file.to_string_lossy();
         tracing::info!("uploading file: {}", file_path);
         grpc.upload_artifact_file(
@@ -303,7 +257,6 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
         .context("upload file")?;
     }
 
-    // Upload spec file
     if !params.no_spec {
         let spec_path = if let Some(ref spec) = params.spec_file {
             let p = std::path::PathBuf::from(spec);
@@ -337,7 +290,6 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
         }
     }
 
-    // Upload additional include files
     for include_path_str in &params.include_files {
         let include_path = std::path::PathBuf::from(include_path_str);
         if !include_path.exists() {
@@ -383,9 +335,6 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
         .collect::<Option<HashMap<String, String>>>()
         .ok_or(anyhow::anyhow!("meta data item did not contain a '='"))?;
 
-    // Blank unless the caller said, or `--detect` found somebody. Leaving it
-    // blank is what hands attribution to the token's owner, which in CI is
-    // whoever created the secret rather than whoever wrote the commit.
     let attribution = super::detect::resolve(
         state,
         params.source_username.clone(),
@@ -394,11 +343,6 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
     )
     .await;
 
-    // The raw signals ride along with the annotation. The server links them to
-    // a forest user where it can and records them either way, so a commit by
-    // somebody with no forest account is still attributed to a name rather than
-    // falling back to the token's owner. An explicit `--metadata` on the same
-    // key wins, like every other explicit flag here.
     for (key, value) in attribution.metadata {
         metadata.entry(key).or_insert(value);
     }
@@ -406,7 +350,7 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
     let source = Source {
         username: attribution.username,
         email: attribution.email,
-        user_id: None, // set server-side from auth token
+        user_id: None,
         source_type: params.source_type.clone(),
         run_url: params.run_url.clone(),
     };
@@ -464,10 +408,6 @@ pub async fn annotate(state: &State, params: &AnnotateParams) -> anyhow::Result<
 mod tests {
     use super::*;
 
-    /// The contract CI depends on: `--format name` prints the first column, so
-    /// the slug has to be first. A script capturing `$(forest release annotate
-    /// --format name)` gets the slug and nothing else — that is what replaced
-    /// scraping it out of a prose line (DATA-637).
     #[test]
     fn format_name_yields_the_slug_alone() {
         let row = AnnotatedRelease {
@@ -480,7 +420,6 @@ mod tests {
         assert_eq!(out, "humbly-handsome-emu\n");
     }
 
-    /// And json stays machine-readable, with both fields.
     #[test]
     fn format_json_carries_slug_and_artifact_id() {
         let row = AnnotatedRelease {
@@ -498,9 +437,6 @@ mod tests {
         );
     }
 
-    /// The regression: a project with nothing to deploy. `WalkDir` surfaces the
-    /// missing root as an error on the first item, which used to abort the whole
-    /// annotate (DATA-637).
     #[test]
     fn a_missing_deployment_dir_is_empty_not_an_error() {
         let missing = Path::new(".forest/deployment-does-not-exist-data-637");
@@ -509,7 +445,6 @@ mod tests {
         assert_eq!(deployment_files_in(missing).unwrap(), Vec::<PathBuf>::new());
     }
 
-    /// And a directory that does exist is still walked, files only.
     #[test]
     fn an_existing_dir_yields_its_files_and_no_directories() {
         let files = deployment_files_in(Path::new("src/cli/release")).unwrap();

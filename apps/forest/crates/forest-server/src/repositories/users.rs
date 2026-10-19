@@ -23,8 +23,6 @@ impl UserTx {
     }
 }
 
-// ─── Row types ───────────────────────────────────────────────────────
-
 pub struct UserRow {
     pub id: Uuid,
     pub username: String,
@@ -105,8 +103,6 @@ pub struct OAuthStateRow {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-// ─── Repository implementation ───────────────────────────────────────
-
 impl UserRepository {
     pub async fn begin(&self) -> anyhow::Result<UserTx> {
         Ok(UserTx {
@@ -117,8 +113,6 @@ impl UserRepository {
     pub fn pool(&self) -> &PgPool {
         &self.db
     }
-
-    // ── Users ────────────────────────────────────────────────────────
 
     pub async fn create_user(
         &self,
@@ -312,8 +306,6 @@ impl UserRepository {
         Ok(rows)
     }
 
-    // ── User emails ─────────────────────────────────────────────────
-
     pub async fn add_user_email(
         &self,
         db: impl PgExecutor<'_>,
@@ -411,11 +403,6 @@ impl UserRepository {
         Ok(row)
     }
 
-    /// Upgrade a user's email verification_source to a stronger value
-    /// (OAuth) — used when an OAuth identity is linked whose email matches
-    /// an already-verified row. No-op if the email doesn't exist. The
-    /// caller is expected to only invoke this on rows it's promoting from
-    /// 'magic_link'; the WHERE filters the upgrade direction to be safe.
     pub async fn upgrade_email_verification_source(
         &self,
         db: impl PgExecutor<'_>,
@@ -480,8 +467,6 @@ impl UserRepository {
         Ok(())
     }
 
-    // ── Identities ──────────────────────────────────────────────────
-
     #[allow(clippy::too_many_arguments)]
     pub async fn create_identity(
         &self,
@@ -533,15 +518,6 @@ impl UserRepository {
         Ok(rows)
     }
 
-    /// Like [`Self::get_identity_by_provider`], but accepts several
-    /// spellings of the provider at once.
-    ///
-    /// `identities.provider` is not consistent across the table's
-    /// history: current writes store the enum wire name lowercased
-    /// (`oauth_provider_github`), but rows created by earlier versions
-    /// hold the short form (`github`). A read that picks one spelling
-    /// silently misses the other half of the table — and reports it as
-    /// "no such person", which is indistinguishable from the truth.
     pub async fn get_identity_by_provider_any(
         &self,
         db: impl PgExecutor<'_>,
@@ -594,13 +570,6 @@ impl UserRepository {
         Ok(())
     }
 
-    /// Does this user have at least one *external* identity row for a
-    /// provider other than the one given? Used by `unlink_oauth_provider`
-    /// to block disconnect when it would strip the last sign-in method.
-    ///
-    /// `native` rows are excluded — they're a denormalized marker created
-    /// alongside `provider_native_credentials` and don't grant any login
-    /// path on their own. The password check is `user_has_native_credential`.
     pub async fn user_has_identity_other_than(
         &self,
         db: impl PgExecutor<'_>,
@@ -642,8 +611,6 @@ impl UserRepository {
         Ok(())
     }
 
-    // ── Native credentials ──────────────────────────────────────────
-
     pub async fn set_native_credential(
         &self,
         db: impl PgExecutor<'_>,
@@ -668,8 +635,6 @@ impl UserRepository {
         Ok(())
     }
 
-    /// Cheap existence check used by `unlink_oauth_provider` to decide
-    /// whether a user can still sign in with a password after the unlink.
     pub async fn user_has_native_credential(
         &self,
         db: impl PgExecutor<'_>,
@@ -708,8 +673,6 @@ impl UserRepository {
 
         Ok(row)
     }
-
-    // ── Native MFA ───────────────────────────────────────────────────
 
     pub async fn create_native_mfa(
         &self,
@@ -805,8 +768,6 @@ impl UserRepository {
 
         Ok(())
     }
-
-    // ── Sessions ────────────────────────────────────────────────────
 
     pub async fn create_session(
         &self,
@@ -910,8 +871,6 @@ impl UserRepository {
         Ok(())
     }
 
-    // ── OAuth state ─────────────────────────────────────────────────
-
     #[allow(clippy::too_many_arguments)]
     pub async fn create_oauth_state(
         &self,
@@ -974,8 +933,6 @@ impl UserRepository {
 
         Ok(())
     }
-
-    // ── Personal access tokens ──────────────────────────────────────
 
     #[allow(clippy::too_many_arguments)]
     pub async fn create_personal_access_token(
@@ -1082,10 +1039,6 @@ impl UserRepository {
         Ok(())
     }
 
-    /// User-scoped delete. Returns the number of rows deleted (0 if the
-    /// token doesn't exist or doesn't belong to `user_id`). Used by the
-    /// gRPC handler to enforce that callers can only delete their own
-    /// tokens without leaking whether an arbitrary `token_id` exists.
     pub async fn delete_personal_access_token_for_user(
         &self,
         db: impl PgExecutor<'_>,
@@ -1103,8 +1056,6 @@ impl UserRepository {
         Ok(result.rows_affected())
     }
 }
-
-// ─── State trait ─────────────────────────────────────────────────────
 
 pub trait UserRepositoryState {
     fn user_repository(&self) -> UserRepository;

@@ -62,19 +62,16 @@ impl CommitCommand {
                     .artifact_id
             }
             (None, None) => {
-                // Resolve organisation: from flag or interactive prompt
                 let organisation = match &self.organisation {
                     Some(org) => org.clone(),
                     None => prompt_org_select(state).await?,
                 };
 
-                // Resolve project: from flag or interactive prompt
                 let project = match &self.project {
                     Some(proj) => proj.clone(),
                     None => prompt_project_select(state, &organisation).await?,
                 };
 
-                // Fetch annotations and release intent states in parallel
                 let (release_annotations, intent_states) = tokio::try_join!(
                     grpc.get_release_annotations_by_project(&organisation, &project),
                     grpc.get_release_intent_states(&organisation, Some(&project), true),
@@ -89,9 +86,6 @@ impl CommitCommand {
                     );
                 }
 
-                // Determine "current" per destination: the most recently created
-                // intent that succeeded on that destination wins.
-                // Intents are returned ordered by created DESC, so first seen wins.
                 let mut current_per_dest: std::collections::HashMap<String, String> =
                     std::collections::HashMap::new();
                 for intent in &intent_states.release_intents {
@@ -104,7 +98,6 @@ impl CommitCommand {
                     }
                 }
 
-                // Build a map: artifact_id -> list of dest display entries
                 let mut dest_by_artifact: std::collections::HashMap<String, Vec<DestDisplay>> =
                     std::collections::HashMap::new();
                 for intent in &intent_states.release_intents {
@@ -143,20 +136,13 @@ impl CommitCommand {
             }
         };
 
-        // Resolve environment: from flag, or interactively — but only when it is
-        // going to be used. Naming destinations explicitly selects them, so
-        // prompting for an environment there asks a question whose answer is
-        // discarded, and on a non-TTY it fails a release that was fully specified.
         let environment = match &self.environment {
             _ if !destination.is_empty() => String::new(),
             Some(env) if !env.is_empty() => env.clone(),
             _ => {
-                // We need the org to list destinations. Try to get it from flags
-                // or from the artifact annotation.
                 let organisation = if let Some(org) = &self.organisation {
                     org.clone()
                 } else {
-                    // Fetch the annotation to get the org
                     let orgs = grpc
                         .get_organisations()
                         .await
@@ -203,11 +189,8 @@ impl CommitCommand {
                 .await
                 .context("wait_release")?;
 
-            eprintln!(); // Empty line after logs
+            eprintln!();
 
-            // A plan stage parked on its approval will not move until someone
-            // reads the plan and says yes; waiting here for that would hang the
-            // very person who has to do it.
             if outcome.end == WatchEnd::Parked {
                 let intent_id = release_result.release_intent_id;
                 let target = match (&self.slug, &self.organisation) {
@@ -224,7 +207,6 @@ impl CommitCommand {
 
             let result = outcome.result;
 
-            // Report results for each destination
             let mut any_failed = false;
             for dest_result in &result.destinations {
                 if dest_result.status.is_success() {
@@ -245,7 +227,6 @@ impl CommitCommand {
                 anyhow::bail!("one or more releases failed");
             }
 
-            // Stream health updates after release
             if self.no_health {
                 return Ok(());
             }
@@ -260,12 +241,10 @@ impl CommitCommand {
 }
 
 impl CommitCommand {
-    /// Watch health updates for a release intent after deployment completes.
-    /// Streams health events for up to 60 seconds or until all destinations are healthy.
     async fn watch_health(&self, grpc: &crate::grpc::GrpcClient, release_intent_id: uuid::Uuid) {
         let mut client = match grpc.health_client().await {
             Ok(c) => c,
-            Err(_) => return, // Health service not available, skip silently
+            Err(_) => return,
         };
 
         let timeout = tokio::time::sleep(std::time::Duration::from_secs(90));
@@ -290,7 +269,6 @@ impl CommitCommand {
                         Err(_) => continue,
                     };
 
-                    // Skip if no data yet or only PENDING/UNSPECIFIED
                     let has_real_data = resp.destinations.iter().any(|d| {
                         d.status != forest_grpc_interface::HealthStatus::Unspecified as i32
                             && d.status != 0
@@ -311,7 +289,7 @@ impl CommitCommand {
                             x if x == forest_grpc_interface::HealthStatus::Degraded as i32 => "DEGRADED",
                             x if x == forest_grpc_interface::HealthStatus::Unhealthy as i32 => "UNHEALTHY",
                             x if x == forest_grpc_interface::HealthStatus::Missing as i32 => "MISSING",
-                            _ => continue, // Skip PENDING/UNSPECIFIED
+                            _ => continue,
                         };
 
                         let key = format!("{}:{}", dest.destination, status_str);
@@ -338,7 +316,6 @@ impl CommitCommand {
     }
 }
 
-/// Prompt user to select an organisation from their memberships.
 async fn prompt_org_select(state: &State) -> anyhow::Result<String> {
     let resp = state
         .grpc_client()
@@ -374,7 +351,6 @@ impl Display for OrgChoice {
     }
 }
 
-/// Prompt user to select a project within an organisation.
 async fn prompt_project_select(state: &State, organisation: &str) -> anyhow::Result<String> {
     let projects = state
         .grpc_client()
@@ -397,7 +373,6 @@ async fn prompt_project_select(state: &State, organisation: &str) -> anyhow::Res
     Ok(selected)
 }
 
-/// Prompt user to select an environment from available destinations.
 async fn prompt_environment_select(state: &State, organisation: &str) -> anyhow::Result<String> {
     let destinations = state
         .grpc_client()
@@ -409,7 +384,6 @@ async fn prompt_environment_select(state: &State, organisation: &str) -> anyhow:
         anyhow::bail!("no destinations found for organisation '{}'", organisation);
     }
 
-    // Collect unique environments
     let mut environments: Vec<String> = destinations
         .iter()
         .map(|d| d.environment.clone())
@@ -433,7 +407,6 @@ struct DestDisplay {
     is_current: bool,
 }
 
-/// Wrapper for ReleaseAnnotation that provides custom Display for inquire Select
 struct ReleaseAnnotationDisplay {
     annotation: ReleaseAnnotation,
     dests: Vec<DestDisplay>,
@@ -445,7 +418,6 @@ impl Display for ReleaseAnnotationDisplay {
         write!(f, "{}: {}", created, self.annotation.context.title)?;
 
         if !self.dests.is_empty() {
-            // Group destinations by environment
             let mut by_env: std::collections::BTreeMap<&str, Vec<&DestDisplay>> =
                 std::collections::BTreeMap::new();
             for dest in &self.dests {
@@ -466,7 +438,6 @@ impl Display for ReleaseAnnotationDisplay {
                             _ => "•",
                         }
                     } else {
-                        // Previously deployed, now superseded
                         "·"
                     };
                     write!(f, "\n    {icon} {}", dest.name)?;

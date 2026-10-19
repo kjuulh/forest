@@ -5,10 +5,6 @@ use mire::{Aggregate, AggregateRoot, EventData};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// ============================================================
-// Events
-// ============================================================
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum DestinationEvent {
@@ -22,8 +18,6 @@ pub enum DestinationEvent {
         type_organisation: String,
         type_name: String,
         type_version: u32,
-        /// Absent on events recorded before sensitive keys existed, which
-        /// replay as an empty set — the behaviour those destinations had.
         #[serde(default)]
         sensitive_keys: Vec<String>,
     },
@@ -46,10 +40,6 @@ impl EventData for DestinationEvent {
         }
     }
 }
-
-// ============================================================
-// Aggregate state
-// ============================================================
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DestinationStatus {
@@ -137,10 +127,6 @@ impl Aggregate for DestinationAggregate {
     }
 }
 
-// ============================================================
-// Commands (pure business logic)
-// ============================================================
-
 pub struct CreateDestinationParams {
     pub organisation: String,
     pub name: String,
@@ -182,16 +168,6 @@ impl DestinationAggregate {
         Ok(destination_id)
     }
 
-    /// Rebuilds the stream for a destination that predates this aggregate.
-    ///
-    /// The `destinations` table is older than the event store, so rows created
-    /// before it exist with no stream at all. `load_or_default` then reports
-    /// `NonExistent` and every write bails with "destination does not exist" —
-    /// the destination is plainly there, and nothing can touch it.
-    ///
-    /// The recorded event is a late reconstruction of what the row already says,
-    /// so it must reuse the row's own id: releases reference `destination_id`,
-    /// and minting a fresh one would orphan them.
     pub fn restore(
         root: &mut AggregateRoot<Self>,
         params: CreateDestinationParams,
@@ -232,9 +208,6 @@ impl DestinationAggregate {
         Ok(())
     }
 
-    /// Replaces the destination-declared sensitive-key set. Keys need not be
-    /// present in `metadata`: declaring a credential before it is set keeps it
-    /// from ever being displayed, even for the first write.
     pub fn update_sensitive_keys(
         root: &mut AggregateRoot<Self>,
         sensitive_keys: Vec<String>,
@@ -273,8 +246,6 @@ impl DestinationAggregate {
     }
 }
 
-/// The one place a `Created` event is built, so a stream rebuilt by `restore`
-/// cannot drift from one written by `create`.
 fn record_created(
     root: &mut AggregateRoot<DestinationAggregate>,
     params: CreateDestinationParams,
@@ -294,8 +265,6 @@ fn record_created(
     });
 }
 
-/// Sorted and de-duplicated, so the stored set has one canonical form and
-/// projections compare cleanly.
 fn normalise_keys(mut keys: Vec<String>) -> Vec<String> {
     keys.retain(|k| !k.trim().is_empty());
     keys.sort();
@@ -303,14 +272,9 @@ fn normalise_keys(mut keys: Vec<String>) -> Vec<String> {
     keys
 }
 
-/// Stream key for a destination aggregate: `{org}/{name}`
 pub fn stream_key(organisation: &str, name: &str) -> String {
     format!("{organisation}/{name}")
 }
-
-// ============================================================
-// Unit tests — pure aggregate logic, no database
-// ============================================================
 
 #[cfg(test)]
 mod tests {
@@ -334,10 +298,6 @@ mod tests {
             sensitive_keys: Vec::new(),
         }
     }
-
-    // ----------------------------------------------------------
-    // Create
-    // ----------------------------------------------------------
 
     #[test]
     fn create_destination_records_event_and_returns_id() {
@@ -380,10 +340,6 @@ mod tests {
         assert!(err.is_err());
         assert!(err.unwrap_err().to_string().contains("deleted"));
     }
-
-    // ----------------------------------------------------------
-    // Update metadata
-    // ----------------------------------------------------------
 
     #[test]
     fn update_metadata_replaces_metadata() {
@@ -434,12 +390,8 @@ mod tests {
         DestinationAggregate::update_metadata(&mut root, meta2.clone()).unwrap();
 
         assert_eq!(root.state.metadata, meta2);
-        assert_eq!(root.pending_count(), 3); // create + 2 updates
+        assert_eq!(root.pending_count(), 3);
     }
-
-    // ----------------------------------------------------------
-    // Delete
-    // ----------------------------------------------------------
 
     #[test]
     fn delete_transitions_to_deleted() {
@@ -471,10 +423,6 @@ mod tests {
         assert!(err.is_err());
         assert!(err.unwrap_err().to_string().contains("already deleted"));
     }
-
-    // ----------------------------------------------------------
-    // Event replay / hydration
-    // ----------------------------------------------------------
 
     #[test]
     fn hydrate_replays_full_lifecycle() {
@@ -554,10 +502,6 @@ mod tests {
         assert_eq!(root.state.status, DestinationStatus::NonExistent);
     }
 
-    // ----------------------------------------------------------
-    // Serde roundtrip
-    // ----------------------------------------------------------
-
     #[test]
     fn event_data_serde_roundtrip() {
         let events = vec![
@@ -586,14 +530,6 @@ mod tests {
         }
     }
 
-    // ----------------------------------------------------------
-    // Stream category / key
-    // ----------------------------------------------------------
-
-    // ----------------------------------------------------------
-    // Default state
-    // ----------------------------------------------------------
-
     #[test]
     fn default_aggregate_is_non_existent_with_empty_fields() {
         let root = new_root();
@@ -609,10 +545,6 @@ mod tests {
         assert_eq!(root.state.type_version, 0);
         assert!(!root.has_pending());
     }
-
-    // ----------------------------------------------------------
-    // Empty / edge-case metadata
-    // ----------------------------------------------------------
 
     #[test]
     fn create_with_empty_metadata() {
@@ -636,10 +568,6 @@ mod tests {
         assert!(root.state.metadata.is_empty());
     }
 
-    // ----------------------------------------------------------
-    // Field preservation
-    // ----------------------------------------------------------
-
     #[test]
     fn update_metadata_does_not_change_other_fields() {
         let mut root = new_root();
@@ -650,7 +578,6 @@ mod tests {
         let new_meta: HashMap<String, String> = [("new_key".into(), "new_val".into())].into();
         DestinationAggregate::update_metadata(&mut root, new_meta).unwrap();
 
-        // All non-metadata fields unchanged
         assert_eq!(root.state.destination_id, Some(id));
         assert_eq!(root.state.organisation, "acme");
         assert_eq!(root.state.name, "prod-k8s");
@@ -668,16 +595,11 @@ mod tests {
         let id = DestinationAggregate::create(&mut root, default_params()).unwrap();
         DestinationAggregate::delete(&mut root).unwrap();
 
-        // Fields still present even after deletion (for audit/replay)
         assert_eq!(root.state.destination_id, Some(id));
         assert_eq!(root.state.organisation, "acme");
         assert_eq!(root.state.name, "prod-k8s");
         assert!(!root.state.metadata.is_empty());
     }
-
-    // ----------------------------------------------------------
-    // Unique IDs
-    // ----------------------------------------------------------
 
     #[test]
     fn each_create_generates_unique_id() {
@@ -703,10 +625,6 @@ mod tests {
 
         assert_ne!(id1, id2);
     }
-
-    // ----------------------------------------------------------
-    // Full lifecycle hydration
-    // ----------------------------------------------------------
 
     #[test]
     fn hydrate_full_lifecycle_create_update_update_delete() {
@@ -747,7 +665,7 @@ mod tests {
         .expect("valid contiguous event history");
 
         assert_eq!(replayed.state.status, DestinationStatus::Deleted);
-        assert_eq!(replayed.state.metadata, meta2); // last update wins
+        assert_eq!(replayed.state.metadata, meta2);
         assert_eq!(replayed.state.organisation, "acme");
     }
 
@@ -793,10 +711,6 @@ mod tests {
         assert_eq!(replayed.state.type_version, 3);
     }
 
-    // ----------------------------------------------------------
-    // Event type strings
-    // ----------------------------------------------------------
-
     #[test]
     fn event_type_strings_are_correct() {
         assert_eq!(
@@ -827,10 +741,6 @@ mod tests {
             "destination.deleted"
         );
     }
-
-    // ----------------------------------------------------------
-    // Serde roundtrip — field-level verification
-    // ----------------------------------------------------------
 
     #[test]
     fn serde_roundtrip_created_preserves_all_fields() {
@@ -888,9 +798,6 @@ mod tests {
 
     #[test]
     fn created_events_recorded_before_sensitive_keys_existed_still_replay() {
-        // Events already in the store have no `sensitive_keys` field. They must
-        // deserialise to an empty set rather than failing hydration, which is
-        // what keeps existing destinations behaving exactly as before.
         let json = serde_json::json!({
             "type": "Created",
             "destination_id": Uuid::now_v7(),
@@ -927,7 +834,6 @@ mod tests {
 
         assert_eq!(root.state.sensitive_keys, vec!["alpha", "zeta"]);
 
-        // Replaces rather than merges.
         DestinationAggregate::update_sensitive_keys(&mut root, vec!["only".into()]).unwrap();
         assert_eq!(root.state.sensitive_keys, vec!["only"]);
     }
@@ -974,14 +880,8 @@ mod tests {
         assert_eq!(back.event_type(), "destination.deleted");
     }
 
-    // ----------------------------------------------------------
-    // Apply idempotency / ordering
-    // ----------------------------------------------------------
-
     #[test]
     fn apply_created_overwrites_previous_fields() {
-        // Simulates re-applying a Created event on a non-default aggregate
-        // (shouldn't happen in practice, but ensures apply is total)
         let mut agg = DestinationAggregate::default();
         agg.organisation = "old".into();
         agg.name = "old-name".into();
@@ -1014,14 +914,9 @@ mod tests {
             metadata: [("new".into(), "val".into())].into(),
         });
 
-        // Old key is gone — it's a full replacement, not merge
         assert!(agg.metadata.get("old").is_none());
         assert_eq!(agg.metadata.get("new").unwrap(), "val");
     }
-
-    // ----------------------------------------------------------
-    // Stream category / key
-    // ----------------------------------------------------------
 
     #[test]
     fn stream_category_is_destination() {

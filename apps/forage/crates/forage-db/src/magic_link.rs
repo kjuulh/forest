@@ -42,9 +42,6 @@ impl MagicLinkStore for PgMagicLinkStore {
         token_type: &str,
         token_hash: &str,
     ) -> Result<Option<ConsumedMagicLink>, MagicLinkError> {
-        // Atomic: delete the row and return its email + return_to if not
-        // expired and the token_type matches. Cross-type redemption is
-        // impossible.
         let row: Option<(String, Option<String>)> = sqlx::query_as(
             "DELETE FROM magic_link_tokens \
              WHERE token_hash = $1 AND token_type = $2 AND expires_at > NOW() \

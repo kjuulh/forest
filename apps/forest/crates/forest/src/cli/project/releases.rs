@@ -49,7 +49,6 @@ impl ReleasesCommand {
 
             eprintln!("Release {id_short} ({})", intent.created_at);
 
-            // ── Pipeline stages ────────────────────────────────
             if !intent.stages.is_empty() {
                 for stage in &intent.stages {
                     let status = PipelineRunStageStatus::try_from(stage.status)
@@ -79,7 +78,6 @@ impl ReleasesCommand {
 
                     println!("  {icon} {}: {type_str} [{status:?}]{deps}", stage.stage_id);
 
-                    // Timestamps
                     let mut times = Vec::new();
                     if let Some(t) = &stage.queued_at {
                         times.push(format!("queued: {t}"));
@@ -101,7 +99,6 @@ impl ReleasesCommand {
                         println!("      error: {err}");
                     }
 
-                    // Show release steps belonging to this stage
                     for step in &intent.steps {
                         if step.stage_id.as_deref() == Some(stage.stage_id.as_str()) {
                             let step_icon = match step.status.as_str() {
@@ -122,7 +119,6 @@ impl ReleasesCommand {
                 }
             }
 
-            // ── Non-pipeline release steps ─────────────────────
             let orphan_steps: Vec<_> = intent
                 .steps
                 .iter()
