@@ -37,7 +37,10 @@ const DOWNLOAD_CHUNK_SIZE: usize = 1024 * 1024;
 /// Every message says where its bytes sit in the whole binary, counting from
 /// `start` (where the requested range begins); the first also carries the
 /// artifact's size and digest, which is how a client recognises a server that
-/// honours ranges.
+/// honours ranges. That first message goes out with the first bytes S3 hands
+/// over rather than once a whole chunk has filled: a client fetching ranges
+/// waits for it before requesting the rest, and on the Understory registry
+/// filling 1 MiB first held that fan-out back by ~0.35 s.
 ///
 /// Pulling from S3 only happens when the consumer polls, so tonic's HTTP/2
 /// flow control backpressures all the way through to object storage and memory
@@ -86,8 +89,10 @@ fn chunked_download(
                 return None;
             }
             loop {
-                if cursor.buffer.len() >= chunk_size {
-                    let remainder = cursor.buffer.split_off(chunk_size);
+                let first = cursor.artifact.is_some();
+                if cursor.buffer.len() >= chunk_size || (first && !cursor.buffer.is_empty()) {
+                    let cut = cursor.buffer.len().min(chunk_size);
+                    let remainder = cursor.buffer.split_off(cut);
                     let chunk = std::mem::replace(&mut cursor.buffer, remainder);
                     let msg = cursor.message(chunk);
                     return Some((Ok(msg), cursor));
@@ -1044,12 +1049,13 @@ mod download_chunking_tests {
     }
 
     #[tokio::test]
-    async fn coalesces_small_parts_into_full_chunks() {
-        // 10 parts of 100 bytes, cut at 256 → 256 + 256 + 256 + 232.
+    async fn coalesces_small_parts_into_full_chunks_after_the_first() {
+        // 10 parts of 100 bytes, cut at 256: the first part alone, then
+        // 256 + 256 + 256 + 132.
         let parts = (0..10).map(|i| vec![i as u8; 100]).collect();
         let chunks = collect(chunked(stream_of(parts), 256)).await.unwrap();
         let sizes: Vec<usize> = chunks.iter().map(|c| c.len()).collect();
-        assert_eq!(sizes, vec![256, 256, 256, 232]);
+        assert_eq!(sizes, vec![100, 256, 256, 256, 132]);
         assert_eq!(sizes.iter().sum::<usize>(), 1000);
     }
 
@@ -1142,6 +1148,20 @@ mod download_chunking_tests {
             chunks.iter().map(|c| c.len()).collect::<Vec<_>>(),
             vec![DOWNLOAD_CHUNK_SIZE, 7]
         );
+    }
+
+    #[tokio::test]
+    async fn the_first_message_is_not_held_back_for_a_full_chunk() {
+        let parts = futures::stream::iter(vec![Ok(bytes::Bytes::from(vec![1u8; 10]))])
+            .chain(futures::stream::pending());
+        let mut stream = Box::pin(chunked(Box::pin(parts), 1024 * 1024));
+        let first = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
+            .await
+            .expect("the first message must not wait for more bytes")
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.chunk.len(), 10);
+        assert_eq!(first.total_size, 4242);
     }
 
     #[tokio::test]
