@@ -154,24 +154,33 @@ converted in place the first time each tool is used; nothing is re-downloaded.
 
 ## Download Tuning
 
-Binary downloads run with bounded, adaptive concurrency. Concurrency starts
-low, grows while aggregate throughput keeps improving, and settles at the
-plateau — so the steady state is normally below the ceiling. Backpressure from
-the registry (`UNAVAILABLE`, `RESOURCE_EXHAUSTED`, timeouts) halves it.
+A large binary is fetched as several byte ranges at once: 8 MiB ranges, up to
+four of one binary in flight, each written at its own offset in one tempfile.
+The file is hashed in full and checked against the registry's digest before it
+is installed; every range after the first is pinned to that digest, so a
+binary republished mid-download is refused rather than mixed. A registry that
+predates ranges simply streams the whole binary, as before.
+
+Downloads of several binaries also run concurrently, with bounded, adaptive
+concurrency: it starts low, grows while aggregate throughput keeps improving,
+and settles at the plateau. Backpressure from the registry (`UNAVAILABLE`,
+`RESOURCE_EXHAUSTED`, timeouts) halves it.
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `--download-concurrency <N>` | adaptive, ceiling 8 | Upper bound on binary downloads in flight. |
+| `--download-concurrency <N>` | adaptive, ceiling 8 | Upper bound on download streams in flight — binaries and the ranges of one binary count against the same ceiling. |
 | `FOREST_DOWNLOAD_CONCURRENCY` | — | Same, as an environment variable. |
 
-`1` turns concurrency off entirely and restores fully serial downloads — the
-escape hatch if a registry or proxy misbehaves under parallel streams. Values
-above 32 are clamped to 32.
+`1` turns concurrency off entirely: one stream at a time, however many
+binaries or ranges — the escape hatch if a registry or proxy misbehaves under
+parallel streams. Values above 32 are clamped to 32.
 
-Because every gRPC client in the CLI shares one HTTP/2 connection, concurrent
-downloads mainly hide per-download latency (the registry's object-storage read,
-plus local hashing and disk writes) rather than adding bandwidth. Raising the
-ceiling far above the default therefore buys little.
+Every gRPC client in the CLI shares one HTTP/2 connection with a 4 MiB
+per-stream and 32 MiB connection window. One stream can therefore carry at
+most 4 MiB per round trip; ranges in parallel are what let a single binary go
+faster than that on a long link, and what got past a per-stream limit observed
+in front of the Understory registry (2026-10-19: ~40 MB/s for one stream,
+~70 MB/s for four, from a 30 ms link).
 
 ---
 

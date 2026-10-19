@@ -212,13 +212,18 @@ impl UpdateCommand {
                             "Downloading {}/{}@{}",
                             dep.organisation, dep.name, resolved_str
                         );
-                        let binary = client
-                            .download_component_binary(
-                                &dep.organisation,
-                                &dep.name,
-                                &resolved_str,
-                                registry_os,
-                                arch,
+                        let streamed = client
+                            .download_component_binary_to_file(
+                                &crate::grpc::BinaryRef {
+                                    organisation: &dep.organisation,
+                                    name: &dep.name,
+                                    version: &resolved_str,
+                                    os: registry_os,
+                                    arch,
+                                },
+                                &component_binary::binary_download_dir()?,
+                                None,
+                                None,
                                 Some(&label),
                             )
                             .await
@@ -228,12 +233,11 @@ impl UpdateCommand {
                                     dep.organisation, dep.name, resolved_str, os, arch
                                 )
                             })?;
-                        let size_bytes = binary.len();
-                        lim.add_bytes(size_bytes as u64);
+                        let size_bytes = streamed.size_bytes;
+                        lim.add_bytes(size_bytes);
 
                         let (sha256, _cache_path) =
-                            component_binary::store_binary_in_cache(&binary)?;
-                        drop(binary);
+                            component_binary::install_downloaded_binary(streamed).await?;
 
                         tracing::debug!(
                             "updated {}/{}@{} ({} bytes)",

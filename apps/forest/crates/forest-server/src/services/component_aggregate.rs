@@ -86,6 +86,66 @@ pub struct ComponentVersion {
     pub version: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct BinaryId<'a> {
+    pub organisation: &'a str,
+    pub name: &'a str,
+    pub version: &'a str,
+    pub os: &'a str,
+    pub arch: &'a str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryRange {
+    Whole,
+    Bytes { offset: u64, length: u64 },
+}
+
+impl BinaryRange {
+    /// The part of this range a binary of `size` bytes holds, like an HTTP
+    /// `Range` header: a length running past the end stops at the end. `None`
+    /// when the range starts at or past the end (or asks for nothing) — except
+    /// that offset 0 of an empty binary is that whole (empty) binary.
+    pub fn clamp_to(self, size: u64) -> Option<Self> {
+        match self {
+            Self::Whole => Some(Self::Whole),
+            Self::Bytes { offset: 0, .. } if size == 0 => Some(Self::Whole),
+            Self::Bytes { offset, length } if length > 0 && offset < size => Some(Self::Bytes {
+                offset,
+                length: length.min(size - offset),
+            }),
+            Self::Bytes { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryArtifact {
+    pub sha256: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DownloadBinaryError {
+    #[error("binary not found: {0}")]
+    NotFound(String),
+    #[error("binary {binary} changed: expected sha256 {expected}, registry has {actual}")]
+    DigestChanged {
+        binary: String,
+        expected: String,
+        actual: String,
+    },
+    #[error("range {offset}+{length} is outside {binary} ({size} bytes)")]
+    OutOfRange {
+        binary: String,
+        offset: u64,
+        length: u64,
+        size: u64,
+    },
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
 pub struct ComponentVersionInfo {
     pub version: String,
     pub protocol_version: String,
@@ -1155,63 +1215,28 @@ impl ComponentService {
         Ok(out)
     }
 
-    /// Download a binary artifact from S3 (returns raw bytes).
-    pub async fn download_binary(
-        &self,
-        organisation: &str,
-        name: &str,
-        version: &str,
-        os: &str,
-        arch: &str,
-    ) -> anyhow::Result<Vec<u8>> {
-        let s3_key = self
-            .binary_storage_path(organisation, name, version, os, arch)
-            .await?;
-
-        self.object_store.get(&s3_key).await.with_context(|| {
-            format!("download binary from S3: {organisation}/{name}@{version} ({os}/{arch})")
-        })
-    }
-
-    /// Stream a binary artifact from S3 without buffering it (DATA-505).
+    /// Stream a binary artifact from S3 without buffering it (DATA-505),
+    /// either whole or as one byte range of it.
     ///
-    /// Preferred over [`Self::download_binary`] for the download RPC: that one
-    /// waits for the entire object before the handler can send anything, so
-    /// time-to-first-byte is the whole S3 GET and peak memory is the artifact
-    /// size (twice over, once the handler chunks it). This lets the handler
-    /// forward chunks as they arrive.
+    /// The returned [`BinaryArtifact`] is what the registry recorded at
+    /// publish, read in the same lookup that found the object: it is what
+    /// `expected_sha256` was checked against, and what a client fetching
+    /// several ranges pins every later range to.
     pub async fn download_binary_stream(
         &self,
-        organisation: &str,
-        name: &str,
-        version: &str,
-        os: &str,
-        arch: &str,
-    ) -> anyhow::Result<crate::object_store::ByteStream> {
-        let s3_key = self
-            .binary_storage_path(organisation, name, version, os, arch)
-            .await?;
-
-        self.object_store
-            .get_stream(&s3_key)
-            .await
-            .with_context(|| {
-                format!("stream binary from S3: {organisation}/{name}@{version} ({os}/{arch})")
-            })
-    }
-
-    /// Resolve the S3 key for a published platform binary.
-    async fn binary_storage_path(
-        &self,
-        organisation: &str,
-        name: &str,
-        version: &str,
-        os: &str,
-        arch: &str,
-    ) -> anyhow::Result<String> {
-        // Look up storage_path from component_artifacts
-        let storage_path: Option<String> = sqlx::query_scalar(
-            "SELECT ca.storage_path
+        id: &BinaryId<'_>,
+        range: BinaryRange,
+        expected_sha256: Option<&str>,
+    ) -> Result<(BinaryArtifact, crate::object_store::ByteStream), DownloadBinaryError> {
+        let BinaryId {
+            organisation,
+            name,
+            version,
+            os,
+            arch,
+        } = *id;
+        let row: Option<(Option<String>, String, i64)> = sqlx::query_as(
+            "SELECT ca.storage_path, ca.sha256, ca.size_bytes
              FROM component_artifacts ca
              JOIN components c ON c.id = ca.component_id
              WHERE c.organisation = $1 AND c.name = $2 AND ca.version = $3
@@ -1224,12 +1249,50 @@ impl ComponentService {
         .bind(arch)
         .fetch_optional(&self.db)
         .await
-        .context("look up binary artifact")?
-        .flatten();
+        .context("look up binary artifact")?;
 
-        storage_path.with_context(|| {
-            format!("binary not found: {organisation}/{name}@{version} ({os}/{arch})")
-        })
+        let what = || format!("{organisation}/{name}@{version} ({os}/{arch})");
+        let Some((Some(s3_key), sha256, size_bytes)) = row else {
+            return Err(DownloadBinaryError::NotFound(what()));
+        };
+        let bare = |s: &str| s.strip_prefix("sha256:").unwrap_or(s).to_ascii_lowercase();
+        let artifact = BinaryArtifact {
+            sha256: bare(&sha256),
+            size_bytes: u64::try_from(size_bytes).context("negative artifact size")?,
+        };
+
+        if let Some(want) = expected_sha256
+            && bare(want) != artifact.sha256
+        {
+            return Err(DownloadBinaryError::DigestChanged {
+                binary: what(),
+                expected: want.to_string(),
+                actual: artifact.sha256,
+            });
+        }
+
+        let stream = match range.clamp_to(artifact.size_bytes) {
+            Some(BinaryRange::Whole) => self.object_store.get_stream(&s3_key).await,
+            Some(BinaryRange::Bytes { offset, length }) => {
+                self.object_store
+                    .get_range_stream(&s3_key, offset, length)
+                    .await
+            }
+            None => {
+                let BinaryRange::Bytes { offset, length } = range else {
+                    unreachable!("a whole-binary request always clamps");
+                };
+                return Err(DownloadBinaryError::OutOfRange {
+                    binary: what(),
+                    offset,
+                    length,
+                    size: artifact.size_bytes,
+                });
+            }
+        }
+        .with_context(|| format!("stream binary from S3: {}", what()))?;
+
+        Ok((artifact, stream))
     }
 
     // ----------------------------------------------------------

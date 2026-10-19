@@ -326,28 +326,42 @@ impl ComponentsService {
         );
 
         let label = format!("Downloading {organisation}/{name}@{version}");
-        let binary = self
+        let streamed = self
             .grpc
-            .download_component_binary(organisation, name, version, registry_os, arch, Some(&label))
+            .download_component_binary_to_file(
+                &crate::grpc::BinaryRef {
+                    organisation,
+                    name,
+                    version,
+                    os: registry_os,
+                    arch,
+                },
+                &crate::services::component_binary::binary_download_dir()?,
+                None,
+                None,
+                Some(&label),
+            )
             .await
             .context("download binary from registry")?;
-        let size_bytes = binary.len();
+        let size_bytes = streamed.size_bytes;
         // Feed the adaptive ramp: bytes actually moved is what it climbs.
         // The driver signals completion; this only reports the bytes.
-        limiter.add_bytes(size_bytes as u64);
+        limiter.add_bytes(size_bytes);
 
-        // Store in content-addressable cache
-        let (sha256, cache_path) =
-            crate::services::component_binary::store_binary_in_cache(&binary)
-                .context("store binary in cache")?;
-        drop(binary);
-
-        let sha256_prefixed = format!("sha256:{sha256}");
+        let sha256_prefixed = format!("sha256:{}", streamed.sha256_hex);
 
         // Verify against the lock file the caller loaded. Read-only, so it is
         // safe to do here inside the concurrent region; the corresponding
         // *write* is the caller's job.
-        lockfile.verify(organisation, name, version, os, arch, &sha256_prefixed)?;
+        if let Err(e) = lockfile.verify(organisation, name, version, os, arch, &sha256_prefixed) {
+            tokio::fs::remove_file(&streamed.temp_path).await.ok();
+            return Err(e);
+        }
+
+        let (sha256, cache_path) =
+            crate::services::component_binary::install_downloaded_binary(streamed)
+                .await
+                .context("store binary in cache")?;
 
         let lock_entry = crate::lockfile::LockEntry {
             organisation: organisation.to_string(),

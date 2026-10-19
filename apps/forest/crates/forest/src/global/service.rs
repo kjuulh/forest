@@ -262,12 +262,15 @@ impl GlobalService {
                     let streamed = self
                         .grpc
                         .download_component_binary_to_file(
-                            &qref.organisation,
-                            &qref.name,
-                            version,
-                            platform::os_str(host.os),
-                            platform::arch_str(host.arch),
+                            &crate::grpc::BinaryRef {
+                                organisation: &qref.organisation,
+                                name: &qref.name,
+                                version,
+                                os: platform::os_str(host.os),
+                                arch: platform::arch_str(host.arch),
+                            },
                             &self.paths.binary_cache_dir(),
+                            Some(&expected_sha),
                             manifest
                                 .platforms
                                 .get(&forest_manifest::PlatformKey {

@@ -92,6 +92,53 @@ impl ObjectStore {
         )))
     }
 
+    /// Stream `length` bytes of an object starting at `offset`, as one ranged
+    /// GET, without buffering it.
+    ///
+    /// The stream yields exactly `length` bytes or ends in an error: a store
+    /// that ignores the `Range` header (answering 200 with the whole object) or
+    /// returns a short or long body never passes for the requested range.
+    pub async fn get_range_stream(
+        &self,
+        key: &str,
+        offset: u64,
+        length: u64,
+    ) -> anyhow::Result<ByteStream> {
+        use s3::request::Request as _;
+
+        anyhow::ensure!(length > 0, "empty range requested for {key}");
+        let last = offset
+            .checked_add(length - 1)
+            .with_context(|| format!("range overflows for {key}"))?;
+        let request = s3::request::tokio_backend::HyperRequest::new(
+            &self.bucket,
+            key,
+            s3::command::Command::GetObjectRange {
+                start: offset,
+                end: Some(last),
+            },
+        )
+        .await
+        .with_context(|| format!("failed to build ranged request: {key}"))?;
+        let response = request
+            .response_data_to_stream()
+            .await
+            .with_context(|| format!("failed to stream object range: {key}"))?;
+
+        if response.status_code != 206 {
+            anyhow::bail!(
+                "failed to stream object range {key} ({offset}+{length}): unexpected status {}",
+                response.status_code
+            );
+        }
+
+        Ok(Box::pin(exact_length(
+            response.bytes,
+            length,
+            format!("{key} ({offset}+{length})"),
+        )))
+    }
+
     /// Delete an object.
     pub async fn delete(&self, key: &str) -> anyhow::Result<()> {
         self.bucket
@@ -109,6 +156,50 @@ impl ObjectStore {
             Err(e) => Err(anyhow::anyhow!("failed to check object existence: {e}")),
         }
     }
+}
+
+fn exact_length<S, E>(
+    inner: S,
+    length: u64,
+    what: String,
+) -> impl futures::Stream<Item = anyhow::Result<Bytes>> + Send
+where
+    S: futures::Stream<Item = Result<Bytes, E>> + Send + Unpin,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    use futures::StreamExt as _;
+
+    futures::stream::unfold((inner, 0u64, false), move |(mut inner, seen, done)| {
+        let what = what.clone();
+        async move {
+            if done {
+                return None;
+            }
+            match inner.next().await {
+                Some(Ok(part)) => {
+                    let seen = seen + part.len() as u64;
+                    if seen > length {
+                        let e = anyhow::anyhow!(
+                            "object range {what}: store returned more than {length} bytes"
+                        );
+                        return Some((Err(e), (inner, seen, true)));
+                    }
+                    Some((Ok(part), (inner, seen, false)))
+                }
+                Some(Err(e)) => Some((
+                    Err(anyhow::Error::new(e).context(format!("reading object range {what}"))),
+                    (inner, seen, true),
+                )),
+                None if seen == length => None,
+                None => {
+                    let e = anyhow::anyhow!(
+                        "object range {what}: store ended after {seen} of {length} bytes"
+                    );
+                    Some((Err(e), (inner, seen, true)))
+                }
+            }
+        }
+    })
 }
 
 /// Key builders for consistent S3 path naming.
@@ -240,5 +331,43 @@ pub mod keys {
             assert!(!key.contains(".."));
             assert!(key.starts_with("components/org/name/1.0.0/files/"));
         }
+    }
+}
+
+#[cfg(test)]
+mod exact_length_tests {
+    use futures::StreamExt as _;
+
+    use super::*;
+
+    async fn through(parts: Vec<&'static [u8]>, length: u64) -> anyhow::Result<Vec<u8>> {
+        let inner = futures::stream::iter(
+            parts
+                .into_iter()
+                .map(|p| Ok::<_, std::io::Error>(Bytes::from_static(p))),
+        );
+        let mut out = Vec::new();
+        let mut stream = Box::pin(exact_length(inner, length, "k (0+n)".into()));
+        while let Some(part) = stream.next().await {
+            out.extend_from_slice(&part?);
+        }
+        Ok(out)
+    }
+
+    #[tokio::test]
+    async fn passes_a_body_of_exactly_the_requested_length() {
+        assert_eq!(through(vec![b"abc", b"de"], 5).await.unwrap(), b"abcde");
+    }
+
+    #[tokio::test]
+    async fn a_short_body_is_an_error_not_a_clean_end() {
+        let err = through(vec![b"abc"], 5).await.unwrap_err();
+        assert!(err.to_string().contains("ended after 3 of 5"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_long_body_is_an_error() {
+        let err = through(vec![b"abc", b"def"], 5).await.unwrap_err();
+        assert!(err.to_string().contains("more than 5"), "{err}");
     }
 }

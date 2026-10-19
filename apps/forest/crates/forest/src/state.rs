@@ -28,12 +28,14 @@ pub struct Config {
     #[arg(short = 'v', long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
 
-    /// Ceiling on binary downloads in flight at once (DATA-505).
+    /// Ceiling on download streams in flight at once (DATA-505): binaries
+    /// downloading concurrently and the byte ranges of one large binary count
+    /// against the same ceiling.
     ///
-    /// Downloads ramp up adaptively and settle wherever aggregate throughput
-    /// stops improving, so this is an upper bound rather than a target — the
-    /// steady state is usually below it. `1` disables concurrency entirely
-    /// (the pre-DATA-505 serial behaviour). Unset means the adaptive default.
+    /// Downloads of several binaries ramp up adaptively and settle wherever
+    /// aggregate throughput stops improving, so this is an upper bound rather
+    /// than a target. `1` disables concurrency entirely: one stream at a time,
+    /// however many binaries or ranges. Unset means the adaptive default.
     #[arg(long, env = "FOREST_DOWNLOAD_CONCURRENCY", global = true, value_parser = clap::value_parser!(u16).range(1..))]
     pub download_concurrency: Option<u16>,
 }

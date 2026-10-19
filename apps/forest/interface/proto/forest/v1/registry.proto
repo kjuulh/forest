@@ -159,10 +159,29 @@ message DownloadBinaryRequest {
   string version = 3;
   string os = 4;
   string arch = 5;
+  // A byte range of the binary, so one binary can be fetched as several
+  // concurrent requests. `length` 0 means the whole binary, and then `offset`
+  // must be 0. A `length` running past the end stops at the end, as with an
+  // HTTP Range header; an `offset` at or past the end is OUT_OF_RANGE. Servers
+  // that predate ranges ignore both fields and stream the whole binary; a
+  // client tells them apart because they leave `sha256` unset in the reply.
+  uint64 offset = 6;
+  uint64 length = 7;
+  // Hex SHA-256 the caller expects the stored binary to have. When set and the
+  // stored binary differs (it was unpublished and republished in between),
+  // the request fails with FAILED_PRECONDITION instead of serving bytes from a
+  // different binary than earlier ranges came from.
+  string expected_sha256 = 8;
 }
 
 message DownloadBinaryResponse {
   bytes chunk = 1;
+  // Position of `chunk` within the whole binary.
+  uint64 offset = 2;
+  // The whole binary's size and hex SHA-256, set on the first message of a
+  // reply only. Unset on every message from a server that predates ranges.
+  uint64 total_size = 3;
+  string sha256 = 4;
 }
 
 // PublishManifest — publish the component manifest (capabilities, spec schema, etc.)

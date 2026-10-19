@@ -4691,11 +4691,36 @@ pub struct DownloadBinaryRequest {
     pub os: ::prost::alloc::string::String,
     #[prost(string, tag="5")]
     pub arch: ::prost::alloc::string::String,
+    /// A byte range of the binary, so one binary can be fetched as several
+    /// concurrent requests. `length` 0 means the whole binary, and then `offset`
+    /// must be 0. A `length` running past the end stops at the end, as with an
+    /// HTTP Range header; an `offset` at or past the end is OUT_OF_RANGE. Servers
+    /// that predate ranges ignore both fields and stream the whole binary; a
+    /// client tells them apart because they leave `sha256` unset in the reply.
+    #[prost(uint64, tag="6")]
+    pub offset: u64,
+    #[prost(uint64, tag="7")]
+    pub length: u64,
+    /// Hex SHA-256 the caller expects the stored binary to have. When set and the
+    /// stored binary differs (it was unpublished and republished in between),
+    /// the request fails with FAILED_PRECONDITION instead of serving bytes from a
+    /// different binary than earlier ranges came from.
+    #[prost(string, tag="8")]
+    pub expected_sha256: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DownloadBinaryResponse {
     #[prost(bytes="vec", tag="1")]
     pub chunk: ::prost::alloc::vec::Vec<u8>,
+    /// Position of `chunk` within the whole binary.
+    #[prost(uint64, tag="2")]
+    pub offset: u64,
+    /// The whole binary's size and hex SHA-256, set on the first message of a
+    /// reply only. Unset on every message from a server that predates ranges.
+    #[prost(uint64, tag="3")]
+    pub total_size: u64,
+    #[prost(string, tag="4")]
+    pub sha256: ::prost::alloc::string::String,
 }
 /// PublishManifest — publish the component manifest (capabilities, spec schema, etc.)
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

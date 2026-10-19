@@ -9,7 +9,10 @@ use crate::{
     actor::Actor,
     grpc::authorize::{self, OrgRole},
     services::{
-        component_aggregate::{ComponentServiceState, ComponentVersion, FileStream},
+        component_aggregate::{
+            BinaryArtifact, BinaryId, BinaryRange, ComponentServiceState, ComponentVersion,
+            DownloadBinaryError, FileStream,
+        },
         oauth_apps::SCOPE_COMPONENTS_PUBLISH,
     },
     state::State,
@@ -31,23 +34,51 @@ const DOWNLOAD_CHUNK_SIZE: usize = 1024 * 1024;
 /// they fill; the final message carries the remainder. An empty object yields
 /// no messages, exactly as before.
 ///
+/// Every message says where its bytes sit in the whole binary, counting from
+/// `start` (where the requested range begins); the first also carries the
+/// artifact's size and digest, which is how a client recognises a server that
+/// honours ranges.
+///
 /// Pulling from S3 only happens when the consumer polls, so tonic's HTTP/2
 /// flow control backpressures all the way through to object storage and memory
 /// stays bounded at roughly one chunk.
 fn chunked_download(
     bytes: crate::object_store::ByteStream,
     chunk_size: usize,
+    start: u64,
+    artifact: BinaryArtifact,
 ) -> impl Stream<Item = std::result::Result<DownloadBinaryResponse, tonic::Status>> + Send {
     struct Cursor {
         bytes: crate::object_store::ByteStream,
         buffer: Vec<u8>,
+        offset: u64,
+        artifact: Option<BinaryArtifact>,
         finished: bool,
+    }
+
+    impl Cursor {
+        fn message(&mut self, chunk: Vec<u8>) -> DownloadBinaryResponse {
+            let offset = self.offset;
+            self.offset += chunk.len() as u64;
+            let (total_size, sha256) = match self.artifact.take() {
+                Some(a) => (a.size_bytes, a.sha256),
+                None => (0, String::new()),
+            };
+            DownloadBinaryResponse {
+                chunk,
+                offset,
+                total_size,
+                sha256,
+            }
+        }
     }
 
     futures::stream::unfold(
         Cursor {
             bytes,
             buffer: Vec::with_capacity(chunk_size),
+            offset: start,
+            artifact: Some(artifact),
             finished: false,
         },
         move |mut cursor| async move {
@@ -58,7 +89,8 @@ fn chunked_download(
                 if cursor.buffer.len() >= chunk_size {
                     let remainder = cursor.buffer.split_off(chunk_size);
                     let chunk = std::mem::replace(&mut cursor.buffer, remainder);
-                    return Some((Ok(DownloadBinaryResponse { chunk }), cursor));
+                    let msg = cursor.message(chunk);
+                    return Some((Ok(msg), cursor));
                 }
                 match cursor.bytes.next().await {
                     Some(Ok(part)) => cursor.buffer.extend_from_slice(&part),
@@ -72,7 +104,8 @@ fn chunked_download(
                             return None;
                         }
                         let chunk = std::mem::take(&mut cursor.buffer);
-                        return Some((Ok(DownloadBinaryResponse { chunk }), cursor));
+                        let msg = cursor.message(chunk);
+                        return Some((Ok(msg), cursor));
                     }
                 }
             }
@@ -431,33 +464,50 @@ impl RegistryService for RegistryServer {
             .await?;
 
         // Stream the object out of S3 rather than buffering it (DATA-505).
-        //
-        // This used to `download_binary(..)` the whole artifact into a `Vec`
-        // and then `.chunks(1 MiB).collect()` it into a second full copy of
-        // the file as a vector of ready-made messages. Time-to-first-byte was
-        // therefore the entire S3 GET, and peak RSS was ~2x the artifact per
-        // concurrent download — which is what made parallel downloads on the
-        // client side unattractive.
-        //
-        // The wire format is deliberately unchanged: still `DownloadBinary`,
-        // still ~1 MiB `DownloadBinaryResponse` messages. Older clients cannot
-        // tell the difference.
-        let byte_stream = self
+        let range = match (req.offset, req.length) {
+            (0, 0) => BinaryRange::Whole,
+            (_, 0) => {
+                return Err(tonic::Status::invalid_argument(
+                    "offset requires a non-zero length",
+                ));
+            }
+            (offset, length) => BinaryRange::Bytes { offset, length },
+        };
+        let expected_sha256 =
+            (!req.expected_sha256.is_empty()).then_some(req.expected_sha256.as_str());
+
+        let id = BinaryId {
+            organisation: &req.organisation,
+            name: &req.name,
+            version: &req.version,
+            os: &req.os,
+            arch: &req.arch,
+        };
+        let (artifact, byte_stream) = self
             .state
             .component_service()
-            .download_binary_stream(
-                &req.organisation,
-                &req.name,
-                &req.version,
-                &req.os,
-                &req.arch,
-            )
+            .download_binary_stream(&id, range, expected_sha256)
             .await
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(|e| match e {
+                DownloadBinaryError::NotFound(_) => tonic::Status::not_found(e.to_string()),
+                DownloadBinaryError::DigestChanged { .. } => {
+                    tonic::Status::failed_precondition(e.to_string())
+                }
+                DownloadBinaryError::OutOfRange { .. } => {
+                    tonic::Status::out_of_range(e.to_string())
+                }
+                DownloadBinaryError::Other(e) => tonic::Status::internal(format!("{e:#}")),
+            })?;
 
+        let start = match range {
+            BinaryRange::Whole => 0,
+            BinaryRange::Bytes { offset, .. } => offset,
+        };
         Ok(tonic::Response::new(Box::pin(chunked_download(
             byte_stream,
             DOWNLOAD_CHUNK_SIZE,
+            start,
+            artifact,
         ))))
     }
 
@@ -968,6 +1018,20 @@ mod download_chunking_tests {
         )
     }
 
+    fn artifact() -> BinaryArtifact {
+        BinaryArtifact {
+            sha256: "ab".repeat(32),
+            size_bytes: 4242,
+        }
+    }
+
+    fn chunked(
+        bytes: crate::object_store::ByteStream,
+        chunk_size: usize,
+    ) -> impl Stream<Item = std::result::Result<DownloadBinaryResponse, tonic::Status>> {
+        chunked_download(bytes, chunk_size, 0, artifact())
+    }
+
     async fn collect(
         stream: impl Stream<Item = std::result::Result<DownloadBinaryResponse, tonic::Status>>,
     ) -> std::result::Result<Vec<Vec<u8>>, tonic::Status> {
@@ -983,9 +1047,7 @@ mod download_chunking_tests {
     async fn coalesces_small_parts_into_full_chunks() {
         // 10 parts of 100 bytes, cut at 256 → 256 + 256 + 256 + 232.
         let parts = (0..10).map(|i| vec![i as u8; 100]).collect();
-        let chunks = collect(chunked_download(stream_of(parts), 256))
-            .await
-            .unwrap();
+        let chunks = collect(chunked(stream_of(parts), 256)).await.unwrap();
         let sizes: Vec<usize> = chunks.iter().map(|c| c.len()).collect();
         assert_eq!(sizes, vec![256, 256, 256, 232]);
         assert_eq!(sizes.iter().sum::<usize>(), 1000);
@@ -993,7 +1055,7 @@ mod download_chunking_tests {
 
     #[tokio::test]
     async fn splits_parts_larger_than_the_chunk_size() {
-        let chunks = collect(chunked_download(stream_of(vec![vec![7u8; 1000]]), 256))
+        let chunks = collect(chunked(stream_of(vec![vec![7u8; 1000]]), 256))
             .await
             .unwrap();
         let sizes: Vec<usize> = chunks.iter().map(|c| c.len()).collect();
@@ -1010,16 +1072,14 @@ mod download_chunking_tests {
             (200u8..255).collect(),
         ];
         let expected: Vec<u8> = parts.iter().flatten().copied().collect();
-        let chunks = collect(chunked_download(stream_of(parts), 64))
-            .await
-            .unwrap();
+        let chunks = collect(chunked(stream_of(parts), 64)).await.unwrap();
         let joined: Vec<u8> = chunks.into_iter().flatten().collect();
         assert_eq!(joined, expected, "download must be byte-identical");
     }
 
     #[tokio::test]
     async fn exact_multiple_of_the_chunk_size_emits_no_empty_trailer() {
-        let chunks = collect(chunked_download(stream_of(vec![vec![1u8; 512]]), 256))
+        let chunks = collect(chunked(stream_of(vec![vec![1u8; 512]]), 256))
             .await
             .unwrap();
         assert_eq!(chunks.len(), 2);
@@ -1029,25 +1089,20 @@ mod download_chunking_tests {
     #[tokio::test]
     async fn an_empty_object_yields_no_messages() {
         // Matches the pre-DATA-505 behaviour: `[].chunks(n)` produced nothing.
-        let chunks = collect(chunked_download(stream_of(vec![]), 256))
-            .await
-            .unwrap();
+        let chunks = collect(chunked(stream_of(vec![]), 256)).await.unwrap();
         assert!(chunks.is_empty());
 
         // Empty parts in the middle of a stream must not produce empty
         // messages either.
-        let chunks = collect(chunked_download(
-            stream_of(vec![vec![], vec![], vec![]]),
-            256,
-        ))
-        .await
-        .unwrap();
+        let chunks = collect(chunked(stream_of(vec![vec![], vec![], vec![]]), 256))
+            .await
+            .unwrap();
         assert!(chunks.is_empty());
     }
 
     #[tokio::test]
     async fn a_storage_error_surfaces_as_a_stream_error() {
-        let result = collect(chunked_download(
+        let result = collect(chunked(
             failing_stream(vec![vec![1u8; 300]], "s3 connection reset"),
             256,
         ))
@@ -1062,7 +1117,7 @@ mod download_chunking_tests {
         // A mid-transfer S3 failure must not retroactively hide the bytes the
         // client already received — it has to arrive as a stream error after
         // them, so the client's sha check is what rejects the partial file.
-        let mut stream = Box::pin(chunked_download(
+        let mut stream = Box::pin(chunked(
             failing_stream(vec![vec![9u8; 600]], "truncated"),
             256,
         ));
@@ -1077,7 +1132,7 @@ mod download_chunking_tests {
     async fn the_production_chunk_size_is_the_legacy_wire_size() {
         // Old clients were written against 1 MiB messages; keep it that way.
         assert_eq!(DOWNLOAD_CHUNK_SIZE, 1024 * 1024);
-        let chunks = collect(chunked_download(
+        let chunks = collect(chunked(
             stream_of(vec![vec![0u8; DOWNLOAD_CHUNK_SIZE + 7]]),
             DOWNLOAD_CHUNK_SIZE,
         ))
@@ -1086,6 +1141,30 @@ mod download_chunking_tests {
         assert_eq!(
             chunks.iter().map(|c| c.len()).collect::<Vec<_>>(),
             vec![DOWNLOAD_CHUNK_SIZE, 7]
+        );
+    }
+
+    #[tokio::test]
+    async fn messages_carry_their_offset_and_only_the_first_names_the_artifact() {
+        let mut stream = Box::pin(chunked_download(
+            stream_of(vec![vec![5u8; 300], vec![6u8; 300]]),
+            256,
+            8 * 1024 * 1024,
+            artifact(),
+        ));
+        let mut messages = Vec::new();
+        while let Some(m) = stream.next().await {
+            messages.push(m.unwrap());
+        }
+        let offsets: Vec<u64> = messages.iter().map(|m| m.offset).collect();
+        let base = 8 * 1024 * 1024;
+        assert_eq!(offsets, vec![base, base + 256, base + 512]);
+        assert_eq!(messages[0].total_size, 4242);
+        assert_eq!(messages[0].sha256, "ab".repeat(32));
+        assert!(
+            messages[1..]
+                .iter()
+                .all(|m| m.total_size == 0 && m.sha256.is_empty())
         );
     }
 }

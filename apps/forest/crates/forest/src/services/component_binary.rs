@@ -460,6 +460,43 @@ pub fn store_binary_in_cache(binary_content: &[u8]) -> anyhow::Result<(String, P
     Ok((sha256, binary_path))
 }
 
+/// Where registry downloads are staged: the root of the content-addressable
+/// cache, so [`install_downloaded_binary`] is a same-filesystem rename.
+pub fn binary_download_dir() -> anyhow::Result<PathBuf> {
+    let cache_dir = dirs::cache_dir().ok_or_else(|| anyhow::anyhow!("cache dir not available"))?;
+    Ok(cache_dir.join("forest").join("components").join("bin"))
+}
+
+/// Install a binary downloaded into [`binary_download_dir`] at
+/// `bin/{prefix}/{sha256}`, named by the hash computed while it was assembled.
+///
+/// The download's tempfile has a unique name, so concurrent installs of the
+/// same binary never write through one another; whichever rename lands last
+/// installs byte-identical content.
+pub async fn install_downloaded_binary(
+    streamed: crate::grpc::StreamedBinary,
+) -> anyhow::Result<(String, PathBuf)> {
+    let sha256 = streamed.sha256_hex;
+    let bin_dir = binary_download_dir()?.join(&sha256[..2]);
+    let binary_path = bin_dir.join(&sha256);
+    let installed = async {
+        tokio::fs::create_dir_all(&bin_dir).await?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            tokio::fs::set_permissions(&streamed.temp_path, std::fs::Permissions::from_mode(0o755))
+                .await?;
+        }
+        tokio::fs::rename(&streamed.temp_path, &binary_path).await
+    }
+    .await;
+    if let Err(e) = installed {
+        tokio::fs::remove_file(&streamed.temp_path).await.ok();
+        return Err(anyhow::Error::new(e).context(format!("installing {}", binary_path.display())));
+    }
+    Ok((sha256, binary_path))
+}
+
 /// Check whether a directory contains a v2 component (has `forest.component.cue`).
 pub fn is_v2_component(component_dir: &Path) -> bool {
     component_dir.join("forest.component.cue").exists()

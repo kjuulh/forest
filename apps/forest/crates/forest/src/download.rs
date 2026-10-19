@@ -5,11 +5,13 @@
 //! Every gRPC client in the CLI shares **one** `tonic::transport::Channel`
 //! (see [`crate::grpc::GrpcClient::channel`]) and therefore one TCP
 //! connection. Running N downloads concurrently opens N HTTP/2 streams over
-//! that single connection — they share one congestion window, so extra
-//! streams buy almost no additional *bandwidth*. What they do buy is
-//! *latency hiding*: each download has a serial prologue (the server's S3
-//! GET before the first byte, our sha256 hashing and disk writes after it)
-//! and overlapping those prologues is where the speedup comes from.
+//! that single connection. They buy *latency hiding* — each download has a
+//! serial prologue (the server's S3 GET before the first byte, our sha256
+//! hashing and disk writes after it) that overlapping hides — and, where a
+//! single stream is capped below the connection (measured in front of the
+//! Understory registry, 2026-10-19), aggregate bandwidth too. One large binary
+//! gets the same effect from its own byte ranges (`grpc::binary_download`);
+//! both draw on one stream budget, so the two never multiply.
 //!
 //! That means the useful in-flight count is small and it saturates quickly.
 //! A big fixed cap would only add server load, file descriptors and one

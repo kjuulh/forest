@@ -514,6 +514,7 @@ async fn end_to_end_tool_binary_upload_and_lazy_fetch() {
                 version: "0.1.0".into(),
                 os: "linux".into(),
                 arch: "amd64".into(),
+                ..Default::default()
             },
         ))
         .await
@@ -541,6 +542,158 @@ async fn end_to_end_tool_binary_upload_and_lazy_fetch() {
             .await
             .expect("query shape");
     assert_eq!(shape, "tool_binary");
+}
+
+/// A byte pattern with no short period, so a range served from the wrong
+/// offset cannot pass for the right one. Spans more than two 1 MiB messages.
+fn patterned_binary() -> Vec<u8> {
+    (0..2_500_123u32)
+        .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+        .collect()
+}
+
+async fn publish_patterned_tool(
+    g: &Given<GlobalToolsData>,
+    token: &str,
+    org: &str,
+    binary: &[u8],
+) -> String {
+    use sha2::{Digest, Sha256};
+    let sha = hex::encode(Sha256::digest(binary));
+    let upload = begin_upload(g, token, org, "ranged-tool", "0.1.0").await;
+    upload_binary(g, token, &upload, "linux", "amd64", binary).await;
+    let manifest = json!({
+        "kind": "binary",
+        "tool": {"name": "ranged", "argv_passthrough": true},
+        "platforms": {"linux_amd64": {"sha256": sha, "size": binary.len()}}
+    });
+    publish_manifest(g, token, &upload, &manifest.to_string())
+        .await
+        .expect("publish_manifest");
+    commit_upload(g, token, &upload).await;
+    sha
+}
+
+fn range_request(
+    org: &str,
+    offset: u64,
+    length: u64,
+    expected_sha256: &str,
+) -> DownloadBinaryRequest {
+    DownloadBinaryRequest {
+        organisation: org.to_string(),
+        name: "ranged-tool".into(),
+        version: "0.1.0".into(),
+        os: "linux".into(),
+        arch: "amd64".into(),
+        offset,
+        length,
+        expected_sha256: expected_sha256.to_string(),
+    }
+}
+
+async fn fetch(
+    g: &Given<GlobalToolsData>,
+    token: &str,
+    req: DownloadBinaryRequest,
+) -> Result<Vec<DownloadBinaryResponse>, tonic::Status> {
+    let mut stream = g
+        .fixture()
+        .registry()
+        .download_binary(authed_request(token, req))
+        .await?
+        .into_inner();
+    let mut out = Vec::new();
+    while let Some(m) = stream.message().await? {
+        out.push(m);
+    }
+    Ok(out)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn download_binary_serves_exactly_the_requested_range_from_object_storage() {
+    let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
+    let token = register_user(&g).await;
+    let org = unique_org();
+    create_org(&g, &token, &org).await;
+    let binary = patterned_binary();
+    let sha = publish_patterned_tool(&g, &token, &org, &binary).await;
+
+    let (offset, length) = (1_048_000u64, 1_300_000u64);
+    let messages = fetch(&g, &token, range_request(&org, offset, length, &sha))
+        .await
+        .expect("ranged download");
+
+    let mut cursor = offset;
+    let mut bytes = Vec::new();
+    for m in &messages {
+        assert_eq!(
+            m.offset, cursor,
+            "messages arrive in order with their offsets"
+        );
+        cursor += m.chunk.len() as u64;
+        bytes.extend_from_slice(&m.chunk);
+    }
+    assert_eq!(bytes, binary[offset as usize..(offset + length) as usize]);
+    assert_eq!(messages[0].sha256, sha);
+    assert_eq!(messages[0].total_size, binary.len() as u64);
+
+    let tail_start = binary.len() as u64 - 10;
+    let tail = fetch(&g, &token, range_request(&org, tail_start, 8 << 20, ""))
+        .await
+        .expect("clamped range");
+    let tail_bytes: Vec<u8> = tail.iter().flat_map(|m| m.chunk.clone()).collect();
+    assert_eq!(tail_bytes, binary[tail_start as usize..]);
+
+    let whole = fetch(&g, &token, range_request(&org, 0, 0, ""))
+        .await
+        .expect("whole download");
+    let whole_bytes: Vec<u8> = whole.iter().flat_map(|m| m.chunk.clone()).collect();
+    assert_eq!(whole_bytes, binary);
+    assert_eq!(whole[0].sha256, sha);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn download_binary_refuses_ranges_it_cannot_serve_faithfully() {
+    let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
+    let token = register_user(&g).await;
+    let org = unique_org();
+    create_org(&g, &token, &org).await;
+    let binary = patterned_binary();
+    let sha = publish_patterned_tool(&g, &token, &org, &binary).await;
+    let size = binary.len() as u64;
+
+    let past_end = fetch(&g, &token, range_request(&org, size, 10, &sha))
+        .await
+        .expect_err("offset at the end");
+    assert_eq!(past_end.code(), tonic::Code::OutOfRange, "{past_end}");
+
+    let no_length = fetch(&g, &token, range_request(&org, 5, 0, &sha))
+        .await
+        .expect_err("offset without a length");
+    assert_eq!(
+        no_length.code(),
+        tonic::Code::InvalidArgument,
+        "{no_length}"
+    );
+
+    let other_binary = "0".repeat(64);
+    let changed = fetch(&g, &token, range_request(&org, 0, 1024, &other_binary))
+        .await
+        .expect_err("pinned to a different digest");
+    assert_eq!(changed.code(), tonic::Code::FailedPrecondition, "{changed}");
+
+    let outsider = register_user(&g).await;
+    let denied = fetch(&g, &outsider, range_request(&org, 1024, 1024, &sha))
+        .await
+        .expect_err("non-member range");
+    assert!(
+        matches!(
+            denied.code(),
+            tonic::Code::PermissionDenied | tonic::Code::NotFound
+        ),
+        "non-member must not read a range: {denied}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -672,6 +825,7 @@ async fn end_to_end_tool_external_no_binary_upload_required() {
                 version: "14.1.1".into(),
                 os: "linux".into(),
                 arch: "amd64".into(),
+                ..Default::default()
             },
         ))
         .await;
