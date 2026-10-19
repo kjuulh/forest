@@ -1069,6 +1069,21 @@ impl GrpcClient {
         Ok(resp.into_inner().app)
     }
 
+    /// Replace an app's editable fields. Forest overwrites every one of them,
+    /// so the caller sends the whole app, changed or not.
+    pub async fn update_oauth_app(
+        &self,
+        request: UpdateOAuthAppRequest,
+    ) -> anyhow::Result<Option<OAuthApp>> {
+        let mut client = self.oauth_apps_client().await?;
+        let resp = client
+            .update_o_auth_app(request)
+            .await
+            .map_err(grpc_err)
+            .context("update oauth app")?;
+        Ok(resp.into_inner().app)
+    }
+
     pub async fn rotate_oauth_app_secret(
         &self,
         organisation_id: &str,
