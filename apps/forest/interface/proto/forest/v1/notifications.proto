@@ -16,8 +16,6 @@ enum NotificationChannel {
   NOTIFICATION_CHANNEL_SLACK = 2;
 }
 
-// Rich context about the release that triggered the notification.
-// Integrations decide which fields to use.
 message ReleaseContext {
   string slug = 1;
   string organisation = 2;
@@ -26,20 +24,15 @@ message ReleaseContext {
   string release_intent_id = 5;
   string destination = 6;
   string environment = 7;
-  // Source info
   string source_username = 8;
   string source_email = 9;
   string source_user_id = 17;
-  // Git ref
   string commit_sha = 10;
   string commit_branch = 11;
-  // Artifact context
   string context_title = 12;
   string context_description = 13;
   string context_web = 14;
-  // Error info (populated on failure)
   string error_message = 15;
-  // Number of destinations involved
   int32 destination_count = 16;
 }
 

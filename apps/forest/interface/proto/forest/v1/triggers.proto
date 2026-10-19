@@ -18,8 +18,6 @@ message Trigger {
     bool force_release = 11;
     string created_at = 12;
     string updated_at = 13;
-    // When true, trigger the project's release pipeline instead of
-    // deploying directly to target destinations/environments.
     bool use_pipeline = 14;
 }
 

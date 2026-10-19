@@ -177,10 +177,10 @@ parallel streams. Values above 32 are clamped to 32.
 
 Every gRPC client in the CLI shares one HTTP/2 connection with a 4 MiB
 per-stream and 32 MiB connection window. One stream can therefore carry at
-most 4 MiB per round trip; ranges in parallel are what let a single binary go
-faster than that on a long link, and what got past a per-stream limit observed
-in front of the Understory registry (2026-10-19: ~40 MB/s for one stream,
-~70 MB/s for four, from a 30 ms link).
+most 4 MiB per round trip, so ranges in parallel help when that window is the
+limit, on a long link. On a short one a single binary is limited by the
+connection instead, and ranges neither help nor hurt: from a 30 ms link, one
+31 MB download moved ~47 MB/s whether it ran as one stream or four ranges.
 
 ---
 

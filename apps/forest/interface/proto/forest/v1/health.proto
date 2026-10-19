@@ -2,53 +2,27 @@ syntax = "proto3";
 
 package forest.v1;
 
-// System liveness check (existing).
 service StatusService {
   rpc Status(GetStatusRequest) returns (GetStatusResponse) {}
 }
 
 message GetStatusRequest {}
 
-// Liveness plus build provenance, so "is this server running my fix?" is
-// answerable without shelling into it.
-//
-// Every field is additive and optional: an older server leaves them empty and
-// a newer server is still understood by an older client, so no API version
-// bump is involved.
 message GetStatusResponse {
-  // Semver of the server binary (its crate version).
   string version = 1;
-  // Short git commit the binary was built from. Empty for a local build that
-  // was not stamped.
   string commit = 2;
-  // RFC 3339 build timestamp. Empty when unstamped.
   string build_time = 3;
 }
 
-// ── Release health monitoring ──────────────────────────────────────
-//
-// The ReleaseHealthService accepts health observations from external
-// agents. The contract is infrastructure-agnostic — agents observe
-// their specific platform (kubernetes, ECS, VMs, etc.) and report
-// generic resource health observations.
-
 service ReleaseHealthService {
-  // Report a health observation for a release on a specific destination.
-  // Called periodically by an agent (every 15-30s or on change).
   rpc ReportHealth(ReportHealthRequest) returns (ReportHealthResponse);
 
-  // Get the current health state for a release intent (all destinations).
   rpc GetReleaseHealth(GetReleaseHealthRequest) returns (GetReleaseHealthResponse);
 
-  // Stream health updates for a release intent.
   rpc WatchReleaseHealth(WatchReleaseHealthRequest) returns (stream ReleaseHealthEvent);
 }
 
-// ── Report (agent → server) ────────────────────────────────────────
-
 message ReportHealthRequest {
-  // Release identity — how the agent correlates observed resources
-  // back to a forest release (e.g. from labels/annotations/tags).
   string release_intent_id = 1;
   string release_id = 2;
   string organisation = 3;
@@ -56,45 +30,29 @@ message ReportHealthRequest {
   string destination = 5;
   string environment = 6;
 
-  // The observed health state
   HealthObservation observation = 10;
 }
 
 message ReportHealthResponse {}
 
-// ── Observation model (infrastructure-agnostic) ────────────────────
-
 message HealthObservation {
-  // Individual observed resources
   repeated ResourceHealth resources = 1;
 
-  // When this observation was taken (RFC 3339)
   string observed_at = 2;
 
-  // Overall computed status for this observation
   HealthStatus status = 3;
 
-  // Human-readable summary message
   string message = 4;
 }
 
-// A single observed resource's health.
-// The meaning of fields depends on the agent — a kubernetes agent
-// fills api_version/kind/namespace, while a VM agent might use
-// different conventions. The server treats these as opaque observations.
 message ResourceHealth {
-  // Resource identification
-  string kind = 1;       // e.g. "Deployment", "Pod", "Service", "VM"
-  string name = 2;       // resource name
-  string namespace = 3;  // optional grouping (k8s namespace, region, etc.)
+  string kind = 1;
+  string name = 2;
+  string namespace = 3;
 
-  // Health state
   HealthStatus status = 4;
   string message = 5;
 
-  // Optional key-value properties for resource-specific data.
-  // Examples: {"desired_replicas": "3", "ready_replicas": "2"},
-  //           {"last_applied_revision": "main@sha1:abc123"}
   map<string, string> properties = 10;
 }
 
@@ -106,8 +64,6 @@ enum HealthStatus {
   HEALTH_STATUS_UNHEALTHY = 4;
   HEALTH_STATUS_MISSING = 5;
 }
-
-// ── Query (CLI/UI → server) ────────────────────────────────────────
 
 message GetReleaseHealthRequest {
   string release_intent_id = 1;
@@ -124,8 +80,6 @@ message DestinationHealth {
   HealthObservation latest_observation = 3;
   HealthStatus status = 4;
 }
-
-// ── Streaming ──────────────────────────────────────────────────────
 
 message WatchReleaseHealthRequest {
   string release_intent_id = 1;

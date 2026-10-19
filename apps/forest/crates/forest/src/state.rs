@@ -41,8 +41,6 @@ pub struct Config {
 }
 
 impl Config {
-    /// In-flight download ceiling, resolved from the flag/env with the
-    /// adaptive default and the hard safety clamp applied.
     pub fn max_downloads_in_flight(&self) -> usize {
         crate::download::resolve_max_in_flight(self.download_concurrency.map(usize::from))
     }

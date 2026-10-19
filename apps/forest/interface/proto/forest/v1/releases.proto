@@ -9,7 +9,6 @@ message AnnotateReleaseRequest {
   ArtifactContext context = 4;
   Project project = 5;
   Ref ref = 6;
-  // When true, skip automatic trigger evaluation (no auto-release from policies).
   bool annotation_only = 7;
 }
 message AnnotateReleaseResponse {
@@ -34,14 +33,10 @@ message ReleaseRequest {
   repeated string destinations = 2;
   repeated string environments = 3;
   bool force = 4;
-  // When true, use the project's release pipeline (DAG) instead of
-  // deploying directly to the specified destinations/environments.
   bool use_pipeline = 5;
-  // When true, create a plan-only pipeline (single Plan stage, no deploy).
   bool prepare_only = 6;
 }
 message ReleaseResponse {
-  // List of release intents created (one per destination)
   repeated ReleaseIntent intents = 1;
 }
 
@@ -64,26 +59,18 @@ message WaitReleaseEvent {
   }
 }
 
-// Sent once, after the stream's first pass has replayed every stage state,
-// destination status and persisted log line. A client that wants a snapshot
-// rather than a live follow stops here: a release parked on a plan approval
-// never reaches a terminal state, so the stream would otherwise never end.
-// Servers without it send nothing; clients fall back to a quiet period.
 message ReplayComplete {}
 
-// Streamed in WaitRelease for pipeline releases: reports stage status changes.
 message PipelineStageUpdate {
   string stage_id = 1;
-  string stage_type = 2;       // "deploy", "wait"
-  string status = 3;           // PENDING, ACTIVE, SUCCEEDED, FAILED, CANCELLED
+  string stage_type = 2;
+  string status = 3;
   optional string queued_at = 4;
   optional string started_at = 5;
   optional string completed_at = 6;
   optional string wait_until = 7;
   optional string error_message = 8;
   optional string approval_status = 9;
-  // Stage ids this stage waits on. Lets a follower tell a PENDING stage that
-  // is blocked behind a parked approval from one about to start.
   repeated string depends_on = 10;
 }
 
@@ -127,8 +114,6 @@ message CreateProjectResponse {
   Project project = 1;
 }
 
-// Single-project lookup. `Project.readme` carries the markdown that the
-// forage Overview renders.
 message GetProjectRequest {
   string organisation = 1;
   string project = 2;
@@ -137,22 +122,13 @@ message GetProjectResponse {
   Project project = 1;
 }
 
-// Update mutable fields on a project. Field-mask semantics: each
-// optional field is updated only when present in the request. Sending
-// an empty string for a present field clears that field. This lets
-// `forest publish` push README, description, and metadata in one round
-// trip while still permitting partial updates from other tooling.
 message UpdateProjectRequest {
   string organisation = 1;
   string project = 2;
-  // Replace the project's README markdown. Max 64 KiB. Empty string is a
-  // valid value (clears the README).
+  // Unset leaves it unchanged; empty clears it. Max 64 KiB.
   optional string readme = 3;
-  // Replace the project's description. Max 4096 chars. Empty allowed.
-  // See specs/features/009-project-metadata.md.
+  // Unset leaves it unchanged; empty clears it. Max 4096 chars.
   optional string description = 4;
-  // Replace the entire metadata blob. Per-field length caps enforced
-  // server-side. To clear all metadata, send an empty ProjectMetadata.
   optional ProjectMetadata metadata = 5;
 }
 message UpdateProjectResponse {
@@ -161,8 +137,8 @@ message UpdateProjectResponse {
 
 
 message GetReleasesByActorRequest {
-  string actor_id = 1;        // user_id or app_id
-  string actor_type = 2;      // "user" or "app"
+  string actor_id = 1;
+  string actor_type = 2;
   int32 page_size = 3;
   string page_token = 4;
 }
@@ -193,16 +169,12 @@ message GetDestinationStatesRequest {
 
 message GetDestinationStatesResponse {
   repeated DestinationState destinations = 1;
-  // Active pipeline runs affecting these destinations (if any).
   repeated PipelineRunState pipeline_runs = 2;
 }
-
-// ── Release intent states (release-centric view) ─────────────────────
 
 message GetReleaseIntentStatesRequest {
   string organisation = 1;
   optional string project = 2;
-  // When true, also include recently completed release intents.
   bool include_completed = 3;
 }
 
@@ -210,44 +182,34 @@ message GetReleaseIntentStatesResponse {
   repeated ReleaseIntentState release_intents = 1;
 }
 
-// Full state of a release intent: pipeline stages + individual release steps.
 message ReleaseIntentState {
   string release_intent_id = 1;
   string artifact_id = 2;
   string project = 3;
   string created_at = 4;
-  // Pipeline stages (empty for non-pipeline releases).
   repeated PipelineStageState stages = 5;
-  // All release_states rows for this intent (deploy steps).
   repeated ReleaseStepState steps = 6;
 }
 
-// Status of a single pipeline stage (saga coordinator view).
 message PipelineStageState {
   string stage_id = 1;
   repeated string depends_on = 2;
   PipelineRunStageType stage_type = 3;
   PipelineRunStageStatus status = 4;
-  // Consistent timestamps for all stage types.
   optional string queued_at = 5;
   optional string started_at = 6;
   optional string completed_at = 7;
   optional string error_message = 8;
-  // Type-specific context.
-  optional string environment = 9;       // deploy/plan stages
-  optional int64 duration_seconds = 10;  // wait stages
-  optional string wait_until = 11;       // wait stages
-  repeated string release_ids = 12;      // deploy/plan stages: individual release IDs
-  optional string approval_status = 13;  // plan stages: AWAITING_APPROVAL, APPROVED, REJECTED
-  optional bool auto_approve = 14;       // plan stages
-  optional string gate_deadline = 15;    // gate stages: when on_timeout decides
-  // gate stages: the requirements not yet satisfied, rendered for a human —
-  // "rollout to be HEALTHY (currently UNHEALTHY)". A parked pipeline should
-  // say what it is parked on rather than look hung.
+  optional string environment = 9;
+  optional int64 duration_seconds = 10;
+  optional string wait_until = 11;
+  repeated string release_ids = 12;
+  optional string approval_status = 13;
+  optional bool auto_approve = 14;
+  optional string gate_deadline = 15;
   repeated string gate_waiting_on = 16;
 }
 
-// Status of a single release step (release_states row).
 message ReleaseStepState {
   string release_id = 1;
   optional string stage_id = 2;
@@ -272,18 +234,12 @@ message DestinationState {
   optional string queued_at = 8;
   optional string completed_at = 9;
   optional int32 queue_position = 10;
-  // Pipeline context: set when this release was created by a pipeline stage.
   optional string release_intent_id = 11;
   optional string stage_id = 12;
-  // When a runner was assigned to this release.
   optional string assigned_at = 13;
-  // When the runner actually started executing.
   optional string started_at = 14;
 }
 
-// ── Pipeline run progress ────────────────────────────────────────────
-
-// Snapshot of an active (or recently completed) pipeline run.
 message PipelineRunState {
   string release_intent_id = 1;
   string artifact_id = 2;
@@ -291,27 +247,22 @@ message PipelineRunState {
   repeated PipelineRunStage stages = 4;
 }
 
-// Status of a single stage within a pipeline run.
 message PipelineRunStage {
   string stage_id = 1;
   repeated string depends_on = 2;
   PipelineRunStageType stage_type = 3;
   PipelineRunStageStatus status = 4;
-  // Type-specific context
-  optional string environment = 5;       // deploy stages
-  optional int64 duration_seconds = 6;   // wait stages
-  optional string queued_at = 7;         // when dependencies were met
+  optional string environment = 5;
+  optional int64 duration_seconds = 6;
+  optional string queued_at = 7;
   optional string started_at = 8;
   optional string completed_at = 9;
   optional string error_message = 10;
   optional string wait_until = 11;
-  repeated string release_ids = 12;      // deploy stages: individual release IDs
-  optional string approval_status = 13;  // plan stages: AWAITING_APPROVAL, APPROVED, REJECTED
-  optional bool auto_approve = 14;       // plan stages
-  optional string gate_deadline = 15;    // gate stages: when on_timeout decides
-  // gate stages: the requirements not yet satisfied, rendered for a human —
-  // "rollout to be HEALTHY (currently UNHEALTHY)". A parked pipeline should
-  // say what it is parked on rather than look hung.
+  repeated string release_ids = 12;
+  optional string approval_status = 13;
+  optional bool auto_approve = 14;
+  optional string gate_deadline = 15;
   repeated string gate_waiting_on = 16;
 }
 
@@ -331,18 +282,9 @@ enum PipelineRunStageStatus {
   PIPELINE_RUN_STAGE_STATUS_FAILED = 4;
   PIPELINE_RUN_STAGE_STATUS_CANCELLED = 5;
   PIPELINE_RUN_STAGE_STATUS_AWAITING_APPROVAL = 6;
-  // Parked waiting to be told. Distinct from ACTIVE so that "nothing is
-  // happening because nobody has reported" is visible rather than looking like
-  // work in progress.
   PIPELINE_RUN_STAGE_STATUS_AWAITING_SIGNAL = 7;
-  // A newer release for the same target overtook this stage's releases, or an
-  // upstream stage was overtaken. Terminal, and deliberately neither FAILED
-  // (nothing went wrong) nor CANCELLED (nobody cancelled it) — see
-  // design/SKIP-TO-LATEST.md.
   PIPELINE_RUN_STAGE_STATUS_SUPERSEDED = 8;
 }
-
-// ── Plan stage approval ──────────────────────────────────────────────
 
 message ApprovePlanStageRequest {
   string release_intent_id = 1;
@@ -362,8 +304,9 @@ message GetPlanOutputRequest {
   string stage_id = 2;
 }
 message GetPlanOutputResponse {
-  string plan_output = 1;            // deprecated: use outputs
-  string status = 2;                 // RUNNING, AWAITING_APPROVAL, APPROVED, REJECTED
+  // Deprecated: use `outputs`.
+  string plan_output = 1;
+  string status = 2;
   repeated PlanDestinationOutput outputs = 3;
 }
 
@@ -371,7 +314,7 @@ message PlanDestinationOutput {
   string destination_id = 1;
   string destination_name = 2;
   string plan_output = 3;
-  string status = 4;                 // SUCCEEDED, FAILED, RUNNING, etc.
+  string status = 4;
 }
 
 service ReleaseService {
@@ -395,18 +338,13 @@ service ReleaseService {
   rpc RejectPlanStage(RejectPlanStageRequest) returns (RejectPlanStageResponse);
   rpc GetPlanOutput(GetPlanOutputRequest) returns (GetPlanOutputResponse);
 
-  // Compare what a project last deployed with what is actually running, and
-  // change neither (forest#286). For `forest/terraform@1` this is
-  // `plan -refresh-only -detailed-exitcode -lock=false` against the artifact of
-  // the destination's last successful deploy. Runs synchronously.
   rpc CheckDrift(CheckDriftRequest) returns (CheckDriftResponse);
 }
 
 message CheckDriftRequest {
   Project project = 1;
   string environment = 2;
-  // Optional: one destination by name. Empty means every destination in the
-  // environment this project has deployed to.
+  // Empty means every destination in the environment this project has deployed to.
   string destination = 3;
 }
 
@@ -416,51 +354,26 @@ message CheckDriftResponse {
 
 enum DriftStatus {
   DRIFT_STATUS_UNSPECIFIED = 0;
-  // The live infrastructure matches state.
   DRIFT_STATUS_IN_SYNC = 1;
-  // Something changed outside forest; `output` says what.
   DRIFT_STATUS_DRIFTED = 2;
-  // This destination type has no drift check.
   DRIFT_STATUS_UNSUPPORTED = 3;
-  // The check itself failed; see `error`.
   DRIFT_STATUS_ERROR = 4;
 }
 
 message DestinationDrift {
   string destination_name = 1;
   DriftStatus status = 2;
-  // The refresh-only plan text, every root labelled.
   string output = 3;
   string error = 4;
-  // The artifact whose rendered config was compared.
   string artifact_id = 5;
 }
 
-// Report that the deploy an annotation announced did not happen.
-//
-// For a project whose rollout Forest does not perform — CI builds an image and
-// deploys it elsewhere, and Forest only announces the result (DATA-637) — an
-// annotation is a promise that something is on its way. When that something
-// fails, nothing in Forest can notice on its own: no release intent exists, so
-// no destination can fail, and the annotation would sit looking pending forever.
-//
-// This records the release that did not work. It creates the same intent
-// against the same destination the successful path would have, and the releases
-// are born FAILED. A project whose successes are releases and whose failures
-// are loose notifications would under-report itself in every view over the
-// release history; the destination is a `forest/noop@1` either way, which is
-// the honest description of what Forest did. Only the outcome differs.
 message ReportReleaseFailedRequest {
-  // Release slug from the annotation, as printed by `forest release annotate`.
   string slug = 1;
 
-  // Why it failed, shown to whoever reads the notification. Keep it short and
-  // concrete — "ECS rollout did not converge" beats "failed".
   string reason = 2;
 
-  // Where the deploy was headed. At least one is required: the failed release
-  // is recorded against a destination, so there has to be one to record it
-  // against. Resolved exactly as `Release` resolves them.
+  // At least one of `destination` and `environment` is required.
   optional string destination = 3;
   optional string environment = 4;
 }
@@ -472,7 +385,6 @@ message Source {
   optional string email = 2;
   optional string source_type = 3;
   optional string run_url = 4;
-  // The actor ID (user, app, or service account UUID) that created this annotation.
   optional string user_id = 5;
 }
 
@@ -508,40 +420,18 @@ message ArtifactDestination {
 message Project {
   string organisation = 1;
   string project = 2;
-  // Markdown README, surfaced on the project Overview page in forage.
-  // Set via `forest project update --readme PATH` (and auto-uploaded from
-  // `README.md` during `forest publish`). 64 KiB cap enforced server-side.
-  // Empty string when no README has been uploaded — distinct from "no
-  // project" (which would be a different RPC error).
   string readme = 3;
-  // Human-readable description shown on the project Overview header.
-  // Set via `forest.cue` `project.description` and pushed by `forest
-  // publish`. ≤ 4096 chars, empty allowed.
-  // See specs/features/009-project-metadata.md.
   string description = 4;
-  // Blessed project metadata (About sidebar). Length caps per field
-  // enforced server-side; no URL validation — bad URLs render as bad
-  // links and are fixed by re-publishing.
   ProjectMetadata metadata = 5;
 }
 
-// Blessed project metadata — surfaced in the project Overview's About
-// sidebar. v1 fields are deliberately small and link/identity-focused.
-// New keys require a spec update (009).
 message ProjectMetadata {
-  // Upstream source repository.
   string git_url = 1;
-  // Public landing page / marketing site.
   string homepage = 2;
-  // Docs site URL.
   string docs_url = 3;
-  // Issue tracker / Slack channel / on-call link.
   string support_url = 4;
-  // Business or team domain — e.g. "payments", "infra".
   string domain = 5;
-  // Responsible team or person.
   string owner = 6;
-  // Free-form labels for org-scoped rule selection.
   repeated string tags = 7;
 }
 

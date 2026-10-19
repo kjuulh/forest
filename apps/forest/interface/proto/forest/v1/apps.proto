@@ -5,20 +5,16 @@ package forest.v1;
 import "google/protobuf/timestamp.proto";
 
 service AppService {
-  // App lifecycle
   rpc CreateApp(CreateAppRequest) returns (CreateAppResponse);
   rpc GetApp(GetAppRequest) returns (GetAppResponse);
   rpc ListApps(ListAppsRequest) returns (ListAppsResponse);
   rpc DeleteApp(DeleteAppRequest) returns (DeleteAppResponse);
   rpc SuspendApp(SuspendAppRequest) returns (SuspendAppResponse);
 
-  // App tokens
   rpc CreateAppToken(CreateAppTokenRequest) returns (CreateAppTokenResponse);
   rpc ListAppTokens(ListAppTokensRequest) returns (ListAppTokensResponse);
   rpc RevokeAppToken(RevokeAppTokenRequest) returns (RevokeAppTokenResponse);
 }
-
-// ─── Core types ──────────────────────────────────────────────────────
 
 message App {
   string app_id = 1;
@@ -38,8 +34,6 @@ message AppToken {
   bool revoked = 5;
   google.protobuf.Timestamp created_at = 6;
 }
-
-// ─── App lifecycle ───────────────────────────────────────────────────
 
 message CreateAppRequest {
   string organisation_id = 1;
@@ -81,17 +75,17 @@ message SuspendAppRequest {
 
 message SuspendAppResponse {}
 
-// ─── App tokens ──────────────────────────────────────────────────────
-
 message CreateAppTokenRequest {
   string app_id = 1;
   string name = 2;
-  int64 expires_in_seconds = 3; // 0 = no expiry
+  // 0 means no expiry.
+  int64 expires_in_seconds = 3;
 }
 
 message CreateAppTokenResponse {
   AppToken token = 1;
-  string raw_token = 2; // only returned on creation
+  // Only returned on creation.
+  string raw_token = 2;
 }
 
 message ListAppTokensRequest {

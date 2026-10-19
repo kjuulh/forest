@@ -1,22 +1,3 @@
-//! Fetching one registry binary as several concurrent byte ranges.
-//!
-//! A single `DownloadBinary` stream through the registry's load balancer tops
-//! out well below what the connection carries: measured from a 30 ms link,
-//! one stream of a 31 MB binary ran at ~40 MB/s, four at once ~70 MB/s in
-//! aggregate over the same connection. So a large binary is requested as
-//! `RANGE_SIZE` pieces, up to `RANGES_PER_BINARY` at a time, each written at
-//! its own offset in one preallocated tempfile as it arrives. Completion order
-//! therefore never decides file order, and nothing is held in memory beyond
-//! the chunks in flight.
-//!
-//! The first range doubles as the probe. Its reply names the binary's size and
-//! digest, and every later range is pinned to that digest, so the server
-//! refuses a range from a binary republished mid-download rather than serving
-//! it. A server that predates ranges ignores the range, streams the whole
-//! binary, and leaves the digest unset; that stream is simply consumed to the
-//! end. Either way the assembled file is hashed in full before the caller may
-//! install it, and it is removed on any failure or cancellation.
-
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -54,15 +35,6 @@ pub(crate) struct RangeRequest {
     pub expected_sha256: Option<String>,
 }
 
-/// Download one binary into a tempfile in `dest_dir`.
-///
-/// `open` issues one `DownloadBinary` request. `expected_sha256` is passed
-/// with the first request, so a registry holding a different binary refuses
-/// before sending any bytes; `expected_size` only sizes the progress bar.
-///
-/// `streams` is shared by every download in the process and bounds the
-/// requests in flight across all binaries and their ranges together, so
-/// concurrent binaries (`crate::download`) and ranges never multiply.
 pub(crate) async fn download_to_file<O, Fut, S>(
     open: O,
     streams: &Arc<Semaphore>,
@@ -206,8 +178,6 @@ fn seal(file: &std::fs::File, path: &Path) -> anyhow::Result<(String, u64)> {
     Ok((hex::encode(hasher.finalize()), size))
 }
 
-/// One stream's worth of work: the first range, whose stream is already open
-/// and whose first message has been read, or a later range still to request.
 enum Job<S> {
     Head {
         stream: S,
@@ -224,8 +194,6 @@ struct Pinned {
     size: u64,
 }
 
-/// The bytes one stream is responsible for. `pinned` is `None` for the whole
-/// binary from a server that predates ranges, whose messages carry no offsets.
 struct Span {
     start: u64,
     end: u64,
@@ -368,8 +336,6 @@ fn bare_hex(sha: &str) -> &str {
     sha.strip_prefix("sha256:").unwrap_or(sha)
 }
 
-/// The tempfile, removed when dropped unless [`Incoming::keep`] hands it over.
-/// Dropping covers every early return and a cancelled download future alike.
 struct Incoming(Option<PathBuf>);
 
 impl Incoming {
@@ -482,8 +448,6 @@ mod tests {
         peak: AtomicUsize,
         requests: Mutex<Vec<RangeRequest>>,
         finished: Mutex<Vec<u64>>,
-        /// Range at offset `k` stalls after its first message until the range
-        /// at offset `waits[k]` has finished.
         waits: HashMap<u64, u64>,
         done: HashMap<u64, Arc<Notify>>,
     }
@@ -514,8 +478,6 @@ mod tests {
             })
         }
 
-        /// Every range waits for the one after it, so they can only finish
-        /// last-first, and only if all of them are in flight together.
         fn reversed(data: Vec<u8>) -> Arc<Self> {
             let last = data.len() as u64 / RANGE * RANGE;
             let waits = (0..last)

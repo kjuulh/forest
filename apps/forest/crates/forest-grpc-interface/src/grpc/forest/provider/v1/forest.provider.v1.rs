@@ -5,21 +5,12 @@ pub struct DescribeRequest {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DescribeResponse {
-    /// Human-readable summary of what this provider releases to, shown next to the
-    /// destination in forest.
     #[prost(string, tag="1")]
     pub description: ::prost::alloc::string::String,
-    /// Metadata this provider accepts, beyond `generic`'s own `provider_url` and
-    /// `provider_token`. forest enforces `required` at destination-creation time;
-    /// everything else is for rendering and for the provider's own validation.
     #[prost(message, repeated, tag="2")]
     pub fields: ::prost::alloc::vec::Vec<MetadataField>,
-    /// Whether Execute handles RELEASE_MODE_PLAN. When false, forest does not offer
-    /// a plan for destinations backed by this provider.
     #[prost(bool, tag="3")]
     pub supports_plan: bool,
-    /// Optional identifier for the type being implemented, e.g. "understory/ecs@1".
-    /// Logged with each release so it is clear which provider served it.
     #[prost(string, tag="4")]
     pub type_name: ::prost::alloc::string::String,
 }
@@ -33,12 +24,10 @@ pub struct MetadataField {
     pub description: ::prost::alloc::string::String,
     #[prost(bool, tag="4")]
     pub required: bool,
-    /// Rendering hint: "text", "url", "number", "password", …
     #[prost(string, tag="5")]
     pub field_type: ::prost::alloc::string::String,
     #[prost(string, tag="6")]
     pub default_value: ::prost::alloc::string::String,
-    /// Credentials. forest redacts these in API responses and never logs them.
     #[prost(bool, tag="7")]
     pub sensitive: bool,
 }
@@ -50,13 +39,6 @@ pub struct ExecuteRequest {
     pub destination: ::core::option::Option<Destination>,
     #[prost(message, optional, tag="3")]
     pub release: ::core::option::Option<Release>,
-    /// A scoped, short-lived token plus the address to use it against. A provider
-    /// that needs the release's rendered artifacts calls
-    /// `forest.v1.RunnerService/GetReleaseFiles` (or `GetSpecFiles`) with them.
-    ///
-    /// Most providers act on infrastructure that already exists and need neither;
-    /// both can be ignored. The token is scoped to this release alone and expires
-    /// with it.
     #[prost(string, tag="4")]
     pub release_token: ::prost::alloc::string::String,
     #[prost(string, tag="5")]
@@ -70,8 +52,6 @@ pub struct Destination {
     pub environment: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
     pub organisation: ::prost::alloc::string::String,
-    /// The destination's metadata with `generic`'s own `provider_*` keys removed,
-    /// so a provider sees only its own configuration.
     #[prost(map="string, string", tag="4")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
@@ -83,8 +63,6 @@ pub struct Release {
     pub project: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
     pub slug: ::prost::alloc::string::String,
-    /// Empty when the release has no source reference. A provider that pins an
-    /// immutable artifact from the commit should fail rather than invent one.
     #[prost(string, tag="4")]
     pub reference_commit_sha: ::prost::alloc::string::String,
     #[prost(string, tag="5")]
@@ -105,48 +83,25 @@ pub mod execute_event {
         Log(super::LogLine),
         #[prost(message, tag="2")]
         Outcome(super::Outcome),
-        /// Something the provider observed and forest should record. Optional, and
-        /// a provider may send any number of them.
         #[prost(message, tag="3")]
         Signal(super::Signal),
     }
 }
-/// A named observation about this release, pushed as it is made.
-///
-/// A provider knows things about a rollout that its final outcome cannot carry:
-/// that the new tasks are up, that a smoke check passed, that the thing is
-/// serving. Sending them as they happen lets a pipeline gate on them — see
-/// forest.v1.SignalService and the `gate` stage type.
-///
-/// Deliberately an event on this stream rather than a call back into forest.
-/// This protocol is self-contained on purpose, so that a provider needs no
-/// forest dependency and can be vendored on its own; a signal that required
-/// dialling forest's SignalService would take that away. forest already knows
-/// which release and organisation this stream belongs to, so the provider only
-/// has to say what it saw.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Signal {
-    /// The provider's own name for it — `rollout`, `smoke`. A pipeline gate waits
-    /// on this name.
     #[prost(string, tag="1")]
     pub name: ::prost::alloc::string::String,
-    /// One of forest.v1.HealthStatus, by name: HEALTHY, PROGRESSING, DEGRADED,
-    /// UNHEALTHY, MISSING. A string rather than the enum so this file stays
-    /// free of forest imports; forest validates it and rejects anything else.
+    /// A forest.v1.HealthStatus name; forest rejects anything else.
     #[prost(string, tag="2")]
     pub status: ::prost::alloc::string::String,
-    /// What a person reads first when a gate did not open. The ECS provider puts
-    /// its poll line here: "deployments=1 running=1/1".
     #[prost(string, tag="3")]
     pub detail: ::prost::alloc::string::String,
-    /// RFC 3339, and the provider's own clock. Empty means "when forest received
-    /// it", which is close enough for a signal sent as it happens.
+    /// RFC 3339; empty means when forest received it.
     #[prost(string, tag="4")]
     pub observed_at: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct LogLine {
-    /// "stdout" or "stderr". Anything else is treated as stdout.
     #[prost(string, tag="1")]
     pub channel: ::prost::alloc::string::String,
     #[prost(string, tag="2")]
@@ -156,11 +111,8 @@ pub struct LogLine {
 pub struct Outcome {
     #[prost(bool, tag="1")]
     pub success: bool,
-    /// Why it failed. Surfaced as the release's failure message, so it should say
-    /// what went wrong and where — this is what someone reads at 3am.
     #[prost(string, tag="2")]
     pub error_message: ::prost::alloc::string::String,
-    /// Plan text, for RELEASE_MODE_PLAN.
     #[prost(string, tag="3")]
     pub plan_output: ::prost::alloc::string::String,
 }
@@ -168,10 +120,7 @@ pub struct Outcome {
 #[repr(i32)]
 pub enum ReleaseMode {
     Unspecified = 0,
-    /// Execute the release.
     Deploy = 1,
-    /// Dry run. Make no change; report what a deploy would do in
-    /// `Outcome.plan_output`, which is what a reviewer approves.
     Plan = 2,
 }
 impl ReleaseMode {

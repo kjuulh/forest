@@ -1,19 +1,8 @@
-//! Acceptance tests for the global-tools registry contract.
-//!
-//! Exercises TASKS/018-global-tools.md §1a.2 (server-side validation) and
-//! §1a.2e (shape persistence) end-to-end against the live gRPC server +
-//! Postgres dev database. Each test creates a unique org, publishes a
-//! manifest, and inspects the server's stored state.
-
 use forest_grpc_interface::*;
 use serde_json::json;
 use tonic::metadata::MetadataValue;
 
 use crate::accepttest::fixtures::{Given, testcase};
-
-// ---------------------------------------------------------------------------
-// Shared scaffolding
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Default)]
 struct GlobalToolsData {
@@ -103,8 +92,6 @@ async fn publish_manifest(
         .map(|_| ())
 }
 
-/// Stream-upload a binary artifact for an in-flight upload.
-/// Mirrors the protocol-level path that `forest components publish` uses.
 async fn upload_binary(
     g: &Given<GlobalToolsData>,
     token: &str,
@@ -156,10 +143,6 @@ fn unique_org() -> String {
     format!("gtorg{}", uuid::Uuid::now_v7().simple())
 }
 
-// ---------------------------------------------------------------------------
-// Happy paths — one per shape
-// ---------------------------------------------------------------------------
-
 #[tokio::test(flavor = "multi_thread")]
 async fn publish_tool_external_manifest_succeeds_and_persists_shape() {
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
@@ -188,7 +171,6 @@ async fn publish_tool_external_manifest_succeeds_and_persists_shape() {
         .expect("publish_manifest must succeed for valid external manifest");
     commit_upload(&g, &token, &upload).await;
 
-    // Verify the manifest round-trips via GetComponentManifest.
     let resp = g
         .fixture()
         .registry()
@@ -207,7 +189,6 @@ async fn publish_tool_external_manifest_succeeds_and_persists_shape() {
     assert_eq!(returned["kind"], "external");
     assert_eq!(returned["tool"]["name"], "rg");
 
-    // Verify the shape persisted on `components`.
     let shape: String =
         sqlx::query_scalar("SELECT shape FROM components WHERE organisation = $1 AND name = $2")
             .bind(&org)
@@ -217,7 +198,6 @@ async fn publish_tool_external_manifest_succeeds_and_persists_shape() {
             .expect("query shape");
     assert_eq!(shape, "tool_external");
 
-    // And that `kind` is also set to "external".
     let kind: String =
         sqlx::query_scalar("SELECT kind FROM components WHERE organisation = $1 AND name = $2")
             .bind(&org)
@@ -296,13 +276,8 @@ async fn publish_hybrid_component_manifest_persists_hybrid_shape() {
     assert_eq!(shape, "hybrid_component");
 }
 
-// ---------------------------------------------------------------------------
-// Negative cases — §1a.2 validation rules
-// ---------------------------------------------------------------------------
-
 #[tokio::test(flavor = "multi_thread")]
 async fn rejects_external_manifest_without_tool_facet() {
-    // §1a.2 rule 2: external ⇒ tool present.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -332,7 +307,6 @@ async fn rejects_external_manifest_without_tool_facet() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rejects_binary_manifest_without_methods_or_tool() {
-    // §1a.2 rule 7.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -358,7 +332,6 @@ async fn rejects_binary_manifest_without_methods_or_tool() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rejects_external_manifest_with_http_scheme() {
-    // §1a.2 rule 4: external URLs must be https://.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -389,7 +362,6 @@ async fn rejects_external_manifest_with_http_scheme() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rejects_external_manifest_with_methods_declared() {
-    // §1a.2e: external manifests cannot declare methods (no describe).
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -421,7 +393,6 @@ async fn rejects_external_manifest_with_methods_declared() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rejects_invalid_tool_name() {
-    // §1a.2 rule 3: tool.name regex.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -461,22 +432,10 @@ async fn publish_tool(
     commit_upload(g, token, &upload).await;
 }
 
-// ---------------------------------------------------------------------------
-// End-to-end: upload binary → lazy fetch via DownloadBinary → exec
-// ---------------------------------------------------------------------------
-
-/// The smallest valid Linux ELF that exits 0 — a minimal shell script that
-/// happens to also satisfy `chmod +x` semantics. For the cache layer we
-/// only need *bytes that round-trip with a stable sha*, not an executable
-/// shape — the test asserts on cache content, not exec.
 const STUB_BINARY: &[u8] = b"#!/bin/sh\necho hello, $1!\nexit 0\n";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn end_to_end_tool_binary_upload_and_lazy_fetch() {
-    // Verifies the full TOOL_BINARY lifecycle on the server side:
-    //   publish → DownloadBinary → bytes match what we uploaded.
-    // This is the contract the client's `resolve_to_cached_path` cold path
-    // depends on.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -502,7 +461,6 @@ async fn end_to_end_tool_binary_upload_and_lazy_fetch() {
         .expect("publish_manifest");
     commit_upload(&g, &token, &upload).await;
 
-    // Now exercise the download path the way `forest global run` would.
     let mut stream = g
         .fixture()
         .registry()
@@ -527,13 +485,9 @@ async fn end_to_end_tool_binary_upload_and_lazy_fetch() {
     }
     assert_eq!(fetched, STUB_BINARY);
 
-    // Sha matches what we uploaded — the client cache layer's content-address
-    // invariant (cache::finalize) accepts these bytes only if the manifest
-    // claims this sha. End-to-end integrity verified.
     let downloaded_sha = hex::encode(Sha256::digest(&fetched));
     assert_eq!(downloaded_sha, expected_sha);
 
-    // Shape persisted as tool_binary.
     let shape: String =
         sqlx::query_scalar("SELECT shape FROM components WHERE organisation = $1 AND name = $2")
             .bind(&org)
@@ -544,8 +498,6 @@ async fn end_to_end_tool_binary_upload_and_lazy_fetch() {
     assert_eq!(shape, "tool_binary");
 }
 
-/// A byte pattern with no short period, so a range served from the wrong
-/// offset cannot pass for the right one. Spans more than two 1 MiB messages.
 fn patterned_binary() -> Vec<u8> {
     (0..2_500_123u32)
         .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
@@ -698,9 +650,6 @@ async fn download_binary_refuses_ranges_it_cannot_serve_faithfully() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn end_to_end_hybrid_component_serves_methods_and_argv_passthrough() {
-    // HYBRID_COMPONENT: same binary, two doorways. The describe protocol
-    // (forest run <command>) reads `methods`; the shim path reads `tool`.
-    // Server-side just stores everything in the manifest and the shape.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -724,7 +673,6 @@ async fn end_to_end_hybrid_component_serves_methods_and_argv_passthrough() {
         .expect("publish_manifest");
     commit_upload(&g, &token, &upload).await;
 
-    // Detail surface exposes both methods and tool facet.
     let detail = g
         .fixture()
         .registry()
@@ -749,9 +697,6 @@ async fn end_to_end_hybrid_component_serves_methods_and_argv_passthrough() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn end_to_end_tool_external_no_binary_upload_required() {
-    // TOOL_EXTERNAL: the manifest carries the URL + sha; the registry never
-    // sees bytes. DownloadBinary will refuse (no artifact uploaded). The
-    // client's resolver picks `FetchPlan::Url` instead.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -775,7 +720,6 @@ async fn end_to_end_tool_external_no_binary_upload_required() {
         .expect("publish external");
     commit_upload(&g, &token, &upload).await;
 
-    // Fetching the manifest exposes the upstream URL for the client to GET.
     let resp = g
         .fixture()
         .registry()
@@ -794,7 +738,6 @@ async fn end_to_end_tool_external_no_binary_upload_required() {
     let url = v["platforms"]["linux_amd64"]["url"].as_str().unwrap();
     assert!(url.starts_with("https://"), "url must be https: {url}");
 
-    // Server-side discovery view should only show the host, not the full URL.
     let detail = g
         .fixture()
         .registry()
@@ -812,8 +755,6 @@ async fn end_to_end_tool_external_no_binary_upload_required() {
     assert_eq!(summary.shape, ComponentShape::ToolExternal as i32);
     assert_eq!(summary.upstream_host, "github.com");
 
-    // DownloadBinary against an external tool should fail — there's no
-    // artifact, the binary lives upstream.
     let resp = g
         .fixture()
         .registry()
@@ -841,8 +782,6 @@ async fn end_to_end_tool_external_no_binary_upload_required() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn discovery_search_returns_shape_and_tool_facet() {
-    // Verifies the §1a.2e ComponentShape + tool/methods/upstream_host
-    // fields are populated on SearchComponents responses.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
@@ -893,14 +832,11 @@ async fn discovery_search_returns_shape_and_tool_facet() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
-    // §1a.2c: ListOrgTools streams components whose shape ∈ {hybrid, tool_*}.
-    // Pure COMPONENTs are excluded. Prereleases are not chosen as latest.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
     create_org(&g, &token, &org).await;
 
-    // 1. Pure component (no tool facet) — should NOT appear in ListOrgTools.
     publish_tool(
         &g,
         &token,
@@ -917,7 +853,6 @@ async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
     )
     .await;
 
-    // 2. Tool binary.
     publish_tool(
         &g,
         &token,
@@ -934,7 +869,6 @@ async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
     )
     .await;
 
-    // 3. Hybrid.
     publish_tool(
         &g,
         &token,
@@ -952,7 +886,6 @@ async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
     )
     .await;
 
-    // 4. External tool.
     publish_tool(
         &g,
         &token,
@@ -974,7 +907,6 @@ async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
     )
     .await;
 
-    // 5. Newer prerelease of `hello` — must NOT win for latest_version.
     publish_tool(
         &g,
         &token,
@@ -991,7 +923,6 @@ async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
     )
     .await;
 
-    // Now call ListOrgTools and consume the stream.
     let mut stream = g
         .fixture()
         .registry()
@@ -1108,7 +1039,6 @@ async fn list_org_tools_requires_org_membership() {
     )
     .await;
 
-    // Outsider user — not a member of `org`.
     let outsider = register_user(&g).await;
     let resp = g
         .fixture()
@@ -1129,14 +1059,12 @@ async fn list_org_tools_requires_org_membership() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rejects_manifest_over_size_cap() {
-    // §1a.2 rule 5.
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
     let token = register_user(&g).await;
     let org = unique_org();
     create_org(&g, &token, &org).await;
     let upload = begin_upload(&g, &token, &org, "oversized", "0.1.0").await;
 
-    // Build a >64 KiB manifest by padding the description field.
     let big_description: String = "x".repeat(70 * 1024);
     let manifest = json!({
         "kind": "binary",

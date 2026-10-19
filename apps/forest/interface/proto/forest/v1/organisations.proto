@@ -39,16 +39,12 @@ message SearchOrganisationsResponse {
 }
 
 message ListMyOrganisationsRequest {
-  // Optional role filter (e.g. "admin"); empty means all roles
   string role = 1;
 }
 message ListMyOrganisationsResponse {
   repeated Organisation organisations = 1;
-  // The role the caller has in each organisation (parallel to organisations)
   repeated string roles = 2;
 }
-
-// -- Members ------------------------------------------------------------------
 
 message OrganisationMember {
   string user_id = 1;
@@ -92,16 +88,10 @@ message ListMembersResponse {
   int32 total_count = 3;
 }
 
-// -- Allowed domain auto-invite (DATA-252) ------------------------------------
-
 message AllowedDomain {
   string domain = 1;
-  // 'auto_invite_any_verified' | 'manual_only' | 'auto_join_oauth' (v1.1).
   string policy = 2;
-  // Surfaced to admins for v1.1 DNS TXT verification ("set TXT _forest-verify
-  // = <token>"). v1 generates and stores but does not validate.
   string dns_verification_token = 3;
-  // Null until DNS TXT proven. v1 ignores; v1.1 will gate auto_join_oauth.
   google.protobuf.Timestamp dns_verified_at = 4;
   google.protobuf.Timestamp created_at = 5;
   string created_by_user_id = 6;
@@ -110,7 +100,6 @@ message AllowedDomain {
 message AddAllowedDomainRequest {
   string organisation_id = 1;
   string domain = 2;
-  // Optional; defaults server-side to 'auto_invite_any_verified'.
   string policy = 3;
 }
 message AddAllowedDomainResponse { AllowedDomain domain = 1; }
@@ -124,8 +113,6 @@ message RemoveAllowedDomainRequest {
 }
 message RemoveAllowedDomainResponse { bool removed = 1; }
 
-// Trigger a DNS TXT lookup at `_forest-verify.<domain>` and flip the row
-// to verified if the configured token is present (DATA-252).
 message VerifyAllowedDomainRequest {
   string organisation_id = 1;
   string domain = 2;
@@ -133,9 +120,9 @@ message VerifyAllowedDomainRequest {
 message VerifyAllowedDomainResponse {
   enum Status {
     STATUS_UNSPECIFIED = 0;
-    VERIFIED = 1;          // freshly verified by this call
-    ALREADY_VERIFIED = 2;  // was already verified; no-op
-    MISSING = 3;           // DNS resolved but no matching TXT was found
+    VERIFIED = 1;
+    ALREADY_VERIFIED = 2;
+    MISSING = 3;
   }
   Status status = 1;
 }
@@ -143,7 +130,6 @@ message VerifyAllowedDomainResponse {
 message JoinOffer {
   string organisation_id = 1;
   string organisation_name = 2;
-  // The user's email domain that matched the allowlist row.
   string matched_domain = 3;
 }
 
@@ -163,13 +149,11 @@ service OrganisationService {
   rpc UpdateMemberRole(UpdateMemberRoleRequest) returns (UpdateMemberRoleResponse);
   rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
 
-  // Admin: manage the per-org auto-invite allowlist.
   rpc AddAllowedDomain(AddAllowedDomainRequest) returns (AddAllowedDomainResponse);
   rpc ListAllowedDomains(ListAllowedDomainsRequest) returns (ListAllowedDomainsResponse);
   rpc RemoveAllowedDomain(RemoveAllowedDomainRequest) returns (RemoveAllowedDomainResponse);
   rpc VerifyAllowedDomain(VerifyAllowedDomainRequest) returns (VerifyAllowedDomainResponse);
 
-  // User: see and accept auto-invite join offers.
   rpc ListJoinOffers(ListJoinOffersRequest) returns (ListJoinOffersResponse);
   rpc AcceptJoinOffer(AcceptJoinOfferRequest) returns (AcceptJoinOfferResponse);
 }

@@ -16,7 +16,6 @@ message UploadArtifactRequest {
   string file_name = 4;
   string file_content = 5;
 
-  // Category of the file: "deployment" (default), "spec", or "attachment"
   string category = 6;
 }
 message UploadArtifactResponse {}
@@ -29,9 +28,7 @@ message CommitArtifactResponse {
 }
 
 message GetArtifactFilesRequest {
-  // The artifact_id (UUID from annotations/artifacts table)
   string artifact_id = 1;
-  // Optional filter: "deployment", "spec", "attachment". Empty = all categories.
   optional string category = 2;
 }
 message GetArtifactFilesResponse {
@@ -49,7 +46,6 @@ message GetArtifactSpecRequest {
   string artifact_id = 1;
 }
 message GetArtifactSpecResponse {
-  // The spec file content (forest.cue), empty string if no spec was uploaded.
   string content = 1;
 }
 

@@ -11656,8 +11656,7 @@ pub mod organisation_service_client {
                 .insert(GrpcMethod::new("forest.v1.OrganisationService", "ListMembers"));
             self.inner.unary(req, path, codec).await
         }
-        /** Admin: manage the per-org auto-invite allowlist.
-*/
+        ///
         pub async fn add_allowed_domain(
             &mut self,
             request: impl tonic::IntoRequest<super::AddAllowedDomainRequest>,
@@ -11774,8 +11773,7 @@ pub mod organisation_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** User: see and accept auto-invite join offers.
-*/
+        ///
         pub async fn list_join_offers(
             &mut self,
             request: impl tonic::IntoRequest<super::ListJoinOffersRequest>,
@@ -11908,8 +11906,7 @@ pub mod organisation_service_server {
             tonic::Response<super::ListMembersResponse>,
             tonic::Status,
         >;
-        /** Admin: manage the per-org auto-invite allowlist.
-*/
+        ///
         async fn add_allowed_domain(
             &self,
             request: tonic::Request<super::AddAllowedDomainRequest>,
@@ -11941,8 +11938,7 @@ pub mod organisation_service_server {
             tonic::Response<super::VerifyAllowedDomainResponse>,
             tonic::Status,
         >;
-        /** User: see and accept auto-invite join offers.
-*/
+        ///
         async fn list_join_offers(
             &self,
             request: tonic::Request<super::ListJoinOffersRequest>,

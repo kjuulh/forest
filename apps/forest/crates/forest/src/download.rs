@@ -1,33 +1,3 @@
-//! Bounded, adaptive concurrency for registry downloads (DATA-505).
-//!
-//! # Why adaptive rather than a fixed cap
-//!
-//! Every gRPC client in the CLI shares **one** `tonic::transport::Channel`
-//! (see [`crate::grpc::GrpcClient::channel`]) and therefore one TCP
-//! connection. Running N downloads concurrently opens N HTTP/2 streams over
-//! that single connection. They buy *latency hiding* — each download has a
-//! serial prologue (the server's S3 GET before the first byte, our sha256
-//! hashing and disk writes after it) that overlapping hides — and, where a
-//! single stream is capped below the connection (measured in front of the
-//! Understory registry, 2026-10-19), aggregate bandwidth too. One large binary
-//! gets the same effect from its own byte ranges (`grpc::binary_download`);
-//! both draw on one stream budget, so the two never multiply.
-//!
-//! That means the useful in-flight count is small and it saturates quickly.
-//! A big fixed cap would only add server load, file descriptors and one
-//! HTTP/2 flow-control window worth of buffering per stream for no gain. So
-//! instead of asserting a number we ramp: start low, grow while aggregate
-//! throughput actually improves, stop at the plateau, and back off when the
-//! source pushes back.
-//!
-//! # Shape
-//!
-//! [`RampState`] is the whole policy and it is a pure state machine — no
-//! clock, no I/O — so the interesting behaviour is unit-testable without
-//! timing flake. [`Limiter`] wraps it in a `Semaphore` whose permit count is
-//! reconciled to the state machine's current limit, and [`map_bounded`]
-//! drives a collection of futures through it.
-
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -36,39 +6,16 @@ use std::time::Instant;
 use futures::StreamExt;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-/// Where the ramp starts. Two is enough to overlap one download's transfer
-/// with the next one's server-side S3 fetch, which is the first and largest
-/// win; anything beyond that has to earn its place by measurement.
 pub const INITIAL_IN_FLIGHT: usize = 2;
 
-/// Default ceiling for the adaptive ramp.
-///
-/// Chosen for the single-shared-connection reality described above: by the
-/// time 8 transfers are in flight, per-download prologues are fully
-/// overlapped and the one TCP flow is the limit, so more streams cannot help.
-/// It is also low enough that 8 × the HTTP/2 stream window stays a modest
-/// amount of client-side buffering. The ramp usually settles well below this.
 pub const DEFAULT_MAX_IN_FLIGHT: usize = 8;
 
-/// Hard ceiling, whatever the user or config asks for. Guards against a typo
-/// (`--download-concurrency 10000`) exhausting file descriptors or memory.
 pub const MAX_IN_FLIGHT_CEILING: usize = 32;
 
-/// Aggregate throughput has to improve by at least this fraction for the ramp
-/// to keep opening slots. Below it we treat the extra concurrency as noise and
-/// give the slot back.
 const GROWTH_THRESHOLD: f64 = 0.10;
 
-/// How many recent completions feed the aggregate-throughput estimate.
 const RATE_WINDOW: usize = 16;
 
-/// Resolve the in-flight ceiling from the CLI flag, falling back to
-/// `FOREST_DOWNLOAD_CONCURRENCY` and then to [`DEFAULT_MAX_IN_FLIGHT`].
-///
-/// `1` is honoured and means "no concurrency" — the fully serial behaviour
-/// that predates DATA-505, which is the escape hatch if a registry ever
-/// misbehaves under parallel streams. `0` is meaningless rather than
-/// dangerous, so it is treated as unset.
 pub fn resolve_max_in_flight(flag: Option<usize>) -> usize {
     let from_env = || {
         std::env::var("FOREST_DOWNLOAD_CONCURRENCY")
@@ -79,37 +26,18 @@ pub fn resolve_max_in_flight(flag: Option<usize>) -> usize {
     requested.clamp(1, MAX_IN_FLIGHT_CEILING)
 }
 
-/// What a finished (or failed) transfer tells the controller.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Signal {
-    /// A transfer completed. `aggregate_rate` is bytes/sec across all recent
-    /// transfers, not this one's own rate — the ramp is climbing total
-    /// throughput, and a single stream getting slower while the total gets
-    /// faster is exactly the trade we want to accept.
     Completed { aggregate_rate: Option<f64> },
-    /// The source pushed back (`UNAVAILABLE`, `RESOURCE_EXHAUSTED`, a
-    /// timeout, a connection reset). Concurrency is plausibly the cause, so
-    /// halve it.
     Backpressure,
-    /// A transfer failed for a reason unrelated to load (not found, sha
-    /// mismatch, permission denied). Carries no information about how many
-    /// streams the source can take, so the ramp must not react to it.
     NeutralFailure,
 }
 
-/// The ramp policy: a single-step hill climb over aggregate throughput.
-///
-/// Grow while each step measurably improves the total rate; on the first step
-/// that does not, give the slot back and stop probing. Back off hard on
-/// backpressure and do not resume probing afterwards — a source that has
-/// already refused work is not somewhere to keep pushing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RampState {
     limit: usize,
     max: usize,
     probing: bool,
-    /// Aggregate rate measured at the limit *below* the current one — the
-    /// number the next step has to beat.
     baseline: Option<f64>,
 }
 
@@ -118,8 +46,6 @@ impl RampState {
         let max = max.clamp(1, MAX_IN_FLIGHT_CEILING);
         Self {
             limit: INITIAL_IN_FLIGHT.min(max),
-            // A ceiling of 1 is an explicit "stay serial", not a starting
-            // point to grow from.
             probing: max > 1,
             max,
             baseline: None,
@@ -138,7 +64,6 @@ impl RampState {
         self.probing
     }
 
-    /// Fold one signal in and return the new limit.
     pub fn observe(&mut self, signal: Signal) -> usize {
         match signal {
             Signal::Backpressure => {
@@ -158,15 +83,10 @@ impl RampState {
 
     fn step(&mut self, aggregate_rate: Option<f64>) {
         if self.limit >= self.max {
-            // Nowhere left to grow; stop measuring for growth.
             self.probing = false;
             return;
         }
         let Some(rate) = aggregate_rate else {
-            // Not enough completions yet to estimate a rate. Open a slot
-            // anyway: the first couple of steps are near-certain wins
-            // (they overlap serial prologues) and waiting for a measurement
-            // we cannot take yet would leave short dependency sets serial.
             self.limit += 1;
             return;
         };
@@ -180,8 +100,6 @@ impl RampState {
                 self.limit += 1;
             }
             Some(_) => {
-                // The extra slot did not pay for itself — hand it back and
-                // settle here.
                 self.limit = (self.limit - 1).max(1);
                 self.probing = false;
             }
@@ -189,11 +107,6 @@ impl RampState {
     }
 }
 
-/// Sliding-window aggregate throughput estimator.
-///
-/// Deliberately measures *completions over wall time* rather than summing
-/// per-transfer rates: with N streams in flight the per-transfer rates each
-/// fall while the total rises, and the total is what we are optimising.
 #[derive(Debug, Default)]
 struct RateWindow {
     samples: VecDeque<(Instant, u64)>,
@@ -207,8 +120,6 @@ impl RateWindow {
         self.samples.push_back((at, bytes));
     }
 
-    /// Bytes/sec across the window, or `None` until there is a span to divide
-    /// by (a single completion has no duration).
     fn rate(&self) -> Option<f64> {
         let first = self.samples.front()?.0;
         let last = self.samples.back()?.0;
@@ -219,20 +130,11 @@ impl RateWindow {
         if span <= 0.0 {
             return None;
         }
-        // Skip the first sample's bytes: those moved before the window
-        // opened, so counting them against this span overstates the rate.
         let bytes: u64 = self.samples.iter().skip(1).map(|(_, b)| *b).sum();
         Some(bytes as f64 / span)
     }
 }
 
-/// Adaptive in-flight limiter.
-///
-/// Permits live in a `Semaphore` and are reconciled to [`RampState::limit`]
-/// as signals arrive. Shrinking cannot revoke a permit that is currently held,
-/// so a shrink records *debt* and the next slot to be released is retired
-/// instead of returned — the cap tightens as work drains, never by
-/// interrupting a transfer that is already running.
 pub struct Limiter {
     semaphore: Arc<Semaphore>,
     inner: Mutex<Inner>,
@@ -243,9 +145,7 @@ pub struct Limiter {
 struct Inner {
     state: RampState,
     rates: RateWindow,
-    /// Permits currently owned by the semaphore (held or available).
     issued: usize,
-    /// Permits owed back — retired as slots are released.
     debt: usize,
 }
 
@@ -266,9 +166,7 @@ impl Limiter {
         })
     }
 
-    /// Wait for a slot. Held for as long as the returned [`Slot`] lives.
     pub async fn acquire(self: &Arc<Self>) -> Slot {
-        // `Semaphore` is never closed, so acquisition cannot fail.
         let permit = self
             .semaphore
             .clone()
@@ -283,25 +181,11 @@ impl Limiter {
         }
     }
 
-    /// Add `bytes` to the throughput estimate. Call this from work that moves
-    /// data; the driver turns it into a ramp signal when the unit finishes.
-    ///
-    /// Deliberately does *not* signal on its own — a unit of work may report
-    /// bytes several times (or not at all) and only the driver knows when it is
-    /// actually done.
     pub fn add_bytes(&self, bytes: u64) {
         let mut inner = self.inner.lock().expect("limiter mutex poisoned");
         inner.rates.record(Instant::now(), bytes);
     }
 
-    /// Signal that a unit of work finished successfully.
-    ///
-    /// Work that reported no bytes (a metadata RPC — a manifest fetch, a
-    /// version lookup) leaves the throughput window empty, so the ramp has no
-    /// rate to compare and grows on each completion until it hits the ceiling.
-    /// That is the behaviour we want there: extra concurrent round trips are
-    /// nearly free and the win is linear in how many are in flight. Byte
-    /// transfers do have a rate, so they hill-climb it instead.
     pub fn note_completion(&self) {
         let rate = {
             let inner = self.inner.lock().expect("limiter mutex poisoned");
@@ -312,8 +196,6 @@ impl Limiter {
         });
     }
 
-    /// Report a signal directly. Public so callers can classify their own
-    /// errors (only they know whether a failure was load-related).
     pub fn record(&self, signal: Signal) {
         let mut inner = self.inner.lock().expect("limiter mutex poisoned");
         let target = inner.state.observe(signal);
@@ -321,12 +203,9 @@ impl Limiter {
     }
 
     fn reconcile(&self, inner: &mut Inner, target: usize) {
-        // Outstanding debt has not been paid yet, so effective capacity is
-        // `issued - debt`. Compare against that, not against `issued`.
         let effective = inner.issued.saturating_sub(inner.debt);
         if target > effective {
             let grow = target - effective;
-            // Cancel debt before minting new permits.
             let from_debt = grow.min(inner.debt);
             inner.debt -= from_debt;
             let mint = grow - from_debt;
@@ -336,11 +215,6 @@ impl Limiter {
             }
         } else if target < effective {
             let mut owe = effective - target;
-            // Retire permits that are sitting idle right now. Only permits
-            // currently *held* by a running transfer have to be settled later
-            // (as debt, on release) — waiting on a release that may never
-            // come would leave a shrink silently unapplied while the limiter
-            // is quiet.
             while owe > 0 {
                 match self.semaphore.try_acquire() {
                     Ok(permit) => {
@@ -355,14 +229,11 @@ impl Limiter {
         }
     }
 
-    /// Current cap.
     pub fn current_limit(&self) -> usize {
         let inner = self.inner.lock().expect("limiter mutex poisoned");
         inner.state.limit()
     }
 
-    /// Highest number of slots ever held simultaneously. The assertion hook
-    /// for "the cap was respected".
     pub fn peak_in_flight(&self) -> usize {
         self.peak_in_flight.load(Ordering::Acquire)
     }
@@ -373,7 +244,6 @@ impl Limiter {
         if inner.debt > 0 {
             inner.debt -= 1;
             inner.issued -= 1;
-            // Retiring the permit shrinks the semaphore for good.
             permit.forget();
         } else {
             drop(permit);
@@ -381,7 +251,6 @@ impl Limiter {
     }
 }
 
-/// A held slot. Dropping it releases (or retires) the underlying permit.
 pub struct Slot {
     limiter: Arc<Limiter>,
     permit: Option<OwnedSemaphorePermit>,
@@ -395,11 +264,6 @@ impl Drop for Slot {
     }
 }
 
-/// Classify a download error for the ramp.
-///
-/// Only load-shaped failures move the limit. A 404 or a sha mismatch says
-/// nothing about how many streams the registry can serve, and reacting to it
-/// would let one bad artifact throttle every other download in the batch.
 pub fn classify(err: &anyhow::Error) -> Signal {
     if let Some(status) = err.downcast_ref::<tonic::Status>() {
         return match status.code() {
@@ -410,9 +274,6 @@ pub fn classify(err: &anyhow::Error) -> Signal {
             _ => Signal::NeutralFailure,
         };
     }
-    // `grpc_err` flattens tonic statuses into plain anyhow errors before most
-    // of the codebase sees them, and reqwest errors arrive with their own
-    // types, so fall back to the message for the load-shaped cases.
     let msg = err.to_string().to_ascii_lowercase();
     let load_shaped = [
         "unavailable",
@@ -434,16 +295,6 @@ pub fn classify(err: &anyhow::Error) -> Signal {
     }
 }
 
-/// Run `f` over `items` with adaptive bounded concurrency, preserving input
-/// order in the results.
-///
-/// Every item is driven to its own completion: one failure never cancels a
-/// sibling, and the returned `Vec` has exactly one entry per input so callers
-/// can report per-item outcomes.
-///
-/// The driver owns the ramp signals — it calls [`Limiter::note_completion`] on
-/// success and classifies failures itself — so `f` only has to report bytes it
-/// moved via [`Limiter::add_bytes`], and work that moves none reports nothing.
 pub async fn map_bounded<T, R, F, Fut>(
     items: Vec<T>,
     limiter: Arc<Limiter>,
@@ -468,8 +319,6 @@ where
                 (index, out)
             }
         }))
-        // The semaphore is the real limit; this only has to be wide enough not to
-        // become one itself.
         .buffer_unordered(MAX_IN_FLIGHT_CEILING)
         .collect()
         .await;
@@ -484,12 +333,9 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::time::Duration;
 
-    // --- resolve_max_in_flight ---
-
     #[test]
     fn flag_wins_and_defaults_apply() {
         assert_eq!(resolve_max_in_flight(Some(4)), 4);
-        // Env is not set in this test process, so None falls to the default.
         assert_eq!(resolve_max_in_flight(None), DEFAULT_MAX_IN_FLIGHT);
     }
 
@@ -503,8 +349,6 @@ mod tests {
         assert_eq!(resolve_max_in_flight(Some(1)), 1);
         assert_eq!(resolve_max_in_flight(Some(0)), 1);
     }
-
-    // --- RampState (pure policy) ---
 
     #[test]
     fn ramp_starts_low_and_below_the_ceiling() {
@@ -529,28 +373,24 @@ mod tests {
     #[test]
     fn grows_while_throughput_improves_then_holds_at_the_plateau() {
         let mut s = RampState::new(8);
-        // No measurement yet — grow on faith.
         assert_eq!(
             s.observe(Signal::Completed {
                 aggregate_rate: None
             }),
             3
         );
-        // First real measurement becomes the baseline and earns a slot.
         assert_eq!(
             s.observe(Signal::Completed {
                 aggregate_rate: Some(100.0)
             }),
             4
         );
-        // +50%: clear win, keep going.
         assert_eq!(
             s.observe(Signal::Completed {
                 aggregate_rate: Some(150.0)
             }),
             5
         );
-        // +2%: noise, not a win. Hand the slot back and settle.
         assert_eq!(
             s.observe(Signal::Completed {
                 aggregate_rate: Some(153.0)
@@ -558,7 +398,6 @@ mod tests {
             4
         );
         assert!(!s.probing(), "should stop probing once it plateaus");
-        // Further completions must not move a settled limit.
         for rate in [400.0, 10.0, 1000.0] {
             assert_eq!(
                 s.observe(Signal::Completed {
@@ -572,7 +411,6 @@ mod tests {
     #[test]
     fn ramp_never_exceeds_its_ceiling() {
         let mut s = RampState::new(4);
-        // Improving forever: the ceiling, not the measurement, must stop it.
         let mut rate = 100.0;
         for _ in 0..50 {
             s.observe(Signal::Completed {
@@ -604,7 +442,6 @@ mod tests {
             "must not keep pushing a source that pushed back"
         );
 
-        // Repeated backpressure decays toward serial but never below 1.
         for _ in 0..10 {
             s.observe(Signal::Backpressure);
         }
@@ -627,8 +464,6 @@ mod tests {
         );
     }
 
-    // --- RateWindow ---
-
     #[test]
     fn rate_needs_two_samples_and_measures_bytes_over_wall_time() {
         let mut w = RateWindow::default();
@@ -637,7 +472,6 @@ mod tests {
         w.record(t0, 1_000);
         assert_eq!(w.rate(), None, "a single completion has no duration");
         w.record(t0 + Duration::from_secs(2), 4_000);
-        // Only the bytes that moved *inside* the span count.
         let rate = w.rate().expect("two samples give a rate");
         assert!(
             (rate - 2_000.0).abs() < 1.0,
@@ -654,8 +488,6 @@ mod tests {
         }
         assert_eq!(w.samples.len(), RATE_WINDOW);
     }
-
-    // --- Limiter (async, cap enforcement) ---
 
     #[tokio::test]
     async fn limiter_never_exceeds_its_ceiling_under_load() {
@@ -724,7 +556,6 @@ mod tests {
         assert_eq!(out.len(), 20, "every input must produce an outcome");
         let failures = out.iter().filter(|r| r.is_err()).count();
         assert_eq!(failures, 4);
-        // Successes are intact and still correlated with their inputs.
         for (i, r) in out.iter().enumerate() {
             let i = i as u32;
             match r {
@@ -740,7 +571,6 @@ mod tests {
     #[tokio::test]
     async fn results_are_returned_in_input_order_despite_out_of_order_completion() {
         let limiter = Limiter::new(8);
-        // Later items finish first.
         let out = map_bounded(
             (0..8u64).collect::<Vec<u64>>(),
             Arc::clone(&limiter),
@@ -758,7 +588,6 @@ mod tests {
     #[tokio::test]
     async fn backpressure_errors_shrink_the_live_limiter() {
         let limiter = Limiter::new(16);
-        // Grow first so there is something to shrink.
         for _ in 0..4 {
             limiter.add_bytes(1_024 * 1_024);
             limiter.note_completion();
@@ -770,7 +599,6 @@ mod tests {
         limiter.record(Signal::Backpressure);
         assert_eq!(limiter.current_limit(), grown / 2);
 
-        // The tightened cap is actually enforced on subsequent work.
         let target = limiter.current_limit();
         let items: Vec<u32> = (0..40).collect();
         let fresh_peak = Arc::new(AtomicUsize::new(0));
@@ -796,10 +624,6 @@ mod tests {
 
     #[tokio::test]
     async fn shrinking_while_idle_takes_effect_immediately() {
-        // Regression: a shrink used to be recorded purely as debt, and debt is
-        // only settled when a slot is *released*. With nothing in flight there
-        // was no release to settle it against, so idle permits stayed
-        // available and the tightened cap was silently ignored.
         let limiter = Limiter::new(8);
         limiter.record(Signal::Backpressure);
         assert_eq!(limiter.current_limit(), 1);
@@ -829,13 +653,9 @@ mod tests {
 
     #[tokio::test]
     async fn shrinking_mid_flight_waits_for_running_transfers() {
-        // The other half of the shrink story: permits that are *held* cannot
-        // be revoked, so the cap has to tighten as work drains rather than by
-        // interrupting a transfer.
         let limiter = Limiter::new(8);
         let gate = Arc::new(tokio::sync::Notify::new());
 
-        // Occupy both starting slots.
         let a = limiter.acquire().await;
         let b = limiter.acquire().await;
         assert_eq!(limiter.peak_in_flight(), 2);
@@ -843,7 +663,6 @@ mod tests {
         limiter.record(Signal::Backpressure);
         assert_eq!(limiter.current_limit(), 1);
 
-        // Nothing new may start while both slots are still held.
         let waiter = {
             let limiter = Arc::clone(&limiter);
             let gate = Arc::clone(&gate);
@@ -856,8 +675,6 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert!(!waiter.is_finished(), "a third slot must not be handed out");
 
-        // Draining one slot pays the debt; it must NOT admit the waiter yet,
-        // because the cap is 1 and one slot is still held.
         drop(a);
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert!(
@@ -865,7 +682,6 @@ mod tests {
             "cap is 1 and a transfer is still running"
         );
 
-        // Draining the last one lets the waiter through.
         drop(b);
         tokio::time::timeout(Duration::from_secs(2), waiter)
             .await
@@ -875,8 +691,6 @@ mod tests {
 
     #[tokio::test]
     async fn retries_inside_a_slot_are_preserved() {
-        // A caller that retries internally must still see its retries run,
-        // and must hold exactly one slot for the whole retry sequence.
         let limiter = Limiter::new(4);
         let attempts = Arc::new(AtomicU64::new(0));
 
@@ -889,7 +703,6 @@ mod tests {
                     let mut last_err = None;
                     for attempt in 0..3 {
                         attempts.fetch_add(1, Ordering::AcqRel);
-                        // Fail the first two attempts of every item.
                         if attempt < 2 {
                             last_err = Some(anyhow::anyhow!("transient"));
                             continue;
@@ -914,11 +727,6 @@ mod tests {
 
     #[tokio::test]
     async fn byteless_work_ramps_to_the_ceiling() {
-        // Metadata RPCs (manifest fetches, version lookups) move no bytes, so
-        // there is no throughput to hill-climb. Extra concurrent round trips
-        // are nearly free there and the win is linear in how many are in
-        // flight, so the ramp should open up to the ceiling rather than stall
-        // at its starting value.
         let limiter = Limiter::new(6);
         let peak = Arc::new(AtomicUsize::new(0));
         let live = Arc::new(AtomicUsize::new(0));
@@ -959,9 +767,6 @@ mod tests {
 
     #[tokio::test]
     async fn the_driver_signals_completion_so_closures_only_report_bytes() {
-        // Guards the contract that makes the above work: `map_bounded` is what
-        // turns a successful unit into a ramp signal. If a closure had to
-        // remember to signal, byte-less fan-outs would silently never ramp.
         let limiter = Limiter::new(8);
         let before = limiter.current_limit();
         map_bounded(
@@ -982,8 +787,6 @@ mod tests {
         let out = map_bounded(Vec::<u32>::new(), limiter, |i, _| async move { Ok(i) }).await;
         assert!(out.is_empty());
     }
-
-    // --- classify ---
 
     #[test]
     fn load_shaped_errors_are_backpressure() {
