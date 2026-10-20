@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.15](https://github.com/understory-io/forest/compare/v0.3.14...v0.3.15) (2026-10-20)
+
+
+### Features
+
+* **components:** `forest components version` for prebuilt builds, and fixes from the agentctl prerelease review ([#325](https://github.com/understory-io/forest/issues/325)) ([d3535da](https://github.com/understory-io/forest/commit/d3535da70b45bc308a754d8c539e9d66ac4e2362))
+* **global:** follow a tool's prereleases only when asked, with `add --prerelease` ([#324](https://github.com/understory-io/forest/issues/324)) ([74a78e1](https://github.com/understory-io/forest/commit/74a78e12286f5c6922531ad62354b36719a46764))
+
+
+### Bug Fixes
+
+* **registry:** send a download's first message with the first bytes, so range fan-out starts at TTFB ([#320](https://github.com/understory-io/forest/issues/320)) ([1fde57c](https://github.com/understory-io/forest/commit/1fde57c91200c438e76a172cc8e179dfd86d067a))
+
 ## [0.3.14](https://github.com/understory-io/forest/compare/v0.3.13...v0.3.14) (2026-10-19)
 
 
