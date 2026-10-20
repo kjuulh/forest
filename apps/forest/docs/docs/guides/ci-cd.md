@@ -131,15 +131,26 @@ the annotated line — a dependency pinned elsewhere in the file is left alone.
 A semver prerelease tag (`v0.2.0-rc.1`, `v0.1.7-ci.1`) is the one case where
 the tag wins. This exists so the pipeline can be exercised, or a release
 candidate cut, without a commit bumping the manifest. The workflow passes the
-version through `FOREST_COMPONENT_VERSION`, which both `forest run build` and
-`forest publish` read — so the version stamped into the binary matches the one
-the registry records.
+version through `FOREST_COMPONENT_VERSION`. `forest publish` publishes under
+it, and a build run by one of forest's rust/go/docker build components
+(`forest run build`) stamps it into the binary, so the two agree.
 
 Doing this by hand:
 
 ```bash
 export FOREST_COMPONENT_VERSION=0.2.0-rc.1
 forest run build && forest publish
+```
+
+A component that builds its own binary (`upload.type: "prebuilt"`, built by
+e.g. `mise run dist`) gets no stamping from forest. Its build script has to
+read the version itself. `forest components version` prints the version
+`forest publish` would use from that directory, with the same precedence:
+
+```bash
+export FOREST_COMPONENT_VERSION=0.2.0-rc.1
+VERSION=$(forest components version) mise run dist   # stamp "$VERSION" into the binary
+forest publish
 ```
 
 Precedence is `--version` > `FOREST_COMPONENT_VERSION` > `forest.cue`. Prefer

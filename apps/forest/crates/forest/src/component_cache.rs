@@ -94,7 +94,7 @@ impl ComponentCache {
                         match self.get_component_from_path(&version_entry.path()).await {
                             Ok(component) => component,
                             Err(e) => {
-                                tracing::warn!(
+                                tracing::debug!(
                                     path = %version_entry.path().to_string_lossy(),
                                     "skipping unparseable component in cache: {e:#}",
                                 );

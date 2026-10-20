@@ -468,6 +468,53 @@ mod abort_on_drop_tests {
     }
 
     #[tokio::test]
+    async fn the_staged_package_does_not_show_up_as_untracked_in_git() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        tokio::fs::write(dir.path().join("forest.cue"), "package x\n")
+            .await
+            .expect("write forest.cue");
+        tokio::fs::write(dir.path().join(".gitignore"), "dist/\n")
+            .await
+            .expect("write the component's own .gitignore");
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .output()
+                .expect("run git")
+        };
+        assert!(git(&["init", "-q"]).status.success());
+
+        let files = super::stage_component_package(
+            dir.path(),
+            &[],
+            &super::DeclaredPaths::default(),
+            Vec::new(),
+        )
+        .await
+        .expect("stage");
+
+        let own_ignore = files.iter().find(|(name, _)| name == ".gitignore");
+        assert_eq!(
+            own_ignore.map(|(_, c)| c.as_slice()),
+            Some(b"dist/\n".as_slice()),
+            "the component's own .gitignore must publish unchanged, got: {files:?}",
+        );
+        let staged_copy = std::fs::read(dir.path().join(super::PACKAGE_DIR).join(".gitignore"))
+            .expect("staged .gitignore");
+        assert_eq!(staged_copy, b"dist/\n");
+        let status = git(&["status", "--porcelain", "--untracked-files=all"]);
+        let untracked = String::from_utf8_lossy(&status.stdout);
+        let mut lines: Vec<&str> = untracked.lines().collect();
+        lines.sort();
+        assert_eq!(
+            lines,
+            ["?? .gitignore", "?? forest.cue"],
+            "got: {untracked}"
+        );
+    }
+
+    #[tokio::test]
     async fn staging_clears_what_the_component_no_longer_has() {
         let dir = tempfile::tempdir().expect("tempdir");
         tokio::fs::write(dir.path().join("forest.cue"), "package x\n")
@@ -613,11 +660,9 @@ pub struct PublishCommand {
     /// before, so manual publishing is unchanged.
     ///
     /// Set the *env* form rather than the flag when the build has to agree:
-    /// `forest run build` reads the same variable, so exporting it once
-    /// covers build and publish and the binary's stamped version matches
-    /// what the registry records. Passing only `--version` overrides the
-    /// publish but leaves an already-built binary stamped with the cue
-    /// version, which `forest publish` warns about.
+    /// forest's rust/go/docker build components stamp that variable into the
+    /// binary. A `prebuilt` build script must stamp it itself; `forest
+    /// components version` prints the version this publish would use.
     #[arg(
         long = "version",
         value_name = "VERSION",
@@ -635,44 +680,12 @@ impl PublishCommand {
     }
 
     fn resolve_version<'a>(&'a self, cue_version: &'a str) -> &'a str {
-        match self.version.as_deref().map(str::trim) {
-            Some(v) if !v.is_empty() => v,
-            _ => cue_version,
-        }
+        effective_version(self.version.as_deref(), cue_version)
     }
 
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
-        let mut cue_args = vec![
-            "export".to_string(),
-            "--out".to_string(),
-            "json".to_string(),
-        ];
         let current_dir = std::env::current_dir()?;
-        let mut dir_entries = tokio::fs::read_dir(&current_dir).await?;
-        while let Some(entry) = dir_entries.next_entry().await? {
-            if entry.path().extension().and_then(|e| e.to_str()) == Some("cue") {
-                cue_args.push(entry.file_name().to_string_lossy().to_string());
-            }
-        }
-
-        let output = crate::tools::cue::output(|| {
-            let mut cmd = tokio::process::Command::new("cue");
-            cmd.args(&cue_args);
-            if let Ok(registry) = std::env::var("CUE_REGISTRY") {
-                cmd.env("CUE_REGISTRY", registry);
-            }
-            cmd
-        })
-        .await?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(crate::diagnostics::report(
-                crate::diagnostics::CueEvalError::from_cue_stderr(&current_dir, &stderr),
-            ));
-        }
-
-        let doc: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        let doc = export_forest_cue(&current_dir).await?;
 
         let component = doc.get("forest").and_then(|f| f.get("component"));
 
@@ -684,10 +697,7 @@ impl PublishCommand {
             .or_else(|| project.and_then(|p| p.get("name")).and_then(|v| v.as_str()))
             .context("component or project name is required")?;
 
-        let cue_version = component
-            .and_then(|c| c.get("version"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("0.1.0");
+        let cue_version = cue_component_version(&doc);
         let version = self.resolve_version(cue_version);
         if version != cue_version {
             crate::ui::status(format!(
@@ -1027,6 +1037,57 @@ async fn ensure_authenticated(state: &State) -> anyhow::Result<()> {
     )
 }
 
+pub(crate) async fn export_forest_cue(
+    current_dir: &std::path::Path,
+) -> anyhow::Result<serde_json::Value> {
+    let mut cue_args = vec![
+        "export".to_string(),
+        "--out".to_string(),
+        "json".to_string(),
+    ];
+    let mut dir_entries = tokio::fs::read_dir(current_dir).await?;
+    while let Some(entry) = dir_entries.next_entry().await? {
+        if entry.path().extension().and_then(|e| e.to_str()) == Some("cue") {
+            cue_args.push(entry.file_name().to_string_lossy().to_string());
+        }
+    }
+
+    let output = crate::tools::cue::output(|| {
+        let mut cmd = tokio::process::Command::new("cue");
+        cmd.args(&cue_args);
+        if let Ok(registry) = std::env::var("CUE_REGISTRY") {
+            cmd.env("CUE_REGISTRY", registry);
+        }
+        cmd
+    })
+    .await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(crate::diagnostics::report(
+            crate::diagnostics::CueEvalError::from_cue_stderr(current_dir, &stderr),
+        ));
+    }
+
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+pub(crate) fn cue_component_version(doc: &serde_json::Value) -> &str {
+    doc.pointer("/forest/component/version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("0.1.0")
+}
+
+pub(crate) fn effective_version<'a>(
+    override_version: Option<&'a str>,
+    cue_version: &'a str,
+) -> &'a str {
+    match override_version.map(str::trim) {
+        Some(v) if !v.is_empty() => v,
+        _ => cue_version,
+    }
+}
+
 fn warn_if_build_saw_a_different_version(component: Option<&serde_json::Value>, version: &str) {
     let declares_binary = component
         .and_then(|c| c.pointer("/upload/architectures"))
@@ -1045,8 +1106,9 @@ fn warn_if_build_saw_a_different_version(component: Option<&serde_json::Value>, 
     eprintln!(
         "warning: publishing as {version}, but FOREST_COMPONENT_VERSION does not carry \
          that value, so the build stamped a different version into the binary.\n         \
-         Export it instead of (or as well as) passing --version, and re-run the build:\n         \
-         export FOREST_COMPONENT_VERSION={version} && forest run build && forest publish"
+         Export it instead of (or as well as) passing --version, and rebuild with it:\n         \
+         export FOREST_COMPONENT_VERSION={version}, then build (a prebuilt build script \
+         reads it from `forest components version`) and `forest publish`"
     );
 }
 
@@ -1644,6 +1706,12 @@ async fn stage_component_package(
         tokio::fs::write(&staged, content)
             .await
             .with_context(|| format!("stage {rel_path}"))?;
+    }
+    if !files.is_empty() {
+        let ignore = dir.join(".forest/component/.gitignore");
+        tokio::fs::write(&ignore, "/.gitignore\n/package/\n")
+            .await
+            .with_context(|| format!("write {}", ignore.display()))?;
     }
 
     Ok(files)

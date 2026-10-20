@@ -275,7 +275,9 @@ manifest build without contacting the registry — worth doing before every real
 publish, since it catches an `external:`/`upload:` mixup and a wrong context.
 `--version <v>` (or `$FOREST_COMPONENT_VERSION`) overrides the version from
 `forest.cue`, which is how a tag-triggered CI release avoids editing a tracked
-file mid-run; export the env form so `forest run build` stamps the same version.
+file mid-run. Export the env form so the build stamps the same version:
+forest's rust/go/docker build components read it, and a `prebuilt` build script
+gets it from `forest components version`.
 
 Browse and scaffold with `forest components list -o <org> -q <query>`,
 `forest components show <org>/<name>`, and `forest components init <name>`.

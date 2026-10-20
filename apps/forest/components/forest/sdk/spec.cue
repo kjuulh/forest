@@ -37,10 +37,13 @@ package sdk
 	// (`@1.3.0-rc.1`) or by opting a tool in with `forest global add
 	// <org>/<name> --prerelease`. Number prereleases upwards (`rc.1`, `rc.2`,
 	// …, compared numerically) and publish the final `1.3.0` when done; it
-	// supersedes its RCs for everyone following them. CI sets a prerelease
-	// without editing this file through `FOREST_COMPONENT_VERSION=1.3.0-rc.1`
-	// (read by `forest run build` and `forest publish`). Build metadata
-	// (`1.3.0+build.5`) is not a prerelease.
+	// supersedes its RCs for everyone following them. Set a prerelease
+	// without editing this file with `FOREST_COMPONENT_VERSION=1.3.0-rc.1`:
+	// `forest publish` publishes under it, and forest's rust/go/docker build
+	// components stamp it into the binary. A build of your own (`prebuilt`)
+	// must stamp it itself; `forest components version` prints the version
+	// `forest publish` will use. Build metadata (`1.3.0+build.5`) is not a
+	// prerelease.
 	version: string & =~#"^\d+\.\d+\.\d+"#
 
 	codegen?: #ForestCodegen

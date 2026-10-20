@@ -340,6 +340,17 @@ option_env!("FOREST_COMPONENT_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 
 …or have the `dist` task fail when the two disagree, before it publishes.
 
+For a `prebuilt` binary, nothing sets `FOREST_COMPONENT_VERSION` at build time
+unless you do. Have the `dist` task take its version from `forest components
+version`, which prints what `forest publish` will publish (`--version` >
+`FOREST_COMPONENT_VERSION` > `forest.cue`). A prerelease then needs no edit to
+`forest.cue`:
+
+```bash
+export FOREST_COMPONENT_VERSION=1.3.0-rc.1
+mise run dist && forest publish
+```
+
 ## Shipping shell integration
 
 If your tool prints an rc-file snippet — completions, a wrapper function, a
