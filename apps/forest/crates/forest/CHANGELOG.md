@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.16](https://github.com/understory-io/forest/compare/v0.3.15...v0.3.16) (2026-10-20)
+
+
+### Features
+
+* **global:** `FOREST_PRERELEASE=1` follows prereleases for every unpinned tool ([#326](https://github.com/understory-io/forest/issues/326)) ([54ead1e](https://github.com/understory-io/forest/commit/54ead1e0bf7423f8e291cb103009653f1e5526d1))
+
 ## [0.3.15](https://github.com/understory-io/forest/compare/v0.3.14...v0.3.15) (2026-10-20)
 
 
