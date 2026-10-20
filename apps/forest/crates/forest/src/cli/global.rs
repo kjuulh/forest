@@ -363,6 +363,7 @@ pub struct AddCommand {
     /// Follow this tool's prereleases: install the highest SemVer version,
     /// prerelease or stable, and keep `forest global update` doing so. Re-run
     /// `forest global add <org>/<name>` without this flag to return to stable.
+    /// `FOREST_PRERELEASE=1` does this for every unpinned tool without a flag.
     #[arg(long = "prerelease")]
     prerelease: bool,
 
@@ -774,12 +775,14 @@ async fn resolve_version(svc: &GlobalService, org: &str, name: &str) -> anyhow::
                 if cat.banned.iter().any(|b| b == tool_name) {
                     anyhow::bail!("{key} is banned in catalogue subscription {org}");
                 }
-                let v = cat
-                    .pins
-                    .get(tool_name)
-                    .cloned()
-                    .unwrap_or(entry.latest_version);
-                return Ok(v);
+                return Ok(svc
+                    .catalogue_version(
+                        &entry.organisation,
+                        &entry.name,
+                        cat.pins.get(tool_name),
+                        &entry.latest_version,
+                    )
+                    .await);
             }
         }
     }

@@ -594,6 +594,16 @@ Behaviour:
   passed again.
 - The opt-in is per tool. Org catalogue subscriptions stay on stable releases,
   and a per-tool entry shadows the catalogue entry as it always has.
+- `FOREST_PRERELEASE=1` in the environment follows prereleases for every tool
+  that is not pinned, catalogue tools included, for as long as it is set:
+  `add` without the flag, `update` and the background update, and
+  `run`/`which`/`warm` resolution. It is not written to `forest.cue`. Unset it
+  (or set `0`) and the next `update` returns per-tool entries to stable;
+  catalogue tools resolve to stable straight away. Catalogue pins, bans and
+  `@<version>` pins still win. A tool with only prereleases is not in the org
+  catalogue, so it still has to be added per tool. Put it in `~/.zshenv` (or
+  your shell's equivalent), not only `~/.zshrc`, so shims run from scripts and
+  the background update see it too.
 - `@<version>` is an exact pin, prerelease or not, and `update` holds it. It
   cannot be combined with `--prerelease`, nor can a whole-org `add <org>`.
 - `forest global run`/`which` with `<org>/<name>@<version>` runs that build

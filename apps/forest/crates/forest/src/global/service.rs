@@ -24,7 +24,10 @@ pub struct GlobalService {
     pub cache: BinaryCache,
     pub grpc: GrpcClient,
     pub max_in_flight: usize,
+    pub prerelease_default: bool,
 }
+
+pub const PRERELEASE_ENV: &str = "FOREST_PRERELEASE";
 
 impl GlobalService {
     pub fn from_state(state: &State) -> Result<Self> {
@@ -34,6 +37,7 @@ impl GlobalService {
             cue: CueEvaluator::new(),
             grpc: state.grpc_client(),
             max_in_flight: state.config.max_downloads_in_flight(),
+            prerelease_default: prerelease_default_from(std::env::var_os(PRERELEASE_ENV)),
             paths,
         })
     }
@@ -930,12 +934,13 @@ impl GlobalService {
         as_shim_name: Option<&str>,
         prerelease: bool,
     ) -> Result<AddOutcome> {
-        let resolved_version = match (version, prerelease) {
-            (Some(v), true) => anyhow::bail!(
+        let follow_prereleases = prerelease || self.prerelease_default;
+        let resolved_version = match (version, follow_prereleases) {
+            (Some(v), _) if prerelease => anyhow::bail!(
                 "{organisation}/{name}@{v} is an exact pin; drop `@{v}` to follow prereleases \
                  with --prerelease"
             ),
-            (Some(v), false) => self
+            (Some(v), _) => self
                 .grpc
                 .get_component_version(name, organisation, v)
                 .await?
@@ -1009,6 +1014,24 @@ impl GlobalService {
             shim_name: shim_name_emitted,
             shape: manifest.shape,
         })
+    }
+
+    pub async fn catalogue_version(
+        &self,
+        organisation: &str,
+        name: &str,
+        pin: Option<&String>,
+        latest_stable: &str,
+    ) -> String {
+        if let Some(pin) = pin {
+            return pin.clone();
+        }
+        if self.prerelease_default
+            && let Ok(Some(newest)) = self.newest_including_prereleases(organisation, name).await
+        {
+            return newest;
+        }
+        latest_stable.to_string()
     }
 
     async fn newest_including_prereleases(
@@ -1100,10 +1123,14 @@ impl GlobalService {
                 upstream_name: upstream_name.clone(),
                 shim_name,
                 qualified: format!("{}/{}", entry.organisation, entry.name),
-                resolved_version: pin_map
-                    .get(upstream_name)
-                    .cloned()
-                    .unwrap_or_else(|| entry.latest_version.clone()),
+                resolved_version: self
+                    .catalogue_version(
+                        &entry.organisation,
+                        &entry.name,
+                        pin_map.get(upstream_name),
+                        &entry.latest_version,
+                    )
+                    .await,
             });
         }
 
@@ -1134,7 +1161,7 @@ impl GlobalService {
                 org.to_string(),
                 name.to_string(),
                 dep.version.clone(),
-                dep.prerelease,
+                dep.prerelease || self.prerelease_default,
             ));
         }
 
@@ -1441,7 +1468,7 @@ impl GlobalService {
                     status,
                     source: if dep.pinned {
                         ToolSource::Pin
-                    } else if dep.prerelease {
+                    } else if dep.prerelease || self.prerelease_default {
                         ToolSource::Prerelease
                     } else {
                         ToolSource::Latest
@@ -1474,11 +1501,14 @@ impl GlobalService {
                     .get(&tool.name)
                     .cloned()
                     .unwrap_or_else(|| tool.name.clone());
-                let pinned_version = cat
-                    .pins
-                    .get(&tool.name)
-                    .cloned()
-                    .unwrap_or(entry.latest_version);
+                let pinned_version = self
+                    .catalogue_version(
+                        &entry.organisation,
+                        &entry.name,
+                        cat.pins.get(&tool.name),
+                        &entry.latest_version,
+                    )
+                    .await;
 
                 let source = if banned {
                     ToolSource::CatalogBanned { org: org.clone() }
@@ -1615,6 +1645,15 @@ pub enum ToolSource {
 pub enum ToolStatus {
     Cached,
     Missing,
+}
+
+fn prerelease_default_from(value: Option<std::ffi::OsString>) -> bool {
+    value.and_then(|v| v.into_string().ok()).is_some_and(|v| {
+        !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "" | "0" | "false" | "no" | "off"
+        )
+    })
 }
 
 fn is_prerelease(version: &str) -> bool {
@@ -1773,6 +1812,18 @@ mod tests {
     fn following_prereleases_ignores_unparseable_versions() {
         assert_eq!(newest_version(["latest", "x.y"]), None);
         assert_eq!(newest_version(["9.9", "0.1.0"]).as_deref(), Some("0.1.0"));
+    }
+
+    #[test]
+    fn the_prerelease_env_turns_on_only_for_a_truthy_value() {
+        let on = |v: &str| prerelease_default_from(Some(v.into()));
+        assert!(!prerelease_default_from(None));
+        for off in ["", " ", "0", "false", "FALSE", "no", "off"] {
+            assert!(!on(off), "{off:?} must leave prereleases off");
+        }
+        for yes in ["1", "true", "yes", "on", "TRUE"] {
+            assert!(on(yes), "{yes:?} must turn prereleases on");
+        }
     }
 
     #[test]

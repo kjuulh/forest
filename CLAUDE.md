@@ -60,7 +60,8 @@ Then `gitnow`/`awslogin` are on `PATH` via `~/.cache/forest/global/shims/`.
 Installs and updates take stable releases only. To follow one tool's
 prereleases, `forest global add <org>/<name> --prerelease` (persisted, so
 `update` keeps following them); re-run `add` without the flag to return to
-stable. `@1.3.0-rc.1` pins one exact build.
+stable. `@1.3.0-rc.1` pins one exact build. `FOREST_PRERELEASE=1` follows
+prereleases for every unpinned tool, catalogue included, while it is set.
 
 Catalogue subscriptions are tunable per tool without unsubscribing:
 `forest global ban <org> <tool>` / `unban`, and `forest global pin <org>/<tool>
@@ -385,7 +386,8 @@ which <tool>` and `forest context list` rather than reading either by hand.
 Useful environment variables: `FOREST_SERVER`, `FOREST_CONTEXT`,
 `FOREST_NO_SHELL_INTEGRATION=1` (the first thing to try when a new shell
 misbehaves), `FOREST_NO_GLOBAL_WARM=1`, `FOREST_NO_AUTO_UPDATE=1`,
-`FOREST_NO_UPDATE_CHECK=1`, and `FOREST_LOG`. `-v`/`-vv`/`-vvv` turn structured
+`FOREST_NO_UPDATE_CHECK=1`, `FOREST_PRERELEASE=1` (follow every unpinned
+tool's prereleases), and `FOREST_LOG`. `-v`/`-vv`/`-vvv` turn structured
 logs back on when the rich UI is hiding what happened.
 
 ## This repo
