@@ -34,27 +34,13 @@ pub struct UpdateCommand {
 #[derive(Default)]
 struct DepUpdate {
     entry: Option<LockEntry>,
-    message: Option<UpdateMessage>,
+    message: Option<String>,
     updated: bool,
-}
-
-enum UpdateMessage {
-    Success(String),
-    Warn(String),
-}
-
-impl UpdateMessage {
-    fn emit(self) {
-        match self {
-            UpdateMessage::Success(m) => crate::ui::success(m),
-            UpdateMessage::Warn(m) => crate::ui::warn(m),
-        }
-    }
 }
 
 impl UpdateCommand {
     pub async fn execute(&self, state: &State) -> anyhow::Result<()> {
-        let project = state.project_parser().get_project().await?;
+        let project = state.project_parser().get_project_specs().await?;
         let project_dir = project.path.clone();
         let client = state.grpc_client();
         let (os, arch) = component_binary::current_platform();
@@ -106,21 +92,12 @@ impl UpdateCommand {
             |(dep, spec), lim| {
                 let client = client.clone();
                 async move {
-                    let versions_response = client
+                    let available = client
                         .list_component_versions(&dep.organisation, &dep.name)
-                        .await;
-
-                    let available = match versions_response {
-                        Ok(resp) => resp,
-                        Err(e) => {
-                            tracing::warn!(
-                                "failed to list versions for {}/{}: {e}",
-                                dep.organisation,
-                                dep.name
-                            );
-                            return Ok(DepUpdate::default());
-                        }
-                    };
+                        .await
+                        .with_context(|| {
+                            format!("list versions of {}/{}", dep.organisation, dep.name)
+                        })?;
 
                     let mut semver_versions: Vec<semver::Version> = available
                         .iter()
@@ -128,15 +105,12 @@ impl UpdateCommand {
                         .collect();
                     semver_versions.sort();
 
-                    let Some(resolved) = spec.resolve(&semver_versions) else {
-                        return Ok(DepUpdate {
-                            message: Some(UpdateMessage::Warn(format!(
-                                "{}/{}: no version matches '{spec}'",
-                                dep.organisation, dep.name
-                            ))),
-                            ..Default::default()
-                        });
-                    };
+                    let resolved = spec.resolve(&semver_versions).with_context(|| {
+                        format!(
+                            "no published version of {}/{} matches '{spec}'",
+                            dep.organisation, dep.name
+                        )
+                    })?;
 
                     let resolved_str = resolved.to_string();
 
@@ -163,10 +137,10 @@ impl UpdateCommand {
                                 .unwrap_or(existing_hash);
                             if component_binary::resolve_binary_from_hash(hash).is_some() {
                                 return Ok(DepUpdate {
-                                    message: Some(UpdateMessage::Success(format!(
+                                    message: Some(format!(
                                         "{}/{}@{} up to date",
                                         dep.organisation, dep.name, resolved_str
-                                    ))),
+                                    )),
                                     ..Default::default()
                                 });
                             }
@@ -222,10 +196,10 @@ impl UpdateCommand {
                                     sha256: format!("sha256:{sha256}"),
                                 },
                             }),
-                            message: Some(UpdateMessage::Success(format!(
+                            message: Some(format!(
                                 "Updated {}/{}@{}",
                                 dep.organisation, dep.name, resolved_str
-                            ))),
+                            )),
                             updated: true,
                         })
                     } else {
@@ -245,17 +219,17 @@ impl UpdateCommand {
                             })?;
                         match outcome {
                             EnsureCachedOutcome::AlreadyCached => Ok(DepUpdate {
-                                message: Some(UpdateMessage::Success(format!(
+                                message: Some(format!(
                                     "{}/{}@{} up to date",
                                     dep.organisation, dep.name, resolved_str
-                                ))),
+                                )),
                                 ..Default::default()
                             }),
                             EnsureCachedOutcome::Downloaded => Ok(DepUpdate {
-                                message: Some(UpdateMessage::Success(format!(
+                                message: Some(format!(
                                     "Updated {}/{}@{} (files)",
                                     dep.organisation, dep.name, resolved_str
-                                ))),
+                                )),
                                 updated: true,
                                 ..Default::default()
                             }),
@@ -289,7 +263,7 @@ impl UpdateCommand {
                 lockfile.insert(entry);
             }
             if let Some(message) = update.message {
-                message.emit();
+                crate::ui::success(message);
             }
             if update.updated {
                 updated += 1;

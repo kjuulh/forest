@@ -39,6 +39,8 @@ forest add <COMPONENT> [--path <PATH>]
 | `COMPONENT` | Component reference: `org/name` or `org/name@version` |
 | `--path` | Use a local path instead of registry version |
 
+Without `@version` it writes the highest stable published version. `@version` is written as given and checked only when a command next loads the project. `forest add` writes `forest.cue` (and a `cue.mod/module.cue` entry), not the lock. A binary download records its version/digest in `forest.lock`; unreleased source after v0.3.16 also records an already-cached binary when the project first resolves it. File/template-only registry dependencies have no version/digest lock.
+
 **Examples:**
 
 ```bash
@@ -49,15 +51,9 @@ forest add forest-contrib/kubernetes-service --path ../local-dev
 
 ---
 
-## `forest build`
+## `forest run build`
 
-Build the component binary for all configured platforms.
-
-```bash
-forest build
-```
-
-Reads `forest.cue` and `spec.cue` to determine component name, version, and target architectures. Outputs binaries to `~/.cache/forest/components/bin/`.
+There is no `forest build`. A component's build runs as `forest run build`, which dispatches to the build component the project depends on (`forest-contrib/build-rust`, `-go` or `-docker`). That build component writes `.forest/component/output/<os>/<arch>/<name>` for the declared platforms; `FOREST_BUILD_TARGETS=linux/amd64,…` narrows them. A `prebuilt` component builds itself and reads the version to stamp from `forest components version`.
 
 ---
 
@@ -71,7 +67,7 @@ forest generate --output <DIR> [--language <LANG>]
 
 | Option | Description |
 |--------|-------------|
-| `--output` | Output directory for generated code (required) |
+| `--output` | Output directory for generated code (default: `codegen.output` from `forest.cue`) |
 | `--language` | Target language: `rust`, `typescript`, `deno`, `ts` (auto-detected if omitted) |
 
 ---
@@ -81,10 +77,14 @@ forest generate --output <DIR> [--language <LANG>]
 Publish the component to the Forest registry.
 
 ```bash
-forest publish
+forest publish [--dry-run] [--version <v>]
 ```
 
-Uploads the compiled binary, CUE spec files, and component manifest. Requires `forest build` to be run first.
+Uploads the built binaries (every platform staged under `.forest/component/output/`), the component's files and its manifest to the effective target registry. It prints `→ Publishing <org>/<name> to <context> (<server>)` (or the server override) before upload. Run `forest run build` before it for built types. Prebuilt dryruns print the target only in unreleased source after v0.3.16; on released v0.3.16 check the context and server overrides yourself.
+
+- `--dry-run` builds the publish manifest without uploading and still needs a login or `FOREST_TOKEN`. Built binary preflight can execute `_meta/describe`, copy the binary into the cache and write `.forest/component/meta.json`; a cached descriptor can be reused. Prebuilt/external shapes skip that probe and those writes.
+- The version is `--version` > `FOREST_COMPONENT_VERSION` > `forest.component.version`. `forest components version` prints the result.
+- Overwrite is refused while a version is published, prereleases included. Admin unpublish permits reuse, so an exact pin controls selection, not lifetime content identity. Existing binary digest locks reject changed replacement bytes; warm cached binaries are not an online revocation check. Ship a new version instead of reusing one.
 
 ---
 
@@ -102,7 +102,11 @@ Checks that project config matches component schemas and verifies contract cover
 
 ## `forest update`
 
-Update dependencies to the latest versions matching the spec.
+Refresh binary entries in `forest.lock` to the newest published version matching each dependency's `version:` (`"1.2.3"` exact, `"1.2"`, `"1"` or `"latest"`). Stable versions are preferred; a prerelease is picked only when no stable version matches, or when it is named exactly. `forest.cue` is not rewritten. Other commands resolve a range to a matching binary version lock when present, so a locked binary range moves only when you run `forest update`.
+
+Runtime range resolution and dotted prerelease specs in `forest update` are unreleased changes after **v0.3.16**. Released v0.3.16 fails to load project dependency ranges during ordinary commands and rejects dotted RC specs in `update`; exact published versions still work for consumption without `update`.
+
+Lock-first selection applies to registry binary lock entries. File/template-only components have no registry version/digest lock, so their ranges resolve again; choose exact versions for reproducible selection and do not infer binary digest protection for component files.
 
 ```bash
 forest update [COMPONENT]
@@ -216,8 +220,13 @@ forest release annotate [OPTIONS]
 Execute the release to destinations.
 
 ```bash
-forest release release [OPTIONS]
+forest release release [SLUG] [OPTIONS]
 ```
+
+Select an existing artifact by its annotation slug or `--artifact-id <artifact-uuid>`.
+After v0.3.16, `--ref` / `-r` are rejected during argument parsing, before release
+side effects; older CLIs accepted but ignored them. A git branch is not an
+artifact identity. This also applies to the `forest release` shorthand.
 
 | Option | Description |
 |--------|-------------|
@@ -225,40 +234,80 @@ forest release release [OPTIONS]
 | `--project`, `-p` | Project name |
 | `--environment`, `-e`, `--env` | Target environment |
 | `--destination`, `-d` | Specific destination(s) (repeatable) |
-| `--ref`, `-r` | Artifact reference |
 | `--artifact-id`, `--id` | Artifact ID |
 | `--force` | Cancel queued releases, jump to front |
 | `--pipeline` | Use the project's release pipeline |
 | `--no-wait` | Don't stream progress |
 
+The existing `release release --pipeline` path still selects or prompts for an
+environment before dispatch. Pass `-e <env>` for noninteractive use; the pipeline
+ignores that environment filter and can include prod. This prompt limitation
+does not change `create`'s target-only flag contract below.
+
 ### `forest release create`
 
-Combined command: prepare, annotate (without triggers), and release.
+**Unreleased source behavior after v0.3.16.** Released v0.3.16 does not have
+this routing. Check `forest release create --help`: newer source makes
+`--environment` optional. A local build may still report `0.3.16`.
+
+Prepare and annotate, then let the project's triggers decide. **Without a
+target, triggers remain enabled and may deploy through the whole pipeline,
+including prod.** With `--environment` or `--destination`, it releases directly
+instead and skips triggers, unless `--skip-commit` is supplied. With `--pipeline`,
+the whole pipeline runs regardless of the target environment.
 
 ```bash
+forest release create [OPTIONS]
 forest release create --environment <ENV> [OPTIONS]
 ```
 
+| Mode | Triggers | Releases |
+|------|----------|----------|
+| no `--environment` / `--destination` | evaluated | whatever a matching trigger starts, usually the project's pipeline |
+| `--environment` or `--destination` | skipped, so they can't race the direct release | that target |
+| either, plus `--skip-commit` | evaluated | whatever a matching trigger starts |
+
+Prefer trigger-to-pipeline release for environment ordering and plan approval.
+Inspect triggers, the whole pipeline and policies first. Released v0.3.16
+servers lack pipeline branch-restriction checks, and their soak can count plans
+or pass with missing source success. Unreleased server source closes those gaps
+([Policies](../concepts/policies.md)); updating only the CLI does not.
+Review branch, artifact and dev elapsed time before approving prod.
+Anchored trigger filters are not authorization for
+an explicit pipeline start. Never route around a denied policy with `-d`.
+
+An annotation's default source type is detected from CI or falls back to `local`.
+Whether it releases depends on the actual trigger filters, not the machine
+that created it. No matching trigger means `show <slug>` finds no release intent.
+
+On v0.3.16 and older, `create` requires an environment,
+skips triggers and `--skip-commit` releases nothing. For a version-independent
+pipeline path, use `forest release prepare` then `forest release annotate
+--source-type ci`. For an annotation without trigger dispatch, use
+`annotate --annotation-only` after prepare; there is no `--no-release`.
+
 | Option | Description |
 |--------|-------------|
-| `--environment`, `-e`, `--env` | Target environment (required) |
+| `--environment`, `-e`, `--env` | Release to this environment directly |
+| `--destination`, `-d` | Release to these destinations directly (repeatable) |
+| `--skip-commit` | Annotate for the triggers even when a target is given |
+| `--pipeline`, `--force`, `--no-wait`, `--no-health` | Apply to the direct release, so they need `--environment` or `--destination` |
 | `--title` | Release title (default: latest git commit subject) |
 | `--description` | Release description (default: git commit body) |
 | `--organisation`, `-o` | Organisation (auto-detected from `forest.cue`) |
 | `--project`, `-p` | Project (auto-detected from `forest.cue`) |
 | `--commit-sha` | Commit SHA (auto-detected from HEAD) |
+| `--source-type` | Source type the triggers match on (default: detected CI, else `local`) |
 | `--set` | Override config values (same as `prepare --set`). Overrides are recorded in annotation metadata. |
 
-**CI Example:**
+**CI example** (after the tested image is pushed under an immutable tag):
 
 ```bash
-# Build image, get tag, release with pinned tag
-IMAGE_TAG=$(git rev-parse --short HEAD)
-docker build -t my-registry/my-app:$IMAGE_TAG .
-docker push my-registry/my-app:$IMAGE_TAG
-
-forest release create --env dev --set kjuulh/service.tag=$IMAGE_TAG
+forest release prepare --set kjuulh/service.tag="$IMAGE_TAG"
+forest release annotate --source-type ci --detect
 ```
+
+Do not also pass an environment to the release action: that can race the trigger.
 
 ---
 
@@ -487,7 +536,7 @@ Configuring where the browser opens (web flow):
 Listen for and manage notifications.
 
 ```bash
-forest notifications subscribe [OPTIONS]
+forest notifications listen [--organisation <ORG>] [--project <PROJECT>]
 ```
 
 ---
@@ -608,11 +657,12 @@ Behaviour:
   cannot be combined with `--prerelease`, nor can a whole-org `add <org>`.
 - `forest global run`/`which` with `<org>/<name>@<version>` runs that build
   without changing the installed selection.
-- A published version, prerelease included, is immutable: publishing the same
-  version again is refused. Ship a new build as a new prerelease number
-  (`1.3.0-rc.2`). An admin unpublish followed by a republish under the same
-  version is not picked up: the lockfile keeps the digest first fetched, and a
-  fetch of the replaced bytes fails with a digest mismatch.
+- Overwrite of a currently published version, prerelease included, is refused.
+  Ship a new build as a new prerelease number (`1.3.0-rc.2`). Admin unpublish
+  permits reuse of the number, so exact pins control selection, not lifetime
+  content identity. The lockfile keeps the digest first fetched and refuses
+  replacement bytes on a later fetch. A warm cached binary can continue running
+  without an online revocation check.
 
 ---
 

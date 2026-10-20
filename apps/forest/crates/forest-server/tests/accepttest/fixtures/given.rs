@@ -39,7 +39,10 @@ async fn create_destination(
 ) -> Given<ReleaseFlowData> {
     let mut dest_client = given.fixture().destinations();
 
-    let local_path = format!("/tmp/forest-accept-test-{}", uuid::Uuid::now_v7());
+    let local_path = std::env::temp_dir()
+        .join(format!("forest-accept-test-{}", uuid::Uuid::now_v7()))
+        .to_string_lossy()
+        .into_owned();
     std::fs::create_dir_all(&local_path).expect("create local path");
 
     let mut metadata = HashMap::new();

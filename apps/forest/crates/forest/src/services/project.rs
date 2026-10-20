@@ -29,21 +29,25 @@ pub struct ProjectParser {
 }
 
 impl ProjectParser {
+    pub async fn get_project_specs(&self) -> anyhow::Result<Project> {
+        self.parse_project_file().await
+    }
+
     pub async fn get_project(&self) -> anyhow::Result<Project> {
         tracing::trace!("getting project");
         let mut project = self.parse_project_file().await?;
+        self.component_service
+            .pin_version_specs(&mut project)
+            .await?;
 
         let components = self.get_project_components(&project).await?;
+        let mut lockfile = crate::lockfile::LockFile::load(&project.path).await?;
+        let mut lock_changed = false;
+        let (os, arch) = component_binary::current_platform();
 
         for component in components {
-            if !project.has_component_usage(&component.organisation, &component.name) {
-                tracing::trace!(
-                    "skipping CLI command registration for {}/{} (no usage block)",
-                    component.organisation,
-                    component.name,
-                );
-                continue;
-            }
+            let has_component_usage =
+                project.has_component_usage(&component.organisation, &component.name);
 
             let v2_component: Option<(std::path::PathBuf, CommandSource)> = match &component.source
             {
@@ -74,6 +78,41 @@ impl ProjectParser {
                     );
 
                     if let Some(ref binary_path) = binary_path {
+                        if let CacheComponentSource::Versioned(version) = &component.source {
+                            let version = version.to_string();
+                            let hash = binary_path
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .context("resolved binary has no cache digest")?;
+                            let sha256 = format!("sha256:{hash}");
+                            lockfile.verify(
+                                &component.organisation,
+                                &component.name,
+                                &version,
+                                os,
+                                arch,
+                                &sha256,
+                            )?;
+                            if lockfile
+                                .get(&component.organisation, &component.name, &version, os, arch)
+                                .is_none()
+                            {
+                                lockfile.insert(crate::lockfile::LockEntry {
+                                    organisation: component.organisation.clone(),
+                                    name: component.name.clone(),
+                                    version,
+                                    source: crate::lockfile::LockSource::Registry {
+                                        os: os.to_string(),
+                                        arch: arch.to_string(),
+                                        sha256,
+                                    },
+                                });
+                                lock_changed = true;
+                            }
+                        }
+                        if !has_component_usage {
+                            continue;
+                        }
                         let descriptor_result = if let Some(cached) =
                             component_binary::load_cached_descriptor_with_meta(
                                 path,
@@ -143,6 +182,9 @@ impl ProjectParser {
                         Some(&component.name),
                         Some(&component.version.to_string()),
                     ) {
+                        if !has_component_usage {
+                            continue;
+                        }
                         if let Some(entrypoint) = component_deno::resolve_entrypoint_with_meta(
                             path,
                             Some(&component.organisation),
@@ -214,6 +256,24 @@ impl ProjectParser {
                             }
                         }
                     } else {
+                        if let CacheComponentSource::Versioned(version) = &component.source
+                            && lockfile
+                                .get(
+                                    &component.organisation,
+                                    &component.name,
+                                    &version.to_string(),
+                                    os,
+                                    arch,
+                                )
+                                .is_some()
+                        {
+                            anyhow::bail!(
+                                "locked binary for {}/{}@{} ({os}/{arch}) is missing or corrupt",
+                                component.organisation,
+                                component.name,
+                                version,
+                            );
+                        }
                         tracing::debug!(
                             "template-only component {}/{} (no binary, templates only)",
                             component.organisation,
@@ -222,6 +282,10 @@ impl ProjectParser {
                     }
                     continue;
                 }
+            }
+
+            if !has_component_usage {
+                continue;
             }
 
             tracing::trace!("found commands: {}", component.commands.len());
@@ -252,6 +316,10 @@ impl ProjectParser {
                     },
                 );
             }
+        }
+
+        if lock_changed {
+            lockfile.save(&project.path).await?;
         }
 
         Ok(project)
@@ -339,7 +407,9 @@ impl ProjectParser {
                 Some(output) => return Ok(output),
                 None => {
                     if !dir_path.pop() {
-                        anyhow::bail!("failed to find forest.toml in project");
+                        anyhow::bail!(
+                            "no forest.cue in this directory or any parent: run this from a forest project"
+                        );
                     }
                 }
             }

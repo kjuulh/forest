@@ -170,7 +170,7 @@ Forest renders these with the project's spec values and copies them to the worki
 ## Lifecycle
 
 1. **Author** — Write the component spec and implementation
-2. **Build** — `forest build` compiles for all configured platforms
+2. **Build** — `forest run build` compiles for the configured platforms
 3. **Publish** — `forest publish` uploads binary + spec to the registry
 4. **Consume** — Projects add the component with `forest add org/name`
 

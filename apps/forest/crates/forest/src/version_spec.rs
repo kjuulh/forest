@@ -14,6 +14,10 @@ impl VersionSpec {
             return Ok(Self::Latest);
         }
 
+        if let Ok(version) = semver::Version::parse(s) {
+            return Ok(Self::Exact(version));
+        }
+
         let parts: Vec<&str> = s.split('.').collect();
         match parts.len() {
             3 => {
@@ -56,6 +60,20 @@ impl VersionSpec {
         }
     }
 
+    pub fn is_exact(&self) -> bool {
+        matches!(self, Self::Exact(_))
+    }
+
+    pub fn pin(
+        &self,
+        locked: &[semver::Version],
+        published: &[semver::Version],
+    ) -> Option<semver::Version> {
+        self.resolve(locked)
+            .or_else(|| self.resolve(published))
+            .cloned()
+    }
+
     pub fn resolve<'a>(&self, versions: &'a [semver::Version]) -> Option<&'a semver::Version> {
         versions
             .iter()
@@ -90,6 +108,33 @@ mod tests {
             VersionSpec::parse("1.2.3").unwrap(),
             VersionSpec::Exact(v("1.2.3"))
         );
+    }
+
+    #[test]
+    fn a_dotted_prerelease_is_an_exact_version() {
+        assert_eq!(
+            VersionSpec::parse("1.3.0-rc.1").unwrap(),
+            VersionSpec::Exact(v("1.3.0-rc.1"))
+        );
+    }
+
+    #[test]
+    fn a_range_pins_to_the_locked_version_before_a_newer_published_one() {
+        let spec = VersionSpec::Minor { major: 0, minor: 3 };
+        assert_eq!(
+            spec.pin(&[v("0.3.0")], &[v("0.3.0"), v("0.3.1")]),
+            Some(v("0.3.0"))
+        );
+    }
+
+    #[test]
+    fn a_range_without_a_matching_lock_takes_the_highest_published_stable() {
+        let spec = VersionSpec::Minor { major: 0, minor: 3 };
+        assert_eq!(
+            spec.pin(&[v("0.2.0")], &[v("0.3.0"), v("0.3.1"), v("0.3.2-rc.1")]),
+            Some(v("0.3.1"))
+        );
+        assert_eq!(spec.pin(&[], &[v("0.4.0")]), None);
     }
 
     #[test]

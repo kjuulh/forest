@@ -22,9 +22,6 @@ pub struct CommitCommand {
     #[arg(long, short = 'p')]
     pub(crate) project: Option<String>,
 
-    #[arg(long = "ref", short = 'r')]
-    pub(crate) r#ref: Option<String>,
-
     #[arg(long, short = 'e', alias = "env")]
     pub(crate) environment: Option<String>,
 

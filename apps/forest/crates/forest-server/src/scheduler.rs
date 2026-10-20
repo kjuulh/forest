@@ -151,12 +151,57 @@ impl SchedulerInner {
             }
         }
 
-        let evaluations = self
-            .policy_registry
-            .evaluate_for_environment(&release_state.project_id, &dest.environment, None, None)
-            .await
-            .unwrap_or_default();
+        let branch: Option<String> = sqlx::query_scalar(
+            "SELECT a.ref->>'commit_branch'
+             FROM release_intents i
+             JOIN annotations a ON a.id = i.annotation_id
+             WHERE i.id = $1",
+        )
+        .bind(release_state.release_intent_id)
+        .fetch_one(&self.release_event_store.db)
+        .await
+        .context("load the queued release annotation branch")?;
 
+        let evaluations = match self
+            .policy_registry
+            .evaluate_for_environment(
+                &release_state.project_id,
+                &dest.environment,
+                branch.as_deref(),
+                None,
+                Some(&release_state.artifact_id),
+            )
+            .await
+        {
+            Ok(evaluations) => evaluations,
+            Err(e) => {
+                tracing::warn!(
+                    %release_id,
+                    env = %dest.environment,
+                    "scheduler: release deferred, policies could not be evaluated: {e:#}"
+                );
+                return Ok(());
+            }
+        };
+
+        if let Some(eval) = evaluations
+            .iter()
+            .find(|eval| !eval.passed && eval.policy_type == PolicyType::BranchRestriction)
+        {
+            let reason = format!("blocked by policy '{}': {}", eval.policy_name, eval.reason);
+            self.release_event_store
+                .emit_event(
+                    release_id,
+                    ReleaseEventType::Failed,
+                    EventPayload {
+                        error_message: Some(reason),
+                        ..Default::default()
+                    },
+                    None,
+                )
+                .await?;
+            return Ok(());
+        }
         for eval in &evaluations {
             if !eval.passed && eval.policy_type == PolicyType::SoakTime {
                 tracing::debug!(

@@ -37,7 +37,7 @@ This creates a `forest.cue` configuration file and sets up the project structure
 forest add forest-contrib/kubernetes-service
 ```
 
-This adds the component as a dependency in your `forest.cue` and updates `forest.lock`.
+This adds the component as a dependency in your `forest.cue`. A binary dependency is recorded in `forest.lock` when downloaded; unreleased source after v0.3.16 also records an already-cached binary when the project first resolves it. File/template-only components have no version/digest lock.
 
 ## Configure Your Service
 
@@ -112,7 +112,7 @@ Forest will prepare manifests, create a release annotation, and deploy to the `d
 The `release create` command streams progress by default. You can also watch any release with:
 
 ```bash
-forest release wait <release-intent-id>
+forest release show <slug> --follow
 ```
 
 ---

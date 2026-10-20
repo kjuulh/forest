@@ -37,7 +37,7 @@ pub enum Commands {
     Annotate(AnnotateCommand),
     /// Execute the release (deploy to destinations)
     Release(CommitCommand),
-    /// Prepare, annotate, and release in one step (annotation-only, no auto-release from triggers).
+    /// Prepare and annotate for the project's triggers; with --env or --destination, release there directly instead.
     Create(CreateCommand),
     /// Show detail (header, stages, destinations, plan output, deploy logs) for a release.
     Show(ShowCommand),

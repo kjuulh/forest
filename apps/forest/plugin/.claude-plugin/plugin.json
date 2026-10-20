@@ -1,0 +1,11 @@
+{
+  "name": "forest",
+  "description": "Use the Forest CLI: components and forest.cue, project and component commands, shared tools, publishing and prereleases, and pipeline-first releases with triggers, policies and approvals.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Understory",
+    "email": "dev@understory.io"
+  },
+  "repository": "https://github.com/understory-io/forest",
+  "keywords": ["forest", "cue", "components", "release", "pipeline", "deployment"]
+}

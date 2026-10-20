@@ -387,3 +387,28 @@ mod global_flag_tests {
         assert_eq!(cmd.config.context.as_deref(), Some("work"));
     }
 }
+
+#[cfg(test)]
+mod release_parser_tests {
+    use super::*;
+
+    #[test]
+    fn release_rejects_ref_instead_of_ignoring_it() {
+        for subcommand in [None, Some("release")] {
+            for slug in [None, Some("prepared-slug")] {
+                for option in ["--ref", "-r"] {
+                    let error = Command::try_parse_from(
+                        ["forest", "release"]
+                            .into_iter()
+                            .chain(subcommand)
+                            .chain(slug)
+                            .chain([option, "main", "-e", "dev"]),
+                    )
+                    .err()
+                    .expect("release must reject a ref argument");
+                    assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+                }
+            }
+        }
+    }
+}

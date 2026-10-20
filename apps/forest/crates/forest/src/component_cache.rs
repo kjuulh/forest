@@ -9,6 +9,36 @@ use crate::{
 
 pub mod models;
 
+const NON_COMPONENT_DIRS: [&str; 2] = ["bin", "include"];
+
+fn apply_cache_identity(
+    component: &mut CacheComponent,
+    organisation: &str,
+    name: &str,
+    version_dir: &str,
+) {
+    match semver::Version::parse(version_dir) {
+        Ok(version) => {
+            if version != component.version {
+                tracing::debug!(
+                    %organisation,
+                    %name,
+                    cached = %version,
+                    manifest = %component.version,
+                    "cached component manifest names another version; using the registry version",
+                );
+            }
+            component.organisation = organisation.to_string();
+            component.name = name.to_string();
+            component.version = version;
+        }
+        Err(e) => {
+            tracing::warn!(%organisation, %name, %version_dir, "cache directory is not a version: {e}");
+        }
+    }
+    component.source = models::CacheComponentSource::Versioned(component.version.clone());
+}
+
 use anyhow::Context;
 
 #[derive(Clone)]
@@ -60,7 +90,9 @@ impl ComponentCache {
             .await
             .context("read organisations entry")?
         {
-            if organisation_entry.file_name() == "bin" {
+            if NON_COMPONENT_DIRS
+                .contains(&organisation_entry.file_name().to_string_lossy().as_ref())
+            {
                 continue;
             }
             let mut name_entries = tokio::fs::read_dir(organisation_entry.path())
@@ -102,8 +134,12 @@ impl ComponentCache {
                             }
                         };
 
-                    component.source =
-                        models::CacheComponentSource::Versioned(component.version.clone());
+                    apply_cache_identity(
+                        &mut component,
+                        &organisation_entry.file_name().to_string_lossy(),
+                        &name_entry.file_name().to_string_lossy(),
+                        &version_entry.file_name().to_string_lossy(),
+                    );
 
                     components.push(component);
                 }
@@ -191,5 +227,45 @@ impl ComponentCacheState for State {
             locations: self.user_locations(),
             component_parser: self.component_parser(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cached(version: &str) -> CacheComponent {
+        CacheComponent {
+            name: "greeter".into(),
+            organisation: "my-org".into(),
+            version: semver::Version::parse(version).unwrap(),
+            dependencies: vec![],
+            requirements: vec![],
+            commands: Default::default(),
+            path: PathBuf::from("/cache/components/my-org/greeter/0.4.0-rc.1"),
+            source: models::CacheComponentSource::Unknown,
+        }
+    }
+
+    #[test]
+    fn the_cache_directory_names_the_version_even_when_the_manifest_disagrees() {
+        let mut component = cached("0.3.0");
+
+        apply_cache_identity(&mut component, "my-org", "greeter", "0.4.0-rc.1");
+
+        assert_eq!(component.version.to_string(), "0.4.0-rc.1");
+        assert!(matches!(
+            component.source,
+            models::CacheComponentSource::Versioned(ref v) if v.to_string() == "0.4.0-rc.1"
+        ));
+    }
+
+    #[test]
+    fn a_directory_that_is_not_a_version_keeps_the_manifest_version() {
+        let mut component = cached("0.3.0");
+
+        apply_cache_identity(&mut component, "my-org", "greeter", "scratch");
+
+        assert_eq!(component.version.to_string(), "0.3.0");
     }
 }

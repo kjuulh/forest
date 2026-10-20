@@ -118,6 +118,11 @@ impl ComponentsService {
 
         tracing::trace!("syncing components");
 
+        let project_dir = match &project {
+            Some(project) => project.path.clone(),
+            None => std::env::current_dir()?,
+        };
+
         let deps = if let Some(project) = project {
             let project = project.clone();
             project.dependencies
@@ -189,7 +194,6 @@ impl ComponentsService {
             .await;
             let upstream = resolved.into_iter().collect::<anyhow::Result<Vec<_>>>()?;
 
-            let project_dir = std::env::current_dir()?;
             let lockfile = crate::lockfile::LockFile::load(&project_dir).await?;
 
             let outcomes =
@@ -453,6 +457,56 @@ impl ComponentsService {
         }
 
         Ok(lock_entry)
+    }
+
+    pub async fn pin_version_specs(
+        &self,
+        project: &mut crate::models::Project,
+    ) -> anyhow::Result<()> {
+        let lockfile = crate::lockfile::LockFile::load(&project.path).await?;
+
+        for dep in project.dependencies.dependencies.iter_mut() {
+            let DependencyType::Versioned(spec_str) = &dep.dependency_type else {
+                continue;
+            };
+            let spec = crate::version_spec::VersionSpec::parse(spec_str).with_context(|| {
+                format!(
+                    "invalid version for {}/{}: '{spec_str}'",
+                    dep.organisation, dep.name
+                )
+            })?;
+            if spec.is_exact() {
+                continue;
+            }
+
+            let locked = lockfile.locked_versions(&dep.organisation, &dep.name);
+            let published = if spec.resolve(&locked).is_some() {
+                Vec::new()
+            } else {
+                self.grpc
+                    .list_component_versions(&dep.organisation, &dep.name)
+                    .await
+                    .with_context(|| format!("list versions of {}/{}", dep.organisation, dep.name))?
+                    .iter()
+                    .filter_map(|v| semver::Version::parse(&v.version).ok())
+                    .collect()
+            };
+
+            let pinned = spec.pin(&locked, &published).with_context(|| {
+                format!(
+                    "no published version of {}/{} matches '{spec}'",
+                    dep.organisation, dep.name
+                )
+            })?;
+            tracing::debug!(
+                "resolved {}/{} '{spec}' to {pinned}",
+                dep.organisation,
+                dep.name
+            );
+            dep.dependency_type = DependencyType::Versioned(pinned.to_string());
+        }
+
+        Ok(())
     }
 
     #[tracing::instrument(skip(self), level = "trace")]

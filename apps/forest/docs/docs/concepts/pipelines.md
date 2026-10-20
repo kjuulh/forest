@@ -1,165 +1,68 @@
 # Pipelines
 
-Pipelines orchestrate multi-stage deployments as directed acyclic graphs (DAGs). They let you model complex rollout strategies — deploy to staging, wait for soak time, run a plan, then deploy to production.
+A pipeline is a project's rollout as a DAG of stages: deploy to dev, wait or plan, then deploy to prod. Releasing through a pipeline is the normal path. It keeps the environment order, the plan approvals and the [policies](policies.md) the project configured, where a direct `--env prod` release skips the ordering and the approvals.
 
-## Stages
+## Defining stages
 
-A pipeline consists of stages with three types:
+Stages are a JSON **object keyed by stage name**:
 
-### Deploy Stage
-
-Deploys to a specific environment's destinations:
-
-```json
-{
-  "name": "deploy-staging",
-  "deploy": {
-    "environment": "staging"
-  }
-}
+```bash
+forest project pipeline create -o my-org -p my-service --name rollout --stages-json '{
+  "deploy-dev":  {"type": "deploy", "environment": "dev"},
+  "plan-prod":   {"type": "plan",   "environment": "prod", "depends_on": ["deploy-dev"]},
+  "deploy-prod": {"type": "deploy", "environment": "prod", "depends_on": ["plan-prod"]}
+}'
 ```
 
-### Wait Stage
+`--stages-file <path>` reads the same JSON from a file. A JSON array is refused (`invalid type: sequence, expected a map`).
 
-Pauses for a specified duration:
+| Type | Fields |
+|---|---|
+| `deploy` | `environment` |
+| `plan` | `environment`, `auto_approve` (default `false`), `destroy` (default `false`) |
+| `wait` | `duration_seconds` |
+| `gate` | `requires: [{signal, in: [...]}]`, `timeout_seconds`, `on_timeout: "fail" \| "proceed"` |
 
-```json
-{
-  "name": "soak-2h",
-  "wait": {
-    "duration_seconds": 7200
-  }
-}
-```
+`depends_on` builds the DAG, and stages without dependencies start immediately. Cycles, unknown dependencies, a gate without requirements or timeout, and a `destroy` plan with `auto_approve` are all refused.
 
-### Plan Stage
-
-Runs a dry-run / preview (e.g., `terraform plan`) before deploying:
-
-```json
-{
-  "name": "plan-prod",
-  "plan": {
-    "environment": "prod",
-    "auto_approve": false
-  }
-}
-```
-
-When `auto_approve` is `false`, the stage enters an **AwaitingApproval** sub-state after the plan completes, requiring manual approval before proceeding.
-
-For `forest/terraform@1` destinations, what you approve is what gets applied. The plan stage saves the binary plan (`terraform plan -out`) together with the provider lock file. The deploy stage of the same release then applies **that file**, and doesn't plan again. If the state changed between approval and apply (someone else applied), terraform refuses the plan as stale and the deploy fails. Re-run the release and review the new plan. A deploy stage whose plan stage ran but has no saved plan also fails rather than re-planning. Saved plans are deleted once their apply has been attempted, and pruned after 7 days if never applied.
-
-### Destroying
-
-A plan stage with `"destroy": true` plans the removal of everything the project manages at that environment's `forest/terraform@1` destinations (`terraform plan -destroy`). The deploy stage after it applies that saved plan, exactly as it applies any other.
-
-```json
-[
-  {"name": "destroy-dev", "plan": {"environment": "dev", "destroy": true}},
-  {"name": "apply-dev", "deploy": {"environment": "dev"}, "depends_on": ["destroy-dev"]}
-]
-```
-
-A destroy plan stage can never set `auto_approve`; the pipeline is refused. Its plan output starts with a `DESTROY PLAN` banner. It destroys what the state holds, so resources with `prevent_destroy` make the plan fail. That's the intended outcome for anything holding data: remove the guard deliberately first.
-
-## DAG Structure
-
-Stages declare dependencies via `depends_on`, forming a DAG:
-
-```json
-[
-  {"name": "deploy-staging", "deploy": {"environment": "staging"}},
-  {"name": "soak", "wait": {"duration_seconds": 7200}, "depends_on": ["deploy-staging"]},
-  {"name": "plan-prod", "plan": {"environment": "prod", "auto_approve": false}, "depends_on": ["soak"]},
-  {"name": "deploy-prod", "deploy": {"environment": "prod"}, "depends_on": ["plan-prod"]}
-]
-```
-
-This creates a linear pipeline:
-
-```
-deploy-staging → soak (2h) → plan-prod → deploy-prod
-```
-
-Stages without dependencies (root stages) start immediately. Forest validates the DAG using topological sort — cycles are rejected.
-
-## Stage Lifecycle
-
-Every stage follows a consistent lifecycle:
+## Stage lifecycle
 
 ```
 PENDING → ACTIVE → SUCCEEDED
-                 → FAILED
-                 → CANCELLED
+                 → FAILED      (dependent stages are CANCELLED)
+                 → SUPERSEDED
+plan:     ACTIVE → AWAITING_APPROVAL → SUCCEEDED | FAILED (rejected)
 ```
 
-Each stage tracks `queued_at`, `started_at`, and `completed_at` timestamps.
+On a server with the unreleased post-v0.3.16 [policy enforcement changes](policies.md), a stage for an environment with a branch restriction **fails** for a disallowed branch before a plan is offered for approval, and an unmet same-artifact deploy soak waits and is re-checked. Released v0.3.16 servers do not enforce pipeline branch restrictions and can count plans toward soak; confirm the server revision before relying on these checks.
 
-### Plan Stage Approval
+## Plan stages and approval
 
-Plan stages have an additional sub-state:
-
-```
-PENDING → ACTIVE → AwaitingApproval → Approved → SUCCEEDED
-                                    → Rejected → FAILED
-```
-
-Approve or reject:
+With `auto_approve: false`, a plan stage parks as `AWAITING_APPROVAL` once the plan completes. `forest release show <slug>` prints the plan output and the command to approve it:
 
 ```bash
-# Via gRPC (CLI support planned)
-ApprovePlanStage { intent_id, stage_name }
-RejectPlanStage { intent_id, stage_name }
+forest release approve <slug> -o my-org -p my-service [--stage plan-prod]
+forest release reject  <slug> -o my-org -p my-service -r "<what to change>"
 ```
 
-## IntentCoordinator
+For `forest/terraform@1` destinations, what you approve is what gets applied. The plan stage saves the binary plan with the provider lock file, and the deploy stage of the same release applies **that file** without planning again. If the state changed in between, terraform refuses the stale plan and the deploy fails; re-run the release and review the new plan. Saved plans are deleted once their apply is attempted, and pruned after 7 days if never applied.
 
-The **IntentCoordinator** is Forest's saga orchestrator. It:
+A plan stage with `"destroy": true` plans the removal of everything the project manages at that environment's terraform destinations, and its output starts with a `DESTROY PLAN` banner. It can never be auto-approved. Resources with `prevent_destroy` make it fail, which is the intended outcome for anything holding data.
 
-1. Watches for pipeline release intents (via NATS + 5s polling fallback)
-2. Evaluates stage readiness based on the `stage_states` DAG
-3. Activates stages when all dependencies are satisfied
-4. Handles transitive cancellation (if a stage fails, dependent stages are cancelled)
-5. Marks the intent as succeeded when all stages complete
+## Starting a pipeline
 
-The coordinator is idempotent — it can safely re-evaluate at any time.
+- **From an annotation (preferred):** a trigger with `--use-pipeline` ([triggers](triggers.md)), for example `--branch '^main$' --source-type '^ci$' --use-pipeline`. CI then only annotates: `forest release prepare` + `forest release annotate --source-type ci`, or `forest release create --source-type ci` without a target.
+- **Explicitly:** `forest release release <slug> -e <env> --pipeline` or `forest release create -e <env> --pipeline`.
 
-## Creating Pipelines
+The no-target `create` shorthand is unreleased after v0.3.16. On released v0.3.16 use `prepare` + `annotate`; `create` requires an environment and skips triggers. Check `create --help`, not a local build's version string.
+
+Either way the **whole pipeline** runs: `-e` and the trigger's environments do not limit which stages run. When a project has several pipelines, the first enabled one by name is used.
+
+## CLI commands
 
 ```bash
-forest project pipeline create prod-rollout \
-  --organisation my-org \
-  --project my-service \
-  --stages-json '[
-    {"name": "deploy-staging", "deploy": {"environment": "staging"}},
-    {"name": "soak", "wait": {"duration_seconds": 7200}, "depends_on": ["deploy-staging"]},
-    {"name": "deploy-prod", "deploy": {"environment": "prod"}, "depends_on": ["soak"]}
-  ]'
+forest project pipeline create -o <org> -p <project> --name <name> --stages-json '<json>' | --stages-file <path>
+forest project pipeline list   -o <org> -p <project>
+forest project pipeline update -o <org> -p <project> --name <name> --stages-json '<json>'
+forest project pipeline delete -o <org> -p <project> --name <name>
 ```
-
-Or from a file:
-
-```bash
-forest project pipeline create prod-rollout \
-  --stages-file pipeline.json
-```
-
-## CLI Commands
-
-```bash
-forest project pipeline create <name> --stages-json '<json>' | --stages-file <path>
-forest project pipeline list --organisation my-org --project my-service
-forest project pipeline update <name> --stages-json '<json>'
-forest project pipeline delete <name>
-```
-
-## Using Pipelines
-
-Reference pipelines when releasing:
-
-```bash
-forest release release --environment prod --pipeline
-```
-
-Or configure [triggers](triggers.md) with `use_pipeline: true` for automatic pipeline execution.

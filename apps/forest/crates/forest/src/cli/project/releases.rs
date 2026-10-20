@@ -96,7 +96,12 @@ impl ReleasesCommand {
                     }
 
                     if let Some(err) = &stage.error_message {
-                        println!("      error: {err}");
+                        let label = if status == PipelineRunStageStatus::Pending {
+                            "blocked"
+                        } else {
+                            "error"
+                        };
+                        println!("      {label}: {err}");
                     }
 
                     for step in &intent.steps {
@@ -114,6 +119,14 @@ impl ReleasesCommand {
                                 "      {step_icon} {}: {} [{}]",
                                 step.destination_name, step.environment, step.status
                             );
+                            if let Some(err) = &step.error_message {
+                                let label = if step.status == "QUEUED" {
+                                    "blocked"
+                                } else {
+                                    "error"
+                                };
+                                println!("        {label}: {err}");
+                            }
                         }
                     }
                 }
@@ -160,7 +173,12 @@ impl ReleasesCommand {
                     }
 
                     if let Some(err) = &step.error_message {
-                        println!("    error: {err}");
+                        let label = if step.status == "QUEUED" {
+                            "blocked"
+                        } else {
+                            "error"
+                        };
+                        println!("    {label}: {err}");
                     }
                 }
             }

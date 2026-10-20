@@ -54,7 +54,7 @@ forest add forest-contrib/kubernetes-service@0.2.0
 forest add forest-contrib/kubernetes-service --path ../my-local-component
 ```
 
-This updates `forest.cue` and creates/updates `forest.lock`.
+This updates `forest.cue`. A binary dependency is recorded in `forest.lock` when downloaded; unreleased source after v0.3.16 also records an already-cached binary when the project first resolves it. File/template-only components have no version/digest lock.
 
 ## Configure Environments
 

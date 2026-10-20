@@ -12,7 +12,7 @@ Forest is a platform that brings structure to how teams build, deploy, and opera
 
 - **Components** are self-contained, versioned plugins (Rust, Go, or Docker) that define commands, deployment hooks, and configuration schemas using [CUE](https://cuelang.org/).
 - **Projects** compose components together, providing environment-specific configuration.
-- **Releases** are first-class, event-sourced operations with full lifecycle management — from annotation through deployment to rollback.
+- **Releases** are first-class, event-sourced operations with full lifecycle management — from annotation through deployment, promotion and roll-back by re-releasing an earlier artifact.
 - **Policies** enforce guardrails like soak times, branch restrictions, and approval gates.
 - **Triggers** automate releases based on branch patterns, commit metadata, or source types.
 - **Pipelines** orchestrate multi-stage deployments as directed acyclic graphs (DAGs).

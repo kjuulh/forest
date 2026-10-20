@@ -8,5 +8,6 @@ This guide walks you through setting up Forest from scratch — installing the C
 2. [Authentication](authentication.md) — Connect to a Forest server
 3. [Your First Project](first-project.md) — Create and configure a project
 4. [Your First Release](first-release.md) — Deploy to an environment
+5. [Using Forest with Claude Code](claude-code.md) — Install the `forest` skill so agents use the real commands
 
 Each section builds on the previous one. By the end, you'll have a working project with environment-specific configuration and a successful release.

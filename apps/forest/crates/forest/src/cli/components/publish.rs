@@ -20,24 +20,36 @@ fn print_publish_context(state: &State, owner: &str, component: &str) {
     });
     match target {
         Ok(target) => {
-            tracing::debug!(
-                "publishing as {owner}/{component} to {} ({})",
-                target.label,
-                target.server
-            );
-            crate::ui::status(publish_line(owner, component, &target));
+            let line = publish_line(owner, component, &target);
+            tracing::debug!("{line}");
+            crate::ui::status(line);
         }
         Err(_) => crate::ui::status(format!("Publishing {owner}/{component}")),
     }
 }
 
+fn display_server(server: &str) -> std::borrow::Cow<'_, str> {
+    if !server.contains(['@', '?', '#']) {
+        return std::borrow::Cow::Borrowed(server);
+    }
+    let Ok(mut url) = reqwest::Url::parse(server) else {
+        return std::borrow::Cow::Borrowed("<invalid server URL>");
+    };
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    std::borrow::Cow::Owned(url.into())
+}
+
 fn publish_line(owner: &str, component: &str, target: &crate::contexts::ServerTarget) -> String {
+    let server = display_server(&target.server);
     if target.label == target.server {
-        format!("Publishing {owner}/{component} to {}", target.server)
+        format!("Publishing {owner}/{component} to {server}")
     } else {
         format!(
             "Publishing {owner}/{component} to {} ({})",
-            target.label, target.server
+            target.label, server
         )
     }
 }
@@ -1502,6 +1514,8 @@ async fn publish_prebuilt(
         crate::ui::warn(msg);
     }
 
+    print_publish_context(state, organisation, name);
+
     if dry_run {
         let listed: Vec<String> = uploads
             .iter()
@@ -1515,7 +1529,6 @@ async fn publish_prebuilt(
         return Ok(());
     }
 
-    print_publish_context(state, organisation, name);
     let client = state.grpc_client();
     let upload_context = client
         .begin_component_upload(organisation, name, version)
@@ -1766,27 +1779,35 @@ mod publish_line_tests {
     use crate::contexts::ServerTarget;
 
     #[test]
-    fn a_context_is_named_with_its_server() {
-        let target = ServerTarget {
-            label: "work".into(),
-            server: "https://api.work.example".into(),
-        };
-        assert_eq!(
-            publish_line("acme", "tool", &target),
-            "Publishing acme/tool to work (https://api.work.example)"
-        );
+    fn publishing_never_echoes_server_url_credentials() {
+        let server = "https://private-user:private-password@api.example/registry?token=private-query#private-fragment";
+        for label in ["work", server] {
+            let target = ServerTarget {
+                label: label.into(),
+                server: server.into(),
+            };
+            let line = publish_line("acme", "tool", &target);
+            assert!(line.contains("api.example/registry"));
+            for secret in [
+                "private-user",
+                "private-password",
+                "private-query",
+                "private-fragment",
+            ] {
+                assert!(!line.contains(secret));
+            }
+        }
     }
 
     #[test]
-    fn an_explicit_server_is_named_once() {
+    fn an_invalid_server_url_does_not_echo_potential_credentials() {
+        let server = "https://[invalid?token=private-query";
         let target = ServerTarget {
-            label: "https://api.other.example".into(),
-            server: "https://api.other.example".into(),
+            label: server.into(),
+            server: server.into(),
         };
-        assert_eq!(
-            publish_line("acme", "tool", &target),
-            "Publishing acme/tool to https://api.other.example"
-        );
+        let line = publish_line("acme", "tool", &target);
+        assert!(!line.contains("private-query"));
     }
 }
 

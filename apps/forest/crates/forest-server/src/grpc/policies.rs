@@ -446,6 +446,7 @@ impl PolicyService for PoliciesServer {
                 &req.target_environment,
                 req.branch.as_deref(),
                 release_intent_id.as_ref(),
+                None,
             )
             .await
             .context("evaluate policies")

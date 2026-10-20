@@ -71,30 +71,10 @@ impl ShowCommand {
             annotation,
             project,
             intent_id,
-            intent_state,
+            mut intent_state,
         } = resolved;
 
         let stages_filter: Option<&str> = self.stage.as_deref();
-
-        let mut plan_outputs: BTreeMap<String, forest_grpc_interface::GetPlanOutputResponse> =
-            BTreeMap::new();
-        for stage in intent_state
-            .stages
-            .iter()
-            .filter(|s| stages_filter.map(|sf| s.stage_id == sf).unwrap_or(true))
-        {
-            if !is_plan_stage(stage.stage_type) {
-                continue;
-            }
-            match grpc.get_plan_output(intent_id, &stage.stage_id).await {
-                Ok(plan) => {
-                    plan_outputs.insert(stage.stage_id.clone(), plan);
-                }
-                Err(e) => {
-                    tracing::warn!(stage = %stage.stage_id, "could not fetch plan output: {e:#}");
-                }
-            }
-        }
 
         let signals = match grpc.list_signals(intent_id).await {
             Ok(signals) => signals,
@@ -104,15 +84,7 @@ impl ShowCommand {
             }
         };
 
-        let mut output = ShowOutput::new(
-            &annotation,
-            &project,
-            &intent_id,
-            &intent_state,
-            &plan_outputs,
-            stages_filter,
-        );
-        output.attach_signals(&signals);
+        let mut output = ShowOutput::new(&annotation, &project, &intent_id, &intent_state);
 
         let format = state.config.format;
         let json_mode = matches!(format, OutputFormat::Json);
@@ -133,6 +105,10 @@ impl ShowCommand {
             .collect();
         let mut log_buffers: BTreeMap<String, Vec<DestLog>> = BTreeMap::new();
         let mut announced_parked = false;
+        let mut any_stage_failed = intent_state
+            .stages
+            .iter()
+            .any(|s| matches!(stage_status_name(s.status), "FAILED" | "CANCELLED"));
 
         let watch = grpc
             .watch_release(
@@ -141,6 +117,9 @@ impl ShowCommand {
                 ReleaseProgress::with_dependencies(depends_on),
                 |event, progress| {
                     use forest_grpc_interface::wait_release_event::Event;
+                    if let Some(Event::StageUpdate(stage)) = &event.event {
+                        any_stage_failed |= matches!(stage.status.as_str(), "FAILED" | "CANCELLED");
+                    }
                     if let Some(Event::LogLine(line)) = &event.event {
                         let stderr = matches!(
                             forest_grpc_interface::LogChannel::try_from(line.channel),
@@ -168,8 +147,53 @@ impl ShowCommand {
             .map_err(|e| {
                 tracing::warn!("wait_release stream error: {e:#}");
                 e
-            })
-            .ok();
+            });
+        let watch = if mode == WatchMode::Follow {
+            let watch = watch.context("follow release stream")?;
+            if !watch.progress.is_terminal() {
+                anyhow::bail!("release stream ended before a terminal release outcome");
+            }
+            Some(watch)
+        } else {
+            watch.ok()
+        };
+
+        if mode == WatchMode::Follow && watch.as_ref().is_some_and(|w| w.end == WatchEnd::Terminal)
+        {
+            intent_state = grpc
+                .get_release_intent_states(&project.organisation, Some(&project.project), true)
+                .await
+                .context("refresh followed release state")?
+                .release_intents
+                .into_iter()
+                .find(|s| s.release_intent_id == intent_state.release_intent_id)
+                .context("followed release intent is no longer available")?;
+            any_stage_failed |= intent_state
+                .stages
+                .iter()
+                .any(|s| matches!(stage_status_name(s.status), "FAILED" | "CANCELLED"));
+        }
+        let mut plan_outputs: BTreeMap<String, forest_grpc_interface::GetPlanOutputResponse> =
+            BTreeMap::new();
+        for stage in intent_state
+            .stages
+            .iter()
+            .filter(|s| stages_filter.map(|sf| s.stage_id == sf).unwrap_or(true))
+        {
+            if !is_plan_stage(stage.stage_type) {
+                continue;
+            }
+            match grpc.get_plan_output(intent_id, &stage.stage_id).await {
+                Ok(plan) => {
+                    plan_outputs.insert(stage.stage_id.clone(), plan);
+                }
+                Err(e) => {
+                    tracing::warn!(stage = %stage.stage_id, "could not fetch plan output: {e:#}");
+                }
+            }
+        }
+        output.attach_state(&intent_state, &plan_outputs, stages_filter);
+        output.attach_signals(&signals);
 
         let awaiting: Vec<String> = match &watch {
             Some(w) => w.progress.awaiting_approval(),
@@ -228,7 +252,7 @@ impl ShowCommand {
                 .any(|s| matches!(s.status.as_str(), "FAILED" | "TIMED_OUT" | "CANCELLED")),
         };
 
-        if any_failed {
+        if any_failed || any_stage_failed {
             anyhow::bail!("release reached a non-success terminal state");
         }
 
@@ -545,9 +569,51 @@ impl ShowOutput {
         project: &Project,
         intent_id: &Uuid,
         intent_state: &forest_grpc_interface::ReleaseIntentState,
+    ) -> Self {
+        Self {
+            slug: annotation.slug.clone(),
+            release_intent_id: intent_id.to_string(),
+            artifact_id: annotation.artifact_id.to_string(),
+            project: format!("{}/{}", project.organisation, project.project),
+            created_at: intent_state.created_at.clone(),
+            title: annotation.context.title.clone(),
+            description: annotation.context.description.clone(),
+            actor: ActorRef {
+                user: annotation.source.username.clone(),
+                email: annotation.source.email.clone(),
+                source_type: annotation.source.source_type.clone(),
+                run_url: annotation.source.run_url.clone(),
+            },
+            source: SourceRef {
+                commit_sha: annotation.reference.as_ref().map(|r| r.commit_sha.clone()),
+                branch: annotation
+                    .reference
+                    .as_ref()
+                    .and_then(|r| r.commit_branch.clone()),
+                repo_url: annotation
+                    .reference
+                    .as_ref()
+                    .and_then(|r| r.repo_url.clone()),
+                version: annotation
+                    .reference
+                    .as_ref()
+                    .and_then(|r| r.version.clone()),
+            },
+            stages: Vec::new(),
+            destinations: Vec::new(),
+            plan_outputs: Vec::new(),
+            logs: Vec::new(),
+            awaiting_approval: Vec::new(),
+            in_progress: false,
+        }
+    }
+
+    fn attach_state(
+        &mut self,
+        intent_state: &forest_grpc_interface::ReleaseIntentState,
         plan_outputs: &BTreeMap<String, forest_grpc_interface::GetPlanOutputResponse>,
         stages_filter: Option<&str>,
-    ) -> Self {
+    ) {
         let stages: Vec<StageView> = intent_state
             .stages
             .iter()
@@ -597,43 +663,9 @@ impl ShowOutput {
                     .collect(),
             })
             .collect();
-
-        Self {
-            slug: annotation.slug.clone(),
-            release_intent_id: intent_id.to_string(),
-            artifact_id: annotation.artifact_id.to_string(),
-            project: format!("{}/{}", project.organisation, project.project),
-            created_at: intent_state.created_at.clone(),
-            title: annotation.context.title.clone(),
-            description: annotation.context.description.clone(),
-            actor: ActorRef {
-                user: annotation.source.username.clone(),
-                email: annotation.source.email.clone(),
-                source_type: annotation.source.source_type.clone(),
-                run_url: annotation.source.run_url.clone(),
-            },
-            source: SourceRef {
-                commit_sha: annotation.reference.as_ref().map(|r| r.commit_sha.clone()),
-                branch: annotation
-                    .reference
-                    .as_ref()
-                    .and_then(|r| r.commit_branch.clone()),
-                repo_url: annotation
-                    .reference
-                    .as_ref()
-                    .and_then(|r| r.repo_url.clone()),
-                version: annotation
-                    .reference
-                    .as_ref()
-                    .and_then(|r| r.version.clone()),
-            },
-            stages,
-            destinations,
-            plan_outputs: plan_views,
-            logs: Vec::new(),
-            awaiting_approval: Vec::new(),
-            in_progress: false,
-        }
+        self.stages = stages;
+        self.destinations = destinations;
+        self.plan_outputs = plan_views;
     }
 
     fn attach_signals(&mut self, signals: &[forest_grpc_interface::Signal]) {
@@ -715,9 +747,6 @@ impl ShowOutput {
             let _ = writeln!(out, "stages:");
             for s in &self.stages {
                 render_stage(&mut out, s);
-                if let Some(err) = &s.error_message {
-                    let _ = writeln!(out, "    error: {err}");
-                }
             }
             out.push('\n');
         }
@@ -804,7 +833,12 @@ fn render_destination(out: &mut String, d: &DestView) {
         status = d.status,
     );
     if let Some(err) = &d.error_message {
-        let _ = writeln!(out, "    error: {err}");
+        let label = if d.status == "QUEUED" {
+            "blocked"
+        } else {
+            "error"
+        };
+        let _ = writeln!(out, "    {label}: {err}");
     }
     for s in &d.signals {
         let _ = writeln!(
@@ -857,6 +891,14 @@ fn render_stage(out: &mut String, s: &StageView) {
         status = s.status,
         approval = if awaiting { ", AWAITING_APPROVAL" } else { "" },
     );
+    if let Some(err) = &s.error_message {
+        let label = if s.status == "PENDING" {
+            "blocked"
+        } else {
+            "error"
+        };
+        let _ = writeln!(out, "    {label}: {err}");
+    }
 }
 
 fn stage_icon(status: &str) -> &'static str {

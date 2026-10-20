@@ -6,10 +6,6 @@ use crate::state::State;
 /// model, protocol, SDK, and deployment flow.
 #[derive(clap::Parser)]
 pub struct DocsCommand {
-    /// Output format
-    #[arg(long, default_value = "text")]
-    format: String,
-
     /// Specific topic to document (omit for full reference)
     topic: Option<String>,
 }
@@ -47,7 +43,7 @@ fn print_topics() {
     println!("  sdk            TypeScript and Rust SDK reference");
     println!("  components     Component types, lifecycle, and CUE spec format");
     println!("  templates      Template system (minijinja) with available globals and filters");
-    println!("  deployment     Deployment flow: prepare, release, rollback");
+    println!("  deployment     Deployment flow: prepare, annotate, release");
     println!("  config         Configuration: CUE modules, registries, environment variables");
     println!("  shell          Shell integration + making forest tools available everywhere");
     println!();
@@ -182,7 +178,7 @@ fn print_commands() {
     println!("    forest publish");
     println!("        Publish the component to the forest registry. Uploads CUE specs,");
     println!("        binary artifacts, and the component manifest.");
-    println!("        Requires FOREST_SERVER to be set.");
+    println!("        Uses the active context's server unless FOREST_SERVER overrides it.");
     println!();
     println!("    forest validate");
     println!("        Validate project config against component specs. Invokes each");
@@ -237,20 +233,23 @@ fn print_commands() {
     println!("                                         destination receives directly");
     println!("        e.g. --set config.image_tag=main-601f507");
     println!();
-    println!("    forest release create --env <env> [--set key=value ...]");
-    println!("        Combined: prepare + annotate + release in one command.");
-    println!("        This is the recommended command for most deployments.");
+    println!("    forest release create [--set key=value ...]");
+    println!("        Prepare + annotate with triggers enabled: a matching trigger,");
+    println!("        usually the project's pipeline, may deploy through prod.");
+    println!("        With --env <env> or --destination it releases there directly instead,");
+    println!("        unless --skip-commit enables triggers even with a target. --pipeline");
+    println!("        runs the whole pipeline; neither flag confines deployment to <env>.");
     println!("        --set overrides are recorded in the release annotation metadata.");
     println!();
     println!("    forest release annotate [options]");
     println!("        Upload deployment artifacts to the forest server.");
     println!("        Commit SHA and branch are auto-detected from git if not specified.");
     println!();
-    println!("    forest release <slug> [--env <env>]");
+    println!("    forest release release <slug> [--env <env>]");
     println!("        Execute a release to destinations.");
     println!();
-    println!("    forest release rollback");
-    println!("        Roll back a deployment (invokes rollback hooks).");
+    println!("    forest release release <older-slug> --env <env>");
+    println!("        Roll back by releasing an earlier artifact again.");
     println!();
     println!("  Resource Management");
     println!();
@@ -559,7 +558,7 @@ fn print_config() {
     println!();
     println!("  Environment Variables");
     println!();
-    println!("    FOREST_SERVER    Forest server URL (required for registry operations)");
+    println!("    FOREST_SERVER    Override the active context's Forest server URL");
     println!("    CUE_REGISTRY     CUE module registry (OCI). Passed to `cue` commands.");
     println!("                     Example: localhost:4042+insecure");
     println!();

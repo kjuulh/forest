@@ -8,7 +8,9 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::State;
-use crate::services::release_event_store::{check_approval_policies, check_soak_time_policies};
+use crate::services::release_event_store::{
+    check_approval_policies, check_branch_policies, check_soak_time_policies,
+};
 use crate::services::release_pipeline::{
     ApprovalStatus, GateTimeout, PipelineStages, SignalRequirement, StageConfig, StageState,
     StageStates, StageStatus, find_ready_stages, has_failed_dependency, has_superseded_dependency,
@@ -456,6 +458,33 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
 
         match &stage_def.config {
             StageConfig::Deploy { environment } => {
+                let branch_blocked = check_branch_policies(
+                    &mut tx,
+                    &intent.project_id,
+                    &intent.annotation_id,
+                    environment,
+                )
+                .await?;
+                if let Some(reason) = branch_blocked {
+                    tracing::warn!(
+                        %intent_id,
+                        stage_id,
+                        environment,
+                        "coordinator: deploy stage failed — {reason}"
+                    );
+                    stage_states.insert(
+                        stage_id.clone(),
+                        StageState {
+                            status: StageStatus::Failed,
+                            error_message: Some(reason),
+                            completed_at: Some(now_str.clone()),
+                            ..StageState::pending()
+                        },
+                    );
+                    changed = true;
+                    continue;
+                }
+
                 let soak_blocked = check_soak_time_policies(
                     &mut tx,
                     &intent.project_id,
@@ -627,6 +656,33 @@ pub async fn evaluate(state: &State, intent_id: Uuid) -> anyhow::Result<()> {
                 );
             }
             StageConfig::Plan { environment, .. } => {
+                let branch_blocked = check_branch_policies(
+                    &mut tx,
+                    &intent.project_id,
+                    &intent.annotation_id,
+                    environment,
+                )
+                .await?;
+                if let Some(reason) = branch_blocked {
+                    tracing::warn!(
+                        %intent_id,
+                        stage_id,
+                        environment,
+                        "coordinator: plan stage failed — {reason}"
+                    );
+                    stage_states.insert(
+                        stage_id.clone(),
+                        StageState {
+                            status: StageStatus::Failed,
+                            error_message: Some(reason),
+                            completed_at: Some(now_str.clone()),
+                            ..StageState::pending()
+                        },
+                    );
+                    changed = true;
+                    continue;
+                }
+
                 let soak_blocked = check_soak_time_policies(
                     &mut tx,
                     &intent.project_id,

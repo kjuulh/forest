@@ -225,10 +225,10 @@ Templates are rendered with the project's spec values during `forest release pre
 ## Build
 
 ```bash
-forest build
+forest run build
 ```
 
-This compiles for all configured architectures and stores the binaries in the content-addressable cache at `~/.cache/forest/components/bin/`.
+This dispatches to the build component the project depends on (`forest-contrib/build-rust`, `-go` or `-docker`). It compiles the declared architectures into `.forest/component/output/<os>/<arch>/<name>`, which `forest publish` uploads.
 
 ## Test Locally
 
@@ -509,7 +509,7 @@ For dependency resolution to work at runtime, the parent project must list every
 Build the component to generate `meta.json` (the component manifest):
 
 ```bash
-forest build
+forest run build
 ```
 
 For local testing, use a path-based dependency in your consuming project, just as with Rust components:
@@ -618,7 +618,7 @@ Forest supports sealing Kubernetes secrets using the `forest run seal` command. 
 
 4. **Projects must list transitive dependencies** — If component A calls component B via `callComponent`, every project that uses A must also declare B as a dependency. Forest does not auto-resolve transitive dependencies at the project level.
 
-5. **`forest build` does not regenerate codegen** — The `forest build` command compiles the component and produces `meta.json`, but it does not re-run code generation. When you change `forest.component.cue`, you must run `forest generate` separately before building.
+5. **`forest run build` does not regenerate codegen** — The build compiles the component and produces `meta.json`, but it does not re-run code generation. When you change `forest.component.cue`, you must run `forest generate` separately before building.
 
 ## First Deployment Workflow
 
@@ -630,7 +630,7 @@ When deploying a new service for the first time, follow this order:
 
    ```bash
    forest generate --output ./src/ --language typescript
-   forest build
+   forest run build
    ```
 
 3. **Seal any required secrets.** Encrypt sensitive values before the first release:

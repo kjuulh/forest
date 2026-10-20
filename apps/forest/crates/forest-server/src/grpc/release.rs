@@ -265,12 +265,23 @@ impl ReleaseService for ReleaseServer {
                     let branch = reference.commit_branch.as_deref();
                     let mut blocked = false;
                     for env in &trigger_match.target_environments {
-                        let evals = self
+                        let evals = match self
                             .state
                             .policy_registry()
-                            .evaluate_for_environment(&project_id, env, branch, None)
+                            .evaluate_for_environment(&project_id, env, branch, None, None)
                             .await
-                            .unwrap_or_default();
+                        {
+                            Ok(evals) => evals,
+                            Err(e) => {
+                                tracing::error!(
+                                    trigger = %trigger_match.trigger_name,
+                                    env = %env,
+                                    "trigger blocked, policies could not be evaluated: {e:#}"
+                                );
+                                blocked = true;
+                                break;
+                            }
+                        };
                         for eval in &evals {
                             if !eval.passed && eval.policy_type == PolicyType::BranchRestriction {
                                 tracing::info!(
@@ -596,30 +607,46 @@ impl ReleaseService for ReleaseServer {
             .release_registry()
             .get_annotation_context(&artifact_id)
             .await
-            .ok();
-        let branch_for_policy = ann_ctx_for_policy
-            .as_ref()
-            .and_then(|a| a.reference.commit_branch.clone());
+            .context("load the artifact annotation for release policies")
+            .to_internal_error()?;
+        let branch_for_policy = ann_ctx_for_policy.reference.commit_branch;
 
-        let target_envs: Vec<String> = if !req.environments.is_empty() {
-            req.environments.clone()
-        } else {
-            Vec::new()
-        };
-
-        if let Ok(project_id) = self
+        let project_id = self
             .state
             .release_registry()
             .get_project_id_from_artifact(&artifact_id)
             .await
+            .context("load the artifact project for release policies")
+            .to_internal_error()?;
         {
+            let mut target_envs = req.environments.clone();
+            let destination_envs = self
+                .state
+                .policy_registry()
+                .environments_of_destinations(&project_id, &req.destinations)
+                .await
+                .context("resolve the environments of the requested destinations")
+                .to_internal_error()?;
+            for env in destination_envs {
+                if !target_envs.contains(&env) {
+                    target_envs.push(env);
+                }
+            }
+
             for env in &target_envs {
                 let evaluations = self
                     .state
                     .policy_registry()
-                    .evaluate_for_environment(&project_id, env, branch_for_policy.as_deref(), None)
+                    .evaluate_for_environment(
+                        &project_id,
+                        env,
+                        branch_for_policy.as_deref(),
+                        None,
+                        Some(&artifact_id),
+                    )
                     .await
-                    .unwrap_or_default();
+                    .context("evaluate release policies")
+                    .to_internal_error()?;
 
                 for eval in &evaluations {
                     if !eval.passed && eval.policy_type == PolicyType::BranchRestriction {
@@ -1343,16 +1370,28 @@ impl ReleaseService for ReleaseServer {
             .context("get destination states")
             .to_internal_error()?;
 
-        let destinations = rows
-            .into_iter()
-            .map(|r| forest_grpc_interface::DestinationState {
+        let mut policy_blockers = PolicyBlockerCache::new();
+        let mut destinations = Vec::with_capacity(rows.len());
+        for r in rows {
+            let error_message = if r.status == "QUEUED" {
+                release_policy_blocker(
+                    &self.state,
+                    &r.release_intent_id,
+                    &r.environment,
+                    &mut policy_blockers,
+                )
+                .await
+            } else {
+                r.error_message
+            };
+            destinations.push(forest_grpc_interface::DestinationState {
                 destination_id: r.destination_id.to_string(),
                 destination_name: r.destination_name,
                 environment: r.environment,
                 release_id: Some(r.release_id.to_string()),
                 artifact_id: Some(r.artifact_id.to_string()),
                 status: Some(r.status),
-                error_message: r.error_message,
+                error_message,
                 queued_at: Some(r.queued_at.to_rfc3339()),
                 assigned_at: r.assigned_at.map(|t| t.to_rfc3339()),
                 started_at: r.started_at.map(|t| t.to_rfc3339()),
@@ -1360,8 +1399,8 @@ impl ReleaseService for ReleaseServer {
                 queue_position: r.queue_position.map(|p| p as i32),
                 release_intent_id: Some(r.release_intent_id.to_string()),
                 stage_id: r.stage_id,
-            })
-            .collect();
+            });
+        }
 
         Ok(Response::new(GetDestinationStatesResponse {
             destinations,
@@ -1409,36 +1448,46 @@ impl ReleaseService for ReleaseServer {
             .context("get release intent states")
             .to_internal_error()?;
 
-        let release_intents = results
-            .into_iter()
-            .map(|(intent, steps)| {
-                let stages = intent_to_stage_states(&intent);
-                let proto_steps = steps
-                    .into_iter()
-                    .map(|s| forest_grpc_interface::ReleaseStepState {
-                        release_id: s.release_id.to_string(),
-                        stage_id: s.stage_id,
-                        destination_name: s.destination_name,
-                        environment: s.environment,
-                        status: s.status,
-                        queued_at: Some(s.queued_at.to_rfc3339()),
-                        assigned_at: s.assigned_at.map(|t| t.to_rfc3339()),
-                        started_at: s.started_at.map(|t| t.to_rfc3339()),
-                        completed_at: s.completed_at.map(|t| t.to_rfc3339()),
-                        error_message: s.error_message,
-                    })
-                    .collect();
+        let mut policy_blockers = PolicyBlockerCache::new();
+        let mut release_intents = Vec::with_capacity(results.len());
+        for (intent, steps) in results {
+            let stages = intent_to_stage_states(&self.state, &intent, &mut policy_blockers).await;
+            let mut proto_steps = Vec::with_capacity(steps.len());
+            for s in steps {
+                let error_message = if s.status == "QUEUED" {
+                    release_policy_blocker(
+                        &self.state,
+                        &intent.release_intent_id,
+                        &s.environment,
+                        &mut policy_blockers,
+                    )
+                    .await
+                } else {
+                    s.error_message
+                };
+                proto_steps.push(forest_grpc_interface::ReleaseStepState {
+                    release_id: s.release_id.to_string(),
+                    stage_id: s.stage_id,
+                    destination_name: s.destination_name,
+                    environment: s.environment,
+                    status: s.status,
+                    queued_at: Some(s.queued_at.to_rfc3339()),
+                    assigned_at: s.assigned_at.map(|t| t.to_rfc3339()),
+                    started_at: s.started_at.map(|t| t.to_rfc3339()),
+                    completed_at: s.completed_at.map(|t| t.to_rfc3339()),
+                    error_message,
+                });
+            }
 
-                forest_grpc_interface::ReleaseIntentState {
-                    release_intent_id: intent.release_intent_id.to_string(),
-                    artifact_id: intent.artifact_id.to_string(),
-                    project: intent.project,
-                    created_at: intent.created_at.to_rfc3339(),
-                    stages,
-                    steps: proto_steps,
-                }
-            })
-            .collect();
+            release_intents.push(forest_grpc_interface::ReleaseIntentState {
+                release_intent_id: intent.release_intent_id.to_string(),
+                artifact_id: intent.artifact_id.to_string(),
+                project: intent.project,
+                created_at: intent.created_at.to_rfc3339(),
+                stages,
+                steps: proto_steps,
+            });
+        }
 
         Ok(Response::new(GetReleaseIntentStatesResponse {
             release_intents,
@@ -1933,10 +1982,76 @@ fn stage_def_to_type_fields(
     }
 }
 
-fn intent_to_stage_states(
+type PolicyBlockerCache =
+    std::collections::HashMap<Uuid, std::collections::HashMap<String, Option<String>>>;
+
+async fn release_policy_blocker(
+    state: &State,
+    release_intent_id: &Uuid,
+    environment: &str,
+    cache: &mut PolicyBlockerCache,
+) -> Option<String> {
+    let blockers = cache.entry(*release_intent_id).or_default();
+    if let Some(reason) = blockers.get(environment) {
+        return reason.clone();
+    }
+    let result: anyhow::Result<Option<String>> = async {
+        let (project_id, artifact_id, branch) = sqlx::query_as::<_, (Uuid, Uuid, Option<String>)>(
+            "SELECT i.project_id, i.artifact, a.ref->>'commit_branch'
+                 FROM release_intents i
+                 JOIN annotations a ON a.id = i.annotation_id
+                 WHERE i.id = $1",
+        )
+        .bind(release_intent_id)
+        .fetch_one(&state.db)
+        .await?;
+        let evaluations = state
+            .policy_registry()
+            .evaluate_for_environment(
+                &project_id,
+                environment,
+                branch.as_deref(),
+                None,
+                Some(&artifact_id),
+            )
+            .await?;
+        Ok(evaluations
+            .iter()
+            .find(|eval| !eval.passed && eval.policy_type == PolicyType::BranchRestriction)
+            .or_else(|| {
+                evaluations
+                    .iter()
+                    .find(|eval| !eval.passed && eval.policy_type == PolicyType::SoakTime)
+            })
+            .map(|eval| format!("policy '{}': {}", eval.policy_name, eval.reason)))
+    }
+    .await;
+
+    let reason = match result {
+        Ok(reason) => reason,
+        Err(_) => {
+            tracing::warn!(
+                %release_intent_id,
+                environment,
+                "release status: policies could not be evaluated"
+            );
+            Some(format!(
+                "policies could not be evaluated for this artifact in {environment}; release remains blocked"
+            ))
+        }
+    };
+    blockers.insert(environment.to_owned(), reason.clone());
+    reason
+}
+
+async fn intent_to_stage_states(
+    state: &State,
     intent: &crate::services::release_event_store::ReleaseIntentRow,
+    cache: &mut PolicyBlockerCache,
 ) -> Vec<forest_grpc_interface::PipelineStageState> {
-    use crate::services::release_pipeline::{PipelineStages, StageStates};
+    use crate::services::release_pipeline::{
+        PipelineStages, StageConfig, StageStates, find_ready_stages,
+    };
 
     let Some(ref stages_json) = intent.stages else {
         return Vec::new();
@@ -1952,6 +2067,21 @@ fn intent_to_stage_states(
         .as_ref()
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
+
+    let mut blockers = std::collections::HashMap::new();
+    for id in find_ready_stages(&stages, &stage_states) {
+        let environment = match &stages[&id].config {
+            StageConfig::Deploy { environment } | StageConfig::Plan { environment, .. } => {
+                environment
+            }
+            _ => continue,
+        };
+        if let Some(reason) =
+            release_policy_blocker(state, &intent.release_intent_id, environment, cache).await
+        {
+            blockers.insert(id, reason);
+        }
+    }
 
     stages
         .iter()
@@ -2001,7 +2131,7 @@ fn intent_to_stage_states(
                 queued_at,
                 started_at,
                 completed_at,
-                error_message,
+                error_message: blockers.remove(id).or(error_message),
                 environment,
                 duration_seconds,
                 wait_until,

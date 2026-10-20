@@ -119,6 +119,23 @@ forest self update    # upgrade to latest
 A one-line nag also prints at the end of every command when a newer release
 exists (cached 24h; suppress with `FOREST_NO_UPDATE_CHECK=1` or `CI=true`).
 
+### Using forest with Claude Code
+
+This repo ships a Claude Code plugin with a `forest` skill. It teaches agents the
+real commands for `forest.cue`, components, tools, publishing and pipeline-first
+releases, and what to check before anything changes shared state.
+
+```text
+/plugin marketplace add understory-io/forest
+/plugin install forest@forest
+```
+
+To try an unmerged change, use your checkout's absolute path as the marketplace
+instead. [Using Forest with Claude Code](apps/forest/docs/docs/getting-started/claude-code.md)
+covers checking that it loaded, updating, and dx-claude's older Forest skills,
+which compete with this one rather than redirecting to it. The skill lives in
+[`apps/forest/plugin/`](apps/forest/plugin/); change it with the CLI.
+
 ## What's here
 
 - [`apps/forest/`](apps/forest/) — the `forest` CLI and supporting libraries

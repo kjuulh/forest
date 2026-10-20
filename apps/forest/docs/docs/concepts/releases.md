@@ -11,6 +11,7 @@ Queued → Assigned → Running → Succeeded
                              → Failed
                              → TimedOut
                              → Cancelled
+                             → Superseded
 ```
 
 | State | Meaning |
@@ -22,6 +23,9 @@ Queued → Assigned → Running → Succeeded
 | **Failed** | Deployment failed |
 | **TimedOut** | No progress within timeout (5 min assigned, 1 hr running) |
 | **Cancelled** | Manually or automatically cancelled |
+| **Superseded** | Replaced by a newer queued release under a `supersede_pending` policy |
+
+A release can also stay **Queued** while a [soak-time policy](policies.md) for its environment is not yet met.
 
 Forest enforces a **partial unique index**: only one release can be in-flight per project+destination at a time.
 
@@ -33,6 +37,7 @@ An annotation creates an immutable record of what you're deploying and why:
 
 ```bash
 forest release annotate \
+  --annotation-only \
   --organisation my-org \
   --project-name my-service \
   --context-title "Deploy v1.2.3" \
@@ -47,27 +52,29 @@ The annotation captures three categories of metadata:
 - **Reference**: commit SHA, branch, message, version, repository URL
 
 !!! note
-    Annotations can trigger automatic releases if [triggers](triggers.md) are configured. Use `--annotation-only` to skip trigger evaluation.
+    This explicit-release recipe skips trigger evaluation with `--annotation-only`. For the normal pipeline-first flow, prepare then annotate without that flag, inspect the configured triggers and whole pipeline first, and do not also make the separate release call below.
 
 ### 2. Release
 
 Execute the deployment:
 
 ```bash
-forest release release \
+forest release release <slug> \
   --organisation my-org \
   --project my-service \
   --environment prod
 ```
 
-This creates one **release intent** per destination. Each intent is an independent unit of work that a runner picks up and executes.
+This creates one **release intent** with a release per destination. Each destination's release is an independent unit of work that a runner picks up and executes.
 
-### 3. Wait
+The slug printed by `annotate` names the artifact. `forest release release <slug> -e <env>` releases that same artifact again: this is how an artifact is promoted to another environment, or rolled back by releasing an earlier slug. There is no separate rollback command.
+
+### 3. Follow
 
 Stream progress in real-time:
 
 ```bash
-forest release wait <release-intent-id>
+forest release show <slug> --follow
 ```
 
 The wait stream includes:
@@ -78,17 +85,20 @@ The wait stream includes:
 
 ## Combined Command
 
-`forest release create` bundles all three steps:
+`forest release create` prepares and annotates, auto-detecting organisation, project and git context:
+
+The no-target form below is in unreleased source after **v0.3.16**. Released v0.3.16 requires an environment and skips triggers; use `prepare` + `annotate --source-type ci` for a version-independent trigger flow. A local build may still print `0.3.16`, so check `create --help`.
 
 ```bash
-forest release create --environment dev
+forest release create --source-type ci       # triggers decide; usually the project's pipeline
+forest release create --environment dev      # release to dev directly, triggers skipped
 ```
 
-It auto-detects organisation, project, and git context from the local environment.
+Without `--environment` or `--destination`, matching triggers release the annotation, and they may deploy through the whole pipeline, including prod. With a target, it releases there directly **unless `--skip-commit` or `--pipeline` is supplied**. `--skip-commit` enables triggers even with `-e dev`; `--pipeline` runs the whole pipeline, not just dev. Neither is an environment fence.
 
 ## Force Release
 
-If a release is already queued for a destination, use `--force` to cancel it and jump to the front:
+If a release is already queued for a destination, use `--force` to cancel it and jump to the front. `--force` does not bypass [policies](policies.md):
 
 ```bash
 forest release release --environment prod --force
@@ -96,10 +106,10 @@ forest release release --environment prod --force
 
 ## Release with Pipeline
 
-Use `--pipeline` to route the release through the project's configured [pipeline](pipelines.md):
+Use `--pipeline` to route the release through the project's configured [pipeline](pipelines.md). The whole pipeline runs, whatever `--environment` says:
 
 ```bash
-forest release release --environment prod --pipeline
+forest release release <slug> --environment dev --pipeline
 ```
 
 ## Event Sourcing

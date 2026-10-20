@@ -1115,6 +1115,64 @@ pub(crate) async fn check_approval_policies(
     Ok(None)
 }
 
+pub(crate) async fn check_branch_policies(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    project_id: &Uuid,
+    annotation_id: &Uuid,
+    target_environment: &str,
+) -> anyhow::Result<Option<String>> {
+    let policies = sqlx::query!(
+        r#"SELECT name, config
+        FROM policies
+        WHERE project_id = $1
+          AND enabled = true
+          AND policy_type = 'branch_restriction'"#,
+        project_id,
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .context("load branch_restriction policies")?;
+    if policies.is_empty() {
+        return Ok(None);
+    }
+
+    let branch = sqlx::query_scalar!(
+        r#"SELECT ref->>'commit_branch' as "branch" FROM annotations WHERE id = $1"#,
+        annotation_id,
+    )
+    .fetch_optional(&mut **tx)
+    .await
+    .context("load the annotation's branch")?
+    .flatten();
+
+    for policy in policies {
+        let crate::services::policy::PolicyConfig::BranchRestriction(config) =
+            crate::services::policy::PolicyConfig::from_record(
+                "branch_restriction",
+                &policy.config,
+            )?
+        else {
+            continue;
+        };
+        if config.target_environment != target_environment {
+            continue;
+        }
+        let eval = crate::services::policy::branch_restriction_verdict(
+            &config,
+            branch.as_deref(),
+            &policy.name,
+        );
+        if !eval.passed {
+            return Ok(Some(format!(
+                "blocked by policy '{}': {}",
+                policy.name, eval.reason
+            )));
+        }
+    }
+
+    Ok(None)
+}
+
 pub(crate) async fn check_soak_time_policies(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     project_id: &Uuid,
@@ -1134,64 +1192,27 @@ pub(crate) async fn check_soak_time_policies(
     .context("load soak_time policies")?;
 
     for policy in policies {
-        let config: serde_json::Value = policy.config;
-        let target = config
-            .get("target_environment")
-            .and_then(|v: &serde_json::Value| v.as_str())
-            .unwrap_or("");
-
-        if target != target_environment {
+        let crate::services::policy::PolicyConfig::SoakTime(config) =
+            crate::services::policy::PolicyConfig::from_record("soak_time", &policy.config)?
+        else {
+            continue;
+        };
+        if config.target_environment != target_environment {
             continue;
         }
 
-        let source_env = config
-            .get("source_environment")
-            .and_then(|v: &serde_json::Value| v.as_str())
-            .unwrap_or("");
-        let duration_secs = config
-            .get("duration_seconds")
-            .and_then(|v: &serde_json::Value| v.as_i64())
-            .unwrap_or(0);
-
-        let last_success = sqlx::query_scalar!(
-            r#"SELECT MAX(rs.updated_at) as "max_updated_at"
-            FROM release_states rs
-            JOIN destinations d ON rs.destination_id = d.id
-            WHERE rs.project_id = $1
-              AND rs.artifact_id = $2
-              AND d.environment = $3
-              AND rs.status = 'SUCCEEDED'"#,
+        let last_deploy = crate::services::policy::last_source_deploy(
+            tx,
             project_id,
-            artifact_id,
-            source_env,
+            Some(artifact_id),
+            &config.source_environment,
         )
-        .fetch_one(&mut **tx)
         .await
         .context("check soak time in pipeline")?;
-
-        match last_success {
-            Some(ts) => {
-                let elapsed = chrono::Utc::now() - ts;
-                let required = chrono::Duration::seconds(duration_secs);
-                if elapsed < required {
-                    let remaining = (required - elapsed).num_seconds();
-                    return Ok(Some(format!(
-                        "policy '{}': {}s remaining ({}s elapsed, {}s required after {} deploy)",
-                        policy.name,
-                        remaining,
-                        elapsed.num_seconds(),
-                        duration_secs,
-                        source_env,
-                    )));
-                }
-            }
-            None => {
-                tracing::debug!(
-                    policy = %policy.name,
-                    source_env,
-                    "no successful deploy to source env yet — soak time not applicable"
-                );
-            }
+        let (passed, reason) =
+            crate::services::policy::soak_verdict(last_deploy, chrono::Utc::now(), &config, true);
+        if !passed {
+            return Ok(Some(format!("policy '{}': {reason}", policy.name)));
         }
     }
 

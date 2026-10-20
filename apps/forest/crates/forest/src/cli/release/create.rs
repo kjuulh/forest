@@ -10,17 +10,13 @@ use super::{
     prepare::PrepareCommand,
 };
 
-/// Combined command: prepare → annotate (without auto-release) → release.
-///
-/// Auto-detects organisation, project, git context, and source info from
-/// the local environment. Only `--env` is required.
-///
-/// Usage: `forest release create --env prod`
 #[derive(clap::Parser)]
+#[command(group = clap::ArgGroup::new("release_target").args(["environment", "destination"]).multiple(true))]
 pub struct CreateCommand {
-    /// Target environment to release to.
+    /// Release to this environment directly, bypassing the project's triggers.
+    /// Omit it to enable triggers, which may deploy through the whole pipeline, including prod.
     #[arg(long, short = 'e', alias = "env")]
-    environment: String,
+    environment: Option<String>,
 
     /// Release title. Defaults to the latest git commit subject.
     #[arg(long)]
@@ -107,7 +103,7 @@ pub struct CreateCommand {
     #[arg(long = "include-file")]
     include_files: Vec<String>,
 
-    /// Target destination(s). If omitted, the server decides.
+    /// Release to these destinations directly, bypassing the project's triggers.
     #[arg(long, short = 'd')]
     destination: Option<Vec<String>>,
 
@@ -120,26 +116,42 @@ pub struct CreateCommand {
     overrides: Vec<String>,
 
     /// Skip waiting for the release to complete.
-    #[arg(long)]
+    #[arg(long, requires = "release_target")]
     no_wait: bool,
 
     /// Skip health monitoring after release.
-    #[arg(long)]
+    #[arg(long, requires = "release_target")]
     no_health: bool,
 
     /// Force release: cancel queued releases and jump to front of queue.
-    #[arg(long)]
+    #[arg(long, requires = "release_target")]
     force: bool,
 
     /// Use the project's release pipeline instead of deploying directly.
-    #[arg(long)]
+    #[arg(long, requires = "release_target")]
     pipeline: bool,
 
-    /// Only prepare and annotate; skip the final release step. The
-    /// published annotation is left for the server-side triggers/pipeline
-    /// to pick up and release automatically.
+    /// Enable triggers instead of a direct release, even when a target is given.
+    /// Matching triggers may deploy through the whole pipeline, including prod.
     #[arg(long = "skip-commit")]
     skip_commit: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Plan {
+    AnnotateForTriggers,
+    Release,
+}
+
+impl CreateCommand {
+    fn plan(&self) -> Plan {
+        let has_target = self.environment.is_some() || self.destination.is_some();
+        if has_target && !self.skip_commit {
+            Plan::Release
+        } else {
+            Plan::AnnotateForTriggers
+        }
+    }
 }
 
 impl CreateCommand {
@@ -197,7 +209,10 @@ impl CreateCommand {
         let title = self.title.clone().or(ci.title.clone()).unwrap_or_else(|| {
             git.subject
                 .clone()
-                .unwrap_or_else(|| format!("release to {}", self.environment))
+                .unwrap_or_else(|| match &self.environment {
+                    Some(env) => format!("release to {env}"),
+                    None => format!("annotate {project_name}"),
+                })
         });
         let description = self
             .description
@@ -235,7 +250,8 @@ impl CreateCommand {
             )
         };
 
-        let total_steps = if self.skip_commit { 2 } else { 3 };
+        let plan = self.plan();
+        let total_steps = if plan == Plan::Release { 3 } else { 2 };
 
         tracing::info!("step 1/{total_steps}: prepare");
         let prepare = PrepareCommand {
@@ -273,7 +289,7 @@ impl CreateCommand {
                 spec_file: self.spec_file.clone(),
                 no_spec: self.no_spec,
                 include_files: self.include_files.clone(),
-                annotation_only: true,
+                annotation_only: plan == Plan::Release,
             },
         )
         .await
@@ -282,9 +298,10 @@ impl CreateCommand {
         let slug = annotated.slug;
         eprintln!("published artifact: {slug}");
 
-        if self.skip_commit {
-            tracing::info!(
-                "skipping release step (--skip-commit); annotation left for server-side pickup"
+        if plan == Plan::AnnotateForTriggers {
+            eprintln!(
+                "annotation published with triggers enabled; matching triggers may deploy, including prod. \
+                 Inspect the outcome with `forest release show {slug}`."
             );
             return Ok(());
         }
@@ -293,7 +310,7 @@ impl CreateCommand {
         let commit = CommitCommand {
             slug: Some(slug),
             organisation: Some(organisation),
-            environment: Some(self.environment.clone()),
+            environment: self.environment.clone(),
             destination: self.destination.clone(),
             no_wait: self.no_wait,
             no_health: self.no_health,
@@ -552,7 +569,7 @@ impl GitInfo {
     async fn detect() -> Self {
         let (sha, branch, message, remote_url, dirty, author_name, author_email) = tokio::join!(
             git_output(&["rev-parse", "HEAD"]),
-            git_output(&["rev-parse", "--abbrev-ref", "HEAD"]),
+            git_output(&["branch", "--show-current"]),
             git_output(&["log", "-1", "--format=%B"]),
             git_output(&["remote", "get-url", "origin"]),
             git_is_dirty(),
@@ -595,6 +612,41 @@ mod tests {
     fn detect(vars: &[(&str, &str)]) -> CiInfo {
         let vars: HashMap<&str, &str> = vars.iter().copied().collect();
         CiInfo::detect_with(|key| vars.get(key).map(|value| (*value).to_string()))
+    }
+
+    fn parse(args: &[&str]) -> Result<CreateCommand, clap::Error> {
+        use clap::Parser;
+        CreateCommand::try_parse_from(std::iter::once("create").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn without_a_target_it_annotates_for_the_triggers() {
+        assert_eq!(parse(&[]).unwrap().plan(), Plan::AnnotateForTriggers);
+    }
+
+    #[test]
+    fn an_environment_or_destination_releases_directly() {
+        assert_eq!(parse(&["-e", "dev"]).unwrap().plan(), Plan::Release);
+        assert_eq!(parse(&["-d", "dev/eu"]).unwrap().plan(), Plan::Release);
+    }
+
+    #[test]
+    fn skip_commit_annotates_for_the_triggers_even_with_an_environment() {
+        assert_eq!(
+            parse(&["-e", "dev", "--skip-commit"]).unwrap().plan(),
+            Plan::AnnotateForTriggers
+        );
+    }
+
+    #[test]
+    fn release_only_flags_require_a_target() {
+        for flag in ["--pipeline", "--force", "--no-wait", "--no-health"] {
+            assert!(parse(&[flag]).is_err(), "{flag} accepted without a target");
+            assert!(
+                parse(&["-e", "dev", flag]).is_ok(),
+                "{flag} refused with -e"
+            );
+        }
     }
 
     #[test]

@@ -14,10 +14,11 @@ forest auth token create --name "ci-bot" | gh secret set FOREST_TOKEN --repo <or
 
 :::note
 This is a *personal* access token — it carries the permissions of whoever
-created it. There is no machine/service-account token today; `forest
-organisation` has no `app` subcommand despite what earlier revisions of this
-guide claimed. Prefer a token created by an account that only holds the access
-CI actually needs.
+created it. Prefer one created by an account that only holds the access CI
+actually needs. A job that only publishes components can use an organisation
+OAuth app with the `client_credentials` grant and the `components:publish`
+scope instead ([Authentication](../getting-started/authentication.md#oauth-apps));
+that scope cannot release.
 :::
 
 Set the token in your pipeline:
@@ -162,11 +163,12 @@ A published prerelease does not reach anyone who did not ask for it. A bare
 `<org>/<name>` resolves to the highest stable release, and the org tool
 catalogue lists stable releases only. A tool with only prereleases is installed
 by exact version or by opting in with `forest global add <org>/<name>
---prerelease`; see [`forest global add --prerelease`](../reference/cli.md#forest-global-add---prerelease).
+--prerelease`; see [`forest global add --prerelease`](../reference/cli.md#forest-global-add-prerelease).
 
-A version cannot be republished, prereleases included, so each new build needs
-a new number: `0.2.0-rc.1`, then `0.2.0-rc.2`. SemVer orders the numeric parts
-numerically, so `rc.10` follows `rc.9`.
+A currently published version cannot be overwritten, prereleases included, so
+each new build needs a new number: `0.2.0-rc.1`, then `0.2.0-rc.2`. Admin unpublish
+permits version reuse; an exact pin alone is not lifetime content identity.
+SemVer orders the numeric parts numerically, so `rc.10` follows `rc.9`.
 
 ### The build runs in CI, not on the registry
 
@@ -451,15 +453,15 @@ Configure triggers on the server side:
 
 ```bash
 # Auto-deploy to staging on main
-forest project trigger create ci-staging \
+forest project trigger create --name ci-staging \
   --branch "^main$" \
   --source-type "^ci$" \
-  --target-environment staging
+  --env staging
 
-# Auto-deploy to prod via pipeline on tags
-forest project trigger create ci-prod \
+# Deploy release tags through the pipeline (all of its stages, prod included)
+forest project trigger create --name ci-prod \
   --branch "^v[0-9]" \
-  --target-environment prod \
+  --source-type "^ci$" \
   --use-pipeline
 ```
 
@@ -467,24 +469,24 @@ This separates **what** gets deployed (CI annotation) from **where** and **how**
 
 ## Explicit Release Flow
 
-For full control, annotate and release explicitly:
+For an explicitly requested direct staging release, first prepare and annotate with `--annotation-only`, retaining the printed slug as `SLUG`. Otherwise annotation can also start a trigger-driven pipeline, including prod. Do not combine trigger dispatch and the separate release below.
 
 ```yaml
 - name: Release to staging
   run: |
-    forest release release \
+    forest release release "$SLUG" \
       --organisation my-org \
       --project my-service \
       --environment staging
 
 - name: Wait for staging
   run: |
-    forest release wait "$INTENT_ID"
+    forest release show "$SLUG" --follow
 ```
 
 ## Policy Evaluation
 
-Before releasing, check if policies allow it:
+Use policy evaluation as a partial environment/branch diagnostic, not a release authorization or CI gate. It has no artifact selector: soak describes the latest successful deploy of **any artifact**, not the one being released. PASS does not prove that artifact soaked, an unrelated newer deploy can cause FAIL, and the command exits 0 even with failed policies. The server evaluates the actual artifact during release.
 
 ```yaml
 - name: Check policies
@@ -492,7 +494,7 @@ Before releasing, check if policies allow it:
     forest project policy evaluate \
       --organisation my-org \
       --project my-service \
-      --environment prod
+      --target-environment prod --branch "$GITHUB_REF_NAME"
 ```
 
 ## Who a release is attributed to
@@ -566,8 +568,9 @@ IMAGE_TAG=$(git rev-parse --short HEAD)
 docker build -t git.example.io/org/my-service:$IMAGE_TAG .
 docker push git.example.io/org/my-service:$IMAGE_TAG
 
-# Release with the exact tag that was just built
-forest release create --env dev \
+# Annotate with the exact tag that was just built; the project's trigger
+# releases it, usually through the pipeline (add --env dev to release dev only)
+forest release create --source-type ci \
   --set my-org/service.tag=$IMAGE_TAG
 ```
 
@@ -584,7 +587,7 @@ config: {
 Multiple overrides can be combined:
 
 ```bash
-forest release create --env prod \
+forest release create --source-type ci \
   --set my-org/service.tag=$IMAGE_TAG \
   --set my-org/service.env_vars.BUILD_SHA=$COMMIT_SHA
 ```
@@ -596,9 +599,7 @@ All `--set` overrides are recorded in the release annotation metadata for audit 
 Subscribe to release events for notifications or dashboards:
 
 ```bash
-forest notifications subscribe \
+forest notifications listen \
   --organisation my-org \
-  --project my-service \
-  --resource-types release \
-  --actions status_changed
+  --project my-service
 ```
