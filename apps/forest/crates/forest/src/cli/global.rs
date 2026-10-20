@@ -24,7 +24,8 @@ enum Commands {
     Scaffold(global_init::GlobalInitCommand),
     /// Set a user-config kv pair (forest global set <key> <value>).
     Set(global_set::GlobalSetCommand),
-    /// Add a per-tool dependency: `<org>/<name>[@<version>]`.
+    /// Add a per-tool dependency: `<org>/<name>[@<version>]`, or follow its
+    /// prereleases with `--prerelease`.
     Add(AddCommand),
     /// Remove a per-tool dependency and its shim.
     Remove(RemoveCommand),
@@ -231,6 +232,12 @@ impl UpdateCommand {
         if out.held > 0 {
             eprintln!("held {} pinned tool(s) at their pinned version", out.held);
         }
+        for s in &out.without_stable {
+            eprintln!(
+                "  {} : kept {}; {} is a prerelease (follow prereleases with `forest global add {} --prerelease`)",
+                s.qualified, s.from, s.to, s.qualified
+            );
+        }
         eprintln!(
             "sync: {} shim(s) created, {} deleted",
             out.sync.created.len(),
@@ -353,6 +360,12 @@ pub struct AddCommand {
     #[arg(long = "alias")]
     alias: Vec<String>,
 
+    /// Follow this tool's prereleases: install the highest SemVer version,
+    /// prerelease or stable, and keep `forest global update` doing so. Re-run
+    /// `forest global add <org>/<name>` without this flag to return to stable.
+    #[arg(long = "prerelease")]
+    prerelease: bool,
+
     /// Skip the implicit `forest global sync` step after writing the
     /// dependency. Useful in scripts / CI that don't want extra network
     /// calls during `add`.
@@ -365,6 +378,12 @@ impl AddCommand {
         let svc = GlobalService::from_state(state)?;
 
         if !self.component.contains('/') && !self.component.contains('@') {
+            if self.prerelease {
+                anyhow::bail!(
+                    "--prerelease applies to a single tool: `forest global add {}/<name> --prerelease`",
+                    self.component
+                );
+            }
             let pins = parse_kv_list(&self.pin, "--pin")?;
             let aliases = parse_kv_list(&self.alias, "--alias")?;
             let outcome = svc
@@ -393,11 +412,25 @@ impl AddCommand {
 
         let (org, name, version) = parse_component_ref(&self.component)?;
         let outcome = svc
-            .add_dependency(&org, &name, version.as_deref(), self.as_shim.as_deref())
+            .add_dependency(
+                &org,
+                &name,
+                version.as_deref(),
+                self.as_shim.as_deref(),
+                self.prerelease,
+            )
             .await?;
         eprintln!(
-            "added {}/{}@{} (shape={:?})",
-            org, name, outcome.resolved_version, outcome.shape
+            "added {}/{}@{} (shape={:?}){}",
+            org,
+            name,
+            outcome.resolved_version,
+            outcome.shape,
+            if self.prerelease {
+                ", following prereleases"
+            } else {
+                ""
+            }
         );
         if let Some(shim) = outcome.shim_name {
             eprintln!("shim created: {}", svc.shim_path(&shim).display());
@@ -519,6 +552,7 @@ impl ListCommand {
                 source: match t.source {
                     ToolSource::Pin => "[pinned]".to_string(),
                     ToolSource::Latest => "[latest]".to_string(),
+                    ToolSource::Prerelease => "[prerelease]".to_string(),
                     ToolSource::Catalog { org } => format!("[catalog:{org}]"),
                     ToolSource::CatalogBanned { org } => format!("[catalog:{org} banned]"),
                     ToolSource::CatalogShadowed { org } => {

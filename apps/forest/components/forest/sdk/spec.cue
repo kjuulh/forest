@@ -23,8 +23,24 @@ package sdk
 	tags?: [...string]
 }
 
+// A component is published with `forest publish` and consumed by version:
+// projects through `dependencies`, tools through `forest global add`.
+//
+// Every published version is immutable, prereleases included: publishing the
+// same version again is refused, so each new build needs a new version.
 #ForestComponent: {
-	name:    string
+	name: string
+
+	// A SemVer version. A stable release (`1.3.0`) is what consumers get by
+	// default. A prerelease (`1.3.0-rc.1`, `1.3.0-alpha.10`) is never picked
+	// for anyone who did not ask for it: it is installed by exact version
+	// (`@1.3.0-rc.1`) or by opting a tool in with `forest global add
+	// <org>/<name> --prerelease`. Number prereleases upwards (`rc.1`, `rc.2`,
+	// …, compared numerically) and publish the final `1.3.0` when done; it
+	// supersedes its RCs for everyone following them. CI sets a prerelease
+	// without editing this file through `FOREST_COMPONENT_VERSION=1.3.0-rc.1`
+	// (read by `forest run build` and `forest publish`). Build metadata
+	// (`1.3.0+build.5`) is not a prerelease.
 	version: string & =~#"^\d+\.\d+\.\d+"#
 
 	codegen?: #ForestCodegen

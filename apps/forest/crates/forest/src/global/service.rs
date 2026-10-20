@@ -711,6 +711,9 @@ pub fn render_user_config(cfg: &UserConfig) -> String {
             if dep.pinned {
                 out.push_str("\t\t\tpinned: true\n");
             }
+            if dep.prerelease {
+                out.push_str("\t\t\tprerelease: true\n");
+            }
             if let Some(shim) = &dep.shim_name {
                 out.push_str(&format!("\t\t\tshim_name: {}\n", cue_string(shim)));
             }
@@ -899,6 +902,7 @@ pub struct SyncOutcome {
 pub struct UpdateOutcome {
     pub bumps: Vec<VersionBump>,
     pub held: usize,
+    pub without_stable: Vec<VersionBump>,
     pub sync: SyncOutcome,
 }
 
@@ -924,20 +928,43 @@ impl GlobalService {
         name: &str,
         version: Option<&str>,
         as_shim_name: Option<&str>,
+        prerelease: bool,
     ) -> Result<AddOutcome> {
-        let component = match version {
-            Some(v) => self
+        let resolved_version = match (version, prerelease) {
+            (Some(v), true) => anyhow::bail!(
+                "{organisation}/{name}@{v} is an exact pin; drop `@{v}` to follow prereleases \
+                 with --prerelease"
+            ),
+            (Some(v), false) => self
                 .grpc
                 .get_component_version(name, organisation, v)
                 .await?
-                .ok_or_else(|| anyhow!("not found: {organisation}/{name}@{v}"))?,
-            None => self
-                .grpc
-                .get_component(name, organisation)
+                .ok_or_else(|| anyhow!("not found: {organisation}/{name}@{v}"))?
+                .version
+                .to_string(),
+            (None, true) => self
+                .newest_including_prereleases(organisation, name)
                 .await?
                 .ok_or_else(|| anyhow!("not found: {organisation}/{name}"))?,
+            (None, false) => {
+                let latest = self
+                    .grpc
+                    .get_component(name, organisation)
+                    .await?
+                    .ok_or_else(|| anyhow!("not found: {organisation}/{name}"))?
+                    .version
+                    .to_string();
+                if is_prerelease(&latest) {
+                    anyhow::bail!(
+                        "{organisation}/{name} has no stable release yet; its newest version is \
+                         the prerelease {latest}. Follow its prereleases with `forest global add \
+                         {organisation}/{name} --prerelease`, or install that build alone with \
+                         `forest global add {organisation}/{name}@{latest}`"
+                    );
+                }
+                latest
+            }
         };
-        let resolved_version = component.version.to_string();
 
         let manifest = self
             .fetch_manifest(organisation, name, &resolved_version)
@@ -945,13 +972,19 @@ impl GlobalService {
 
         let mut cfg = self.load_user_config().await?;
         let key = format!("{organisation}/{name}");
+        let env = cfg
+            .dependencies
+            .get(&key)
+            .map(|d| d.env.clone())
+            .unwrap_or_default();
         cfg.dependencies.insert(
             key.clone(),
             Dependency {
                 version: resolved_version.clone(),
                 pinned: version.is_some(),
+                prerelease,
                 shim_name: as_shim_name.map(str::to_string),
-                env: Default::default(),
+                env,
             },
         );
         self.save_user_config(&cfg).await?;
@@ -976,6 +1009,19 @@ impl GlobalService {
             shim_name: shim_name_emitted,
             shape: manifest.shape,
         })
+    }
+
+    async fn newest_including_prereleases(
+        &self,
+        organisation: &str,
+        name: &str,
+    ) -> Result<Option<String>> {
+        let versions = self
+            .grpc
+            .list_component_versions(organisation, name)
+            .await
+            .with_context(|| format!("listing versions of {organisation}/{name}"))?;
+        Ok(newest_version(versions.iter().map(|v| v.version.as_str())))
     }
 
     pub async fn subscribe_to_org(
@@ -1088,6 +1134,7 @@ impl GlobalService {
                 org.to_string(),
                 name.to_string(),
                 dep.version.clone(),
+                dep.prerelease,
             ));
         }
 
@@ -1095,19 +1142,35 @@ impl GlobalService {
         let latests = crate::download::map_bounded(
             floating,
             std::sync::Arc::clone(&limiter),
-            |(key, org, name, current), _lim| async move {
-                let latest = match self.grpc.get_component(&name, &org).await {
-                    Ok(Some(c)) => Some(c.version.to_string()),
-                    _ => None,
+            |(key, org, name, current, prerelease), _lim| async move {
+                let latest = if prerelease {
+                    self.newest_including_prereleases(&org, &name)
+                        .await
+                        .ok()
+                        .flatten()
+                } else {
+                    match self.grpc.get_component(&name, &org).await {
+                        Ok(Some(c)) => Some(c.version.to_string()),
+                        _ => None,
+                    }
                 };
-                Ok((key, current, latest))
+                Ok((key, current, latest, prerelease))
             },
         )
         .await;
 
+        let mut without_stable = Vec::new();
         for resolved in latests {
-            let (key, current, latest) = resolved?;
+            let (key, current, latest, prerelease) = resolved?;
             let Some(latest) = latest else { continue };
+            if !prerelease && is_prerelease(&latest) {
+                without_stable.push(VersionBump {
+                    qualified: key,
+                    from: current,
+                    to: latest,
+                });
+                continue;
+            }
             if latest != current {
                 if let Some(dep) = cfg.dependencies.get_mut(&key) {
                     dep.version = latest.clone();
@@ -1125,7 +1188,12 @@ impl GlobalService {
         if let Err(e) = self.migrate_binary_store().await {
             tracing::debug!("binary-store migration skipped: {e:#}");
         }
-        Ok(UpdateOutcome { bumps, held, sync })
+        Ok(UpdateOutcome {
+            bumps,
+            held,
+            without_stable,
+            sync,
+        })
     }
 
     pub async fn sync_shims(&self) -> Result<SyncOutcome> {
@@ -1373,6 +1441,8 @@ impl GlobalService {
                     status,
                     source: if dep.pinned {
                         ToolSource::Pin
+                    } else if dep.prerelease {
+                        ToolSource::Prerelease
                     } else {
                         ToolSource::Latest
                     },
@@ -1433,7 +1503,7 @@ impl GlobalService {
 
                 if matches!(
                     out.get(&shim_name).map(|t| &t.source),
-                    Some(ToolSource::Pin) | Some(ToolSource::Latest)
+                    Some(ToolSource::Pin) | Some(ToolSource::Latest) | Some(ToolSource::Prerelease)
                 ) {
                     continue;
                 }
@@ -1535,6 +1605,7 @@ fn matches_selector(t: &ListedTool, selectors: &[String]) -> bool {
 pub enum ToolSource {
     Pin,
     Latest,
+    Prerelease,
     Catalog { org: String },
     CatalogBanned { org: String },
     CatalogShadowed { org: String },
@@ -1544,6 +1615,18 @@ pub enum ToolSource {
 pub enum ToolStatus {
     Cached,
     Missing,
+}
+
+fn is_prerelease(version: &str) -> bool {
+    semver::Version::parse(version).is_ok_and(|v| !v.pre.is_empty())
+}
+
+fn newest_version<'a>(versions: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    versions
+        .into_iter()
+        .filter_map(|v| semver::Version::parse(v).ok().map(|parsed| (parsed, v)))
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, v)| v.to_string())
 }
 
 pub fn parse_qualified_ref_from_shim(body: &str) -> Option<QualifiedRef> {
@@ -1669,6 +1752,38 @@ mod tests {
     }
 
     #[test]
+    fn following_prereleases_picks_the_highest_semver_not_the_last_string() {
+        let got = newest_version(["1.2.0", "1.3.0-alpha.10", "1.3.0-alpha.2", "1.3.0-alpha.9"]);
+        assert_eq!(got.as_deref(), Some("1.3.0-alpha.10"));
+    }
+
+    #[test]
+    fn following_prereleases_lets_a_final_release_beat_its_own_rc() {
+        let got = newest_version(["1.3.0-rc.1", "1.3.0", "1.3.0-rc.2"]);
+        assert_eq!(got.as_deref(), Some("1.3.0"));
+    }
+
+    #[test]
+    fn following_prereleases_takes_a_newer_rc_over_an_older_stable() {
+        let got = newest_version(["1.2.0", "1.3.0-rc.1"]);
+        assert_eq!(got.as_deref(), Some("1.3.0-rc.1"));
+    }
+
+    #[test]
+    fn following_prereleases_ignores_unparseable_versions() {
+        assert_eq!(newest_version(["latest", "x.y"]), None);
+        assert_eq!(newest_version(["9.9", "0.1.0"]).as_deref(), Some("0.1.0"));
+    }
+
+    #[test]
+    fn build_metadata_alone_is_not_a_prerelease() {
+        assert!(!is_prerelease("1.3.0+build.7"));
+        assert!(is_prerelease("1.3.0-rc.1+build.7"));
+        assert!(is_prerelease("1.3.0-alpha.10"));
+        assert!(!is_prerelease("1.3.0"));
+    }
+
+    #[test]
     fn render_user_config_round_trips_via_parser() {
         let mut cfg = UserConfig::default();
         cfg.dependencies.insert(
@@ -1676,6 +1791,7 @@ mod tests {
             Dependency {
                 version: "14.1.1".into(),
                 pinned: true,
+                prerelease: false,
                 shim_name: Some("rg".into()),
                 env: [("FUNGUS_SERVER".to_string(), "https://prod".to_string())]
                     .into_iter()

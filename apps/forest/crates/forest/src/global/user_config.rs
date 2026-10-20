@@ -13,6 +13,7 @@ pub struct UserConfig {
 pub struct Dependency {
     pub version: String,
     pub pinned: bool,
+    pub prerelease: bool,
     pub shim_name: Option<String>,
     pub env: BTreeMap<String, String>,
 }
@@ -109,12 +110,22 @@ pub fn parse(json: &str) -> Result<UserConfig, UserConfigError> {
                         return Err(UserConfigError::InvalidJson("pinned must be a bool".into()));
                     }
                 };
+                let prerelease = match dep_obj.get("prerelease") {
+                    None | Some(serde_json::Value::Null) => false,
+                    Some(serde_json::Value::Bool(b)) => *b,
+                    Some(_) => {
+                        return Err(UserConfigError::InvalidJson(
+                            "prerelease must be a bool".into(),
+                        ));
+                    }
+                };
                 let env = parse_dep_env(dep_obj.get("env"))?;
                 out.insert(
                     k.clone(),
                     Dependency {
                         version,
                         pinned,
+                        prerelease,
                         shim_name,
                         env,
                     },
@@ -290,6 +301,35 @@ mod tests {
         assert_eq!(dep.version, "14.1.1");
         assert!(dep.shim_name.is_none());
         assert!(!dep.pinned);
+        assert!(!dep.prerelease);
+    }
+
+    #[test]
+    fn parses_prerelease_opt_in_with_a_dotted_prerelease_version() {
+        let json = r#"{
+            "config": {
+                "dependencies": {
+                    "cuteorg/ripgrep": {"version": "1.3.0-alpha.10", "prerelease": true}
+                }
+            }
+        }"#;
+        let c = parse(json).unwrap();
+        let dep = c.dependencies.get("cuteorg/ripgrep").unwrap();
+        assert_eq!(dep.version, "1.3.0-alpha.10");
+        assert!(dep.prerelease);
+        assert!(!dep.pinned);
+    }
+
+    #[test]
+    fn rejects_non_bool_prerelease() {
+        let json = r#"{
+            "config": {
+                "dependencies": {
+                    "cuteorg/ripgrep": {"version": "1.3.0-rc.1", "prerelease": "yes"}
+                }
+            }
+        }"#;
+        assert!(matches!(parse(json), Err(UserConfigError::InvalidJson(_))));
     }
 
     #[test]

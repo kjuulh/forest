@@ -147,12 +147,15 @@ the environment form: `--version` reaches the upload but not the build, leaving
 the binary reporting the manifest's version. `forest publish` warns when it
 detects this.
 
-:::warning
-Forest does not exclude prereleases when resolving a bare `<org>/<name>` — it
-takes the semver maximum. A prerelease numbered above the current release
-becomes what everyone installs. Number test prereleases *below* the current
-release (`0.1.7-ci.1`, not `0.1.99-ci.1`), or publish them to a dev registry.
-:::
+A published prerelease does not reach anyone who did not ask for it. A bare
+`<org>/<name>` resolves to the highest stable release, and the org tool
+catalogue lists stable releases only. A tool with only prereleases is installed
+by exact version or by opting in with `forest global add <org>/<name>
+--prerelease`; see [`forest global add --prerelease`](../reference/cli.md#forest-global-add---prerelease).
+
+A version cannot be republished, prereleases included, so each new build needs
+a new number: `0.2.0-rc.1`, then `0.2.0-rc.2`. SemVer orders the numeric parts
+numerically, so `rc.10` follows `rc.9`.
 
 ### The build runs in CI, not on the registry
 

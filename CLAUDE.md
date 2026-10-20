@@ -57,6 +57,11 @@ Then `gitnow`/`awslogin` are on `PATH` via `~/.cache/forest/global/shims/`.
 | `forest global verify` | re-hash every cached binary; delete mismatches |
 | `forest global sync` | repair shims that drifted from `forest.cue` |
 
+Installs and updates take stable releases only. To follow one tool's
+prereleases, `forest global add <org>/<name> --prerelease` (persisted, so
+`update` keeps following them); re-run `add` without the flag to return to
+stable. `@1.3.0-rc.1` pins one exact build.
+
 Catalogue subscriptions are tunable per tool without unsubscribing:
 `forest global ban <org> <tool>` / `unban`, and `forest global pin <org>/<tool>
 <version>` / `unpin`. `add` also accepts `--ban`, `--pin name=version`,

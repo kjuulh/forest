@@ -989,6 +989,120 @@ async fn list_org_tools_filters_by_shape_and_returns_latest_non_prerelease() {
     );
 }
 
+fn tool_manifest(name: &str, sha_fill: char) -> serde_json::Value {
+    json!({
+        "kind": "binary",
+        "tool": {"name": name, "argv_passthrough": true},
+        "platforms": {
+            "linux_amd64": {"sha256": sha_fill.to_string().repeat(64)}
+        }
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dotted_prereleases_are_listed_by_semver_and_resolve_exactly_while_latest_stays_stable() {
+    let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();
+    let token = register_user(&g).await;
+    let org = unique_org();
+    create_org(&g, &token, &org).await;
+
+    for (version, fill) in [
+        ("1.2.0", 'a'),
+        ("1.3.0-alpha.2", 'b'),
+        ("1.3.0-alpha.10", 'c'),
+        ("1.3.0-rc.1", 'd'),
+    ] {
+        publish_tool(
+            &g,
+            &token,
+            &org,
+            "prtool",
+            version,
+            tool_manifest("prtool", fill),
+        )
+        .await;
+    }
+
+    let listed: Vec<String> = g
+        .fixture()
+        .registry()
+        .list_component_versions(authed_request(
+            &token,
+            ListComponentVersionsRequest {
+                organisation: org.clone(),
+                name: "prtool".into(),
+            },
+        ))
+        .await
+        .expect("list_component_versions")
+        .into_inner()
+        .versions
+        .into_iter()
+        .map(|v| v.version)
+        .collect();
+    assert_eq!(
+        listed,
+        ["1.3.0-rc.1", "1.3.0-alpha.10", "1.3.0-alpha.2", "1.2.0"],
+        "versions must be newest-first by SemVer precedence"
+    );
+
+    let latest = g
+        .fixture()
+        .registry()
+        .get_component(authed_request(
+            &token,
+            GetComponentRequest {
+                name: "prtool".into(),
+                organisation: org.clone(),
+            },
+        ))
+        .await
+        .expect("get_component")
+        .into_inner()
+        .component
+        .expect("component");
+    assert_eq!(latest.version, "1.2.0");
+
+    let manifest = g
+        .fixture()
+        .registry()
+        .get_component_manifest(authed_request(
+            &token,
+            GetComponentManifestRequest {
+                organisation: org.clone(),
+                name: "prtool".into(),
+                version: "1.3.0-alpha.10".into(),
+            },
+        ))
+        .await
+        .expect("get_component_manifest")
+        .into_inner()
+        .manifest_json;
+    let manifest: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    assert_eq!(
+        manifest["platforms"]["linux_amd64"]["sha256"],
+        "c".repeat(64),
+        "an exact dotted prerelease must resolve to its own artifact"
+    );
+
+    let republish = g
+        .fixture()
+        .registry()
+        .begin_upload(authed_request(
+            &token,
+            BeginUploadRequest {
+                name: "prtool".into(),
+                organisation: org.clone(),
+                version: "1.3.0-rc.1".into(),
+            },
+        ))
+        .await;
+    assert!(
+        republish.is_err(),
+        "a published prerelease is immutable; new builds need a new prerelease number"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn list_org_tools_returns_empty_stream_for_org_with_no_tools() {
     let (g, _w, _t) = testcase::<GlobalToolsData>().await.unwrap();

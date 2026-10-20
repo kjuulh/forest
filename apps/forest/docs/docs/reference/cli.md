@@ -566,6 +566,46 @@ path — one exec, `eval` the output.
 
 ---
 
+## `forest global add --prerelease`
+
+Follow one tool's prereleases instead of its stable releases.
+
+```bash
+forest global add understory/fungus --prerelease   # highest SemVer, prerelease or stable
+forest global update                               # keeps following prereleases for it
+forest global add understory/fungus                # back to the latest stable release
+forest global run understory/fungus@1.3.0-rc.1 -- --version   # one build, once
+```
+
+Behaviour:
+
+- Without `--prerelease`, `add` and `update` never select a prerelease. A tool
+  with no stable release yet is refused with the newest prerelease named, rather
+  than installed, and `update` never moves an entry onto a prerelease.
+- With it, `add` installs the highest version by SemVer precedence:
+  `1.3.0-alpha.10` beats `1.3.0-alpha.2`, `1.3.0` beats `1.3.0-rc.2`, and build
+  metadata (`1.3.0+build.5`) is not a prerelease. The choice is stored as
+  `prerelease: true` on that entry in `~/.config/forest/forest.cue`, so `forest
+  global update` and the daily background update follow it. `forest global list`
+  shows such a tool as `[prerelease]`.
+- Running `add` again without the flag returns the tool to stable and clears the
+  opt-in; if the tool has no stable release, the opt-in is left as it was.
+  Hand-set `env` overrides on the entry are kept either way; `--as` must be
+  passed again.
+- The opt-in is per tool. Org catalogue subscriptions stay on stable releases,
+  and a per-tool entry shadows the catalogue entry as it always has.
+- `@<version>` is an exact pin, prerelease or not, and `update` holds it. It
+  cannot be combined with `--prerelease`, nor can a whole-org `add <org>`.
+- `forest global run`/`which` with `<org>/<name>@<version>` runs that build
+  without changing the installed selection.
+- A published version, prerelease included, is immutable: publishing the same
+  version again is refused. Ship a new build as a new prerelease number
+  (`1.3.0-rc.2`). An admin unpublish followed by a republish under the same
+  version is not picked up: the lockfile keeps the digest first fetched, and a
+  fetch of the replaced bytes fails with a digest mismatch.
+
+---
+
 ## `forest global warm`
 
 Pre-download the binaries for global tools that aren't cached yet, capture their
