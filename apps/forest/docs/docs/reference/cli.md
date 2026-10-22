@@ -615,6 +615,28 @@ path — one exec, `eval` the output.
 
 ---
 
+## `forest self`
+
+```bash
+forest self check [--prerelease]        # exit 1 when a newer release exists
+forest self update [--prerelease]       # latest stable, or highest including prereleases
+forest self update <version>            # exactly that release, older ones included
+```
+
+After v0.3.16 (check: `forest self update --help` lists `--prerelease`):
+
+- Without a version, `update` never replaces a newer binary with an older
+  release. `--prerelease` applies to one run; `FOREST_PRERELEASE=1` applies it
+  to `update`, `check` and the update notice while it is set. Nothing is saved.
+- A version must be SemVer (`v` optional); it is also the way back to stable.
+- The archive's `.sha256` record must name and match it, and the new binary's
+  `forest --version` must equal the requested version, before it replaces the
+  running one.
+- `forest --version` prints `(commit <sha>)` for release builds and
+  `(local build)` from source.
+
+Cutting a forest prerelease is described in `RELEASING.md` at the repo root.
+
 ## `forest global add --prerelease`
 
 Follow one tool's prereleases instead of its stable releases.
@@ -663,6 +685,7 @@ Behaviour:
   content identity. The lockfile keeps the digest first fetched and refuses
   replacement bytes on a later fetch. A warm cached binary can continue running
   without an online revocation check.
+  After v0.3.16 it also covers forest itself; see [`forest self`](#forest-self).
 
 ---
 

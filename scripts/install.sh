@@ -23,10 +23,23 @@ command -v gh >/dev/null 2>&1 \
 gh auth status >/dev/null 2>&1 \
   || err "gh CLI is not authenticated. Run 'gh auth login' first."
 
+semver_tag='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+
 if [ -z "$VERSION" ]; then
     VERSION=$(gh release view --repo "$REPO" --json tagName --jq '.tagName') \
         || err "Failed to resolve latest release. Check repo access."
+    case "$VERSION" in
+        *-*) err "The latest stable release $VERSION carries a prerelease version (published without GitHub's prerelease flag). Pass the version explicitly to install it anyway." ;;
+    esac
+else
+    case "$VERSION" in
+        v*) ;;
+        *) VERSION="v$VERSION" ;;
+    esac
 fi
+
+printf '%s\n' "$VERSION" | grep -Eq "$semver_tag" \
+    || err "'$VERSION' is not a release version; expected SemVer such as v0.3.16 or v0.3.16-rc.1."
 
 uname_s=$(uname -s)
 uname_m=$(uname -m)
@@ -65,6 +78,18 @@ gh release download "$VERSION" \
     --dir "$tmp" \
     || err "Failed to download $asset from $REPO. Check the tag exists and you have access."
 
+checksum_record=""
+record_count=0
+while IFS= read -r record || [ -n "$record" ]; do
+    record_count=$((record_count + 1))
+    checksum_record="$record"
+done < "$tmp/$checksum"
+checksum_pattern='^[0-9a-fA-F]{64} [ *](.+)$'
+if [ "$record_count" -ne 1 ] || ! [[ "$checksum_record" =~ $checksum_pattern ]] \
+    || [ "${BASH_REMATCH[1]}" != "$asset" ]; then
+    err "Checksum file must contain exactly one SHA-256 record for $asset."
+fi
+
 verify_sha256() {
     local sumfile="$1"
     if command -v sha256sum >/dev/null 2>&1; then
@@ -80,6 +105,11 @@ verify_sha256() {
 
 tar -xzf "$tmp/$asset" -C "$tmp"
 
+identity=$("$tmp/$BIN" --version 2>/dev/null) || identity=""
+reported=$(printf '%s\n' "$identity" | awk 'NR == 1 && $1 == "forest" { print $2 }')
+[ "$reported" = "${VERSION#v}" ] \
+    || err "Refusing to install: $asset reports '${identity:-nothing}', not forest ${VERSION#v}."
+
 target_path="$PREFIX/bin/$BIN"
 mkdir -p "$PREFIX/bin" 2>/dev/null || true
 if [ -w "$PREFIX/bin" ]; then
@@ -93,7 +123,7 @@ else
     fi
 fi
 
-echo "==> $BIN $VERSION installed at $target_path"
+echo "==> $identity installed at $target_path"
 
 case ":$PATH:" in
     *":$PREFIX/bin:"*)

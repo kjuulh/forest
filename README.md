@@ -119,6 +119,21 @@ forest self update    # upgrade to latest
 A one-line nag also prints at the end of every command when a newer release
 exists (cached 24h; suppress with `FOREST_NO_UPDATE_CHECK=1` or `CI=true`).
 
+**After v0.3.16** (check: `forest self update --help` lists `--prerelease`),
+forest itself has prereleases:
+
+```bash
+forest self update                  # latest stable; never steps down to an older one
+forest self update --prerelease     # highest release usable on this platform, including prereleases
+forest self update v0.3.15          # exact release; permits a deliberate downgrade
+```
+
+`--prerelease` applies only to that run. `FOREST_PRERELEASE=1`, which already
+makes global tools follow prereleases, does the same for `self update`,
+`self check` and the nag while it is set; unset it to go back to stable.
+`forest --version` names the commit a release was built from. Cutting a forest
+prerelease is described in [`RELEASING.md`](RELEASING.md).
+
 ### Using forest with Claude Code
 
 This repo ships a Claude Code plugin with a `forest` skill. It teaches agents the

@@ -56,8 +56,8 @@ on:
       forest-version:
         description: >-
           forest CLI release tag to install, e.g. `v0.2.9`. Empty installs the
-          latest release. Pin it when a publish must be reproducible against a
-          known CLI.
+          latest fully-published stable release. Pin it when a publish must be
+          reproducible against a known CLI.
         type: string
         required: false
         default: ""
@@ -235,20 +235,11 @@ jobs:
           FOREST_CLI_VERSION: ${{ inputs.forest-version }}
         run: |
           set -euo pipefail
-          # Resolve which forest release to install rather than trusting
-          # "latest". forest releases on every merge to main, and its
-          # release.yml attaches install.sh only after all three platform
-          # builds finish — so for several minutes the newest release exists
-          # with no assets, and `gh release download` fails with "no assets to
-          # download". A component release landing in that window would fail
-          # for a reason having nothing to do with the component.
-          #
-          # Because install.sh is uploaded by a job that `needs: [build]`, its
-          # presence proves the tarballs are already there: the newest release
-          # carrying install.sh is the newest fully-published one.
           tag="${FOREST_CLI_VERSION:-}"
           if [ -z "$tag" ]; then
-            for candidate in $(gh release list --repo understory-io/forest --limit 10 --json tagName --jq '.[].tagName'); do
+            candidates="$(gh api --paginate 'repos/understory-io/forest/releases?per_page=100' \
+              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name | select(test("^v[0-9]+[.][0-9]+[.][0-9]+$"))')"
+            for candidate in $candidates; do
               if gh release view "$candidate" --repo understory-io/forest --json assets \
                    --jq '[.assets[].name] | any(. == "install.sh")' | grep -q true; then
                 tag="$candidate"
@@ -258,7 +249,7 @@ jobs:
             done
           fi
           if [ -z "$tag" ]; then
-            echo "::error::No forest release with install.sh found in the last 10 releases." >&2
+            echo "::error::No stable forest release with install.sh found." >&2
             exit 1
           fi
           echo "installing forest $tag"
@@ -354,20 +345,11 @@ jobs:
           FOREST_CLI_VERSION: ${{ inputs.forest-version }}
         run: |
           set -euo pipefail
-          # Resolve which forest release to install rather than trusting
-          # "latest". forest releases on every merge to main, and its
-          # release.yml attaches install.sh only after all three platform
-          # builds finish — so for several minutes the newest release exists
-          # with no assets, and `gh release download` fails with "no assets to
-          # download". A component release landing in that window would fail
-          # for a reason having nothing to do with the component.
-          #
-          # Because install.sh is uploaded by a job that `needs: [build]`, its
-          # presence proves the tarballs are already there: the newest release
-          # carrying install.sh is the newest fully-published one.
           tag="${FOREST_CLI_VERSION:-}"
           if [ -z "$tag" ]; then
-            for candidate in $(gh release list --repo understory-io/forest --limit 10 --json tagName --jq '.[].tagName'); do
+            candidates="$(gh api --paginate 'repos/understory-io/forest/releases?per_page=100' \
+              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name | select(test("^v[0-9]+[.][0-9]+[.][0-9]+$"))')"
+            for candidate in $candidates; do
               if gh release view "$candidate" --repo understory-io/forest --json assets \
                    --jq '[.assets[].name] | any(. == "install.sh")' | grep -q true; then
                 tag="$candidate"
@@ -377,7 +359,7 @@ jobs:
             done
           fi
           if [ -z "$tag" ]; then
-            echo "::error::No forest release with install.sh found in the last 10 releases." >&2
+            echo "::error::No stable forest release with install.sh found." >&2
             exit 1
           fi
           echo "installing forest $tag"

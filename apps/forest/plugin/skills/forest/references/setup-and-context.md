@@ -7,13 +7,23 @@ Forest is distributed from the private `understory-io/forest` GitHub releases, s
 ```bash
 gh release download --repo understory-io/forest --pattern install.sh -O - \
   | FOREST_PROFILE='name=<context>,server=<server-url>' bash
-forest self check      # is a newer release out?
+forest self check      # is a newer stable release out?
 forest self update     # install it
 ```
 
 `install.sh` seeds the context from `FOREST_PROFILE` with `forest context provision`. Installing or updating the user's CLI is their call; suggest the command rather than running it unasked.
 
-`forest --version` prints the last *released* number even on a newer unreleased build. When behaviour matters, check for the flag in `forest <cmd> --help` rather than trusting the version string.
+**After v0.3.16** (check: `forest self update --help` lists `--prerelease`), forest itself has prereleases:
+
+- `forest self update` takes the latest stable release, and never replaces a newer binary (a prerelease, a local build) with an older one.
+- `forest self update --prerelease` takes the highest SemVer release, stable or prerelease, for that run; `forest self check --prerelease` compares against it. `alpha.2 < alpha.10 < rc.1 < final`, so a final release replaces its own RCs.
+- `FOREST_PRERELEASE=1` makes `self update`, `self check` and the update notice do that while it is set, as it does for tools ([tools.md](tools.md)). Nothing is saved, and unsetting it does not step a prerelease down.
+- `forest self update <version>` installs exactly that release, which is also the way back to stable from a prerelease. Install one exact release fresh with `... | bash -s -- <tag>`. Non-SemVer values such as `latest` are refused.
+- Before replacing anything, every path checks that the `.sha256` file holds one record naming the archive and matching it, and that the new binary's `forest --version` is the requested version.
+
+On v0.3.16 and older, plain `self update` installs GitHub's latest release even over a newer binary; `self update <tag>` already installs an exact prerelease once one is published.
+
+`forest --version` does not reveal an unreleased build on v0.3.16 and older: it prints the last released number. After v0.3.16, release builds print `forest <version> (commit <sha>)` and builds from source `forest <version> (local build)`. When behaviour matters, check for the flag in `forest <cmd> --help` rather than trusting the version string.
 
 ## Contexts: which server a command talks to
 
@@ -81,7 +91,7 @@ forest destination types
 | `<project>/forest.lock` | the project's locked dependency digests |
 | `<project>/.forest/` | build output and rendered deployment files; gitignore it |
 
-All of these follow `XDG_*`. An isolated `HOME` plus `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME` and `TMPDIR` keeps an experiment away from the user's real setup. Add `FOREST_NO_AUTO_UPDATE=1 FOREST_NO_GLOBAL_WARM=1 FOREST_NO_UPDATE_CHECK=1` to stop background work, and leave `FOREST_PRERELEASE` unset unless the experiment is about prereleases (v0.3.16+: it makes unpinned tools follow prereleases, see [tools.md](tools.md)).
+All of these follow `XDG_*`. An isolated `HOME` plus `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME` and `TMPDIR` keeps an experiment away from the user's real setup. Add `FOREST_NO_AUTO_UPDATE=1 FOREST_NO_GLOBAL_WARM=1 FOREST_NO_UPDATE_CHECK=1` to stop background work, and leave `FOREST_PRERELEASE` unset unless the experiment is about prereleases (v0.3.16+: it makes unpinned tools follow prereleases, see [tools.md](tools.md); after v0.3.16 also forest's own `self update`, `self check` and update notice).
 
 ## Output for scripts
 

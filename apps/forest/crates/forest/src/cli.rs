@@ -57,6 +57,7 @@ pub(crate) mod prompts;
 #[command(
     author,
     version,
+    long_version = self_cmd::long_version(),
     about,
     long_about,
     subcommand_required = true,

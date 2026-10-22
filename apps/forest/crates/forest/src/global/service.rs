@@ -1647,7 +1647,7 @@ pub enum ToolStatus {
     Missing,
 }
 
-fn prerelease_default_from(value: Option<std::ffi::OsString>) -> bool {
+pub(crate) fn prerelease_default_from(value: Option<std::ffi::OsString>) -> bool {
     value.and_then(|v| v.into_string().ok()).is_some_and(|v| {
         !matches!(
             v.trim().to_ascii_lowercase().as_str(),
