@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.17](https://github.com/understory-io/forest/compare/v0.3.16...v0.3.17) (2026-10-22)
+
+
+### Features
+
+* pipeline-first release create, enforced branch/soak policies, runtime version ranges, and the forest Claude Code skill ([#328](https://github.com/understory-io/forest/issues/328)) ([b5175bd](https://github.com/understory-io/forest/commit/b5175bd6c2c51388cfb739b49006efec746a8309))
+* **self:** publish and opt into forest's own prereleases ([#329](https://github.com/understory-io/forest/issues/329)) ([9e3a2aa](https://github.com/understory-io/forest/commit/9e3a2aaa0c42b1ba4caf87fe37f0f42761970dcd))
+
+
+### Bug Fixes
+
+* **deps:** stop trusting emSign ECC Root CA - G3 in the compiled-in webpki roots ([#331](https://github.com/understory-io/forest/issues/331)) ([09f84dc](https://github.com/understory-io/forest/commit/09f84dc2704d56074322845e46385d74ffdaea8f))
+
 ## [0.3.16](https://github.com/understory-io/forest/compare/v0.3.15...v0.3.16) (2026-10-20)
 
 
